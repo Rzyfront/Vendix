@@ -232,11 +232,14 @@ export class DianTestService {
   async enqueueTestSet(
     config_id: number,
     resolution_id: number,
-    options: { smoke?: boolean } = {},
+    options: { smoke?: boolean; validate_only?: boolean } = {},
   ): Promise<{ job_id: string }> {
     const config = await this.getConfigById(config_id);
 
-    if (!config.test_set_id) {
+    // La vía de validación no envía al set, así que no necesita su identificador:
+    // un tenant que aún no tiene set asignado igual puede comprobar que su
+    // certificado, su firma y su XML son conformes antes de pedirlo.
+    if (!config.test_set_id && !options.validate_only) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
@@ -255,8 +258,14 @@ export class DianTestService {
     // Una fila descartada por el defecto anterior puede seguir teniendo
     // `pending: true` y `zip_key`, y sin esta condición el tenant queda encerrado:
     // la UI le ofrece ejecutar el set y aquí se le niega. El descarte gana.
+    //
+    // La vía de validación queda EXENTA: la guarda existe para no gastar otro
+    // bloque de consecutivos en un set que la DIAN todavía debe juzgar, y una
+    // validación sincrónica no se envía al set. Sin esta exención el diagnóstico
+    // sería inalcanzable justo cuando más se necesita — con un lote atascado.
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
     if (
+      !options.validate_only &&
       previous.pending === true &&
       previous.zip_key &&
       previous.abandoned !== true
@@ -273,6 +282,7 @@ export class DianTestService {
       config_id,
       resolution_id,
       smoke: options.smoke === true,
+      validate_only: options.validate_only === true,
       context: {
         // `store_id` puede quedar `undefined` legítimamente: la plataforma emite
         // con la organización como identidad fiscal, sin tienda.
@@ -348,12 +358,20 @@ export class DianTestService {
    * un ZipKey y tarda minutos en clasificar, así que sondear aquí no podía
    * alcanzar un veredicto — solo alargaba el trabajo 33 s. El veredicto lo
    * obtienen el cron de repoll y el endpoint de consulta de estado.
+   *
+   * `options.validate_only` cambia la operación SOAP a `SendBillSync`, que SÍ es
+   * sincrónica: la DIAN contesta en la misma llamada con `IsValid` y la lista
+   * completa de reglas violadas. Ver el comentario del bucle de envío.
    */
   async executeTestSet(
     config_id: number,
     resolution_id: number,
-    options: { smoke?: boolean } = {},
+    options: { smoke?: boolean; validate_only?: boolean } = {},
   ) {
+    // Una validación es por definición de UN documento: someter 50 a `SendBillSync`
+    // no diría nada que el primero no diga y gastaría 50 consecutivos. Se deriva
+    // aquí, una vez, para que el resto del método no tenga que recordar la regla.
+    const diagnostic = options.smoke === true || options.validate_only === true;
     const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
@@ -463,7 +481,11 @@ export class DianTestService {
     //
     // No es un set válido para habilitar: la DIAN exige la composición completa.
     // Es un diagnóstico del transporte y la ingesta.
-    const composition = options.smoke
+    //
+    // VÍA DE VALIDACIÓN — `options.validate_only`: la misma factura, sometida a
+    // `SendBillSync` en vez de `SendTestSetAsync`. Comparte la composición de 1
+    // documento por la razón de arriba.
+    const composition = diagnostic
       ? { invoices: 1, debit_notes: 0, credit_notes: 0 }
       : resolveTestSetComposition(config.operation_mode);
     const TEST_SET_SIZE = testSetSize(composition);
@@ -554,7 +576,19 @@ export class DianTestService {
       country_code: 'CO',
       email: 'test@vendix.com',
       tax_regime: '49',
-      tax_scheme: 'ZZ',
+      // `tax_scheme` alimenta `cbc:TaxLevelCode`, que pertenece a la lista de
+      // RESPONSABILIDADES FISCALES: O-13 gran contribuyente, O-15 autorretenedor,
+      // O-23 agente de retención de IVA, O-47 régimen simple, R-99-PN no aplica.
+      //
+      // Aquí decía `'ZZ'`, que es de OTRA lista —la de tributos, `cac:TaxScheme`—,
+      // y la DIAN lo rechaza con la regla FAJ26 «Responsabilidad informada por
+      // emisor no válido según lista». El contrato estaba bien documentado en
+      // `DianIssuerData` y la emisión real ya lo respeta
+      // (`dian-direct.provider.ts`, que cae a 'O-15'): el valor inválido vivía
+      // solo en el generador del set de pruebas. Se usa el MISMO valor por defecto
+      // que la emisión real para que habilitación y producción no declaren cosas
+      // distintas sobre el mismo NIT.
+      tax_scheme: 'O-15',
     };
 
     const customer: DianCustomerData = {
@@ -603,10 +637,10 @@ export class DianTestService {
 
     // 5. Update status to testing.
     //
-    // La vía de humo NO lo toca: un documento suelto no es un intento de
+    // Las vías de diagnóstico NO lo tocan: un documento suelto no es un intento de
     // habilitación, y marcar `testing` por él dejaría la guía de habilitación
     // afirmando que hay un set en curso cuando no lo hay.
-    if (!options.smoke) {
+    if (!diagnostic) {
       await this.prisma.dian_configurations.update({
         where: { id: config_id },
         data: { enablement_status: 'testing' },
@@ -984,6 +1018,22 @@ export class DianTestService {
     //
     // Secuencial a propósito: son llamadas SOAP a la DIAN y el orden es la
     // evidencia de qué consecutivo se gastó primero.
+    //
+    // VÍA DE VALIDACIÓN — `options.validate_only` cambia la operación a
+    // `SendBillSync`, que es SINCRÓNICA: la DIAN contesta en la misma llamada con
+    // `IsValid` y la lista completa de reglas violadas (`ErrorMessage`), en vez de
+    // un ZipKey que hay que sondear y que puede no llevar nunca a un veredicto.
+    //
+    // Por qué existe: un ZipKey no distingue «tu documento está bien y está en
+    // cola» de «tu documento nunca se clasificó». Durante un mes eso dejó el
+    // diagnóstico en manos del contador del portal, que solo dice sí o no y vive
+    // fuera del sistema. `SendBillSync` dice POR QUÉ, con código de regla.
+    //
+    // Y no lleva `testSetId`: no puede rechazar el set ni consumir un intento de
+    // habilitación, que es lo único verdaderamente irrecuperable aquí. El
+    // documento es byte a byte el mismo que envía el set de pruebas — misma
+    // generación, mismo CUFE, misma firma, mismo nombre de archivo —, porque un
+    // diagnóstico sobre un documento distinto no diagnostica nada.
     const submissions: {
       file_name: string;
       zip_file_name: string;
@@ -993,6 +1043,8 @@ export class DianTestService {
       status_message?: string;
       raw_response?: string;
       error?: string;
+      /** Reglas de validación que la DIAN reportó para ESTE documento. */
+      error_messages?: string[];
     }[] = [];
 
     for (const file of files) {
@@ -1004,13 +1056,20 @@ export class DianTestService {
       });
 
       try {
-        const response = await this.soap_client.sendTestSetAsync(
-          this.buildMultiFileZip([file]),
-          file_zip_name,
-          config.test_set_id,
-          environment,
-          ws_credentials,
-        );
+        const response = options.validate_only
+          ? await this.soap_client.sendBillSync(
+              this.buildMultiFileZip([file]),
+              file_zip_name,
+              environment,
+              ws_credentials,
+            )
+          : await this.soap_client.sendTestSetAsync(
+              this.buildMultiFileZip([file]),
+              file_zip_name,
+              config.test_set_id,
+              environment,
+              ws_credentials,
+            );
         submissions.push({
           file_name: file.name,
           zip_file_name: file_zip_name,
@@ -1019,6 +1078,11 @@ export class DianTestService {
           status_code: response.status_code,
           status_message: response.status_message,
           raw_response: response.raw_response?.slice(0, 4000),
+          // Las reglas violadas son el producto de la vía de validación: sin
+          // persistirlas el envío sincrónico no valdría más que el asíncrono.
+          ...(response.error_messages?.length
+            ? { error_messages: response.error_messages }
+            : {}),
         });
       } catch (error) {
         // No se aborta: los documentos ya enviados gastaron consecutivos y su
@@ -1046,9 +1110,18 @@ export class DianTestService {
       status_code: first?.status_code,
       status_message: first?.status_message,
       raw_response: first?.raw_response,
-      error_messages: submissions
-        .filter((s) => s.error)
-        .map((s) => `${s.file_name}: ${s.error}`),
+      // Dos clases de error se agregan aquí y ninguna puede tapar a la otra: el
+      // fallo de transporte (`error`) y las reglas de validación que la DIAN
+      // reportó por documento (`error_messages`). Sin la segunda, la vía de
+      // validación devolvería `IsValid: false` sin decir qué falló.
+      error_messages: [
+        ...submissions
+          .filter((s) => s.error)
+          .map((s) => `${s.file_name}: ${s.error}`),
+        ...submissions.flatMap((s) =>
+          (s.error_messages ?? []).map((m) => `${s.file_name}: ${m}`),
+        ),
+      ],
     } as DianSendBillResponse;
 
     const zip_file_name = first?.zip_file_name ?? '';
@@ -1072,7 +1145,13 @@ export class DianTestService {
     // (e.g. DIAN StatusCode 2 "set Rechazado") is a REJECTION, not pending.
     const terminal = zip_key ? this.isTerminalZipStatus(verdict) : true;
     const still_processing = !!zip_key && !success && !terminal;
-    const rejected = !success && !still_processing;
+    // `rejected` significa «la DIAN rechazó el SET de habilitación», y eso es lo
+    // que leen la guía y el gate de emisión. Una validación sincrónica que sale
+    // inválida NO es eso: no se envió al set, no consumió un intento y no cambia
+    // el estado de la habilitación. Marcarla `rejected` haría que un diagnóstico
+    // exitoso —encontrar los defectos— se leyera como un fracaso de habilitación.
+    const rejected =
+      options.validate_only === true ? false : !success && !still_processing;
 
     // 10. Persist result + raw evidence (DIAN's exact status XML for diagnosis).
     const result_data = {
@@ -1080,6 +1159,11 @@ export class DianTestService {
       // Marca el lote como diagnóstico, no como intento de habilitación. Sin esto
       // un envío de 1 documento se lee igual que un set completo fallido.
       smoke: options.smoke === true,
+      // Vía de validación sincrónica: `SendBillSync`, sin `testSetId`. `is_valid`
+      // es el veredicto que la DIAN dio en la misma llamada, y es lo único de este
+      // registro que responde «¿el documento está bien?» sin ambigüedad.
+      validate_only: options.validate_only === true,
+      ...(options.validate_only ? { is_valid: success } : {}),
       total_documents: files.length,
       // Derivados de `composition`, no literales. Estaban escritos a mano como
       // 30/10/10, así que en cualquier modo con otra composición el registro
@@ -1133,14 +1217,35 @@ export class DianTestService {
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
       data: {
-        last_test_result: result_data,
-        enablement_status: success ? 'test_set_passed' : 'testing',
-        enablement_evidence: success ? result_data : undefined,
+        // Una validación NO sobrescribe el registro del lote: `last_test_result`
+        // es la única copia del ZipKey y de las claves de documento del envío en
+        // vuelo, y perderlos deja ese lote imposible de consultar — exactamente el
+        // agujero que ya nos dejó un lote solo en `dian_audit_logs`. Se anida bajo
+        // `validation`, así que el diagnóstico convive con el lote en vez de
+        // reemplazarlo.
+        last_test_result: options.validate_only
+          ? { ...previous_result, validation: result_data }
+          : result_data,
+        // Un diagnóstico NO mueve el estado de habilitación. El paso 5 ya evitaba
+        // marcar `testing` ANTES de enviar, pero esta escritura de DESPUÉS seguía
+        // haciéndolo: una vía de humo sobre una config `not_started` la dejaba en
+        // `testing`, y un éxito suelto habría escrito `test_set_passed` —
+        // habilitando con un documento donde la DIAN exige 50.
+        ...(diagnostic
+          ? {}
+          : {
+              enablement_status: success
+                ? ('test_set_passed' as const)
+                : ('testing' as const),
+              enablement_evidence: success ? result_data : undefined,
+            }),
       },
     });
 
     await this.createAuditLog(config.id, {
-      action: 'run_test_set',
+      // Acción propia: en la historia de auditoría una validación sincrónica no
+      // debe leerse como un intento de habilitación.
+      action: options.validate_only ? 'validate_document' : 'run_test_set',
       // Tri-state: a batch DIAN has not judged yet is `pending`, not `error`.
       // Labelling it `error` made a perfectly healthy submission look broken.
       status: success ? 'success' : still_processing ? 'pending' : 'error',
@@ -1162,9 +1267,13 @@ export class DianTestService {
     return {
       success,
       documents_generated: true,
-      message: success
-        ? 'Set de pruebas procesado y validado por la DIAN.'
-        : is_ws_security_error
+      message: options.validate_only
+        ? success
+          ? 'La DIAN validó el documento: IsValid = true, sin reglas violadas. El camino de generación y firma es conforme.'
+          : `La DIAN rechazó el documento con ${verdict.error_messages?.length ?? 0} regla(s): ${verdict.error_messages?.join(' | ') || verdict.status_message}`
+        : success
+          ? 'Set de pruebas procesado y validado por la DIAN.'
+          : is_ws_security_error
           ? `${files.length} documento(s) generado(s) y firmado(s). La DIAN rechazó la firma WS-Security del envelope SOAP.`
           : verdict.error_messages?.length
             ? `La DIAN reportó errores de validación: ${verdict.error_messages.join(' | ')}`
@@ -1191,13 +1300,17 @@ export class DianTestService {
       executed_at: result_data.executed_at,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
-      // La vía de humo NO escribe `enablement_status` (ver paso 5), así que
-      // tampoco puede afirmarlo: devuelve el que la config tiene de verdad.
-      enablement_status: options.smoke
+      // Las vías de diagnóstico NO escriben `enablement_status`, así que tampoco
+      // pueden afirmarlo: devuelven el que la config tiene de verdad.
+      enablement_status: diagnostic
         ? config.enablement_status
         : success
           ? 'test_set_passed'
           : 'testing',
+      // Se devuelven para que la UI pueda distinguir un veredicto de validación de
+      // un veredicto de habilitación sin inferirlo de la ausencia de `zip_key`.
+      validate_only: options.validate_only === true,
+      ...(options.validate_only ? { is_valid: success } : {}),
       response_time_ms: Date.now() - started_at,
     };
   }

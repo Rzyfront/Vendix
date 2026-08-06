@@ -177,8 +177,17 @@ export class UblCreditNoteBuilder {
         .att('currencyID', currency)
         .txt(dianLineExtension(item));
 
+      // `cac:StandardItemIdentification` obligatorio — regla FAZ09. Las notas
+      // construyen su línea aparte (`CreditNoteLine`), así que el arreglo del
+      // builder compartido de líneas de factura NO las alcanza. Son 10 de los 50
+      // documentos que exige el set de pruebas: dejarlas fuera rechazaría el set.
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
+      ubl_item
+        .ele(UBL_NAMESPACES.CAC, 'StandardItemIdentification')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .att('schemeID', UBL_CONSTANTS.ITEM_IDENTIFICATION_SCHEME_ID)
+        .txt(item.item_code?.trim() || String(index + 1));
 
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
       price

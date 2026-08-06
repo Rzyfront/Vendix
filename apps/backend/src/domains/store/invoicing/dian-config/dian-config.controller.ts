@@ -227,11 +227,18 @@ export class DianConfigController {
     // Vía de humo: 1 documento, 1 consecutivo. Diagnostica si la DIAN ingiere el
     // envío sin quemar los 50 que exige el set. No habilita.
     @Query('smoke') smoke?: string,
+    // Vía de validación: el MISMO documento por `SendBillSync`, que responde en la
+    // misma llamada con `IsValid` y las reglas violadas. No lleva `testSetId`, así
+    // que no puede rechazar el set ni consumir un intento de habilitación.
+    @Query('validate') validate?: string,
   ) {
     const result = await this.dian_test_service.enqueueTestSet(
       id,
       resolution_id,
-      { smoke: smoke === 'true' || smoke === '1' },
+      {
+        smoke: smoke === 'true' || smoke === '1',
+        validate_only: validate === 'true' || validate === '1',
+      },
     );
     return this.response_service.success(result);
   }

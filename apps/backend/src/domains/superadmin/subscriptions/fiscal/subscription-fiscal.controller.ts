@@ -127,14 +127,29 @@ export class SubscriptionFiscalController {
     description:
       'Vía de humo: emite UNA factura y gasta UN consecutivo, para comprobar si la DIAN ingiere el envío sin quemar los 50. No habilita.',
   })
-  async runTestSet(@Query('smoke') smoke?: string): Promise<any> {
+  @ApiQuery({
+    name: 'validate',
+    required: false,
+    description:
+      'Vía de validación: emite el MISMO documento y lo somete a SendBillSync, que responde en la misma llamada con IsValid y la lista completa de reglas violadas. No lleva testSetId, así que no puede rechazar el set ni consumir un intento de habilitación.',
+  })
+  async runTestSet(
+    @Query('smoke') smoke?: string,
+    @Query('validate') validate?: string,
+  ): Promise<any> {
     const isSmoke = smoke === 'true' || smoke === '1';
-    const result = await this.fiscalService.runTestSet({ smoke: isSmoke });
+    const isValidateOnly = validate === 'true' || validate === '1';
+    const result = await this.fiscalService.runTestSet({
+      smoke: isSmoke,
+      validate_only: isValidateOnly,
+    });
     return this.responseService.success(
       result,
-      isSmoke
-        ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
-        : 'Set de pruebas encolado: se está construyendo y firmando',
+      isValidateOnly
+        ? 'Validación encolada: 1 documento por SendBillSync, sin enviar al set de pruebas'
+        : isSmoke
+          ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
+          : 'Set de pruebas encolado: se está construyendo y firmando',
     );
   }
 

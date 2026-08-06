@@ -41,6 +41,20 @@ export interface DianTestSetJob {
    */
   smoke?: boolean;
   /**
+   * Vía de validación: emite el MISMO documento que el set de pruebas y lo somete
+   * a `SendBillSync` en vez de `SendTestSetAsync`.
+   *
+   * Existe porque un ZipKey no distingue «tu documento está bien y está en cola»
+   * de «tu documento nunca se clasificó», y esa ambigüedad dejó el diagnóstico en
+   * manos del contador del portal de habilitación durante un mes. `SendBillSync`
+   * es sincrónica: la DIAN contesta en la misma llamada con `IsValid` y la lista
+   * completa de reglas violadas, cada una con su código.
+   *
+   * No lleva `testSetId`: no puede rechazar el set ni consumir un intento de
+   * habilitación. Implica la composición de 1 documento, igual que `smoke`.
+   */
+  validate_only?: boolean;
+  /**
    * Snapshot del contexto tomado al encolar. El worker lo restaura con
    * `RequestContextService.run(...)` porque `StorePrismaService` lee el scope de
    * AsyncLocalStorage, que NO existe naturalmente dentro de un worker de BullMQ.

@@ -584,17 +584,38 @@ export class TenantDianConfigController {
     @Param('tenantId', ParseIntPipe) tenantId: number,
     @Param('configId', ParseIntPipe) configId: number,
     @Body('resolution_id', ParseIntPipe) resolutionId: number,
+    // Vía de humo: 1 documento al set. Vía de validación: 1 documento por
+    // `SendBillSync`, sin `testSetId`. Se exponen aquí porque esta consola es la
+    // ÚNICA forma de diagnosticar un tenant cuyo portal de la DIAN no controlamos
+    // — sin ellas, diagnosticar a HIDRO exigiría gastarle 50 consecutivos.
+    @Query('smoke') smoke?: string,
+    @Query('validate') validate?: string,
   ) {
+    const isSmoke = smoke === 'true' || smoke === '1';
+    const isValidateOnly = validate === 'true' || validate === '1';
+
     const result = await this.runAs(req, scope, tenantId, async () => {
       const config = await this.storeDian.getConfigById(configId);
       // Se proyecta ANTES de encolar: después, el worker ya puede haber
       // reservado el bloque y `current_number` diría el rango siguiente.
-      const consumes = await this.projectConsumedRange(config, resolutionId);
-      const job = await this.dianTest.enqueueTestSet(configId, resolutionId);
+      const consumes = await this.projectConsumedRange(config, resolutionId, {
+        diagnostic: isSmoke || isValidateOnly,
+      });
+      const job = await this.dianTest.enqueueTestSet(configId, resolutionId, {
+        smoke: isSmoke,
+        validate_only: isValidateOnly,
+      });
       return { ...job, consumes };
     });
 
-    return this.response.success(result, 'Set de pruebas encolado');
+    return this.response.success(
+      result,
+      isValidateOnly
+        ? 'Validación encolada: 1 documento por SendBillSync, sin enviar al set'
+        : isSmoke
+          ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
+          : 'Set de pruebas encolado',
+    );
   }
 
   @Post('dian-config/:configId/abandon-test-set')
@@ -721,6 +742,10 @@ export class TenantDianConfigController {
   private async projectConsumedRange(
     config: { operation_mode?: string | null },
     resolution_id: number,
+    // Las vías de diagnóstico emiten UN documento. Sin este parámetro la consola
+    // advertiría que va a quemar 50 consecutivos cuando va a quemar 1, y el
+    // operador decidiría sobre un dato falso justo en la advertencia irreversible.
+    options: { diagnostic?: boolean } = {},
   ) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id: resolution_id },
@@ -737,7 +762,14 @@ export class TenantDianConfigController {
     if (!resolution) return null;
 
     const operation_mode = config.operation_mode as any;
-    const total = testSetSize(resolveTestSetComposition(operation_mode));
+    const diagnostic_composition = {
+      invoices: 1,
+      debit_notes: 0,
+      credit_notes: 0,
+    };
+    const total = options.diagnostic
+      ? testSetSize(diagnostic_composition)
+      : testSetSize(resolveTestSetComposition(operation_mode));
     const number_from = Math.max(
       resolution.range_from,
       (resolution.current_number ?? 0) + 1,
@@ -747,7 +779,13 @@ export class TenantDianConfigController {
       resolution_id: resolution.id,
       prefix: resolution.prefix,
       resolution_number: resolution.resolution_number,
+      // `composition` describe lo que la DIAN EXIGE para habilitar; `total_documents`
+      // y `diagnostic` describen lo que ESTE envío va a gastar. Son dos cosas
+      // distintas y confundirlas es lo que hacía que un envío de 1 documento se
+      // anunciara como 50.
       composition: buildTestSetCompositionView(operation_mode),
+      total_documents: total,
+      diagnostic: options.diagnostic === true,
       number_from,
       number_to: number_from + total - 1,
       range_to: resolution.range_to,
