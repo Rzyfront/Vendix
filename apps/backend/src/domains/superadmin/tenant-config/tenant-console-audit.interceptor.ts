@@ -9,6 +9,10 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 
 import { AuditAction, AuditService } from '@common/audit/audit.service';
+import {
+  RequestContextService,
+  type RequestContext,
+} from '@common/context/request-context.service';
 import { TenantContextRunner } from '@common/context/tenant-context-runner.service';
 
 import { toTenantTarget } from './dto/tenant-scope-param.dto';
@@ -105,6 +109,12 @@ export class TenantConsoleAuditInterceptor implements NestInterceptor {
       userAgent: String(request.headers?.['user-agent'] ?? ''),
       path: url.split('?')[0],
       method,
+      // El contexto ALS de la petición se captura AQUÍ porque en el `tap` ya
+      // no existe: el ALS muere con el handler, y `TenantContextRunner.resolve`
+      // exige contexto de super admin ambiente. Sin esta copia, cada escritura
+      // se quedaba sin auditar con un warning "requiere un contexto de super
+      // administrador" — el guard bloqueando a su propio auditor.
+      ambient: RequestContextService.getContext() ?? null,
     };
 
     return next.handle().pipe(
@@ -127,6 +137,7 @@ export class TenantConsoleAuditInterceptor implements NestInterceptor {
       userAgent: string;
       path: string;
       method: string;
+      ambient: RequestContext | null;
     },
     payload: unknown,
   ): Promise<void> {
@@ -134,12 +145,16 @@ export class TenantConsoleAuditInterceptor implements NestInterceptor {
       const scopeParam = String(snapshot.params.scope ?? '');
       const tenantIdParam = Number(snapshot.params.tenantId);
 
-      if (!scopeParam || !Number.isInteger(tenantIdParam)) {
+      if (!scopeParam || !Number.isInteger(tenantIdParam) || !snapshot.ambient) {
         return;
       }
 
-      const scope = await this.runner.resolve(
-        toTenantTarget(scopeParam, tenantIdParam),
+      // Se reinstala el contexto capturado para resolver el tenant: es el mismo
+      // que autorizó la petición, no uno fabricado, así que el guard de super
+      // admin del runner sigue significando lo que dice.
+      const scope = await RequestContextService.runIsolated(
+        snapshot.ambient,
+        () => this.runner.resolve(toTenantTarget(scopeParam, tenantIdParam)),
       );
 
       await this.audit.log({
@@ -151,8 +166,12 @@ export class TenantConsoleAuditInterceptor implements NestInterceptor {
         action: this.actionFor(snapshot.method),
         resource: this.resourceFor(snapshot.path),
         resourceId: this.resourceIdFor(snapshot.params, payload),
-        newValues: snapshot.body,
-        metadata: {
+        // La marca del rail va DENTRO de `new_values`, no en `metadata`:
+        // `audit_logs` no tiene columna `metadata` y `AuditService.log()`
+        // acepta el campo y lo descarta en silencio (`:74-95` nunca lo mapea).
+        // Pasarlo ahí habría dejado el rastro sin la única marca que permite
+        // distinguir "lo cambió soporte" de "lo cambió el comerciante".
+        newValues: {
           via: 'superadmin_tenant_console',
           method: snapshot.method,
           path: snapshot.path,
@@ -162,6 +181,7 @@ export class TenantConsoleAuditInterceptor implements NestInterceptor {
           // El binario del certificado nunca se guarda; solo el hecho de que
           // hubo una subida, que es lo que se audita.
           file_uploaded: snapshot.hasFile || undefined,
+          payload: snapshot.body,
         },
         ipAddress: snapshot.ip,
         userAgent: snapshot.userAgent,
