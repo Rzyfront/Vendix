@@ -250,6 +250,13 @@ export interface DianConfig {
   software_id: string;
   software_pin_encrypted: string; // Always '****' from API
   certificate_s3_key: string | null;
+  /**
+   * Sustituye a `certificate_s3_key` en la consola de tenants del super admin,
+   * que redacta la clave del objeto: nombra dónde vive el material
+   * criptográfico de un tercero y quien mira ahí no es el dueño del NIT.
+   * Ausente en el panel del comerciante, donde la clave sí viaja.
+   */
+  certificate_present?: boolean;
   certificate_password_encrypted: string | null; // Always '****' from API
   certificate_expiry: string | null;
   environment: 'test' | 'production';
