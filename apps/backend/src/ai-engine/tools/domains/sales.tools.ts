@@ -198,8 +198,8 @@ export function createSalesTools(deps: SalesToolDeps): RegisteredTool[] {
               clientes_distintos: summary.total_customers,
             },
             variacion_vs_periodo_anterior: {
-              ingresos_pct: round2(summary.revenue_growth),
-              ordenes_pct: round2(summary.orders_growth),
+              ingresos_pct: round2(summary.revenue_growth ?? 0),
+              ordenes_pct: round2(summary.orders_growth ?? 0),
               nota: 'El periodo anterior es un tramo de la misma duración inmediatamente previo. 0 significa que el periodo anterior no tuvo ventas, no que no haya cambio.',
             },
           });
