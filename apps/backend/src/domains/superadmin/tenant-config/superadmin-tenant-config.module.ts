@@ -6,8 +6,11 @@ import { TenantContextRunner } from '@common/context/tenant-context-runner.servi
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 import { TenantConsoleAuditInterceptor } from './tenant-console-audit.interceptor';
+import { TenantDianModule } from './tenant-dian.module';
 import { TenantDirectoryController } from './tenant-directory.controller';
 import { TenantDirectoryService } from './tenant-directory.service';
+import { TenantResolutionsModule } from './tenant-resolutions.module';
+import { TenantSettingsModule } from './tenant-settings.module';
 
 /**
  * Consola de tenants del super admin.
@@ -34,7 +37,17 @@ import { TenantDirectoryService } from './tenant-directory.service';
  * de modo que el resto de la aplicación no lo nota.
  */
 @Module({
-  imports: [PrismaModule, ResponseModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    // Cada superficie del rail trae su propio módulo y auto-provee
+    // `TenantContextRunner` en vez de importarlo de aquí: la dependencia
+    // inversa cerraría un ciclo con este mismo módulo, que es quien los cablea.
+    // El runner es sin estado, así que varias instancias son equivalentes.
+    TenantDianModule,
+    TenantResolutionsModule,
+    TenantSettingsModule,
+  ],
   controllers: [TenantDirectoryController],
   providers: [
     TenantContextRunner,

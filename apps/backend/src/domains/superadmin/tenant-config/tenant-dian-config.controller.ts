@@ -276,7 +276,10 @@ export class TenantDianConfigController {
     const result = await this.runAs(req, scope, tenantId, () =>
       this.storeDian.getProductionReadiness(configId),
     );
-    return this.response.success(result, 'Checklist de producción obtenido');
+    return this.response.success(
+      this.redactReadiness(result),
+      'Checklist de producción obtenido',
+    );
   }
 
   @Get('dian-config/:configId/test-results')
@@ -774,6 +777,35 @@ export class TenantDianConfigController {
     return Array.isArray(configs)
       ? configs.map((config) => this.redact(config))
       : configs;
+  }
+
+  /**
+   * `getProductionReadiness` devuelve `resolutions[]` con `technical_key` en
+   * claro (`dian-config.service.ts:634` la selecciona y `:691` la propaga).
+   * Esa clave alimenta el CUFE: quien la tiene puede fabricar el identificador
+   * único de un documento a nombre del comerciante.
+   *
+   * Se sustituye por `technical_key_set`, que es lo que la checklist necesita
+   * de verdad —saber si falta cargarla—, en coherencia con lo que ya hacen
+   * `TenantDirectoryService` y el rail de resoluciones. La fuga es previa y
+   * también afecta al panel del comerciante; ahí queda como deuda declarada,
+   * pero un rail cross-tenant no puede propagarla: aquí el que mira no es el
+   * dueño del NIT.
+   */
+  private redactReadiness<T>(readiness: T): T {
+    if (!readiness || typeof readiness !== 'object') return readiness;
+
+    const source = readiness as Record<string, any>;
+    if (!Array.isArray(source.resolutions)) return readiness;
+
+    return {
+      ...source,
+      resolutions: source.resolutions.map((resolution: any) => {
+        if (!resolution || typeof resolution !== 'object') return resolution;
+        const { technical_key, ...rest } = resolution as Record<string, any>;
+        return { ...rest, technical_key_set: Boolean(technical_key) };
+      }),
+    } as T;
   }
 
   private toPositiveInt(value: string | undefined, fallback: number): number {
