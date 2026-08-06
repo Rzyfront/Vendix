@@ -1,5 +1,8 @@
 import { OpenAICompatibleProvider } from './openai-compatible.provider';
-import { AIProviderConfig } from '../interfaces/ai-provider.interface';
+import {
+  AIModelType,
+  AIProviderConfig,
+} from '../interfaces/ai-provider.interface';
 
 describe('OpenAICompatibleProvider', () => {
   const buildProvider = (
@@ -318,6 +321,91 @@ describe('OpenAICompatibleProvider', () => {
 
       expect(response.success).toBe(false);
       expect(response.error).toBe('Transcription model returned no text');
+    });
+  });
+
+  describe('model type resolution', () => {
+    const withType = (
+      modelType: AIModelType | undefined,
+      settings: Record<string, any> = {},
+    ) =>
+      new OpenAICompatibleProvider({
+        provider: 'OpenAI',
+        sdkType: 'openai_compatible',
+        apiKey: 'test-key',
+        modelId: 'gpt-4o-mini-transcribe',
+        baseUrl: 'https://api.openai.com/v1',
+        modelType,
+        settings,
+      });
+
+    // The defect this closes: the column was the only field the superadmin form
+    // writes, and the provider only read `settings.model_type`. Every audio
+    // configuration therefore resolved to `text`, so its connection test called
+    // `/chat/completions` with an audio model and came back "Model <id> does not
+    // exist" — a message that blames the model for an endpoint fault.
+    it('reads the model type from the column when settings do not carry it', () => {
+      expect((withType('transcription') as any).getModelType()).toBe(
+        'transcription',
+      );
+      expect((withType('speech') as any).getModelType()).toBe('speech');
+    });
+
+    it('lets an explicit settings override win over the column', () => {
+      expect(
+        (withType('speech', { model_type: 'text' }) as any).getModelType(),
+      ).toBe('text');
+    });
+
+    it('still infers image from settings when the column holds its default', () => {
+      expect(
+        (withType('text', { image_model: 'gpt-image-1' }) as any).getModelType(),
+      ).toBe('image');
+    });
+
+    it('falls back to text when neither source says anything', () => {
+      expect((withType(undefined) as any).getModelType()).toBe('text');
+    });
+  });
+
+  describe('audio failure diagnostics', () => {
+    const audioProvider = (baseUrl: string, apiKey = 'test-key') =>
+      new OpenAICompatibleProvider({
+        provider: 'Custom',
+        sdkType: 'openai_compatible',
+        apiKey,
+        modelId: 'whisper-1',
+        baseUrl,
+        modelType: 'transcription',
+        settings: {},
+      });
+
+    it('names the host and endpoint instead of the model on a 404', () => {
+      const message = (
+        audioProvider('https://openrouter.ai/api/v1') as any
+      ).describeAudioFailure('/audio/transcriptions', '404 Not Found');
+
+      expect(message).toContain('openrouter.ai');
+      expect(message).toContain('/audio/transcriptions');
+      expect(message).toContain('not its model');
+    });
+
+    it('leaves a genuine model error untouched', () => {
+      const original = 'The model `whisper-9` does not exist';
+      const message = (
+        audioProvider('https://api.openai.com/v1') as any
+      ).describeAudioFailure('/audio/transcriptions', original);
+
+      expect(message).toBe(original);
+    });
+
+    // This provider cannot be constructed without a key — the OpenAI SDK throws
+    // on an empty one — so a "no API key" message cannot live at this layer. It
+    // belongs to `AIEngineService.describeInitFailure`, which is the only place
+    // that observes the failed construction. Asserted here so the constraint is
+    // not rediscovered by moving the check back down.
+    it('refuses to construct without a key', () => {
+      expect(() => audioProvider('https://api.openai.com/v1', '')).toThrow();
     });
   });
 });

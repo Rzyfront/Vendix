@@ -650,7 +650,13 @@ export class OpenAICompatibleProvider implements AIProvider {
       };
     }
 
-    return { success: false, message: response.error || 'Unknown error' };
+    return {
+      success: false,
+      message: this.describeAudioFailure(
+        '/audio/speech',
+        response.error || 'Unknown error',
+      ),
+    };
   }
 
   private async testTranscriptionConnection(): Promise<{
@@ -671,7 +677,40 @@ export class OpenAICompatibleProvider implements AIProvider {
       };
     }
 
-    return { success: false, message: response.error || 'Unknown error' };
+    return {
+      success: false,
+      message: this.describeAudioFailure(
+        '/audio/transcriptions',
+        response.error || 'Unknown error',
+      ),
+    };
+  }
+
+  /**
+   * Reframes a provider error when the real fault is the destination.
+   *
+   * A host that does not implement an audio endpoint answers the same way for
+   * every model id, so forwarding its message unchanged tells the operator to
+   * keep changing the model — the one field that cannot fix it. OpenRouter is
+   * the case this exists for: it serves `/chat/completions` and nothing under
+   * `/audio`, and its 404 mentions neither the path nor the host.
+   */
+  private describeAudioFailure(path: string, error: string): string {
+    const looksLikeMissingEndpoint =
+      /\b404\b|not found|no such (?:endpoint|route|path)|unknown (?:url|path|endpoint)|invalid url/i.test(
+        error,
+      );
+
+    if (!looksLikeMissingEndpoint) return error;
+
+    let host = this.config.baseUrl || 'the configured host';
+    try {
+      host = new URL(this.getApiRootBaseUrl()).host;
+    } catch {
+      // Keep the raw base_url: an unparseable one is itself worth showing.
+    }
+
+    return `${host} did not serve ${path} — "${error}". Check this configuration's endpoint, not its model: a host without audio support answers the same way for every model id.`;
   }
 
   private async testRerankConnection(): Promise<{
@@ -1421,15 +1460,40 @@ export class OpenAICompatibleProvider implements AIProvider {
     );
   }
 
+  /**
+   * Resolves which capability this configuration represents.
+   *
+   * Reading `settings.model_type` used to be the *only* source, and nothing in
+   * the write path populates it — the superadmin DTO persists `model_type` as
+   * its own column. So every speech and transcription configuration resolved to
+   * `text`, its connection test fell through to `chat()`, and an audio model id
+   * sent to `/chat/completions` came back as `Model <id> does not exist`. The
+   * message named the model while the fault was the endpoint, which is why
+   * changing the model never helped.
+   *
+   * Precedence is deliberately conservative so nothing that resolves to a
+   * non-text type today changes answer:
+   *
+   * 1. `settings.model_type` — an explicit override some rows already carry.
+   * 2. The column, when it says something other than `text`.
+   * 3. The image heuristic, for configurations created before the column
+   *    existed and still holding its `text` default.
+   */
   private getModelType(): string {
-    const modelType =
+    const override =
       this.config.settings?.model_type || this.config.settings?.modelType;
 
-    if (typeof modelType === 'string' && modelType.trim()) {
-      return modelType.trim();
+    if (typeof override === 'string' && override.trim()) {
+      return override.trim();
     }
 
-    return this.hasImageGenerationSettings() ? 'image' : 'text';
+    if (this.config.modelType && this.config.modelType !== 'text') {
+      return this.config.modelType;
+    }
+
+    return this.hasImageGenerationSettings()
+      ? 'image'
+      : (this.config.modelType ?? 'text');
   }
 
   private hasImageGenerationSettings(): boolean {

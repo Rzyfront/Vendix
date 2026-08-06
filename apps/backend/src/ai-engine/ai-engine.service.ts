@@ -25,6 +25,7 @@ import {
 } from './interfaces/ai-provider.interface';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
+import { MinimaxSpeechProvider } from './providers/minimax-speech.provider';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../common/redis/redis.module';
@@ -87,13 +88,25 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
-  private initializeProvider(config: any) {
+  /**
+   * Registers a provider for a configuration.
+   *
+   * Returns `null` on success, or a message explaining why no provider could be
+   * built. The load-time loop ignores the value — it already logs — but
+   * `testProvider` needs it: without a reason it reported every construction
+   * failure as `Unknown sdk_type`, which is wrong for the most common one. A
+   * configuration with no API key cannot even construct `OpenAICompatibleProvider`
+   * (the OpenAI SDK throws on an empty key), so the operator was told the sdk
+   * type was unrecognised while the type was fine and the secret was missing.
+   */
+  private initializeProvider(config: any): string | null {
     const providerConfig: AIProviderConfig = {
       provider: config.provider,
       sdkType: config.sdk_type,
       apiKey: this.resolveApiKey(config),
       modelId: config.model_id,
       baseUrl: config.base_url || undefined,
+      modelType: config.model_type || undefined,
       settings: config.settings as Record<string, any>,
     };
 
@@ -106,11 +119,14 @@ export class AIEngineService implements OnModuleInit {
         case 'anthropic_compatible':
           provider = new AnthropicCompatibleProvider(providerConfig);
           break;
-        default:
-          this.logger.warn(
-            `Unknown sdk_type: ${config.sdk_type} for provider ${config.provider}`,
-          );
-          return;
+        case 'minimax_t2a':
+          provider = new MinimaxSpeechProvider(providerConfig);
+          break;
+        default: {
+          const unknown = `Unknown sdk_type: ${config.sdk_type} for provider ${config.provider}`;
+          this.logger.warn(unknown);
+          return unknown;
+        }
       }
 
       this.providers.set(config.id, provider);
@@ -118,11 +134,28 @@ export class AIEngineService implements OnModuleInit {
         config.id,
         (config.settings as Record<string, any>) || {},
       );
+      return null;
     } catch (error: any) {
       this.logger.error(
         `Failed to initialize provider "${config.provider}" (${config.sdk_type}): ${error.message}`,
       );
+      return this.describeInitFailure(config, error);
     }
+  }
+
+  /**
+   * Names the cause of a construction failure in terms the operator can act on.
+   *
+   * An absent key is checked first because it is both the most common cause and
+   * the one whose native error is least useful: the OpenAI SDK reports a missing
+   * `OPENAI_API_KEY` environment variable, which is not where Vendix stores it.
+   */
+  private describeInitFailure(config: any, error: any): string {
+    if (!this.resolveApiKey(config)) {
+      return this.missingApiKeyMessage(config);
+    }
+
+    return error?.message || 'Provider initialization failed';
   }
 
   private resolveApiKey(config: any): string {
@@ -189,35 +222,18 @@ export class AIEngineService implements OnModuleInit {
   async testProvider(
     configId: number,
   ): Promise<{ success: boolean; message: string }> {
-    const provider = this.providers.get(configId);
-    if (!provider) {
-      // Try to load it on-the-fly for testing
-      const config = await this.prisma.ai_engine_configs.findUnique({
-        where: { id: configId },
-      });
-      if (!config) {
-        throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
-      }
-      this.initializeProvider(config);
-      const freshProvider = this.providers.get(configId);
-      if (!freshProvider) {
-        return {
-          success: false,
-          message: `Unknown sdk_type: ${config.sdk_type}`,
-        };
-      }
-      const result = await freshProvider.testConnection();
-      await this.prisma.ai_engine_configs.update({
-        where: { id: configId },
-        data: {
-          last_tested_at: new Date(),
-          last_test_ok: result.success,
-        },
-      });
-      return result;
+    const config = await this.prisma.ai_engine_configs.findUnique({
+      where: { id: configId },
+    });
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
     }
 
-    const result = await provider.testConnection();
+    const result = await this.runProviderTest(configId, config);
+
+    // Recorded for every outcome, including the ones that never reach the
+    // provider. A configuration the operator just tested and that failed must
+    // not keep showing the green dot of its last successful test.
     await this.prisma.ai_engine_configs.update({
       where: { id: configId },
       data: {
@@ -225,7 +241,44 @@ export class AIEngineService implements OnModuleInit {
         last_test_ok: result.success,
       },
     });
+
     return result;
+  }
+
+  private async runProviderTest(
+    configId: number,
+    config: any,
+  ): Promise<{ success: boolean; message: string }> {
+    // Checked before dispatching, not only when construction fails.
+    // `OpenAICompatibleProvider` builds fine with an empty key — `generateSpeech`
+    // and `transcribeAudio` use raw `fetch`, so the request goes out with an
+    // empty `Bearer` and the operator gets the provider's own 401: a paragraph
+    // about Authorization headers for a secret that was simply never entered.
+    if (!this.resolveApiKey(config)) {
+      return { success: false, message: this.missingApiKeyMessage(config) };
+    }
+
+    const cached = this.providers.get(configId);
+    if (cached) {
+      return cached.testConnection();
+    }
+
+    // Not loaded — either inactive at boot or newly created. Build it now.
+    const failure = this.initializeProvider(config);
+    const fresh = this.providers.get(configId);
+    if (!fresh) {
+      return {
+        success: false,
+        message: failure || `Unknown sdk_type: ${config.sdk_type}`,
+      };
+    }
+
+    return fresh.testConnection();
+  }
+
+  private missingApiKeyMessage(config: any): string {
+    const envKey = `AI_${String(config.provider).toUpperCase().replace(/\s+/g, '_')}_API_KEY`;
+    return `This configuration has no API key. Add it to the configuration, or expose ${envKey} in the environment.`;
   }
 
   async reloadConfigurations(): Promise<void> {
