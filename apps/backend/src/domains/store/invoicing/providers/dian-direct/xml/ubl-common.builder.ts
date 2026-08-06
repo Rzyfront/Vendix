@@ -693,9 +693,26 @@ export class UblCommonBuilder {
         .ele(UBL_NAMESPACES.CBC, 'ID')
         .txt(tax_code);
 
-      // Item description
+      // Item description + identificación estándar del ítem.
+      //
+      // `cac:StandardItemIdentification` es obligatorio: la DIAN rechaza la línea
+      // sin él con la regla FAZ09 «StandardItemIdentification no informado». No se
+      // emitía en ningún tipo de documento, así que el defecto alcanzaba también a
+      // la emisión real, no solo a la habilitación.
+      //
+      // `schemeID="999"` = «estándar de adopción del contribuyente». Es el valor
+      // correcto mientras Vendix no publique catálogo UNSPSC (001) ni GTIN (010):
+      // declarar uno de esos sin tenerlo sería una afirmación falsa sobre el
+      // origen del código. El número de línea es la caída cuando el llamador no
+      // aporta código — identifica el ítem dentro del documento, que es lo que la
+      // regla pide, sin inventar un catálogo que no existe.
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
+      ubl_item
+        .ele(UBL_NAMESPACES.CAC, 'StandardItemIdentification')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .att('schemeID', UBL_CONSTANTS.ITEM_IDENTIFICATION_SCHEME_ID)
+        .txt(item.item_code?.trim() || String(index + 1));
 
       // Price
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');

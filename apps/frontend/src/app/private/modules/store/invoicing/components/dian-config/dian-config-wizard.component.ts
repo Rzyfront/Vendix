@@ -178,6 +178,21 @@ interface PersistedTestResult {
     status_message: string;
     success: boolean;
   }>;
+  /**
+   * Vía de validación sincrónica (`SendBillSync`), anidada porque no reemplaza al
+   * lote. Es el veredicto que no admite interpretación: la DIAN respondió en la
+   * misma llamada con `IsValid` y las reglas violadas.
+   */
+  validation?: {
+    executed_at?: string | null;
+    is_valid?: boolean;
+    dian_response?: {
+      status_code?: string;
+      status_message?: string;
+      error_messages?: string[];
+      raw_response?: string;
+    } | null;
+  } | null;
 }
 
 /**

@@ -45,6 +45,16 @@ export const UBL_CONSTANTS = {
    * invoice, '20'/'22' for credit notes, '30'/'32' for debit notes). Each
    * builder sets it from `DIAN_OPERATION_TYPES` per document + reference.
    */
+  /**
+   * `@schemeID` de `cac:StandardItemIdentification/cbc:ID` en toda línea de todo
+   * documento. `999` = «estándar de adopción del contribuyente».
+   *
+   * La DIAN exige el elemento (regla FAZ09 «StandardItemIdentification no
+   * informado»), y el esquema declara de DÓNDE sale el código: 001 UNSPSC, 010
+   * GTIN, 999 el propio del contribuyente. Vendix no publica catálogo UNSPSC ni
+   * GTIN, así que declarar cualquiera de esos sería afirmar un origen falso.
+   */
+  ITEM_IDENTIFICATION_SCHEME_ID: '999',
   /** Profile ID for standard invoicing */
   PROFILE_ID: 'DIAN 2.1: Factura Electrónica de Venta',
   /**

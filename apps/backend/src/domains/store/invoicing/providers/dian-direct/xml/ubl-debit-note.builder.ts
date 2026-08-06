@@ -176,8 +176,16 @@ export class UblDebitNoteBuilder {
         .att('currencyID', currency)
         .txt(dianLineExtension(item));
 
+      // `cac:StandardItemIdentification` obligatorio — regla FAZ09. Ver el mismo
+      // comentario en la nota crédito: `DebitNoteLine` se construye aparte, así
+      // que el builder compartido de líneas de factura no la alcanza.
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
+      ubl_item
+        .ele(UBL_NAMESPACES.CAC, 'StandardItemIdentification')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .att('schemeID', UBL_CONSTANTS.ITEM_IDENTIFICATION_SCHEME_ID)
+        .txt(item.item_code?.trim() || String(index + 1));
 
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
       price

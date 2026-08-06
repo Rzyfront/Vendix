@@ -126,6 +126,17 @@ export interface ProviderInvoiceItem {
   discount_amount: string;
   tax_amount: string;
   total_amount: string;
+  /**
+   * Código del ítem para `cac:StandardItemIdentification/cbc:ID`, que la DIAN
+   * exige en toda línea (regla FAZ09 «StandardItemIdentification no informado»).
+   *
+   * OPCIONAL a propósito: el builder cae al número de línea cuando falta, así que
+   * ningún llamador queda obligado a inventar un código de catálogo. De dónde
+   * sale el código real del producto en emisión —SKU, código de barras, UNSPSC—
+   * es una decisión de negocio aparte. Se emite con `schemeID="999"`, «estándar
+   * de adopción del contribuyente», porque Vendix no publica catálogo UNSPSC.
+   */
+  item_code?: string;
 }
 
 export interface ProviderInvoiceTax {

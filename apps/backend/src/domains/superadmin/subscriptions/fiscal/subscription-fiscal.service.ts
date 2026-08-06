@@ -916,7 +916,7 @@ export class SubscriptionFiscalService {
    * worker resolvería otra entidad fiscal — o ninguna.
    */
   async runTestSet(
-    options: { smoke?: boolean } = {},
+    options: { smoke?: boolean; validate_only?: boolean } = {},
   ): Promise<{ job_id: string }> {
     const { settings, configId, resolutionId } =
       await this.requireTestSetTargets();
