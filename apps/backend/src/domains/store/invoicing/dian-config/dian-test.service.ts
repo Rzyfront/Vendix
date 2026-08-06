@@ -250,8 +250,16 @@ export class DianTestService {
       );
     }
 
+    // `abandoned !== true` es deliberado y no es redundante con `pending`.
+    // Una fila descartada por el defecto anterior puede seguir teniendo
+    // `pending: true` y `zip_key`, y sin esta condición el tenant queda encerrado:
+    // la UI le ofrece ejecutar el set y aquí se le niega. El descarte gana.
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
-    if (previous.pending === true && previous.zip_key) {
+    if (
+      previous.pending === true &&
+      previous.zip_key &&
+      previous.abandoned !== true
+    ) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_002,
         `El set de pruebas ${previous.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
@@ -357,7 +365,13 @@ export class DianTestService {
       string,
       any
     >;
-    if (previous_result.pending === true && previous_result.zip_key) {
+    // `abandoned !== true`: ver la misma guarda en `enqueueTestSet`. Un lote
+    // descartado no bloquea el reenvío, ni aunque `pending` haya quedado en true.
+    if (
+      previous_result.pending === true &&
+      previous_result.zip_key &&
+      previous_result.abandoned !== true
+    ) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_002,
         `El set de pruebas ${previous_result.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
@@ -1070,6 +1084,58 @@ export class DianTestService {
     const environment = config.environment as 'test' | 'production';
 
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
+
+    // Un lote descartado NO se vuelve a consultar.
+    //
+    // Este era el bug: al descartar, `abandonTestSet` dejaba `pending: false`, y
+    // el siguiente sondeo — el del wizard, cada 15 s — llamaba aquí, la DIAN
+    // respondía «Batch en proceso de validación» y la línea de abajo reescribía
+    // `pending: true`. El descarte se deshacía solo, y como las guardas de
+    // reenvío miran `pending`, el tenant quedaba encerrado: la UI le ofrecía
+    // ejecutar un set nuevo y el backend le contestaba DIAN_TEST_SET_002.
+    //
+    // Además de negarse a sondear, normaliza la fila: así una configuración ya
+    // corrompida por el defecto anterior se cura en el primer sondeo, sin
+    // necesidad de tocar datos de producción a mano.
+    if (previous.abandoned === true) {
+      const healed: Record<string, any> = { ...previous, pending: false };
+      delete healed.zip_key;
+      delete healed.tracking_id;
+
+      if (previous.pending === true || previous.zip_key) {
+        await this.prisma.dian_configurations.update({
+          where: { id: config_id },
+          data: { last_test_result: healed },
+        });
+      }
+
+      const wait = analyzeTestSetWait(healed);
+
+      // Misma forma que el retorno normal: la UI y el cron leen campos concretos
+      // de esta respuesta, y una unión con propiedades ausentes los rompería.
+      return {
+        success: false,
+        pending: false,
+        rejected: false,
+        zip_key: null,
+        dian_status: null,
+        status_message: wait.reason,
+        error_messages: [] as string[],
+        poll_history: [] as TestSetPollAttempt[],
+        executed_at: previous.executed_at ?? null,
+        rechecked_at: previous.rechecked_at ?? null,
+        total_documents: previous.total_documents ?? null,
+        invoices_count: previous.invoices ?? null,
+        debit_notes_count: previous.debit_notes ?? null,
+        credit_notes_count: previous.credit_notes ?? null,
+        environment,
+        enablement_status: config.enablement_status,
+        wait,
+        message:
+          'El lote anterior está descartado. Puedes ejecutar un set de pruebas nuevo.',
+      };
+    }
+
     const zip_key: string | null = previous.zip_key ?? null;
 
     if (!zip_key) {
@@ -1298,7 +1364,7 @@ export class DianTestService {
       ? previous.abandoned_batches
       : [];
 
-    const result_data = {
+    const result_data: Record<string, any> = {
       ...previous,
       pending: false,
       abandoned: true,
@@ -1313,6 +1379,19 @@ export class DianTestService {
         },
       ],
     };
+
+    // El puntero al lote vivo se BORRA, no se deja con `pending: false`.
+    //
+    // `pending` solo era un booleano que cualquier sondeo podía reescribir, y uno
+    // lo hacía: `checkTestSetStatus` devolvía `pending: true` en cuanto la DIAN
+    // repetía «en proceso de validación», deshaciendo el descarte. Sin `zip_key`
+    // no hay nada que consultar, así que el descarte deja de ser una bandera
+    // opinable y pasa a ser un hecho estructural.
+    //
+    // La clave no se pierde: queda en `abandoned_batches` (arriba) y en
+    // `dian_audit_logs`, que es donde vive la auditoría del abandono.
+    delete result_data.zip_key;
+    delete result_data.tracking_id;
 
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
