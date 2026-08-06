@@ -18,7 +18,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { map, switchMap } from 'rxjs';
+import { map, switchMap, timer, type Subscription } from 'rxjs';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
@@ -1437,8 +1437,20 @@ export class DianConfigWizardComponent {
     () => this.readiness()?.checks.filter((c) => c.satisfied) ?? [],
   );
 
-  private pollHandle: ReturnType<typeof setInterval> | null = null;
-  private tipHandle: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Temporizadores del asistente, como suscripciones RxJS y no como
+   * `setInterval`.
+   *
+   * POR QUÉ IMPORTA: un `setInterval` sólo muere si alguien se acuerda de
+   * llamar a `clearInterval`. Aquí lo hacía `destroyRef.onDestroy`, pero el
+   * asistente pasó a montarse también desde la consola de super admin, donde el
+   * injector de la ruta se CACHEA y no se destruye al cambiar de tenant: un
+   * temporizador superviviente seguiría interrogando a la DIAN por el
+   * contribuyente que el operador ya cerró. `takeUntilDestroyed(destroyRef)`
+   * ata el flujo al componente y no depende de que nadie recuerde nada.
+   */
+  private pollSubscription: Subscription | null = null;
+  private tipSubscription: Subscription | null = null;
 
   constructor() {
     // Sync initial inputs → internal signals (react to changes from parent)
@@ -2033,26 +2045,26 @@ export class DianConfigWizardComponent {
   // ── Polling lifecycle ─────────────────────────────────────
   private startPolling(): void {
     this.startTips();
-    if (this.pollHandle || this.pollExhausted()) return;
+    if (this.pollSubscription || this.pollExhausted()) return;
     this.polling.set(true);
-    this.pollHandle = setInterval(() => {
-      if (this.pollAttempts() >= MAX_AUTO_POLLS) {
-        // Stop pestering DIAN: the ZipKey is persisted, so the merchant can come
-        // back whenever and resolve the verdict with one click.
-        this.pollExhausted.set(true);
-        this.stopPolling();
-        return;
-      }
-      this.pollAttempts.update((n) => n + 1);
-      this.checkTestSetStatus(true);
-    }, POLL_INTERVAL_MS);
+    this.pollSubscription = timer(POLL_INTERVAL_MS, POLL_INTERVAL_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.pollAttempts() >= MAX_AUTO_POLLS) {
+          // Stop pestering DIAN: the ZipKey is persisted, so the merchant can
+          // come back whenever and resolve the verdict with one click.
+          this.pollExhausted.set(true);
+          this.stopPolling();
+          return;
+        }
+        this.pollAttempts.update((n) => n + 1);
+        this.checkTestSetStatus(true);
+      });
   }
 
   private stopPolling(): void {
-    if (this.pollHandle) {
-      clearInterval(this.pollHandle);
-      this.pollHandle = null;
-    }
+    this.pollSubscription?.unsubscribe();
+    this.pollSubscription = null;
     this.polling.set(false);
     this.stopTips();
   }
@@ -2146,18 +2158,18 @@ export class DianConfigWizardComponent {
   }
 
   private startTips(): void {
-    if (this.tipHandle) return;
-    this.tipHandle = setInterval(() => {
-      this.tipIndex.update((i) => i + 1);
-      this.nowTick.update((n) => n + 1);
-    }, TIP_ROTATION_MS);
+    if (this.tipSubscription) return;
+    this.tipSubscription = timer(TIP_ROTATION_MS, TIP_ROTATION_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.tipIndex.update((i) => i + 1);
+        this.nowTick.update((n) => n + 1);
+      });
   }
 
   private stopTips(): void {
-    if (this.tipHandle) {
-      clearInterval(this.tipHandle);
-      this.tipHandle = null;
-    }
+    this.tipSubscription?.unsubscribe();
+    this.tipSubscription = null;
   }
 
   testConnection(): void {
