@@ -17,6 +17,15 @@ if (typeof window !== 'undefined') {
     if (typeof first === 'string' && first.includes('NG0505')) return;
     originalConsoleError(...args);
   };
+  // NG0505 is logged via console.warn, not console.error. Catch it too:
+  // the prerendered '/' shell (per app.config.server.ts anti-bleed contract)
+  // intentionally has no SSR transfer state, so this warning is by design.
+  const originalConsoleWarn = console.warn.bind(console);
+  console.warn = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === 'string' && first.includes('NG0505')) return;
+    originalConsoleWarn(...args);
+  };
 }
 
 if (typeof window !== 'undefined') {
