@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
 import { ResponseModule } from '@common/responses/response.module';
 import { TenantContextRunner } from '@common/context/tenant-context-runner.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
+import { TenantConsoleAuditInterceptor } from './tenant-console-audit.interceptor';
 import { TenantDirectoryController } from './tenant-directory.controller';
 import { TenantDirectoryService } from './tenant-directory.service';
 
@@ -24,11 +26,21 @@ import { TenantDirectoryService } from './tenant-directory.service';
  * bloquea escrituras bajo `/api/store/**`, así que desde este rail se puede
  * configurar un tenant suspendido. Es el comportamiento de soporte que se
  * quiere, pero es un bypass consciente, no un descuido.
+ *
+ * `TenantConsoleAuditInterceptor` se registra como `APP_INTERCEPTOR` desde
+ * aquí, no en `app.module.ts`: así se instancia con ESTE injector —el único
+ * que provee `TenantContextRunner`— y sigue cubriendo todos los sub-módulos
+ * del rail sin que cada uno tenga que declararlo. Filtra por prefijo de URL,
+ * de modo que el resto de la aplicación no lo nota.
  */
 @Module({
   imports: [PrismaModule, ResponseModule],
   controllers: [TenantDirectoryController],
-  providers: [TenantContextRunner, TenantDirectoryService],
+  providers: [
+    TenantContextRunner,
+    TenantDirectoryService,
+    { provide: APP_INTERCEPTOR, useClass: TenantConsoleAuditInterceptor },
+  ],
   exports: [TenantContextRunner],
 })
 export class SuperadminTenantConfigModule {}

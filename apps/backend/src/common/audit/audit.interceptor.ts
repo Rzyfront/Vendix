@@ -20,6 +20,11 @@ export class AuditInterceptor implements NestInterceptor {
     '/stats', // Statistics endpoints (evita bucle infinito)
     '/dashboard', // Dashboard data (evita problemas de rendimiento)
     '/metrics', // Metrics endpoints
+    // Consola de tenants del super admin: se audita con su propio interceptor
+    // (`TenantConsoleAuditInterceptor`). Este de aquí atribuiría la fila a la
+    // organización del super admin —no a la del tenant configurado— y
+    // clasificaría un cambio de configuración DIAN como una edición de tienda.
+    '/superadmin/tenants',
   ];
 
   private shouldExclude(url: string): boolean {
