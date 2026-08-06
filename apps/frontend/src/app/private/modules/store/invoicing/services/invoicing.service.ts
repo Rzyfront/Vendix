@@ -219,8 +219,19 @@ export class InvoicingService {
     return this.http.post(this.getApiUrl(`dian-config/${config_id}/test-connection`), {});
   }
 
+  /**
+   * Encola el set de pruebas. Responde 202 con `job_id`, no con el resultado:
+   * construir, firmar y subir los 50 documentos toma ~74 s, y nginx corta el
+   * request a los 60 s. El resultado se obtiene sondeando `getDianTestSetJob`.
+   */
   runDianTestSet(config_id: number, resolution_id: number): Observable<any> {
     return this.http.post(this.getApiUrl(`dian-config/${config_id}/run-test-set`), { resolution_id });
+  }
+
+  getDianTestSetJob(config_id: number, job_id: string): Observable<any> {
+    return this.http.get(
+      this.getApiUrl(`dian-config/${config_id}/run-test-set/${job_id}`),
+    );
   }
 
   getDianTestResults(config_id: number): Observable<any> {

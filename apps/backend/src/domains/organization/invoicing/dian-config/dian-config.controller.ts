@@ -184,12 +184,30 @@ export class OrgDianConfigController {
    */
   @Post(':id/run-test-set')
   @Permissions('organization:invoicing:dian:write')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   async runTestSet(
     @Param('id', ParseIntPipe) id: number,
     @Body('resolution_id', ParseIntPipe) resolution_id: number,
   ) {
-    const result = await this.dian_test_service.runTestSet(id, resolution_id);
+    const result = await this.dian_test_service.enqueueTestSet(
+      id,
+      resolution_id,
+    );
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Sondeo del job. Misma guardia que en tienda: la `id` de configuración de la
+   * ruta es lo que autoriza leer el resultado, porque los ids de BullMQ son
+   * globales y `job.returnvalue` vive en Redis, fuera del scope de Prisma.
+   */
+  @Get(':id/run-test-set/:jobId')
+  @Permissions('organization:invoicing:dian:read')
+  async getTestSetJobStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('jobId') job_id: string,
+  ) {
+    const result = await this.dian_test_service.getTestSetJobStatus(job_id, id);
     return this.response_service.success(result);
   }
 }

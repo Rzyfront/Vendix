@@ -9,6 +9,8 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { switchMap } from 'rxjs';
+import { pollAsyncJob } from '../../../../../../../core/utils/async-job-poll.util';
 import {
   FormBuilder,
   FormControl,
@@ -448,25 +450,54 @@ export class PlatformDianConfigComponent {
   // Vendix debe aprobar el mismo set de habilitación que cualquier obligado
   // antes de que la DIAN lo habilite en producción.
 
+  /**
+   * Encola el set y sondea el job hasta que termina.
+   *
+   * El POST devuelve 202 con un `job_id`: construir, firmar y subir los 50
+   * documentos toma ~74 s, y el request sincrónico anterior moría en el
+   * `proxy_read_timeout` de 60 s de nginx con un 504 mientras el backend lo
+   * completaba bien. Ese 504 caía en el `error` de abajo, así que `reloadStatus()`
+   * no corría y la pantalla se quedaba con el estado de ANTES del envío.
+   */
   onRunTestSet(): void {
     if (!this.store.configured() || this.testSetBusy()) return;
     this.testSetBusy.set(true);
     this.fiscal
       .runTestSet()
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        switchMap(({ job_id }) =>
+          pollAsyncJob(() => this.fiscal.getTestSetJobStatus(job_id)),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
-        next: (result) => {
+        next: (job) => {
           this.testSetBusy.set(false);
-          this.testSetResult.set(result);
-          this.toast.success('Set de pruebas enviado a la DIAN', 'Enviado');
+          this.testSetResult.set(job.result ?? job);
+          if (job.status === 'failed') {
+            this.toast.error(
+              job.error ?? 'El envío del set de pruebas falló',
+              'Falló el envío',
+            );
+          } else {
+            this.toast.success('Set de pruebas enviado a la DIAN', 'Enviado');
+          }
+          // Se recarga en los DOS casos: un job fallido pudo haber alcanzado a
+          // enviar el lote antes de romperse, y el estado real vive en el backend.
           this.reloadStatus();
         },
         error: (err: { error?: { message?: string } }) => {
           this.testSetBusy.set(false);
+          // NUNCA afirmar «no se pudo enviar»: si el envío ya arrancó, el lote
+          // salió y quemó su bloque de consecutivos autorizados, que no se
+          // recuperan. Un mensaje que asegura que no pasó nada invita a reenviar
+          // y quemar otro bloque.
           this.toast.error(
-            err?.error?.message ?? 'No se pudo enviar el set de pruebas',
-            'Error',
+            err?.error?.message ??
+              'No se pudo confirmar el envío. El lote puede haber salido: consulta el estado antes de reenviar.',
+            'Sin confirmar',
           );
+          this.reloadStatus();
         },
       });
   }
@@ -538,6 +569,10 @@ export class PlatformDianConfigComponent {
             err?.error?.message ?? 'No se pudo descartar el lote',
             'Error',
           );
+          // Recargar también al fallar: el descarte pudo haberse aplicado y solo
+          // haberse perdido la respuesta. Dejar la UI con el estado viejo es lo
+          // que hacía parecer que el botón no hacía nada.
+          this.reloadStatus();
         },
       });
   }

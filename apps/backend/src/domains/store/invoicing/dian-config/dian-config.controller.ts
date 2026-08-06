@@ -203,14 +203,41 @@ export class DianConfigController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Encola el set de pruebas y responde 202 con el id del job.
+   *
+   * Era sincrónico y tardaba ~107 s, así que nginx lo cortaba a los 60 s con un
+   * 504 mientras el backend lo completaba bien: la UI se quedaba con el estado de
+   * antes del envío y avisaba «no se pudo enviar» sobre un lote que sí se había
+   * enviado y ya había quemado su bloque de consecutivos.
+   */
   @Post(':id/run-test-set')
   @Permissions('invoicing:write')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   async runTestSet(
     @Param('id', ParseIntPipe) id: number,
     @Body('resolution_id', ParseIntPipe) resolution_id: number,
   ) {
-    const result = await this.dian_test_service.runTestSet(id, resolution_id);
+    const result = await this.dian_test_service.enqueueTestSet(
+      id,
+      resolution_id,
+    );
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Sondeo del job encolado. El `id` de la configuración viaja en la ruta y es lo
+   * que autoriza la lectura: los ids de BullMQ son enteros globales sobre una cola
+   * compartida por todos los tenants, y `job.returnvalue` sale de Redis, donde el
+   * cliente Prisma scopeado no llega.
+   */
+  @Get(':id/run-test-set/:jobId')
+  @Permissions('invoicing:read')
+  async getTestSetJobStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('jobId') job_id: string,
+  ) {
+    const result = await this.dian_test_service.getTestSetJobStatus(job_id, id);
     return this.response_service.success(result);
   }
 

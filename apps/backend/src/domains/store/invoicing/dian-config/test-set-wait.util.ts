@@ -71,6 +71,47 @@ export function analyzeTestSetWait(
   now: number = Date.now(),
 ): TestSetWaitAnalysis {
   const result = (last_test_result ?? {}) as Record<string, any>;
+  const documents = Array.isArray(result.documents) ? result.documents : [];
+  const diagnosable = documents.length > 0;
+
+  // El descarte se evalúa ANTES de exigir un `zip_key`, y antes que `pending`.
+  //
+  // POR QUÉ EL ORDEN IMPORTA: `abandonTestSet` borra `zip_key` precisamente para
+  // que ningún sondeo pueda resucitar el lote, así que la clave solo sobrevive en
+  // `abandoned_batches`. Y mientras `checkTestSetStatus` pudo reescribir
+  // `pending: true` sobre un lote ya descartado, la única defensa era que esta
+  // rama se evaluara primero. Un tenant real quedó 51 h con `abandoned: true` y
+  // `pending: true` a la vez, con la UI ofreciéndole reenviar y el backend
+  // negándoselo con DIAN_TEST_SET_002.
+  if (result.abandoned === true) {
+    const abandoned_batches = Array.isArray(result.abandoned_batches)
+      ? result.abandoned_batches
+      : [];
+    const key: string | null =
+      result.zip_key ??
+      abandoned_batches[abandoned_batches.length - 1]?.zip_key ??
+      null;
+
+    return {
+      state: 'abandoned',
+      waiting_ms: null,
+      stalled: false,
+      // Un lote descartado no se diagnostica: la DIAN no va a emitir veredicto
+      // sobre él y sus documentos ya no representan el estado de la habilitación.
+      //
+      // OJO: esto NO significa que falten las claves de documento. La UI mostraba
+      // «este lote se envió antes de que se guardaran las claves de documento»
+      // para cualquier `diagnosable: false`, y en un lote descartado con sus 50
+      // CUFE guardados eso era una mentira. Por eso esta rama trae su propio
+      // `reason`: la UI debe explicar el estado con este texto, no inventarlo.
+      diagnosable: false,
+      reason: key
+        ? `El lote ${key} se descartó sin veredicto de la DIAN. Puedes ejecutar un set de pruebas nuevo.`
+        : 'El último lote se descartó sin veredicto de la DIAN. Puedes ejecutar un set de pruebas nuevo.',
+      next_actions: ['run_test_set'],
+    };
+  }
+
   const zipKey: string | null = result.zip_key ?? null;
 
   if (!zipKey) {
@@ -80,20 +121,6 @@ export function analyzeTestSetWait(
       stalled: false,
       diagnosable: false,
       reason: null,
-      next_actions: ['run_test_set'],
-    };
-  }
-
-  const documents = Array.isArray(result.documents) ? result.documents : [];
-  const diagnosable = documents.length > 0;
-
-  if (result.abandoned === true) {
-    return {
-      state: 'abandoned',
-      waiting_ms: null,
-      stalled: false,
-      diagnosable: false,
-      reason: `El lote ${zipKey} se descartó sin veredicto de la DIAN.`,
       next_actions: ['run_test_set'],
     };
   }

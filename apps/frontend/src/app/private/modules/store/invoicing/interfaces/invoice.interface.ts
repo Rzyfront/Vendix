@@ -291,6 +291,13 @@ export interface DianTestResult {
   rejected?: boolean;
   /** DIAN's batch handle; the only way to re-poll without re-sending. */
   zip_key?: string | null;
+  /**
+   * Resolución con la que se envió el último set. El wizard la usa para
+   * preseleccionar el selector: elegirla mal quema un bloque de consecutivos
+   * autorizados que no se recupera, así que la elección del usuario debe
+   * sobrevivir a recargar la página.
+   */
+  resolution_id?: number | null;
   error_messages?: string[];
   executed_at?: string | null;
   rechecked_at?: string | null;

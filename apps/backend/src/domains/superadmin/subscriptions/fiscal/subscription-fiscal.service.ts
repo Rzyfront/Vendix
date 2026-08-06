@@ -906,11 +906,32 @@ export class SubscriptionFiscalService {
     };
   }
 
-  async runTestSet() {
+  /**
+   * Encola el set de pruebas de la plataforma y devuelve el id del job.
+   *
+   * El encolado ocurre DENTRO de `runInPlatformContext` a propósito: ahí es donde
+   * existe el contexto de plataforma (`store_id: undefined`, la organización como
+   * identidad fiscal), y `enqueueTestSet` lo fotografía en el payload para que el
+   * worker lo restaure. Encolar fuera guardaría el contexto del superadmin y el
+   * worker resolvería otra entidad fiscal — o ninguna.
+   */
+  async runTestSet(): Promise<{ job_id: string }> {
     const { settings, configId, resolutionId } =
       await this.requireTestSetTargets();
     return this.runInPlatformContext(settings, () =>
-      this.dianTestService.runTestSet(configId, resolutionId),
+      this.dianTestService.enqueueTestSet(configId, resolutionId),
+    );
+  }
+
+  /**
+   * Estado del job encolado. La `configId` que autoriza la lectura la resuelve
+   * `requireTestSetTargets` desde los ajustes de plataforma, no el llamador, así
+   * que un id de job ajeno no puede colarse por la ruta.
+   */
+  async getTestSetJobStatus(jobId: string) {
+    const { settings, configId } = await this.requireTestSetTargets();
+    return this.runInPlatformContext(settings, () =>
+      this.dianTestService.getTestSetJobStatus(jobId, configId),
     );
   }
 

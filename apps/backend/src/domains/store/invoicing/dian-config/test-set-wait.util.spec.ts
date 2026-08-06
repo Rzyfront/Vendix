@@ -1,0 +1,164 @@
+import {
+  TEST_SET_STALL_AFTER_MS,
+  analyzeTestSetWait,
+} from './test-set-wait.util';
+
+/**
+ * Estos casos existen por un bug de producción, no por cobertura.
+ *
+ * Un tenant real (HIDRO INSTALACIONES) quedó 51 h con `abandoned: true` y
+ * `pending: true` a la vez: al descartar el lote, `abandonTestSet` dejaba
+ * `pending: false`, y el sondeo del wizard —cada 15 s— llamaba a
+ * `checkTestSetStatus`, que reescribía `pending: true` en cuanto la DIAN repetía
+ * «Batch en proceso de validación». El descarte se deshacía solo.
+ *
+ * Como las guardas de reenvío miran `pending`, el resultado era un candado sin
+ * salida: la UI ofrecía ejecutar un set nuevo y el backend contestaba
+ * DIAN_TEST_SET_002. Y como la rama `abandoned` devuelve `diagnosable: false`,
+ * la UI imprimía «este lote se envió antes de que se guardaran las claves de
+ * documento» sobre un lote que tenía sus 50 CUFE guardados.
+ *
+ * Lo que se fija acá es el ORDEN de evaluación: el descarte gana sobre `pending`
+ * y no depende de que `zip_key` siga presente.
+ */
+describe('analyzeTestSetWait', () => {
+  const NOW = new Date('2026-08-06T00:20:00.000Z').getTime();
+  const SUBMITTED = '2026-08-03T20:59:03.221Z';
+  const ZIP_KEY = '932bceac-eaae-4c12-a9e6-8e51c3e13a84';
+
+  const documents = Array.from({ length: 50 }, (_, i) => ({
+    cufe: `cufe-${i}`,
+    number: `SETP99000000${i}`,
+  }));
+
+  it('trata un lote descartado como descartado aunque un sondeo haya reescrito pending', () => {
+    const wait = analyzeTestSetWait(
+      {
+        zip_key: ZIP_KEY,
+        executed_at: SUBMITTED,
+        // La combinación imposible que existía en producción.
+        abandoned: true,
+        pending: true,
+        documents,
+        abandoned_batches: [{ zip_key: ZIP_KEY }],
+      },
+      NOW,
+    );
+
+    expect(wait.state).toBe('abandoned');
+    expect(wait.stalled).toBe(false);
+    expect(wait.next_actions).toEqual(['run_test_set']);
+  });
+
+  it('reconoce el descarte cuando abandonTestSet ya borró zip_key', () => {
+    const wait = analyzeTestSetWait(
+      {
+        // Sin `zip_key`: es lo que deja el descarte, para que ningún sondeo
+        // pueda resucitar el lote.
+        executed_at: SUBMITTED,
+        abandoned: true,
+        pending: false,
+        documents,
+        abandoned_batches: [{ zip_key: ZIP_KEY }],
+      },
+      NOW,
+    );
+
+    expect(wait.state).toBe('abandoned');
+    expect(wait.next_actions).toEqual(['run_test_set']);
+    // La clave se recupera del historial: sin esto el estado degradaba a `idle`
+    // y el usuario perdía todo rastro de qué lote había descartado.
+    expect(wait.reason).toContain(ZIP_KEY);
+  });
+
+  it('explica el descarte por el descarte, no por claves de documento faltantes', () => {
+    const wait = analyzeTestSetWait(
+      { zip_key: ZIP_KEY, executed_at: SUBMITTED, abandoned: true, documents },
+      NOW,
+    );
+
+    // `diagnosable: false` es correcto —un lote descartado no se diagnostica—
+    // pero la razón NO puede ser que falten las claves: acá hay 50.
+    expect(wait.diagnosable).toBe(false);
+    expect(wait.reason).toContain('descartó');
+    expect(wait.reason).not.toContain('claves de documento');
+  });
+
+  it('sin lote no hay nada que esperar', () => {
+    const wait = analyzeTestSetWait({}, NOW);
+    expect(wait.state).toBe('idle');
+    expect(wait.next_actions).toEqual(['run_test_set']);
+  });
+
+  it('un lote reciente sigue en proceso y solo admite volver a consultar', () => {
+    const wait = analyzeTestSetWait(
+      {
+        zip_key: ZIP_KEY,
+        pending: true,
+        executed_at: new Date(NOW - 60_000).toISOString(),
+        documents,
+      },
+      NOW,
+    );
+
+    expect(wait.state).toBe('processing');
+    expect(wait.stalled).toBe(false);
+    expect(wait.next_actions).toEqual(['recheck']);
+  });
+
+  it('pasado el umbral se declara estancado y ofrece diagnosticar o reenviar', () => {
+    const wait = analyzeTestSetWait(
+      {
+        zip_key: ZIP_KEY,
+        pending: true,
+        executed_at: new Date(NOW - TEST_SET_STALL_AFTER_MS - 1).toISOString(),
+        documents,
+      },
+      NOW,
+    );
+
+    expect(wait.state).toBe('stalled');
+    expect(wait.stalled).toBe(true);
+    expect(wait.diagnosable).toBe(true);
+    expect(wait.next_actions).toEqual([
+      'diagnose_documents',
+      'abandon_and_resend',
+    ]);
+  });
+
+  it('un lote estancado sin claves guardadas solo admite reenviar', () => {
+    const wait = analyzeTestSetWait(
+      {
+        zip_key: ZIP_KEY,
+        pending: true,
+        executed_at: new Date(NOW - TEST_SET_STALL_AFTER_MS - 1).toISOString(),
+        // Envío anterior a que se persistieran las claves por documento.
+        documents: [],
+      },
+      NOW,
+    );
+
+    expect(wait.diagnosable).toBe(false);
+    expect(wait.next_actions).toEqual(['abandon_and_resend']);
+    // Acá SÍ corresponde el mensaje que la UI usaba para todo.
+    expect(wait.reason).toContain('claves de documento');
+  });
+
+  it('el reloj de la espera cuenta desde el envío, no desde el último sondeo', () => {
+    const executed_at = new Date(NOW - TEST_SET_STALL_AFTER_MS - 1).toISOString();
+    const wait = analyzeTestSetWait(
+      {
+        zip_key: ZIP_KEY,
+        pending: true,
+        executed_at,
+        // Sondeado hace un segundo: si el reloj se reiniciara con cada consulta,
+        // quien insiste en «volver a consultar» nunca llegaría a `stalled`.
+        rechecked_at: new Date(NOW - 1_000).toISOString(),
+        documents,
+      },
+      NOW,
+    );
+
+    expect(wait.state).toBe('stalled');
+  });
+});

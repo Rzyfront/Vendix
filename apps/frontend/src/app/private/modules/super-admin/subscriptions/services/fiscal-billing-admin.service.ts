@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../../../../environments/environment';
+import { AsyncJobStatus } from '../../../../../core/utils/async-job-poll.util';
 import {
   ApiEnvelope,
   CreatePlatformResolutionDto,
@@ -74,9 +75,20 @@ export class FiscalBillingAdminService {
   // store-level flow (send / re-poll / diagnose per document / discard).
   // ─────────────────────────────────────────────────────────
 
-  runTestSet(): Observable<unknown> {
+  /**
+   * Encola el envío. Responde 202 con `job_id`, no con el resultado: construir,
+   * firmar y subir 50 documentos toma ~74 s y nginx corta el request a los 60 s.
+   * El resultado se obtiene con `getTestSetJobStatus`.
+   */
+  runTestSet(): Observable<{ job_id: string }> {
     return this.http
-      .post<ApiEnvelope<unknown>>(`${this.base}/test-set`, {})
+      .post<ApiEnvelope<{ job_id: string }>>(`${this.base}/test-set`, {})
+      .pipe(map((res) => res.data));
+  }
+
+  getTestSetJobStatus(jobId: string): Observable<AsyncJobStatus> {
+    return this.http
+      .get<ApiEnvelope<AsyncJobStatus>>(`${this.base}/test-set/job/${jobId}`)
       .pipe(map((res) => res.data));
   }
 

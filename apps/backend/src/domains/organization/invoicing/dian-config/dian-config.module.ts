@@ -8,10 +8,20 @@ import { EncryptionService } from '../../../../common/services/encryption.servic
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
+import { BullModule } from '@nestjs/bullmq';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, S3Module, DianDirectModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    S3Module,
+    DianDirectModule,
+    // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
+    // `DianTestService` en sus providers, porque Nest instancia el servicio una
+    // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
+    BullModule.registerQueue({ name: 'dian-test-set' }),
+  ],
   controllers: [OrgDianConfigController],
   providers: [
     OrgDianConfigService,

@@ -18,7 +18,9 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { map, switchMap } from 'rxjs';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
   DianAuditLog,
   DianConfig,
@@ -146,6 +148,8 @@ interface PersistedTestResult {
   tracking_id?: string;
   number_from?: number;
   number_to?: number;
+  /** Resolución usada en ese envío; preselecciona el selector al volver. */
+  resolution_id?: number | null;
   dian_response?: {
     success?: boolean;
     status_code?: string;
@@ -735,6 +739,22 @@ interface PersistedTestResult {
                   </div>
                 </div>
               }
+              <!-- ══ Lote descartado ══
+                   Sin esto, tras recargar no quedaba rastro del descarte y la
+                   pantalla volvía a verse como si nunca se hubiera enviado nada.
+                   El texto viene del backend (`wait.reason`) a propósito: la UI ya
+                   inventó una explicación una vez —«se envió antes de que se
+                   guardaran las claves de documento»— sobre un lote que sí tenía
+                   sus 50 CUFE guardados. -->
+              @if (testSetWait()?.state === 'abandoned') {
+                <div class="p-3 rounded-lg border border-border bg-[var(--color-surface)] flex items-start gap-2">
+                  <app-icon name="trash-2" [size]="14" class="mt-0.5 shrink-0 text-text-secondary"></app-icon>
+                  <p class="text-xs text-text-secondary">
+                    {{ testSetWait()?.reason }}
+                  </p>
+                </div>
+              }
+
               <!-- ══ Waiting state: DIAN acknowledged the batch, no verdict yet ══
                    El contenedor cambia de "informativo" a "advertencia" cuando el
                    backend declara el lote estancado: un spinner azul eterno es
@@ -1244,6 +1264,15 @@ export class DianConfigWizardComponent {
     if (this.runningTestSet()) return 'running';
     const result = this.testSetResult();
     if (!result) return 'idle';
+
+    // El backend es la autoridad sobre el estado del lote, igual que con
+    // `stalled`. Antes esto se derivaba solo de los booleanos y el
+    // `return 'pending'` de abajo convertía cualquier estado que no fuera
+    // success/pending/rejected en «la DIAN está validando tu set de pruebas».
+    // Un lote DESCARTADO cae justo ahí: la pantalla afirmaba que la DIAN estaba
+    // validando un lote que el usuario acababa de descartar.
+    if (this.testSetWait()?.state === 'abandoned') return 'idle';
+
     if (result.success) return 'passed';
     if (result.pending) return 'pending';
     if (result.rejected) return 'rejected';
@@ -1684,14 +1713,44 @@ export class DianConfigWizardComponent {
         next: (response: any) => {
           const list: InvoiceResolution[] = response?.data || [];
           this.resolutions.set(list);
-          // With a single active resolution there is nothing to choose: leaving
-          // the selector empty only disabled the run button for no reason.
-          if (list.length === 1 && this.selectedResolutionId() === null) {
-            this.selectedResolutionId.set(list[0].id);
-          }
+          this.reconcileSelectedResolution();
         },
         error: () => this.resolutions.set([]),
       });
+  }
+
+  /**
+   * Preselecciona la resolución del set de pruebas.
+   *
+   * POR QUÉ EXISTE: el selector arrancaba vacío salvo que hubiera exactamente una
+   * resolución, así que con dos o más había que volver a elegirla en cada entrada
+   * al wizard — y elegir mal quema un bloque de consecutivos autorizados que no se
+   * recupera. La resolución del último envío ya está persistida en
+   * `last_test_result.resolution_id`, así que la elección del usuario sobrevive
+   * sin necesidad de columna nueva.
+   *
+   * Se llama desde las DOS cargas (resoluciones y resultados) porque son
+   * asíncronas e independientes: cuál termina primero no debe cambiar el
+   * resultado. Solo escribe si el selector está vacío, así que nunca pisa una
+   * elección hecha a mano.
+   */
+  private reconcileSelectedResolution(): void {
+    if (this.selectedResolutionId() !== null) return;
+
+    const list = this.resolutions();
+    if (list.length === 0) return;
+
+    const remembered = this.testSetResult()?.resolution_id ?? null;
+    if (remembered !== null && list.some((res) => res.id === remembered)) {
+      this.selectedResolutionId.set(remembered);
+      return;
+    }
+
+    // Con una sola candidata no hay nada que elegir: dejar el selector vacío solo
+    // deshabilitaba el botón de ejecutar sin motivo.
+    if (list.length === 1) {
+      this.selectedResolutionId.set(list[0].id);
+    }
   }
 
   /**
@@ -1716,6 +1775,9 @@ export class DianConfigWizardComponent {
           }
           const mapped = this.mapPersistedResult(persisted, payload?.environment);
           this.testSetResult.set(mapped);
+          // La resolución del último envío ya está en el resultado persistido:
+          // reconciliar aquí es lo que evita tener que volver a elegirla.
+          this.reconcileSelectedResolution();
           if (mapped.pending) {
             // Resolve the verdict right away; DIAN may have finished while the
             // merchant was away.
@@ -1760,6 +1822,7 @@ export class DianConfigWizardComponent {
       rechecked_at: persisted.rechecked_at ?? null,
       number_from: persisted.number_from ?? null,
       number_to: persisted.number_to ?? null,
+      resolution_id: persisted.resolution_id ?? null,
       poll_history: persisted.poll_history,
     };
   }
@@ -2058,17 +2121,41 @@ export class DianConfigWizardComponent {
     this.pollAttempts.set(0);
     this.startTips();
 
+    // El POST solo ENCOLA (202 + job_id) y el resultado se sondea. Antes era
+    // sincrónico y tardaba ~107 s, así que nginx lo cortaba a los 60 s con un 504
+    // mientras el backend lo terminaba bien: el `next` no corría, la pantalla se
+    // quedaba con el estado previo al envío y el toast decía «Error al ejecutar
+    // set de pruebas» sobre un lote que sí había salido y ya había quemado su
+    // bloque de consecutivos autorizados.
     this.invoicingService.runDianTestSet(cfg.id, resId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        switchMap((response: any) => {
+          const jobId = String(response?.data?.job_id ?? response?.job_id ?? '');
+          return pollAsyncJob(() =>
+            this.invoicingService
+              .getDianTestSetJob(cfg.id, jobId)
+              .pipe(map((res: any) => res?.data ?? res)),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
-        next: (response: any) => {
-          const result: DianTestResult = response?.data || response;
+        next: (job: any) => {
           this.runningTestSet.set(false);
+          if (job?.status === 'failed') {
+            this.stopTips();
+            this.toast.error(
+              job?.error || 'El envío del set de pruebas falló',
+            );
+            this.checkTestSetStatus(true);
+            return;
+          }
+          const result: DianTestResult = job?.result as DianTestResult;
           // A non-success response is NOT automatically an error: `pending`
           // means the batch is queued at DIAN. The old code showed no feedback
           // at all in that case, which is why a healthy submission looked silent.
           this.applyTestSetOutcome(result, false);
-          if (result.pending) {
+          if (result?.pending) {
             this.toast.info(
               `La DIAN recibió ${this.testSetDocumentsLabel()} y los está validando. Puedes esperar aquí o volver más tarde.`,
             );
@@ -2087,7 +2174,14 @@ export class DianConfigWizardComponent {
             this.checkTestSetStatus(true);
             return;
           }
-          this.toast.error(extractApiErrorMessage(err) || 'Error al ejecutar set de pruebas');
+          // Nunca afirmar que no se ejecutó: si el worker ya arrancó, el lote
+          // salió y quemó numeración que no se recupera. Se consulta el estado
+          // real en vez de dejar a la vista creyendo que no pasó nada.
+          this.toast.error(
+            extractApiErrorMessage(err) ||
+              'No se pudo confirmar el envío. El lote puede haber salido: revisa el estado antes de reenviar.',
+          );
+          this.checkTestSetStatus(true);
         },
       });
   }
