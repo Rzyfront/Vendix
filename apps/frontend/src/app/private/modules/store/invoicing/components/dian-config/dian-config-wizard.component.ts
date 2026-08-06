@@ -28,7 +28,7 @@ import {
   DianTestResult,
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
-import { InvoicingService } from '../../services/invoicing.service';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -1181,7 +1181,7 @@ interface PersistedTestResult {
   `,
 })
 export class DianConfigWizardComponent {
-  private readonly invoicingService = inject(InvoicingService);
+  private readonly invoicingService = inject(DianConfigApiService);
   private readonly fb = inject(FormBuilder);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);

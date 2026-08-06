@@ -4,7 +4,7 @@ import { NgClass } from '@angular/common';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
-import { InvoicingService } from '../../services/invoicing.service';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DianConfig, DianNitType } from '../../interfaces/invoice.interface';
 
 import {
@@ -221,7 +221,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
   `,
 })
 export class DianConfigComponent {
-  private readonly invoicingService = inject(InvoicingService);
+  private readonly invoicingService = inject(DianConfigApiService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
