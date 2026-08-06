@@ -25,6 +25,13 @@ model users {
   last_name                  String                       @db.VarChar(100)
   avatar_url                 String?                      @db.Text
   organization_id            Int
+  /**
+   * QUI-646: soft-delete flag for the membership module. NULL = not archived
+   * (current behaviour). Set = hide from the members list while keeping the
+   * row for FK integrity, history, and audit. Distinct from `state = 'inactive'`,
+   * which is an authentication lock — archived users can still log in.
+   */
+  archived_at                DateTime?                    @db.Timestamp(6)
   phone                      String?                      @db.VarChar(50)
   document_number            String?                      @db.VarChar(50)
   document_type              String?                      @db.VarChar(50)

@@ -3689,6 +3689,29 @@ export const ErrorCodes = {
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
   },
+
+  // Membresías — archivo de miembro bloqueado por plan activo (QUI-646).
+  // 409 y no 422: la operación ES válida pero requiere acción previa del
+  // usuario (pausar o cancelar el plan). El frontend debe mostrar los planes
+  // activos y enlazar al formulario de transición.
+  MEMBERSHIP_ARCHIVE_BLOCKED_ACTIVE_PLAN_001: {
+    code: 'MEMBERSHIP_ARCHIVE_BLOCKED_ACTIVE_PLAN_001',
+    httpStatus: 409,
+    devMessage:
+      'Member has active membership plans; pause or cancel them before archiving the member',
+  },
+  // Membresías — intento de archivar un miembro que ya está archivado.
+  MEMBERSHIP_ALREADY_ARCHIVED_001: {
+    code: 'MEMBERSHIP_ALREADY_ARCHIVED_001',
+    httpStatus: 409,
+    devMessage: 'Member is already archived',
+  },
+  // Membresías — intento de reactivar un miembro que NO está archivado.
+  MEMBERSHIP_NOT_ARCHIVED_001: {
+    code: 'MEMBERSHIP_NOT_ARCHIVED_001',
+    httpStatus: 409,
+    devMessage: 'Member is not archived',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

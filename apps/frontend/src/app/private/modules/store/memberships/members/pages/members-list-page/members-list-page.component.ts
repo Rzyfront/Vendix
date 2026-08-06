@@ -33,6 +33,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 import {
   GymMembership,
+  GymMembershipQuery,
   GymMembershipStatus,
   GYM_MEMBERSHIP_STATUS_COLORS,
   GYM_MEMBERSHIP_STATUS_LABELS,
@@ -79,9 +80,15 @@ export class MembershipMembersListPageComponent implements OnInit {
   readonly memberships = signal<GymMembership[]>([]);
   readonly stats = signal<MembersStats>({ total: 0, active: 0, pending: 0, expired: 0 });
 
-  readonly filters = signal({ page: 1, limit: 10 });
+  readonly filters = signal({ page: 1, limit: 10, include_archived: false });
   readonly totalItems = signal(0);
   readonly isLoading = signal(false);
+  /**
+   * QUI-646: when true, the list includes members whose customer row carries
+   * archived_at (hidden by default). The toggle lives in the page-level
+   * dropdown actions so operators can switch without losing the search term.
+   */
+  readonly includeArchived = signal(false);
 
   readonly searchTerm = signal('');
   readonly statusFilter = signal<GymMembershipStatus | 'all'>('all');
@@ -124,6 +131,15 @@ export class MembershipMembersListPageComponent implements OnInit {
       icon: 'plus',
       action: 'create',
       variant: 'primary',
+    },
+    // QUI-646: toggle to show/hide archived members without losing the
+    // search term or paging state.
+    {
+      label: this.includeArchived()
+        ? 'Ocultar archivados'
+        : 'Mostrar archivados',
+      icon: this.includeArchived() ? 'eye-off' : 'archive',
+      action: 'toggle_archived',
     },
   ]);
 
@@ -172,14 +188,33 @@ export class MembershipMembersListPageComponent implements OnInit {
     },
   ]);
 
-  readonly tableActions = computed<TableAction[]>(() => [
-    {
-      label: 'Ver detalle',
-      icon: 'eye',
-      variant: 'info',
-      action: (item: GymMembership) => this.openDetail(item),
-    },
-  ]);
+  readonly tableActions = computed<TableAction[]>(() => {
+    const archived = this.membershipsService.isArchived;
+    return [
+      {
+        label: 'Ver detalle',
+        icon: 'eye',
+        variant: 'info',
+        action: (item: GymMembership) => this.openDetail(item),
+      },
+      // QUI-646: row-level archive / unarchive. The action label flips on
+      // the customer's archived_at; the guard happens server-side and the
+      // membership itself surfaces a toast if the backend refuses (active
+      // plan still in place).
+      {
+        label: (item: GymMembership) =>
+          archived(item) ? 'Reactivar' : 'Archivar',
+        icon: (item: GymMembership) =>
+          archived(item) ? 'rotate-ccw' : 'archive',
+        variant: (item: GymMembership) =>
+          archived(item) ? 'success' : 'outline',
+        action: (item: GymMembership) =>
+          archived(item)
+            ? this.confirmUnarchive.bind(this, item)
+            : this.confirmArchive.bind(this, item),
+      },
+    ];
+  });
 
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'customer',
@@ -240,12 +275,13 @@ export class MembershipMembersListPageComponent implements OnInit {
   loadMemberships(): void {
     this.isLoading.set(true);
 
-    const query: Record<string, unknown> = {
+    const query: GymMembershipQuery = {
       page: this.filters().page,
       limit: this.filters().limit,
+      include_archived: this.includeArchived(),
     };
-    if (this.statusFilter() !== 'all') query['status'] = this.statusFilter();
-    if (this.searchTerm()) query['search'] = this.searchTerm();
+    if (this.statusFilter() !== 'all') query.status = this.statusFilter() as GymMembershipStatus;
+    if (this.searchTerm()) query.search = this.searchTerm();
 
     this.membershipsService
       .listPaginated(query)
@@ -302,15 +338,69 @@ export class MembershipMembersListPageComponent implements OnInit {
     this.loadMemberships();
   }
 
+  /**
+   * QUI-646: toggle the include_archived filter from a dropdown action so
+   * the operator can switch the view without losing the search term.
+   */
+  toggleIncludeArchived(): void {
+    this.includeArchived.update((v) => !v);
+    this.filters.update((f) => ({ ...f, include_archived: this.includeArchived(), page: 1 }));
+    this.loadMemberships();
+  }
+
   onPageChange(page: number): void {
     this.filters.update((f) => ({ ...f, page }));
     this.loadMemberships();
+  }
+
+  /**
+   * QUI-646: row-level archive. Wrapped in a confirm modal so a stray click
+   * doesn't soft-delete a customer. If the backend rejects (active plan in
+   * place) the server message surfaces in a toast.
+   */
+  confirmArchive(item: GymMembership): void {
+    const ok = window.confirm(
+      `¿Archivar al socio ${this.customerName(item)}? Los planes deben estar pausados o cancelados.`,
+    );
+    if (!ok) return;
+    this.membershipsService.archiveMember(item.customer_id).subscribe({
+      next: () => {
+        this.toastService.success(
+          'Socio archivado',
+          `${this.customerName(item)} ya no aparece en el listado`,
+        );
+        this.loadMemberships();
+      },
+      error: (msg: string) => {
+        this.toastService.error('No se pudo archivar', msg);
+      },
+    });
+  }
+
+  confirmUnarchive(item: GymMembership): void {
+    const ok = window.confirm(
+      `¿Reactivar al socio ${this.customerName(item)}?`,
+    );
+    if (!ok) return;
+    this.membershipsService.unarchiveMember(item.customer_id).subscribe({
+      next: () => {
+        this.toastService.success(
+          'Socio reactivado',
+          `${this.customerName(item)} vuelve a aparecer en el listado`,
+        );
+        this.loadMemberships();
+      },
+      error: (msg: string) => {
+        this.toastService.error('No se pudo reactivar', msg);
+      },
+    });
   }
 
   onActionClick(action: string): void {
     if (action === 'create') this.assignMembership();
     else if (action === 'refresh') this.loadMemberships();
     else if (action === 'bulk_scan') this.showBulkScanner.set(true);
+    else if (action === 'toggle_archived') this.toggleIncludeArchived();
   }
 
   assignMembership(): void {

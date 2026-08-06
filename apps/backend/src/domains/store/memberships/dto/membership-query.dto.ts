@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import { IsBooleanString, IsEnum, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { membership_status_enum } from '@prisma/client';
 
@@ -36,4 +36,13 @@ export class MembershipQueryDto {
   @IsString()
   @Length(1, 100)
   search?: string;
+
+  /**
+   * QUI-646: by default the list HIDES members that were soft-archived via
+   * `users.archived_at`. Pass `include_archived=true` to surface them (the
+   * archive/unarchive actions render in this view).
+   */
+  @IsOptional()
+  @IsBooleanString()
+  include_archived?: string;
 }
