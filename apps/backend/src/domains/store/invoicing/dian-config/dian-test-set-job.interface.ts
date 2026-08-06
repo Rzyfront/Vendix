@@ -29,6 +29,18 @@ export interface DianTestSetJob {
   /** Resolución de habilitación que aporta la numeración. */
   resolution_id: number;
   /**
+   * Vía de humo: emite UNA factura y gasta UN consecutivo, en vez de la
+   * composición completa que exige la DIAN.
+   *
+   * Existe porque el consecutivo autorizado es finito e irrecuperable y el único
+   * juez de la ingesta es el contador del portal de habilitación. HIDRO gastó 150
+   * en tres lotes de 50 sin que la DIAN recibiera un documento. Con esto la
+   * pregunta «¿la DIAN ingiere lo que enviamos?» cuesta 1 número, no 50.
+   *
+   * NO habilita: un documento suelto no es un set válido.
+   */
+  smoke?: boolean;
+  /**
    * Snapshot del contexto tomado al encolar. El worker lo restaura con
    * `RequestContextService.run(...)` porque `StorePrismaService` lee el scope de
    * AsyncLocalStorage, que NO existe naturalmente dentro de un worker de BullMQ.

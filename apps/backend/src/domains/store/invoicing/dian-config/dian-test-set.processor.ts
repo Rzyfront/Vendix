@@ -31,11 +31,12 @@ export class DianTestSetProcessor extends WorkerHost {
   }
 
   async process(job: Job<DianTestSetJob>): Promise<unknown> {
-    const { config_id, resolution_id, context } = job.data;
+    const { config_id, resolution_id, smoke, context } = job.data;
 
     this.logger.log(
       `Procesando set de pruebas DIAN job=${job.id} config=${config_id} ` +
-        `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}`,
+        `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}` +
+        (smoke ? ' [HUMO: 1 documento]' : ''),
     );
 
     const requestId =
@@ -56,7 +57,10 @@ export class DianTestSetProcessor extends WorkerHost {
           user_id: context?.user_id,
           request_id: requestId,
         },
-        () => this.dianTestService.executeTestSet(config_id, resolution_id),
+        () =>
+          this.dianTestService.executeTestSet(config_id, resolution_id, {
+            smoke: smoke === true,
+          }),
       );
     } catch (error: any) {
       this.logger.error(
