@@ -1109,31 +1109,11 @@ export class DianTestService {
         });
       }
 
-      const wait = analyzeTestSetWait(healed);
-
-      // Misma forma que el retorno normal: la UI y el cron leen campos concretos
-      // de esta respuesta, y una unión con propiedades ausentes los rompería.
-      return {
-        success: false,
-        pending: false,
-        rejected: false,
-        zip_key: null,
-        dian_status: null,
-        status_message: wait.reason,
-        error_messages: [] as string[],
-        poll_history: [] as TestSetPollAttempt[],
-        executed_at: previous.executed_at ?? null,
-        rechecked_at: previous.rechecked_at ?? null,
-        total_documents: previous.total_documents ?? null,
-        invoices_count: previous.invoices ?? null,
-        debit_notes_count: previous.debit_notes ?? null,
-        credit_notes_count: previous.credit_notes ?? null,
-        environment,
-        enablement_status: config.enablement_status,
-        wait,
-        message:
-          'El lote anterior está descartado. Puedes ejecutar un set de pruebas nuevo.',
-      };
+      return this.testSetStatusFromStoredResult(
+        config,
+        healed,
+        'El lote anterior está descartado. Puedes ejecutar un set de pruebas nuevo.',
+      );
     }
 
     const zip_key: string | null = previous.zip_key ?? null;
@@ -1175,6 +1155,48 @@ export class DianTestService {
       pending: still_processing,
       rejected,
     };
+
+    // Concurrencia optimista sobre el lote consultado.
+    //
+    // Sondear a la DIAN tarda ~31 s, y este método hace leer-modificar-escribir
+    // sobre TODO `last_test_result`. Sin este chequeo, una consulta que empezó
+    // antes de un envío escribe su snapshot rancio encima y borra el ZipKey del
+    // lote nuevo.
+    //
+    // Pasó en producción, config 12, con estos tiempos exactos:
+    //   00:13:04.228  la consulta lee `last_test_result` (ZipKey 932bceac)
+    //   00:13:16.447  el envío escribe el suyo         (ZipKey fa6f3f51)
+    //   00:13:35.444  la consulta escribe su snapshot  → fa6f3f51 desaparece
+    // Ese lote se envió a la DIAN, quemó 50 consecutivos autorizados
+    // (990000050–990000099) y su ZipKey solo sobrevive en `dian_audit_logs`.
+    // Un veredicto que no se puede consultar es un bloque de numeración perdido.
+    //
+    // La ventana no desaparece con el envío asíncrono: el cron reconsulta cada
+    // 10 minutos y tarda 31 s, así que puede solaparse igual con un envío de 81 s.
+    const current = await this.getConfigById(config_id);
+    const current_result = (current.last_test_result ?? {}) as Record<
+      string,
+      any
+    >;
+    if (current_result.zip_key !== zip_key) {
+      // Otro envío reemplazó el lote mientras consultábamos. El veredicto que
+      // traemos es de un lote que ya no es el vigente: escribirlo perdería el
+      // nuevo. Se descarta el resultado, no el lote.
+      await this.createAuditLog(config.id, {
+        action: 'check_test_set_status',
+        status: 'pending',
+        error_message:
+          `La consulta del lote ${zip_key} se descartó: otro envío dejó ` +
+          `${current_result.zip_key ?? '(ninguno)'} como lote vigente mientras se consultaba.`,
+        duration_ms: Date.now() - started_at,
+      });
+
+      return this.testSetStatusFromStoredResult(
+        current,
+        current_result,
+        'Se envió un lote nuevo mientras se consultaba el anterior. Consulta el estado del lote vigente.',
+      );
+    }
 
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
@@ -1409,6 +1431,43 @@ export class DianTestService {
       zip_key,
       message:
         'El lote anterior quedó descartado. Puedes ejecutar un nuevo set de pruebas.',
+    };
+  }
+
+  /**
+   * Respuesta de una consulta de estado que NO sondeó a la DIAN (lote descartado)
+   * o que decidió no escribir su resultado (otro envío ganó la carrera).
+   *
+   * Existe para que esas salidas tengan EXACTAMENTE la misma forma que el retorno
+   * normal: la UI y el cron leen campos concretos de esta respuesta
+   * (`wait.state`, `success`, `zip_key`…), y una unión con propiedades ausentes
+   * los rompe en compilación o, peor, en runtime con `undefined`.
+   */
+  private testSetStatusFromStoredResult(
+    config: { environment: string; enablement_status: string },
+    result: Record<string, any>,
+    message: string,
+  ) {
+    const wait = analyzeTestSetWait(result);
+    return {
+      success: false,
+      pending: result.pending === true,
+      rejected: result.rejected === true,
+      zip_key: (result.zip_key ?? null) as string | null,
+      dian_status: null as string | null,
+      status_message: wait.reason,
+      error_messages: [] as string[],
+      poll_history: [] as TestSetPollAttempt[],
+      executed_at: result.executed_at ?? null,
+      rechecked_at: result.rechecked_at ?? null,
+      total_documents: result.total_documents ?? null,
+      invoices_count: result.invoices ?? null,
+      debit_notes_count: result.debit_notes ?? null,
+      credit_notes_count: result.credit_notes ?? null,
+      environment: config.environment as 'test' | 'production',
+      enablement_status: config.enablement_status,
+      wait,
+      message,
     };
   }
 
