@@ -1098,15 +1098,24 @@ export class SalesAnalyticsService {
     );
 
     return results
-      .map((r) => ({
-        channel: r.channel,
-        display_name: labels[r.channel] || r.channel,
-        order_count: r._count.id,
-        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
-        percentage: total > 0
-          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
-          : 0,
-      }))
+      .map((r) => {
+        const revenue = Math.round(Number(r._sum.grand_total || 0) * 100) / 100;
+        const orderCount = r._count.id ?? 0;
+        const ticketPromedio =
+          orderCount > 0
+            ? Math.round((revenue / orderCount) * 100) / 100
+            : 0;
+        return {
+          channel: r.channel,
+          display_name: labels[r.channel] || r.channel,
+          order_count: orderCount,
+          revenue,
+          ticket_promedio: ticketPromedio,
+          percentage: total > 0
+            ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+            : 0,
+        };
+      })
       .sort((a, b) => b.revenue - a.revenue);
   }
 

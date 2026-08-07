@@ -402,6 +402,12 @@ export class CustomersAnalyticsService {
 
     return results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
+      const totalSpent = Math.round(Number(r._sum.grand_total || 0) * 100) / 100;
+      const orderCount = r._count.id || 0;
+      const ticketPromedio =
+        orderCount > 0
+          ? Math.round((totalSpent / orderCount) * 100) / 100
+          : 0;
       return {
         id: r.customer_id,
         customer_name:
@@ -409,8 +415,9 @@ export class CustomersAnalyticsService {
         first_name: customer?.first_name || '',
         last_name: customer?.last_name || '',
         email: customer?.email || '',
-        total_orders: r._count.id || 0,
-        total_spent: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        total_orders: orderCount,
+        total_spent: totalSpent,
+        ticket_promedio: ticketPromedio,
         // RAW Date — el emitter la formatea con TZ. NULL si nunca ha
         // comprado (no debería pasar porque la query filtra customer_id NOT NULL).
         last_order_date: r._max.created_at ?? null,

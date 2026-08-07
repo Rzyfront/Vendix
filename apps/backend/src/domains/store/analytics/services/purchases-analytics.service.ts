@@ -616,6 +616,7 @@ export class PurchasesAnalyticsService {
           tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
           payment_status: o.payment_status,
         };
+        // (la fila ya incluye los 4 stats: total, days_overdue, tax y _count)
       });
   }
 }

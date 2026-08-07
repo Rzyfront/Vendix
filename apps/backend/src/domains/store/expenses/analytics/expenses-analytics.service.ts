@@ -195,25 +195,32 @@ export class ExpensesAnalyticsService {
       take: 10000,
     });
 
-    return expenses.map((e) => ({
-      id: e.id,
-      expense_date: e.expense_date,
-      category_name: e.expense_categories?.name ?? 'Sin categoría',
-      description: e.description ?? '',
-      amount: Math.round(Number(e.amount || 0) * 100) / 100,
-      currency: e.currency ?? 'COP',
-      state: e.state,
-      is_recognized: RECOGNIZED_EXPENSE_STATES.includes(e.state as any),
-      created_by:
-        e.created_by_user
-          ? `${e.created_by_user.first_name} ${e.created_by_user.last_name}`.trim()
-          : '',
-      approved_by:
-        e.approved_by_user
-          ? `${e.approved_by_user.first_name} ${e.approved_by_user.last_name}`.trim()
-          : '',
-      receipt_url: e.receipt_url,
-      notes: e.notes,
-    }));
+    return expenses.map((e) => {
+      const isRecognized = RECOGNIZED_EXPENSE_STATES.includes(e.state as any);
+      return {
+        id: e.id,
+        expense_date: e.expense_date,
+        category_name: e.expense_categories?.name ?? 'Sin categoría',
+        description: e.description ?? '',
+        amount: Math.round(Number(e.amount || 0) * 100) / 100,
+        currency: e.currency ?? 'COP',
+        state: e.state,
+        is_recognized: isRecognized ? 'Sí' : 'No',
+        // Para el adapter frontend (footer:count sobre estas columnas
+        // produce # Reconocidos y # Pendientes en los stats).
+        recognized_count: isRecognized ? 1 : 0,
+        pending_count: e.state === 'pending' ? 1 : 0,
+        created_by:
+          e.created_by_user
+            ? `${e.created_by_user.first_name} ${e.created_by_user.last_name}`.trim()
+            : '',
+        approved_by:
+          e.approved_by_user
+            ? `${e.approved_by_user.first_name} ${e.approved_by_user.last_name}`.trim()
+            : '',
+        receipt_url: e.receipt_url,
+        notes: e.notes,
+      };
+    });
   }
 }
