@@ -7,6 +7,8 @@ const PARAMS: SpeechCacheParams = {
   voice: 'shimmer',
   format: 'mp3',
   speed: 1,
+  // Obligatorio desde que el volumen entró a la clave de caché.
+  vol: 1,
 };
 
 /**

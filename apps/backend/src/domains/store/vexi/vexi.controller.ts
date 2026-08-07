@@ -134,8 +134,14 @@ export class VexiController {
     // happened, above.
     let audio: { audioBase64: string; contentType: string } | null = null;
     if (dto.speak && summary) {
-      const params = await this.speech.resolveParams();
-      audio = await this.speech.synthesize(summary, params);
+      // La moneda va también acá porque el resumen de una escritura es
+      // justamente donde aparecen los montos: "subí el precio de la Coca a
+      // $3.500" es el caso típico de este camino, no la excepción.
+      const [params, currency] = await Promise.all([
+        this.speech.resolveParams(),
+        this.speech.resolveCurrency(),
+      ]);
+      audio = await this.speech.synthesize(summary, params, currency);
     }
 
     return this.responseService.success(
