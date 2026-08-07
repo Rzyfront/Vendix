@@ -4,3 +4,4 @@ export * from './s3-url.helper';
 export * from './store-bootstrap.helper';
 export * from './location-tenant-validator.helper';
 export * from './helpers.module';
+export * from './fiscal-identity.helper';

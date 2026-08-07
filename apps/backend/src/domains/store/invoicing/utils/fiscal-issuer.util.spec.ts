@@ -114,6 +114,7 @@ describe('resolveIssuerFiscalIdentity', () => {
           nit: '902056589',
           legal_name: 'QUICKSS S.A.S.',
           municipality_code: '44847',
+          department: 'La Guajira',
         },
         organization: null,
       }),
@@ -182,6 +183,7 @@ describe('resolveIssuerFiscalIdentity', () => {
         fiscal_data: {
           legal_name: 'HIDRO INSTALACIONES J.L. S.A.S',
           municipality_code: '11001',
+          department: 'Bogotá D.C.',
         },
       }),
     );
