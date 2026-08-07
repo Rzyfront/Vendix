@@ -40,7 +40,7 @@ import {
  * Top-level keys retained when sanitizing an incoming settings payload.
  * Anything else is dropped and logged. Order does not matter.
  */
-const KNOWN_SECTIONS = [
+export const KNOWN_SECTIONS = [
   'general',
   'inventory',
   'checkout',

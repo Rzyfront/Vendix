@@ -498,7 +498,7 @@ interface PersistedTestResult {
                         <div class="w-2 h-2 rounded-full bg-primary"></div>
                       }
                     </div>
-                    <span class="text-sm font-medium text-text-primary">Produccion</span>
+                    <span class="text-sm font-medium text-text-primary">Producción</span>
                   </div>
                   <p class="text-xs text-text-secondary pl-6">
                     Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
@@ -522,7 +522,7 @@ interface PersistedTestResult {
                 </div>
                 <div class="flex items-center justify-between mt-2">
                   <span class="text-text-secondary">Ambiente actual:</span>
-                  <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
+                  <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</span>
                 </div>
               </div>
               <!-- ── Paso a producción ── -->
@@ -763,7 +763,7 @@ interface PersistedTestResult {
                   </div>
                   <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-success' : 'text-error'">
                     <div>{{ testResult()!.message }}</div>
-                    <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
+                    <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</div>
                     <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
                     @if (testResult()!.dian_status) {
                       <div>Estado DIAN: {{ testResult()!.dian_status }}</div>
