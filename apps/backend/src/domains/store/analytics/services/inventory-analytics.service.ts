@@ -456,6 +456,106 @@ export class InventoryAnalyticsService {
     return mergeStoreSettingsWithDefaults(row?.settings);
   }
 
+  /**
+   * QUI-550: inventario agrupado por proveedor via supplier_products.
+   * Para cada supplier con al menos un producto vinculado calcula:
+   *   - product_count: cuántos productos del store le compramos
+   *   - total_stock_quantity: suma de products.stock_quantity
+   *   - total_stock_value: stock × cost_per_unit (preferimos el cost del
+   *     supplier_products sobre el cost_price del producto, porque
+   *     refleja el precio real de compra al proveedor)
+   *   - avg_cost_per_unit: promedio del cost_per_unit del proveedor
+   *   - preferred_count: cuántos productos tienen is_preferred=true
+   *     con este supplier
+   */
+  async getInventoryBySupplierForExport(query: InventoryAnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new ForbiddenException('Store context required');
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    const links = await this.prisma.supplier_products.findMany({
+      where: {
+        organization_id: organizationId,
+        supplier: { store_id: storeId },
+        products: {
+          state: 'active',
+          track_inventory: true,
+        },
+      },
+      select: {
+        supplier_id: true,
+        product_id: true,
+        cost_per_unit: true,
+        is_preferred: true,
+        supplier: { select: { name: true, code: true } },
+        products: {
+          select: { stock_quantity: true, cost_price: true },
+        },
+      },
+      take: 10000,
+    });
+
+    const buckets = new Map<number, {
+      supplier_id: number;
+      supplier_name: string;
+      supplier_code: string | null;
+      product_count: number;
+      total_stock_quantity: number;
+      total_stock_value: number;
+      cost_sum: number;
+      cost_count: number;
+      preferred_count: number;
+    }>();
+
+    for (const link of links) {
+      const bucket = buckets.get(link.supplier_id) ?? {
+        supplier_id: link.supplier_id,
+        supplier_name: link.supplier.name,
+        supplier_code: link.supplier.code,
+        product_count: 0,
+        total_stock_quantity: 0,
+        total_stock_value: 0,
+        cost_sum: 0,
+        cost_count: 0,
+        preferred_count: 0,
+      };
+      const stock = Number(link.products?.stock_quantity ?? 0);
+      // Preferir el cost_per_unit del supplier_products; caer al
+      // cost_price del producto si el link no tiene precio pactado.
+      const unitCost = Number(
+        link.cost_per_unit ?? link.products?.cost_price ?? 0,
+      );
+      bucket.product_count += 1;
+      bucket.total_stock_quantity += stock;
+      bucket.total_stock_value += stock * unitCost;
+      if (unitCost > 0) {
+        bucket.cost_sum += unitCost;
+        bucket.cost_count += 1;
+      }
+      if (link.is_preferred) bucket.preferred_count += 1;
+      buckets.set(link.supplier_id, bucket);
+    }
+
+    return Array.from(buckets.values())
+      .map((b) => ({
+        supplier_id: b.supplier_id,
+        supplier_name: b.supplier_name,
+        supplier_code: b.supplier_code ?? null,
+        product_count: b.product_count,
+        total_stock_quantity: b.total_stock_quantity,
+        total_stock_value: Math.round(b.total_stock_value * 100) / 100,
+        avg_cost_per_unit:
+          b.cost_count > 0
+            ? Math.round((b.cost_sum / b.cost_count) * 100) / 100
+            : 0,
+        preferred_count: b.preferred_count,
+      }))
+      .sort((a, b) => b.total_stock_value - a.total_stock_value);
+  }
+
   async getStockMovements(query: InventoryAnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
