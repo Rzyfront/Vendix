@@ -662,6 +662,38 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * QUI-550: inventario agrupado por proveedor via supplier_products.
+   * Una fila por proveedor con conteo de productos, stock total,
+   * valorización y promedio de costo pactado.
+   */
+  @Get('inventory/by-supplier/export')
+  @Permissions('store:analytics:read')
+  async exportInventoryBySupplier(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.inventory_analytics_service.getInventoryBySupplierForExport(
+        query,
+      );
+
+    const columns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_code', header: 'Código', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number' },
+      { key: 'total_stock_quantity', header: 'Stock Total', type: 'number' },
+      { key: 'avg_cost_per_unit', header: 'Costo Promedio', type: 'currency' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency' },
+      { key: 'preferred_count', header: 'Productos Preferidos', type: 'number' },
+    ];
+
+    await this.emitReport(res, 'inventario_por_proveedor', tz, [
+      this.toSheet('Inventario por Proveedor', columns, rows, tz),
+    ]);
+  }
+
   @Get('customers/trends')
   @Permissions('store:analytics:read')
   async getCustomersTrends(@Query() query: AnalyticsQueryDto) {

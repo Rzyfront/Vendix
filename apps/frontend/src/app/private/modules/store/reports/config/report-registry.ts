@@ -593,6 +593,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-550: Inventario por proveedor via supplier_products.
+    // Una fila por proveedor con: productos vinculados, stock total,
+    // costo promedio pactado, valorización total y cuántos de sus
+    // productos son preferred.
+    id: 'inventory-by-supplier',
+    category: 'inventory',
+    title: 'Inventario por Proveedor',
+    description: 'Stock y valorización agrupados por proveedor',
+    detailedDescription:
+      'Para cada proveedor con productos vinculados, muestra cuántos productos tienes con él, el stock total de esos productos, el costo promedio pactado y el valor total en bodega. Útil para negociar volúmenes y diversificar proveedores.',
+    icon: 'building',
+    route: '/admin/reports/inventory/inventory-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_code', header: 'Código', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number', footer: 'sum' },
+      { key: 'total_stock_quantity', header: 'Stock Total', type: 'number', footer: 'sum' },
+      { key: 'avg_cost_per_unit', header: 'Costo Promedio', type: 'currency' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency', footer: 'sum' },
+      { key: 'preferred_count', header: 'Preferidos', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'inventario_por_proveedor',
+    stats: [
+      { key: 'total_stock_value', label: 'Valor Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_stock_quantity', label: 'Stock Total', type: 'number', icon: 'layers' },
+      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/by-supplier',
+    exportEndpoint: 'store/analytics/inventory/by-supplier/export',
+  },
+
+  {
     id: 'inventory-valuation',
     category: 'inventory',
     title: 'Valoracion',
