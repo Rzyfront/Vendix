@@ -1870,6 +1870,23 @@ export const ErrorCodes = {
     devMessage: 'DIAN test set job not found',
   },
   /**
+   * Two active resolutions declare the SAME number and range, so which one a
+   * caller gets depends on row order rather than on configuration.
+   *
+   * Why this is fatal rather than a warning: a consecutive already delivered to
+   * DIAN can never be reused — DIAN rejects duplicated numbering permanently. Two
+   * active twins advance `current_number` independently, so the one left behind
+   * will re-issue numbers the other already sent, and every document it emits
+   * from then on is dead on arrival. Failing to emit costs a legible error;
+   * emitting costs the remainder of the range.
+   */
+  DIAN_TEST_SET_008: {
+    code: 'DIAN_TEST_SET_008',
+    httpStatus: 409,
+    devMessage:
+      'More than one active numbering resolution declares the same number and range; deactivate the duplicate before emitting',
+  },
+  /**
    * A RADIAN event references a document that DIAN never accepted. Events attach
    * to an existing electronic document by CUFE, so registering one against a
    * draft, rejected or not-yet-transmitted invoice would reference a key that does
