@@ -57,3 +57,9 @@ export const selectActiveTask = createSelector(
   selectVexiState,
   (state) => state.activeTask,
 );
+
+/** What the recovery effect needs to build a fresh intent for a dropped turn. */
+export const selectLastTurn = createSelector(
+  selectVexiState,
+  (state) => state.lastTurn,
+);

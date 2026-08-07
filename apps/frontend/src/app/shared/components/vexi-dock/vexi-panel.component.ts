@@ -1627,7 +1627,11 @@ export class VexiPanelComponent {
    * keyboard shortcut reaches it, and the card never pre-focuses it.
    */
   protected confirmProposal(): void {
-    this.facade.confirmProposal();
+    // The mode is read here, at the moment of the approval, and not from a flag
+    // the effect could consult later: the person can be listening when they tap
+    // Aprobar and reading by the time the acknowledgement comes back, and what
+    // decides whether it is spoken is how they gave the approval.
+    this.facade.confirmProposal(this.voiceUi());
   }
 
   protected rejectProposal(): void {
