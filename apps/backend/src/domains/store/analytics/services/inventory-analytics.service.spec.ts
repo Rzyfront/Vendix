@@ -62,8 +62,8 @@ describe('InventoryAnalyticsService', () => {
 
   // ==================== DATA-COMPLETE-7 ====================
 
-  describe('getStockLevelsForExport (DATA-COMPLETE-7)', () => {
-    it('returns the COMPLETE array (not a {data,meta} envelope) even past 100 rows, ignoring page/limit', async () => {
+  describe('getStockLevelsForExport (DATA-COMPLETE-7, QUI-546)', () => {
+    it('QUI-546: returns the COMPLETE array (not a {data,meta} envelope) even past 100 rows, ignoring page/limit', async () => {
       prisma.products.findMany.mockResolvedValue(buildProducts(150));
 
       // The frontend sends page+limit; the export reader must ignore them and
