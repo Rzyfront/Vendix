@@ -377,11 +377,16 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'email', header: 'Correo', type: 'text' },
       { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
       { key: 'total_revenue', header: 'Ingresos', type: 'currency', footer: 'sum' },
+      // avg_per_order (no se muestra como columna en la tabla; solo
+      // existe para alimentar el stat "Ticket Promedio" via footer
+      // 'average' en la columna virtual).
+      { key: 'avg_per_order', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
     ],
     exportFilename: 'ventas_por_vendedor',
     stats: [
       { key: 'total_revenue', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
       { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: 'avg_per_order', label: 'Ticket Promedio', type: 'currency', icon: 'receipt' },
       { key: '_count', label: 'Vendedores', type: 'number', icon: 'users' },
     ],
     dataEndpoint: 'store/analytics/sales/by-seller',

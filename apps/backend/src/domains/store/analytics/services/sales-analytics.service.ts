@@ -1071,6 +1071,10 @@ export class SalesAnalyticsService {
     return Array.from(buckets.values())
       .map((b) => {
         const user = userMap.get(b.seller_id);
+        const avgPerOrder =
+          b.order_count > 0
+            ? Math.round((b.total_revenue / b.order_count) * 100) / 100
+            : 0;
         return {
           seller_id: b.seller_id,
           seller_name: user
@@ -1079,6 +1083,7 @@ export class SalesAnalyticsService {
           email: user?.email || '',
           order_count: b.order_count,
           total_revenue: Math.round(b.total_revenue * 100) / 100,
+          avg_per_order: avgPerOrder,
         };
       })
       .sort((a, b) => b.total_revenue - a.total_revenue);
