@@ -45,6 +45,7 @@ import {
   TestSetZipCounts,
   TestSetZipVerdict,
 } from './test-set-zip-aggregate.util';
+import { resolveIssuerFiscalIdentity } from '../utils/fiscal-issuer.util';
 import {
   DianTestSetJob,
   DianTestSetJobState,
@@ -669,45 +670,96 @@ export class DianTestService {
       range_to: String(resolution.range_to),
     };
 
-    const organization = await this.prisma.organizations.findFirst({
-      where: { id: context.organization_id },
-    });
+    // ALCANCE FISCAL: `fiscal_data` vive en `store_settings` para entidades con
+    // alcance de TIENDA y en `organization_settings` para las de ORGANIZACIÓN. Es
+    // el mismo criterio que aplica la emisión real en `dian-direct.provider.ts`, y
+    // leer solo el de organización deja sin identidad a los tenants por tienda:
+    // en producción HIDRO (cfg 12, store 97) tiene su `fiscal_data` en
+    // `store_settings` y `organization_settings.fiscal_data` en null.
+    const issuer_entity = config.accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: { id: config.accounting_entity_id },
+          select: {
+            name: true,
+            legal_name: true,
+            fiscal_scope: true,
+            // La dirección FISCAL, no una de despacho: vive en `addresses` con
+            // `type='billing'` por la decisión documentada en `schema.prisma`.
+            organization: {
+              include: {
+                organization_settings: true,
+                addresses: {
+                  where: { type: 'billing' },
+                  orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                  take: 1,
+                },
+              },
+            },
+            store: {
+              include: {
+                store_settings: true,
+                addresses: {
+                  where: { type: 'billing' },
+                  orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                  take: 1,
+                },
+              },
+            },
+          },
+        })
+      : null;
 
-    const issuer: DianIssuerData = {
+    const is_store_scope = issuer_entity?.fiscal_scope === 'STORE';
+    const organization =
+      issuer_entity?.organization ??
+      (await this.prisma.organizations.findFirst({
+        where: { id: context.organization_id },
+      }));
+
+    const scoped_settings = (
+      is_store_scope
+        ? issuer_entity?.store?.store_settings?.settings
+        : issuer_entity?.organization?.organization_settings?.settings
+    ) as Record<string, unknown> | undefined;
+    // Respaldo cruzado: un tenant por tienda que solo guardó su identidad a nivel
+    // de organización (o al revés) no debe quedarse sin emisor por eso.
+    const org_settings =
+      scoped_settings ??
+      ((issuer_entity?.organization?.organization_settings?.settings ??
+        issuer_entity?.store?.store_settings?.settings) as
+        | Record<string, unknown>
+        | undefined);
+
+    const scoped_address = is_store_scope
+      ? issuer_entity?.store?.addresses?.[0]
+      : issuer_entity?.organization?.addresses?.[0];
+
+    // EL EMISOR SALE DE LA FUENTE ÚNICA DE LA VERDAD, NO DE LITERALES.
+    //
+    // Aquí vivían hardcodeados `address_line: 'Calle 1 # 1-1'`, `city_code:
+    // '11001'` (Bogotá), `tax_regime: '49'` y `tax_scheme: 'O-15'`. Con el NIT de
+    // Quickss (902056589), cuyo RUT registra Riohacha 44847 y las
+    // responsabilidades O-13 y O-47, cada documento del set declaraba tres cosas
+    // incoherentes con el RUT a la vez. La peor era `'49'`: NO responsable de IVA
+    // en documentos que cobran 19% de IVA, una contradicción dentro del mismo
+    // documento.
+    //
+    // `resolveIssuerFiscalIdentity` es el MISMO resolvedor que consume la emisión
+    // real, así que habilitación y producción no pueden volver a declarar cosas
+    // distintas sobre el mismo NIT — que es exactamente cómo se produjo un 'O-15'
+    // aquí y un 'O-13' allá.
+    const issuer: DianIssuerData = resolveIssuerFiscalIdentity({
       nit: config.nit,
-      nit_dv: config.nit_dv || '0',
-      // El nombre lo manda la CONFIGURACIÓN DIAN, no la organización: la DIAN
-      // lo confronta contra el RUT del NIT que va en el mismo documento, y el
-      // dueño del NIT es la entidad fiscal, no el tenant de Vendix. Con la
-      // precedencia invertida el set declaraba el nombre de la organización
-      // ('Vendix Corp') sobre el NIT de la entidad fiscal ('QUICKSS S.A.S.
-      // SOLUCIONES RÁPIDAS DE SOFTWARE'), y la DIAN notificaba FAJ43b «Nombre
-      // informado No corresponde al registrado en el RUT con respecto al Nit
-      // suministrado». La organización queda como caída para configuraciones
-      // viejas sin nombre propio.
-      legal_name: config.name || organization?.name,
-      address_line: 'Calle 1 # 1-1',
-      city_code: '11001',
-      city_name: 'Bogotá',
-      department_code: '11',
-      department_name: 'Bogotá D.C.',
-      country_code: 'CO',
-      email: 'test@vendix.com',
-      tax_regime: '49',
-      // `tax_scheme` alimenta `cbc:TaxLevelCode`, que pertenece a la lista de
-      // RESPONSABILIDADES FISCALES: O-13 gran contribuyente, O-15 autorretenedor,
-      // O-23 agente de retención de IVA, O-47 régimen simple, R-99-PN no aplica.
-      //
-      // Aquí decía `'ZZ'`, que es de OTRA lista —la de tributos, `cac:TaxScheme`—,
-      // y la DIAN lo rechaza con la regla FAJ26 «Responsabilidad informada por
-      // emisor no válido según lista». El contrato estaba bien documentado en
-      // `DianIssuerData` y la emisión real ya lo respeta
-      // (`dian-direct.provider.ts`, que cae a 'O-15'): el valor inválido vivía
-      // solo en el generador del set de pruebas. Se usa el MISMO valor por defecto
-      // que la emisión real para que habilitación y producción no declaren cosas
-      // distintas sobre el mismo NIT.
-      tax_scheme: 'O-15',
-    };
+      config_name: config.name,
+      fiscal_data: (org_settings?.fiscal_data ?? null) as Record<
+        string,
+        unknown
+      > | null,
+      entity: issuer_entity,
+      organization,
+      address: scoped_address ?? null,
+      email: organization?.email,
+    });
 
     const customer: DianCustomerData = {
       document_type: '13',
