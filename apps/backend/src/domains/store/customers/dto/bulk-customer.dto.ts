@@ -13,38 +13,13 @@ import { DOCUMENT_TYPE_CODES } from '../../../../common/constants/document-types
 import { DocumentNumberMatchesType } from '../../../../common/validators/document-number.validator';
 
 /**
- * Error canónico para UNA fila del lote de carga masiva.
- *
- * Este shape es emitido por DOS lugares del backend:
- *  - El `ValidationPipe` scoped del controller (errores de DTO: emails mal
- *    formados, strings en lugar de números, etc.).
- *  - El catch por fila de `CustomersBulkService.uploadCustomers()` (errores
- *    de negocio: email duplicado, documento duplicado, etc.).
- *
- * Mantener el mismo shape permite que el frontend renderice una sola tabla
- * de errores sin tener que distinguir entre "falló la validación del DTO" y
- * "falló al guardar en BD".
+ * Re-export del shape canónico de error de carga masiva. La definición
+ * vive en `@common/validators/bulk-validation.util` para que pueda ser
+ * reutilizado por otros bulks (products, orders) sin invertir la
+ * dependencia `common → domains`.
  */
-export interface BulkRowError {
-  /** Índice 1-based de la fila dentro de la plantilla Excel (header = fila 1). */
-  row: number;
-  /** Encabezado de la columna legible para el operador (`"Correo"`, `"Documento"`, etc.). */
-  column: string;
-  /** Clave técnica del campo (`email`, `document_number`, etc.). */
-  field: string;
-  /** Valor que disparó el error, tal cual vino en la fila. */
-  value: unknown;
-  /** Motivo concreto del fallo, en español. */
-  message: string;
-  /**
-   * Código estable de error. El frontend puede usarlo para colorear / filtrar
-   * (`validation` | `duplicate_email` | `duplicate_document` | `conflict` |
-   * `internal`, etc.).
-   */
-  code: string;
-  /** Acción sugerida para corregir el error, en español. Vacío si no aplica. */
-  suggestion?: string;
-}
+import type { BulkRowError } from '../../../../common/validators/bulk-validation.util';
+export type { BulkRowError };
 
 export class BulkCustomerItemDto {
   @ApiPropertyOptional({ example: 'maria.garcia@email.com' })

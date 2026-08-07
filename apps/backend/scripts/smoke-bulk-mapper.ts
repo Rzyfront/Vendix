@@ -1,95 +1,105 @@
 /**
- * Smoke test para el mapper per-row del bulk service.
- * Verifica las 4 ramas: duplicate_email, duplicate_document, conflict, internal.
+ * Smoke test para el mapper per-row del bulk service y para el helper
+ * getFieldAndColumnForCode. Cubre todas las ramas para que un cambio en
+ * el copy o en la columna asignada se detecte sin necesidad de backend
+ * corriendo ni JWT.
  */
 import { mapBulkErrorToUserCopy } from '../src/domains/store/customers/customers-bulk.service';
-
-const cases: Array<{
-  name: string;
-  code: string;
-  details?: Record<string, unknown>;
-  expect: { code: string; messageIncludes: string; suggestionIncludes?: string };
-}> = [
-  {
-    name: 'duplicate_email con value',
-    code: 'SYS_CONFLICT_001',
-    details: { kind: 'email', value: 'juan@x.com' },
-    expect: {
-      code: 'duplicate_email',
-      messageIncludes: 'juan@x.com',
-      suggestionIncludes: 'Usa otro correo',
-    },
-  },
-  {
-    name: 'duplicate_email sin value',
-    code: 'SYS_CONFLICT_001',
-    details: { kind: 'email' },
-    expect: {
-      code: 'duplicate_email',
-      messageIncludes: 'este correo',
-      suggestionIncludes: 'Usa otro correo',
-    },
-  },
-  {
-    name: 'duplicate_document con value+type',
-    code: 'SYS_CONFLICT_001',
-    details: { kind: 'document', value: '12345678', type: 'CC' },
-    expect: {
-      code: 'duplicate_document',
-      messageIncludes: '12345678',
-      messageIncludes2: 'CC',
-      suggestionIncludes: 'Verifica',
-    },
-  },
-  {
-    name: 'SYS_CONFLICT_001 genérico (sin kind)',
-    code: 'SYS_CONFLICT_001',
-    details: {},
-    expect: {
-      code: 'conflict',
-      messageIncludes: 'conflicto',
-    },
-  },
-  {
-    name: 'SYS_CONFLICT_001 sin details',
-    code: 'SYS_CONFLICT_001',
-    details: undefined,
-    expect: {
-      code: 'conflict',
-      messageIncludes: 'conflicto',
-    },
-  },
-  {
-    name: 'cualquier otro código',
-    code: 'INTERNAL_ERROR',
-    details: undefined,
-    expect: {
-      code: 'internal',
-      messageIncludes: 'Error interno',
-    },
-  },
-];
+import { getFieldAndColumnForCode } from '../src/common/validators/bulk-validation.util';
 
 let pass = 0;
 let fail = 0;
-for (const c of cases) {
-  const got = mapBulkErrorToUserCopy(c.code, c.details);
-  const okCode = got.code === c.expect.code;
-  const okMsg = got.message.includes(c.expect.messageIncludes);
-  const okSug =
-    !c.expect.suggestionIncludes ||
-    (got.suggestion ?? '').includes(c.expect.suggestionIncludes);
-  if (okCode && okMsg && okSug) {
-    console.log(`[OK]   ${c.name}`);
-    console.log(`      → ${JSON.stringify(got)}`);
+
+const check = (name: string, got: unknown, expect: Record<string, unknown>) => {
+  const errors: string[] = [];
+  for (const [k, v] of Object.entries(expect)) {
+    const actual = (got as any)[k];
+    if (typeof v === 'string' && v.startsWith('contains:')) {
+      if (typeof actual !== 'string' || !actual.includes(v.slice('contains:'.length))) {
+        errors.push(`${k} debería contener "${v.slice('contains:'.length)}", got: ${JSON.stringify(actual)}`);
+      }
+    } else if (actual !== v) {
+      errors.push(`${k} esperado ${JSON.stringify(v)}, got ${JSON.stringify(actual)}`);
+    }
+  }
+  if (errors.length === 0) {
+    console.log(`[OK]   ${name}`);
     pass++;
   } else {
-    console.log(`[FAIL] ${c.name}`);
-    console.log(`      got:      ${JSON.stringify(got)}`);
-    console.log(`      expected: code=${c.expect.code}, msg includes "${c.expect.messageIncludes}"${c.expect.suggestionIncludes ? `, sug includes "${c.expect.suggestionIncludes}"` : ''}`);
+    console.log(`[FAIL] ${name}`);
+    console.log(`      got: ${JSON.stringify(got)}`);
+    for (const e of errors) console.log(`        - ${e}`);
+    fail++;
+  }
+};
+
+// ─── mapBulkErrorToUserCopy ──────────────────────────────────────────
+console.log('── mapBulkErrorToUserCopy ──');
+check('duplicate_email con value', mapBulkErrorToUserCopy('SYS_CONFLICT_001', { kind: 'email', value: 'juan@x.com' }), {
+  code: 'duplicate_email',
+  message: 'contains:juan@x.com',
+  suggestion: 'contains:Usa otro correo',
+});
+check('duplicate_email sin value', mapBulkErrorToUserCopy('SYS_CONFLICT_001', { kind: 'email' }), {
+  code: 'duplicate_email',
+  message: 'contains:este correo',
+  suggestion: 'contains:Usa otro correo',
+});
+check('duplicate_document con value+type', mapBulkErrorToUserCopy('SYS_CONFLICT_001', { kind: 'document', value: '12345678', type: 'CC' }), {
+  code: 'duplicate_document',
+  message: 'contains:12345678',
+  suggestion: 'contains:Verifica',
+});
+// Que el tipo DIAN aparezca en el mensaje
+{
+  const got = mapBulkErrorToUserCopy('SYS_CONFLICT_001', { kind: 'document', value: '12345678', type: 'CC' });
+  if (got.message.includes('CC')) {
+    console.log('[OK]   duplicate_document incluye el tipo DIAN en el mensaje');
+    pass++;
+  } else {
+    console.log(`[FAIL] duplicate_document debe incluir el tipo "CC" en el mensaje, got: ${got.message}`);
     fail++;
   }
 }
+check('SYS_CONFLICT_001 sin kind (genérico)', mapBulkErrorToUserCopy('SYS_CONFLICT_001', {}), {
+  code: 'conflict',
+  message: 'contains:conflicto',
+});
+check('SYS_CONFLICT_001 sin details', mapBulkErrorToUserCopy('SYS_CONFLICT_001', undefined), {
+  code: 'conflict',
+  message: 'contains:conflicto',
+});
+check('cualquier otro código', mapBulkErrorToUserCopy('INTERNAL_ERROR', undefined), {
+  code: 'internal',
+  message: 'contains:Error interno',
+});
+
+// ─── getFieldAndColumnForCode ────────────────────────────────────────
+console.log('\n── getFieldAndColumnForCode ──');
+check('duplicate_email → email / Correo', getFieldAndColumnForCode('duplicate_email'), {
+  field: 'email',
+  column: 'Correo',
+});
+check('duplicate_document → document_number / Documento', getFieldAndColumnForCode('duplicate_document'), {
+  field: 'document_number',
+  column: 'Documento',
+});
+check('duplicate_email_in_file → email / Correo', getFieldAndColumnForCode('duplicate_email_in_file'), {
+  field: 'email',
+  column: 'Correo',
+});
+check('conflict → general / General', getFieldAndColumnForCode('conflict'), {
+  field: 'general',
+  column: 'General',
+});
+check('internal → general / General', getFieldAndColumnForCode('internal'), {
+  field: 'general',
+  column: 'General',
+});
+check('cualquier otro → general / General', getFieldAndColumnForCode('cualquier-otro'), {
+  field: 'general',
+  column: 'General',
+});
 
 console.log(`\n${pass}/${pass + fail} casos pasaron.`);
 if (fail > 0) process.exit(1);

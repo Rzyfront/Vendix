@@ -1,5 +1,41 @@
 import { ValidationError } from 'class-validator';
-import { BulkRowError } from '../../domains/store/customers/dto/bulk-customer.dto';
+
+/**
+ * Error canónico para UNA fila de una carga masiva (clientes, productos,
+ * órdenes, etc.). Este shape es emitido por DOS lugares:
+ *  - El `exceptionFactory` del `ValidationPipe` global (errores de DTO:
+ *    emails mal formados, strings en lugar de números, etc.).
+ *  - El catch por fila del bulk service respectivo (errores de negocio:
+ *    email duplicado, documento duplicado, etc.).
+ *
+ * Mantener el mismo shape permite que el frontend renderice una sola tabla
+ * de errores sin tener que distinguir entre "falló la validación del DTO"
+ * y "falló al guardar en BD".
+ *
+ * Vive aquí (en `common/`) y NO en un DTO de dominio para que la util
+ * pueda ser reusada por otros bulks (products, orders, ...) sin invertir
+ * la dependencia `common → domains`.
+ */
+export interface BulkRowError {
+  /** Índice 1-based de la fila dentro de la plantilla Excel (header = fila 1). 0 = desconocida. */
+  row: number;
+  /** Encabezado de la columna legible para el operador (`"Correo"`, `"Documento"`, etc.). */
+  column: string;
+  /** Clave técnica del campo (`email`, `document_number`, etc.). */
+  field: string;
+  /** Valor que disparó el error, tal cual vino en la fila. */
+  value: unknown;
+  /** Motivo concreto del fallo, en español. */
+  message: string;
+  /**
+   * Código estable de error. El frontend puede usarlo para colorear / filtrar
+   * (`validation` | `duplicate_email` | `duplicate_document` | `conflict` |
+   * `internal`, etc.).
+   */
+  code: string;
+  /** Acción sugerida para corregir el error, en español. Vacío si no aplica. */
+  suggestion?: string;
+}
 
 /**
  * Column header (in Spanish) for each DTO field. Used by the bulk
@@ -34,6 +70,31 @@ export const CONSTRAINT_SUGGESTIONS: Record<string, string> = {
   DocumentNumberMatchesType:
     'Revisa que la cantidad de dígitos coincida con el tipo de documento (CC: 6-10, NIT: 9 + dígito de verificación, etc.).',
 };
+
+/**
+ * Mapea un `code` de `BulkRowError` (canónico, emitido por el mapper o
+ * por el catch per-row) al campo técnico del DTO y al encabezado legible
+ * que verá el operador.
+ *
+ * El campo técnico es lo que el frontend usa para resaltar la celda en
+ * el Excel si algún día se hace; el encabezado es lo que se muestra en
+ * la columna "Columna" de la tabla de errores.
+ */
+export function getFieldAndColumnForCode(code: string): {
+  field: string;
+  column: string;
+} {
+  switch (code) {
+    case 'duplicate_email':
+      return { field: 'email', column: FIELD_TO_COLUMN.email };
+    case 'duplicate_document':
+      return { field: 'document_number', column: FIELD_TO_COLUMN.document_number };
+    case 'duplicate_email_in_file':
+      return { field: 'email', column: FIELD_TO_COLUMN.email };
+    default:
+      return { field: 'general', column: 'General' };
+  }
+}
 
 /**
  * Detecta si el árbol de errores de class-validator pertenece a una carga
@@ -86,11 +147,14 @@ export function flattenBulkValidationErrors(
     err: ValidationError,
     fallbackIndex: number,
   ): number => {
+    // Si el DTO trae `row_number` (1-based, número de fila del Excel),
+    // lo respetamos. Si no, devolvemos 0 para señalar "fila desconocida"
+    // y que el frontend muestre "Fila ?" en vez de inventar un número.
     const candidate = (err.value as { row_number?: number } | null)
       ?.row_number;
     return typeof candidate === 'number' && candidate > 0
       ? candidate
-      : fallbackIndex + 1; // +1 para mantener consistencia 1-based
+      : 0;
   };
 
   const walk = (errs: ValidationError[], rowHint?: number) => {

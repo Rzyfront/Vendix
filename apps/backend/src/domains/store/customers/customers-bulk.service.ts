@@ -16,6 +16,10 @@ import {
 } from './dto/bulk-customer.dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
+import {
+  FIELD_TO_COLUMN,
+  getFieldAndColumnForCode,
+} from '@common/validators/bulk-validation.util';
 
 /**
  * Mapea un error interno (código de `VendixHttpException` + `details`) a un
@@ -242,22 +246,6 @@ export class CustomersBulkService {
   }
 
   /**
-   * Mapeo de campo técnico del DTO al encabezado de la columna en la
-   * plantilla. Duplicado del controller (no se importa para evitar
-   * dependencia circular). Si se agrega una columna nueva, mantener
-   * ambos en sincronía.
-   */
-  private static readonly FIELD_TO_COLUMN: Record<string, string> = {
-    email: 'Correo',
-    first_name: 'Nombre',
-    last_name: 'Apellido',
-    document_number: 'Documento',
-    document_type: 'Tipo Documento',
-    phone: 'Teléfono',
-    row_number: 'Fila',
-  };
-
-  /**
    * Procesa la carga masiva de clientes.
    *
    * Política de errores (QUI-606):
@@ -310,8 +298,7 @@ export class CustomersBulkService {
       const rowNum = customerData.row_number ?? 0;
       const pushError = (rowError: BulkRowError) => {
         const fieldCol =
-          CustomersBulkService.FIELD_TO_COLUMN[rowError.field] ??
-          rowError.column;
+          FIELD_TO_COLUMN[rowError.field] ?? rowError.column;
         results.push({
           customer: null,
           status: 'error',
@@ -394,10 +381,11 @@ export class CustomersBulkService {
             : undefined;
         const message = userCopy.message || baseMessage || 'Error desconocido';
 
+        const { field, column } = getFieldAndColumnForCode(userCopy.code);
         const rowError: BulkRowError = {
           row: rowNum,
-          column: userCopy.code === 'duplicate_email' ? 'Correo' : 'General',
-          field: userCopy.code === 'duplicate_email' ? 'email' : 'general',
+          column,
+          field,
           value: details?.value ?? null,
           code: userCopy.code,
           message,
