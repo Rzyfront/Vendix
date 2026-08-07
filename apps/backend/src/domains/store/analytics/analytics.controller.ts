@@ -594,6 +594,38 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-545: exporta el listado de productos activos con stock bajo o
+   * en cero (qty ≤ reorder_point) con su riesgo monetario.
+   * Reutiliza `resolveProductLowStockThreshold` para que el criterio
+   * sea consistente con la vista de pantalla.
+   */
+  @Get('inventory/low-stock/export')
+  @Permissions('store:analytics:read')
+  async exportLowStock(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.inventory_analytics_service.getLowStockForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'product_id', header: 'ID', type: 'number' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'stock_bajo', tz, [
+      this.toSheet('Stock Bajo', columns, rows, tz),
+    ]);
+  }
+
   // ==================== CUSTOMERS ANALYTICS ====================
 
   @Get('customers/summary')
