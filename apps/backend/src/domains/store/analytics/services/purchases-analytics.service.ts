@@ -3,14 +3,9 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
-  Granularity,
   PurchasesBySupplierQueryDto,
 } from '../dto/analytics-query.dto';
-import {
-  getDateTruncInterval,
-  getPreviousPeriod,
-  parseDateRange,
-} from '../utils/date.util';
+import { getPreviousPeriod, parseDateRange } from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -489,11 +484,7 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         location: { store_id: storeId },
-        // order_date es DateTime? (instante real) — filtrar nulls aquí
-        // evita que POs sin fecha caigan en el bucket 1970-01-01 al truncar
-        // en JS. tz-audit:ignore marca la columna como instante real (no
-        // business-date que requiera resolveLocalDateOnlyRange).
-        order_date: { not: null, gte: startDate, lte: endDate }, // tz-audit:ignore (DateTime?, instante real)
+        order_date: { gte: startDate, lte: endDate },
       },
       select: {
         status: true,
@@ -571,9 +562,9 @@ export class PurchasesAnalyticsService {
     const orders = await this.prisma.purchase_orders.findMany({
       where: {
         organization_id: organizationId,
-        location: { store_id: storeId },
+        suppliers: { store_id: storeId },
         payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: { not: null }, // tz-audit:ignore (DateTime?, instante real)
+        payment_due_date: { not: null },
       },
       select: {
         id: true,
@@ -633,14 +624,11 @@ export class PurchasesAnalyticsService {
  * Espejo de `date_trunc('<interval>', timestamp)` de Postgres.
  */
 function truncateToGranularity(date: Date, granularity: Granularity): Date {
-  // tz-audit:ignore — aritmética UTC deliberada. El bucket es local-UTC
-  // (espejo de date_trunc), no un cálculo de negocio-date. La conversión
-  // a TZ de la tienda ocurre en parseDateRange, fuera de este helper.
   const d = new Date(date);
-  d.setUTCMilliseconds(0); // tz-audit:ignore
-  d.setUTCSeconds(0); // tz-audit:ignore
-  d.setUTCMinutes(0); // tz-audit:ignore
-  d.setUTCHours(0); // tz-audit:ignore
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  d.setUTCHours(0);
   switch (granularity) {
     case Granularity.HOUR:
       return d;
