@@ -911,6 +911,47 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-543: Arqueo de caja. Listado de sesiones de caja con apertura,
+    // cierre esperado vs real, y diferencia. El backend (FinancialAnalyticsService.
+    // getCashSessionsForExport) ya devuelve los 12 campos en el shape canónico;
+    // aquí solo se cablea el registry + ruta.
+    id: 'cash-sessions',
+    category: 'financial',
+    title: 'Arqueo de Caja',
+    description: 'Sesiones de caja con apertura, cierre esperado, real y diferencia',
+    detailedDescription:
+      'Detalle de cada sesión de caja: quién la abrió y cerró, monto de apertura, total de ventas y gastos, cierre esperado vs real, y la diferencia (descuadre). Útil para auditar cuadres diarios y detectar fugas.',
+    icon: 'cash',
+    route: '/admin/reports/financial/cash-sessions',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'opened_at',
+    columns: [
+      { key: 'opened_at', header: 'Apertura', type: 'date' },
+      { key: 'closed_at', header: 'Cierre', type: 'date' },
+      { key: 'register_name', header: 'Caja', type: 'text' },
+      { key: 'opened_by_name', header: 'Abrió', type: 'text' },
+      { key: 'closed_by_name', header: 'Cerró', type: 'text' },
+      { key: 'opening_amount', header: 'Monto Apertura', type: 'currency' },
+      { key: 'total_sales', header: 'Ventas', type: 'currency', footer: 'sum' },
+      { key: 'total_expenses', header: 'Gastos', type: 'currency', footer: 'sum' },
+      { key: 'expected_closing_amount', header: 'Cierre Esperado', type: 'currency' },
+      { key: 'actual_closing_amount', header: 'Cierre Real', type: 'currency' },
+      { key: 'difference', header: 'Diferencia', type: 'currency', footer: 'sum' },
+      { key: 'status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'arqueo_caja',
+    stats: [
+      { key: 'total_sales', label: 'Total Ventas', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_expenses', label: 'Total Gastos', type: 'currency', icon: 'trending-down' },
+      { key: 'difference', label: 'Descuadre Total', type: 'currency', icon: 'alert-triangle' },
+    ],
+    dataEndpoint: 'store/analytics/financial/cash-sessions',
+    exportEndpoint: 'store/analytics/financial/cash-sessions/export',
+  },
+
+  {
     id: 'profit-loss',
     category: 'financial',
     title: 'Estado de Resultados',

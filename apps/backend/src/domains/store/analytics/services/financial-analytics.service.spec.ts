@@ -569,7 +569,7 @@ describe('FinancialAnalyticsService', () => {
   });
 
   describe('getCashSessionsForExport', () => {
-    it('DATA-CELL-4: returns RAW Date instants (no .toISOString().split formatting)', async () => {
+    it('QUI-543: returns RAW Date instants (no .toISOString().split formatting)', async () => {
       const openedAt = new Date('2026-07-08T15:30:00.000Z');
       const closedAt = new Date('2026-07-08T23:45:00.000Z');
 
