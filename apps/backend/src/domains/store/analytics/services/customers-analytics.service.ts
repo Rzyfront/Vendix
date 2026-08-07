@@ -361,6 +361,63 @@ export class CustomersAnalyticsService {
     });
   }
 
+  /**
+   * QUI-541: variante flat-array de getTopCustomers para XLSX. Devuelve
+   * TODOS los clientes ordenados por gasto (no solo top 10) con la
+   * misma forma de fila pero con `last_order_date` como `Date` cruda
+   * (no string) para que el emitter XLSX la formatee con la TZ de
+   * la tienda.
+   */
+  async getTopCustomersForExport(query: AnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        customer_id: { not: null },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _sum: { grand_total: true },
+      _count: { id: true },
+      _max: { created_at: true },
+      orderBy: { _sum: { grand_total: 'desc' } },
+      take: 10000,
+    });
+
+    const customerIds = results
+      .map((r) => r.customer_id)
+      .filter(Boolean) as number[];
+    const customers = await this.prisma.users.findMany({
+      where: { id: { in: customerIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
+    });
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+    return results.map((r) => {
+      const customer = customerMap.get(r.customer_id as number);
+      return {
+        id: r.customer_id,
+        customer_name:
+          `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
+        first_name: customer?.first_name || '',
+        last_name: customer?.last_name || '',
+        email: customer?.email || '',
+        total_orders: r._count.id || 0,
+        total_spent: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        // RAW Date — el emitter la formatea con TZ. NULL si nunca ha
+        // comprado (no debería pasar porque la query filtra customer_id NOT NULL).
+        last_order_date: r._max.created_at ?? null,
+      };
+    });
+  }
+
   async getCustomersChannels(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
