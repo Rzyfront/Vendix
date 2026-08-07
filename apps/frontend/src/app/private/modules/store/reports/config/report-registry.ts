@@ -122,73 +122,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/purchases/by-supplier',
   },
 
-  {
-    // QUI-547: Tendencias de compra. Serie temporal con date_trunc sobre
-    // order_date al granularity del query (hour|day|week|month|year,
-    // default day). Permite ver el comportamiento de compras en el tiempo.
-    id: 'purchase-trends',
-    category: 'purchases',
-    title: 'Tendencias de Compra',
-    description: 'Serie temporal de órdenes de compra por período',
-    detailedDescription:
-      'Evolución temporal de las compras: cuántas órdenes se generaron, monto total y desglose entre pendientes y recibidas en cada período (hora, día, semana, mes o año).',
-    icon: 'trending-up',
-    route: '/admin/reports/purchases/purchase-trends',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'period',
-    columns: [
-      { key: 'period', header: 'Período', type: 'date' },
-      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
-      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
-      { key: 'completed_count', header: 'Recibidas', type: 'number', footer: 'sum' },
-    ],
-    exportFilename: 'tendencias_compra',
-    stats: [
-      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'file-text' },
-      { key: 'pending_count', label: 'Pendientes', type: 'number', icon: 'clock' },
-    ],
-    dataEndpoint: 'store/analytics/purchases/trends',
-    exportEndpoint: 'store/analytics/purchases/trends/export',
-  },
-
-  {
-    // QUI-542: Cuentas por pagar a proveedores con bucketing de
-    // antigüedad. purchase_orders con payment_status unpaid|partial.
-    id: 'purchase-aging',
-    category: 'purchases',
-    title: 'Cuentas por Pagar (Aging)',
-    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
-    detailedDescription:
-      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
-    icon: 'clock-alert',
-    route: '/admin/reports/purchases/purchase-aging',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'order_number', header: 'OC', type: 'text' },
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date-only' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date-only' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
-      { key: 'payment_status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'cuentas_por_pagar',
-    stats: [
-      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/purchases/aging',
-    exportEndpoint: 'store/analytics/purchases/aging/export',
-  },
-
-  // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
+  // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────
 
   {
     id: 'reviews-summary',
@@ -391,38 +325,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
-    // QUI-549: Ventas por canal. groupBy de orders.channel con
-    // COMPLETED_SALE_STATES, mostrando órdenes, ingresos y % de
-    // participación por canal (POS, ecommerce, agent, whatsapp,
-    // marketplace).
-    id: 'sales-by-channel',
-    category: 'sales',
-    title: 'Por Canal',
-    description: 'Distribución de ventas por canal: POS, ecommerce, agente, etc.',
-    detailedDescription:
-      'Conoce por dónde venden más: punto de venta, tienda online, agente IA, WhatsApp o marketplace. Distribución con conteo de órdenes, ingresos y % de participación.',
-    icon: 'radio',
-    route: '/admin/reports/sales/sales-by-channel',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'channel',
-    columns: [
-      { key: 'display_name', header: 'Canal', type: 'text' },
-      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'revenue', header: 'Ingresos', type: 'currency', footer: 'sum' },
-      { key: 'percentage', header: '% Participación', type: 'percentage' },
-    ],
-    exportFilename: 'ventas_por_canal',
-    stats: [
-      { key: 'revenue', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
-      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
-    ],
-    dataEndpoint: 'store/analytics/sales/by-channel',
-    exportEndpoint: 'store/analytics/sales/by-channel/export',
-  },
-
-  {
     id: 'sales-trends',
     category: 'sales',
     title: 'Tendencias',
@@ -517,41 +419,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/inventory/stock-levels',
     exportEndpoint: 'store/analytics/inventory/export',
-  },
-
-  {
-    // QUI-545: Stock bajo / puntos de reorden. Reusa getLowStockAlerts del
-    // service (que ya filtra qty <= reorder_point con el helper compartido)
-    // y le agrega `stock_value_at_risk` (qty * cost_price) para mostrar el
-    // impacto monetario de reponer.
-    id: 'inventory-low-stock',
-    category: 'inventory',
-    title: 'Stock Bajo',
-    description: 'Productos en o por debajo del punto de reorden',
-    detailedDescription:
-      'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
-    icon: 'alert-triangle',
-    route: '/admin/reports/inventory/inventory-low-stock',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'product_id',
-    columns: [
-      { key: 'product_name', header: 'Producto', type: 'text' },
-      { key: 'sku', header: 'SKU', type: 'text' },
-      { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
-      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
-      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
-      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
-    ],
-    exportFilename: 'stock_bajo',
-    stats: [
-      { key: 'stock_quantity', label: 'Unidades en Riesgo', type: 'number', icon: 'layers' },
-      { key: 'stock_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/inventory/low-stock',
-    exportEndpoint: 'store/analytics/inventory/low-stock/export',
   },
 
   {
@@ -901,8 +768,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'document_number', header: 'Documento', type: 'text' },
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
-      { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'issue_date', header: 'Emisión', type: 'date' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
       { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'balance', header: 'Saldo', type: 'currency', footer: 'sum' },

@@ -197,34 +197,6 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
-  /**
-   * QUI-549: exporta el resumen de ventas por canal (POS, ecommerce, etc.)
-   * con conteo de órdenes, revenue total y % de participación. Reutiliza
-   * el `groupBy` de `getSalesByChannel` y aplica redondeo a 2 decimales
-   * en revenue y percentage.
-   */
-  @Get('sales/by-channel/export')
-  @Permissions('store:analytics:read')
-  async exportSalesByChannel(
-    @Query() query: SalesAnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.sales_analytics_service.getSalesByChannelForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'display_name', header: 'Canal', type: 'text' },
-      { key: 'order_count', header: 'Órdenes', type: 'number' },
-      { key: 'revenue', header: 'Ingresos', type: 'currency' },
-      { key: 'percentage', header: '% Participación', type: 'percent' },
-    ];
-
-    await this.emitReport(res, 'ventas_por_canal', tz, [
-      this.toSheet('Ventas por Canal', columns, rows, tz),
-    ]);
-  }
-
   @Get('sales/export')
   @Permissions('store:analytics:read')
   async exportSalesAnalytics(
@@ -622,38 +594,6 @@ export class AnalyticsController {
     ]);
   }
 
-  /**
-   * QUI-545: exporta el listado de productos activos con stock bajo o
-   * en cero (qty ≤ reorder_point) con su riesgo monetario.
-   * Reutiliza `resolveProductLowStockThreshold` para que el criterio
-   * sea consistente con la vista de pantalla.
-   */
-  @Get('inventory/low-stock/export')
-  @Permissions('store:analytics:read')
-  async exportLowStock(
-    @Query() query: InventoryAnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.inventory_analytics_service.getLowStockForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'product_id', header: 'ID', type: 'number' },
-      { key: 'product_name', header: 'Producto', type: 'text' },
-      { key: 'sku', header: 'SKU', type: 'text' },
-      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
-      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
-      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
-      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
-    ];
-
-    await this.emitReport(res, 'stock_bajo', tz, [
-      this.toSheet('Stock Bajo', columns, rows, tz),
-    ]);
-  }
-
   // ==================== CUSTOMERS ANALYTICS ====================
 
   @Get('customers/summary')
@@ -742,8 +682,8 @@ export class AnalyticsController {
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
       { key: 'customer_email', header: 'Correo', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
-      { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'issue_date', header: 'Emisión', type: 'date' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
       { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'original_amount', header: 'Original', type: 'currency' },
