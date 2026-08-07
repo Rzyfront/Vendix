@@ -12,9 +12,54 @@ import {
   BulkCustomerUploadDto,
   BulkCustomerUploadResultDto,
   BulkCustomerUploadItemResultDto,
+  BulkRowError,
 } from './dto/bulk-customer.dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
+
+/**
+ * Mapea un error interno (código de `VendixHttpException` + `details`) a un
+ * `BulkRowError` en español, con código canónico y sugerencia de acción.
+ *
+ * El mapping es la ÚNICA fuente de verdad del copy de errores a nivel de
+ * fila. Si la excepción ya trae un `message` en español (los `VendixHttpException`
+ * que lanza `customers.service.ts`), se respeta; si no, se cae al genérico.
+ *
+ * @returns los campos `code`, `message` y `suggestion` que el bulk service
+ *          pone en el `BulkRowError`. `row` y `field` se setean fuera.
+ */
+export function mapBulkErrorToUserCopy(
+  errorCode: string,
+  details: Record<string, unknown> | undefined,
+): { code: string; message: string; suggestion?: string } {
+  if (errorCode === 'SYS_CONFLICT_001') {
+    const kind = details?.kind;
+    if (kind === 'email') {
+      const email = (details?.value as string | undefined) ?? 'este correo';
+      return {
+        code: 'duplicate_email',
+        message: `El correo "${email}" ya está registrado en la organización`,
+        suggestion:
+          'Usa otro correo electrónico o elimina la fila si es un duplicado.',
+      };
+    }
+    if (kind === 'document') {
+      const doc = (details?.value as string | undefined) ?? '';
+      const type = (details?.type as string | undefined) ?? '';
+      return {
+        code: 'duplicate_document',
+        message: `Ya existe un cliente con el documento "${doc}" de tipo "${type}"`,
+        suggestion:
+          'Verifica que el documento no esté duplicado en la plantilla o usa otro tipo de documento.',
+      };
+    }
+    return {
+      code: 'conflict',
+      message: 'El cliente no se pudo crear porque entra en conflicto con datos existentes',
+    };
+  }
+  return { code: 'internal', message: 'Error interno al procesar la fila' };
+}
 
 @Injectable()
 export class CustomersBulkService {
@@ -197,7 +242,31 @@ export class CustomersBulkService {
   }
 
   /**
-   * Procesa la carga masiva de clientes
+   * Mapeo de campo técnico del DTO al encabezado de la columna en la
+   * plantilla. Duplicado del controller (no se importa para evitar
+   * dependencia circular). Si se agrega una columna nueva, mantener
+   * ambos en sincronía.
+   */
+  private static readonly FIELD_TO_COLUMN: Record<string, string> = {
+    email: 'Correo',
+    first_name: 'Nombre',
+    last_name: 'Apellido',
+    document_number: 'Documento',
+    document_type: 'Tipo Documento',
+    phone: 'Teléfono',
+    row_number: 'Fila',
+  };
+
+  /**
+   * Procesa la carga masiva de clientes.
+   *
+   * Política de errores (QUI-606):
+   *  - Errores de lote (lote > 1000, sin store context) → 4xx con
+   *    `VendixHttpException` (cuerpo entero falla).
+   *  - Errores por fila (validación de campo, email duplicado, doc duplicado)
+   *    → NO revientan el lote: se acumulan en `results[].row_error` y el
+   *    endpoint responde 201 con `failed > 0` para que el frontend los
+   *    pinte uno por uno.
    */
   async uploadCustomers(
     bulkUploadDto: BulkCustomerUploadDto,
@@ -217,25 +286,20 @@ export class CustomersBulkService {
       throw new VendixHttpException(ErrorCodes.CUST_BULK_004);
     }
 
-    // Validar duplicados en el archivo (solo emails que existan)
-    const emailsInFile = new Set<string>();
-    const duplicateEmails: string[] = [];
-
+    // Pre-calculamos duplicados DENTRO del archivo y los marcamos por fila
+    // (no rompemos el lote entero). Cada fila duplicada se reporta con su
+    // propio `BulkRowError`.
+    const emailToFirstRow = new Map<string, number>();
+    const duplicateEmailsByRow = new Map<number, string>(); // row -> email
     for (const customer of customers) {
       if (!customer.email) continue;
-      const normalizedEmail = customer.email.toLowerCase().trim();
-      if (emailsInFile.has(normalizedEmail)) {
-        duplicateEmails.push(customer.email);
+      const normalized = customer.email.toLowerCase().trim();
+      const row = customer.row_number ?? 0;
+      if (emailToFirstRow.has(normalized)) {
+        duplicateEmailsByRow.set(row, customer.email);
       } else {
-        emailsInFile.add(normalizedEmail);
+        emailToFirstRow.set(normalized, row);
       }
-    }
-
-    if (duplicateEmails.length > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.CUST_BULK_003,
-        `Emails duplicados en el archivo: ${duplicateEmails.slice(0, 5).join(', ')}${duplicateEmails.length > 5 ? '...' : ''}`,
-      );
     }
 
     const results: BulkCustomerUploadItemResultDto[] = [];
@@ -243,7 +307,37 @@ export class CustomersBulkService {
     let failed = 0;
 
     for (const customerData of customers) {
-      const rowNum = customerData.row_number;
+      const rowNum = customerData.row_number ?? 0;
+      const pushError = (rowError: BulkRowError) => {
+        const fieldCol =
+          CustomersBulkService.FIELD_TO_COLUMN[rowError.field] ??
+          rowError.column;
+        results.push({
+          customer: null,
+          status: 'error',
+          message: rowError.message,
+          error: rowError.code,
+          row_number: rowNum,
+          row_error: { ...rowError, column: fieldCol },
+        });
+        failed++;
+      };
+
+      // Duplicado dentro del archivo: error per-row ANTES de tocar la BD.
+      const dupEmail = duplicateEmailsByRow.get(rowNum);
+      if (dupEmail) {
+        pushError({
+          row: rowNum,
+          column: 'Correo',
+          field: 'email',
+          value: dupEmail,
+          code: 'duplicate_email_in_file',
+          message: `El correo "${dupEmail}" aparece más de una vez en la plantilla`,
+          suggestion:
+            'Deja solo una fila con este correo y elimina las demás (o usa correos distintos).',
+        });
+        continue;
+      }
 
       try {
         // Validar: requiere al menos nombre O documento
@@ -273,12 +367,50 @@ export class CustomersBulkService {
         });
         successful++;
       } catch (error) {
+        // Si viene de un `VendixHttpException` (lanzado por `customers.service.ts`
+        // o por la validación `CUST_BULK_002` de arriba), usamos su `errorCode`
+        // + `details` para producir el `BulkRowError` canónico en español.
+        // Si es un error inesperado, caemos al genérico.
+        const isVendix = error instanceof VendixHttpException;
+        const errorCode = isVendix
+          ? (error as VendixHttpException).errorCode
+          : 'INTERNAL';
+        // `getResponse()` devuelve el body de NestJS: { error_code, message, details }
+        const responseBody: { message?: string; details?: Record<string, unknown> } = isVendix
+          ? ((error as VendixHttpException).getResponse() as {
+              message?: string;
+              details?: Record<string, unknown>;
+            })
+          : { message: error?.message };
+        const details = responseBody.details;
+
+        // El mapper es la fuente de verdad del copy en español.
+        // `baseMessage` solo es un fallback si el mapper no devuelve nada
+        // útil (p.ej. para códigos que todavía no cubre).
+        const userCopy = mapBulkErrorToUserCopy(errorCode, details);
+        const baseMessage =
+          typeof responseBody?.message === 'string'
+            ? responseBody.message
+            : undefined;
+        const message = userCopy.message || baseMessage || 'Error desconocido';
+
+        const rowError: BulkRowError = {
+          row: rowNum,
+          column: userCopy.code === 'duplicate_email' ? 'Correo' : 'General',
+          field: userCopy.code === 'duplicate_email' ? 'email' : 'general',
+          value: details?.value ?? null,
+          code: userCopy.code,
+          message,
+        };
+        if (userCopy.suggestion) rowError.suggestion = userCopy.suggestion;
+
         results.push({
           customer: null,
           status: 'error',
-          message: error.message || 'Error desconocido',
-          error: error.constructor.name,
+          message,
+          error: errorCode,
           row_number: rowNum,
+          row_error: rowError,
         });
         failed++;
       }
