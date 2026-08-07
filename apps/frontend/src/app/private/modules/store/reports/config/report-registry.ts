@@ -494,6 +494,77 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-545: Stock bajo / puntos de reorden. Reusa getLowStockAlerts del
+    // service (que ya filtra qty <= reorder_point con el helper compartido)
+    // y le agrega `stock_value_at_risk` (qty * cost_price) para mostrar el
+    // impacto monetario de reponer.
+    id: 'inventory-low-stock',
+    category: 'inventory',
+    title: 'Stock Bajo',
+    description: 'Productos en o por debajo del punto de reorden',
+    detailedDescription:
+      'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
+    icon: 'alert-triangle',
+    route: '/admin/reports/inventory/inventory-low-stock',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'stock_bajo',
+    stats: [
+      { key: 'stock_quantity', label: 'Unidades en Riesgo', type: 'number', icon: 'layers' },
+      { key: 'stock_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/low-stock',
+    exportEndpoint: 'store/analytics/inventory/low-stock/export',
+  },
+
+  {
+    // QUI-550: Inventario por proveedor via supplier_products.
+    // Una fila por proveedor con: productos vinculados, stock total,
+    // costo promedio pactado, valorización total y cuántos de sus
+    // productos son preferred.
+    id: 'inventory-by-supplier',
+    category: 'inventory',
+    title: 'Inventario por Proveedor',
+    description: 'Stock y valorización agrupados por proveedor',
+    detailedDescription:
+      'Para cada proveedor con productos vinculados, muestra cuántos productos tienes con él, el stock total de esos productos, el costo promedio pactado y el valor total en bodega. Útil para negociar volúmenes y diversificar proveedores.',
+    icon: 'building',
+    route: '/admin/reports/inventory/inventory-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_code', header: 'Código', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number', footer: 'sum' },
+      { key: 'total_stock_quantity', header: 'Stock Total', type: 'number', footer: 'sum' },
+      { key: 'avg_cost_per_unit', header: 'Costo Promedio', type: 'currency' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency', footer: 'sum' },
+      { key: 'preferred_count', header: 'Preferidos', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'inventario_por_proveedor',
+    stats: [
+      { key: 'total_stock_value', label: 'Valor Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_stock_quantity', label: 'Stock Total', type: 'number', icon: 'layers' },
+      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/by-supplier',
+    exportEndpoint: 'store/analytics/inventory/by-supplier/export',
+  },
+
+  {
     id: 'inventory-valuation',
     category: 'inventory',
     title: 'Valoracion',
