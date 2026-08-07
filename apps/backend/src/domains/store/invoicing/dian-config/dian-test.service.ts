@@ -40,6 +40,12 @@ import {
 } from '../utils/dian-file-naming.util';
 import { analyzeTestSetWait } from './test-set-wait.util';
 import {
+  aggregateZipVerdicts,
+  TestSetZipAggregate,
+  TestSetZipCounts,
+  TestSetZipVerdict,
+} from './test-set-zip-aggregate.util';
+import {
   DianTestSetJob,
   DianTestSetJobState,
   DianTestSetJobStatusResult,
@@ -66,7 +72,17 @@ export interface TestSetPollAttempt {
   status_code: string;
   status_message: string;
   success: boolean;
+  /**
+   * ZipKey consultado. Opcional porque un lote de un solo ZipKey no necesita
+   * desambiguar, y porque los registros escritos antes de que el sondeo fuera
+   * multi-lote no lo traen.
+   */
+  zip_key?: string;
 }
+
+// `TestSetZipVerdict` y `TestSetZipCounts` viven en `test-set-zip-aggregate.util`
+// junto a la regla que los combina, por la misma razón que `analyzeTestSetWait`:
+// el endpoint HTTP y el cron de re-sondeo deben coincidir en el veredicto.
 
 @Injectable()
 export class DianTestService {
@@ -435,6 +451,90 @@ export class DianTestService {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'Resolution not found',
+      );
+    }
+
+    // GUARDA — la misma resolución DIAN activa dos veces en la misma organización.
+    //
+    // Se comprueba ANTES de reservar el bloque de numeración: reservar primero y
+    // descubrirlo después ya habría movido `current_number`.
+    //
+    // LA DIAN NUMERA POR (NIT EMISOR, RESOLUCIÓN). El NIT emisor es `config.nit`
+    // — es el valor que los seis builders de `dian-direct.provider.ts` escriben
+    // en `cac:AccountingSupplierParty/…/cbc:CompanyID` vía
+    // `issuer_nit: onlyDigits(config.nit)`. Dos matices que definen esta guarda:
+    //
+    // 1. NO se agrupa por `accounting_entities.tax_id`. Ese campo es el eje
+    //    CONTABLE (a qué libro se imputa el asiento) y NUNCA viaja en el XML. En
+    //    producción las tres entidades de la organización 1 comparten el
+    //    `tax_id` de la semilla (`900123456-7`) mientras el NIT real de la
+    //    plataforma vive en `config.nit` (`902056589`). Agrupar por ese campo
+    //    lanzaría este 409 sobre emisiones legítimas y a la vez dejaría pasar el
+    //    caso inverso: dos entidades con `tax_id` distinto emitiendo bajo un
+    //    mismo `config.nit`.
+    //
+    // 2. NO se agrupa por `config.nit` directamente: `invoice_resolutions` no
+    //    tiene FK a `dian_configurations`, y la organización 1 tiene TRES
+    //    configuraciones a nivel plataforma con tres NIT distintos (13, 14, 15).
+    //    Resolver «qué configuración emitiría esta fila» sería adivinar.
+    //
+    // Queda `organization_id`: la frontera de tenant real, y el alcance bajo el
+    // cual una sola configuración DIAN gobierna la emisión. El caso de producción
+    // que motiva la guarda:
+    //
+    //   resolución 9  → entidad 18 «Tienda Principal Vendix»     consecutivo 989999999 (nunca emitió)
+    //   resolución 10 → entidad 95 «Vendix S.A.S. (Consolidado)» consecutivo 990000160
+    //
+    // Misma organización, misma resolución 18760000001, mismo rango, contadores
+    // separados. Emitir por la 9 saca 990000000 bajo un NIT que ya entregó hasta
+    // 990000160, y la DIAN rechaza numeración duplicada de forma DEFINITIVA: ese
+    // consecutivo no se recupera. La resolución 8 (HIDRO, organización 75) queda
+    // fuera y así debe ser: otro NIT, contador legítimamente independiente.
+    //
+    // No se auto-resuelve eligiendo la de `current_number` mayor: sin saber cuál
+    // fila es la correcta, adivinar puede quemar el resto del rango en silencio.
+    // Un humano decide cuál desactivar.
+    //
+    // LÍMITE CONOCIDO: la consulta va por el cliente Prisma SCOPEADO, así que si
+    // el alcance del llamador no alcanza la fila gemela, la guarda no la ve.
+    // Cruzar el aislamiento de tenant para verla sería peor. Es defensa en
+    // profundidad, no el control principal: el control principal es no tener dos
+    // filas activas.
+    const active_twin = await this.prisma.invoice_resolutions.findFirst({
+      where: {
+        id: { not: resolution.id },
+        is_active: true,
+        organization_id: resolution.organization_id,
+        document_type: resolution.document_type,
+        resolution_number: resolution.resolution_number,
+        prefix: resolution.prefix,
+        range_from: resolution.range_from,
+        range_to: resolution.range_to,
+      },
+      select: {
+        id: true,
+        current_number: true,
+        accounting_entity_id: true,
+      },
+    });
+    if (active_twin) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_008,
+        `La resolución ${resolution.resolution_number} (prefijo ${resolution.prefix}, ` +
+          `rango ${resolution.range_from}-${resolution.range_to}) está activa dos veces ` +
+          `en esta organización: id=${resolution.id} en la entidad contable ` +
+          `${resolution.accounting_entity_id} (consecutivo ${resolution.current_number}) y ` +
+          `id=${active_twin.id} en la entidad ${active_twin.accounting_entity_id} ` +
+          `(consecutivo ${active_twin.current_number}). Ambas emitirían bajo el NIT ` +
+          `${config.nit}, así que desactiva la que no corresponda antes de emitir: la que ` +
+          `quede atrasada reemitiría numeración que la DIAN ya recibió bajo ese NIT, y ese ` +
+          `rechazo es definitivo.`,
+        {
+          dian_configuration_id: config_id,
+          resolution_id: resolution.id,
+          duplicate_resolution_id: active_twin.id,
+          nit: config.nit,
+        },
       );
     }
 
@@ -1422,19 +1522,58 @@ export class DianTestService {
       );
     }
 
+    // Un envío de 50 documentos sale como 50 ZIP independientes, cada uno con su
+    // propio ZipKey; `zip_key` es solo el PRIMERO. Consultar únicamente ese
+    // dejaba los otros 49 veredictos inalcanzables por construcción: la DIAN
+    // podía haber rechazado el documento 37 y la UI seguía informando «en
+    // proceso» porque el documento 1 seguía en cola. `zip_keys` los guarda todos
+    // desde el envío (ver el armado de `last_test_result`), así que la
+    // información estaba ahí: nadie la leía.
+    const zip_keys: string[] = (
+      Array.isArray(previous.zip_keys) ? previous.zip_keys : []
+    ).filter((k: unknown): k is string => typeof k === 'string' && k.length > 0);
+    const batch_keys = zip_keys.length ? zip_keys : [zip_key];
+
     const ws_credentials = await this.loadWsCredentials(config);
 
     const poll_history: TestSetPollAttempt[] = [];
-    const verdict = await this.pollTestSetStatus(
-      zip_key,
-      environment,
-      ws_credentials,
-      poll_history,
-    );
+    let verdict: DianSendBillResponse;
+    let zip_verdicts: Record<string, TestSetZipVerdict> | undefined;
+    let zip_counts: TestSetZipCounts | undefined;
+    let zip_aggregate: TestSetZipAggregate | undefined;
 
-    const success = verdict.success;
+    if (batch_keys.length === 1) {
+      // Un lote único conserva el reintento acotado de siempre: el asistente
+      // espera que UNA consulta lo resuelva, y con un solo ZipKey esos ~36 s de
+      // espera sí caben en la petición.
+      verdict = await this.pollTestSetStatus(
+        batch_keys[0],
+        environment,
+        ws_credentials,
+        poll_history,
+      );
+    } else {
+      const batch = await this.pollBatchZipKeys(
+        batch_keys,
+        environment,
+        ws_credentials,
+        poll_history,
+        (previous.zip_verdicts ?? {}) as Record<string, TestSetZipVerdict>,
+      );
+      verdict = batch.primary;
+      zip_verdicts = batch.verdicts;
+      zip_aggregate = batch.aggregate;
+      zip_counts = batch.aggregate.counts;
+    }
+
+    // Con N lotes el estado sale del agregado (`aggregateZipVerdicts`), no de un
+    // veredicto suelto: basta un rechazo para que el set esté rechazado, y hacen
+    // falta TODOS resueltos con éxito para declararlo aprobado.
+    const success = zip_aggregate ? zip_aggregate.success : verdict.success;
     // Terminal non-success (real StatusCode / fault / errors) == rejected, not pending.
-    const still_processing = !success && !this.isTerminalZipStatus(verdict);
+    const still_processing = zip_aggregate
+      ? zip_aggregate.pending
+      : !success && !this.isTerminalZipStatus(verdict);
     const rejected = !success && !still_processing;
 
     const result_data = {
@@ -1451,6 +1590,8 @@ export class DianTestService {
       poll_history,
       pending: still_processing,
       rejected,
+      ...(zip_verdicts && { zip_verdicts }),
+      ...(zip_counts && { zip_counts }),
     };
 
     // Concurrencia optimista sobre el lote consultado.
@@ -1526,6 +1667,9 @@ export class DianTestService {
       pending: still_processing,
       rejected,
       zip_key,
+      // Nulo cuando el lote es de un solo ZipKey: ahí el recuento no aporta nada
+      // que `pending`/`rejected` no digan ya.
+      zip_counts: (zip_counts ?? null) as TestSetZipCounts | null,
       dian_status: verdict.status_code,
       status_message: verdict.status_message,
       error_messages: verdict.error_messages ?? [],
@@ -1751,6 +1895,7 @@ export class DianTestService {
       pending: result.pending === true,
       rejected: result.rejected === true,
       zip_key: (result.zip_key ?? null) as string | null,
+      zip_counts: (result.zip_counts ?? null) as TestSetZipCounts | null,
       dian_status: null as string | null,
       status_message: wait.reason,
       error_messages: [] as string[],
@@ -1811,6 +1956,127 @@ export class DianTestService {
     }
 
     return last as DianSendBillResponse;
+  }
+
+  /**
+   * Sondea los N ZipKeys de un lote y agrega su veredicto.
+   *
+   * POR QUÉ NO REUSA `pollTestSetStatus` PARA N LOTES
+   *
+   * Ese método reintenta hasta 6 veces con 5 s de espera ANTES de cada intento:
+   * ~36 s por ZipKey. Con un envío de 50 documentos —que sale como 50 ZIP
+   * independientes, cada uno con su propio ZipKey— eso son 30 minutos de tiempo
+   * de pared. No cabe en una petición HTTP y desborda el cron que lo invoca.
+   *
+   * El reintento interno existe para que UNA consulta resuelva UN lote que puede
+   * voltear a terminal en esos 30 s. Con N lotes la repetición la aporta quien
+   * llama (el cron cada 15 min), así que aquí se hace UN intento por ZipKey no
+   * resuelto y se persiste el que sí resolvió. Cada invocación avanza y ninguna
+   * repregunta lo ya sabido.
+   *
+   * AGREGACIÓN — un lote de habilitación es atómico frente al operador:
+   *   · cualquier ZipKey terminal sin éxito  ⇒ el set está RECHAZADO
+   *   · todos resueltos y todos con éxito    ⇒ el set está APROBADO
+   *   · en cualquier otro caso               ⇒ sigue PENDIENTE
+   *
+   * `primary` es el veredicto que representa al lote en `dian_response`: el
+   * primer rechazo si hay alguno —que es lo que el operador necesita leer—, si
+   * no el primer éxito, y si no el último «en proceso».
+   */
+  private async pollBatchZipKeys(
+    zip_keys: string[],
+    environment: 'test' | 'production',
+    ws_credentials: WsSecurityCredentials | undefined,
+    poll_history: TestSetPollAttempt[],
+    known: Record<string, TestSetZipVerdict>,
+  ): Promise<{
+    primary: DianSendBillResponse;
+    verdicts: Record<string, TestSetZipVerdict>;
+    aggregate: TestSetZipAggregate;
+  }> {
+    const verdicts: Record<string, TestSetZipVerdict> = { ...known };
+    const pending_keys = zip_keys.filter((k) => !verdicts[k]);
+
+    // Concurrencia acotada: 50 peticiones simultáneas a la DIAN es un pico que
+    // el servicio de habilitación responde con timeouts, y un timeout aquí se
+    // lee igual que «en proceso» — perderíamos el veredicto sin saberlo.
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    let pending_sample: DianSendBillResponse | null = null;
+
+    const worker = async () => {
+      while (cursor < pending_keys.length) {
+        const key = pending_keys[cursor++];
+        const status = await this.soap_client.getStatusZip(
+          key,
+          environment,
+          ws_credentials,
+        );
+
+        poll_history.push({
+          attempt: poll_history.length + 1,
+          status_code: status.status_code,
+          status_message: status.status_message,
+          success: status.success,
+          zip_key: key,
+        });
+
+        if (this.isTerminalZipStatus(status)) {
+          verdicts[key] = {
+            zip_key: key,
+            success: status.success,
+            status_code: status.status_code,
+            status_message: status.status_message,
+            error_messages: status.error_messages ?? [],
+            resolved_at: new Date().toISOString(),
+          };
+        } else {
+          // Solo se guarda una muestra NO terminal, y solo para conservar la
+          // redacción literal de la DIAN («Batch en proceso de validación») en el
+          // agregado. Un veredicto terminal nunca se lee de aquí: para eso está
+          // `aggregate.primary_key`.
+          pending_sample = pending_sample ?? status;
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, pending_keys.length) }, worker),
+    );
+
+    const aggregate = aggregateZipVerdicts(zip_keys, verdicts);
+
+    // `duration_ms: 0` porque este objeto no representa una llamada: reconstituye
+    // un veredicto YA persistido para que el agregado tenga la misma forma que un
+    // sondeo en vivo. Medir cero milisegundos de red es exacto, no un relleno.
+    const asResponse = (v: TestSetZipVerdict): DianSendBillResponse => ({
+      success: v.success,
+      status_code: v.status_code,
+      status_message: v.status_message,
+      error_messages: v.error_messages,
+      raw_response: '',
+      has_dian_verdict: true,
+      duration_ms: 0,
+    });
+
+    const primary = aggregate.primary_key
+      ? asResponse(verdicts[aggregate.primary_key])
+      : (pending_sample ?? {
+          success: false,
+          status_code: 'NO_VERDICT',
+          status_message: 'Batch en proceso de validación.',
+          error_messages: [],
+          raw_response: '',
+          duration_ms: 0,
+        });
+
+    this.logger.log(
+      `[DIAN test-set] agregado sobre ${aggregate.counts.total} ZipKeys: ` +
+        `resueltos=${aggregate.counts.resolved} aceptados=${aggregate.counts.accepted} ` +
+        `rechazados=${aggregate.counts.rejected} pendientes=${aggregate.counts.pending}`,
+    );
+
+    return { primary, verdicts, aggregate };
   }
 
   /**
