@@ -797,6 +797,42 @@ export class AnalyticsController {
     );
   }
 
+  /**
+   * QUI-547: serie temporal de compras agrupada por período
+   * (hour|day|week|month|year según query.granularity). Una fila por bucket
+   * con conteo de órdenes, gasto total, pendientes vs recibidas.
+   */
+  @Get('purchases/trends')
+  @Permissions('store:analytics:read')
+  async getPurchasesTrends(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.purchases_analytics_service.getPurchasesTrendsForExport(query);
+    return this.response_service.success(rows);
+  }
+
+  @Get('purchases/trends/export')
+  @Permissions('store:analytics:read')
+  async exportPurchasesTrends(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.purchases_analytics_service.getPurchasesTrendsForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'period', header: 'Período', type: 'date' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number' },
+      { key: 'completed_count', header: 'Recibidas', type: 'number' },
+    ];
+
+    await this.emitReport(res, 'tendencias_compra', tz, [
+      this.toSheet('Tendencias de Compra', columns, rows, tz),
+    ]);
+  }
+
   @Get('purchases/export')
   @Permissions('store:analytics:read')
   async exportPurchasesAnalytics(

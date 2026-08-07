@@ -89,6 +89,7 @@ export const reportsRoutes: Routes = [
           { path: '', redirectTo: 'purchase-summary', pathMatch: 'full' },
           { path: 'purchase-summary', loadComponent: () => import('./pages/purchases/purchase-summary-report/purchase-summary-report.component').then(c => c.PurchaseSummaryReportComponent) },
           { path: 'purchase-by-supplier', loadComponent: () => import('./pages/purchases/purchase-by-supplier-report/purchase-by-supplier-report.component').then(c => c.PurchaseBySupplierReportComponent) },
+          { path: 'purchase-trends', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'purchase-trends' } },
         ],
       },
       {

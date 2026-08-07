@@ -58,7 +58,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (3) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -120,6 +120,39 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: '_count', label: 'Proveedores', type: 'number', icon: 'building-2' },
     ],
     dataEndpoint: 'store/analytics/purchases/by-supplier',
+  },
+
+  {
+    // QUI-547: Tendencias de compra. Serie temporal con date_trunc sobre
+    // order_date al granularity del query (hour|day|week|month|year,
+    // default day). Permite ver el comportamiento de compras en el tiempo.
+    id: 'purchase-trends',
+    category: 'purchases',
+    title: 'Tendencias de Compra',
+    description: 'Serie temporal de órdenes de compra por período',
+    detailedDescription:
+      'Evolución temporal de las compras: cuántas órdenes se generaron, monto total y desglose entre pendientes y recibidas en cada período (hora, día, semana, mes o año).',
+    icon: 'trending-up',
+    route: '/admin/reports/purchases/purchase-trends',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'period',
+    columns: [
+      { key: 'period', header: 'Período', type: 'date' },
+      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
+      { key: 'completed_count', header: 'Recibidas', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'tendencias_compra',
+    stats: [
+      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'file-text' },
+      { key: 'pending_count', label: 'Pendientes', type: 'number', icon: 'clock' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/trends',
+    exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
   // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────

@@ -4,8 +4,9 @@ import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
   PurchasesBySupplierQueryDto,
+  Granularity,
 } from '../dto/analytics-query.dto';
-import { getPreviousPeriod, parseDateRange } from '../utils/date.util';
+import { getPreviousPeriod, parseDateRange, getDateTruncInterval } from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -455,5 +456,119 @@ export class PurchasesAnalyticsService {
     return supplierStats
       .slice(0, query.limit || supplierStats.length)
       .map(serialize);
+  }
+
+  /**
+   * QUI-547: serie temporal de compras agregada por período
+   * (hour|day|week|month|year según query.granularity, default day).
+   *
+   * Trae todas las POs del rango y las bucketa en JS. Para un store
+   * típico con miles de POs por mes es perfectamente manejable y evita
+   * depender de $queryRaw que StorePrismaService no expone. Si el
+   * dataset crece a >100k POs por período conviene migrar a SQL
+   * nativo.
+   */
+  async getPurchasesTrendsForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+    const granularity: Granularity = query.granularity ?? Granularity.DAY;
+    const interval = getDateTruncInterval(granularity);
+
+    const purchaseOrders = await this.prisma.purchase_orders.findMany({
+      where: {
+        organization_id: organizationId,
+        location: { store_id: storeId },
+        order_date: { gte: startDate, lte: endDate },
+      },
+      select: {
+        status: true,
+        total_amount: true,
+        order_date: true,
+      },
+    });
+
+    // Bucketing en JS. Usamos UTC porque la conversión a TZ ya se hizo
+    // en parseDateRange, y date_trunc('day', timestamp) en Postgres
+    // opera en la TZ de la sesión. Para mantener consistencia con
+    // `getDateTruncInterval` (que es solo el nombre del intervalo),
+    // truncamos manualmente en UTC al inicio del bucket correspondiente.
+    const buckets = new Map<number, {
+      period: Date;
+      order_count: number;
+      total_spent: number;
+      pending_count: number;
+      completed_count: number;
+    }>();
+
+    for (const po of purchaseOrders) {
+      const period = truncateToGranularity(po.order_date, granularity);
+      const key = period.getTime();
+      const bucket = buckets.get(key) ?? {
+        period,
+        order_count: 0,
+        total_spent: 0,
+        pending_count: 0,
+        completed_count: 0,
+      };
+      bucket.order_count += 1;
+      bucket.total_spent += Number(po.total_amount || 0);
+      if (this.PENDING_STATES.includes(po.status as any)) {
+        bucket.pending_count += 1;
+      } else if (this.COMPLETED_STATES.includes(po.status as any)) {
+        bucket.completed_count += 1;
+      }
+      buckets.set(key, bucket);
+    }
+
+    return Array.from(buckets.values())
+      .sort((a, b) => a.period.getTime() - b.period.getTime())
+      .map((b) => ({
+        period: b.period,
+        order_count: b.order_count,
+        total_spent: Math.round(b.total_spent * 100) / 100,
+        pending_count: b.pending_count,
+        completed_count: b.completed_count,
+        granularity: interval,
+      }));
+  }
+}
+
+/**
+ * Trunca una fecha al inicio del bucket de granularidad dado (en UTC).
+ * Espejo de `date_trunc('<interval>', timestamp)` de Postgres.
+ */
+function truncateToGranularity(date: Date, granularity: Granularity): Date {
+  const d = new Date(date);
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  d.setUTCHours(0);
+  switch (granularity) {
+    case Granularity.HOUR:
+      return d;
+    case Granularity.YEAR:
+      d.setUTCMonth(0);
+      d.setUTCDate(1);
+      return d;
+    case Granularity.MONTH:
+      d.setUTCDate(1);
+      return d;
+    case Granularity.WEEK: {
+      // Semana inicia en lunes (ISO 8601). setUTCDate(1 - dayOfWeek) ajusta.
+      const day = d.getUTCDay(); // 0=domingo..6=sábado
+      const isoDay = day === 0 ? 7 : day; // 1=lunes..7=domingo
+      d.setUTCDate(d.getUTCDate() - (isoDay - 1));
+      return d;
+    }
+    case Granularity.DAY:
+    default:
+      return d;
   }
 }
