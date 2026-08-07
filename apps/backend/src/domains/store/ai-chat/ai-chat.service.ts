@@ -9,6 +9,7 @@ import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
 import { VexiSpeechService } from '../vexi/vexi-speech.service';
+import { SPEECH_REGISTER_BLOCK } from '../vexi/vexi-speech.constants';
 import type {
   VexiSpeechTurn,
   VexiVoiceFrame,
@@ -364,8 +365,21 @@ export class AIChatService {
         signal?.addEventListener('abort', () => turn.abort(), { once: true });
       }
 
-      const filler = await voice.filler();
-      if (filler) yield filler;
+      // `previous` es lo que hacía falta para que la rotación existiera de
+      // verdad: sin él `pickFiller` recibía undefined, resolvía el índice
+      // anterior en -1 y devolvía SIEMPRE la primera frase del banco. Las otras
+      // trece estaban escritas, sintetizadas y pinneadas en caché, y ninguna se
+      // oía nunca.
+      const previousFiller = this.speech.lastFiller(conversationId);
+      const filler = await voice.filler(previousFiller);
+      if (filler) {
+        // Se recuerda al emitirla, no al cerrar el turno. Un turno cuyo
+        // transporte se cae no llega al cierre, y ese es precisamente el caso en
+        // que el reintento no debe repetir la misma muletilla que la persona ya
+        // escuchó hace dos segundos.
+        this.speech.rememberFiller(conversationId, voice.usedFiller());
+        yield filler;
+      }
     }
 
     // Save user message.
@@ -419,7 +433,11 @@ export class AIChatService {
       const agentStream = this.aiAgent.runAgentStream({
         goal: intent.content,
         app_key: appKey,
-        messages: this.buildContextWindow(conversation),
+        // El mismo flag que enciende la síntesis enciende el registro hablado.
+        // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
+        // dos en fase: si se dicta, se responde para ser oído — y si el mismo
+        // hilo sigue por escrito en el turno siguiente, vuelve a prosa sola.
+        messages: this.buildContextWindow(conversation, undefined, intent.speak),
         variables: await this.vexiContext.buildSnapshot({
           uiContext: intent.ui_context,
           attachmentIds: intent.attachment_ids,
@@ -497,9 +515,13 @@ export class AIChatService {
         };
       }
     } else {
+      // La rama sin agente también dicta, así que también necesita el registro:
+      // una tienda con `agent_enabled` en false igual habla, y sin esto sería la
+      // única superficie que contesta con listas y asteriscos en voz alta.
       const contextMessages = this.buildContextWindow(
         conversation,
         intent.content,
+        intent.speak,
       );
 
       for await (const chunk of this.aiEngine.runStream(
@@ -632,8 +654,28 @@ export class AIChatService {
   private buildContextWindow(
     conversation: ConversationWithMessages,
     newMessage?: string,
+    /**
+     * Este turno se va a dictar, así que la respuesta se escribe para ser oída.
+     */
+    speak?: boolean,
   ): AIMessage[] {
     const messages: AIMessage[] = [];
+
+    // Como mensaje de sistema del turno y NO como un {{placeholder}} en el
+    // `system_prompt` almacenado, que era la otra opción.
+    //
+    // Ese prompt lo edita un operador desde Super Admin, así que un placeholder
+    // ahí es un mecanismo que cualquiera puede borrar sin saber que existía —
+    // y la migración que lo insertara pisaría ediciones que ya están en
+    // producción. Acá el bloque no depende de ninguna fila: viaja con el turno
+    // o no viaja.
+    //
+    // Primero en la ventana para que quede pegado al prompt de sistema
+    // interpolado y se lea como su continuación. Va delante del historial a
+    // propósito: el registro gobierna cómo se responde, no de qué se habla.
+    if (speak) {
+      messages.push({ role: 'system', content: SPEECH_REGISTER_BLOCK });
+    }
 
     // Add recent messages from history (last N)
     const recentMessages = conversation.messages.slice(
