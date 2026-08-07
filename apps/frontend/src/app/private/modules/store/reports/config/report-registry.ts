@@ -58,7 +58,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (3) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -155,7 +155,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
-  // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────
+  // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
 
   {
     id: 'reviews-summary',
@@ -191,6 +191,45 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/reviews/summary',
     exportEndpoint: 'store/analytics/reviews/export',
+  },
+
+  {
+    // QUI-548: Reseñas por producto. Una fila por producto con total,
+    // promedio, distribución de estrellas y conteo de verificadas.
+    id: 'reviews-by-product',
+    category: 'reviews',
+    title: 'Reseñas por Producto',
+    description: 'Calificación promedio y distribución de estrellas por producto',
+    detailedDescription:
+      'Detalle de reseñas agrupadas por producto: total, promedio (1 decimal), distribución 1-5 estrellas, cuántas son de compra verificada y cuántas siguen pendientes de moderación.',
+    icon: 'star',
+    route: '/admin/reports/reviews/reviews-by-product',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'total_reviews', header: 'Reseñas', type: 'number', footer: 'sum' },
+      { key: 'average_rating', header: 'Promedio', type: 'number' },
+      { key: 'stars_5', header: '5★', type: 'number', footer: 'sum' },
+      { key: 'stars_4', header: '4★', type: 'number', footer: 'sum' },
+      { key: 'stars_3', header: '3★', type: 'number', footer: 'sum' },
+      { key: 'stars_2', header: '2★', type: 'number', footer: 'sum' },
+      { key: 'stars_1', header: '1★', type: 'number', footer: 'sum' },
+      { key: 'verified_count', header: 'Verificadas', type: 'number', footer: 'sum' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
+      { key: 'last_review_date', header: 'Última Reseña', type: 'date' },
+    ],
+    exportFilename: 'resenas_por_producto',
+    stats: [
+      { key: 'total_reviews', label: 'Total Reseñas', type: 'number', icon: 'message-square' },
+      { key: 'average_rating', label: 'Promedio General', type: 'number', icon: 'star' },
+      { key: 'verified_count', label: 'Verificadas', type: 'number', icon: 'check-circle' },
+    ],
+    dataEndpoint: 'store/analytics/reviews/by-product',
+    exportEndpoint: 'store/analytics/reviews/by-product/export',
   },
 
   // ─── VENTAS (6) ───────────────────────────────────────────────────────────────
