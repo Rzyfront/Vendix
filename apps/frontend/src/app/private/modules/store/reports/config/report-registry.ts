@@ -911,6 +911,147 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-543: Arqueo de caja. Listado de sesiones de caja con apertura,
+    // cierre esperado vs real, y diferencia. El backend (FinancialAnalyticsService.
+    // getCashSessionsForExport) ya devuelve los 12 campos en el shape canónico;
+    // aquí solo se cablea el registry + ruta.
+    id: 'cash-sessions',
+    category: 'financial',
+    title: 'Arqueo de Caja',
+    description: 'Sesiones de caja con apertura, cierre esperado, real y diferencia',
+    detailedDescription:
+      'Detalle de cada sesión de caja: quién la abrió y cerró, monto de apertura, total de ventas y gastos, cierre esperado vs real, y la diferencia (descuadre). Útil para auditar cuadres diarios y detectar fugas.',
+    icon: 'cash',
+    route: '/admin/reports/financial/cash-sessions',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'opened_at',
+    columns: [
+      { key: 'opened_at', header: 'Apertura', type: 'date' },
+      { key: 'closed_at', header: 'Cierre', type: 'date' },
+      { key: 'register_name', header: 'Caja', type: 'text' },
+      { key: 'opened_by_name', header: 'Abrió', type: 'text' },
+      { key: 'closed_by_name', header: 'Cerró', type: 'text' },
+      { key: 'opening_amount', header: 'Monto Apertura', type: 'currency' },
+      { key: 'total_sales', header: 'Ventas', type: 'currency', footer: 'sum' },
+      { key: 'total_expenses', header: 'Gastos', type: 'currency', footer: 'sum' },
+      { key: 'expected_closing_amount', header: 'Cierre Esperado', type: 'currency' },
+      { key: 'actual_closing_amount', header: 'Cierre Real', type: 'currency' },
+      { key: 'difference', header: 'Diferencia', type: 'currency', footer: 'sum' },
+      { key: 'status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'arqueo_caja',
+    stats: [
+      { key: 'total_sales', label: 'Total Ventas', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_expenses', label: 'Total Gastos', type: 'currency', icon: 'trending-down' },
+      { key: 'difference', label: 'Descuadre Total', type: 'currency', icon: 'alert-triangle' },
+    ],
+    dataEndpoint: 'store/analytics/financial/cash-sessions',
+    exportEndpoint: 'store/analytics/financial/cash-sessions/export',
+  },
+
+  {
+    // QUI-544: Resumen de gastos. Submódulo nuevo expenses/analytics/ con
+    // 3 endpoints: summary, by-category, detail. Filtra por
+    // RECOGNIZED_EXPENSE_STATES (approved|paid) por defecto.
+    id: 'expenses-summary',
+    category: 'financial',
+    title: 'Resumen de Gastos',
+    description: 'Totales de gastos aprobados y pagados del período',
+    detailedDescription:
+      'Resumen agregado de gastos del período: total reconocido, pendientes, count y promedio. Filtra por RECOGNIZED_EXPENSE_STATES (approved, paid); el estado pending NO cuenta como gasto del período.',
+    icon: 'trending-down',
+    route: '/admin/reports/financial/expenses-summary',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_recognized', label: 'Reconocidos', type: 'currency' },
+        { key: 'total_pending', label: 'Pendientes', type: 'currency' },
+        { key: 'average_expense', label: 'Promedio', type: 'currency' },
+        { key: 'recognized_count', label: '# Reconocidos', type: 'number' },
+      ],
+    },
+    columns: [
+      { key: 'total_recognized', header: 'Reconocidos', type: 'currency' },
+      { key: 'total_pending', header: 'Pendientes', type: 'currency' },
+      { key: 'recognized_count', header: '# Reconocidos', type: 'number' },
+      { key: 'pending_count', header: '# Pendientes', type: 'number' },
+      { key: 'average_expense', header: 'Promedio', type: 'currency' },
+    ],
+    exportFilename: 'resumen_gastos',
+    stats: [
+      { key: 'total_recognized', label: 'Reconocidos', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_pending', label: 'Pendientes', type: 'currency', icon: 'clock' },
+      { key: 'average_expense', label: 'Promedio', type: 'currency', icon: 'calculator' },
+      { key: 'recognized_count', label: '# Reconocidos', type: 'number', icon: 'check-circle' },
+    ],
+    dataEndpoint: 'store/analytics/expenses/summary',
+    exportEndpoint: 'store/analytics/expenses/summary',
+  },
+  {
+    id: 'expenses-by-category',
+    category: 'financial',
+    title: 'Gastos por Categoría',
+    description: 'Desglose de gastos por categoría con % de participación',
+    detailedDescription:
+      'Para cada categoría de gasto, muestra el total, count, promedio y % de participación en el total del período. Útil para identificar dónde se va el dinero.',
+    icon: 'pie-chart',
+    route: '/admin/reports/financial/expenses-by-category',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'category_id',
+    columns: [
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'expense_count', header: 'Gastos', type: 'number', footer: 'sum' },
+      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'average_expense', header: 'Promedio', type: 'currency' },
+      { key: 'percentage', header: '% Participación', type: 'percentage' },
+    ],
+    exportFilename: 'gastos_por_categoria',
+    stats: [
+      { key: 'total_amount', label: 'Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'expense_count', label: 'Gastos', type: 'number', icon: 'list' },
+      { key: '_count', label: 'Categorías', type: 'number', icon: 'tag' },
+    ],
+    dataEndpoint: 'store/analytics/expenses/by-category',
+    exportEndpoint: 'store/analytics/expenses/by-category',
+  },
+  {
+    id: 'expenses-detail',
+    category: 'financial',
+    title: 'Detalle de Gastos',
+    description: 'Listado crudo de gastos con categoría, aprobador y recibo',
+    detailedDescription:
+      'Cada gasto individual del período con su categoría, descripción, monto, estado, aprobador y link al recibo. Útil para auditoría.',
+    icon: 'receipt',
+    route: '/admin/reports/financial/expenses-detail',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'expense_date', header: 'Fecha', type: 'date' },
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'description', header: 'Descripción', type: 'text' },
+      { key: 'amount', header: 'Monto', type: 'currency', footer: 'sum' },
+      { key: 'state', header: 'Estado', type: 'text' },
+      { key: 'is_recognized', header: 'Reconocido', type: 'text' },
+      { key: 'created_by', header: 'Creado por', type: 'text' },
+      { key: 'approved_by', header: 'Aprobado por', type: 'text' },
+    ],
+    exportFilename: 'detalle_gastos',
+    stats: [
+      { key: 'amount', label: 'Total', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/expenses/detail',
+    exportEndpoint: 'store/analytics/expenses/detail',
+  },
+
+  {
     id: 'profit-loss',
     category: 'financial',
     title: 'Estado de Resultados',
