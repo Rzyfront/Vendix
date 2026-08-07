@@ -456,4 +456,198 @@ export class PurchasesAnalyticsService {
       .slice(0, query.limit || supplierStats.length)
       .map(serialize);
   }
+
+  /**
+   * QUI-547: serie temporal de compras agregada por período
+   * (hour|day|week|month|year según query.granularity, default day).
+   *
+   * Trae todas las POs del rango y las bucketa en JS. Para un store
+   * típico con miles de POs por mes es perfectamente manejable y evita
+   * depender de $queryRaw que StorePrismaService no expone. Si el
+   * dataset crece a >100k POs por período conviene migrar a SQL
+   * nativo.
+   */
+  async getPurchasesTrendsForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+    const granularity: Granularity = query.granularity ?? Granularity.DAY;
+    const interval = getDateTruncInterval(granularity);
+
+    const purchaseOrders = await this.prisma.purchase_orders.findMany({
+      where: {
+        organization_id: organizationId,
+        location: { store_id: storeId },
+        order_date: { gte: startDate, lte: endDate },
+      },
+      select: {
+        status: true,
+        total_amount: true,
+        order_date: true,
+      },
+    });
+
+    // Bucketing en JS. Usamos UTC porque la conversión a TZ ya se hizo
+    // en parseDateRange, y date_trunc('day', timestamp) en Postgres
+    // opera en la TZ de la sesión. Para mantener consistencia con
+    // `getDateTruncInterval` (que es solo el nombre del intervalo),
+    // truncamos manualmente en UTC al inicio del bucket correspondiente.
+    const buckets = new Map<number, {
+      period: Date;
+      order_count: number;
+      total_spent: number;
+      pending_count: number;
+      completed_count: number;
+    }>();
+
+    for (const po of purchaseOrders) {
+      const period = truncateToGranularity(po.order_date, granularity);
+      const key = period.getTime();
+      const bucket = buckets.get(key) ?? {
+        period,
+        order_count: 0,
+        total_spent: 0,
+        pending_count: 0,
+        completed_count: 0,
+      };
+      bucket.order_count += 1;
+      bucket.total_spent += Number(po.total_amount || 0);
+      if (this.PENDING_STATES.includes(po.status as any)) {
+        bucket.pending_count += 1;
+      } else if (this.COMPLETED_STATES.includes(po.status as any)) {
+        bucket.completed_count += 1;
+      }
+      buckets.set(key, bucket);
+    }
+
+    return Array.from(buckets.values())
+      .sort((a, b) => a.period.getTime() - b.period.getTime())
+      .map((b) => ({
+        period: b.period,
+        order_count: b.order_count,
+        total_spent: Math.round(b.total_spent * 100) / 100,
+        pending_count: b.pending_count,
+        completed_count: b.completed_count,
+        granularity: interval,
+      }));
+  }
+
+  /**
+   * QUI-542: cuentas por pagar a proveedores con bucketing de
+   * antigüedad. Toma purchase_orders con payment_status IN
+   * ('unpaid', 'partial') y payment_due_date no nulo, calcula días
+   * de mora desde payment_due_date vs now(), y bucket:
+   *   - '0-30' (corriente)
+   *   - '31-60'
+   *   - '61-90'
+   *   - '90+' (crítico, escalación)
+   *
+   * Una fila por orden con supplier, total, saldo pendiente, días de
+   * mora y bucket.
+   */
+  async getAccountsPayableForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    const orders = await this.prisma.purchase_orders.findMany({
+      where: {
+        organization_id: organizationId,
+        suppliers: { store_id: storeId },
+        payment_status: { in: ['unpaid', 'partial'] },
+        payment_due_date: { not: null },
+      },
+      select: {
+        id: true,
+        order_number: true,
+        supplier_invoice_number: true,
+        total_amount: true,
+        tax_amount: true,
+        order_date: true,
+        payment_due_date: true,
+        payment_status: true,
+        suppliers: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: { payment_due_date: 'asc' },
+      take: 10000,
+    });
+
+    const now = new Date();
+
+    return orders
+      .filter((o) => o.payment_due_date !== null)
+      .map((o) => {
+        const days = Math.max(
+          0,
+          Math.floor(
+            (now.getTime() - o.payment_due_date!.getTime()) / 86400000,
+          ),
+        );
+        const bucket =
+          days <= 30
+            ? '0-30'
+            : days <= 60
+              ? '31-60'
+              : days <= 90
+                ? '61-90'
+                : '90+';
+        return {
+          id: o.id,
+          order_number: o.order_number,
+          supplier_invoice_number: o.supplier_invoice_number ?? '',
+          supplier_id: o.suppliers.id,
+          supplier_name: o.suppliers.name,
+          supplier_code: o.suppliers.code ?? '',
+          order_date: o.order_date,
+          payment_due_date: o.payment_due_date,
+          days_overdue: days,
+          aging_bucket: bucket,
+          total_amount: Math.round(Number(o.total_amount) * 100) / 100,
+          tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
+          payment_status: o.payment_status,
+        };
+      });
+  }
+}
+
+/**
+ * Trunca una fecha al inicio del bucket de granularidad dado (en UTC).
+ * Espejo de `date_trunc('<interval>', timestamp)` de Postgres.
+ */
+function truncateToGranularity(date: Date, granularity: Granularity): Date {
+  const d = new Date(date);
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  d.setUTCHours(0);
+  switch (granularity) {
+    case Granularity.HOUR:
+      return d;
+    case Granularity.YEAR:
+      d.setUTCMonth(0);
+      d.setUTCDate(1);
+      return d;
+    case Granularity.MONTH:
+      d.setUTCDate(1);
+      return d;
+    case Granularity.WEEK: {
+      // Semana inicia en lunes (ISO 8601). setUTCDate(1 - dayOfWeek) ajusta.
+      const day = d.getUTCDay(); // 0=domingo..6=sábado
+      const isoDay = day === 0 ? 7 : day; // 1=lunes..7=domingo
+      d.setUTCDate(d.getUTCDate() - (isoDay - 1));
+      return d;
+    }
+    case Granularity.DAY:
+    default:
+      return d;
+  }
 }
