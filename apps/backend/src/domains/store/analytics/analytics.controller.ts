@@ -771,6 +771,41 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * QUI-548: reseñas agregadas por producto con promedio, distribución
+   * de estrellas, conteo de verificadas/pendientes y fecha de la última.
+   */
+  @Get('reviews/by-product/export')
+  @Permissions('store:analytics:read')
+  async exportReviewsByProduct(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.reviews_analytics_service.getReviewsByProduct(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'product_id', header: 'ID Producto', type: 'number' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'total_reviews', header: 'Reseñas', type: 'number' },
+      { key: 'average_rating', header: 'Promedio', type: 'number' },
+      { key: 'stars_5', header: '5★', type: 'number' },
+      { key: 'stars_4', header: '4★', type: 'number' },
+      { key: 'stars_3', header: '3★', type: 'number' },
+      { key: 'stars_2', header: '2★', type: 'number' },
+      { key: 'stars_1', header: '1★', type: 'number' },
+      { key: 'verified_count', header: 'Verificadas', type: 'number' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number' },
+      { key: 'last_review_date', header: 'Última Reseña', type: 'date' },
+    ];
+
+    await this.emitReport(res, 'resenas_por_producto', tz, [
+      this.toSheet('Reseñas por Producto', columns, rows, tz),
+    ]);
+  }
+
   @Get('reviews/export')
   @Permissions('store:analytics:read')
   async exportReviewsAnalytics(
