@@ -1312,6 +1312,22 @@
       "sessions": 0,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "ea42bae1",
+      "created_by": "rzy",
+      "created_at": "2026-08-07T21:04:40Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "3efe4165",
+      "created_by": "rzy",
+      "created_at": "2026-08-07T21:45:36Z",
+      "sessions": 0,
+      "memories": 6,
+      "prompts": 0
     }
   ]
 }
