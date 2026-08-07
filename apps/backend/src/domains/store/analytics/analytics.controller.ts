@@ -252,6 +252,20 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-551: data endpoint (JSON paginado) para la vista de pantalla.
+   * Devuelve el mismo array plano que `getSalesBySellerForExport`
+   * envuelto en `success()` — la paginación es client-side sobre
+   * el array completo (típicamente <100 vendedores por tienda).
+   */
+  @Get('sales/by-seller')
+  @Permissions('store:analytics:read')
+  async getSalesBySeller(@Query() query: SalesAnalyticsQueryDto) {
+    const rows =
+      await this.sales_analytics_service.getSalesBySellerForExport(query);
+    return this.response_service.success(rows);
+  }
+
   @Get('sales/export')
   @Permissions('store:analytics:read')
   async exportSalesAnalytics(
