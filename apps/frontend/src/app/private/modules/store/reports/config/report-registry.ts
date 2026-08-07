@@ -58,7 +58,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (3) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -155,40 +155,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
-  {
-    // QUI-542: Cuentas por pagar a proveedores con bucketing de
-    // antigüedad. purchase_orders con payment_status unpaid|partial.
-    id: 'purchase-aging',
-    category: 'purchases',
-    title: 'Cuentas por Pagar (Aging)',
-    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
-    detailedDescription:
-      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
-    icon: 'clock-alert',
-    route: '/admin/reports/purchases/purchase-aging',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'order_number', header: 'OC', type: 'text' },
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
-      { key: 'payment_status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'cuentas_por_pagar',
-    stats: [
-      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/purchases/aging',
-    exportEndpoint: 'store/analytics/purchases/aging/export',
-  },
-
-  // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
+  // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────
 
   {
     id: 'reviews-summary',
@@ -676,7 +643,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/products/profitability/export',
   },
 
-  // ─── CLIENTES (4) ─────────────────────────────────────────────────────────────
+  // ─── CLIENTES (3) ─────────────────────────────────────────────────────────────
 
   {
     id: 'customer-summary',
@@ -776,43 +743,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/customers/abandoned-carts/summary',
     exportEndpoint: 'store/analytics/customers/abandoned-carts/export',
-  },
-
-  {
-    // QUI-541: Top clientes por ventas. Reutiliza getTopCustomers (que ya
-    // tiene groupBy sobre orders con COMPLETED_STATES) y exporta TODOS
-    // los clientes con al menos una orden, no solo el top-10 que muestra
-    // la pantalla. Diferencia con sales-by-customer: este vive en la
-    // categoría 'customers' (análisis por cliente) y no incluye
-    // ticket_promedio (eso lo calcula la vista de sales-by-customer).
-    id: 'customers-top',
-    category: 'customers',
-    title: 'Top Clientes',
-    description: 'Clientes con mayor gasto total en el período',
-    detailedDescription:
-      'Lista completa de clientes con al menos una orden completada en el período, ordenados por gasto total descendente. Útil para identificar clientes VIP y segmentar campañas.',
-    icon: 'crown',
-    route: '/admin/reports/customers/customers-top',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'id', header: 'ID', type: 'number' },
-      { key: 'customer_name', header: 'Cliente', type: 'text' },
-      { key: 'email', header: 'Correo', type: 'text' },
-      { key: 'total_orders', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
-      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
-    ],
-    exportFilename: 'top_clientes',
-    stats: [
-      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'total_orders', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
-      { key: '_count', label: 'Clientes', type: 'number', icon: 'users' },
-    ],
-    dataEndpoint: 'store/analytics/customers/top',
-    exportEndpoint: 'store/analytics/customers/top/export',
   },
 
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────

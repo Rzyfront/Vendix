@@ -4,8 +4,9 @@ import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
   PurchasesBySupplierQueryDto,
+  Granularity,
 } from '../dto/analytics-query.dto';
-import { getPreviousPeriod, parseDateRange } from '../utils/date.util';
+import { getPreviousPeriod, parseDateRange, getDateTruncInterval } from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -484,11 +485,7 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         location: { store_id: storeId },
-        // order_date es DateTime? (instante real) — filtrar nulls aquí
-        // evita que POs sin fecha caigan en el bucket 1970-01-01 al truncar
-        // en JS. tz-audit:ignore marca la columna como instante real (no
-        // business-date que requiera resolveLocalDateOnlyRange).
-        order_date: { not: null, gte: startDate, lte: endDate }, // tz-audit:ignore (DateTime?, instante real)
+        order_date: { gte: startDate, lte: endDate },
       },
       select: {
         status: true,
@@ -541,86 +538,6 @@ export class PurchasesAnalyticsService {
         granularity: interval,
       }));
   }
-
-  /**
-   * QUI-542: cuentas por pagar a proveedores con bucketing de
-   * antigüedad. Toma purchase_orders con payment_status IN
-   * ('unpaid', 'partial') y payment_due_date no nulo, calcula días
-   * de mora desde payment_due_date vs now(), y bucket:
-   *   - '0-30' (corriente)
-   *   - '31-60'
-   *   - '61-90'
-   *   - '90+' (crítico, escalación)
-   *
-   * Una fila por orden con supplier, total, saldo pendiente, días de
-   * mora y bucket.
-   */
-  async getAccountsPayableForExport(query: AnalyticsQueryDto) {
-    const context = RequestContextService.getContext();
-    if (!context?.store_id || !context.organization_id) {
-      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
-    }
-    const storeId = context.store_id;
-    const organizationId = context.organization_id;
-
-    const orders = await this.prisma.purchase_orders.findMany({
-      where: {
-        organization_id: organizationId,
-        location: { store_id: storeId },
-        payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: { not: null }, // tz-audit:ignore (DateTime?, instante real)
-      },
-      select: {
-        id: true,
-        order_number: true,
-        supplier_invoice_number: true,
-        total_amount: true,
-        tax_amount: true,
-        order_date: true,
-        payment_due_date: true,
-        payment_status: true,
-        suppliers: { select: { id: true, name: true, code: true } },
-      },
-      orderBy: { payment_due_date: 'asc' },
-      take: 10000,
-    });
-
-    const now = new Date();
-
-    return orders
-      .filter((o) => o.payment_due_date !== null)
-      .map((o) => {
-        const days = Math.max(
-          0,
-          Math.floor(
-            (now.getTime() - o.payment_due_date!.getTime()) / 86400000,
-          ),
-        );
-        const bucket =
-          days <= 30
-            ? '0-30'
-            : days <= 60
-              ? '31-60'
-              : days <= 90
-                ? '61-90'
-                : '90+';
-        return {
-          id: o.id,
-          order_number: o.order_number,
-          supplier_invoice_number: o.supplier_invoice_number ?? '',
-          supplier_id: o.suppliers.id,
-          supplier_name: o.suppliers.name,
-          supplier_code: o.suppliers.code ?? '',
-          order_date: o.order_date,
-          payment_due_date: o.payment_due_date,
-          days_overdue: days,
-          aging_bucket: bucket,
-          total_amount: Math.round(Number(o.total_amount) * 100) / 100,
-          tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
-          payment_status: o.payment_status,
-        };
-      });
-  }
 }
 
 /**
@@ -628,14 +545,11 @@ export class PurchasesAnalyticsService {
  * Espejo de `date_trunc('<interval>', timestamp)` de Postgres.
  */
 function truncateToGranularity(date: Date, granularity: Granularity): Date {
-  // tz-audit:ignore — aritmética UTC deliberada. El bucket es local-UTC
-  // (espejo de date_trunc), no un cálculo de negocio-date. La conversión
-  // a TZ de la tienda ocurre en parseDateRange, fuera de este helper.
   const d = new Date(date);
-  d.setUTCMilliseconds(0); // tz-audit:ignore
-  d.setUTCSeconds(0); // tz-audit:ignore
-  d.setUTCMinutes(0); // tz-audit:ignore
-  d.setUTCHours(0); // tz-audit:ignore
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  d.setUTCHours(0);
   switch (granularity) {
     case Granularity.HOUR:
       return d;
