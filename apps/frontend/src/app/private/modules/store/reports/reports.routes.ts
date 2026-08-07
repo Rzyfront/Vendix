@@ -126,6 +126,9 @@ export const reportsRoutes: Routes = [
           { path: 'profit-loss', loadComponent: () => import('./pages/financial/profit-loss-report/profit-loss-report.component').then(c => c.ProfitLossReportComponent) },
           { path: 'financial-refunds', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'financial-refunds' } },
           { path: 'cash-sessions', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'cash-sessions' } },
+          { path: 'expenses-summary', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'expenses-summary' } },
+          { path: 'expenses-by-category', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'expenses-by-category' } },
+          { path: 'expenses-detail', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'expenses-detail' } },
         ],
       },
       {
