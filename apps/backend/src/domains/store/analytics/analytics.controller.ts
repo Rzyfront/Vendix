@@ -197,6 +197,34 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * QUI-549: exporta el resumen de ventas por canal (POS, ecommerce, etc.)
+   * con conteo de órdenes, revenue total y % de participación. Reutiliza
+   * el `groupBy` de `getSalesByChannel` y aplica redondeo a 2 decimales
+   * en revenue y percentage.
+   */
+  @Get('sales/by-channel/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByChannel(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.sales_analytics_service.getSalesByChannelForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency' },
+      { key: 'percentage', header: '% Participación', type: 'percent' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_canal', tz, [
+      this.toSheet('Ventas por Canal', columns, rows, tz),
+    ]);
+  }
+
   @Get('sales/export')
   @Permissions('store:analytics:read')
   async exportSalesAnalytics(

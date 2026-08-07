@@ -985,6 +985,57 @@ export class SalesAnalyticsService {
   }
 
   /**
+   * QUI-549: variante flat-array de getSalesByChannel para exportación XLSX.
+   * Devuelve todos los canales (sin paginación ni slice de limit) en el
+   * mismo shape que la vista de pantalla. Como `orders.channel` es enum con
+   * máximo 5 valores (pos, ecommerce, agent, whatsapp, marketplace), el
+   * `take: 10000` es solo defensa — el groupBy retorna un row por valor.
+   */
+  async getSalesByChannelForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        ...(query.channel && { channel: query.channel }),
+      },
+      _sum: { grand_total: true },
+      _count: { id: true },
+    });
+
+    const labels: Record<string, string> = {
+      pos: 'Punto de Venta',
+      ecommerce: 'Tienda Online',
+      agent: 'Agente IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+
+    const total = results.reduce(
+      (sum, r) => sum + Number(r._sum.grand_total || 0),
+      0,
+    );
+
+    return results
+      .map((r) => ({
+        channel: r.channel,
+        display_name: labels[r.channel] || r.channel,
+        order_count: r._count.id,
+        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        percentage: total > 0
+          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }
+
+  /**
    * Raw dataset for the sales export, split into two coherent shapes so the
    * emission phase never double-counts:
    *
