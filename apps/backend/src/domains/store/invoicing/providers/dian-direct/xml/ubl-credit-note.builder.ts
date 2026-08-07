@@ -2,10 +2,6 @@ import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
 import {
-  dianAmount,
-  dianLineExtension,
-} from '../../../utils/dian-money.util';
-import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
 } from '../constants/dian-document-types';
@@ -155,7 +151,7 @@ export class UblCreditNoteBuilder {
     }
 
     // Parties
-    UblCommonBuilder.buildSupplierParty(doc, issuer);
+    UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
     // Tax totals
@@ -164,41 +160,18 @@ export class UblCreditNoteBuilder {
     // Legal monetary total
     UblCommonBuilder.buildLegalMonetaryTotal(doc, credit_note_data, currency);
 
-    // Credit note lines (similar to invoice lines but with CreditNoteLine)
-    credit_note_data.items.forEach((item, index) => {
-      const line = doc.ele(UBL_NAMESPACES.CAC, 'CreditNoteLine');
-      line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
-      line
-        .ele(UBL_NAMESPACES.CBC, 'CreditedQuantity')
-        .att('unitCode', 'EA')
-        .txt(item.quantity);
-      line
-        .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
-        .att('currencyID', currency)
-        .txt(dianLineExtension(item));
-
-      // `cac:StandardItemIdentification` obligatorio — regla FAZ09. Las notas
-      // construyen su línea aparte (`CreditNoteLine`), así que el arreglo del
-      // builder compartido de líneas de factura NO las alcanza. Son 10 de los 50
-      // documentos que exige el set de pruebas: dejarlas fuera rechazaría el set.
-      const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
-      ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
-      ubl_item
-        .ele(UBL_NAMESPACES.CAC, 'StandardItemIdentification')
-        .ele(UBL_NAMESPACES.CBC, 'ID')
-        .att('schemeID', UBL_CONSTANTS.ITEM_IDENTIFICATION_SCHEME_ID)
-        .txt(item.item_code?.trim() || String(index + 1));
-
-      const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
-      price
-        .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(item.unit_price));
-      price
-        .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
-        .txt('1.00');
-    });
+    // `cac:CreditNoteLine` comparte cuerpo con `cac:InvoiceLine`: en UBL los dos
+    // tipos difieren SOLO en el nombre del elemento de cantidad. Se delega al
+    // builder común en vez de escribir la línea aparte, porque esa duplicación
+    // dejó la nota crédito sin `cac:TaxTotal` de línea (regla CAS01b) y obligó a
+    // replicar a mano el arreglo de FAZ09 — 10 de los 50 documentos del set.
+    UblCommonBuilder.buildDocumentLines(
+      doc,
+      credit_note_data.items,
+      credit_note_data.taxes,
+      currency,
+      { line_element: 'CreditNoteLine', quantity_element: 'CreditedQuantity' },
+    );
 
     return doc.end({ prettyPrint: true });
   }

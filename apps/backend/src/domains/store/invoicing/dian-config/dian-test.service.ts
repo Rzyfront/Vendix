@@ -819,6 +819,24 @@ export class DianTestService {
           note_number,
         );
 
+      // El CUDE de una nota NO usa la clave técnica: el anexo §11.4 lo define
+      // como
+      //
+      //   SHA-384(NumFac + FecFac + HorFac + ValFac + CodImp1 + ValImp1
+      //     + CodImp2 + ValImp2 + CodImp3 + ValImp3 + ValTot + NitOFE + NumAdq
+      //     + Software-PIN + TipoAmbiente)
+      //
+      // donde `Software-PIN` es «Pin del software registrado en el catálogo del
+      // participante». La clave técnica solo entra en el CUFE de la factura, y
+      // ni una ni otro viajan en el XML — de ahí que el error sea invisible en
+      // el documento y solo aparezca cuando la DIAN recalcula el hash.
+      //
+      // La vía de emisión real (`dian-direct.provider.ts`) ya pasaba el PIN; el
+      // generador del set pasaba `resolution.technical_key`, así que los 20
+      // documentos de nota del set —10 NC + 10 ND de 50— llevaban un CUDE que
+      // no reproduce el que la DIAN calcula. `CufeCalculator.generate` nombra el
+      // parámetro `technical_key` porque es la misma posición en la cadena; lo
+      // que cambia es el valor.
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
         issue_date: today,
@@ -828,7 +846,7 @@ export class DianTestService {
         total_amount: total,
         issuer_nit: config.nit,
         customer_nit: '222222222222',
-        technical_key: resolution.technical_key || '',
+        technical_key: software_pin,
         environment: environment === 'test' ? '2' : '1',
       });
 
@@ -927,6 +945,24 @@ export class DianTestService {
           note_number,
         );
 
+      // El CUDE de una nota NO usa la clave técnica: el anexo §11.4 lo define
+      // como
+      //
+      //   SHA-384(NumFac + FecFac + HorFac + ValFac + CodImp1 + ValImp1
+      //     + CodImp2 + ValImp2 + CodImp3 + ValImp3 + ValTot + NitOFE + NumAdq
+      //     + Software-PIN + TipoAmbiente)
+      //
+      // donde `Software-PIN` es «Pin del software registrado en el catálogo del
+      // participante». La clave técnica solo entra en el CUFE de la factura, y
+      // ni una ni otro viajan en el XML — de ahí que el error sea invisible en
+      // el documento y solo aparezca cuando la DIAN recalcula el hash.
+      //
+      // La vía de emisión real (`dian-direct.provider.ts`) ya pasaba el PIN; el
+      // generador del set pasaba `resolution.technical_key`, así que los 20
+      // documentos de nota del set —10 NC + 10 ND de 50— llevaban un CUDE que
+      // no reproduce el que la DIAN calcula. `CufeCalculator.generate` nombra el
+      // parámetro `technical_key` porque es la misma posición en la cadena; lo
+      // que cambia es el valor.
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
         issue_date: today,
@@ -936,7 +972,7 @@ export class DianTestService {
         total_amount: total,
         issuer_nit: config.nit,
         customer_nit: '222222222222',
-        technical_key: resolution.technical_key || '',
+        technical_key: software_pin,
         environment: environment === 'test' ? '2' : '1',
       });
 
