@@ -449,6 +449,64 @@ export class InventoryAnalyticsService {
     return results.slice(0, query.limit || 100);
   }
 
+  /**
+   * QUI-545: variante flat-array de `getLowStockAlerts` para exportación XLSX.
+   * Devuelve TODAS las filas (no la envoltura paginada ni el slice de `limit`)
+   * con datos crudos: stock_quantity numérico, reorder_point calculado por
+   * helper, cost_price y un derivado `stock_value_at_risk` para que el
+   * reporte de "stock bajo" muestre el riesgo monetario de comprar
+   * antes de que se agote.
+   */
+  async getLowStockForExport(query: InventoryAnalyticsQueryDto) {
+    const settings = await this.loadMergedSettings();
+
+    const products = await this.prisma.products.findMany({
+      where: {
+        state: 'active',
+        track_inventory: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
+        stock_quantity: true,
+        cost_price: true,
+        min_stock_level: true,
+        reorder_point: true,
+      },
+      orderBy: { stock_quantity: 'asc' },
+      take: 10000,
+    });
+
+    return products
+      .filter((p) => {
+        const qty = Number(p.stock_quantity || 0);
+        const reorderPoint = resolveProductLowStockThreshold(settings, p);
+        return qty <= reorderPoint;
+      })
+      .map((product) => {
+        const qty = Number(product.stock_quantity || 0);
+        const reorderPoint = resolveProductLowStockThreshold(settings, product);
+        const minLevel = Number(product.min_stock_level || 0);
+        const cost = Number(product.cost_price || 0);
+        return {
+          product_id: product.id,
+          product_name: product.name,
+          sku: product.sku,
+          image_url: product.product_images?.[0]?.image_url ?? null,
+          stock_quantity: qty,
+          min_stock_level: minLevel,
+          reorder_point: reorderPoint,
+          status: qty === 0 ? 'out_of_stock' : 'low_stock',
+          stock_value_at_risk: Math.round(qty * cost * 100) / 100,
+        };
+      });
+  }
+
   private async loadMergedSettings(): Promise<StoreSettings> {
     const row = await this.prisma.store_settings.findFirst({
       select: { settings: true },
