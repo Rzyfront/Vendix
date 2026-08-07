@@ -667,9 +667,16 @@ effect(() => {
       .publishToPool(Number(this.orderId))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.dispatching.set(false);
-          this.toastService.success('Orden enviada a despacho');
+          // Idempotente: si ya estaba publicada se dice así, no "enviada".
+          if (res?.already_pooled) {
+            this.toastService.info(
+              'La orden ya estaba en el pool de despacho, esperando repartidor',
+            );
+          } else {
+            this.toastService.success('Orden enviada a despacho');
+          }
           this.startNewSale();
         },
         error: (err: any) => {

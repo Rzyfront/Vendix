@@ -124,6 +124,51 @@ describe('VexiRealtimeService', () => {
     });
   });
 
+  describe('describeRealtimeCapability', () => {
+    const describeFor = (config: Record<string, any> | null) =>
+      (service as any).describeRealtimeCapability(config);
+
+    it('permite una config OpenAI-compatible', () => {
+      expect(
+        describeFor({ ...audioConfig, sdk_type: 'openai_compatible' }),
+      ).toBeNull();
+    });
+
+    it('permite una config ausente, porque cae al host de OpenAI', () => {
+      // No es un fallo: `createSession` usa DEFAULT_BASE_URL. Lo que falta ahí
+      // es la clave, y de eso se ocupa la comprobación siguiente — reportar
+      // "incapaz" mandaría a revisar el sdk_type de una fila que no existe.
+      expect(describeFor(null)).toBeNull();
+    });
+
+    it('rechaza MiniMax T2A nombrando la config y el sdk_type', () => {
+      // El caso real de producción: `vexi_realtime_voice` apuntando a la config
+      // 16. Antes de esto el POST salía hacia
+      // https://api.minimax.io/v1/t2a_v2/realtime/client_secrets y el 4xx se
+      // reportaba como "el proveedor rechazó la sesión".
+      const message = describeFor({
+        ...audioConfig,
+        label: 'MiniMax — Dictado de voz (T2A)',
+        provider: 'MiniMax',
+        sdk_type: 'minimax_t2a',
+        model_id: 'speech-2.8-hd',
+        base_url: 'https://api.minimax.io/v1/t2a_v2',
+      });
+
+      expect(message).toContain('vexi_realtime_voice');
+      expect(message).toContain('MiniMax — Dictado de voz (T2A)');
+      expect(message).toContain('minimax_t2a');
+      // Tiene que decir la salida, no sólo el problema.
+      expect(message).toContain('pipeline');
+    });
+
+    it('rechaza anthropic_compatible, que tampoco expone Realtime API', () => {
+      expect(
+        describeFor({ ...audioConfig, sdk_type: 'anthropic_compatible' }),
+      ).toContain('anthropic_compatible');
+    });
+  });
+
   describe('buildSessionPatch', () => {
     const build = (settings: Record<string, any>) =>
       (service as any).buildSessionPatch(settings);

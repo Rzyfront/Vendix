@@ -102,6 +102,15 @@ export class VexiRealtimeService {
     dto: CreateRealtimeSessionDto,
   ): Promise<RealtimeSessionGrant> {
     const { config, instructions } = await this.resolveVoiceSetup();
+
+    // Antes de gastar un viaje al proveedor, comprobar que el proveedor es de
+    // los que hablan este protocolo. Sin esto el 502 genérico de abajo culpa al
+    // proveedor de un error de configuración nuestro.
+    const mismatch = this.describeRealtimeCapability(config);
+    if (mismatch) {
+      throw new VendixHttpException(ErrorCodes.AI_PROVIDER_002, mismatch);
+    }
+
     const apiKey = this.resolveApiKey(config);
 
     if (!apiKey) {
@@ -140,11 +149,17 @@ export class VexiRealtimeService {
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       this.logger.error(
-        `Realtime client secret request failed (${response.status}): ${detail.slice(0, 300)}`,
+        `Realtime client secret request failed (${response.status}) ` +
+          `host=${baseUrl} model=${model}: ${detail.slice(0, 300)}`,
       );
+      // El host y el modelo entran en el mensaje porque son la mitad del
+      // diagnóstico y ninguno es secreto; la clave nunca sale de este proceso.
+      // Sin ellos, "el proveedor rechazó la sesión" obliga a leer logs de
+      // producción para saber a QUÉ proveedor se le pidió.
       throw new VendixHttpException(
         ErrorCodes.AI_PROVIDER_001,
-        'Realtime provider rejected the session request',
+        `El proveedor de realtime rechazó la sesión (HTTP ${response.status}) ` +
+          `en ${baseUrl}${CLIENT_SECRETS_PATH} con el modelo "${model}".`,
       );
     }
 
@@ -229,6 +244,44 @@ export class VexiRealtimeService {
   // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------
+
+  /**
+   * Explains, before any network call, why the configured provider cannot serve
+   * a realtime session — or returns null when it can be attempted.
+   *
+   * Existe porque el fallo real es indistinguible del correcto desde el lado del
+   * proveedor: `vexi_realtime_voice` quedó apuntando a una config de MiniMax
+   * T2A, que sólo dicta texto a audio. El POST a
+   * `https://api.minimax.io/v1/t2a_v2/realtime/client_secrets` devuelve un 4xx
+   * como devolvería una clave vencida, y el mensaje resultante — "Realtime
+   * provider rejected the session request" — culpa al proveedor de una decisión
+   * de configuración nuestra, sin nombrar el campo que hay que corregir.
+   *
+   * El discriminante es `sdk_type`, no `model_type` ni la URL: es el campo que
+   * elige el cliente en `AIEngineService.initializeProvider`, y de los tres
+   * valores admitidos (`openai_compatible`, `anthropic_compatible`,
+   * `minimax_t2a`) sólo el primero expone el Realtime API. Una URL heurística
+   * daría falsos negativos con despliegues tipo Azure, cuyo host no se parece al
+   * de OpenAI y sí habla el protocolo.
+   *
+   * Una config ausente NO es un fallo: `createSession` cae al host de OpenAI por
+   * defecto, que sí es capaz. Ese caso lo cubre la comprobación de clave.
+   */
+  private describeRealtimeCapability(
+    config: ai_engine_configs | null,
+  ): string | null {
+    if (!config) return null;
+    if (config.sdk_type === 'openai_compatible') return null;
+
+    return (
+      `La aplicación ${VOICE_APP_KEY} apunta a la configuración ` +
+      `"${config.label}" (${config.provider} / ${config.sdk_type}), que no expone ` +
+      `el Realtime API: sólo el sdk_type "openai_compatible" lo hace. ` +
+      `Apúntala a un proveedor OpenAI-compatible con /realtime, o usa el motor ` +
+      `"pipeline" en Ajustes → Vexi → Motor de voz, que sí funciona con ` +
+      `${config.provider}.`
+    );
+  }
 
   /**
    * Resolves the two halves of a voice session from the AI Engine surface:

@@ -104,6 +104,12 @@ export interface CarrierCloseRouteResult {
 export interface PublishToPoolResult {
   order_id: number;
   pooled_at: string;
+  /**
+   * `true` cuando la orden YA estaba publicada y la llamada fue un no-op
+   * idempotente (`pooled_at` es el instante de la publicación original). Sirve
+   * para no mentirle al operador con "orden enviada" en un segundo click.
+   */
+  already_pooled?: boolean;
 }
 
 /** Query del historial de rutas (`GET /store/carrier/routes`). */

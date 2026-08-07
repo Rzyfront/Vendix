@@ -93,15 +93,22 @@ export class StoreSettingsFacade {
   /**
    * Which engine answers a voice turn.
    *
-   * Falls back to `realtime` rather than to null, because the caller is a gesture
-   * handler: an absent value has to route somewhere, and routing to what the
-   * store already had is the only choice that changes nothing on upgrade. Every
-   * store that predates the key gets exactly the behaviour it has today.
+   * Cae a `pipeline`, no a `realtime` ni a null. El llamador es un manejador de
+   * gesto: un valor ausente tiene que enrutar a algún lado, y tiene que ser al
+   * motor que puede responder. El realtime necesita un proveedor que exponga el
+   * Realtime API, y cuando no hay ninguno configurado el gesto terminaba en un
+   * 502; el pipeline sólo necesita las apps de transcripción y dictado, que sí
+   * están configuradas. Ver el mismo razonamiento en
+   * `default-store-settings.ts`.
+   *
+   * Este fallback tiene que coincidir con el default del backend. Si divergen,
+   * una tienda sin valor propio enruta a un motor en el navegador y a otro en el
+   * servidor, y el síntoma aparece lejos de la causa.
    *
    * A separate axis from the interface. This decides *what answers*; the panel's
    * own chat ⇄ voice toggle decides *what the person is looking at*.
    */
   readonly vexiVoiceEngine = computed<'realtime' | 'pipeline'>(() =>
-    this.settings()?.vexi?.voice_engine === 'pipeline' ? 'pipeline' : 'realtime',
+    this.settings()?.vexi?.voice_engine === 'realtime' ? 'realtime' : 'pipeline',
   );
 }
