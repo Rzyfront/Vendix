@@ -76,6 +76,9 @@ export const reportsRoutes: Routes = [
           { path: 'customer-summary', loadComponent: () => import('./pages/customers/customer-summary-report/customer-summary-report.component').then(c => c.CustomerSummaryReportComponent) },
           { path: 'customer-acquisition', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customer-acquisition' } },
           { path: 'customer-abandoned-carts', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customer-abandoned-carts' } },
+          { path: 'customers-top', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customers-top' } },
+          { path: 'customers-receivable', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customers-receivable' } },
+          { path: 'customers-aging', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customers-aging' } },
         ],
       },
       {

@@ -663,6 +663,72 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-540: cuentas por cobrar de clientes (open + partial) con
+   * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
+   */
+  @Get('customers/receivable/export')
+  @Permissions('store:analytics:read')
+  async exportAccountsReceivable(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.customers_analytics_service.getAccountsReceivableForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'document_number', header: 'Documento', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
+      { key: 'customer_email', header: 'Correo', type: 'text' },
+      { key: 'issue_date', header: 'Emisión', type: 'date' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'original_amount', header: 'Original', type: 'currency' },
+      { key: 'paid_amount', header: 'Pagado', type: 'currency' },
+      { key: 'balance', header: 'Saldo', type: 'currency' },
+      { key: 'status', header: 'Estado', type: 'text' },
+    ];
+
+    await this.emitReport(res, 'cuentas_por_cobrar', tz, [
+      this.toSheet('Cuentas por Cobrar', columns, rows, tz),
+    ]);
+  }
+
+  /**
+   * QUI-539: días sin comprar por cliente (riesgo de churn). Agrupa
+   * por cliente: última orden, días desde, total órdenes, lifetime
+   * value y bucket de antigüedad.
+   */
+  @Get('customers/aging/export')
+  @Permissions('store:analytics:read')
+  async exportCustomersAging(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.customers_analytics_service.getCustomersAgingForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_email', header: 'Correo', type: 'text' },
+      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
+      { key: 'customer_since', header: 'Cliente Desde', type: 'date' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+      { key: 'days_since_last_order', header: 'Días Sin Comprar', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number' },
+      { key: 'lifetime_value', header: 'Valor Vida', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'cartera_clientes_aging', tz, [
+      this.toSheet('Cartera Clientes Aging', columns, rows, tz),
+    ]);
+  }
+
   @Get('customers/abandoned-carts/summary')
   @Permissions('store:analytics:read')
   async getAbandonedCartsSummary(@Query() query: AnalyticsQueryDto) {
