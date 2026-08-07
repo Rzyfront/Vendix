@@ -635,6 +635,36 @@ export class AnalyticsController {
     );
   }
 
+  /**
+   * QUI-541: exporta TODOS los clientes con al menos una orden en el
+   * período, ordenados por gasto total descendente. Reutiliza el
+   * `groupBy` de `getTopCustomers` pero sin el `take: 10` que tiene
+   * la vista de pantalla.
+   */
+  @Get('customers/top/export')
+  @Permissions('store:analytics:read')
+  async exportTopCustomers(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.customers_analytics_service.getTopCustomersForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'id', header: 'ID Cliente', type: 'number' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+    ];
+
+    await this.emitReport(res, 'top_clientes', tz, [
+      this.toSheet('Top Clientes', columns, rows, tz),
+    ]);
+  }
+
   @Get('customers/export')
   @Permissions('store:analytics:read')
   async exportCustomersAnalytics(
