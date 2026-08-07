@@ -244,4 +244,51 @@ describe('SalesAnalyticsService', () => {
       expect(row.customer_name).toBe('Ada Lovelace');
     });
   });
+
+  // ==================== QUI-549: VENTAS POR CANAL ====================
+
+  describe('getSalesByChannelForExport (QUI-549)', () => {
+    it('aggregates by channel, sorts by revenue desc, and computes % participation with 2-decimal rounding', async () => {
+      prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      prisma.orders.groupBy.mockResolvedValue([
+        { channel: 'pos', _sum: { grand_total: 600000 }, _count: { id: 12 } },
+        { channel: 'ecommerce', _sum: { grand_total: 300000 }, _count: { id: 8 } },
+        { channel: 'agent', _sum: { grand_total: 100000 }, _count: { id: 2 } },
+      ] as any);
+
+      const rows = await service.getSalesByChannelForExport({} as any);
+
+      expect(rows).toHaveLength(3);
+      // Total 1,000,000. POS 60%, ecommerce 30%, agent 10%.
+      const pos = rows.find((r) => r.channel === 'pos');
+      expect(pos!.revenue).toBe(600000);
+      expect(pos!.order_count).toBe(12);
+      expect(pos!.percentage).toBe(60);
+      expect(pos!.display_name).toBe('Punto de Venta');
+
+      const ecom = rows.find((r) => r.channel === 'ecommerce');
+      expect(ecom!.revenue).toBe(300000);
+      expect(ecom!.percentage).toBe(30);
+      expect(ecom!.display_name).toBe('Tienda Online');
+
+      const agent = rows.find((r) => r.channel === 'agent');
+      expect(agent!.revenue).toBe(100000);
+      expect(agent!.percentage).toBe(10);
+      expect(agent!.display_name).toBe('Agente IA');
+
+      // Sort: POS (600k) > ecommerce (300k) > agent (100k).
+      expect(rows[0].channel).toBe('pos');
+      expect(rows[1].channel).toBe('ecommerce');
+      expect(rows[2].channel).toBe('agent');
+    });
+
+    it('returns empty array (not paginated envelope) when no channels have sales', async () => {
+      prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      prisma.orders.groupBy.mockResolvedValue([] as any);
+      const rows = await service.getSalesByChannelForExport({} as any);
+      expect(Array.isArray(rows)).toBe(true);
+      expect(rows).toHaveLength(0);
+      expect((rows as any).data).toBeUndefined();
+    });
+  });
 });
