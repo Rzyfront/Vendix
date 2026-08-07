@@ -226,8 +226,19 @@ export class UblCommonBuilder {
 
   /**
    * Builds the supplier (emisor) party element.
+   *
+   * `numbering_prefix` es el prefijo de la resolución de numeración (el mismo
+   * que viaja en `sts:AuthorizedInvoices/sts:Prefix`). Identifica el PUNTO DE
+   * FACTURACIÓN y va en `cac:PartyLegalEntity/cac:CorporateRegistrationScheme`
+   * — ver la nota de FAJ49/FAJ50 más abajo. Es opcional porque el documento
+   * soporte construye su emisor a partir de un tercero no obligado a facturar,
+   * que no tiene resolución propia: ahí el grupo se omite.
    */
-  static buildSupplierParty(parent: any, issuer: DianIssuerData): void {
+  static buildSupplierParty(
+    parent: any,
+    issuer: DianIssuerData,
+    numbering_prefix?: string,
+  ): void {
     const supplier = parent.ele(UBL_NAMESPACES.CAC, 'AccountingSupplierParty');
     // AdditionalAccountID = tipo de persona/organización ('1' Jurídica default,
     // '2' Natural). The tax regime ('48'/'49') belongs in TaxLevelCode, not here.
@@ -298,6 +309,38 @@ export class UblCommonBuilder {
       .att('schemeID', issuer.nit_dv)
       .att('schemeName', issuer.document_type || '31')
       .txt(issuer.nit);
+
+    // FAJ49 + FAJ50 (espejos CAJ49/CAJ50 en nota crédito y DAJ49/DAJ50 en nota
+    // débito, las tres de severidad RECHAZO). `cac:CorporateRegistrationScheme`
+    // identifica el PUNTO DE FACTURACIÓN, y de ese punto cuelgan la autorización
+    // de numeración y el software habilitado para usarla. El anexo define
+    // FAB10a como la comparación
+    //
+    //   sts:AuthorizedInvoices/sts:Prefix
+    //     == cac:PartyLegalEntity/cac:CorporateRegistrationScheme/cbc:ID
+    //
+    // Sin el grupo no hay lado derecho contra el que comparar, así que la DIAN
+    // no resuelve el punto — y en cascada no resuelve la autorización (FAD05e
+    // «el número no existe para la autorización») ni el software autorizado
+    // para ella (FAB24a presencia, FAB27b huella, FAB25/FAB26 atributos). Es el
+    // mismo racimo de un solo XPath ausente que ya produjo FAJ28/29/32 con la
+    // dirección fiscal: siete reglas, un elemento.
+    //
+    // En la vía asincrónica el efecto era peor que un rechazo: la DIAN devolvía
+    // ZipKey y no clasificaba el lote en el set de pruebas, así que el portal
+    // quedaba en «Recibidos 0» y `GetStatus` respondía código 66 —«TrackId no
+    // existe en los registros de la DIAN»— sobre un CUFE que ella misma había
+    // validado como correcto por la vía sincrónica.
+    //
+    // `cbc:Name` (FAJ51) es el número de matrícula mercantil: 6-12 dígitos,
+    // 0..1, solo notificación. NO se emite. Vendix no almacena la matrícula, y
+    // declarar un número inventado afirmaría un registro que no existe.
+    if (numbering_prefix) {
+      legal
+        .ele(UBL_NAMESPACES.CAC, 'CorporateRegistrationScheme')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .txt(numbering_prefix);
+    }
 
     // Contact
     if (issuer.email || issuer.phone) {
@@ -687,12 +730,51 @@ export class UblCommonBuilder {
     taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
+    UblCommonBuilder.buildDocumentLines(parent, items, taxes, currency, {
+      line_element: 'InvoiceLine',
+      quantity_element: 'InvoicedQuantity',
+    });
+  }
+
+  /**
+   * Emite las líneas de un documento —cantidad, descuento, `cac:TaxTotal` de
+   * línea, ítem y precio— para los tres tipos que comparten estructura en UBL.
+   *
+   * `InvoiceLineType`, `CreditNoteLineType` y `DebitNoteLineType` difieren SOLO
+   * en el nombre del elemento de cantidad (`InvoicedQuantity` /
+   * `CreditedQuantity` / `DebitedQuantity`); el resto de la secuencia UBL es
+   * idéntico, incluido el orden `AllowanceCharge → TaxTotal → Item → Price`.
+   *
+   * Antes cada builder escribía su propia línea, y esa duplicación ya dejó
+   * arreglos afuera dos veces:
+   *
+   *   - FAZ09 (`cac:StandardItemIdentification`) se arregló en la factura y hubo
+   *     que replicarlo a mano en las notas.
+   *   - `cac:TaxTotal` de línea nunca llegó a ellas — reglas CAS01b y DAS01b,
+   *     que alcanzan a 20 de los 50 documentos que exige el set de habilitación.
+   *
+   * Un solo cuerpo hace imposible que la próxima regla alcance a un tipo de
+   * documento y no a los otros.
+   */
+  static buildDocumentLines(
+    parent: any,
+    items: ProviderInvoiceItem[],
+    taxes: ProviderInvoiceTax[],
+    currency: string,
+    options: {
+      line_element: 'InvoiceLine' | 'CreditNoteLine' | 'DebitNoteLine';
+      quantity_element:
+        | 'InvoicedQuantity'
+        | 'CreditedQuantity'
+        | 'DebitedQuantity';
+    },
+  ): void {
     items.forEach((item, index) => {
-      const line = parent.ele(UBL_NAMESPACES.CAC, 'InvoiceLine');
+      const line = parent.ele(UBL_NAMESPACES.CAC, options.line_element);
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
 
       line
-        .ele(UBL_NAMESPACES.CBC, 'InvoicedQuantity')
+        .ele(UBL_NAMESPACES.CBC, options.quantity_element)
         .att('unitCode', 'EA') // Each (unit)
         .txt(item.quantity);
 
