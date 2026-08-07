@@ -538,6 +538,86 @@ export class PurchasesAnalyticsService {
         granularity: interval,
       }));
   }
+
+  /**
+   * QUI-542: cuentas por pagar a proveedores con bucketing de
+   * antigüedad. Toma purchase_orders con payment_status IN
+   * ('unpaid', 'partial') y payment_due_date no nulo, calcula días
+   * de mora desde payment_due_date vs now(), y bucket:
+   *   - '0-30' (corriente)
+   *   - '31-60'
+   *   - '61-90'
+   *   - '90+' (crítico, escalación)
+   *
+   * Una fila por orden con supplier, total, saldo pendiente, días de
+   * mora y bucket.
+   */
+  async getAccountsPayableForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    const orders = await this.prisma.purchase_orders.findMany({
+      where: {
+        organization_id: organizationId,
+        suppliers: { store_id: storeId },
+        payment_status: { in: ['unpaid', 'partial'] },
+        payment_due_date: { not: null },
+      },
+      select: {
+        id: true,
+        order_number: true,
+        supplier_invoice_number: true,
+        total_amount: true,
+        tax_amount: true,
+        order_date: true,
+        payment_due_date: true,
+        payment_status: true,
+        suppliers: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: { payment_due_date: 'asc' },
+      take: 10000,
+    });
+
+    const now = new Date();
+
+    return orders
+      .filter((o) => o.payment_due_date !== null)
+      .map((o) => {
+        const days = Math.max(
+          0,
+          Math.floor(
+            (now.getTime() - o.payment_due_date!.getTime()) / 86400000,
+          ),
+        );
+        const bucket =
+          days <= 30
+            ? '0-30'
+            : days <= 60
+              ? '31-60'
+              : days <= 90
+                ? '61-90'
+                : '90+';
+        return {
+          id: o.id,
+          order_number: o.order_number,
+          supplier_invoice_number: o.supplier_invoice_number ?? '',
+          supplier_id: o.suppliers.id,
+          supplier_name: o.suppliers.name,
+          supplier_code: o.suppliers.code ?? '',
+          order_date: o.order_date,
+          payment_due_date: o.payment_due_date,
+          days_overdue: days,
+          aging_bucket: bucket,
+          total_amount: Math.round(Number(o.total_amount) * 100) / 100,
+          tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
+          payment_status: o.payment_status,
+        };
+      });
+  }
 }
 
 /**

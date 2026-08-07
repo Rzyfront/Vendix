@@ -926,6 +926,38 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-542: cuentas por pagar a proveedores con bucketing de
+   * antigüedad. purchase_orders con payment_status IN ('unpaid',
+   * 'partial') y payment_due_date no nulo.
+   */
+  @Get('purchases/aging/export')
+  @Permissions('store:analytics:read')
+  async exportAccountsPayable(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.purchases_analytics_service.getAccountsPayableForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'order_number', header: 'OC', type: 'text' },
+      { key: 'supplier_invoice_number', header: 'Factura Prov.', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'order_date', header: 'Fecha OC', type: 'date' },
+      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_amount', header: 'Total', type: 'currency' },
+      { key: 'payment_status', header: 'Estado', type: 'text' },
+    ];
+
+    await this.emitReport(res, 'cuentas_por_pagar', tz, [
+      this.toSheet('Cuentas por Pagar', columns, rows, tz),
+    ]);
+  }
+
   @Get('purchases/export')
   @Permissions('store:analytics:read')
   async exportPurchasesAnalytics(
