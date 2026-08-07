@@ -34,8 +34,8 @@ describe('AnalyticsRegistry', () => {
   });
 
   describe('ANALYTICS_VIEWS', () => {
-    it('should have 26 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(26);
+    it('should have 24 views', () => {
+      expect(ANALYTICS_VIEWS).toHaveSize(24);
     });
 
     it('should have unique keys', () => {
