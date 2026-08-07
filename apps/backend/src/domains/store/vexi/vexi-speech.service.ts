@@ -21,6 +21,11 @@ const DEFAULT_SPEECH_PARAMS: SpeechCacheParams = {
   voice: 'shimmer',
   format: 'mp3',
   speed: 1,
+  // 1 es «sin cambio», el default del proveedor. El 1.5 que pidió producción
+  // vive en la metadata sembrada de `vexi_voice_tts`, no acá: este objeto es el
+  // respaldo para cuando la fila falta, y un respaldo que sube el volumen
+  // escondería que la configuración real no se pudo leer.
+  vol: 1,
 };
 
 /**
@@ -111,6 +116,7 @@ export class VexiSpeechService {
         format:
           this.text(speech.response_format) ?? DEFAULT_SPEECH_PARAMS.format,
         speed: this.positive(speech.speed) ?? DEFAULT_SPEECH_PARAMS.speed,
+        vol: this.positive(speech.vol) ?? DEFAULT_SPEECH_PARAMS.vol,
       };
     } catch (error) {
       // A voice turn must not die because the config lookup failed; the
@@ -224,6 +230,11 @@ export class VexiSpeechService {
           voice: params.voice,
           responseFormat: params.format,
           speed: params.speed,
+          // Se manda explícito en vez de dejar que el proveedor lo lea de su
+          // config: así el valor que viaja es EL MISMO que entró en la clave de
+          // caché, y una entrada nunca puede describir un volumen distinto del
+          // que realmente se sintetizó.
+          vol: params.vol,
         },
       );
 

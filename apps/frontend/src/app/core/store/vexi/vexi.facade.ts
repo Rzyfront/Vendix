@@ -119,8 +119,12 @@ export class VexiFacade {
   }
 
   /** Applies the pending write. The effect reads the token from the store. */
-  confirmProposal(): void {
-    this.store.dispatch(VexiActions.confirmProposal());
+  /**
+   * `speak` comes from the caller because only the surface knows whether the
+   * person is looking at the thread or listening to it.
+   */
+  confirmProposal(speak = false): void {
+    this.store.dispatch(VexiActions.confirmProposal({ speak }));
   }
 
   rejectProposal(): void {

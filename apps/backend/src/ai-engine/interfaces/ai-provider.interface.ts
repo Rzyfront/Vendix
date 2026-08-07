@@ -197,6 +197,16 @@ export interface AISpeechRequestOptions {
   voice?: string;
   responseFormat?: 'mp3' | 'pcm' | 'wav' | (string & {});
   speed?: number;
+  /**
+   * Output gain, as a multiplier over the provider's own default (1 = unchanged).
+   *
+   * Optional per request for the same reason `speed` is: it is a voice
+   * parameter, so it belongs to the application an operator edits, not only to
+   * the provider config that until now could be reached solely by SQL. A
+   * provider that has no notion of volume ignores it — `openai-compatible`
+   * builds its request body key by key, so an unknown field never travels.
+   */
+  vol?: number;
   provider?: Record<string, any>;
 }
 
