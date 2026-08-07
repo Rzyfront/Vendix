@@ -225,6 +225,33 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-551: ventas por vendedor (staff que creó la sales_order).
+   * Reutiliza getSalesBySellerForExport del service.
+   */
+  @Get('sales/by-seller/export')
+  @Permissions('store:analytics:read')
+  async exportSalesBySeller(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.sales_analytics_service.getSalesBySellerForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'seller_id', header: 'ID Vendedor', type: 'number' },
+      { key: 'seller_name', header: 'Vendedor', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'total_revenue', header: 'Ingresos', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_vendedor', tz, [
+      this.toSheet('Ventas por Vendedor', columns, rows, tz),
+    ]);
+  }
+
   @Get('sales/export')
   @Permissions('store:analytics:read')
   async exportSalesAnalytics(

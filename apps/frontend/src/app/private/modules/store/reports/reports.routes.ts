@@ -41,6 +41,7 @@ export const reportsRoutes: Routes = [
           { path: 'sales-by-customer', loadComponent: () => import('./pages/sales/sales-by-customer-report/sales-by-customer-report.component').then(c => c.SalesByCustomerReportComponent) },
           { path: 'sales-by-payment', loadComponent: () => import('./pages/sales/sales-by-payment-report/sales-by-payment-report.component').then(c => c.SalesByPaymentReportComponent) },
           { path: 'sales-by-channel', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'sales-by-channel' } },
+          { path: 'sales-by-seller', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'sales-by-seller' } },
           { path: 'sales-trends', loadComponent: () => import('./pages/sales/sales-trends-report/sales-trends-report.component').then(c => c.SalesTrendsReportComponent) },
         ],
       },
