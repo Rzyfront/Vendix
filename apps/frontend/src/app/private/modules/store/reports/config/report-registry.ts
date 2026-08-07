@@ -397,6 +397,70 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-549: Ventas por canal. groupBy de orders.channel con
+    // COMPLETED_SALE_STATES, mostrando órdenes, ingresos y % de
+    // participación por canal (POS, ecommerce, agent, whatsapp,
+    // marketplace).
+    id: 'sales-by-channel',
+    category: 'sales',
+    title: 'Por Canal',
+    description: 'Distribución de ventas por canal: POS, ecommerce, agente, etc.',
+    detailedDescription:
+      'Conoce por dónde venden más: punto de venta, tienda online, agente IA, WhatsApp o marketplace. Distribución con conteo de órdenes, ingresos y % de participación.',
+    icon: 'radio',
+    route: '/admin/reports/sales/sales-by-channel',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'channel',
+    columns: [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency', footer: 'sum' },
+      { key: 'percentage', header: '% Participación', type: 'percentage' },
+    ],
+    exportFilename: 'ventas_por_canal',
+    stats: [
+      { key: 'revenue', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-channel',
+    exportEndpoint: 'store/analytics/sales/by-channel/export',
+  },
+
+  {
+    // QUI-551: Ventas por vendedor. sales_orders.created_by_user_id
+    // es el proxy de "vendedor" (POS-heavy; ecommerce/whatsapp sin
+    // sales_order previa no se atribuyen a nadie).
+    id: 'sales-by-seller',
+    category: 'sales',
+    title: 'Por Vendedor',
+    description: 'Ventas atribuidas al staff que creó la orden',
+    detailedDescription:
+      'Ranking de vendedores por ingresos generados. La atribución es al usuario staff que creó la sales_order (principalmente POS). Órdenes ecommerce y WhatsApp que no pasan por sales_order no se atribuyen a un vendedor específico.',
+    icon: 'user-cog',
+    route: '/admin/reports/sales/sales-by-seller',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'seller_id',
+    columns: [
+      { key: 'seller_name', header: 'Vendedor', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_revenue', header: 'Ingresos', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'ventas_por_vendedor',
+    stats: [
+      { key: 'total_revenue', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: '_count', label: 'Vendedores', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-seller',
+    exportEndpoint: 'store/analytics/sales/by-seller/export',
+  },
+
+  {
     id: 'sales-trends',
     category: 'sales',
     title: 'Tendencias',

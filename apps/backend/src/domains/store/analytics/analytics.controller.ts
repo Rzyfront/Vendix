@@ -197,6 +197,61 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * QUI-549: exporta el resumen de ventas por canal (POS, ecommerce, etc.)
+   * con conteo de órdenes, revenue total y % de participación. Reutiliza
+   * el `groupBy` de `getSalesByChannel` y aplica redondeo a 2 decimales
+   * en revenue y percentage.
+   */
+  @Get('sales/by-channel/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByChannel(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.sales_analytics_service.getSalesByChannelForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency' },
+      { key: 'percentage', header: '% Participación', type: 'percent' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_canal', tz, [
+      this.toSheet('Ventas por Canal', columns, rows, tz),
+    ]);
+  }
+
+  /**
+   * QUI-551: ventas por vendedor (staff que creó la sales_order).
+   * Reutiliza getSalesBySellerForExport del service.
+   */
+  @Get('sales/by-seller/export')
+  @Permissions('store:analytics:read')
+  async exportSalesBySeller(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.sales_analytics_service.getSalesBySellerForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'seller_id', header: 'ID Vendedor', type: 'number' },
+      { key: 'seller_name', header: 'Vendedor', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'total_revenue', header: 'Ingresos', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_vendedor', tz, [
+      this.toSheet('Ventas por Vendedor', columns, rows, tz),
+    ]);
+  }
+
   @Get('sales/export')
   @Permissions('store:analytics:read')
   async exportSalesAnalytics(
