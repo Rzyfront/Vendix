@@ -39,6 +39,18 @@ export class MinimaxSpeechProvider implements AIProvider {
   private static readonly SPEED_MAX = 2;
   private static readonly DEFAULT_SPEED = 1;
 
+  /**
+   * Misma razón que la velocidad: MiniMax valida y rechaza, no acota.
+   *
+   * El mínimo es un valor por encima de cero y no cero: `vol: 0` es audio
+   * silencioso, y devolver un turno mudo con éxito 200 es peor que ignorar el
+   * valor — nadie configura el volumen en cero a propósito, y si lo hiciera por
+   * error no tendría forma de saber por qué Vexi dejó de hablar.
+   */
+  private static readonly VOL_MIN = 0.1;
+  private static readonly VOL_MAX = 10;
+  private static readonly DEFAULT_VOL = 1;
+
   private static readonly DEFAULT_VOICE = 'Spanish_MaturePartner';
   private static readonly DEFAULT_FORMAT = 'mp3';
   private static readonly DEFAULT_SAMPLE_RATE = 32000;
@@ -129,7 +141,13 @@ export class MinimaxSpeechProvider implements AIProvider {
             this.config.settings?.voice ||
             MinimaxSpeechProvider.DEFAULT_VOICE,
           speed: this.clampSpeed(options?.speed ?? this.config.settings?.speed),
-          vol: this.positive(this.config.settings?.vol) ?? 1,
+          // La opción de la petición manda sobre la config, igual que `speed`.
+          // Antes `vol` salía SÓLO de `config.settings`, así que dos líneas
+          // contiguas tenían dos modelos de permiso distintos: la velocidad la
+          // editaba un operador desde la aplicación y el volumen sólo se podía
+          // cambiar por SQL. `vol` es un multiplicador sobre el default del
+          // proveedor (1 = sin cambio) y MiniMax admite hasta 10.
+          vol: this.clampVol(options?.vol ?? this.config.settings?.vol),
           pitch: this.finite(this.config.settings?.pitch) ?? 0,
         },
         audio_setting: {
@@ -259,6 +277,15 @@ export class MinimaxSpeechProvider implements AIProvider {
     return Math.min(
       MinimaxSpeechProvider.SPEED_MAX,
       Math.max(MinimaxSpeechProvider.SPEED_MIN, speed),
+    );
+  }
+
+  private clampVol(value: unknown): number {
+    const vol = this.finite(value);
+    if (vol === undefined) return MinimaxSpeechProvider.DEFAULT_VOL;
+    return Math.min(
+      MinimaxSpeechProvider.VOL_MAX,
+      Math.max(MinimaxSpeechProvider.VOL_MIN, vol),
     );
   }
 

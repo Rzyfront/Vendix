@@ -1429,6 +1429,9 @@ export class AIEngineService implements OnModuleInit {
         speechConfig.response_format ||
         speechConfig.responseFormat,
       speed: overrides?.speed ?? speechConfig.speed,
+      // `??` y no `||`: un `vol` de 0 es un valor legítimo (silencio) y con `||`
+      // caería al de la config, que es lo contrario de lo que el operador pidió.
+      vol: overrides?.vol ?? speechConfig.vol,
       provider: overrides?.provider || speechConfig.provider,
     };
   }

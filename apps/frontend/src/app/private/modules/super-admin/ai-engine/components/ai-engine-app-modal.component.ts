@@ -149,7 +149,10 @@ import {
                 }
               </div>
 
-              <div formGroupName="speech" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div
+                formGroupName="speech"
+                class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+              >
                 <app-input
                   formControlName="voice"
                   label="Voz"
@@ -173,12 +176,30 @@ import {
                   [control]="form.get('speech.speed')"
                   [disabled]="isSubmitting()"
                 ></app-input>
+
+                <!-- Sólo para MiniMax: el TTS de OpenAI no tiene parámetro de
+                     ganancia, y ofrecer un campo que el proveedor ignora en
+                     silencio es peor que no ofrecerlo. -->
+                @if (supportsVol()) {
+                  <app-input
+                    formControlName="vol"
+                    label="Volumen"
+                    type="number"
+                    [placeholder]="'1'"
+                    [control]="form.get('speech.vol')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                }
               </div>
 
               <p class="text-xs text-text-secondary">
                 La voz es el identificador exacto del proveedor. Velocidad: 1 =
                 normal, rango admitido de {{ speedRange()[0] }} a
                 {{ speedRange()[1] }}.
+                @if (supportsVol()) {
+                  Volumen: 1 = sin cambio, multiplicador de {{ volRange[0] }} a
+                  {{ volRange[1] }} (1.5 sube un 50%).
+                }
               </p>
 
               @if (voiceSuggestions().length) {
@@ -209,6 +230,22 @@ import {
                     {{ selectedProviderName() || 'Este proveedor' }} solo admite
                     entre <strong>{{ speedRange()[0] }}</strong> y
                     <strong>{{ speedRange()[1] }}</strong>.
+                  </span>
+                </p>
+              }
+
+              @if (volOutOfRange()) {
+                <p
+                  class="text-xs text-red-600 flex items-start gap-1"
+                  role="alert"
+                >
+                  <span class="font-medium">Volumen fuera de rango:</span>
+                  <span>
+                    {{ selectedProviderName() || 'Este proveedor' }} solo admite
+                    entre <strong>{{ volRange[0] }}</strong> y
+                    <strong>{{ volRange[1] }}</strong>. MiniMax rechaza la
+                    petición en vez de acotar el valor, así que el turno se
+                    perdería al sintetizar.
                   </span>
                 </p>
               }
@@ -354,7 +391,8 @@ import {
               form.invalid ||
               isSubmitting() ||
               modelTypeMismatch() ||
-              speedOutOfRange()
+              speedOutOfRange() ||
+              volOutOfRange()
             "
             [loading]="isSubmitting()"
           >
@@ -391,6 +429,7 @@ export class AIEngineAppModalComponent implements OnChanges {
   private currentConfigId = signal<string | null>(null);
   currentModelType = signal<AIModelType | null>('text');
   private currentSpeed = signal<number | null>(null);
+  private currentVol = signal<number | null>(null);
 
   selectedConfigModelType = computed<AIModelType | null>(() => {
     const id = this.currentConfigId();
@@ -456,6 +495,27 @@ export class AIEngineAppModalComponent implements OnChanges {
     return speed < min || speed > max;
   });
 
+  /**
+   * Ventana de volumen. Sólo MiniMax lo admite: el TTS de OpenAI no tiene
+   * parámetro de ganancia, así que el campo se oculta en vez de ofrecer algo que
+   * el proveedor va a ignorar en silencio.
+   *
+   * El mínimo es 0.1 y no 0 a propósito: `vol: 0` sintetiza audio mudo y lo
+   * devuelve con éxito, o sea que Vexi dejaría de hablar sin ningún error que lo
+   * explique.
+   */
+  volRange: readonly [number, number] = [0.1, 10];
+
+  supportsVol = computed<boolean>(() => this.isSpeechApp() && this.isMinimax());
+
+  volOutOfRange = computed<boolean>(() => {
+    if (!this.supportsVol()) return false;
+    const vol = this.currentVol();
+    if (vol === null) return false;
+    const [min, max] = this.volRange;
+    return vol < min || vol > max;
+  });
+
   private isMinimax = computed<boolean>(() =>
     (this.selectedProviderName() || '').toLowerCase().includes('minimax'),
   );
@@ -507,6 +567,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       voice: [''],
       response_format: ['mp3'],
       speed: [null as number | null],
+      vol: [null as number | null],
     }),
   });
 
@@ -531,6 +592,15 @@ export class AIEngineAppModalComponent implements OnChanges {
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((speed: unknown) => {
         this.currentSpeed.set(this.toFiniteNumber(speed));
+      });
+
+    // Un `computed()` no reacciona a un FormControl, así que el valor se espeja
+    // en una señal como ya se hace con la velocidad.
+    this.form
+      .get('speech.vol')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((vol: unknown) => {
+        this.currentVol.set(this.toFiniteNumber(vol));
       });
   }
 
@@ -565,6 +635,7 @@ export class AIEngineAppModalComponent implements OnChanges {
           voice: speech['voice'] ?? '',
           response_format: speech['response_format'] ?? 'mp3',
           speed: speech['speed'] ?? null,
+          vol: speech['vol'] ?? null,
         },
         key: a.key,
         name: a.name,
@@ -585,6 +656,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       this.currentModelType.set(modelType);
       this.currentConfigId.set(a.config_id?.toString() || null);
       this.currentSpeed.set(this.toFiniteNumber(speech['speed']));
+      this.currentVol.set(this.toFiniteNumber(speech['vol']));
       // Disable key editing on existing apps
       this.form.get('key')?.disable();
     } else if (this.isOpen() && !this.app()) {
@@ -594,7 +666,9 @@ export class AIEngineAppModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    if (this.form.invalid || this.speedOutOfRange()) return;
+    if (this.form.invalid || this.speedOutOfRange() || this.volOutOfRange()) {
+      return;
+    }
 
     const raw = this.form.getRawValue();
     const data: any = {
@@ -666,6 +740,7 @@ export class AIEngineAppModalComponent implements OnChanges {
     const voice = (raw.speech?.voice || '').trim();
     const format = raw.speech?.response_format || undefined;
     const speed = this.toFiniteNumber(raw.speech?.speed);
+    const vol = this.toFiniteNumber(raw.speech?.vol);
 
     if (voice) speech['voice'] = voice;
     else delete speech['voice'];
@@ -675,6 +750,15 @@ export class AIEngineAppModalComponent implements OnChanges {
 
     if (speed !== null) speech['speed'] = speed;
     else delete speech['speed'];
+
+    // El campo está oculto para proveedores sin ganancia, pero el valor que ya
+    // estuviera guardado NO se borra: ocultar un control no es lo mismo que
+    // pedir que su dato desaparezca, y el operador podría estar cambiando de
+    // config temporalmente. Sólo se escribe o se limpia cuando el campo se ve.
+    if (this.supportsVol()) {
+      if (vol !== null) speech['vol'] = vol;
+      else delete speech['vol'];
+    }
 
     if (Object.keys(speech).length) existing['speech'] = speech;
     else delete existing['speech'];
@@ -699,11 +783,12 @@ export class AIEngineAppModalComponent implements OnChanges {
       retry_max: null,
       retry_delay: null,
       is_active: true,
-      speech: { voice: '', response_format: 'mp3', speed: null },
+      speech: { voice: '', response_format: 'mp3', speed: null, vol: null },
     });
     this.currentModelType.set('text');
     this.currentConfigId.set(null);
     this.currentSpeed.set(null);
+    this.currentVol.set(null);
   }
 
   private syncOutputFormatWithConfig(configId: string | null): void {

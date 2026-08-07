@@ -1180,6 +1180,17 @@ Devuelve SOLO este JSON:
           // diez justo en el camino crítico de latencia.
           response_format: 'mp3',
           speed: 1,
+          // Multiplicador de ganancia sobre el default del proveedor (1 = sin
+          // cambio). 1.5 porque el default se escuchaba demasiado bajo en el
+          // parlante de un celular, que es donde se usa el modo voz. Sólo
+          // MiniMax lo honra: el TTS de OpenAI no tiene parámetro de volumen y
+          // lo ignora. Editable desde Super Admin sin deploy.
+          //
+          // Cambiarlo invalida la caché de síntesis a propósito: `vol` es parte
+          // de `SpeechCacheParams` y de la clave, así que el banco de muletillas
+          // se vuelve a calentar al volumen nuevo en vez de quedarse fijado al
+          // viejo en el tier que nunca se desaloja.
+          vol: 1.5,
         },
       },
     },
