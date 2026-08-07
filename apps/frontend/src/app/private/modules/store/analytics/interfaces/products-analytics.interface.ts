@@ -55,13 +55,21 @@ export interface ProductProfitability {
   revenue: number;
   total_cost: number;
   profit: number;
-  margin: number;
-  markup: number;
+  margin: number | null;
+  markup: number | null;
   units_sold: number;
   avg_selling_price: number;
+  recipe_unit_cost: number | null;
+  coverage_ratio: number;
   catalog_base_price: number;
   catalog_cost_price: number;
   catalog_margin: number | null;
+}
+
+export interface CostCoverageSummary {
+  units_total: number;
+  units_without_cost: number;
+  coverage_ratio: number;
 }
 
 export interface ProfitabilitySummary {
@@ -70,11 +78,20 @@ export interface ProfitabilitySummary {
   total_cost: number;
   total_profit: number;
   overall_margin: number;
+  cost_coverage: CostCoverageSummary;
 }
 
 export interface ProfitabilityResponse {
-  products: ProductProfitability[];
+  data: ProductProfitability[];
   summary: ProfitabilitySummary;
+  meta: {
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      total_pages: number;
+    };
+  };
 }
 
 // Query DTO for Products Analytics

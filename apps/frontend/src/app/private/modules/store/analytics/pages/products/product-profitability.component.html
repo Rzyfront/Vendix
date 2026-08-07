@@ -77,6 +77,34 @@
     </div>
   </div>
 
+  <!-- QUI-623: Aviso de cobertura de costo -->
+  @if (!loading() && summary()?.cost_coverage?.units_without_cost) {
+    <div
+      class="mx-1 mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3"
+      role="alert"
+    >
+      <app-icon
+        name="alert-triangle"
+        class="text-amber-600 mt-0.5 shrink-0"
+      ></app-icon>
+      <div class="text-sm">
+        <p class="font-semibold text-amber-900">
+          {{ summary()?.cost_coverage?.units_without_cost }} de
+          {{ summary()?.cost_coverage?.units_total }} unidades vendidas no
+          tienen costo registrado en este período.
+        </p>
+        <p class="text-amber-800 mt-1">
+          El margen y markup de las filas correspondientes a esas unidades no
+          son reales (aparecerán inflados al 100%). Cobertura actual:
+          <strong>{{
+            ((summary()?.cost_coverage?.coverage_ratio ?? 0) * 100)
+              | number : '1.1-1'
+          }}%</strong>
+        </p>
+      </div>
+    </div>
+  }
+
   <!-- Content Grid -->
   <div class="grid grid-cols-1 gap-6">
     <!-- Charts Grid -->

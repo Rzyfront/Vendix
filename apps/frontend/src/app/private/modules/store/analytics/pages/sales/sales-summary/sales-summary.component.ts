@@ -30,6 +30,7 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
 import { truncateLabel, compactCountAxis } from '../../../../../../../shared/utils/chart-labels.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
+import { comparisonLabelFor, DatePresetLike } from '../../../utils/comparison-label.util';
 
 @Component({
   selector: 'vendix-sales-summary',
@@ -127,10 +128,10 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     this.store.dispatch(SalesActions.setDateRange({ dateRange: range }));
   }
 
-  getGrowthText(growth?: number): string {
+  getGrowthText(growth?: number | null): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
-    return `${sign}${growth.toFixed(1)}% vs período anterior`;
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset as DatePresetLike)}`;
   }
 
   private updateCharts(trends: SalesTrend[], granularity: string): void {
