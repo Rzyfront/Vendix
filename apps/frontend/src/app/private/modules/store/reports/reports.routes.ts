@@ -52,6 +52,7 @@ export const reportsRoutes: Routes = [
           { path: '', redirectTo: 'inventory-overview', pathMatch: 'full' },
           { path: 'inventory-overview', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-overview' } },
           { path: 'inventory-stock-info', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-stock-info' } },
+          { path: 'inventory-low-stock', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-low-stock' } },
           { path: 'inventory-valuation', loadComponent: () => import('./pages/inventory/inventory-valuation-report/inventory-valuation-report.component').then(c => c.InventoryValuationReportComponent) },
           { path: 'inventory-movements', loadComponent: () => import('./pages/inventory/inventory-movements-report/inventory-movements-report.component').then(c => c.InventoryMovementsReportComponent) },
           { path: 'inventory-movement-analysis', loadComponent: () => import('./pages/inventory/inventory-movement-analysis-report/inventory-movement-analysis-report.component').then(c => c.InventoryMovementAnalysisReportComponent) },
