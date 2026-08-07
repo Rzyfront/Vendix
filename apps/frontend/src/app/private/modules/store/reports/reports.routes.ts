@@ -99,6 +99,7 @@ export const reportsRoutes: Routes = [
         children: [
           { path: '', redirectTo: 'reviews-summary', pathMatch: 'full' },
           { path: 'reviews-summary', loadComponent: () => import('./pages/reviews/reviews-summary-report/reviews-summary-report.component').then(c => c.ReviewsSummaryReportComponent) },
+          { path: 'reviews-by-product', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'reviews-by-product' } },
         ],
       },
       {
