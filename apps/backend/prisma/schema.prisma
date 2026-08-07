@@ -1320,6 +1320,9 @@ model orders {
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions  table_sessions[]
+
+  // QUI-628: back-relation from carts.converted_order_id
+  carts_converted carts[]   @relation("cart_converted_order")
   kitchen_tickets kitchen_tickets[]
 
   // Dispatch (remisión) back-relation
@@ -2712,20 +2715,35 @@ model system_zone_updates {
 // ===== ECOMMERCE MODELS =====
 
 model carts {
-  id         Int       @id @default(autoincrement())
-  store_id   Int
-  user_id    Int
-  currency   String?   @db.VarChar(10)
-  subtotal   Decimal   @default(0.00) @db.Decimal(12, 2)
-  created_at DateTime? @default(now()) @db.Timestamp(6)
-  updated_at DateTime? @default(now()) @db.Timestamp(6)
+  id                Int                @id @default(autoincrement())
+  store_id          Int
+  user_id           Int
+  currency          String?            @db.VarChar(10)
+  subtotal          Decimal            @default(0.00) @db.Decimal(12, 2)
+  /// Operational state for the analytics abandoned-cart definition. NULL for
+  /// carts created before this migration; treated as 'active' for metrics.
+  state             cart_state_enum?
+  /// FK to the order this cart converted into. NULL = never converted (active
+  /// or abandoned). Used by analytics to distinguish recovered carts from
+  /// abandoned ones without heuristics over user_id + timestamp.
+  converted_order_id Int?
+  converted_at      DateTime?          @db.Timestamp(6)
+  /// Last time anything happened to this cart (item add/update, subtotal
+  /// recompute, etc.). Drives the "older than N minutes" operational
+  /// definition of "abandoned".
+  last_activity_at  DateTime?          @db.Timestamp(6)
+  created_at        DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?          @default(now()) @db.Timestamp(6)
 
-  cart_items cart_items[]
-  store      stores       @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  user       users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  cart_items       cart_items[]
+  store            stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  user             users               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  converted_order  orders?             @relation("cart_converted_order", fields: [converted_order_id], references: [id], onDelete: SetNull)
 
   @@unique([store_id, user_id])
   @@index([user_id])
+  @@index([store_id, state, last_activity_at])
+  @@index([store_id, converted_at])
 }
 
 model cart_items {
@@ -3245,6 +3263,18 @@ enum order_channel_enum {
   agent
   whatsapp
   marketplace
+}
+
+/// QUI-628: operational state of a cart. Drives the abandoned-carts metric.
+/// `active` = cart with items, not converted, recent activity.
+/// `abandoned` = cart with items, not converted, last_activity_at older than
+/// the configured threshold (default 60 min).
+/// `converted` = cart with converted_order_id set (the order was created from
+/// this cart via the ecommerce or whatsapp checkout flow).
+enum cart_state_enum {
+  active
+  abandoned
+  converted
 }
 
 enum order_installment_state_enum {

@@ -2,13 +2,32 @@ import { DateRangeFilter } from './analytics.interface';
 
 // Sales Summary
 export interface SalesSummary {
+  /**
+   * QUI-610: revenue is now OPERATING revenue (subtotal − discounts + shipping).
+   * VAT is excluded — it is reported separately as `total_taxes` (a DIAN
+   * liability, NOT store income).
+   */
   total_revenue: number;
+  /**
+   * QUI-610: IVA collected in the period. Display as "no es ingreso — se
+   * declara a la DIAN", not as a revenue line.
+   */
+  total_taxes: number;
+  /**
+   * QUI-610: waiter tips collected. These are NOT store revenue.
+   */
+  total_tips: number;
   total_orders: number;
   average_order_value: number;
   total_units_sold: number;
   total_customers: number;
-  revenue_growth?: number;
-  orders_growth?: number;
+  /**
+   * QUI-610: growth against the previous period on IDENTICAL definitions.
+   * `null` when the previous period had no base — the UI must render
+   * "sin base de comparación", NOT "0 %" (defect C8 of the catalog).
+   */
+  revenue_growth: number | null;
+  orders_growth: number | null;
 }
 
 // Sales by Product

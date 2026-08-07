@@ -161,8 +161,11 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const profitable = products.filter((p) => p.margin > 0).length;
-    const unprofitable = products.filter((p) => p.margin <= 0).length;
+    // QUI-623: `margin` is now `number | null` (null when there is no revenue
+    // to measure against). Coerce to 0 for the chart bucket so rows with no
+    // revenue read as "no margin" instead of crashing the compiler.
+    const profitable = products.filter((p) => (p.margin ?? 0) > 0).length;
+    const unprofitable = products.filter((p) => (p.margin ?? 0) <= 0).length;
     const zeroMargin = products.filter((p) => p.margin === 0).length;
     const colors = ['#22c55e', '#ef4444', '#f59e0b'];
 
@@ -250,7 +253,11 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px">
                   <span>Margen:</span>
-                  <strong>${product.margin}%</strong>
+                  <strong>${
+                    product.margin == null
+                      ? '—'
+                      : `${product.margin}%`
+                  }</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px">
                   <span>Ingresos:</span>

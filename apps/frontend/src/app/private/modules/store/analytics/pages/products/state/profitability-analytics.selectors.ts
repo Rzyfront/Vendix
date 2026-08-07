@@ -57,7 +57,9 @@ export const selectTopProfitableProducts = createSelector(
 export const selectMostProfitableByMargin = createSelector(
   selectProfitabilityProducts,
   (products) =>
+    // QUI-623: margin is `number | null`. Rows without a measurable margin
+    // (no revenue) sort to the end so a profitable row wins instead of `null`.
     [...products]
-      .filter((p) => p.margin > 0)
-      .sort((a, b) => b.margin - a.margin)[0] || null,
+      .filter((p) => p.margin != null && p.margin > 0)
+      .sort((a, b) => (b.margin ?? 0) - (a.margin ?? 0))[0] || null,
 );

@@ -19,6 +19,12 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
+import {
+  COMPLETED_SALE_STATES,
+  computeOperatingRevenue,
+  computeGrowth,
+  round2 as roundMoney,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
@@ -100,8 +106,15 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  // States that count as completed sales
+  // States that count as completed sales (kept as private alias for legacy
+  // call sites in this file; new code should use COMPLETED_SALE_STATES from
+  // the analytics-metrics contract — see getSalesSummary below).
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
+
+  /** Single rounding policy — delegates to the contract. */
+  private round2(value: number): number {
+    return roundMoney(value);
+  }
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -122,10 +135,15 @@ export class SalesAnalyticsService {
     // Only cache when a tenant is in scope; a store-less key could leak data
     // across tenants. store_id isolates the tenant; the date-range inputs plus
     // the channel filter capture the period/filter.
+    //
+    // QUI-610: cache version bumped v1 -> v2 because the summary contract
+    // changed (operating revenue instead of grand_total, total_taxes emitted
+    // separately, growth is now nullable). Without this bump the old
+    // grand_total cache would be served for up to 2 minutes after deploy.
     if (!storeId) {
       return this.computeSalesSummary(query);
     }
-    const cacheKey = `analytics:sales:summary:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cacheKey = `analytics:sales:summary:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>
@@ -149,7 +167,7 @@ export class SalesAnalyticsService {
       await Promise.all([
         this.prisma.orders.aggregate({
           where: {
-            state: { in: this.COMPLETED_STATES },
+            state: { in: [...COMPLETED_SALE_STATES] },
             ...(query.channel && { channel: query.channel }),
             created_at: {
               gte: startDate,
@@ -157,7 +175,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -165,7 +187,7 @@ export class SalesAnalyticsService {
         }),
         this.prisma.orders.aggregate({
           where: {
-            state: { in: this.COMPLETED_STATES },
+            state: { in: [...COMPLETED_SALE_STATES] },
             ...(query.channel && { channel: query.channel }),
             created_at: {
               gte: previousStartDate,
@@ -173,7 +195,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -182,7 +208,7 @@ export class SalesAnalyticsService {
         this.prisma.order_items.aggregate({
           where: {
             orders: {
-              state: { in: this.COMPLETED_STATES },
+              state: { in: [...COMPLETED_SALE_STATES] },
               ...(query.channel && { channel: query.channel }),
               created_at: {
                 gte: startDate,
@@ -197,7 +223,7 @@ export class SalesAnalyticsService {
         this.prisma.orders.groupBy({
           by: ['customer_id'],
           where: {
-            state: { in: this.COMPLETED_STATES },
+            state: { in: [...COMPLETED_SALE_STATES] },
             ...(query.channel && { channel: query.channel }),
             created_at: {
               gte: startDate,
@@ -210,28 +236,51 @@ export class SalesAnalyticsService {
         }),
       ]);
 
-    const totalRevenue = Number(currentPeriod._sum.grand_total || 0);
+    // QUI-610: operating revenue per the contract (subtotal − discounts + freight).
+    // VAT is a DIAN liability, NEVER income; reported separately as `total_taxes`.
+    // tips are waiter money, NEVER store revenue; reported separately as
+    // `total_tips`. Before this fix, `total_revenue = SUM(grand_total)` folded
+    // tax + tip + shipping into income (defects 1+2 of the ticket catalog),
+    // contradicting Resumen General and Estado de Resultados which were already
+    // on the contract since commit 5f153533c.
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(currentPeriod._sum.subtotal_amount || 0),
+      discounts: Number(currentPeriod._sum.discount_amount || 0),
+      shipping: Number(currentPeriod._sum.shipping_cost || 0),
+      tax: Number(currentPeriod._sum.tax_amount || 0),
+    });
+    const totalTaxes = Number(currentPeriod._sum.tax_amount || 0);
+    const totalTips = Number(currentPeriod._sum.tip_amount || 0);
     const totalOrders = currentPeriod._count.id || 0;
-    const previousRevenue = Number(previousPeriod._sum.grand_total || 0);
+
+    const previousRevenue = computeOperatingRevenue({
+      subtotal: Number(previousPeriod._sum.subtotal_amount || 0),
+      discounts: Number(previousPeriod._sum.discount_amount || 0),
+      shipping: Number(previousPeriod._sum.shipping_cost || 0),
+      tax: Number(previousPeriod._sum.tax_amount || 0),
+    });
+    const previousTaxes = Number(previousPeriod._sum.tax_amount || 0);
     const previousOrders = previousPeriod._count.id || 0;
 
-    const revenueGrowth =
-      previousRevenue > 0
-        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-        : 0;
-    const ordersGrowth =
-      previousOrders > 0
-        ? ((totalOrders - previousOrders) / previousOrders) * 100
-        : 0;
+    // `computeGrowth` returns `null` when the previous base is 0; the UI must
+    // render that as "sin base de comparación", not "0 %" (contract requirement
+    // C8 — defect 4 of the ticket catalog).
+    const revenueGrowth = computeGrowth(totalRevenue, previousRevenue);
+    const ordersGrowth = computeGrowth(totalOrders, previousOrders);
 
     return {
-      total_revenue: totalRevenue,
+      total_revenue: this.round2(totalRevenue),
+      total_taxes: this.round2(totalTaxes),
+      total_tips: this.round2(totalTips),
       total_orders: totalOrders,
-      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+      average_order_value:
+        totalOrders > 0 ? this.round2(totalRevenue / totalOrders) : 0,
       total_units_sold: Number(unitsSold._sum.quantity || 0),
       total_customers: customers.length,
-      revenue_growth: revenueGrowth,
-      orders_growth: ordersGrowth,
+      revenue_growth:
+        revenueGrowth === null ? null : this.round2(revenueGrowth),
+      orders_growth:
+        ordersGrowth === null ? null : this.round2(ordersGrowth),
     };
   }
 

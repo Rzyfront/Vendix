@@ -150,3 +150,64 @@ export function round2(value: number): number {
   const sign = value < 0 ? -1 : 1;
   return (sign * Math.round((Math.abs(value) + Number.EPSILON) * 100)) / 100;
 }
+
+/**
+ * PRODUCT PROFITABILITY — per-product COGS-based formulas used by the
+ * `products/profitability` analytics view (QUI-623).
+ *
+ * The unit of every input is **whole-currency** (revenue and COGS are sums
+ * across the period for one product). All three helpers keep full precision
+ * inside and return ROUNDED values for emission, per the `round2` policy.
+ *
+ * `cogs` MUST come from the historical snapshot (`SUM(oi.quantity *
+ * oi.cost_price)`). Using the current `products.cost_price` would rewrite
+ * closed periods on the next cost edit and contradict the Estado de
+ * Resultados, which is the regression QUI-623 fixes.
+ */
+
+// --- raw (un-rounded) helpers ---------------------------------------------
+
+/** Profit = revenue − cogs. Negative when cost exceeds revenue. */
+export function computeProductProfit(revenue: number, cogs: number): number {
+  return (Number(revenue) || 0) - (Number(cogs) || 0);
+}
+
+/**
+ * Margin as a RATIO (0..1, possibly negative). Returns `null` when there is no
+ * revenue to measure against — never `0`, which would falsely read as a
+ * perfectly zero-margin line. `computeGrowth` uses the same null convention.
+ */
+export function computeProductMargin(revenue: number, profit: number): number | null {
+  if (!Number.isFinite(revenue) || revenue <= 0) return null;
+  return profit / revenue;
+}
+
+/**
+ * Markup as a RATIO (0..∞, possibly negative). Returns `null` when COGS is
+ * zero OR negative (a refund-only line has no cost basis to mark up). Reads
+ * differently from margin: 100 % markup on a 50-cost / 100-revenue line is
+ * +100 %, vs 50 % margin — the same line, different denominators.
+ */
+export function computeProductMarkup(cogs: number, profit: number): number | null {
+  if (!Number.isFinite(cogs) || cogs <= 0) return null;
+  return profit / cogs;
+}
+
+// --- emitted (rounded) helpers --------------------------------------------
+
+/** Emitted product profit, rounded. */
+export function productProfitRounded(revenue: number, cogs: number): number {
+  return round2(computeProductProfit(revenue, cogs));
+}
+
+/** Emitted product margin as PERCENTAGE (e.g. `42.5`), or `null` (UI: "—"). */
+export function productMarginPct(revenue: number, profit: number): number | null {
+  const m = computeProductMargin(revenue, profit);
+  return m === null ? null : round2(m * 100);
+}
+
+/** Emitted product markup as PERCENTAGE, or `null`. */
+export function productMarkupPct(cogs: number, profit: number): number | null {
+  const m = computeProductMarkup(cogs, profit);
+  return m === null ? null : round2(m * 100);
+}

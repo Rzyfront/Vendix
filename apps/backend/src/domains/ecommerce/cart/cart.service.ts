@@ -61,9 +61,16 @@ export class CartService {
 
     if (!cart) {
       const currency = await this.settingsService.getStoreCurrency();
+      // QUI-628: a newly-created cart is 'active' and its last_activity_at is
+      // `now`. Without this, a freshly-created cart would read as
+      // state=NULL/last_activity_at=NULL until the first item is added — and
+      // the abandoned-cart metric would silently treat every fresh cart as
+      // already overdue.
       cart = await this.prisma.carts.create({
         data: {
           currency,
+          state: 'active',
+          last_activity_at: new Date(),
           // store_id y user_id se inyectan automáticamente
         },
         include: this.cartInclude,
@@ -183,8 +190,13 @@ export class CartService {
 
     if (!cart) {
       const currency = await this.settingsService.getStoreCurrency();
+      // QUI-628: same rationale as the create in getOrCreateCart.
       cart = await this.prisma.carts.create({
-        data: { currency },
+        data: {
+          currency,
+          state: 'active',
+          last_activity_at: new Date(),
+        },
       });
     } else {
       cart = await this.clearCartIfExpired(cart);
@@ -335,9 +347,50 @@ export class CartService {
       return sum + Number(item.unit_price) * item.quantity;
     }, 0);
 
+    // QUI-628: every cart mutation that touches items (add / update qty /
+    // sync from localStorage / clear) flows through this helper, so refreshing
+    // `last_activity_at` here is the single point that keeps the
+    // abandoned-cart definition honest. Without this, "abandoned since N
+    // minutes ago" would use created_at, which never moves and over-counts
+    // active carts.
     await this.prisma.carts.update({
       where: { id: cart_id },
-      data: { subtotal, updated_at: new Date() },
+      data: {
+        subtotal,
+        updated_at: new Date(),
+        last_activity_at: new Date(),
+      },
+    });
+  }
+
+  /**
+   * QUI-628: stamp the user's cart as converted when an order is created from
+   * it (ecommerce + whatsapp checkout flows). Idempotent: re-stamping with a
+   * different order id overwrites (rare path). The cart row is preserved so
+   * the analytics endpoint can join carts to orders via converted_order_id.
+   *
+   * Guest checkouts have no user-scoped cart on the server, so this is a
+   * no-op for them — by design, guest checkouts are not "recovered carts" in
+   * the abandoned-carts metric because we never tracked the cart in the first
+   * place.
+   */
+  async markCartConverted(
+    customerId: number,
+    orderId: number,
+    convertedAt: Date = new Date(),
+  ): Promise<void> {
+    if (!customerId) return;
+    await this.prisma.carts.updateMany({
+      where: {
+        user_id: customerId,
+        // Don't overwrite an existing conversion — first checkout wins.
+        converted_order_id: null,
+      },
+      data: {
+        state: 'converted',
+        converted_order_id: orderId,
+        converted_at: convertedAt,
+      },
     });
   }
 

@@ -28,7 +28,7 @@ export class ProfitabilityAnalyticsEffects {
         return this.analyticsService.getProductProfitability(query).pipe(
           map((response) =>
             ProfitabilityActions.loadProfitabilitySuccess({
-              products: response.data.products,
+              products: response.data.data,
               summary: response.data.summary,
             }),
           ),
