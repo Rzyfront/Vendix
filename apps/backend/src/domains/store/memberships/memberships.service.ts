@@ -193,9 +193,27 @@ export class MembershipsService {
 
   async findAll(query: MembershipQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 10, status, customer_id, plan_id, search } =
-      query ?? {};
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      customer_id,
+      plan_id,
+      search,
+      include_archived,
+    } = query ?? {};
     const skip = (page - 1) * limit;
+    const showArchived = include_archived === 'true';
+
+    // QUI-646: archived members (users.archived_at IS NOT NULL) are hidden by
+    // default. Resolve the set of allowed customer_ids here and intersect
+    // with the search/customer_id filter below. An empty set collapses to
+    // `[-1]` so the membership query returns 0 rows instead of every row.
+    const archivedUsers = await this.prisma.withoutScope().users.findMany({
+      where: { main_store_id: storeId, archived_at: { not: null } } as any,
+      select: { id: true },
+    });
+    const archivedIds = new Set(archivedUsers.map((u) => u.id));
 
     // Server-side search: pre-fetch users matching the term in any of the
     // canonical contact fields, then restrict memberships to that set.
@@ -220,16 +238,31 @@ export class MembershipsService {
       // Intersect with an explicit customer_id if provided; otherwise use all
       // matches. An empty set is forced to [-1] so the query returns 0 rows
       // instead of the entire store membership list.
-      const customerIdsFilter =
+      let customerIdsFilter =
         customer_id !== undefined
           ? matchedIds.filter((id) => id === customer_id)
           : matchedIds;
+
+      // Apply the archive filter unless explicitly overridden.
+      if (!showArchived) {
+        customerIdsFilter = customerIdsFilter.filter(
+          (id) => !archivedIds.has(id),
+        );
+      }
 
       customerFilter = {
         in: customerIdsFilter.length ? customerIdsFilter : [-1],
       };
     } else if (customer_id !== undefined) {
-      customerFilter = customer_id;
+      // Single explicit customer — hide if archived unless include_archived.
+      if (!showArchived && archivedIds.has(customer_id)) {
+        customerFilter = -1;
+      } else {
+        customerFilter = customer_id;
+      }
+    } else if (archivedIds.size > 0 && !showArchived) {
+      // No explicit customer_id, no search: restrict to non-archived customers.
+      customerFilter = { notIn: Array.from(archivedIds) };
     }
 
     const where: Prisma.membershipsWhereInput = {
@@ -655,7 +688,10 @@ export class MembershipsService {
           last_name: true,
           email: true,
           phone: true,
-        },
+          // QUI-646: surface the soft-delete marker so the membership list can
+          // show 'Archivar' / 'Reactivar' based on the customer's state.
+          archived_at: true,
+        } as any,
       }),
     ]);
 
@@ -667,5 +703,100 @@ export class MembershipsService {
       plan: planMap.get(r.plan_id) ?? null,
       customer: customerMap.get(r.customer_id) ?? null,
     }));
+  }
+
+  // ============================================================
+  // QUI-646: archive / unarchive of a member (soft delete).
+  // ============================================================
+
+  /**
+   * Soft-deletes a member: stamps `users.archived_at = now()` and returns the
+   * updated user. Rejected when the member still has any membership with
+   * `status = 'active'` — the operator must pause or cancel those first.
+   *
+   * The row is preserved (no DELETE): FK integrity, history, and audit logs
+   * remain intact; only the finder (`findAll` and the membership list) hides
+   * archived rows from default views.
+   */
+  async archiveMember(customerId: number): Promise<{ archived_at: Date }> {
+    const storeId = this.requireStoreId();
+
+    // 1. Verify the customer exists in this store's scope and is a member.
+    //    `users` is tenant-scoped — withoutScope() requires an explicit
+    //    store_id predicate.
+    const customer = await this.prisma.withoutScope().users.findFirst({
+      where: { id: customerId, main_store_id: storeId },
+      select: { id: true, archived_at: true } as any,
+    });
+    if (!customer) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    // 2. Idempotency: a second archive is a 409 so the frontend can show
+    //    a useful message instead of silently "succeeding" again.
+    if ((customer as any).archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_ALREADY_ARCHIVED_001,
+      );
+    }
+
+    // 3. Guard: active memberships block the archive. Frozen / suspended /
+    //    expired / cancelled / pending_payment are all OK — they don't
+    //    represent a live obligation to the gym. We surface the count so the
+    //    frontend can prompt the operator to pause or cancel each one.
+    const activeCount = await this.memberships.count({
+      where: {
+        store_id: storeId,
+        customer_id: customerId,
+        status: membership_status_enum.active,
+      },
+    });
+    if (activeCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_ARCHIVE_BLOCKED_ACTIVE_PLAN_001,
+      );
+    }
+
+    // 4. Stamp. Single UPDATE — the soft-delete marker IS the source of
+    //    truth; the membership rows are untouched.
+    //
+    //    Cast to `any` because `@prisma/client` types haven't been
+    //    regenerated yet for the new column; runtime works because the
+    //    migration ships `archived_at`. Once `prisma generate` runs in
+    //    deploy, these casts can go away.
+    const updated = await this.prisma.withoutScope().users.update({
+      where: { id: customerId },
+      data: { archived_at: new Date() } as any,
+      select: { archived_at: true } as any,
+    });
+    return { archived_at: (updated as any).archived_at };
+  }
+
+  /**
+   * Reverses an archive: clears `users.archived_at`. Idempotency guard:
+   *   409 if the member is NOT currently archived (no silent no-ops).
+   */
+  async unarchiveMember(customerId: number): Promise<{ archived_at: null }> {
+    const storeId = this.requireStoreId();
+
+    const customer = await this.prisma.withoutScope().users.findFirst({
+      where: { id: customerId, main_store_id: storeId },
+      select: { id: true, archived_at: true } as any,
+    });
+    if (!customer) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+    if (!(customer as any).archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_NOT_ARCHIVED_001,
+      );
+    }
+
+    await this.prisma.withoutScope().users.update({
+      where: { id: customerId },
+      data: { archived_at: null } as any,
+      select: { archived_at: true } as any,
+    });
+    return { archived_at: null };
   }
 }

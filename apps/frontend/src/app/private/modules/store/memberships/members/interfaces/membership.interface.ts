@@ -31,6 +31,12 @@ export interface GymMembershipCustomerRef {
   last_name: string | null;
   email: string | null;
   phone: string | null;
+  /**
+   * QUI-646: soft-delete marker for the membership module. NULL = active,
+   * set = archived (hidden from the default list, surfaced via the
+   * 'Mostrar archivados' filter). Distinct from `state` (account lock).
+   */
+  archived_at?: string | Date | null;
 }
 
 export interface GymMembership {
@@ -85,6 +91,11 @@ export interface GymMembershipQuery {
   customer_id?: number;
   plan_id?: number;
   search?: string;
+  /**
+   * QUI-646: surface archived members (those whose customer row carries
+   * users.archived_at IS NOT NULL). Default = false; the list hides them.
+   */
+  include_archived?: boolean;
 }
 
 export interface RenewMembershipDto {

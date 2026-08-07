@@ -135,6 +135,48 @@ export class MembershipsController {
     }
   }
 
+  // ============================================================
+  // QUI-646: archive / unarchive of a member (soft delete).
+  //
+  // Lives under `/store/memberships/members/:customerId/...` so the URL
+  // makes clear the operation targets the CUSTOMER (the member), not a
+  // membership row. The endpoint is a no-op for already-archived members
+  // (409) so the frontend can show a precise message; for unarchive, the
+  // opposite.
+  // ============================================================
+
+  @Post('members/:customerId/archive')
+  @Permissions('store:memberships:update')
+  async archiveMember(
+    @Param('customerId', ParseIntPipe) customerId: number,
+  ) {
+    try {
+      const result = await this.service.archiveMember(customerId);
+      return this.responseService.updated(
+        result,
+        'Socio archivado exitosamente',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al archivar el socio');
+    }
+  }
+
+  @Post('members/:customerId/unarchive')
+  @Permissions('store:memberships:update')
+  async unarchiveMember(
+    @Param('customerId', ParseIntPipe) customerId: number,
+  ) {
+    try {
+      const result = await this.service.unarchiveMember(customerId);
+      return this.responseService.updated(
+        result,
+        'Socio reactivado exitosamente',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al reactivar el socio');
+    }
+  }
+
   @Post(':id/suspend')
   @Permissions('store:memberships:update')
   async suspend(@Param('id', ParseIntPipe) id: number) {

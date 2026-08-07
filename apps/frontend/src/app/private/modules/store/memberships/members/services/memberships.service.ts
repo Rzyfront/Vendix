@@ -61,6 +61,11 @@ export class MembershipsService {
     if (query.search) {
       params = params.set('search', query.search);
     }
+    // QUI-646: backend defaults to hiding archived members; only send the
+    // param when the caller explicitly opts in.
+    if (query.include_archived) {
+      params = params.set('include_archived', 'true');
+    }
 
     return this.http
       .get<PaginatedApiResponse<GymMembership>>(
@@ -161,6 +166,41 @@ export class MembershipsService {
       .post<ApiResponse<RenewMembershipResult>>(
         `${this.apiUrl}${this.basePath}/${id}/renew`,
         dto,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  // ============================================================
+  // QUI-646: archive / unarchive of the customer behind the membership.
+  // ============================================================
+
+  /** Returns `true` when the customer behind the membership is archived. */
+  isArchived(member: GymMembership): boolean {
+    const archived = member.customer?.archived_at;
+    if (!archived) return false;
+    return !!archived;
+  }
+
+  archiveMember(customerId: number): Observable<{ archived_at: string }> {
+    return this.http
+      .post<ApiResponse<{ archived_at: string }>>(
+        `${this.apiUrl}${this.basePath}/members/${customerId}/archive`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  unarchiveMember(customerId: number): Observable<{ archived_at: null }> {
+    return this.http
+      .post<ApiResponse<{ archived_at: null }>>(
+        `${this.apiUrl}${this.basePath}/members/${customerId}/unarchive`,
+        {},
       )
       .pipe(
         map((res) => res.data),
