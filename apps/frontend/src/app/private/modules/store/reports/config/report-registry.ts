@@ -1023,6 +1023,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/customers/receivable/export',
   },
 
+  {
+    // QUI-539: Cartera de clientes por días sin comprar (aging).
+    // Una fila por cliente con su última orden, bucket de antigüedad
+    // (0-30 / 31-60 / 61-90 / 90+) y lifetime value. Útil para
+    // campañas de reactivación.
+    id: 'customers-aging',
+    category: 'customers',
+    title: 'Cartera Clientes (Aging)',
+    description: 'Días desde la última compra por cliente',
+    detailedDescription:
+      'Para cada cliente con al menos una orden completada, calcula los días desde su última compra y los bucketa en antigüedad (activo 0-30, enfriándose 31-60, dormido 61-90, churn 90+). Útil para segmentar campañas de reactivación.',
+    icon: 'user-clock',
+    route: '/admin/reports/customers/customers-aging',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'customer_id',
+    columns: [
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_email', header: 'Correo', type: 'text' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+      { key: 'days_since_last_order', header: 'Días Sin Comprar', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'lifetime_value', header: 'Valor Vida', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'cartera_clientes_aging',
+    stats: [
+      { key: 'lifetime_value', label: 'Valor Vida Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_orders', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: '_count', label: 'Clientes', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/analytics/customers/aging',
+    exportEndpoint: 'store/analytics/customers/aging/export',
+  },
+
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────
 
   {

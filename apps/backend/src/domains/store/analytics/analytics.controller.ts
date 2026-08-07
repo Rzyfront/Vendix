@@ -817,6 +817,38 @@ export class AnalyticsController {
     ]);
   }
 
+  /**
+   * QUI-539: días sin comprar por cliente (riesgo de churn). Agrupa
+   * por cliente: última orden, días desde, total órdenes, lifetime
+   * value y bucket de antigüedad.
+   */
+  @Get('customers/aging/export')
+  @Permissions('store:analytics:read')
+  async exportCustomersAging(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.customers_analytics_service.getCustomersAgingForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_email', header: 'Correo', type: 'text' },
+      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
+      { key: 'customer_since', header: 'Cliente Desde', type: 'date' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+      { key: 'days_since_last_order', header: 'Días Sin Comprar', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number' },
+      { key: 'lifetime_value', header: 'Valor Vida', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'cartera_clientes_aging', tz, [
+      this.toSheet('Cartera Clientes Aging', columns, rows, tz),
+    ]);
+  }
+
   @Get('customers/abandoned-carts/summary')
   @Permissions('store:analytics:read')
   async getAbandonedCartsSummary(@Query() query: AnalyticsQueryDto) {
