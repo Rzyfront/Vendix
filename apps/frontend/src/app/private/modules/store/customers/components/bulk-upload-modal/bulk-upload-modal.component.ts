@@ -230,23 +230,41 @@ import {
                     <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
                     Detalle de Errores
                   </div>
-                  <div class="max-h-60 overflow-y-auto bg-surface">
+                  <div class="max-h-72 overflow-y-auto bg-surface">
                     <table class="min-w-full divide-y divide-gray-200">
                       <thead class="bg-gray-50">
                         <tr>
-                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
-                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Fila</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Columna</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Valor</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Motivo</th>
                         </tr>
                       </thead>
                       <tbody class="bg-surface divide-y divide-gray-200">
                         @for (result of uploadResults()!.results; track result; let i = $index) {
                           @if (result.status === 'error') {
                             <tr>
-                              <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                                Fila {{ result.row_number || (i + 1) }}:
-                                {{ getCustomerLabel(result, i) }}
+                              <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 align-top">
+                                <div class="text-xs text-gray-400">Fila</div>
+                                <div>{{ result.row_number || (i + 1) }}</div>
+                                <div class="text-xs text-gray-500 mt-1">{{ getCustomerLabel(result, i) }}</div>
                               </td>
-                              <td class="px-4 py-2 text-sm text-red-600">{{ result.message }}</td>
+                              <td class="px-3 py-2 text-sm align-top">
+                                <span class="inline-block bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-medium">
+                                  {{ result.row_error?.column || 'General' }}
+                                </span>
+                              </td>
+                              <td class="px-3 py-2 text-sm text-gray-700 align-top font-mono text-xs break-all max-w-[160px]">
+                                {{ result.row_error?.value || '—' }}
+                              </td>
+                              <td class="px-3 py-2 text-sm text-red-700 align-top">
+                                <div>{{ result.row_error?.message || result.message }}</div>
+                                @if (result.row_error?.suggestion) {
+                                  <div class="mt-1 text-xs text-gray-600 italic">
+                                    💡 {{ result.row_error.suggestion }}
+                                  </div>
+                                }
+                              </td>
                             </tr>
                           }
                         }
@@ -358,13 +376,22 @@ export class CustomerBulkUploadModalComponent {
 
   // Mensajes de error legibles para el paso Resultados cuando NO hay results[]:
   // prioriza los validationErrors del backend, si no cae al mensaje de uploadError.
+  // Formato: "Fila N — Columna: <col> — Motivo: <msg> — 💡 <suggestion>".
   readonly stepErrorMessages = computed<string[]>(() => {
     const r = this.uploadResults();
     const ve = r?.validationErrors;
     if (Array.isArray(ve) && ve.length > 0) {
-      return ve.map((e: any) =>
-        typeof e === 'string' ? e : (e?.message ?? JSON.stringify(e)),
-      );
+      return ve.map((e: any) => {
+        if (typeof e === 'string') return e;
+        const row = e?.row ? `Fila ${e.row}` : 'Fila ?';
+        const column = e?.column ? `Columna: ${e.column}` : null;
+        const value = e?.value != null && e.value !== '' ? `Valor: "${e.value}"` : null;
+        const reason = e?.message ?? 'Error';
+        const suggestion = e?.suggestion ? `💡 ${e.suggestion}` : null;
+        return [row, column, value, reason, suggestion]
+          .filter(Boolean)
+          .join(' — ');
+      });
     }
     const err = this.uploadError();
     if (Array.isArray(err)) return err.map((e: any) => String(e));
