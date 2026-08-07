@@ -122,7 +122,73 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/purchases/by-supplier',
   },
 
-  // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────
+  {
+    // QUI-547: Tendencias de compra. Serie temporal con date_trunc sobre
+    // order_date al granularity del query (hour|day|week|month|year,
+    // default day). Permite ver el comportamiento de compras en el tiempo.
+    id: 'purchase-trends',
+    category: 'purchases',
+    title: 'Tendencias de Compra',
+    description: 'Serie temporal de órdenes de compra por período',
+    detailedDescription:
+      'Evolución temporal de las compras: cuántas órdenes se generaron, monto total y desglose entre pendientes y recibidas en cada período (hora, día, semana, mes o año).',
+    icon: 'trending-up',
+    route: '/admin/reports/purchases/purchase-trends',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'period',
+    columns: [
+      { key: 'period', header: 'Período', type: 'date' },
+      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
+      { key: 'completed_count', header: 'Recibidas', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'tendencias_compra',
+    stats: [
+      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'file-text' },
+      { key: 'pending_count', label: 'Pendientes', type: 'number', icon: 'clock' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/trends',
+    exportEndpoint: 'store/analytics/purchases/trends/export',
+  },
+
+  {
+    // QUI-542: Cuentas por pagar a proveedores con bucketing de
+    // antigüedad. purchase_orders con payment_status unpaid|partial.
+    id: 'purchase-aging',
+    category: 'purchases',
+    title: 'Cuentas por Pagar (Aging)',
+    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
+    detailedDescription:
+      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
+    icon: 'clock-alert',
+    route: '/admin/reports/purchases/purchase-aging',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'order_number', header: 'OC', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'order_date', header: 'Fecha OC', type: 'date' },
+      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'payment_status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'cuentas_por_pagar',
+    stats: [
+      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/aging',
+    exportEndpoint: 'store/analytics/purchases/aging/export',
+  },
+
+  // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
 
   {
     id: 'reviews-summary',
