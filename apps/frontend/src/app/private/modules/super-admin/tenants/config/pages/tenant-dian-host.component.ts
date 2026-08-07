@@ -14,10 +14,13 @@ import { fromEvent, of, timer, type Observable } from 'rxjs';
 import { catchError, filter, exhaustMap, startWith, tap } from 'rxjs/operators';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { dianEnablementLabel } from '../../../../../../core/utils/dian-enablement-status.util';
 import { DianConfigComponent } from '../../../../store/invoicing/components/dian-config/dian-config.component';
 import type {
   DianConfig,
   DianEmissionStatus,
+  DianProductionReadiness,
+  DianReadinessCheck,
   DianTestResult,
   InvoiceResolution,
 } from '../../../../store/invoicing/interfaces/invoice.interface';
@@ -27,6 +30,7 @@ import {
   ButtonComponent,
   CardComponent,
   ConfirmationModalComponent,
+  FileUploadDropzoneComponent,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -34,6 +38,11 @@ import {
   ToastService,
   type SelectorOption,
 } from '../../../../../../shared/components';
+import {
+  formatDateOnlyUTC,
+  toLocalDateString,
+  toUTCDateString,
+} from '../../../../../../shared/utils/date.util';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import {
   TENANT_CAPABILITY,
@@ -46,6 +55,39 @@ const MASKED_SECRET = '****';
 
 /** Cada cuánto se sondea el job encolado o el veredicto pendiente de la DIAN. */
 const POLL_INTERVAL_MS = 15_000;
+
+/** Umbral en días a partir del cual el certificado se avisa como «por vencer». */
+const CERTIFICATE_EXPIRY_WARNING_DAYS = 60;
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Único tipo de documento con el que la DIAN acepta un set de habilitación.
+ * Enviar el set contra una resolución de nota crédito quema consecutivos de un
+ * rango que no sirve para habilitar, y eso no se deshace.
+ */
+const TEST_SET_DOCUMENT_TYPE = 'sales_invoice';
+
+const RESOLUTION_DOCUMENT_LABELS: Record<string, string> = {
+  sales_invoice: 'factura de venta',
+  credit_note: 'nota crédito',
+  debit_note: 'nota débito',
+  pos_equivalent: 'documento equivalente POS',
+  support_document: 'documento soporte',
+};
+
+const CERTIFICATE_SOURCE_LABELS: Record<string, string> = {
+  manual_upload: 'Carga manual',
+  manual_upload_validated: 'Carga manual validada',
+  kms_managed: 'Custodiado en KMS',
+  imported: 'Importado',
+};
+
+const OPERATION_MODE_LABELS: Record<string, string> = {
+  own_software: 'Software propio',
+  provider: 'Proveedor tecnológico',
+  free_dian: 'Gratuita DIAN',
+};
 
 /**
  * Bloque de consecutivos que el envío del set va a quemar. Lo calcula el backend
@@ -69,6 +111,73 @@ interface TestSetComposition {
   readonly total: number;
   readonly label: string;
 }
+
+/**
+ * Campos que el rail de super admin sí devuelve y que `DianConfig` todavía no
+ * declara. Se tipan acá en vez de leerse por índice porque el proyecto compila
+ * con `noPropertyAccessFromIndexSignature`: sobre un índice, `config?.campo` no
+ * compila, y castear a `any` esconde exactamente los errores que este panel
+ * existe para mostrar.
+ */
+interface TenantDianConfig extends DianConfig {
+  readonly certificate_subject?: string | null;
+  readonly certificate_issuer?: string | null;
+  readonly certificate_serial_number?: string | null;
+  readonly certificate_nit?: string | null;
+  readonly certificate_source?: string | null;
+  readonly certificate_uploaded_at?: string | null;
+  readonly certificate_kms_key_id?: string | null;
+  readonly operation_mode?: string | null;
+  readonly configuration_type?: string | null;
+}
+
+/**
+ * `document_type` viaja en la respuesta de resoluciones pero no está declarado
+ * en `InvoiceResolution`, y es EL campo que decide si una resolución sirve para
+ * un set de habilitación.
+ */
+interface ResolutionRow extends InvoiceResolution {
+  readonly document_type?: string | null;
+  readonly technical_key_set?: boolean;
+}
+
+/** Ficha legible del certificado, derivada del DN que devuelve la API. */
+interface CertificateSummary {
+  readonly holder: string | null;
+  readonly nit: string | null;
+  readonly serial: string | null;
+  readonly issuer: string | null;
+  readonly uploadedAt: string | null;
+  readonly expiry: string | null;
+  readonly daysLeft: number | null;
+  readonly statusLabel: string;
+  readonly statusVariant: StatusVariant;
+  readonly source: string | null;
+}
+
+/** Evidencia del último lote enviado, para no dejar un badge rojo sin respaldo. */
+interface LastSubmission {
+  readonly total: number | null;
+  readonly invoices: number | null;
+  readonly creditNotes: number | null;
+  readonly debitNotes: number | null;
+  readonly executedAt: string | null;
+  readonly recheckedAt: string | null;
+  readonly zipKey: string | null;
+  readonly polls: number;
+  readonly pollsWithoutVerdict: number;
+  readonly lastPollMessage: string | null;
+}
+
+interface ChecklistGroup {
+  readonly key: string;
+  readonly title: string;
+  readonly hint: string;
+  readonly classes: string;
+  readonly items: DianReadinessCheck[];
+}
+
+type StatusVariant = 'success' | 'warning' | 'error' | 'neutral' | 'info';
 
 type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
 
@@ -95,6 +204,13 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
  *    fricción tiene que ser proporcional a eso. El asistente conserva sus
  *    propios botones porque es código compartido; el camino soportado para
  *    super admin es este panel.
+ *
+ * 4. **Esta consola MUESTRA, no vuelve a preguntar.** Es la pantalla con la que
+ *    soporte destraba una habilitación sin entrar al panel del comerciante: si
+ *    el dato ya viaja en la respuesta —el titular del certificado, el ZipKey del
+ *    lote, la checklist de producción— pedirlo otra vez o esconderlo obliga a
+ *    adivinar sobre el NIT de un tercero. Todo lo que el backend publica se
+ *    pinta; nada que el backend vaya a rechazar se ofrece habilitado.
  */
 @Component({
   selector: 'app-tenant-dian-host',
@@ -107,6 +223,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
     ButtonComponent,
     CardComponent,
     ConfirmationModalComponent,
+    FileUploadDropzoneComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
@@ -114,7 +231,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
     DianConfigComponent,
   ],
   template: `
-    <div class="space-y-3 md:space-y-4">
+    <div class="space-y-3">
       @if (ownerNotice(); as notice) {
         <app-alert-banner variant="warning" icon="alert-triangle">
           {{ notice.message }}
@@ -138,44 +255,83 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
 
       <!-- Estado de emisión ------------------------------------------------ -->
       <app-card [responsive]="true">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h2 class="text-base font-semibold text-text-primary">
-              Emisión electrónica
-            </h2>
-            <p class="mt-0.5 max-w-xl text-xs text-text-secondary">
-              {{ emissionReason() }}
-            </p>
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="text-base font-semibold text-text-primary">
+                Emisión electrónica
+              </h2>
+              <p class="mt-0.5 max-w-xl text-xs text-text-secondary">
+                {{ emissionReason() }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <app-badge [variant]="emissionVariant()" size="sm">
+                Emisión: {{ emissionLabel() }}
+              </app-badge>
+              <app-button
+                variant="ghost"
+                size="sm"
+                [loading]="refreshing()"
+                (clicked)="reload()"
+              >
+                <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+                Actualizar
+              </app-button>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
-            <app-badge [variant]="emissionVariant()" size="sm">
-              {{ emissionLabel() }}
-            </app-badge>
-            <app-button
-              variant="ghost"
-              size="sm"
-              [loading]="refreshing()"
-              (clicked)="reload()"
+
+          <!-- La respuesta completa de emission-status: es literalmente la
+               contestación a «¿por qué este cliente no está emitiendo?», que es
+               para lo que existe esta consola. -->
+          @if (emissionGroups().length) {
+            <div
+              class="grid gap-2 border-t border-border pt-3 sm:grid-cols-2 xl:grid-cols-3"
             >
-              <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
-              Actualizar
-            </app-button>
-          </div>
+              @for (group of emissionGroups(); track group.key) {
+                <div class="rounded-md border p-2.5" [class]="group.classes">
+                  <p class="text-[11px] font-semibold uppercase tracking-wide">
+                    {{ group.title }}
+                  </p>
+                  <p class="mt-0.5 text-[11px] opacity-80">{{ group.hint }}</p>
+                  <ul class="mt-1.5 space-y-1.5">
+                    @for (item of group.items; track item.key) {
+                      <li class="text-[11px] leading-snug">
+                        <span class="font-medium">{{ item.label }}</span>
+                        @if (item.action) {
+                          <span class="block opacity-80">{{ item.action }}</span>
+                        }
+                      </li>
+                    }
+                  </ul>
+                </div>
+              }
+            </div>
+          }
         </div>
       </app-card>
 
       <!-- Operaciones de riesgo -------------------------------------------- -->
       @if (configs().length) {
         <app-card [responsive]="true">
-          <div class="space-y-4">
-            <header class="border-b border-border pb-3">
-              <h2 class="text-base font-semibold text-text-primary">
-                Operaciones de habilitación
-              </h2>
-              <p class="mt-0.5 text-xs text-text-secondary">
-                Acciones que tocan la identidad fiscal del contribuyente. Todas
-                piden confirmación explícita.
-              </p>
+          <div class="space-y-3">
+            <header
+              class="flex flex-wrap items-start justify-between gap-2 border-b border-border pb-2.5"
+            >
+              <div class="min-w-0">
+                <h2 class="text-base font-semibold text-text-primary">
+                  Operaciones de habilitación
+                </h2>
+                <p class="mt-0.5 text-xs text-text-secondary">
+                  Acciones que tocan la identidad fiscal del contribuyente.
+                  Todas piden confirmación explícita.
+                </p>
+              </div>
+              @if (selectedConfig(); as config) {
+                <app-badge variant="info" size="xs">
+                  Habilitación: {{ enablementLabel(config) }}
+                </app-badge>
+              }
             </header>
 
             <!-- app-selector es un CVA: su valor entra por formControl, no por
@@ -183,13 +339,75 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                  toSignal porque un computed() no reacciona a un FormControl. -->
             <app-selector
               label="Configuración DIAN"
+              placeholder="Selecciona la configuración a operar"
               [options]="configOptions()"
               [formControl]="configControl"
             ></app-selector>
 
             @if (selectedConfig(); as config) {
+              <!-- Identidad de la configuración ------------------------- -->
+              <!-- Estaba sólo dentro del asistente de edición: para leer el
+                   software_id había que abrir un formulario de escritura sobre
+                   el NIT de un tercero. -->
+              <dl
+                class="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border bg-background/60 p-2.5 sm:grid-cols-3 xl:grid-cols-6"
+              >
+                <div class="min-w-0">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    NIT-DV
+                  </dt>
+                  <dd class="font-mono text-xs text-text-primary">
+                    {{ config.nit }}{{ config.nit_dv ? '-' + config.nit_dv : '' }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    Ambiente
+                  </dt>
+                  <dd class="text-xs text-text-primary">
+                    {{
+                      config.environment === 'production'
+                        ? 'Producción'
+                        : 'Pruebas'
+                    }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    Modo de operación
+                  </dt>
+                  <dd class="text-xs text-text-primary">
+                    {{ operationModeLabel(config) }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    Predeterminada
+                  </dt>
+                  <dd class="text-xs text-text-primary">
+                    {{ config.is_default ? 'Sí' : 'No' }}
+                  </dd>
+                </div>
+                <div class="col-span-2 min-w-0">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    Software ID
+                  </dt>
+                  <dd class="break-all font-mono text-[11px] text-text-primary">
+                    {{ config.software_id || '—' }}
+                  </dd>
+                </div>
+                <div class="col-span-2 min-w-0 xl:col-span-6">
+                  <dt class="text-[10px] uppercase text-text-secondary">
+                    Test Set ID
+                  </dt>
+                  <dd class="break-all font-mono text-[11px] text-text-primary">
+                    {{ config.test_set_id || '—' }}
+                  </dd>
+                </div>
+              </dl>
+
               <!-- Certificado ------------------------------------------- -->
-              <section class="rounded-lg border border-border p-3">
+              <section class="rounded-lg border border-border p-2.5">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <app-icon
@@ -201,45 +419,188 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                       Certificado digital
                     </h3>
                   </div>
-                  <app-badge
-                    [variant]="hasCertificate(config) ? 'success' : 'neutral'"
-                    size="xs"
-                  >
-                    {{ hasCertificate(config) ? 'Cargado' : 'Sin cargar' }}
-                  </app-badge>
-                </div>
-
-                @if (canUploadCertificate()) {
-                  <div class="mt-3 space-y-2">
-                    <input
-                      type="file"
-                      accept=".p12,.pfx"
-                      class="block w-full text-xs text-text-secondary file:mr-3 file:rounded-md file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-xs file:text-text-primary"
-                      (change)="onCertificateFile($event)"
-                    />
-                    <app-input
-                      label="Contraseña del certificado"
-                      type="password"
-                      [formControl]="certificatePassword"
-                      helperText="Se precarga enmascarada cuando ya hay una guardada. Un .p12 nuevo exige escribir la suya: la almacenada no lo abre."
-                    ></app-input>
-                    <div class="flex justify-end">
+                  <div class="flex items-center gap-2">
+                    @if (certificateSummary(); as cert) {
+                      <app-badge [variant]="cert.statusVariant" size="xs">
+                        {{ cert.statusLabel }}
+                      </app-badge>
+                    } @else {
+                      <app-badge variant="neutral" size="xs">
+                        Sin cargar
+                      </app-badge>
+                    }
+                    @if (
+                      canUploadCertificate() &&
+                      hasCertificate(config) &&
+                      !replacingCertificate()
+                    ) {
                       <app-button
-                        variant="primary"
+                        variant="ghost"
                         size="sm"
-                        [disabled]="!canSubmitCertificate()"
-                        [loading]="uploadingCertificate()"
-                        (clicked)="askAction('certificate')"
+                        (clicked)="startCertificateReplacement()"
                       >
                         <app-icon
                           name="upload"
-                          [size]="16"
+                          [size]="14"
                           slot="icon"
                         ></app-icon>
-                        Subir certificado
+                        Reemplazar
                       </app-button>
-                    </div>
+                    }
                   </div>
+                </div>
+
+                <!-- Ficha: los 8 campos que ya llegaban y la pantalla tiraba.
+                     Un badge que sólo dice «Cargado» obliga a abrir el .p12 por
+                     fuera para saber a nombre de quién firma este tenant. -->
+                @if (certificateSummary(); as cert) {
+                  <dl
+                    class="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 xl:grid-cols-4"
+                  >
+                    <div class="col-span-2 min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Titular
+                      </dt>
+                      <dd
+                        class="truncate text-xs font-medium text-text-primary"
+                        [title]="cert.holder || ''"
+                      >
+                        {{ cert.holder || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        NIT del certificado
+                      </dt>
+                      <dd class="font-mono text-xs text-text-primary">
+                        {{ cert.nit || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Serie
+                      </dt>
+                      <dd class="break-all font-mono text-xs text-text-primary">
+                        {{ cert.serial || '—' }}
+                      </dd>
+                    </div>
+                    <div class="col-span-2 min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Emisor
+                      </dt>
+                      <dd
+                        class="truncate text-xs text-text-primary"
+                        [title]="cert.issuer || ''"
+                      >
+                        {{ cert.issuer || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Cargado
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ cert.uploadedAt || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Vence
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ cert.expiry || '—' }}
+                        @if (cert.daysLeft !== null) {
+                          <span class="text-text-secondary">
+                            ({{ cert.daysLeft }} días)
+                          </span>
+                        }
+                      </dd>
+                    </div>
+                    <div class="col-span-2 min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Origen
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ cert.source || '—' }}
+                      </dd>
+                    </div>
+                  </dl>
+                } @else if (canUploadCertificate()) {
+                  <p class="mt-2 text-[11px] text-text-secondary">
+                    Esta configuración no tiene certificado cargado: sin él no
+                    se puede firmar ningún documento ante la DIAN.
+                  </p>
+                }
+
+                @if (canUploadCertificate()) {
+                  @if (certificateFormOpen()) {
+                    <div
+                      class="mt-2.5 space-y-2 rounded-md border border-dashed border-border p-2.5"
+                    >
+                      <app-file-upload-dropzone
+                        label="Adjunta el archivo .p12 o .pfx"
+                        helperText="La clave privada del contribuyente. El backend rechaza el archivo si su NIT no coincide."
+                        accept=".p12,.pfx"
+                        icon="key"
+                        (fileSelected)="onCertificateFileSelected($event)"
+                        (fileRemoved)="onCertificateFileSelected(null)"
+                      ></app-file-upload-dropzone>
+
+                      <!-- La contraseña guardada NO se precarga enmascarada: un
+                           campo con «****» revelable por el botón de ojo parece
+                           la contraseña real, y canSubmitCertificate ya rechaza
+                           ese centinela, así que rellenarlo sólo confundía. -->
+                      @if (hasStoredCertificatePassword()) {
+                        <p
+                          class="flex items-start gap-1.5 text-[11px] text-text-secondary"
+                        >
+                          <app-icon
+                            name="lock"
+                            [size]="13"
+                            class="mt-px shrink-0"
+                          ></app-icon>
+                          <span>
+                            Hay una contraseña guardada para el certificado
+                            actual. No hace falta reingresarla, y no abre un
+                            archivo nuevo.
+                          </span>
+                        </p>
+                      }
+
+                      <app-input
+                        label="Contraseña del .p12 nuevo"
+                        type="password"
+                        [formControl]="certificatePassword"
+                        helperText="Se habilita al adjuntar el archivo: la contraseña guardada no abre un .p12 distinto."
+                      ></app-input>
+
+                      <div class="flex flex-wrap justify-end gap-2">
+                        @if (hasCertificate(selectedConfig())) {
+                          <app-button
+                            variant="ghost"
+                            size="sm"
+                            (clicked)="cancelCertificateReplacement()"
+                          >
+                            Cancelar
+                          </app-button>
+                        }
+                        <app-button
+                          variant="primary"
+                          size="sm"
+                          [disabled]="!canSubmitCertificate()"
+                          [loading]="uploadingCertificate()"
+                          (clicked)="askAction('certificate')"
+                        >
+                          <app-icon
+                            name="upload"
+                            [size]="16"
+                            slot="icon"
+                          ></app-icon>
+                          Subir certificado
+                        </app-button>
+                      </div>
+                    </div>
+                  }
                 } @else {
                   <p class="mt-2 text-[11px] text-text-secondary">
                     Requiere la capacidad
@@ -249,7 +610,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
               </section>
 
               <!-- Set de pruebas ---------------------------------------- -->
-              <section class="rounded-lg border border-border p-3">
+              <section class="rounded-lg border border-border p-2.5">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <app-icon
@@ -261,14 +622,87 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                       Set de pruebas de habilitación
                     </h3>
                   </div>
+                  <!-- Rotulado como LOTE a propósito: describe el envío, no la
+                       emisión ni la habilitación. Sin el prefijo, este badge y
+                       el de emisión parecen contradecirse en la misma pantalla. -->
                   <app-badge [variant]="testSetVariant()" size="xs">
-                    {{ testSetLabel() }}
+                    Lote: {{ testSetLabel() }}
                   </app-badge>
                 </div>
 
+                <!-- Evidencia del último envío: sin esto el operador ve un
+                     badge rojo y ningún dato con el que reclamar el veredicto. -->
+                @if (lastSubmission(); as sent) {
+                  <dl
+                    class="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 rounded-md bg-background/60 p-2.5 sm:grid-cols-4"
+                  >
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Documentos enviados
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ sent.total ?? '—' }}
+                        @if (sent.invoices !== null) {
+                          <span class="text-text-secondary">
+                            ({{ sent.invoices }} FV / {{ sent.creditNotes }} NC /
+                            {{ sent.debitNotes }} ND)
+                          </span>
+                        }
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Enviado
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ sent.executedAt || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Última consulta
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ sent.recheckedAt || '—' }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[10px] uppercase text-text-secondary">
+                        Consultas sin veredicto
+                      </dt>
+                      <dd class="text-xs text-text-primary">
+                        {{ sent.pollsWithoutVerdict }} de {{ sent.polls }}
+                      </dd>
+                    </div>
+                    @if (sent.zipKey) {
+                      <div class="col-span-2 min-w-0 sm:col-span-4">
+                        <dt class="text-[10px] uppercase text-text-secondary">
+                          ZipKey — identificador con el que se reclama el
+                          veredicto a la DIAN
+                        </dt>
+                        <dd
+                          class="break-all font-mono text-[11px] text-text-primary"
+                        >
+                          {{ sent.zipKey }}
+                        </dd>
+                      </div>
+                    }
+                    @if (sent.lastPollMessage) {
+                      <div class="col-span-2 min-w-0 sm:col-span-4">
+                        <dt class="text-[10px] uppercase text-text-secondary">
+                          Respuesta de la DIAN
+                        </dt>
+                        <dd class="text-[11px] text-text-primary">
+                          {{ sent.lastPollMessage }}
+                        </dd>
+                      </div>
+                    }
+                  </dl>
+                }
+
                 @if (consumes(); as burned) {
                   <div
-                    class="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+                    class="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
                   >
                     <p class="font-semibold">
                       Consecutivos quemados por el último envío
@@ -283,7 +717,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
 
                 @if (polling()) {
                   <div
-                    class="mt-3 flex items-center gap-2 rounded-md bg-background p-2 text-xs text-text-secondary"
+                    class="mt-2 flex items-center gap-2 rounded-md bg-background p-2 text-xs text-text-secondary"
                   >
                     <div
                       class="h-3 w-3 animate-spin rounded-full border-b-2 border-primary"
@@ -293,13 +727,47 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                 }
 
                 @if (canRunTestSet()) {
-                  <div class="mt-3 space-y-2">
+                  <div class="mt-2.5 space-y-2">
                     <app-selector
                       label="Resolución de numeración"
+                      placeholder="Selecciona la resolución que se va a consumir"
                       [options]="resolutionOptions()"
                       [formControl]="resolutionControl"
                       helpText="El envío consume un bloque de esta resolución."
                     ></app-selector>
+
+                    <!-- Varias resoluciones sirven y ninguna se elige sola:
+                         quemar consecutivos de la equivocada es irreversible. -->
+                    @if (resolutionChoiceRequired()) {
+                      <p
+                        class="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900"
+                      >
+                        <app-icon
+                          name="alert-triangle"
+                          [size]="14"
+                          class="mt-px shrink-0"
+                        ></app-icon>
+                        <span>
+                          Hay {{ eligibleResolutions().length }} resoluciones de
+                          factura de venta vigentes y con rango disponible. No se
+                          preselecciona ninguna: el envío quema consecutivos que
+                          no se recuperan, así que la resolución la escoges tú.
+                        </span>
+                      </p>
+                    }
+
+                    @for (warning of resolutionWarnings(); track warning) {
+                      <p
+                        class="flex items-start gap-1.5 text-[11px] text-red-600"
+                      >
+                        <app-icon
+                          name="alert-triangle"
+                          [size]="14"
+                          class="mt-px shrink-0"
+                        ></app-icon>
+                        <span>{{ warning }}</span>
+                      </p>
+                    }
 
                     @if (projectedBurn(); as burn) {
                       <p class="text-[11px] text-text-secondary">
@@ -350,7 +818,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
               </section>
 
               <!-- Promoción a producción -------------------------------- -->
-              <section class="rounded-lg border border-border p-3">
+              <section class="rounded-lg border border-border p-2.5">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <app-icon
@@ -368,6 +836,7 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                     "
                     size="xs"
                   >
+                    Ambiente:
                     {{
                       config.environment === 'production'
                         ? 'Producción'
@@ -376,20 +845,91 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
                   </app-badge>
                 </div>
 
-                <p class="mt-2 text-xs text-text-secondary">
+                <p class="mt-1.5 text-xs text-text-secondary">
                   A partir de la promoción, cada venta del comerciante se emite
                   ante la DIAN con este NIT y deja de imprimirse como documento
                   no fiscal.
                 </p>
 
+                <!-- Checklist de production-readiness. El backend ya la
+                     devolvía y nadie la pedía: sin ella el operador teclea el
+                     NIT completo para enterarse del rechazo después. -->
+                @if (readinessGroups().length) {
+                  <div
+                    class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                  >
+                    @for (group of readinessGroups(); track group.key) {
+                      <div class="rounded-md border p-2.5" [class]="group.classes">
+                        <p
+                          class="text-[11px] font-semibold uppercase tracking-wide"
+                        >
+                          {{ group.title }}
+                        </p>
+                        <p class="mt-0.5 text-[11px] opacity-80">
+                          {{ group.hint }}
+                        </p>
+                        <ul class="mt-1.5 space-y-1.5">
+                          @for (item of group.items; track item.key) {
+                            <li class="flex items-start gap-1.5 text-[11px]">
+                              <app-icon
+                                [name]="item.satisfied ? 'check' : 'x'"
+                                [size]="13"
+                                class="mt-px shrink-0"
+                              ></app-icon>
+                              <span class="leading-snug">
+                                <span class="font-medium">{{ item.label }}</span>
+                                @if (!item.satisfied && item.action) {
+                                  <span class="block opacity-80">
+                                    {{ item.action }}
+                                  </span>
+                                }
+                              </span>
+                            </li>
+                          }
+                        </ul>
+                      </div>
+                    }
+                  </div>
+                }
+
+                @if (readinessUnavailable()) {
+                  <p
+                    class="mt-2 flex items-start gap-1.5 text-[11px] text-text-secondary"
+                  >
+                    <app-icon
+                      name="info"
+                      [size]="13"
+                      class="mt-px shrink-0"
+                    ></app-icon>
+                    <span>
+                      No se pudo verificar la checklist de producción. La
+                      promoción sigue disponible detrás del NIT tecleado: un
+                      fallo de red no debe frenar una operación de soporte
+                      legítima, y el backend vuelve a validar al recibirla.
+                    </span>
+                  </p>
+                }
+
                 @if (canPromote()) {
-                  <div class="mt-3 flex justify-end">
+                  <div
+                    class="mt-2.5 flex flex-wrap items-center justify-end gap-2"
+                  >
+                    @if (promoteBlockReason(); as reason) {
+                      <p
+                        class="mr-auto flex items-start gap-1.5 text-[11px] text-red-600"
+                      >
+                        <app-icon
+                          name="alert-triangle"
+                          [size]="14"
+                          class="mt-px shrink-0"
+                        ></app-icon>
+                        <span>{{ reason }}</span>
+                      </p>
+                    }
                     <app-button
                       variant="danger"
                       size="sm"
-                      [disabled]="
-                        promoting() || config.environment === 'production'
-                      "
+                      [disabled]="!canOpenPromoteGate()"
                       [loading]="promoting()"
                       (clicked)="openPromoteGate()"
                     >
@@ -445,6 +985,14 @@ type RiskyAction = 'certificate' | 'run-test-set' | 'abandon';
           anulan con nota crédito.
         </app-alert-banner>
 
+        @if (readinessUnavailable()) {
+          <app-alert-banner variant="warning" icon="info">
+            No se pudo leer la checklist de producción de este tenant, así que
+            esta promoción va sin verificación previa. El backend la vuelve a
+            validar y puede rechazarla.
+          </app-alert-banner>
+        }
+
         <p class="text-sm text-text-secondary">
           Escribe el NIT
           <strong class="text-text-primary">{{ expectedNit() }}</strong> para
@@ -493,12 +1041,15 @@ export class TenantDianHostComponent {
   protected readonly capability = TENANT_CAPABILITY;
 
   // ── Datos ────────────────────────────────────────────────────────────
-  protected readonly configs = signal<DianConfig[]>([]);
-  protected readonly resolutions = signal<InvoiceResolution[]>([]);
+  protected readonly configs = signal<TenantDianConfig[]>([]);
+  protected readonly resolutions = signal<ResolutionRow[]>([]);
   protected readonly emission = signal<DianEmissionStatus | null>(null);
   protected readonly lastResult = signal<DianTestResult | null>(null);
   protected readonly composition = signal<TestSetComposition | null>(null);
   protected readonly consumes = signal<TestSetConsumes | null>(null);
+  protected readonly readiness = signal<DianProductionReadiness | null>(null);
+  /** La checklist no se pudo leer. NO bloquea: sólo se declara. */
+  protected readonly readinessUnavailable = signal(false);
 
   // Los dos selectores son CVAs: el valor viaja por FormControl y se puentea a
   // señal con `toSignal`, porque un `computed()` que lea `control.value` se
@@ -532,6 +1083,8 @@ export class TenantDianHostComponent {
   protected readonly promoting = signal(false);
   protected readonly pendingAction = signal<RiskyAction | null>(null);
   protected readonly promoteGateOpen = signal(false);
+  /** El formulario de subida sólo se abre a petición si ya hay certificado. */
+  protected readonly replacingCertificate = signal(false);
 
   private readonly certificateFile = signal<File | null>(null);
   private readonly activeJobId = signal<string | null>(null);
@@ -584,17 +1137,15 @@ export class TenantDianHostComponent {
       this.canPromote(),
   );
 
-  protected readonly selectedConfig = computed<DianConfig | null>(() => {
+  protected readonly selectedConfig = computed<TenantDianConfig | null>(() => {
     const id = this.selectedConfigId();
     return this.configs().find((config) => config.id === id) ?? null;
   });
 
-  protected readonly selectedResolution = computed<InvoiceResolution | null>(
-    () => {
-      const id = this.selectedResolutionId();
-      return this.resolutions().find((row) => row.id === id) ?? null;
-    },
-  );
+  protected readonly selectedResolution = computed<ResolutionRow | null>(() => {
+    const id = this.selectedResolutionId();
+    return this.resolutions().find((row) => row.id === id) ?? null;
+  });
 
   protected readonly configOptions = computed<SelectorOption[]>(() =>
     this.configs().map((config) => ({
@@ -602,18 +1153,74 @@ export class TenantDianHostComponent {
       label: config.is_default ? `${config.name} (predeterminada)` : config.name,
       description: `${config.nit}${config.nit_dv ? '-' + config.nit_dv : ''} · ${
         config.environment === 'production' ? 'Producción' : 'Pruebas'
-      }`,
+      } · ${dianEnablementLabel(config.enablement_status)}`,
     })),
   );
 
+  /**
+   * Opciones del selector de resoluciones.
+   *
+   * Desactivar sólo por `is_active` era insuficiente: una resolución de nota
+   * crédito está activa y sirve perfectamente para su documento, pero NO para
+   * un set de habilitación. La descripción dice por qué está bloqueada en vez
+   * de dejar una fila muerta sin explicación.
+   */
   protected readonly resolutionOptions = computed<SelectorOption[]>(() =>
-    this.resolutions().map((row) => ({
-      value: row.id,
-      label: `${row.prefix || 'sin prefijo'} · ${row.resolution_number}`,
-      description: `Actual ${row.current_number} · rango ${row.range_from}–${row.range_to}`,
-      disabled: !row.is_active,
-    })),
+    this.resolutions().map((row) => {
+      const blocked = this.resolutionBlockReason(row);
+      const remaining = row.range_to - (row.current_number ?? 0);
+      return {
+        value: row.id,
+        label: `${row.prefix || 'sin prefijo'} · ${row.resolution_number}`,
+        description: blocked
+          ? `${blocked} · rango ${row.range_from}–${row.range_to}`
+          : `Actual ${row.current_number} · rango ${row.range_from}–${row.range_to} · quedan ${remaining}`,
+        disabled: blocked !== null,
+      };
+    }),
   );
+
+  /**
+   * Resoluciones con las que un set de habilitación es viable HOY: activas, de
+   * factura de venta, vigentes por fecha y con rango disponible.
+   */
+  protected readonly eligibleResolutions = computed<ResolutionRow[]>(() =>
+    this.resolutions().filter((row) => this.isEligibleForTestSet(row)),
+  );
+
+  /** Hay más de una candidata y ninguna elegida: la escoge el operador. */
+  protected readonly resolutionChoiceRequired = computed(
+    () =>
+      this.selectedResolutionId() === null &&
+      this.eligibleResolutions().length > 1,
+  );
+
+  /**
+   * Avisos sobre la resolución YA elegida. El desbordamiento de rango lo reporta
+   * `projectedBurn`; acá van los dos que faltaban: vigencia vencida y tipo de
+   * documento equivocado.
+   */
+  protected readonly resolutionWarnings = computed<string[]>(() => {
+    const row = this.selectedResolution();
+    if (!row) return [];
+
+    const warnings: string[] = [];
+
+    if (this.isResolutionExpired(row)) {
+      warnings.push(
+        `Esta resolución venció el ${this.formatDay(row.valid_to) ?? row.valid_to}. La DIAN rechaza documentos numerados fuera de vigencia.`,
+      );
+    }
+
+    const documentType = this.resolutionDocumentType(row);
+    if (documentType !== null && documentType !== TEST_SET_DOCUMENT_TYPE) {
+      warnings.push(
+        `Esta resolución es de ${this.documentTypeLabel(documentType)}, no de factura de venta: no sirve para un set de habilitación.`,
+      );
+    }
+
+    return warnings;
+  });
 
   protected readonly expectedNit = computed(
     () => this.selectedConfig()?.nit ?? '',
@@ -625,6 +1232,122 @@ export class TenantDianHostComponent {
     return this.promoteNitTyped().trim() === expected;
   });
 
+  // ── Certificado ──────────────────────────────────────────────────────
+  protected readonly hasStoredCertificatePassword = computed(() => {
+    const stored = this.selectedConfig()?.certificate_password_encrypted;
+    return Boolean(stored);
+  });
+
+  /**
+   * Sin certificado el formulario está abierto —es lo único que falta—; con
+   * certificado se abre a petición. Un input de archivo vacío junto a un badge
+   * «Cargado» invita a resubir un .p12 que ya está bien.
+   */
+  protected readonly certificateFormOpen = computed(() => {
+    const config = this.selectedConfig();
+    if (!config) return false;
+    if (!this.hasCertificate(config)) return true;
+    return this.replacingCertificate();
+  });
+
+  protected readonly certificateSummary = computed<CertificateSummary | null>(
+    () => {
+      const config = this.selectedConfig();
+      if (!config || !this.hasCertificate(config)) return null;
+
+      const daysLeft = this.daysUntil(config.certificate_expiry);
+      const source = config.certificate_source ?? null;
+
+      return {
+        holder: this.extractCommonName(config.certificate_subject),
+        nit: config.certificate_nit ?? null,
+        serial: config.certificate_serial_number ?? null,
+        issuer: this.extractCommonName(config.certificate_issuer),
+        uploadedAt: this.formatInstant(config.certificate_uploaded_at),
+        expiry: this.formatDay(config.certificate_expiry),
+        daysLeft,
+        statusLabel: this.certificateStatusLabel(daysLeft),
+        statusVariant: this.certificateStatusVariant(daysLeft),
+        source: source ? (CERTIFICATE_SOURCE_LABELS[source] ?? source) : null,
+      };
+    },
+  );
+
+  // ── Emisión: la respuesta completa, no una línea ─────────────────────
+  protected readonly emissionGroups = computed<ChecklistGroup[]>(() => {
+    const status = this.emission();
+    if (!status) return [];
+
+    const blockers = status.blockers ?? [];
+    const warnings = status.warnings ?? [];
+
+    return this.buildGroups(
+      blockers.filter(
+        (item) => item.owner === 'platform' && item.blocked_by !== 'dian',
+      ),
+      blockers.filter(
+        (item) => item.owner === 'tenant' && item.blocked_by !== 'dian',
+      ),
+      blockers.filter((item) => item.blocked_by === 'dian'),
+      warnings,
+    );
+  });
+
+  // ── Producción: checklist real, no adivinanza ────────────────────────
+  protected readonly readinessGroups = computed<ChecklistGroup[]>(() => {
+    const report = this.readiness();
+    if (!report) return [];
+
+    const checks = report.checks ?? [];
+    const blocking = checks.filter((item) => item.severity !== 'warning');
+
+    return this.buildGroups(
+      blocking.filter(
+        (item) => item.owner === 'platform' && item.blocked_by !== 'dian',
+      ),
+      blocking.filter(
+        (item) => item.owner === 'tenant' && item.blocked_by !== 'dian',
+      ),
+      blocking.filter((item) => item.blocked_by === 'dian'),
+      checks.filter((item) => item.severity === 'warning'),
+    );
+  });
+
+  /**
+   * Primer bloqueante que impide la promoción.
+   *
+   * `readiness() === null` NO bloquea: si la consulta falló, el gate de tecleo
+   * del NIT sigue siendo la protección, y un fallo de red no puede impedir una
+   * operación de soporte legítima.
+   */
+  protected readonly promoteBlockReason = computed<string | null>(() => {
+    const config = this.selectedConfig();
+    if (!config) return null;
+    if (config.environment === 'production') {
+      return 'Esta configuración ya está en producción.';
+    }
+
+    const report = this.readiness();
+    if (!report || report.ready !== false) return null;
+
+    const pending = (report.checks ?? []).find(
+      (item) => !item.satisfied && item.severity !== 'warning',
+    );
+    if (!pending) {
+      return 'La checklist de producción del backend todavía no está satisfecha.';
+    }
+
+    return `Falta: ${pending.label}${pending.action ? ` — ${pending.action}` : ''} (${this.ownerLabel(pending)}).`;
+  });
+
+  protected readonly canOpenPromoteGate = computed(() => {
+    const config = this.selectedConfig();
+    if (!config || this.promoting()) return false;
+    if (config.environment === 'production') return false;
+    return this.readiness()?.ready !== false;
+  });
+
+  // ── Set de pruebas ───────────────────────────────────────────────────
   /**
    * Proyección del bloque que el envío quemaría.
    *
@@ -654,6 +1377,43 @@ export class TenantDianHostComponent {
     };
   });
 
+  /** Evidencia del último envío: composición, ZipKey, fechas y sondeos. */
+  protected readonly lastSubmission = computed<LastSubmission | null>(() => {
+    const result = this.lastResult();
+    if (!result) return null;
+
+    const history = result.poll_history ?? [];
+    const zipKey = result.zip_key ?? null;
+    const total = result.total_documents ?? null;
+    const invoices = result.invoices_count ?? null;
+
+    // Sin ninguno de estos datos no hay nada que mostrar: el badge basta.
+    if (total === null && invoices === null && !zipKey && !result.executed_at) {
+      return null;
+    }
+
+    const lastPoll = history.length ? history[history.length - 1] : null;
+
+    return {
+      total:
+        total ??
+        (invoices !== null
+          ? invoices +
+            (result.credit_notes_count ?? 0) +
+            (result.debit_notes_count ?? 0)
+          : null),
+      invoices,
+      creditNotes: result.credit_notes_count ?? null,
+      debitNotes: result.debit_notes_count ?? null,
+      executedAt: this.formatInstant(result.executed_at),
+      recheckedAt: this.formatInstant(result.rechecked_at),
+      zipKey,
+      polls: history.length,
+      pollsWithoutVerdict: history.filter((entry) => !entry.success).length,
+      lastPollMessage: lastPoll?.status_message ?? null,
+    };
+  });
+
   /** Hay veredicto pendiente que la DIAN todavía puede emitir. */
   private readonly verdictPending = computed(() => {
     const result = this.lastResult();
@@ -673,6 +1433,13 @@ export class TenantDianHostComponent {
       : 'La DIAN acusó recibo del lote y todavía no emite veredicto.',
   );
 
+  /**
+   * Etiqueta del LOTE enviado — no de la habilitación ni de la emisión.
+   *
+   * Los tres badges de esta pantalla describen cosas distintas y se leían como
+   * contradicción; el vocabulario de `enablement_status` tiene un dueño único
+   * (`dianEnablementLabel`) y no se replica acá.
+   */
   protected readonly testSetLabel = computed(() => {
     const result = this.lastResult();
     if (!result) return 'No enviado';
@@ -683,9 +1450,7 @@ export class TenantDianHostComponent {
     return 'Desconocido';
   });
 
-  protected readonly testSetVariant = computed<
-    'success' | 'warning' | 'error' | 'neutral'
-  >(() => {
+  protected readonly testSetVariant = computed<StatusVariant>(() => {
     const result = this.lastResult();
     if (!result) return 'neutral';
     if (result.success) return 'success';
@@ -737,6 +1502,10 @@ export class TenantDianHostComponent {
   });
 
   constructor() {
+    // La contraseña sólo se habilita cuando hay un .p12 adjunto: es el único
+    // momento en que el backend la exige.
+    this.certificatePassword.disable({ emitEvent: false });
+
     if (isPlatformBrowser(this.platformId)) {
       this.documentVisible.set(document.visibilityState === 'visible');
       fromEvent(document, 'visibilitychange')
@@ -783,7 +1552,7 @@ export class TenantDianHostComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: unknown) => {
-          const rows = this.unwrapArray<DianConfig>(response);
+          const rows = this.unwrapArray<TenantDianConfig>(response);
           this.configs.set(rows);
           this.refreshing.set(false);
 
@@ -809,7 +1578,12 @@ export class TenantDianHostComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.resolutions.set([...(response?.data ?? [])]);
+          this.resolutions.set([
+            ...((response?.data ?? []) as ResolutionRow[]),
+          ]);
+          // Las resoluciones y el último resultado llegan en cualquier orden,
+          // así que la preselección se reintenta desde ambos lados.
+          this.autoSelectResolution();
         },
         error: () => this.resolutions.set([]),
       });
@@ -835,25 +1609,30 @@ export class TenantDianHostComponent {
   }
 
   private onConfigSelected(configId: number | null): void {
-    // Nada de la configuración anterior sobrevive al cambio: un secreto o un
-    // veredicto arrastrado describiría al contribuyente equivocado.
+    // Nada de la configuración anterior sobrevive al cambio: un secreto, un
+    // veredicto o una resolución arrastrados describirían al contribuyente
+    // equivocado. La resolución se limpia para volver a derivarse del
+    // `last_result` de ESTA configuración.
     this.certificateFile.set(null);
     this.consumes.set(null);
     this.lastResult.set(null);
     this.composition.set(null);
     this.activeJobId.set(null);
+    this.readiness.set(null);
+    this.readinessUnavailable.set(false);
+    this.replacingCertificate.set(false);
+    this.resolutionControl.setValue(null);
 
-    const config = this.configs().find((row) => row.id === configId) ?? null;
-    // Regla del centinela: el formulario pinta `****` cuando hay contraseña
-    // guardada, sin mirar qué devolvió la API. El front no confía en que el
-    // backend haya enmascarado.
-    this.certificatePassword.setValue(
-      config?.certificate_password_encrypted ? MASKED_SECRET : '',
-    );
+    // La contraseña guardada NO se precarga: `****` en un campo revelable
+    // parece la contraseña real y `canSubmitCertificate` ya rechaza el
+    // centinela, así que rellenarlo sólo confundía.
+    this.certificatePassword.setValue('');
+    this.certificatePassword.disable({ emitEvent: false });
 
     if (configId === null) return;
 
     this.loadTestResults(configId);
+    this.loadReadiness(configId);
     this.resumeActiveJob(configId);
   }
 
@@ -870,19 +1649,67 @@ export class TenantDianHostComponent {
           this.composition.set(
             (payload?.['composition'] as TestSetComposition) ?? null,
           );
-          // Preseleccionar la resolución del último envío no es cosmético:
-          // elegir otra quema un bloque distinto de consecutivos autorizados.
-          const resolutionId = (payload?.['last_result'] as DianTestResult)
-            ?.resolution_id;
-          if (resolutionId && this.selectedResolutionId() === null) {
-            this.resolutionControl.setValue(resolutionId);
-          }
+          this.autoSelectResolution();
         },
         error: () => {
           this.lastResult.set(null);
           this.composition.set(null);
         },
       });
+  }
+
+  /**
+   * Checklist de producción del backend. Existía y nadie la pedía: sin ella el
+   * botón se ofrecía habilitado y el rechazo llegaba después de teclear el NIT
+   * completo del contribuyente.
+   */
+  private loadReadiness(configId: number): void {
+    this.api
+      .getDianProductionReadiness(configId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: unknown) => {
+          const payload = this.unwrapObject(response);
+          this.readiness.set(
+            (payload as DianProductionReadiness | null) ?? null,
+          );
+          this.readinessUnavailable.set(payload === null);
+        },
+        error: () => {
+          // Falla de red o 5xx: se declara, pero NO se bloquea la promoción.
+          this.readiness.set(null);
+          this.readinessUnavailable.set(true);
+        },
+      });
+  }
+
+  /**
+   * Preselección de la resolución que el envío va a consumir.
+   *
+   * Orden deliberado:
+   *   1. La del último envío. Cambiarla quema un bloque DISTINTO de
+   *      consecutivos autorizados, así que la elección previa manda.
+   *   2. Si no hubo envío, la única candidata viable — activa, de factura de
+   *      venta, vigente y con rango disponible.
+   *   3. Si hay VARIAS candidatas no se elige ninguna. Elegir en silencio entre
+   *      candidatas es irreversible y ya se pagó una vez: el operador escoge.
+   */
+  private autoSelectResolution(): void {
+    if (this.selectedResolutionId() !== null) return;
+
+    const rows = this.resolutions();
+    if (!rows.length) return;
+
+    const fromLastResult = this.lastResult()?.resolution_id ?? null;
+    if (fromLastResult && rows.some((row) => row.id === fromLastResult)) {
+      this.resolutionControl.setValue(fromLastResult);
+      return;
+    }
+
+    const candidates = this.eligibleResolutions();
+    if (candidates.length === 1) {
+      this.resolutionControl.setValue(candidates[0].id);
+    }
   }
 
   // ── Sondeo ───────────────────────────────────────────────────────────
@@ -975,16 +1802,27 @@ export class TenantDianHostComponent {
     return `vendix.superadmin.dian.job.${this.store.scope}.${this.store.tenantId()}.${configId}`;
   }
 
-  // ── Confirmaciones ───────────────────────────────────────────────────
-  protected onCertificateFile(event: Event): void {
-    const input = event.target as HTMLInputElement | null;
-    this.certificateFile.set(input?.files?.[0] ?? null);
-    // Un archivo nuevo invalida el centinela: la contraseña guardada no lo abre.
-    if (this.certificatePassword.value === MASKED_SECRET) {
-      this.certificatePassword.setValue('');
+  // ── Certificado: adjuntar y reemplazar ───────────────────────────────
+  protected startCertificateReplacement(): void {
+    this.replacingCertificate.set(true);
+  }
+
+  protected cancelCertificateReplacement(): void {
+    this.replacingCertificate.set(false);
+    this.onCertificateFileSelected(null);
+  }
+
+  protected onCertificateFileSelected(file: File | null): void {
+    this.certificateFile.set(file);
+    this.certificatePassword.setValue('');
+    if (file) {
+      this.certificatePassword.enable({ emitEvent: false });
+    } else {
+      this.certificatePassword.disable({ emitEvent: false });
     }
   }
 
+  // ── Confirmaciones ───────────────────────────────────────────────────
   protected askAction(action: RiskyAction): void {
     this.pendingAction.set(action);
   }
@@ -1090,8 +1928,8 @@ export class TenantDianHostComponent {
       .subscribe({
         next: () => {
           this.uploadingCertificate.set(false);
-          this.certificateFile.set(null);
-          this.certificatePassword.setValue(MASKED_SECRET);
+          this.replacingCertificate.set(false);
+          this.onCertificateFileSelected(null);
           this.toast.success('Certificado cargado');
           this.reload();
         },
@@ -1217,10 +2055,202 @@ export class TenantDianHostComponent {
    * privada, pero nombra dónde vive. Leer sólo `certificate_s3_key` haría que
    * esta consola dijera «sin cargar» sobre certificados que sí existen.
    */
-  protected hasCertificate(config: DianConfig): boolean {
+  protected hasCertificate(config: DianConfig | null): boolean {
+    if (!config) return false;
     const present = (config as { certificate_present?: boolean })
       .certificate_present;
     return present ?? Boolean(config.certificate_s3_key);
+  }
+
+  protected enablementLabel(config: TenantDianConfig): string {
+    return dianEnablementLabel(config.enablement_status);
+  }
+
+  protected operationModeLabel(config: TenantDianConfig): string {
+    const mode = config.operation_mode;
+    if (!mode) return '—';
+    return OPERATION_MODE_LABELS[mode] ?? mode;
+  }
+
+  private ownerLabel(check: DianReadinessCheck): string {
+    return check.owner === 'platform'
+      ? 'lo resuelve Vendix'
+      : 'lo resuelve el comerciante';
+  }
+
+  /**
+   * Las cuatro cubetas con las que se lee cualquier checklist DIAN: quién puede
+   * moverla. Sin esta separación, «esperando a la DIAN» se lee como tarea
+   * pendiente y alguien reenvía un set que sigue en revisión.
+   */
+  private buildGroups(
+    platform: DianReadinessCheck[],
+    tenant: DianReadinessCheck[],
+    waiting: DianReadinessCheck[],
+    warnings: DianReadinessCheck[],
+  ): ChecklistGroup[] {
+    return [
+      {
+        key: 'platform',
+        title: 'Lo resuelve Vendix',
+        hint: 'Operación de plataforma; el comerciante no puede tocarlo.',
+        classes: 'border-red-300 bg-red-50 text-red-900',
+        items: platform,
+      },
+      {
+        key: 'tenant',
+        title: 'Lo resuelve el comerciante',
+        hint: 'Accionable ya desde el panel del tenant.',
+        classes: 'border-amber-300 bg-amber-50 text-amber-900',
+        items: tenant,
+      },
+      {
+        key: 'dian',
+        title: 'Sólo se espera a la DIAN',
+        hint: 'Nuestra parte está hecha. Reenviar no adelanta nada.',
+        classes: 'border-blue-300 bg-blue-50 text-blue-900',
+        items: waiting,
+      },
+      {
+        key: 'warnings',
+        title: 'Avisos tempranos',
+        hint: 'No frenan la emisión, pero se vencen.',
+        classes: 'border-border bg-background text-text-secondary',
+        items: warnings,
+      },
+    ].filter((group) => group.items.length > 0);
+  }
+
+  // ── Resoluciones ─────────────────────────────────────────────────────
+  /**
+   * `null` significa DESCONOCIDO, no «factura de venta».
+   *
+   * La asimetría es deliberada: lo desconocido nunca se elige solo (podría
+   * quemar el rango equivocado) pero tampoco se bloquea en el selector (el
+   * operador sabe más que un campo ausente).
+   */
+  private resolutionDocumentType(row: ResolutionRow): string | null {
+    const type = row.document_type;
+    return typeof type === 'string' && type ? type : null;
+  }
+
+  private documentTypeLabel(type: string): string {
+    return RESOLUTION_DOCUMENT_LABELS[type] ?? type;
+  }
+
+  private isResolutionExpired(row: ResolutionRow): boolean {
+    if (!row.valid_to) return false;
+    const end = new Date(row.valid_to);
+    if (Number.isNaN(end.getTime())) return false;
+    // `valid_to` es un día calendario, no un instante: se compara como fecha
+    // sólo, en UTC, para no correrlo un día por el huso del navegador.
+    return toUTCDateString(end) < toLocalDateString();
+  }
+
+  private isEligibleForTestSet(row: ResolutionRow): boolean {
+    if (!row.is_active) return false;
+    if (this.resolutionDocumentType(row) !== TEST_SET_DOCUMENT_TYPE) {
+      return false;
+    }
+    if (this.isResolutionExpired(row)) return false;
+    return (row.current_number ?? 0) < row.range_to;
+  }
+
+  /** Por qué esta resolución no sirve, o `null` si sí sirve. */
+  private resolutionBlockReason(row: ResolutionRow): string | null {
+    if (!row.is_active) return 'Inactiva';
+
+    const documentType = this.resolutionDocumentType(row);
+    if (documentType !== null && documentType !== TEST_SET_DOCUMENT_TYPE) {
+      return `No sirve para el set: es de ${this.documentTypeLabel(documentType)}`;
+    }
+
+    if (this.isResolutionExpired(row)) {
+      return `Vencida el ${this.formatDay(row.valid_to) ?? row.valid_to}`;
+    }
+
+    if ((row.current_number ?? 0) >= row.range_to) return 'Rango agotado';
+
+    return null;
+  }
+
+  // ── Fechas ───────────────────────────────────────────────────────────
+  /**
+   * Fecha de calendario. Pasa por `formatDateOnlyUTC`, la utilidad del
+   * proyecto: `toLocaleDateString` directo corre el día un puesto en husos
+   * negativos, que es el defecto conocido de esta base de código.
+   */
+  protected formatDay(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return formatDateOnlyUTC(date);
+  }
+
+  /**
+   * Instante (envío, reconsulta, carga del certificado).
+   *
+   * La fecha sale de la utilidad del proyecto y la hora se arma con las partes
+   * UTC del propio Date, sin pasar por ICU: el `hourCycle` del contenedor
+   * imprime «24:00» a medianoche y acá no hay ninguna razón para arriesgarlo.
+   */
+  protected formatInstant(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${formatDateOnlyUTC(date)} ${hours}:${minutes} UTC`;
+  }
+
+  private daysUntil(value: string | null | undefined): number | null {
+    if (!value) return null;
+    const target = new Date(value);
+    if (Number.isNaN(target.getTime())) return null;
+
+    const targetDay = Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth(),
+      target.getUTCDate(),
+    );
+    const now = new Date();
+    const today = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
+
+    return Math.round((targetDay - today) / MS_PER_DAY);
+  }
+
+  private certificateStatusLabel(daysLeft: number | null): string {
+    if (daysLeft === null) return 'Cargado';
+    if (daysLeft < 0) return 'Vencido';
+    if (daysLeft < CERTIFICATE_EXPIRY_WARNING_DAYS) {
+      return `Vence en ${daysLeft} días`;
+    }
+    return 'Vigente';
+  }
+
+  private certificateStatusVariant(daysLeft: number | null): StatusVariant {
+    if (daysLeft === null) return 'neutral';
+    if (daysLeft < 0) return 'error';
+    if (daysLeft < CERTIFICATE_EXPIRY_WARNING_DAYS) return 'warning';
+    return 'success';
+  }
+
+  /**
+   * Extrae el `CN=` de un DN X.500.
+   *
+   * El DN llega como lista separada por comas y el CN casi nunca es el primer
+   * atributo: en el certificado real viene detrás de `streetAddress` y de un
+   * OID numérico, así que partir por la primera coma devolvería basura.
+   */
+  private extractCommonName(dn: string | null | undefined): string | null {
+    if (!dn) return null;
+    const match = /(?:^|,)\s*CN\s*=\s*([^,]+)/i.exec(dn);
+    const value = match ? match[1].trim() : '';
+    return value || null;
   }
 
   /** El CVA puede devolver el valor como string; el id siempre es numérico. */

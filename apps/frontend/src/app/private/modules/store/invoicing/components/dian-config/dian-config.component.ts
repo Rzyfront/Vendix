@@ -10,6 +10,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { dianEnablementLabel } from '../../../../../../core/utils/dian-enablement-status.util';
 
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DianConfig, DianNitType } from '../../interfaces/invoice.interface';
@@ -41,6 +42,22 @@ interface DianStats {
 }
 
 type EnvironmentFilter = 'all' | 'test' | 'production';
+
+/**
+ * Color del badge de estado de habilitación, keyeado por el valor crudo del
+ * enum. Espeja `dianEnablementVariant` traducido al vocabulario que entiende
+ * `app-responsive-data-view` («warn»/«danger», no «warning»/«error»), y se
+ * comparte entre la columna de tabla y la tarjeta móvil para que no vuelvan a
+ * divergir.
+ */
+const ENABLEMENT_COLOR_MAP: Record<string, string> = {
+  not_started: 'neutral',
+  testing: 'warn',
+  test_set_passed: 'success',
+  enabled: 'success',
+  suspended: 'danger',
+  expired: 'danger',
+};
 
 /**
  * DIAN Configuration page — standard admin module layout.
@@ -99,7 +116,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
             iconColor="text-amber-600"
           ></app-stats>
           <app-stats
-            title="En produccion"
+            title="En producción"
             [value]="s.production"
             smallText="Ambiente productivo"
             iconName="globe"
@@ -167,7 +184,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
                 [ngClass]="envFilter() === 'production' ? 'bg-primary text-[var(--color-text-on-primary)] border-primary' : 'bg-[var(--color-surface)] text-text-secondary border-border'"
                 (click)="envFilter.set('production')"
               >
-                Produccion
+                Producción
               </button>
             </div>
           </div>
@@ -357,7 +374,7 @@ export class DianConfigComponent {
         },
       },
       transform: (_val: any, item?: DianConfig) =>
-        item?.environment === 'production' ? 'Produccion' : 'Pruebas',
+        item?.environment === 'production' ? 'Producción' : 'Pruebas',
     },
     {
       key: 'enablement_status',
@@ -366,15 +383,13 @@ export class DianConfigComponent {
       priority: 1,
       badgeConfig: {
         type: 'status',
-        colorMap: {
-          not_started: 'neutral',
-          testing: 'warn',
-          enabled: 'success',
-          suspended: 'danger',
-        },
+        // El color se resuelve por el VALOR CRUDO de la fila, no por la
+        // etiqueta: los 6 estados del enum deben estar acá o el badge se queda
+        // sin color justo en los que faltaban («test_set_passed», «expired»).
+        colorMap: ENABLEMENT_COLOR_MAP,
       },
       transform: (_val: any, item?: DianConfig) =>
-        this.enablementLabel(item?.enablement_status ?? 'not_started'),
+        dianEnablementLabel(item?.enablement_status),
     },
     {
       key: 'certificate_expiry',
@@ -438,21 +453,16 @@ export class DianConfigComponent {
     badgeKey: 'enablement_status',
     badgeConfig: {
       type: 'status',
-      colorMap: {
-        not_started: 'neutral',
-        testing: 'warn',
-        enabled: 'success',
-        suspended: 'danger',
-      },
+      colorMap: ENABLEMENT_COLOR_MAP,
     },
     badgeTransform: (_val: any, item?: DianConfig) =>
-      this.enablementLabel(item?.enablement_status ?? 'not_started'),
+      dianEnablementLabel(item?.enablement_status),
     detailKeys: [
       {
         key: 'environment',
         label: 'Ambiente',
         icon: 'globe',
-        transform: (val: any) => (val === 'production' ? 'Produccion' : 'Pruebas'),
+        transform: (val: any) => (val === 'production' ? 'Producción' : 'Pruebas'),
       },
       {
         key: 'certificate_expiry',
@@ -622,15 +632,5 @@ export class DianConfigComponent {
       NIT_EXTRANJERIA: 'NIT Ext.',
     };
     return labels[type] || type;
-  }
-
-  private enablementLabel(status: string): string {
-    const labels: Record<string, string> = {
-      not_started: 'No iniciado',
-      testing: 'En pruebas',
-      enabled: 'Habilitado',
-      suspended: 'Suspendido',
-    };
-    return labels[status] || status;
   }
 }

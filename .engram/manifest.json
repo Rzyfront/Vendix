@@ -1264,6 +1264,22 @@
       "sessions": 1,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "3fd71f3c",
+      "created_by": "rzy",
+      "created_at": "2026-08-07T01:34:40Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "ac421ad8",
+      "created_by": "rzy",
+      "created_at": "2026-08-07T01:46:36Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }

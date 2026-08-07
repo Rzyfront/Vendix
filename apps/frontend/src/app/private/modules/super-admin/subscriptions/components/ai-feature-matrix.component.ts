@@ -119,7 +119,13 @@ export class AiFeatureMatrixComponent {
       description: 'Habilita llamadas del IA Engine que consumen tokens para redactar, resumir o transformar contenido.',
       capField: 'monthly_tokens_cap',
       capLabel: 'Tokens mensuales',
-      capHelp: 'Cupo mensual consumido por AIEngineService.run(). Cero significa sin cupo util.',
+      // Cero es ILIMITADO, no bloqueado. `checkQuota` en
+      // subscription-access.service.ts hace `if (cap <= 0) return { exceeded:
+      // false }` — un cap ausente o en cero se lee como "sin tope declarado".
+      // El texto anterior decia lo contrario, de modo que un operador que
+      // quisiera cortar el consumo ponia 0 y obtenia barra libre.
+      capHelp:
+        'Cupo mensual consumido por AIEngineService.run(). Cero significa ILIMITADO: para restringir hay que poner un numero mayor que cero.',
     },
     {
       key: 'streaming_chat',
@@ -166,7 +172,7 @@ export class AiFeatureMatrixComponent {
       capField: 'monthly_voice_seconds_cap',
       capLabel: 'Segundos de voz al mes',
       capHelp:
-        'Se mide en segundos de sesion, no en sesiones: un turno de push-to-talk dura 5-20 s. 3600 = 1 hora, 7200 = 2 horas. Cero deja la funcion sin cupo util aunque el switch este encendido.',
+        'Se mide en segundos de sesion, no en sesiones: un turno de push-to-talk dura 5-20 s. 3600 = 1 hora, 7200 = 2 horas. Cero significa ILIMITADO: lo que habilita o corta la funcion es el switch, no el cupo.',
     },
   ];
 
