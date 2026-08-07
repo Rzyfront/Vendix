@@ -418,6 +418,103 @@ export class CustomersAnalyticsService {
     });
   }
 
+  /**
+   * QUI-540: cuentas por cobrar de clientes con bucketing de antigüedad.
+   *
+   * Una fila por `accounts_receivable` con status='open' o 'partial',
+   * enriquecida con datos del cliente y bucketed en:
+   *   - '0-30 días' (current)
+   *   - '31-60 días'
+   *   - '61-90 días'
+   *   - '90+ días' (riesgo de incobrabilidad)
+   *
+   * El campo `days_overdue` que ya existe en la tabla lo respetamos si
+   * está poblado; si no, lo calculamos desde `due_date` vs `now()`.
+   *
+   * `issue_date` y `due_date` son DATE (sin hora), pero Prisma los devuelve
+   * como Date instants. El emitter los formatea con TZ.
+   */
+  async getAccountsReceivableForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const receivables = await this.prisma.accounts_receivable.findMany({
+      where: {
+        store_id: storeId,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
+      },
+      select: {
+        id: true,
+        customer_id: true,
+        source_type: true,
+        source_id: true,
+        document_number: true,
+        original_amount: true,
+        paid_amount: true,
+        balance: true,
+        currency: true,
+        issue_date: true,
+        due_date: true,
+        days_overdue: true,
+        last_payment_date: true,
+        status: true,
+        customer: {
+          select: {
+            first_name: true,
+            last_name: true,
+            email: true,
+            document_number: true,
+          },
+        },
+      },
+      orderBy: { due_date: 'asc' },
+      take: 10000,
+    });
+
+    const now = new Date();
+
+    return receivables.map((r) => {
+      const days = r.days_overdue > 0
+        ? r.days_overdue
+        : Math.max(0, Math.floor((now.getTime() - r.due_date.getTime()) / 86400000));
+      const bucket =
+        days <= 30
+          ? '0-30'
+          : days <= 60
+            ? '31-60'
+            : days <= 90
+              ? '61-90'
+              : '90+';
+      const customerName = r.customer
+        ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
+        : '';
+      return {
+        id: r.id,
+        customer_id: r.customer_id,
+        customer_name: customerName,
+        customer_email: r.customer?.email ?? '',
+        customer_document: r.customer?.document_number ?? '',
+        document_number: r.document_number ?? '',
+        source_type: r.source_type,
+        source_id: r.source_id,
+        issue_date: r.issue_date,
+        due_date: r.due_date,
+        days_overdue: days,
+        aging_bucket: bucket,
+        original_amount: Math.round(Number(r.original_amount) * 100) / 100,
+        paid_amount: Math.round(Number(r.paid_amount) * 100) / 100,
+        balance: Math.round(Number(r.balance) * 100) / 100,
+        currency: r.currency,
+        status: r.status,
+        last_payment_date: r.last_payment_date,
+      };
+    });
+  }
+
   async getCustomersChannels(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
