@@ -451,11 +451,23 @@ export function getDefaultStoreSettings(): StoreSettings {
     // section (receipts, POS) would stamp it into the row permanently.
     vexi: {
       enabled: false,
-      // `realtime` preserva exactamente el comportamiento de hoy. El pipeline se
-      // elige por tienda cuando sus números de latencia y costo lo justifiquen,
-      // no por defecto: cambiar el default movería el motor de todas las tiendas
-      // en el mismo deploy que lo introduce.
-      voice_engine: 'realtime',
+      // `pipeline`, y el motivo no es preferencia sino capacidad.
+      //
+      // El default anterior era `realtime`, elegido para "no mover el motor de
+      // ninguna tienda". Pero el realtime necesita un proveedor que exponga el
+      // Realtime API (`/realtime/client_secrets`), y en producción no hay
+      // ninguna config así: `vexi_realtime_voice` quedó apuntando a MiniMax T2A,
+      // que sólo dicta. El resultado era que las 82 tiendas sin valor propio
+      // caían al único motor sin proveedor capaz y el gesto de voz devolvía
+      // `AI_PROVIDER_001` 502. Un default que apunta a lo único que no funciona
+      // no preserva comportamiento: preserva una falla.
+      //
+      // El pipeline sí tiene sus dos extremos configurados y activos
+      // (`vexi_voice_stt` y `vexi_voice_tts`), así que es el default honesto.
+      // Una tienda que quiera el realtime lo pide explícito desde
+      // Ajustes → Vexi → Motor de voz, y si su config no es capaz de realtime
+      // `VexiRealtimeService` lo dice en el error en vez de intentarlo.
+      voice_engine: 'pipeline',
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

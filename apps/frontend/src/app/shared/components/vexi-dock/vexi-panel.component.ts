@@ -148,6 +148,30 @@ const SUGGESTIONS: readonly string[] = [
         </button>
       </header>
 
+      <!-- Modo voz: la avatar arriba, animada mientras habla, y los captions
+           DEBAJO de ella. Va acá, hermana de la cabecera, y no dentro de
+           .vexi-panel__body: ese body es flex en FILA para poner el cajón de
+           conversaciones al costado, así que un tercer hermano ahí se acomodaba
+           AL LADO de los captions y les robaba el ancho —el texto quedaba
+           partido en columnas de siete caracteres. La raíz .vexi-panel sí es
+           flex column, que es la dirección que este bloque necesita.
+           Sigue fuera de #scroller, así que tampoco se va con el scroll. -->
+      @if (voiceUi()) {
+        <div class="vexi-voice__stage">
+          <span
+            class="vexi-voice__portrait"
+            [class.is-speaking]="voiceSpeaking()"
+            aria-hidden="true"
+          >
+            <app-vexi-avatar
+              [expression]="voiceExpression()"
+              [voice]="voiceSpeaking()"
+            />
+          </span>
+          <p class="vexi-voice__status" role="status">{{ voiceStatus() }}</p>
+        </div>
+      }
+
       <div class="vexi-panel__body">
         <!-- Kept in the DOM and collapsed by width instead of destroyed: an
              @if would drop and rebuild the list on every toggle, which cannot
@@ -174,31 +198,18 @@ const SUGGESTIONS: readonly string[] = [
           </div>
         </aside>
 
-        <!-- Modo voz: la avatar grande arriba, animada mientras habla. Vive
-             fuera de #scroller para que no se vaya con el scroll de los
-             captions — es el ancla visual del modo, no una entrada más. -->
-        @if (voiceUi()) {
-          <div class="vexi-voice__stage">
-            <span
-              class="vexi-voice__portrait"
-              [class.is-speaking]="voiceSpeaking()"
-              aria-hidden="true"
-            >
-              <app-vexi-avatar
-                [expression]="voiceExpression()"
-                [voice]="voiceSpeaking()"
-              />
-            </span>
-            <p class="vexi-voice__status" role="status">{{ voiceStatus() }}</p>
-          </div>
-        }
-
         <div
           #scroller
           class="vexi-panel__messages"
           [class.vexi-panel__messages--captions]="voiceUi()"
         >
-          @if (showEmptyState()) {
+          <!-- El estado vacío es del modo chat. En modo voz sobra y estorba: el
+               escenario de arriba ya muestra la avatar y el estado, así que
+               renderizar los dos daba DOS avatares a la vez —una en el escenario
+               y otra chica dentro del hilo— más un bloque de bienvenida y sus
+               chips de sugerencia debajo del botón de micrófono. Los chips además
+               escriben en el composer de texto, que en modo voz no existe. -->
+          @if (showEmptyState() && !voiceUi()) {
             <div class="vexi-empty">
               <span class="vexi-empty__portrait" aria-hidden="true">
                 <app-vexi-avatar [expression]="'idle'" />
@@ -221,6 +232,12 @@ const SUGGESTIONS: readonly string[] = [
               </div>
             </div>
           }
+
+          <!-- Modo voz sin nada dicho todavía: el área de captions queda
+               vacía a propósito. No va ningún cartel de relleno — el estado ya
+               lo dice la avatar de arriba y la instrucción ya la dice el botón
+               de micrófono de abajo; un texto en el medio solo compite con los
+               dos por la atención. -->
 
           @for (message of renderedMessages(); track message.id) {
             @if (message.role === 'user') {
@@ -852,13 +869,28 @@ const SUGGESTIONS: readonly string[] = [
         gap: 6px;
         padding: 14px 12px 10px;
         border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
-        /* flex-shrink:0 es obligatorio aquí: el escenario es hermano del
-           contenedor de scroll dentro de un flex column, y sin esto los captions
-           lo comprimen hasta hacerlo desaparecer en una conversación larga. */
+        /* flex-shrink:0 es obligatorio aquí: el escenario es hermano de
+           .vexi-panel__body —que crece con flex: 1 1 auto— dentro de la columna
+           del panel, y sin esto los captions lo comprimen hasta hacerlo
+           desaparecer en una conversación larga. */
         flex-shrink: 0;
       }
 
+      /* position: relative NO es decorativo acá. app-vexi-avatar tiene
+         :host { position: absolute; inset: 0 }, así que se resuelve contra el
+         ancestro POSICIONADO más cercano, no contra su padre. Sin esto el avatar
+         se escapaba de la caja de 96px y se estiraba hasta el panel entero:
+         desbordaba por la izquierda y tapaba el texto. La regla ng-deep de abajo
+         (width/height 100%) no podía salvarlo: ese 100% también se resolvía
+         contra el panel. .vexi-empty__portrait ya lo documenta arriba; este
+         bloque, añadido después para el modo voz, no lo siguió. Cualquier caja
+         nueva que envuelva la avatar necesita position: relative y tamaño.
+
+         Sin comillas invertidas en este comentario a propósito: el bloque styles
+         es un template literal y una comilla invertida lo termina, con errores
+         TS1005 a 200 líneas de distancia del backtick. */
       .vexi-voice__portrait {
+        position: relative;
         display: block;
         width: 96px;
         height: 96px;
@@ -1595,7 +1627,11 @@ export class VexiPanelComponent {
    * keyboard shortcut reaches it, and the card never pre-focuses it.
    */
   protected confirmProposal(): void {
-    this.facade.confirmProposal();
+    // The mode is read here, at the moment of the approval, and not from a flag
+    // the effect could consult later: the person can be listening when they tap
+    // Aprobar and reading by the time the acknowledgement comes back, and what
+    // decides whether it is spoken is how they gave the approval.
+    this.facade.confirmProposal(this.voiceUi());
   }
 
   protected rejectProposal(): void {

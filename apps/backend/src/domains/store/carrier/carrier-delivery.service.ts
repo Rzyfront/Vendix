@@ -23,6 +23,7 @@ import {
 } from '../dispatch-routes/dto';
 import { PoolQueryDto } from './dto/pool-query.dto';
 import { RouteHistoryQueryDto } from './dto/route-history-query.dto';
+import { poolMembershipWhere } from './carrier-pool.contract';
 
 /**
  * A single order sitting in the carrier pool (published by the admin, not yet
@@ -566,9 +567,14 @@ export class CarrierDeliveryService {
 
   /**
    * `GET /store/carrier/pool` — orders published by the admin and not yet
-   * claimed. `orders` is auto-scoped; the pool predicate is derived:
-   * `dispatch_pool_at IS NOT NULL AND claimed_by_carrier_user_id IS NULL AND
-   *  dispatch_fulfillment != 'full'`.
+   * claimed. `orders` is auto-scoped; la pertenencia al pool la define el
+   * contrato único {@link poolMembershipWhere} (publicada + sin reclamar + en un
+   * estado todavía entregable).
+   *
+   * El filtro `dispatch_fulfillment != 'full'` que vivía aquí fue RETIRADO: el
+   * flujo crea la remisión al publicar, así que ese rollup queda en `'full'`
+   * para toda orden pooleada sana y el predicado escondía exactamente los
+   * registros que debía mostrar (ver `carrier-pool.contract.ts`).
    */
   async listPool(query: PoolQueryDto): Promise<{
     data: PoolItem[];
@@ -582,9 +588,7 @@ export class CarrierDeliveryService {
     const search = query.search?.trim();
 
     const where: Prisma.ordersWhereInput = {
-      dispatch_pool_at: { not: null },
-      claimed_by_carrier_user_id: null,
-      dispatch_fulfillment: { not: 'full' },
+      ...poolMembershipWhere(),
       ...(search && {
         OR: [
           {
@@ -672,14 +676,13 @@ export class CarrierDeliveryService {
   }> {
     const { store_id, user_id } = this.requireContext();
 
-    // STEP 1 — Claim atómico primero-gana.
+    // STEP 1 — Claim atómico primero-gana. MISMO predicado que `listPool` (vía
+    // el contrato compartido) + `store_id` explícito porque esto ESCRIBE.
     const claimed = await this.prisma.orders.updateMany({
       where: {
+        ...poolMembershipWhere(),
         id: order_id,
         store_id,
-        dispatch_pool_at: { not: null },
-        claimed_by_carrier_user_id: null,
-        dispatch_fulfillment: { not: 'full' },
       },
       data: { claimed_by_carrier_user_id: user_id },
     });
@@ -778,8 +781,13 @@ export class CarrierDeliveryService {
 
   /**
    * Build the full-order dispatch items (COD shortcut): dispatch every ordered
-   * line at its full quantity. `createFromOrder` requires `items` and validates
-   * stock; the pool predicate already excludes fully-dispatched orders.
+   * line at its full quantity. `createFromOrder` requires `items` y valida
+   * stock.
+   *
+   * Sólo se usa en el camino LEGACY del claim (orden pooleada por un flujo
+   * antiguo que NO dejó remisión). El flujo actual publica con remisión, así que
+   * el claim la ADJUNTA y nunca llega aquí; `createFromOrder` rechazaría el
+   * duplicado con DSP_ORDER_STATE_001.
    */
   private async buildDispatchItems(order_id: number): Promise<
     CreateFromOrderDto['items']

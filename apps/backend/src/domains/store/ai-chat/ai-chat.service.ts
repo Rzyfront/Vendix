@@ -307,6 +307,7 @@ export class AIChatService {
       ui_context: dto.ui_context,
       attachment_ids: dto.attachment_ids,
       speak: dto.speak,
+      skip_user_message: dto.skip_user_message,
       user_id: RequestContextService.getContext()?.user_id,
     });
   }
@@ -367,14 +368,26 @@ export class AIChatService {
       if (filler) yield filler;
     }
 
-    // Save user message
-    await this.prisma.ai_messages.create({
-      data: {
-        conversation_id: conversationId,
-        role: 'user',
-        content: intent.content,
-      },
-    });
+    // Save user message.
+    //
+    // Skipped when the client is replaying a turn whose transport dropped: the
+    // row was written by the attempt that died, and this write happens BEFORE the
+    // model is called, so a dropped turn almost always left it behind. Writing it
+    // again would show the person's question twice in a conversation they only
+    // asked once — the one visible artefact a transparent retry must not leave.
+    //
+    // Trusting the client on this is safe because the flag can only ever cause a
+    // *missing* user row, never a forged one: the content it would have written is
+    // the client's own `content` either way.
+    if (!intent.skip_user_message) {
+      await this.prisma.ai_messages.create({
+        data: {
+          conversation_id: conversationId,
+          role: 'user',
+          content: intent.content,
+        },
+      });
+    }
 
     // Claims this stream id as the only channel allowed to answer this turn's UI
     // commands. Without it a leaked `stream_id` would let any authenticated user

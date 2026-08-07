@@ -1624,9 +1624,17 @@ export class OrderDetailsPageComponent {
       .publishToPool(Number(this.orderId))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.isProcessingAction.set(false);
-          this.toastService.success('Orden enviada a despacho');
+          // Idempotente: un segundo envío no es un error, pero tampoco es una
+          // publicación nueva — se dice lo que realmente pasó.
+          if (res?.already_pooled) {
+            this.toastService.info(
+              'La orden ya estaba en el pool de despacho, esperando repartidor',
+            );
+          } else {
+            this.toastService.success('Orden enviada a despacho');
+          }
           this.loadData();
         },
         error: (err: RepartosApiError) => {

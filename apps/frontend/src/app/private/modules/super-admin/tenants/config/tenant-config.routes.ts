@@ -136,10 +136,16 @@ export const TENANT_CONFIG_ROUTES: Routes = [
     path: '',
     component: TenantConfigShellComponent,
     providers: [...provideSuperadminDianApi()],
+    // Cada hoja declara su propio `title` (formato «Sección - Ámbito», el mismo
+    // de `users.routes.ts`). Sin él, `BreadcrumbService` no encuentra entrada
+    // para una URL de cinco segmentos, su efecto de título se abstiene y la
+    // pestaña del navegador se queda con el rótulo de la pantalla anterior
+    // —«General»— sin importar en qué sub-sección esté soporte.
     children: [
       { path: '', pathMatch: 'full', redirectTo: DEFAULT_TAB },
       {
         path: 'settings',
+        title: 'Ajustes - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-settings.component').then(
             (c) => c.TenantSettingsComponent,
@@ -147,6 +153,7 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'modules',
+        title: 'Módulos - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-modules.component').then(
             (c) => c.TenantModulesComponent,
@@ -154,6 +161,7 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'fiscal',
+        title: 'Identidad fiscal - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-fiscal.component').then(
             (c) => c.TenantFiscalComponent,
@@ -161,6 +169,7 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'dian',
+        title: 'Documentos electrónicos - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-dian-host.component').then(
             (c) => c.TenantDianHostComponent,
@@ -168,6 +177,7 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'domains',
+        title: 'Dominios - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-domains.component').then(
             (c) => c.TenantDomainsComponent,

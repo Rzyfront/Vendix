@@ -30,6 +30,20 @@ export interface VexiState {
   activeTask: VexiTask | null;
   /** Set the moment `queue_task` returns, before the first poll answers. */
   activeTaskId: number | null;
+  /**
+   * Enough of the last turn to send it again.
+   *
+   * Needed because the stream intent is deliberately single-use — consumed with
+   * `getdel` so a reconnecting `EventSource` cannot replay an agent turn — so a
+   * transparent retry has to build a *new* intent from the original request. The
+   * message itself is the only thing the browser cannot recover from the server.
+   */
+  lastTurn: {
+    conversationId: number;
+    content: string;
+    attachmentIds?: string[];
+    speak?: boolean;
+  } | null;
 }
 
 export const initialVexiState: VexiState = {
@@ -45,6 +59,7 @@ export const initialVexiState: VexiState = {
   pendingProposal: null,
   activeTask: null,
   activeTaskId: null,
+  lastTurn: null,
 };
 
 export const vexiReducer = createReducer(
@@ -109,29 +124,51 @@ export const vexiReducer = createReducer(
     error,
   })),
 
-  on(VexiActions.sendMessage, (state, { content }) => {
-    if (!state.activeConversationId) return state;
-    return {
-      ...state,
-      isSending: true,
-      messages: [
-        ...state.messages,
-        {
-          id: -Date.now(),
-          conversation_id: state.activeConversationId,
-          role: 'user' as const,
+  on(
+    VexiActions.sendMessage,
+    (state, { content, attachmentIds, speak, isRetry }) => {
+      if (!state.activeConversationId) return state;
+
+      const base = {
+        ...state,
+        isSending: true,
+        streamingContent: '',
+        isStreaming: true,
+        // Recorded on every send, retries included: the replay of a replay is
+        // blocked by the `isRetry` flag on the action, not by forgetting the
+        // payload, and keeping it means a later manual resend still works.
+        lastTurn: {
+          conversationId: state.activeConversationId,
           content,
-          tool_calls: null,
-          tokens_used: 0,
-          cost_usd: 0,
-          metadata: null,
-          created_at: new Date().toISOString(),
+          attachmentIds,
+          speak,
         },
-      ],
-      streamingContent: '',
-      isStreaming: true,
-    };
-  }),
+      };
+
+      // A retry re-uses the bubble that is already on screen. Appending again
+      // would show the person's question twice for a turn they only asked once —
+      // and the whole point of the retry is that they never find out it happened.
+      if (isRetry) return base;
+
+      return {
+        ...base,
+        messages: [
+          ...state.messages,
+          {
+            id: -Date.now(),
+            conversation_id: state.activeConversationId,
+            role: 'user' as const,
+            content,
+            tool_calls: null,
+            tokens_used: 0,
+            cost_usd: 0,
+            metadata: null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      };
+    },
+  ),
 
   on(VexiActions.sendMessageSuccess, (state, { assistantMessage }) => ({
     ...state,
@@ -228,10 +265,39 @@ export const vexiReducer = createReducer(
       : null,
   })),
 
-  on(VexiActions.confirmProposalSuccess, (state) => ({
-    ...state,
-    pendingProposal: null,
-  })),
+  // Clearing the card is not the same as answering. Approving used to do only
+  // the first: the card vanished, the write landed on the server, and the thread
+  // stayed silent — which reads exactly like a button that did nothing. The
+  // backend does persist a `role: 'tool'` row for the applied change, but the
+  // panel renders `tool` turns as plumbing, so even reloading showed nothing.
+  //
+  // So the acknowledgement is appended here as a visible assistant turn. Local
+  // and not refetched, because the server's copy is that unrenderable `tool` row:
+  // the sentence exists on the wire, not in a shape the thread can show.
+  on(VexiActions.confirmProposalSuccess, (state, { summary }) => {
+    const text = summary?.trim() || 'Listo, apliqué el cambio.';
+
+    return {
+      ...state,
+      pendingProposal: null,
+      messages: state.activeConversationId
+        ? [
+            ...state.messages,
+            {
+              id: -Date.now(),
+              conversation_id: state.activeConversationId,
+              role: 'assistant' as const,
+              content: text,
+              tool_calls: null,
+              tokens_used: 0,
+              cost_usd: 0,
+              metadata: null,
+              created_at: new Date().toISOString(),
+            },
+          ]
+        : state.messages,
+    };
+  }),
 
   // The proposal is dropped, not left pending: the token is single-use and
   // consumed on the failed attempt, so retrying it would fail again. Vexi has
@@ -242,10 +308,41 @@ export const vexiReducer = createReducer(
     error,
   })),
 
-  on(VexiActions.rejectProposal, (state) => ({
-    ...state,
-    pendingProposal: null,
-  })),
+  // Rejecting needs an answer for the same reason approving does — a card that
+  // just disappears is indistinguishable from a button that failed. The sentence
+  // names the target so the thread stays readable later: "no lo apliqué" on its
+  // own is unreadable once two proposals have gone by.
+  //
+  // Nothing is sent to the server. There is no reject endpoint and there should
+  // not be: the token is single-use and short-lived, so declining is simply never
+  // spending it. A revocation call would be a second way to fail at doing nothing.
+  on(VexiActions.rejectProposal, (state) => {
+    const target = state.pendingProposal?.preview?.target;
+    const text = target
+      ? `Listo, no toqué nada en ${target}.`
+      : 'Listo, no apliqué el cambio.';
+
+    return {
+      ...state,
+      pendingProposal: null,
+      messages: state.activeConversationId
+        ? [
+            ...state.messages,
+            {
+              id: -Date.now(),
+              conversation_id: state.activeConversationId,
+              role: 'assistant' as const,
+              content: text,
+              tool_calls: null,
+              tokens_used: 0,
+              cost_usd: 0,
+              metadata: null,
+              created_at: new Date().toISOString(),
+            },
+          ]
+        : state.messages,
+    };
+  }),
 
   on(VexiActions.streamComplete, (state) => {
     if (!state.activeConversationId) return { ...state, isStreaming: false, isSending: false, streamingContent: '' };
@@ -270,6 +367,23 @@ export const vexiReducer = createReducer(
       streamingContent: '',
     };
   }),
+
+  // Deliberately leaves the turn looking alive: no `error`, no clearing of
+  // `isStreaming`. The reconciliation is a few hundred milliseconds away and it
+  // usually ends in "the answer was already there", so flipping the UI to a
+  // failed state first would flash an error the next tick contradicts.
+  on(VexiActions.streamDropped, (state) => state),
+
+  on(VexiActions.streamReconciled, (state) => ({
+    ...state,
+    isStreaming: false,
+    isSending: false,
+    // Dropped, not appended. The buffer holds a truncated copy of an answer the
+    // server already has in full, and `loadMessagesSuccess` arrives with the real
+    // one in the same effect.
+    streamingContent: '',
+    error: null,
+  })),
 
   on(VexiActions.streamError, (state, { error }) => ({
     ...state,

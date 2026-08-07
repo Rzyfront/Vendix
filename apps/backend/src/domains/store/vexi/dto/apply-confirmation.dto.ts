@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsObject,
   IsOptional,
@@ -44,4 +45,20 @@ export class ApplyConfirmationDto {
   @Type(() => Number)
   @IsInt()
   conversation_id?: number;
+
+  /**
+   * Asks for the acknowledgement to come back as audio as well as text.
+   *
+   * Set by the panel when the person is in voice mode, because an approval given
+   * by voice that answers only in writing leaves them staring at a screen they
+   * were not reading.
+   *
+   * Note what is NOT here: any text to synthesize. The endpoint speaks the
+   * `summary` the tool itself produced, so this flag cannot turn the confirmation
+   * endpoint into a general text-to-speech surface — the person can ask for audio,
+   * never for arbitrary audio.
+   */
+  @IsOptional()
+  @IsBoolean()
+  speak?: boolean;
 }

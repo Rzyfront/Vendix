@@ -339,6 +339,12 @@ import {
   PanelLeftOpen,
   PanelLeftClose,
   SquarePen,
+  // Modo voz de Vexi. Estaba en uso en `vexi-panel.component.ts` SIN estar
+  // registrado, así que `<app-icon name="mic">` caía al glifo de reemplazo: el
+  // botón de "mantén presionado para hablar" mostraba un signo de pregunta.
+  // Un nombre no registrado no rompe el build ni la consola — degrada en
+  // silencio a un icono equivocado, que es por qué sobrevivió al deploy.
+  Mic,
 } from 'lucide-angular';
 
 /**
@@ -414,6 +420,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // UI elements
   circle: Circle,
+
+  // Modo voz de Vexi
+  mic: Mic,
 
   // User action icons
   'user-plus': UserPlus,

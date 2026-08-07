@@ -55,15 +55,28 @@ export interface StoreSettings {
  * `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`.
  */
 export interface VexiSettings {
-  enabled: boolean;
+  /**
+   * Opcional, igual que en el DTO del backend (`VexiSettingsDto.enabled?`).
+   *
+   * `Partial<StoreSettings>` es superficial: hace opcional la sección `vexi`,
+   * pero no sus campos. Con `enabled` requerido, un PATCH que sólo quiere mover
+   * el motor de voz estaba obligado a reenviar `enabled`, y reenviar un valor
+   * que no se está editando es cómo se sobreescribe por accidente el cambio que
+   * otra pestaña acaba de hacer. Ausente significa apagado — leer siempre por
+   * `StoreSettingsFacade.vexiEnabled()`, que compara contra `=== true`.
+   */
+  enabled?: boolean;
 
   /**
    * Which engine answers a voice turn: `realtime` (WebRTC speech-to-speech) or
    * `pipeline` (transcribe → the chat's text agent → dictate).
    *
    * Read it through `StoreSettingsFacade.vexiVoiceEngine()`, which defaults an
-   * absent value to `realtime` — never as `settings.vexi!.voice_engine`, or a
+   * absent value to `pipeline` — never as `settings.vexi!.voice_engine`, or a
    * store that predates the key routes the gesture nowhere.
+   *
+   * Sólo el pipeline puede ejecutar escrituras con confirmación, porque es el
+   * único que pasa por la tarjeta de aprobación del panel.
    */
   voice_engine?: 'realtime' | 'pipeline';
 }
