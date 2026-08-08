@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { Prisma } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
@@ -144,66 +146,98 @@ export class FinancialAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    // Aggregate tax from order_item_taxes via order_items -> orders
-    const orderItems = await this.prisma.order_items.findMany({
-      where: {
-        orders: {
-          state: { in: this.REVENUE_STATES },
-          created_at: { gte: startDate, lte: endDate },
-        },
-      },
-      select: {
-        id: true,
-        total_price: true,
-        tax_amount_item: true,
-        order_item_taxes: {
-          select: {
-            tax_name: true,
-            tax_rate: true,
-            tax_amount: true,
-            tax_type: true,
-            is_compound: true,
-          },
-        },
-      },
-    });
+    // Scoped store-prisma client only exposes $queryRawUnsafe, not $queryRaw,
+    // so we go through `withoutScope()` to use the safe `Prisma.sql` template
+    // form and explicitly filter by store_id in the WHERE clause (the same
+    // pattern used by `aggregateRevenueOrders` below for org-level reads).
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id ?? 0;
+    const rawClient: PrismaClient = this.prisma.withoutScope();
 
-    // Aggregate by tax_name
-    const taxBreakdown = new Map<
-      string,
-      {
-        tax_name: string;
-        tax_type: string;
-        tax_rate: number;
-        total_tax: number;
-        taxable_amount: number;
-        is_compound: boolean;
-      }
-    >();
+    // SAFE_STATE_REGEX-equivalent guard for the inlined IN list. SQLSTATE list
+    // is also charset-validated by sqlStateList; this cast documents intent.
+    const revenueStates = sqlStateList(COMPLETED_SALE_STATES);
 
-    let totalTaxableRevenue = 0;
+    // QUI-630: GROUP BY on the per-tax rows in SQL — no more findMany of every
+    // line into memory (defect 6). Base derived from each tax's own amount/rate
+    // (defects 1+2), so a line with IVA + INC compounds correctly contributes its
+    // IVA base and its INC base as two separate rows of the right size, not
+    // `item_total` repeated. Tax type NULL is surfaced as 'unclassified' rather
+    // than silently classified as 'iva' (defect 7). Orders state is restricted
+    // to COMPLETED_SALE_STATES — 'refunded' is excluded because the IVA on a
+    // refunded order was already collected when the order was delivered; the
+    // refund is recognized separately via `refunds.tax_refund` (defect 5).
+    const taxRows = await rawClient.$queryRaw<Array<{
+      tax_type: string;
+      tax_name: string;
+      tax_rate: string | number;
+      is_compound: boolean;
+      total_tax: string | number;
+      taxable_amount: string | number;
+    }>>(Prisma.sql`
+      SELECT
+        COALESCE(oit.tax_type::text, 'unclassified') AS tax_type,
+        oit.tax_name AS tax_name,
+        oit.tax_rate AS tax_rate,
+        COALESCE(oit.is_compound, false) AS is_compound,
+        SUM(oit.tax_amount)::decimal AS total_tax,
+        CASE
+          WHEN oit.tax_rate > 0
+            THEN SUM(oit.tax_amount) / (oit.tax_rate / 100)
+          ELSE 0
+        END::decimal AS taxable_amount
+      FROM order_item_taxes oit
+      -- The join from order_item_taxes to order_items is a per-item fan-in
+      -- (each tax row belongs to exactly one item); SUM aggregates per-tax rows
+      -- AFTER GROUP BY, not order-level columns, so the order fan-out rule
+      -- does not apply here.
+      JOIN order_items oi ON oit.order_item_id = oi.id -- tz-audit:ignore
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN (${revenueStates})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+      GROUP BY
+        COALESCE(oit.tax_type::text, 'unclassified'),
+        oit.tax_name,
+        oit.tax_rate,
+        COALESCE(oit.is_compound, false)
+    `);
 
-    for (const item of orderItems) {
-      const itemTotal = Number(item.total_price || 0);
-      totalTaxableRevenue += itemTotal;
+    // Defect 3: separate the period's line totals into "items that carry at
+    // least one tax row" (taxable_revenue) and "items that carry none"
+    // (exempt_revenue). The OLD code summed ALL `order_items.total_price`
+    // regardless of whether the item had taxes, which dragged the effective
+    // tax rate DOWN whenever the catalog contained any exempt product.
+    const revenueRows = await rawClient.$queryRaw<Array<{
+      taxable_revenue: string | number;
+      exempt_revenue: string | number;
+    }>>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN taxed.id IS NOT NULL THEN oi.total_price END), 0)::decimal
+          AS taxable_revenue,
+        COALESCE(SUM(CASE WHEN taxed.id IS NULL THEN oi.total_price END), 0)::decimal
+          AS exempt_revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT oit.id
+        FROM order_item_taxes oit
+        WHERE oit.order_item_id = oi.id
+        LIMIT 1
+      ) AS taxed ON true
+      WHERE o.store_id = ${storeId}
+        AND o.state IN (${revenueStates})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+    `);
 
-      for (const tax of item.order_item_taxes) {
-        const taxName = tax.tax_name;
-        const existing = taxBreakdown.get(taxName) || {
-          tax_name: taxName,
-          tax_type: tax.tax_type ?? 'iva',
-          tax_rate: Number(tax.tax_rate || 0),
-          total_tax: 0,
-          taxable_amount: 0,
-          is_compound: tax.is_compound || false,
-        };
-        existing.total_tax += Number(tax.tax_amount || 0);
-        existing.taxable_amount += itemTotal;
-        taxBreakdown.set(taxName, existing);
-      }
-    }
+    const taxableRevenue = Number(revenueRows[0]?.taxable_revenue ?? 0);
+    const exemptRevenue = Number(revenueRows[0]?.exempt_revenue ?? 0);
 
-    // Get tax refunds
+    // Tax refunds remain on the `refunds` table (cross-period subtraction is a
+    // known limitation, see ticket defect 5 — handling refund-period match is
+    // out of scope for this ticket).
     const taxRefunds = await this.prisma.refunds.aggregate({
       where: {
         state: { in: ['completed', 'approved'] },
@@ -213,7 +247,7 @@ export class FinancialAnalyticsService {
         tax_refund: true,
       },
     });
-    const totalTaxRefunded = this.round2(Number(taxRefunds._sum.tax_refund || 0));
+    const totalTaxRefunded = this.round2(Number(taxRefunds._sum.tax_refund ?? 0));
 
     // DATA-CELL-2: round each breakdown row FIRST, then derive the collected
     // total from the SUM of those rounded rows. Previously the total accumulated
@@ -222,27 +256,29 @@ export class FinancialAnalyticsService {
     // detail rows by cents. Deriving the total from the rounded breakdown
     // guarantees the reconciliation invariant
     // `sum(breakdown[].total_tax) === total_tax_collected`.
-    const breakdown = Array.from(taxBreakdown.values()).map((b) => ({
+    const breakdown = taxRows.map((b) => ({
       tax_name: b.tax_name,
       tax_type: b.tax_type,
-      tax_rate: this.round2(b.tax_rate),
-      total_tax: this.round2(b.total_tax),
-      taxable_amount: this.round2(b.taxable_amount),
+      tax_rate: this.round2(Number(b.tax_rate)),
+      total_tax: this.round2(Number(b.total_tax)),
+      taxable_amount: this.round2(Number(b.taxable_amount)),
       is_compound: b.is_compound,
     }));
     const totalTaxCollected = this.round2(
       breakdown.reduce((sum, b) => sum + b.total_tax, 0),
     );
-    const totalTaxableRevenueRounded = this.round2(totalTaxableRevenue);
+    const taxableRevenueRounded = this.round2(taxableRevenue);
+    const exemptRevenueRounded = this.round2(exemptRevenue);
 
     return {
       total_tax_collected: totalTaxCollected,
       total_tax_refunded: totalTaxRefunded,
       net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
-      total_taxable_revenue: totalTaxableRevenueRounded,
+      total_taxable_revenue: taxableRevenueRounded,
+      exempt_revenue: exemptRevenueRounded,
       effective_tax_rate:
-        totalTaxableRevenueRounded > 0
-          ? this.round2((totalTaxCollected / totalTaxableRevenueRounded) * 100)
+        taxableRevenueRounded > 0
+          ? this.round2((totalTaxCollected / taxableRevenueRounded) * 100)
           : 0,
       breakdown,
     };

@@ -28,6 +28,7 @@ import { SubscriptionTrialService } from '../../store/subscriptions/services/sub
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 import { SettingsService } from '../../store/settings/settings.service';
 import { SettingsService as OrgSettingsService } from '../settings/settings.service';
+import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
 import {
   normalizeFiscalStatusBlock,
   type FiscalStatusBlock,
@@ -1731,7 +1732,7 @@ export class OnboardingWizardService {
       const baseMethods =
         await this.prismaService.system_payment_methods.findMany({
           where: {
-            name: { in: ['cash', 'payment_vouchers'] },
+            name: { in: [...BASE_SYSTEM_PAYMENT_METHOD_NAMES] },
             is_active: true,
           },
         });

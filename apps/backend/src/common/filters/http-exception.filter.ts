@@ -35,14 +35,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (resp?.error_code) errorCode = resp.error_code;
       details = resp?.details;
 
+      // QUI-606: si el exceptionFactory del ValidationPipe global (en
+      // main.ts) ya produjo un `validationErrors[]` con shape canónico
+      // (caso bulk customers), lo preservamos tal cual bajo `details`.
+      if (Array.isArray(resp?.validationErrors)) {
+        details = { ...(details || {}), validationErrors: resp.validationErrors };
+      }
+
       const rawMessage =
         resp && typeof resp === 'object'
           ? (resp.message ?? resp.error ?? exception.message)
           : (resp ?? exception.message);
 
       if (Array.isArray(rawMessage)) {
-        errorCode = 'SYS_VALIDATION_001';
-        details = { validationErrors: rawMessage };
+        if (!errorCode) errorCode = 'SYS_VALIDATION_001';
+        // Para el path no-bulk seguimos exponiendo el array de strings
+        // estándar de NestJS, pero bajo `details.validationErrors` para
+        // que el frontend tenga un único punto de lectura.
+        if (!details?.validationErrors) {
+          details = { ...(details || {}), validationErrors: rawMessage };
+        }
         message = 'Validation failed';
       } else if (typeof rawMessage === 'string') {
         message = rawMessage;

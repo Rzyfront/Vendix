@@ -14,6 +14,10 @@ type MockStorePrismaService = {
   expenses: { aggregate: jest.Mock };
   cash_register_sessions: { findMany: jest.Mock };
   store_settings: { findFirst: jest.Mock };
+  // QUI-630: getTaxSummary moved to $queryRaw. Each call returns the rows the
+  // SQL would have produced; the first call is the GROUP BY for taxes, the
+  // second is the taxable/exempt split.
+  $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
 
@@ -43,6 +47,7 @@ describe('FinancialAnalyticsService', () => {
       expenses: { aggregate: jest.fn() },
       cash_register_sessions: { findMany: jest.fn() },
       store_settings: { findFirst: jest.fn() },
+      $queryRaw: jest.fn(),
       withoutScope: jest.fn(),
     } as MockStorePrismaService;
 
@@ -51,10 +56,20 @@ describe('FinancialAnalyticsService', () => {
     // tz-aware parseDateRange path runs (the legacy UTC path is not used here).
     prisma.store_settings.findFirst.mockResolvedValue(null);
 
-    // withoutScope().$queryRaw is used for the COGS raw SQL.
+    // QUI-630: the unscoped prisma client returned by withoutScope() is the
+    // surface that getTaxSummary calls $queryRaw on. Share the mock function
+    // across both the top-level `prisma.$queryRaw` and the `withoutScope()`
+    // client so each test can set up its own per-call responses via
+    // `mockResolvedValueOnce` on a SINGLE jest.fn().
+    const queryRawMock = prisma.$queryRaw;
     prisma.withoutScope.mockReturnValue({
-      $queryRaw: jest.fn().mockResolvedValue([{ cogs: 0 }]),
+      $queryRaw: queryRawMock,
     });
+    // Default empty responses for the two queries; individual tests override
+    // these with mockResolvedValueOnce.
+    queryRawMock.mockResolvedValue([]);
+    // Re-bind after the previous mockResolvedValue to keep the default in sync.
+    prisma.withoutScope.mockReturnValue({ $queryRaw: queryRawMock });
 
     // Default currency lookup for the financial export (overridable per test).
     prisma.orders.findFirst.mockResolvedValue({ currency: 'COP' });
@@ -253,76 +268,160 @@ describe('FinancialAnalyticsService', () => {
   });
 
   describe('getTaxSummary', () => {
-    it('mirror: refunded-only period nets tax to 0 (not negative)', async () => {
-      prisma.order_items.findMany.mockResolvedValue([
+    it('QUI-630 defect 1+2: base is derived from each tax row (tax/rate), NOT the item total — a line with two taxes splits its base correctly', async () => {
+      // SQL output for one item that carries IVA 19% (tax=190) and INC 8% (tax=80).
+      // Item total = 1000, but each tax's base must be derived from the tax's own
+      // amount/rate: 190/0.19 = 1000, 80/0.08 = 1000. Before the fix the OLD code
+      // summed `item.total_price` per tax row, so the IVA row would show base=1000
+      // AND the INC row would show base=1000 (same item), inflating the aggregate.
+      prisma.$queryRaw.mockResolvedValueOnce([
         {
-          id: 1,
-          total_price: 2500,
-          tax_amount_item: 475,
-          order_item_taxes: [
-            {
-              tax_name: 'IVA 19%',
-              tax_rate: 19,
-              tax_amount: 475,
-              tax_type: 'iva',
-              is_compound: false,
-            },
-          ],
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'inc',
+          tax_name: 'INC 8%',
+          tax_rate: 8,
+          is_compound: false,
+          total_tax: '80.000',
+          taxable_amount: '1000.0000000000',
         },
       ]);
-      prisma.refunds.aggregate.mockResolvedValue({
-        _sum: { tax_refund: 475 },
-      });
-
-      const result = await service.getTaxSummary(QUERY as any);
-
-      expect(result.total_tax_collected).toBe(475);
-      expect(result.total_tax_refunded).toBe(475);
-      expect(result.net_tax).toBe(0);
-    });
-
-    it('DATA-CELL-2: total_tax_collected equals the SUM of the rounded breakdown rows', async () => {
-      prisma.order_items.findMany.mockResolvedValue([
-        {
-          id: 1,
-          total_price: 1000,
-          tax_amount_item: 138.126,
-          order_item_taxes: [
-            {
-              tax_name: 'IVA 19%',
-              tax_rate: 19,
-              tax_amount: 138.126,
-              tax_type: 'iva',
-              is_compound: false,
-            },
-          ],
-        },
-        {
-          id: 2,
-          total_price: 1200,
-          tax_amount_item: 139.514,
-          order_item_taxes: [
-            {
-              tax_name: 'INC 8%',
-              tax_rate: 8,
-              tax_amount: 139.514,
-              tax_type: 'inc',
-              is_compound: false,
-            },
-          ],
-        },
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
       ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
 
-      // Each breakdown row is rounded to 2 decimals ...
+      const ivaRow = result.breakdown.find((b) => b.tax_name === 'IVA 19%');
+      const incRow = result.breakdown.find((b) => b.tax_name === 'INC 8%');
+      // Per-tax base derived from its OWN amount/rate, not duplicated from item.
+      expect(ivaRow?.taxable_amount).toBe(1000);
+      expect(incRow?.taxable_amount).toBe(1000);
+      // taxable_revenue only counts items WITH at least one tax row.
+      expect(result.total_taxable_revenue).toBe(1000);
+      expect(result.exempt_revenue).toBe(0);
+      expect(result.total_tax_collected).toBe(270);
+    });
+
+    it('QUI-630 defect 3: exempt_revenue is separate and does NOT dilute effective_tax_rate', async () => {
+      // 1 item with tax (1000 base, 190 tax) and 1 exempt item (500, no taxes).
+      // OLD code: taxable_revenue = 1500, effective_rate = 190/1500 = 12.67%
+      // NEW code: taxable_revenue = 1000, exempt_revenue = 500, effective_rate = 19%
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '500.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.total_taxable_revenue).toBe(1000);
+      expect(result.exempt_revenue).toBe(500);
+      expect(result.effective_tax_rate).toBe(19);
+    });
+
+    it('QUI-630 defect 5: refunded orders are EXCLUDED from tax collected (defect: their tax was already collected when delivered)', async () => {
+      // Period with one delivered order (tax 190) and one refunded order (tax 50).
+      // The SQL behind $queryRaw was already filtered by COMPLETED_SALE_STATES
+      // (no `refunded`), so only the 190 reaches the aggregate. The refund
+      // subtracts separately via `refunds.tax_refund`.
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: { tax_refund: 50 },
+      });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      // The refunded order's 50 is NOT in collected (it's not in the GROUP BY
+      // because `orders.state IN ('delivered','finished')` excludes 'refunded').
+      expect(result.total_tax_collected).toBe(190);
+      // It IS subtracted as a refund.
+      expect(result.total_tax_refunded).toBe(50);
+      expect(result.net_tax).toBe(140);
+    });
+
+    it('QUI-630 defect 7: tax_type NULL is surfaced as `unclassified` (never silently classified as `iva`)', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'unclassified', // already COALESCEd in SQL
+          tax_name: 'Unknown tax',
+          tax_rate: 5,
+          is_compound: false,
+          total_tax: '50.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      const row = result.breakdown.find((b) => b.tax_name === 'Unknown tax');
+      expect(row?.tax_type).toBe('unclassified');
+    });
+
+    it('DATA-CELL-2: total_tax_collected equals the SUM of the rounded breakdown rows (regression check)', async () => {
+      // Three rows with unrounded tax amounts that will round to 2 decimals.
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '138.126',
+          taxable_amount: '727.0000000000',
+        },
+        {
+          tax_type: 'inc',
+          tax_name: 'INC 8%',
+          tax_rate: 8,
+          is_compound: false,
+          total_tax: '139.514',
+          taxable_amount: '1743.9250000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1743.925', exempt_revenue: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
       const ivaRow = result.breakdown.find((b) => b.tax_name === 'IVA 19%');
       const incRow = result.breakdown.find((b) => b.tax_name === 'INC 8%');
       expect(ivaRow?.total_tax).toBe(138.13);
       expect(incRow?.total_tax).toBe(139.51);
 
-      // ... and the collected total is the SUM of those rounded rows.
       const detailSum = result.breakdown.reduce((s, b) => s + b.total_tax, 0);
       expect(round2(detailSum)).toBe(result.total_tax_collected);
       expect(result.total_tax_collected).toBe(277.64);
@@ -331,35 +430,28 @@ describe('FinancialAnalyticsService', () => {
 
   describe('getTaxSummaryForExport', () => {
     beforeEach(() => {
-      prisma.order_items.findMany.mockResolvedValue([
+      // Two rows that match the SQL GROUP BY output: one IVA, one INC, each
+      // with unrounded tax amounts that round to 2 decimals.
+      prisma.$queryRaw.mockResolvedValueOnce([
         {
-          id: 1,
-          total_price: 1000,
-          tax_amount_item: 138.126,
-          order_item_taxes: [
-            {
-              tax_name: 'IVA 19%',
-              tax_rate: 19,
-              tax_amount: 138.126,
-              tax_type: 'iva',
-              is_compound: false,
-            },
-          ],
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '138.126',
+          taxable_amount: '727.0000000000',
         },
         {
-          id: 2,
-          total_price: 1200,
-          tax_amount_item: 139.514,
-          order_item_taxes: [
-            {
-              tax_name: 'INC 8%',
-              tax_rate: 8,
-              tax_amount: 139.514,
-              tax_type: 'inc',
-              is_compound: false,
-            },
-          ],
+          tax_type: 'inc',
+          tax_name: 'INC 8%',
+          tax_rate: 8,
+          is_compound: false,
+          total_tax: '139.514',
+          taxable_amount: '1743.9250000000',
         },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1743.925', exempt_revenue: '0.000' },
       ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
     });
