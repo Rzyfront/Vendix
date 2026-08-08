@@ -2280,6 +2280,20 @@ export class SubscriptionFiscalService {
         ? this.splitCustomerNit(org).dv
         : undefined,
       customer_person_type: org?.person_type ?? undefined,
+      // `customer_regime` NO declara el régimen de IVA del adquiriente, pese al
+      // nombre. Alimenta `normalizePartyAccountType`, que produce '1' o '2' para
+      // `cbc:AdditionalAccountID` (Persona Jurídica / Natural) y decide por
+      // `document_type` cuando el valor no es reconocible — así que con un NIT
+      // (document_type '31') devuelve '1' tanto para '49' como para 'COMUN'.
+      //
+      // El régimen de IVA del adquiriente viaja por otro camino:
+      // `cbc:TaxLevelCode`, que el builder construye desde
+      // `customer_tax_responsibilities?.[0] || 'R-99-PN'` (ubl-common.builder.ts).
+      // Ver también su nota: «The tax regime ('48'/'49') belongs in TaxLevelCode,
+      // not here.»
+      //
+      // Por eso el default '49' no declara nada falso, y derivarlo con
+      // `isVatResponsible` no cambiaría el XML: parecería un arreglo sin serlo.
       customer_regime: org?.tax_regime ?? '49',
       customer_tax_responsibilities: org?.fiscal_responsibilities?.length
         ? org.fiscal_responsibilities
