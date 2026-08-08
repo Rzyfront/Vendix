@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { InvoiceLineItem, InvoiceSplitBreakdown } from '../types/billing.types';
 
 /**
@@ -45,7 +46,15 @@ export class SubscriptionInvoicePdfService {
         store_subscription: {
           include: {
             plan: true,
-            store: { include: { organizations: true } },
+            store: {
+              include: {
+                organizations: {
+                  include: {
+                    organization_settings: { select: { settings: true } },
+                  },
+                },
+              },
+            },
           },
         },
         payments: {
@@ -72,6 +81,8 @@ export class SubscriptionInvoicePdfService {
 
     const store = invoice.store_subscription.store;
     const organization = store.organizations;
+    const fiscalData = ((organization?.organization_settings as any)?.settings
+      ?.fiscal_data ?? null) as Record<string, unknown> | null;
 
     const lineItems: InvoiceLineItem[] = Array.isArray(invoice.line_items)
       ? (invoice.line_items as unknown as InvoiceLineItem[])
@@ -93,8 +104,12 @@ export class SubscriptionInvoicePdfService {
       store: { name: store.name, code: store.store_code ?? null },
       organization: {
         name: organization?.name ?? '',
-        legal_name: organization?.legal_name ?? null,
-        tax_id: organization?.tax_id ?? null,
+        // NIT y razón social resueltos por el resolvedor único. Antes el PDF
+        // de la factura de suscripción leía `organization.legal_name` /
+        // `organization.tax_id` (columnas, no JSON), que podían estar vacías o
+        // rancio. Ahora `fiscal_data` gana a la columna.
+        legal_name: this.resolveLegalName(organization, fiscalData),
+        tax_id: this.resolveTaxId(organization, fiscalData),
         email: organization?.email ?? null,
       },
       planName: invoice.store_subscription.plan?.name ?? null,
@@ -633,6 +648,57 @@ export class SubscriptionInvoicePdfService {
       case 'issued':
       default:
         return { bg: '#EFF6FF', border: '#BFDBFE', fg: '#1D4ED8' };
+    }
+  }
+
+  /**
+   * Resuelve la razón social vía el resolvedor único (`fiscal_data` gana a
+   * `organizations.legal_name`). Si lanza (paso 2), cae a la columna como
+   * respaldo — el PDF de la factura de suscripción debe poder generarse
+   * aunque la identidad fiscal esté incompleta.
+   */
+  private resolveLegalName(
+    organization: any,
+    fiscalData: Record<string, unknown> | null,
+  ): string | null {
+    try {
+      const identity = resolveTenantFiscalIdentity({
+        nit: organization?.tax_id ?? '',
+        fiscal_data: fiscalData,
+        organization: organization
+          ? {
+              legal_name: organization.legal_name,
+              name: organization.name,
+            }
+          : null,
+      });
+      return identity.legal_name ?? null;
+    } catch {
+      return organization?.legal_name ?? null;
+    }
+  }
+
+  /**
+   * Resuelve el NIT vía el resolvedor único. Si lanza, cae a la columna.
+   */
+  private resolveTaxId(
+    organization: any,
+    fiscalData: Record<string, unknown> | null,
+  ): string | null {
+    try {
+      const identity = resolveTenantFiscalIdentity({
+        nit: organization?.tax_id ?? '',
+        fiscal_data: fiscalData,
+        organization: organization
+          ? {
+              legal_name: organization.legal_name,
+              name: organization.name,
+            }
+          : null,
+      });
+      return identity.nit || null;
+    } catch {
+      return organization?.tax_id ?? null;
     }
   }
 }

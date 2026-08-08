@@ -3,6 +3,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { S3Service } from '../../../../common/services/s3.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   BANK_BATCH_BUILDER_REGISTRY,
   BankBatchBuilder,
@@ -122,14 +123,51 @@ export class PayrollBankExportService {
       );
     }
 
-    // 5. Get organization data
+    // 5. Get organization data + NIT resuelto por el resolvedor único
+    // (`resolveTenantFiscalIdentity`). `fiscal_data` gana a la columna
+    // `organizations.tax_id` — un archivo bancario con un NIT rancio o vacío
+    // es un dato legal falso entregado a un banco.
     const context = RequestContextService.getContext();
     const organization = await this.prisma.organizations.findFirst({
       where: { id: context?.organization_id },
-      select: { id: true, name: true, tax_id: true },
+      select: {
+        id: true,
+        name: true,
+        tax_id: true,
+        legal_name: true,
+        organization_settings: { select: { settings: true } },
+      },
     });
 
-    if (!organization?.tax_id) {
+    if (!organization) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        'Organization is required for ACH export.',
+      );
+    }
+
+    const fiscalData = (
+      (organization.organization_settings?.settings as any)?.fiscal_data ??
+        null
+    ) as Record<string, unknown> | null;
+
+    let companyNit = organization.tax_id || '';
+    try {
+      const identity = resolveTenantFiscalIdentity({
+        nit: organization.tax_id || '',
+        fiscal_data: fiscalData,
+        organization: {
+          legal_name: organization.legal_name,
+          name: organization.name,
+        },
+      });
+      if (identity.nit) companyNit = identity.nit;
+    } catch {
+      // Si el resolvedor lanza, caemos al valor de la columna. El export
+      // bancario debe poder emitirse aunque `fiscal_data` esté incompleto.
+    }
+
+    if (!companyNit) {
       throw new VendixHttpException(
         ErrorCodes.PAYROLL_STATUS_001,
         'Organization tax ID (NIT) is required for ACH export. Please configure it in organization settings.',
@@ -144,7 +182,7 @@ export class PayrollBankExportService {
         payroll_run_id,
         payroll_number: payroll_run.payroll_number,
         company_name: organization.name,
-        company_nit: organization.tax_id,
+        company_nit: companyNit,
         payment_date: payroll_run.payment_date || new Date(),
         total_amount,
         record_count: employees.length,

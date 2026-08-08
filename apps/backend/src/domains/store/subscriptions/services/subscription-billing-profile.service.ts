@@ -3,6 +3,7 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { computeNitDv, normalizeNit } from '@common/utils/nit.util';
 import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.constants';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
 
 /**
@@ -175,9 +176,11 @@ export class SubscriptionBillingProfileService {
         email: true,
         document_type: true,
         verification_digit: true,
+        name: true,
         person_type: true,
         tax_regime: true,
         fiscal_responsibilities: true,
+        organization_settings: { select: { settings: true } },
         addresses: {
           where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
@@ -201,6 +204,30 @@ export class SubscriptionBillingProfileService {
       this.fiscalModuleActive(organizationId),
     ]);
 
+    const orgFiscalData = ((org?.organization_settings as any)?.settings
+      ?.fiscal_data ?? null) as Record<string, unknown> | null;
+
+    // NIT y razón social resueltos por el resolvedor único (no se calculan dos
+    // veces). Si lanza, caemos a la columna — el perfil de facturación debe
+    // poder leerse aunque la identidad fiscal esté incompleta.
+    let resolvedNit: string | null = org?.tax_id ?? null;
+    let resolvedNitDv: string | null = org?.verification_digit ?? null;
+    let resolvedLegalName: string | null = org?.legal_name ?? null;
+    try {
+      const identity = resolveTenantFiscalIdentity({
+        nit: org?.tax_id ?? '',
+        fiscal_data: orgFiscalData,
+        organization: org
+          ? { legal_name: org.legal_name, name: org.name }
+          : null,
+      });
+      resolvedNit = identity.nit || resolvedNit;
+      resolvedNitDv = identity.nit_dv || resolvedNitDv;
+      resolvedLegalName = identity.legal_name || resolvedLegalName;
+    } catch {
+      // Mantener los valores de columna como respaldo.
+    }
+
     return {
       // `enabled: false` means the checkout must not render the fiscal section
       // at all — not that the data is missing.
@@ -209,11 +236,11 @@ export class SubscriptionBillingProfileService {
       locked: complete && fiscalActive,
       profile: org
         ? {
-            legal_name: org.legal_name,
-            tax_id: org.tax_id,
+            legal_name: resolvedLegalName ?? org.legal_name,
+            tax_id: resolvedNit ?? org.tax_id,
             email: org.email,
             document_type: org.document_type,
-            verification_digit: org.verification_digit,
+            verification_digit: resolvedNitDv ?? org.verification_digit,
             person_type: org.person_type,
             tax_regime: org.tax_regime,
             fiscal_responsibilities: org.fiscal_responsibilities,
@@ -289,6 +316,7 @@ export class SubscriptionBillingProfileService {
         email: true,
         document_type: true,
         verification_digit: true,
+        name: true,
         addresses: {
           where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],

@@ -33,6 +33,7 @@ import {
   buildTenantFiscalColumns,
   mergeFiscalData,
 } from '@common/helpers/organization-fiscal-columns.helper';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import {
   SETTINGS_TRANSITION_GUARDS,
@@ -1135,7 +1136,7 @@ export class SettingsService {
           }),
         this.prisma.withoutScope().organizations.findUnique({
           where: { id: organization_id },
-          select: { legal_name: true, tax_id: true },
+          select: { legal_name: true, tax_id: true, name: true },
         }),
       ]);
       const orgFiscal = ((orgSettings?.settings as any)?.fiscal_data ??
@@ -1145,19 +1146,47 @@ export class SettingsService {
       const orgTaxIdDv = orgFiscal.tax_id_dv ?? orgFiscal.nit_dv;
       const orgNitType = orgFiscal.nit_type;
 
+      // Antes del paso 5 del plan, este return vivía con su propia cascada de
+      // respaldos store→org. Esa cascada podía divergir de la del resolvedor
+      // único (ej: `nit_dv` se concatenaba al NIT sin re-derivar). El
+      // resolvedor decide precedencias — `fiscal_data` gana a la columna — y
+      // expone un contrato ancho con campos crudos; lo proyectamos a la forma
+      // que el formulario de tienda espera.
+      let resolvedLegalName: unknown = storeLevel.legal_name;
+      let resolvedNit: unknown = storeLevel.tax_id ?? storeLevel.nit;
+      let resolvedNitDv: unknown = storeLevel.tax_id_dv ?? storeLevel.nit_dv;
+      let resolvedNitType: unknown = storeLevel.nit_type;
+      try {
+        const identity = resolveTenantFiscalIdentity({
+          nit: (orgTaxId as string) ?? '',
+          fiscal_data: orgFiscal,
+          organization: organization
+            ? { legal_name: organization.legal_name, name: organization.name }
+            : null,
+        });
+        resolvedLegalName = identity.legal_name ?? resolvedLegalName;
+        resolvedNit = identity.nit || resolvedNit;
+        resolvedNitDv = identity.nit_dv || resolvedNitDv;
+        resolvedNitType = identity.nit_type || resolvedNitType;
+      } catch {
+        // El resolvedor lanza si `municipality_code` o `department` faltan
+        // (paso 2). Mantenemos la cascada previa como respaldo para no romper
+        // el GET del wizard.
+      }
+
       return {
         ...storeLevel,
         legal_name: blank(storeLevel.legal_name)
-          ? orgLegalName
+          ? resolvedLegalName
           : storeLevel.legal_name,
-        nit: blank(storeLevel.nit) ? orgTaxId : storeLevel.nit,
-        nit_dv: blank(storeLevel.nit_dv) ? orgTaxIdDv : storeLevel.nit_dv,
-        tax_id: blank(storeLevel.tax_id) ? orgTaxId : storeLevel.tax_id,
+        nit: blank(storeLevel.nit) ? resolvedNit : storeLevel.nit,
+        nit_dv: blank(storeLevel.nit_dv) ? resolvedNitDv : storeLevel.nit_dv,
+        tax_id: blank(storeLevel.tax_id) ? resolvedNit : storeLevel.tax_id,
         tax_id_dv: blank(storeLevel.tax_id_dv)
-          ? orgTaxIdDv
+          ? resolvedNitDv
           : storeLevel.tax_id_dv,
         nit_type: blank(storeLevel.nit_type)
-          ? orgNitType
+          ? resolvedNitType
           : storeLevel.nit_type,
       } as StoreSettings['fiscal_data'];
     }

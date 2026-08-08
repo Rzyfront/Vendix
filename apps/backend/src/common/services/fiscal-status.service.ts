@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../errors';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   FiscalArea,
   FiscalDetectorSignals,
@@ -453,30 +454,38 @@ export class FiscalStatusService {
     // Identity fields prefer the scope-aware fiscal_data JSON the dashboard
     // writes, falling back to DIAN config (NIT/DV/type) and the organization
     // record. DIAN owns the canonical NIT once a config exists.
+    //
+    // Antes del paso 5 del plan, esta cascada vivía con su propia implementación
+    // que duplicaba la del resolvedor único. La reemplazamos por
+    // `resolveTenantFiscalIdentity` para que la decisión de precedencias viva
+    // en un solo lugar — si el JSON trae `nit_dv` rancio, el cálculo derivado
+    // gana. Si el resolvedor lanza (paso 2: municipio/departamento/razón social
+    // faltante), caemos al `dian_configurations` NIT como respaldo.
+    let identityLegalName: string | null = null;
+    let identityNit: string | null = null;
+    let identityNitDv: string | null = null;
+    try {
+      const identity = resolveTenantFiscalIdentity({
+        nit: dian?.nit ?? organization.tax_id ?? '',
+        fiscal_data: fiscalData ?? null,
+        organization: {
+          legal_name: organization.legal_name,
+          name: organization.name,
+        },
+      });
+      identityLegalName = identity.legal_name;
+      identityNit = identity.nit;
+      identityNitDv = identity.nit_dv;
+    } catch {
+      // Caer al comportamiento previo si el resolvedor no puede.
+    }
+
     const legal_name =
-      (typeof fiscalData?.legal_name === 'string'
-        ? fiscalData.legal_name
-        : null) ??
-      organization.legal_name ??
-      null;
-    const tax_id =
-      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
-      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
-      organization.tax_id ??
-      null;
+      identityLegalName ?? organization.legal_name ?? null;
+    const tax_id = identityNit ?? organization.tax_id ?? null;
     const nit =
-      dian?.nit ??
-      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
-      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
-      organization.tax_id ??
-      null;
-    const nit_dv =
-      dian?.nit_dv ??
-      (typeof fiscalData?.nit_dv === 'string' ? fiscalData.nit_dv : null) ??
-      (typeof fiscalData?.tax_id_dv === 'string'
-        ? fiscalData.tax_id_dv
-        : null) ??
-      null;
+      dian?.nit ?? identityNit ?? organization.tax_id ?? null;
+    const nit_dv = identityNitDv ?? dian?.nit_dv ?? null;
     const nit_type =
       (dian?.nit_type ? String(dian.nit_type) : null) ??
       (typeof fiscalData?.nit_type === 'string' ? fiscalData.nit_type : null) ??
