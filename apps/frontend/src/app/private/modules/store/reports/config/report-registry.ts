@@ -626,7 +626,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
       { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
       { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'status_label', header: 'Estado', type: 'text' },
       { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
     ],
     exportFilename: 'stock_bajo',
@@ -1362,7 +1362,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'recognized_count', label: '# Reconocidos', type: 'number', icon: 'check-circle' },
     ],
     dataEndpoint: 'store/analytics/expenses/summary',
-    exportEndpoint: 'store/analytics/expenses/summary',
+    exportEndpoint: 'store/analytics/expenses/summary/export',
   },
   {
     id: 'expenses-by-category',
@@ -1392,7 +1392,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: '_count', label: 'Categorías', type: 'number', icon: 'tag' },
     ],
     dataEndpoint: 'store/analytics/expenses/by-category',
-    exportEndpoint: 'store/analytics/expenses/by-category',
+    exportEndpoint: 'store/analytics/expenses/by-category/export',
   },
   {
     id: 'expenses-detail',
@@ -1429,7 +1429,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: '_count', label: 'Total Movimientos', type: 'number', icon: 'list' },
     ],
     dataEndpoint: 'store/analytics/expenses/detail',
-    exportEndpoint: 'store/analytics/expenses/detail',
+    exportEndpoint: 'store/analytics/expenses/detail/export',
   },
 
   {

@@ -16,6 +16,7 @@ import {
 } from '@common/reports/report-column.types';
 import { formatCellDate } from '@common/reports/report-builder';
 import { ExpensesAnalyticsService } from './expenses-analytics.service';
+import { ResponseService } from '../../../../common/responses/response.service';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
@@ -33,6 +34,7 @@ export class ExpensesAnalyticsController {
   constructor(
     private readonly expenses_analytics_service: ExpensesAnalyticsService,
     private readonly prisma: StorePrismaService,
+    private readonly response_service: ResponseService,
   ) {}
 
   private async resolveReportTz(): Promise<string> {
@@ -49,6 +51,14 @@ export class ExpensesAnalyticsController {
    * Resumen agregado del período: totales por estado, count, promedio.
    */
   @Get('summary')
+  @Permissions('store:analytics:read')
+  async getExpensesSummary(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.expenses_analytics_service.getExpensesSummaryForExport(query);
+    return this.response_service.success(rows);
+  }
+
+  @Get('summary/export')
   @Permissions('store:analytics:read')
   async exportExpensesSummary(
     @Query() query: AnalyticsQueryDto,
@@ -78,6 +88,14 @@ export class ExpensesAnalyticsController {
    */
   @Get('by-category')
   @Permissions('store:analytics:read')
+  async getExpensesByCategory(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.expenses_analytics_service.getExpensesByCategoryForExport(query);
+    return this.response_service.success(rows);
+  }
+
+  @Get('by-category/export')
+  @Permissions('store:analytics:read')
   async exportExpensesByCategory(
     @Query() query: AnalyticsQueryDto,
     @Res() res: Response,
@@ -101,6 +119,14 @@ export class ExpensesAnalyticsController {
    * Detalle crudo de gastos (un row por expense) para análisis granular.
    */
   @Get('detail')
+  @Permissions('store:analytics:read')
+  async getExpensesDetail(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.expenses_analytics_service.getExpensesDetailForExport(query);
+    return this.response_service.success(rows);
+  }
+
+  @Get('detail/export')
   @Permissions('store:analytics:read')
   async exportExpensesDetail(
     @Query() query: AnalyticsQueryDto,

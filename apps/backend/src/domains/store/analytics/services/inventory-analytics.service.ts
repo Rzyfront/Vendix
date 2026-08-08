@@ -428,6 +428,8 @@ export class InventoryAnalyticsService {
         const reorderPoint = resolveProductLowStockThreshold(settings, product);
         const minLevel = Number(product.min_stock_level || 0);
         const cost = Number(product.cost_price || 0);
+        const status = qty === 0 ? 'out_of_stock' : 'low_stock';
+        const statusLabel = qty === 0 ? 'Sin Stock' : 'Stock Bajo';
         return {
           product_id: product.id,
           product_name: product.name,
@@ -436,7 +438,8 @@ export class InventoryAnalyticsService {
           stock_quantity: qty,
           min_stock_level: minLevel,
           reorder_point: reorderPoint,
-          status: qty === 0 ? 'out_of_stock' : 'low_stock',
+          status,
+          status_label: statusLabel,
           stock_value_at_risk: Math.round(qty * cost * 100) / 100,
         };
       });
