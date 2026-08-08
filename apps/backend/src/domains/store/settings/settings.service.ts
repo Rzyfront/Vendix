@@ -33,7 +33,7 @@ import {
   buildTenantFiscalColumns,
   mergeFiscalData,
 } from '@common/helpers/organization-fiscal-columns.helper';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import {
   SETTINGS_TRANSITION_GUARDS,
@@ -1152,27 +1152,30 @@ export class SettingsService {
       // resolvedor decide precedencias — `fiscal_data` gana a la columna — y
       // expone un contrato ancho con campos crudos; lo proyectamos a la forma
       // que el formulario de tienda espera.
-      let resolvedLegalName: unknown = storeLevel.legal_name;
-      let resolvedNit: unknown = storeLevel.tax_id ?? storeLevel.nit;
-      let resolvedNitDv: unknown = storeLevel.tax_id_dv ?? storeLevel.nit_dv;
-      let resolvedNitType: unknown = storeLevel.nit_type;
-      try {
-        const identity = resolveTenantFiscalIdentity({
-          nit: (orgTaxId as string) ?? '',
-          fiscal_data: orgFiscal,
-          organization: organization
-            ? { legal_name: organization.legal_name, name: organization.name }
-            : null,
-        });
-        resolvedLegalName = identity.legal_name ?? resolvedLegalName;
-        resolvedNit = identity.nit || resolvedNit;
-        resolvedNitDv = identity.nit_dv || resolvedNitDv;
-        resolvedNitType = identity.nit_type || resolvedNitType;
-      } catch {
-        // El resolvedor lanza si `municipality_code` o `department` faltan
-        // (paso 2). Mantenemos la cascada previa como respaldo para no romper
-        // el GET del wizard.
-      }
+      // Esta es una superficie de LECTURA: el GET que llena el formulario fiscal
+      // del wizard. Se usa el resolvedor PERMISIVO, no el estricto envuelto en
+      // try/catch: el tenant abre este formulario justamente porque le faltan
+      // datos, así que un campo ausente es el estado NORMAL aquí, no una
+      // excepción. Con el estricto había que atrapar el throw para no romper el
+      // GET — control de flujo por excepción para un caso esperado.
+      // Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
+      const { identity } = tryResolveTenantFiscalIdentity({
+        nit: (orgTaxId as string) ?? '',
+        fiscal_data: orgFiscal,
+        organization: organization
+          ? { legal_name: organization.legal_name, name: organization.name }
+          : null,
+      });
+      // Los campos que el resolvedor no pudo resolver llegan vacíos, así que la
+      // cascada previa sigue actuando como respaldo con un `||` explícito.
+      const resolvedLegalName: unknown =
+        identity.legal_name || storeLevel.legal_name;
+      const resolvedNit: unknown =
+        identity.nit || storeLevel.tax_id || storeLevel.nit;
+      const resolvedNitDv: unknown =
+        identity.nit_dv || storeLevel.tax_id_dv || storeLevel.nit_dv;
+      const resolvedNitType: unknown =
+        identity.nit_type || storeLevel.nit_type;
 
       return {
         ...storeLevel,

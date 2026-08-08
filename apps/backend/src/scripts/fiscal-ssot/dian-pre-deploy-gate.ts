@@ -25,11 +25,17 @@
  * Exit code 1 = diferencias detectadas, deploy se detiene.
  */
 
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
 import { resolveIssuerFiscalIdentity } from '../../domains/store/invoicing/utils/fiscal-issuer.util';
 import { DianIssuerData } from '../../domains/store/invoicing/providers/dian-direct/interfaces/dian-config.interface';
 
-const prisma = new PrismaClient();
+// Bajo Prisma 7 el cliente se construye SIEMPRE con driver adapter: un
+// `new PrismaClient()` a secas lanza `PrismaClientInitializationError`. Mismo
+// patrón que `BasePrismaService`. Este gate solo lee y no envía nada a la DIAN.
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 interface FieldDiff {
   tenant: string;
@@ -175,15 +181,32 @@ export async function runPreDeployGate(): Promise<{ differences: number }> {
     include: {
       accounting_entity: {
         include: {
+          // `type: 'billing'` NO es opcional: es la dirección FISCAL, y es el
+          // filtro que aplican TODOS los consumidores reales
+          // (`dian-test.service.ts`, `invoice-pdf.service.ts`). Sin él este gate
+          // toma la primera dirección cualquiera y reporta un falso positivo:
+          // la tienda 97 tiene `store_physical` id=701 (is_primary=true,
+          // municipality_code NULL) por delante de su `billing` id=771 (11001),
+          // así que el gate «detenía el deploy» por un municipio ausente que el
+          // camino de emisión sí resuelve. Un gate que frena por la razón
+          // equivocada acaba ignorado, y eso es peor que no tenerlo.
           organization: {
             include: {
-              addresses: { orderBy: [{ is_primary: 'desc' }, { id: 'asc' }], take: 1 },
+              addresses: {
+                where: { type: 'billing' },
+                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                take: 1,
+              },
               organization_settings: { select: { settings: true } },
             },
           },
           store: {
             include: {
-              addresses: { orderBy: [{ is_primary: 'desc' }, { id: 'asc' }], take: 1 },
+              addresses: {
+                where: { type: 'billing' },
+                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                take: 1,
+              },
               store_settings: { select: { settings: true } },
             },
           },

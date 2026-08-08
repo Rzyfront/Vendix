@@ -278,6 +278,32 @@ describe('asimetría lectura/emisión', () => {
     expect(identity.department).not.toMatch(/^\d+$/);
   });
 
+  it('el permisivo entrega nit y nit_dv aunque falte TODO lo demás', () => {
+    // Esta es la garantía que sostiene a las superficies de nómina. `paystub`
+    // consume solo `nit` y `nit_dv`; `payroll-bank-export` solo `nit`. Los dos son
+    // DERIVADOS, así que nunca aparecen en `missing` y el permisivo los produce
+    // siempre. Sin esta propiedad, cambiarlos al permisivo habría sido una
+    // apuesta en vez de una consecuencia.
+    //
+    // Medido en producción: las 3 organizaciones que corren nómina tienen
+    // `fiscal_data` en NULL. Con el estricto, el 100% de las colillas y de los
+    // archivos bancarios dejaba de generarse — 11 corridas de nómina.
+    const { identity, missing } = tryResolveTenantFiscalIdentity({
+      nit: '900123456',
+      fiscal_data: null,
+      organization: { name: 'Comercial Sin Datos Fiscales' },
+    });
+
+    expect(identity.nit).toBe('900123456');
+    expect(identity.nit_dv).toBe('8');
+    // Y lo que falta se reporta, no se inventa.
+    expect(missing).toEqual(['municipality_code', 'department']);
+    // `legal_name` NO falta: `organizations.name` es NOT NULL y es el último
+    // respaldo dentro del resolvedor.
+    expect(missing).not.toContain('legal_name');
+    expect(identity.legal_name).toBe('Comercial Sin Datos Fiscales');
+  });
+
   it('con identidad completa los dos predicados coinciden campo por campo', () => {
     // La única diferencia entre ambos debe ser el trato del campo ausente. Con
     // datos completos son la misma función, y esto lo prueba.

@@ -90,7 +90,27 @@ export class InvoicePdfService {
 
     const org = invoice.organization;
     const store = invoice.store;
-    const issuer = this.resolveIssuer(org, store);
+
+    // DOCUMENTO ELECTRÓNICO vs RECIBO INTERNO — decide la severidad del emisor.
+    //
+    // `dian_status = 'not_applicable'` (el default de la columna) significa que
+    // esta factura NO es un documento electrónico: nunca se transmitió, no tiene
+    // CUFE y no hay XML firmado con el que el PDF deba cuadrar. Es un recibo
+    // interno, y negarle la impresión por falta de municipio DIAN es una
+    // regresión sin justificación fiscal.
+    //
+    // Medido en producción antes de este cambio: de 48 tiendas con `fiscal_data`
+    // cargado, UNA tiene municipio fiscal resoluble. Siete tiendas con alcance
+    // STORE y facturas ya emitidas —cinco de ellas SIN configuración DIAN, o sea
+    // con facturas que no son documentos electrónicos— habrían dejado de poder
+    // generar el PDF de facturas que ya existen.
+    //
+    // Cuando sí hay documento electrónico (pending/accepted/rejected/error), el
+    // PDF acompaña un XML firmado y debe declarar lo mismo que él: ahí el
+    // estricto es correcto y fallar antes de imprimir un dato fabricado es más
+    // barato que imprimirlo. Ver la nota de asimetría en `fiscal-identity.helper.ts`.
+    const is_electronic_document = invoice.dian_status !== 'not_applicable';
+    const issuer = this.resolveIssuer(org, store, is_electronic_document);
 
     // Optionally download logo
     const logo_url = issuer.logo_url;
@@ -444,12 +464,16 @@ export class InvoicePdfService {
    * y podía imprimir un NIT rancio o 'N/A' si `fiscal_data` no estaba cargado,
    * además de leer `nit_dv` directamente del JSON (que es una columna derivada).
    *
-   * `strict` distingue los dos consumidores, y la distinción NO es cosmética:
+   * `strict` distingue los tres casos, y la distinción NO es cosmética:
    *
-   * - `generatePdf` (default, `strict: true`) imprime un documento que se entrega
-   *   al cliente y debe cuadrar con el XML firmado. Si la identidad está
-   *   incompleta, es correcto fallar antes de imprimir un dato fabricado.
-   * - `previewPdf` (`strict: false`) es la vista previa de la PLANTILLA en
+   * - `generatePdf` de un DOCUMENTO ELECTRÓNICO (`dian_status !== 'not_applicable'`)
+   *   → `strict: true`. El PDF acompaña un XML firmado y debe declarar lo mismo
+   *   que él; fallar antes de imprimir un dato fabricado es más barato.
+   * - `generatePdf` de un RECIBO INTERNO (`dian_status = 'not_applicable'`, el
+   *   default) → `strict: false`. No hay XML, no hay CUFE, no hay nada con lo que
+   *   cuadrar: negar el recibo por falta de municipio DIAN es una regresión sin
+   *   justificación fiscal.
+   * - `previewPdf` → `strict: false`. Vista previa de la PLANTILLA en
    *   configuración: no consume numeración, no toca la DIAN, no persiste nada, y
    *   existe justamente para que el comerciante compruebe si sus datos legales
    *   caben en el formato. Con el resolvedor estricto, el tenant que aún no ha

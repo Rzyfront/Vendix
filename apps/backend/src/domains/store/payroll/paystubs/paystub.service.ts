@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../../common/services/s3.service';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   PaystubPdfBuilder,
   PaystubData,
@@ -100,10 +100,10 @@ export class PaystubService {
 
     const data: PaystubData = {
       company_name: org.name,
-      // NIT resuelto vía `resolveTenantFiscalIdentity` — `fiscal_data` gana a la
-      // columna `organizations.tax_id` y la columna se ignora si está vacía o
-      // rancio. Antes caía a 'N/A' en la colilla si la columna estaba vacía,
-      // un dato legal falso entregado al empleado.
+      // NIT resuelto por la fuente única: `fiscal_data` gana a la columna
+      // `organizations.tax_id`, y el DV se deriva por módulo 11. Antes caía a
+      // 'N/A' literal en la colilla, un dato falso entregado al empleado.
+      // Ver `resolveCompanyNit` sobre por qué usa el resolvedor PERMISIVO.
       company_nit: this.resolveCompanyNit(org),
       company_logo_buffer: logo_buffer,
       employee_name: `${employee.first_name} ${employee.last_name}`,
@@ -361,18 +361,35 @@ export class PaystubService {
   }
 
   /**
-   * Resuelve el NIT de la empresa para impresión en la colilla vía el
-   * resolvedor único. Es la ÚNICA fuente: si la identidad fiscal está
-   * incompleta, el resolvedor lanza y la generación de la colilla falla —
-   * preferible a imprimir un NIT de columna rancio o literal 'N/A' en
-   * un documento laboral entregado al empleado.
+   * Resuelve el NIT de la empresa para imprimir en la colilla, vía el resolvedor
+   * único en su variante PERMISIVA.
+   *
+   * POR QUÉ PERMISIVO Y NO ESTRICTO — este método lee EXACTAMENTE dos campos,
+   * `nit` y `nit_dv`, y los dos son DERIVADOS: el resolvedor los produce siempre y
+   * nunca aparecen en `missing`. El estricto, en cambio, lanza por
+   * `municipality_code`, `legal_name` o `department`, ninguno de los cuales se
+   * imprime aquí. O sea: bloqueaba la colilla por campos que no usa.
+   *
+   * Y una colilla es un documento LABORAL, no una emisión electrónica. No se
+   * transmite a la DIAN ni acompaña un XML firmado, así que exigirle dirección
+   * fiscal es aplicarle un requisito que no le corresponde. La nómina electrónica
+   * (`dian-payroll.provider.ts`) sí necesita municipio y dirección, y ahí el
+   * estricto se mantiene.
+   *
+   * Medido en producción: las TRES organizaciones que corren nómina tienen
+   * `fiscal_data` en NULL y ninguna dirección con municipio. Con el estricto, el
+   * 100% de las colillas dejaba de generarse — 11 corridas de nómina.
+   *
+   * El NIT sigue saliendo de la fuente única, y el DV se deriva por módulo 11: la
+   * columna nunca vuelve a imprimirse cruda, ni el literal 'N/A' de antes.
+   * Ver la nota de asimetría en `fiscal-identity.helper.ts`.
    */
   private resolveCompanyNit(org: any): string {
     const fiscalData = (
       (org?.organization_settings?.settings as any)?.fiscal_data ?? null
     ) as Record<string, unknown> | null;
 
-    const identity = resolveTenantFiscalIdentity({
+    const { identity } = tryResolveTenantFiscalIdentity({
       nit: org?.tax_id || '',
       fiscal_data: fiscalData,
       organization: org

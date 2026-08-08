@@ -3,7 +3,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { S3Service } from '../../../../common/services/s3.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   BANK_BATCH_BUILDER_REGISTRY,
   BankBatchBuilder,
@@ -123,12 +123,20 @@ export class PayrollBankExportService {
       );
     }
 
-    // 5. NIT del archivo bancario resuelto por el resolvedor único
-    // (`resolveTenantFiscalIdentity`). El resolvedor es la ÚNICA fuente — un
-    // archivo bancario con un NIT rancio o vacío es un dato legal falso
-    // entregado a un banco. Si la identidad fiscal está incompleta
-    // (`municipality_code` ausente, etc.) el resolvedor lanza y el export
-    // falla: preferible a un NIT fabricado.
+    // 5. NIT del archivo bancario resuelto por el resolvedor único, en su
+    // variante PERMISIVA — y con una guarda propia sobre el ÚNICO campo que este
+    // archivo consume.
+    //
+    // El estricto lanzaba por `municipality_code`, `legal_name` o `department`,
+    // que este export no escribe en ninguna parte: bloqueaba por campos que no
+    // usa. Medido en producción, las TRES organizaciones que corren nómina tienen
+    // `fiscal_data` en NULL y ninguna dirección con municipio, así que el 100% de
+    // los archivos bancarios dejaba de generarse.
+    //
+    // Pero permisivo NO significa laxo aquí: un archivo bancario lo parsea una
+    // máquina y un NIT vacío lo corrompe, así que se valida `identity.nit`
+    // explícitamente más abajo. La guarda se mueve al campo que importa, no
+    // desaparece. Ver la nota de asimetría en `fiscal-identity.helper.ts`.
     const context = RequestContextService.getContext();
     const organization = await this.prisma.organizations.findFirst({
       where: { id: context?.organization_id },
@@ -153,11 +161,10 @@ export class PayrollBankExportService {
         null
     ) as Record<string, unknown> | null;
 
-    // El resolvedor resuelve el NIT desde `fiscal_data` (fuente única).
-    // No pasamos `organization.tax_id` como fallback: si `fiscal_data` está
-    // incompleto, la generación del archivo bancario debe fallar — preferible
-    // a un NIT de columna rancio entregado a un banco.
-    const identity = resolveTenantFiscalIdentity({
+    // El NIT sale de `fiscal_data` (fuente única). NO se pasa
+    // `organization.tax_id` como respaldo: la columna es una proyección y puede
+    // estar rancia, y un NIT rancio entregado a un banco es un dato legal falso.
+    const { identity } = tryResolveTenantFiscalIdentity({
       nit: '',
       fiscal_data: fiscalData,
       organization: {
@@ -166,6 +173,17 @@ export class PayrollBankExportService {
       },
     });
     const companyNit = identity.nit;
+
+    // La guarda que sí corresponde a este archivo: sin NIT no hay export. Es un
+    // fallo explícito y accionable, no un `throw` genérico por un municipio que
+    // el archivo bancario nunca lleva.
+    if (!companyNit) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        'La organización no tiene NIT en su identidad fiscal (settings.fiscal_data.nit). ' +
+          'Cárgalo antes de generar el archivo bancario.',
+      );
+    }
 
     const total_amount = employees.reduce((sum, e) => sum + e.net_pay, 0);
 

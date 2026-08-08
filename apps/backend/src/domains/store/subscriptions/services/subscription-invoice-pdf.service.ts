@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { InvoiceLineItem, InvoiceSplitBreakdown } from '../types/billing.types';
 
 /**
@@ -99,15 +99,20 @@ export class SubscriptionInvoicePdfService {
 
     const currency = invoice.currency ?? 'COP';
 
+    // Identidad del CLIENTE para el bloque «Facturado a», resuelta UNA vez: antes
+    // se llamaba dos veces al resolvedor para leer dos campos del mismo objeto.
+    const customerIdentity = this.resolveFiscalIdentity(organization, fiscalData);
+
     const buffer = await this.renderPdf({
       invoice,
       store: { name: store.name, code: store.store_code ?? null },
       organization: {
         name: organization?.name ?? '',
-        // NIT y razón social resueltos por el resolvedor único — la ÚNICA
-        // fuente. Si lanza, el PDF no se genera.
-        legal_name: this.resolveFiscalIdentity(organization, fiscalData).legal_name,
-        tax_id: this.resolveFiscalIdentity(organization, fiscalData).nit,
+        // NIT y razón social salen de la fuente única: `fiscal_data` gana a la
+        // columna, y el DV se deriva. Ver `resolveFiscalIdentity` sobre por qué
+        // este PDF usa el resolvedor permisivo.
+        legal_name: customerIdentity.legal_name,
+        tax_id: customerIdentity.nit,
         email: organization?.email ?? null,
       },
       planName: invoice.store_subscription.plan?.name ?? null,
@@ -650,15 +655,30 @@ export class SubscriptionInvoicePdfService {
   }
 
   /**
-   * Resuelve la identidad fiscal del emisor vía el resolvedor único. Es la
-   * ÚNICA fuente: si lanza (ej: `municipality_code` ausente), la generación
-   * del PDF falla — preferible a imprimir un NIT de columna rancio.
+   * Resuelve la identidad fiscal del CLIENTE (el tenant que paga la suscripción)
+   * para el bloque «Facturado a», vía el resolvedor único en su variante
+   * PERMISIVA.
+   *
+   * POR QUÉ PERMISIVO — este método devuelve exactamente dos campos,
+   * `legal_name` y `nit`, y ninguno de los dos es la razón por la que el estricto
+   * lanza: lanza por `municipality_code` y `department`, que no se imprimen aquí.
+   * Bloqueaba el PDF por campos que no usa.
+   *
+   * Y la identidad que se resuelve es la del CLIENTE, no la del emisor: la
+   * plataforma emite estas facturas y su propia identidad está completa. Medido en
+   * producción, 47 de 48 tiendas no tienen municipio fiscal resoluble, así que con
+   * el estricto la factura de suscripción de casi cualquier cliente no se podía
+   * generar — y el cliente no puede arreglar eso: es una factura que le emiten a
+   * él. Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
+   *
+   * `legal_name` sigue resolviéndose siempre porque `organizations.name` es NOT
+   * NULL y actúa de último respaldo dentro del propio resolvedor.
    */
   private resolveFiscalIdentity(
     organization: any,
     fiscalData: Record<string, unknown> | null,
   ): { legal_name: string; nit: string } {
-    return resolveTenantFiscalIdentity({
+    const { identity } = tryResolveTenantFiscalIdentity({
       nit: organization?.tax_id ?? '',
       fiscal_data: fiscalData,
       organization: organization
@@ -668,5 +688,6 @@ export class SubscriptionInvoicePdfService {
           }
         : null,
     });
+    return identity;
   }
 }

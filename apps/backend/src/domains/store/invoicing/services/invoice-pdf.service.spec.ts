@@ -95,4 +95,102 @@ describe('InvoicePdfService — asimetría vista previa / emisión', () => {
     expect(Buffer.isBuffer(buffer)).toBe(true);
     expect(buffer.length).toBeGreaterThan(0);
   });
+
+  /**
+   * `generatePdf` decide la severidad por el DOCUMENTO, no por la superficie:
+   * estricto si la factura es electrónica, permisivo si es un recibo interno.
+   *
+   * Medido en producción: de 48 tiendas con `fiscal_data`, UNA tiene municipio
+   * fiscal resoluble. Siete tiendas con alcance STORE y facturas ya emitidas
+   * —cinco SIN configuración DIAN— habrían dejado de poder imprimir facturas que
+   * ya existen.
+   *
+   * Estos dos tests miran solo el punto de decisión: si el resolvedor corta el
+   * flujo o no. No montan el pipeline completo de PDF ni S3, así que el caso
+   * permisivo puede fallar más adelante por otra razón — lo que se afirma es que
+   * NO falla por el municipio.
+   */
+  describe('generatePdf — electrónico vs recibo interno', () => {
+    const invoiceWith = (dian_status: string) => ({
+      id: 1,
+      dian_status,
+      invoice_number: 'FV-1',
+      customer_address: null,
+      customer: null,
+      customer_name: 'Consumidor Final',
+      resolution: null,
+      invoice_items: [],
+      invoice_taxes: [],
+      organization: {
+        id: 1,
+        name: 'Comercial A Medio Cargar',
+        legal_name: null,
+        tax_id: null,
+        phone: null,
+        email: 'facturacion@medio.co',
+        logo_url: null,
+        fiscal_scope: 'STORE',
+        addresses: [],
+        organization_settings: { settings: {} },
+      },
+      store: {
+        id: 10,
+        name: 'Tienda Centro',
+        legal_name: null,
+        logo_url: null,
+        addresses: [],
+        // Identidad a medias: NIT y razón social sí, municipio DIAN no.
+        store_settings: {
+          settings: {
+            fiscal_data: {
+              nit: '900123456',
+              legal_name: 'COMERCIAL A MEDIO CARGAR S.A.S.',
+            },
+          },
+        },
+      },
+    });
+
+    const serviceFor = (dian_status: string) => {
+      const prisma = {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue(invoiceWith(dian_status)),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        withoutScope: () => ({
+          stores: { findFirst: jest.fn().mockResolvedValue(null) },
+          organizations: { findFirst: jest.fn().mockResolvedValue(null) },
+        }),
+      } as any;
+      const s3 = {
+        downloadImage: jest.fn(),
+        uploadBuffer: jest.fn().mockResolvedValue({ key: 'k', url: 'u' }),
+      } as any;
+      return new InvoicePdfService(prisma, s3, { emit: jest.fn() } as any);
+    };
+
+    it('recibo interno (not_applicable): NO corta por el municipio', async () => {
+      const error = await RequestContextService.run(requestContext, () =>
+        serviceFor('not_applicable')
+          .generatePdf(1)
+          .then(() => null)
+          .catch((e) => e),
+      );
+
+      expect(String(error?.message ?? '')).not.toMatch(/municipio DIAN/);
+    });
+
+    it('documento electrónico (accepted): SÍ corta por el municipio', async () => {
+      // Aquí existe un XML firmado con el que el PDF debe cuadrar, así que
+      // imprimir un dato fabricado sería peor que no imprimir.
+      const error = await RequestContextService.run(requestContext, () =>
+        serviceFor('accepted')
+          .generatePdf(1)
+          .then(() => null)
+          .catch((e) => e),
+      );
+
+      expect(String(error?.message ?? '')).toMatch(/municipio DIAN/);
+    });
+  });
 });
