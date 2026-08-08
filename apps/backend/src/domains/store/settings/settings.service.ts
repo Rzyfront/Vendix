@@ -29,6 +29,10 @@ import {
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import {
+  buildTenantFiscalColumns,
+  mergeFiscalData,
+} from '@common/helpers/organization-fiscal-columns.helper';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import {
   SETTINGS_TRANSITION_GUARDS,
@@ -1201,32 +1205,23 @@ export class SettingsService {
     const currentSettings = mergeStoreSettingsWithDefaults(existing?.settings);
     const previousFiscalData = currentSettings.fiscal_data ?? {};
 
-    const nextFiscalData = {
-      ...previousFiscalData,
-      ...dto,
-    };
-    const legal_name =
-      typeof dto.legal_name === 'string' ? dto.legal_name.trim() : undefined;
-    const tax_id =
-      typeof dto.tax_id === 'string'
-        ? dto.tax_id.trim()
-        : typeof dto.nit === 'string'
-          ? dto.nit.trim()
-          : undefined;
-    const tax_id_dv =
-      typeof dto.tax_id_dv === 'string'
-        ? dto.tax_id_dv.trim()
-        : typeof dto.nit_dv === 'string'
-          ? dto.nit_dv.trim()
-          : undefined;
-    const nit_type =
-      typeof dto.nit_type === 'string' ? dto.nit_type.trim() : undefined;
-    const municipality_code =
-      typeof dto.municipality_code === 'string'
-        ? dto.municipality_code.trim()
-        : undefined;
-    const ciiu_code =
-      typeof dto.ciiu_code === 'string' ? dto.ciiu_code.trim() : undefined;
+    // Fusión superficial centralizada en `mergeFiscalData` (ver §"Approach
+    // Chosen" del plan de identidad fiscal SSOT). Antes este spread se hacía
+    // inline — mismo resultado, pero el nombre no declaraba la intención.
+    const nextFiscalData = mergeFiscalData(
+      previousFiscalData as Record<string, unknown>,
+      dto,
+    );
+
+    // Proyección única de columnas del alcance tienda vía
+    // `buildTenantFiscalColumns`. Antes este bloque inlineaba la lectura de cada
+    // campo del DTO y la escritura de cada columna, así que el mismo payload
+    // podía producir columnas distintas si el orden o el saneado cambiaban.
+    const storeColumns = buildTenantFiscalColumns(
+      'store',
+      dto,
+      nextFiscalData,
+    );
 
     const updatedSettings: StoreSettings = {
       ...currentSettings,
@@ -1246,20 +1241,12 @@ export class SettingsService {
         },
       });
 
-      await tx.stores.update({
-        where: { id: store_id },
-        data: {
-          ...(legal_name !== undefined && { legal_name: legal_name || null }),
-          ...(tax_id !== undefined && { tax_id: tax_id || null }),
-          ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
-          ...(nit_type !== undefined && { nit_type: nit_type || null }),
-          ...(municipality_code !== undefined && {
-            municipality_code: municipality_code || null,
-          }),
-          ...(ciiu_code !== undefined && { ciiu_code: ciiu_code || null }),
-          updated_at: new Date(),
-        },
-      });
+      if (Object.keys(storeColumns).length > 0) {
+        await tx.stores.update({
+          where: { id: store_id },
+          data: { ...storeColumns, updated_at: new Date() },
+        });
+      }
     });
 
     try {
