@@ -528,9 +528,23 @@ export class DianConfigService {
     }
 
     if (status === 'enabled') {
+      // `shared_technical_key` se resuelve y se pasa explícitamente. No basta con
+      // que `ReadinessConfig` lo declare obligatorio: `config` viene de
+      // `StorePrismaService`, cuyos modelos cuelgan de un `scoped_client: any`, así
+      // que difundirlo compila sin el campo y llegaría como `undefined`. La
+      // comprobación falla cerrado ante `undefined`, pero marcar una configuración
+      // como habilitada es justo el momento en que el dato debe ser real.
+      const shared_technical_key =
+        await this.readiness.findResolutionsSharingTechnicalKey({
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type: config.configuration_type,
+        });
       this.readiness.assertProductionReady({
         ...config,
         enablement_status: status,
+        shared_technical_key,
       });
     }
 

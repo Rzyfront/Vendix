@@ -582,8 +582,21 @@ export class FiscalProductionReadinessService {
       {
         key: 'technical_key_per_nit',
         label: 'Clave técnica propia del rango (no compartida con otro NIT)',
-        satisfied: !shared_cltec,
-        action: shared_cltec
+        // `=== null` y no `!shared_cltec`: distingue COMPROBADO Y LIMPIO (null) de
+        // NO COMPROBADO (undefined). El campo es obligatorio en `ReadinessConfig`,
+        // pero eso NO lo garantiza TypeScript: `StorePrismaService` expone sus
+        // modelos sobre un `scoped_client: any`, así que un llamador que difunda una
+        // fila leída por ahí compila sin el campo y lo pasa como `undefined`.
+        // Con `!shared_cltec` ese caso daba `satisfied: true` y la comprobación
+        // pasaba en vacío — el fallo en abierto que este archivo existe para evitar.
+        satisfied: shared_cltec === null,
+        action: shared_cltec === undefined
+          ? 'No se comprobó si la clave técnica está compartida con otro NIT. ' +
+            'El llamador debe resolver `shared_technical_key` con ' +
+            '`findResolutionsSharingTechnicalKey` antes de evaluar: sin ese dato la ' +
+            'comprobación no puede afirmar nada, y afirmar que está limpia sería ' +
+            'peor que no comprobarla.'
+          : shared_cltec
           ? `La clave técnica de la resolución ${shared_cltec.resolution_id} está ` +
             `compartida con ${shared_cltec.foreign.length} resolución(es) de otro NIT ` +
             `(${shared_cltec.foreign

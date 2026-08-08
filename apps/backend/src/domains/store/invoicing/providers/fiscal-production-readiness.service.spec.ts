@@ -48,6 +48,10 @@ describe('FiscalProductionReadinessService', () => {
     last_test_result: { success: true },
     nit: '900123456',
     accounting_entity_id: 77,
+    // Una configuración LISTA es una que ya se comprobó y salió limpia. `null` es
+    // ese estado; los tests que ejercitan el hallazgo o el caso sin comprobar lo
+    // sobreescriben de forma explícita.
+    shared_technical_key: null,
     ...overrides,
   });
 
@@ -264,6 +268,24 @@ describe('FiscalProductionReadinessService', () => {
       expect(check?.action).toMatch(/902075738/);
       expect(check?.action).toMatch(/portal de habilitación/);
       // Bloqueante: emitir con una ClTec ajena gasta el consecutivo.
+      expect(report.missing).toContain('technical_key_per_nit');
+    });
+
+    it('FALLA CERRADO cuando el llamador no comprobó el hallazgo', () => {
+      const { service } = createService(readyConfig());
+
+      // `undefined`, no `null`: un llamador que difunde una fila de
+      // `StorePrismaService` compila sin el campo pese a ser obligatorio, porque
+      // sus modelos cuelgan de un `scoped_client: any`. La comprobación no puede
+      // afirmar que está limpia sin haberla hecho.
+      const report = service.evaluateProductionReadiness({
+        ...readyConfig(),
+        shared_technical_key: undefined as any,
+      });
+
+      const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
+      expect(check?.satisfied).toBe(false);
+      expect(check?.action).toMatch(/No se comprobó/);
       expect(report.missing).toContain('technical_key_per_nit');
     });
 
