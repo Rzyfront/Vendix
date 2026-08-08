@@ -266,3 +266,35 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     );
   });
 });
+
+describe('UblCommonBuilder.toTaxLevelCode — enumeración cerrada (FAJ26)', () => {
+  it('conserva los códigos que la lista de cbc:TaxLevelCode acepta', () => {
+    expect(UblCommonBuilder.toTaxLevelCode('O-13')).toBe('O-13');
+    expect(UblCommonBuilder.toTaxLevelCode('O-13;O-47')).toBe('O-13;O-47');
+    expect(UblCommonBuilder.toTaxLevelCode('R-99-PN')).toBe('R-99-PN');
+  });
+
+  it('descarta los códigos del RUT que NO están en la lista', () => {
+    // Casilla 53 del RUT de Quickss. Ninguno pertenece a la enumeración de
+    // TaxLevelCode: declararlos produjo FAJ26 «Responsabilidad informada por
+    // emisor no valida según lista».
+    expect(UblCommonBuilder.toTaxLevelCode('O-05')).toBe('R-99-PN');
+    expect(
+      UblCommonBuilder.toTaxLevelCode('O-05;O-07;O-14;O-42;O-48'),
+    ).toBe('R-99-PN');
+  });
+
+  it('conserva solo la intersección cuando la cadena mezcla ambos catálogos', () => {
+    expect(UblCommonBuilder.toTaxLevelCode('O-05;O-13;O-48')).toBe('O-13');
+  });
+
+  it('cae a R-99-PN ante vacío, nulo o basura', () => {
+    expect(UblCommonBuilder.toTaxLevelCode('')).toBe('R-99-PN');
+    expect(UblCommonBuilder.toTaxLevelCode(null)).toBe('R-99-PN');
+    expect(UblCommonBuilder.toTaxLevelCode('COMUN')).toBe('R-99-PN');
+  });
+
+  it('tolera espacios alrededor de los códigos', () => {
+    expect(UblCommonBuilder.toTaxLevelCode(' O-13 ; O-47 ')).toBe('O-13;O-47');
+  });
+});

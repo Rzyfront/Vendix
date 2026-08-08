@@ -47,6 +47,48 @@ export class UblCommonBuilder {
     'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)';
 
   /**
+   * Responsabilidades ACEPTADAS por `cbc:TaxLevelCode` (Anexo 1.9).
+   *
+   * NO es el catálogo de la casilla 53 del RUT. Son dos listas distintas y ese es
+   * el defecto que esto cierra: una migración escribió las responsabilidades del
+   * RUT (`O-05, O-07, O-14, O-42, O-48`) en el campo que alimenta este elemento, y
+   * la DIAN respondió FAJ26 «Responsabilidad informada por emisor no valida según
+   * lista». Antes declaraba `O-13;O-47`, que sí están en la enumeración — por eso
+   * FAJ26 no aparecía.
+   *
+   * `R-99-PN` es el valor «ninguna de las anteriores» de la propia lista, y es el
+   * respaldo correcto: un contribuyente cuyas responsabilidades del RUT no caen en
+   * ninguna de estas categorías no declara ninguna, no inventa una.
+   */
+  private static readonly TAX_LEVEL_CODES = new Set([
+    'O-13', // Gran contribuyente
+    'O-15', // Autorretenedor
+    'O-23', // Agente de retención IVA
+    'O-47', // Régimen simple de tributación
+    'R-99-PN', // No responsable / ninguna de las anteriores
+  ]);
+
+  /** Valor «ninguna de las anteriores» de la lista de responsabilidades. */
+  static readonly TAX_LEVEL_CODE_NONE = 'R-99-PN';
+
+  /**
+   * Filtra a la enumeración de `cbc:TaxLevelCode`.
+   *
+   * Acepta la forma con punto y coma que el anexo permite (`'O-13;O-15'`), descarta
+   * lo que no pertenece a la lista, y devuelve `R-99-PN` cuando no queda nada.
+   * Nunca propaga un código del RUT que la DIAN rechazaría.
+   */
+  static toTaxLevelCode(value?: string | null): string {
+    const kept = String(value ?? '')
+      .split(';')
+      .map((code) => code.trim())
+      .filter((code) => UblCommonBuilder.TAX_LEVEL_CODES.has(code));
+    return kept.length
+      ? kept.join(';')
+      : UblCommonBuilder.TAX_LEVEL_CODE_NONE;
+  }
+
+  /**
    * Builds the UBLExtensions element with the full DIAN `sts:DianExtensions`
    * block that DIAN validates, in the mandated order:
    *   1. InvoiceControl  (InvoiceAuthorization, AuthorizationPeriod, AuthorizedInvoices)
@@ -142,10 +184,30 @@ export class UblCommonBuilder {
       .att('schemeName', '31') // 31 = NIT
       .txt(software_security.provider_nit ?? options?.issuer_nit ?? '');
 
-    // NOTE: the DIAN sts schema names this element `softwareID` (lowercase 's'),
-    // NOT `SoftwareID`. Using the wrong casing fails schema validation.
+    // `sts:SoftwareID` con S MAYÚSCULA.
+    //
+    // Aquí decía `softwareID` en minúscula, con un comentario que afirmaba que la
+    // mayúscula «falla la validación de esquema» — sin citar fuente. La medición
+    // dice lo contrario: la validación sincrónica del 2026-08-08 devolvió TRES
+    // reglas del mismo bloque diciendo «no informado» sobre valores que el XML SÍ
+    // llevaba:
+    //
+    //   FAB24a  «No se encuentra informado el código de software»
+    //   FAB25   «No informado el literal “195”»          <- schemeAgencyID
+    //   FAB26   «No informado el literal “CO, DIAN (…)”» <- schemeAgencyName
+    //
+    // Los dos literales están presentes y son exactos, y van pegados como
+    // atributos de ESTE elemento. Que la DIAN los declare ausentes significa que
+    // su XPath no encuentra el elemento que los porta: tres reglas, un nombre mal
+    // escrito. Es el mismo patrón que FAB10a con `CorporateRegistrationScheme`.
+    //
+    // Corrobora la mayúscula el propio repositorio: los builders de nómina
+    // (`nomina-individual.builder.ts`, `nomina-adjustment.builder.ts`) emiten
+    // `SoftwareID`. Y el comentario anterior es exactamente la forma de error que
+    // `dian-test-set-composition.ts` documenta: una afirmación sin fuente que cada
+    // relectura confirmaba.
     software
-      .ele(UBL_NAMESPACES.STS, 'softwareID')
+      .ele(UBL_NAMESPACES.STS, 'SoftwareID')
       .att('schemeAgencyID', '195')
       .att('schemeAgencyName', agency_name)
       .txt(software_security.software_id);
@@ -282,7 +344,9 @@ export class UblCommonBuilder {
     // literal 'No aplica'. The regime is NOT emitted as a 48/49 code, and it no
     // longer lives in AdditionalAccountID (which is now the person type).
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
-    tax_level.att('listName', 'No aplica').txt(issuer.tax_scheme);
+    tax_level
+      .att('listName', 'No aplica')
+      .txt(UblCommonBuilder.toTaxLevelCode(issuer.tax_scheme));
 
     UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer);
 
