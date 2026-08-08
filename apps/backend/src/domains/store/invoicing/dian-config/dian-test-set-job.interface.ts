@@ -29,6 +29,13 @@ export interface DianTestSetJob {
   /** Resolución de habilitación que aporta la numeración. */
   resolution_id: number;
   /**
+   * Consulta a la DIAN los rangos autorizados y NO emite nada.
+   *
+   * Corta antes de reservar numeración: cuesta cero consecutivos. Es la vía para
+   * dejar de transcribir del portal los datos de la resolución.
+   */
+  numbering_range?: boolean;
+  /**
    * Vía de humo: emite UNA factura y gasta UN consecutivo, en vez de la
    * composición completa que exige la DIAN.
    *
