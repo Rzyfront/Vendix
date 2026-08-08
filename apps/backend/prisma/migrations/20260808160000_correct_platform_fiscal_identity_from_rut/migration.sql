@@ -19,6 +19,25 @@
 --   immediately before writing this file. Verified values are quoted in each
 --   guard below, so every guard cites a measured value, not a supposed one.
 --
+-- HISTORIA — se aplicó a medias una vez, y esto importa para releerla:
+--   El primer intento (2026-08-08 19:06 UTC, deploy de 801f1c409) falló en la
+--   sentencia 3a con `42703: column "updated_at" of relation "addresses" does
+--   not exist`. Prisma NO envuelve el archivo en una transacción, así que las
+--   siete primeras sentencias commitearon y las dos de `addresses` no. La fila de
+--   `_prisma_migrations` quedó con `finished_at NULL` y `applied_steps_count 0`
+--   —engañoso: ese contador solo avanza al terminar bien— bloqueando todo deploy
+--   posterior. Recuperado con `migrate resolve --rolled-back` + reintento.
+--
+--   El dry-run original no lo detectó porque construía la base desechable con un
+--   `CREATE TABLE addresses` escrito a mano, con un `updated_at` que la tabla real
+--   no tiene: probó una ficción. El dry-run correcto usa el esquema real
+--   (`pg_dump --schema-only` de las tres tablas), no uno transcrito.
+--
+--   El reintento es seguro precisamente por las guardas por campo: las siete
+--   sentencias ya aplicadas no casan su guarda y quedan en no-op, y solo las dos
+--   de `addresses` escriben. Con una guarda compartida, el reintento habría
+--   saltado también las correcciones de `fiscal_data`.
+--
 -- ─────────────────────────────────────────────────────────────────────────────
 -- POR QUÉ EXISTE
 --
@@ -185,8 +204,15 @@ UPDATE organizations
 
 -- 3a. Municipio. Se actualiza en sitio; no se borra ni se recrea, porque
 --     `addresses` es referenciada por FK.
+--
+--     SIN `updated_at`: la tabla `addresses` NO TIENE esa columna. Sus columnas
+--     son id, store_id, address_line1, address_line2, city, state_province,
+--     country_code, postal_code, phone_number, type, is_primary, latitude,
+--     longitude, organization_id, user_id, municipality_code. `organizations` y
+--     `organization_settings` sí la tienen, de ahí la asimetría con los pasos 1 y 2.
+--     No añadir `updated_at = now()` aquí: es lo que produjo el 42703.
 UPDATE addresses
-   SET municipality_code = '44001', updated_at = now()
+   SET municipality_code = '44001'
  WHERE organization_id = 1 AND type = 'billing'
    AND city = 'Riohacha' AND municipality_code = '44847';
 
@@ -194,6 +220,6 @@ UPDATE addresses
 --     Guardado por IS NULL: en producción la columna está vacía, no con un valor
 --     de semilla. Si alguien ya escribió un teléfono aquí, se respeta.
 UPDATE addresses
-   SET phone_number = '3234668500', updated_at = now()
+   SET phone_number = '3234668500'
  WHERE organization_id = 1 AND type = 'billing'
    AND city = 'Riohacha' AND phone_number IS NULL;
