@@ -1,6 +1,7 @@
 import {
   FiscalIdentitySource,
   resolveTenantFiscalIdentity,
+  tryResolveTenantFiscalIdentity,
 } from './fiscal-identity.helper';
 
 /** `fiscal_data` real de la plataforma, tal como está en producción. */
@@ -221,5 +222,71 @@ describe('resolveTenantFiscalIdentity', () => {
 
     expect(identity.tax_responsibilities).toEqual(['O-15']);
     expect(identity.tax_scheme).toBe('O-15');
+  });
+});
+
+/**
+ * ASIMETRÍA LECTURA/EMISIÓN.
+ *
+ * El resolvedor estricto llegó a producción cableado en dos superficies de
+ * LECTURA — el checklist fiscal (`fiscal-status.service.ts`) y la sección fiscal
+ * del checkout (`subscription-billing-profile.service.ts`) — y ahí lanzaba
+ * «No hay municipio DIAN para el NIT …» justo para los tenants con datos
+ * incompletos, que son los que abren esas pantallas para completarlos: no podían
+ * cargar su identidad fiscal porque leerla reventaba.
+ *
+ * Estos tests fijan la regla en las DOS direcciones. Una sola dirección no sirve:
+ * un cambio que hiciera permisivo el estricto pasaría un test que solo verificara
+ * que el permisivo no lanza.
+ */
+describe('asimetría lectura/emisión', () => {
+  /** Tenant a medio cargar: NIT y razón social sí, dirección fiscal todavía no. */
+  const INCOMPLETE = source({
+    config_name: undefined,
+    fiscal_data: {
+      nit: '800987654',
+      legal_name: 'COMERCIALIZADORA A MEDIO CARGAR S.A.S.',
+    },
+  });
+
+  it('el permisivo NO lanza con identidad incompleta y reporta qué falta', () => {
+    const { identity, missing } = tryResolveTenantFiscalIdentity(INCOMPLETE);
+
+    expect(missing).toEqual(['municipality_code', 'department']);
+    // Lo que sí se pudo resolver sigue siendo utilizable por la pantalla.
+    expect(identity.nit).toBe('800987654');
+    expect(identity.legal_name).toBe('COMERCIALIZADORA A MEDIO CARGAR S.A.S.');
+    // Y el DV se deriva igual: la derivación no depende de estar completo.
+    expect(identity.nit_dv).toBe('4');
+  });
+
+  it('el estricto SÍ lanza con la misma identidad incompleta', () => {
+    // La misma fuente, el otro predicado. Si algún día este test deja de lanzar,
+    // significa que alguien volvió permisiva la ruta de emisión.
+    expect(() => resolveTenantFiscalIdentity(INCOMPLETE)).toThrow(
+      /municipio DIAN/,
+    );
+  });
+
+  it('los campos ausentes llegan como cadena vacía, nunca inventados', () => {
+    const { identity } = tryResolveTenantFiscalIdentity(INCOMPLETE);
+
+    expect(identity.municipality_code).toBe('');
+    expect(identity.department).toBe('');
+    // En particular NO se deriva el departamento de municipality_code.slice(0,2):
+    // eso pondría un código numérico en un campo de nombre.
+    expect(identity.department).not.toMatch(/^\d+$/);
+  });
+
+  it('con identidad completa los dos predicados coinciden campo por campo', () => {
+    // La única diferencia entre ambos debe ser el trato del campo ausente. Con
+    // datos completos son la misma función, y esto lo prueba.
+    const strict = resolveTenantFiscalIdentity(source());
+    const { identity: permissive, missing } = tryResolveTenantFiscalIdentity(
+      source(),
+    );
+
+    expect(missing).toEqual([]);
+    expect(permissive).toEqual(strict);
   });
 });

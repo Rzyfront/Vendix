@@ -165,21 +165,42 @@ function resolveResponsibilities(
 }
 
 /**
- * Construye la identidad fiscal cruda del tenant desde la fuente única de la verdad.
+ * Campos obligatorios para EMITIR que el resolvedor no pudo resolver.
  *
- * @throws Error si `municipality_code`, `legal_name` o `department` son
- *   irresolubles. La DIAN valida la dirección fiscal contra el RUT, así que
- *   emitir con un municipio inventado, una razón social vacía o un departamento
- *   numérico produce un rechazo que cuesta un consecutivo autorizado
- *   irrecuperable. Fallar aquí es estrictamente más barato.
- *
- *   Un rechazo de la DIAN por dato del emisor cuesta un consecutivo autorizado
- *   irrecuperable; un lanzamiento antes de emitir no cuesta nada.
+ * `municipality_code` y `department` alimentan `cac:RegistrationAddress`, y
+ * `legal_name` alimenta `cbc:RegistrationName`: los tres son obligatorios en el
+ * documento electrónico y la DIAN los confronta contra el RUT del NIT.
  */
-export function resolveTenantFiscalIdentity(
+export type MissingFiscalField =
+  | 'legal_name'
+  | 'municipality_code'
+  | 'department';
+
+/** Resultado del resolvedor permisivo: identidad parcial + qué falta para emitir. */
+export interface PartialFiscalIdentity {
+  /**
+   * Identidad con lo que sí se pudo resolver. Los campos listados en `missing`
+   * llegan como `''` — leerlos sin consultar `missing` es el error que este
+   * contrato existe para hacer visible.
+   */
+  identity: TenantFiscalIdentity;
+  /** Vacío ⇒ la identidad está completa y es apta para emitir. */
+  missing: MissingFiscalField[];
+}
+
+/**
+ * Núcleo compartido. NO lanza: resuelve lo que puede y reporta lo que falta.
+ *
+ * Los dos resolvedores públicos son proyecciones de esta función, así que ambos
+ * deciden las MISMAS precedencias. Lo único que los diferencia es qué hacen ante
+ * un campo obligatorio ausente — ver `resolveTenantFiscalIdentity` (lanza) y
+ * `tryResolveTenantFiscalIdentity` (reporta).
+ */
+function buildFiscalIdentity(
   source: FiscalIdentitySource,
-): TenantFiscalIdentity {
+): PartialFiscalIdentity {
   const fiscalData = source.fiscal_data ?? null;
+  const missing: MissingFiscalField[] = [];
 
   const rawNit = str(fiscalData, 'nit') || str(fiscalData, 'tax_id') || source.nit;
   const { number: nit, dv } = normalizeNit(rawNit);
@@ -190,22 +211,12 @@ export function resolveTenantFiscalIdentity(
     source.entity?.legal_name?.trim() ||
     source.organization?.legal_name?.trim() ||
     source.organization?.name?.trim();
-  if (!legal_name) {
-    throw new Error(
-      `No hay razón social para el NIT ${nit}: se necesita ` +
-        `fiscal_data.legal_name, config_name o la fila de la organización.`,
-    );
-  }
+  if (!legal_name) missing.push('legal_name');
 
   const municipality_code =
     str(fiscalData, 'municipality_code') ||
     source.address?.municipality_code?.trim();
-  if (!municipality_code) {
-    throw new Error(
-      `No hay municipio DIAN para el NIT ${nit}: se necesita ` +
-        `fiscal_data.municipality_code o una dirección con municipality_code.`,
-    );
-  }
+  if (!municipality_code) missing.push('municipality_code');
 
   const fiscal_address =
     str(fiscalData, 'fiscal_address') ||
@@ -215,7 +226,72 @@ export function resolveTenantFiscalIdentity(
 
   const department =
     str(fiscalData, 'department') || source.address?.state_province?.trim();
-  if (!department) {
+  if (!department) missing.push('department');
+
+  return {
+    missing,
+    identity: {
+      nit,
+      nit_dv: dv,
+      legal_name: legal_name ?? '',
+      fiscal_address,
+      municipality_code: municipality_code ?? '',
+      city,
+      department: department ?? '',
+      country: str(fiscalData, 'country') || 'CO',
+      postal_code: source.address?.postal_code?.trim() || undefined,
+      phone:
+        source.address?.phone_number?.trim() ||
+        source.organization?.phone?.trim() ||
+        undefined,
+      email: source.email?.trim() || source.organization?.email?.trim() || '',
+      nit_type: str(fiscalData, 'nit_type'),
+      person_type: str(fiscalData, 'person_type'),
+      tax_regime: str(fiscalData, 'tax_regime'),
+      tax_responsibilities: resolveResponsibilities(
+        fiscalData,
+        source.organization?.fiscal_responsibilities,
+      ),
+      tax_scheme: str(fiscalData, 'tax_scheme'),
+      ciiu_code: str(fiscalData, 'ciiu') || str(fiscalData, 'ciiu_code'),
+    },
+  };
+}
+
+/**
+ * Resolvedor ESTRICTO — para superficies que EMITEN.
+ *
+ * Úsalo cuando el dato sale del sistema hacia un tercero: XML de la DIAN, colilla
+ * de nómina, archivo bancario, PDF de factura. Un dato fiscal inventado en esos
+ * documentos es una afirmación legal falsa, y ante la DIAN un rechazo por dato del
+ * emisor cuesta un consecutivo autorizado irrecuperable. Lanzar antes de emitir no
+ * cuesta nada.
+ *
+ * NO lo uses en superficies de LECTURA o EDICIÓN — usa
+ * `tryResolveTenantFiscalIdentity`. Ver la nota de asimetría más abajo.
+ *
+ * @throws Error si `legal_name`, `municipality_code` o `department` son
+ *   irresolubles, en ese orden de precedencia.
+ */
+export function resolveTenantFiscalIdentity(
+  source: FiscalIdentitySource,
+): TenantFiscalIdentity {
+  const { identity, missing } = buildFiscalIdentity(source);
+  const nit = identity.nit;
+
+  if (missing.includes('legal_name')) {
+    throw new Error(
+      `No hay razón social para el NIT ${nit}: se necesita ` +
+        `fiscal_data.legal_name, config_name o la fila de la organización.`,
+    );
+  }
+  if (missing.includes('municipality_code')) {
+    throw new Error(
+      `No hay municipio DIAN para el NIT ${nit}: se necesita ` +
+        `fiscal_data.municipality_code o una dirección con municipality_code.`,
+    );
+  }
+  if (missing.includes('department')) {
     throw new Error(
       `No hay departamento para el NIT ${nit}: se necesita ` +
         `fiscal_data.department o la columna state_province de la dirección. ` +
@@ -224,31 +300,34 @@ export function resolveTenantFiscalIdentity(
     );
   }
 
-  return {
-    nit,
-    nit_dv: dv,
-    legal_name,
-    fiscal_address,
-    municipality_code,
-    city,
-    department,
-    country: str(fiscalData, 'country') || 'CO',
-    postal_code: source.address?.postal_code?.trim() || undefined,
-    phone:
-      source.address?.phone_number?.trim() ||
-      source.organization?.phone?.trim() ||
-      undefined,
-    email: source.email?.trim() || source.organization?.email?.trim() || '',
-    nit_type: str(fiscalData, 'nit_type'),
-    person_type: str(fiscalData, 'person_type'),
-    tax_regime: str(fiscalData, 'tax_regime'),
-    tax_responsibilities: resolveResponsibilities(
-      fiscalData,
-      source.organization?.fiscal_responsibilities,
-    ),
-    tax_scheme: str(fiscalData, 'tax_scheme'),
-    ciiu_code: str(fiscalData, 'ciiu') || str(fiscalData, 'ciiu_code'),
-  };
+  return identity;
+}
+
+/**
+ * Resolvedor PERMISIVO — para superficies que MUESTRAN o EDITAN.
+ *
+ * ASIMETRÍA LECTURA/EMISIÓN — por qué existen dos y no uno:
+ *
+ * `vendix-fiscal-scope` § «Predicate Default Rules» ya establece la regla para los
+ * predicados fiscales: el default correcto ante datos indeterminados depende de lo
+ * que el predicado gobierna, y **nunca se voltea el default de un predicado
+ * compartido — se deriva uno nuevo**. Esta función es ese predicado derivado.
+ *
+ * El checklist fiscal (`fiscal-status.service.ts`) y la sección fiscal del checkout
+ * (`subscription-billing-profile.service.ts`) existen precisamente para que el
+ * tenant VEA y CORRIJA lo que le falta. Si lanzan cuando falta un dato, el tenant
+ * recibe un error en vez de la lista de lo que debe llenar, y no puede cargar su
+ * identidad fiscal porque leerla revienta — huevo y gallina. El defecto llegó a
+ * producción en ambas superficies al eliminar sus try/catch de forma uniforme.
+ *
+ * Devuelve `missing` para que la superficie decida: mostrar el hueco, deshabilitar
+ * el candado, o bloquear la emisión. Lo que NO debe hacer es leer un campo de
+ * `identity` sin haber consultado `missing`.
+ */
+export function tryResolveTenantFiscalIdentity(
+  source: FiscalIdentitySource,
+): PartialFiscalIdentity {
+  return buildFiscalIdentity(source);
 }
 
 /**

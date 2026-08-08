@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../errors';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   FiscalArea,
   FiscalDetectorSignals,
@@ -451,16 +451,19 @@ export class FiscalStatusService {
       },
     });
 
-    // Identidad resuelta por el resolvedor único — la ÚNICA fuente. Si la
-    // identidad fiscal está incompleta (paso 2: municipio/departamento/razón
-    // social faltante), el resolvedor lanza y la lectura del checklist falla.
+    // Identidad resuelta por el resolvedor único — la ÚNICA fuente — en su
+    // variante PERMISIVA, y esto no es negociable aquí: el checklist existe para
+    // decirle al tenant QUÉ le falta. Con el resolvedor estricto, un tenant con
+    // identidad incompleta recibía un error en lugar de la lista de huecos, y no
+    // podía cargar sus datos fiscales porque leerlos lanzaba — huevo y gallina.
+    // Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
+    //
     // `nit_type` no vive en el contrato ancho del resolvedor porque es un
     // detalle del campo `nit_type` del formulario, no de la identidad derivada.
     // El NIT inicial del resolvedor viene del JSON (fuente única) o de
     // `dian_configurations` — nunca de la columna `organizations.tax_id`,
-    // que puede estar vacía o rancio. Si todo está incompleto, el resolvedor
-    // lanza y la lectura del checklist falla loud.
-    const identity = resolveTenantFiscalIdentity({
+    // que puede estar vacía o rancia.
+    const { identity } = tryResolveTenantFiscalIdentity({
       nit: dian?.nit ?? '',
       fiscal_data: fiscalData ?? null,
       organization: {

@@ -3,7 +3,7 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { computeNitDv, normalizeNit } from '@common/utils/nit.util';
 import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.constants';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
 
 /**
@@ -207,11 +207,15 @@ export class SubscriptionBillingProfileService {
     const orgFiscalData = ((org?.organization_settings as any)?.settings
       ?.fiscal_data ?? null) as Record<string, unknown> | null;
 
-    // NIT y razón social resueltos por el resolvedor único. Es la ÚNICA
-    // fuente: si la identidad fiscal está incompleta, el resolvedor lanza
-    // y la lectura del perfil de facturación falla — preferible a devolver
-    // un NIT de columna rancio al cliente.
-    const identity = resolveTenantFiscalIdentity({
+    // NIT y razón social resueltos por el resolvedor único — la ÚNICA fuente —
+    // en su variante PERMISIVA. Esta es una superficie de LECTURA/EDICIÓN: el
+    // cliente abre la sección fiscal del checkout justamente para completar lo
+    // que le falta. Con el resolvedor estricto, `get()` lanzaba
+    // «No hay municipio DIAN para el NIT …» y la sección quedaba inaccesible
+    // para los tenants que más necesitan llenarla. La emisión sigue usando el
+    // resolvedor estricto; ver la nota de asimetría lectura/emisión en
+    // `fiscal-identity.helper.ts`.
+    const { identity } = tryResolveTenantFiscalIdentity({
       nit: org?.tax_id ?? '',
       fiscal_data: orgFiscalData,
       organization: org

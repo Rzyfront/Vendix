@@ -24,6 +24,22 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
     person_type: '1',
     tax_regime: '49',
     fiscal_responsibilities: ['R-99-PN'],
+    // Una organización COMPLETA lleva su NIT en `fiscal_data`, no solo en la
+    // columna: `isComplete` lo valida desde el JSON porque las columnas son una
+    // proyección y pueden estar vacías o rancias — es la tesis del plan de SSOT.
+    // Sin esto el fixture describe el contrato viejo y `complete` sale `false`.
+    organization_settings: {
+      settings: {
+        fiscal_data: {
+          nit: '800987654',
+          legal_name: 'Comercial del Norte SAS',
+          municipality_code: '11001',
+          city: 'Bogotá',
+          department: 'Bogotá D.C.',
+          fiscal_address: 'Calle 10 # 20-30',
+        },
+      },
+    },
     addresses: [
       {
         address_line1: 'Calle 10 # 20-30',
@@ -215,7 +231,11 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
         complete: true,
         locked: true,
       });
-      expect(result.profile?.tax_id).toBe('800987654-3');
+      // El NIT sale del resolvedor único, que devuelve el número normalizado SIN
+      // el DV — el DV viaja aparte en `nit_dv` y se deriva por módulo 11. La
+      // columna guardaba '800987654-3', un par imposible: el DV real de
+      // 800987654 es 4. Afirmar el valor de la columna era afirmar el defecto.
+      expect(result.profile?.tax_id).toBe('800987654');
     });
 
     it('leaves the profile editable when the fiscal module is not active', async () => {

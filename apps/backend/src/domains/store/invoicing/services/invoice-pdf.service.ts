@@ -9,7 +9,10 @@ import {
   PRINT_FORMATS,
   PrintFormat,
 } from '../../settings/interfaces/store-settings.interface';
-import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import {
+  resolveTenantFiscalIdentity,
+  tryResolveTenantFiscalIdentity,
+} from '@common/helpers/fiscal-identity.helper';
 
 const INVOICE_PDF_INCLUDE = {
   invoice_items: true,
@@ -273,7 +276,9 @@ export class InvoicePdfService {
         })
       : null;
 
-    const issuer = this.resolveIssuer(org, store);
+    // Vista previa de plantilla, no emisión: identidad incompleta debe RENDERIZAR
+    // con los huecos visibles, no lanzar. Ver `resolveIssuer`.
+    const issuer = this.resolveIssuer(org, store, false);
 
     let logo_buffer: Buffer | undefined;
     if (issuer.logo_url) {
@@ -438,8 +443,22 @@ export class InvoicePdfService {
    * exactamente los que firmó el XML. Antes esta función duplicaba la cascada
    * y podía imprimir un NIT rancio o 'N/A' si `fiscal_data` no estaba cargado,
    * además de leer `nit_dv` directamente del JSON (que es una columna derivada).
+   *
+   * `strict` distingue los dos consumidores, y la distinción NO es cosmética:
+   *
+   * - `generatePdf` (default, `strict: true`) imprime un documento que se entrega
+   *   al cliente y debe cuadrar con el XML firmado. Si la identidad está
+   *   incompleta, es correcto fallar antes de imprimir un dato fabricado.
+   * - `previewPdf` (`strict: false`) es la vista previa de la PLANTILLA en
+   *   configuración: no consume numeración, no toca la DIAN, no persiste nada, y
+   *   existe justamente para que el comerciante compruebe si sus datos legales
+   *   caben en el formato. Con el resolvedor estricto, el tenant que aún no ha
+   *   cargado su identidad fiscal —el que más necesita esta pantalla— recibía
+   *   «No hay municipio DIAN para el NIT …» en vez de la vista previa.
+   *
+   * Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
    */
-  private resolveIssuer(org: any, store: any) {
+  private resolveIssuer(org: any, store: any, strict = true) {
     const scope: string = org?.fiscal_scope ?? 'STORE';
     const scoped_settings =
       scope === 'STORE'
@@ -453,10 +472,9 @@ export class InvoicePdfService {
     const owner = scope === 'STORE' ? store : org;
     const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
 
-    // El resolvedor es la ÚNICA fuente. Si lanza (ej: `municipality_code`
-    // ausente), la impresión del PDF falla — preferible a un NIT fabricado
-    // o un 'N/A' literal en un documento entregado al cliente.
-    const identity = resolveTenantFiscalIdentity({
+    // El resolvedor es la ÚNICA fuente en los dos modos: ambos deciden las mismas
+    // precedencias y solo difieren ante un campo obligatorio ausente.
+    const source = {
       nit: org?.tax_id || store?.tax_id || '',
       fiscal_data: fiscal,
       entity: org
@@ -483,7 +501,11 @@ export class InvoicePdfService {
           }
         : null,
       email: org?.email,
-    });
+    };
+
+    const identity = strict
+      ? resolveTenantFiscalIdentity(source)
+      : tryResolveTenantFiscalIdentity(source).identity;
 
     const address_line =
       identity.fiscal_address && (identity.city || identity.department)
