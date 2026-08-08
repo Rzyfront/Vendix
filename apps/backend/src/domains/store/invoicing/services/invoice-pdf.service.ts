@@ -9,6 +9,7 @@ import {
   PRINT_FORMATS,
   PrintFormat,
 } from '../../settings/interfaces/store-settings.interface';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 
 const INVOICE_PDF_INCLUDE = {
   invoice_items: true,
@@ -431,11 +432,12 @@ export class InvoicePdfService {
   // ─── Private Helpers ─────────────────────────────────────────────
 
   /**
-   * Legal identity of whoever issues this invoice. Prefers the `fiscal_data`
-   * block of the scope that owns the DIAN habilitación (store under
-   * `fiscal_scope = STORE`, organization otherwise) and only falls back to the
-   * plain organization row, so the printed document cannot show a different
-   * razón social / NIT than the signed XML.
+   * Legal identity of whoever issues this invoice. Pasa por el resolvedor único
+   * (`resolveTenantFiscalIdentity`) — el mismo que consumen `dian-direct` y
+   * `dian-test` — para que la razón social y el NIT impresos en el PDF sean
+   * exactamente los que firmó el XML. Antes esta función duplicaba la cascada
+   * y podía imprimir un NIT rancio o 'N/A' si `fiscal_data` no estaba cargado,
+   * además de leer `nit_dv` directamente del JSON (que es una columna derivada).
    */
   private resolveIssuer(org: any, store: any) {
     const scope: string = org?.fiscal_scope ?? 'STORE';
@@ -444,51 +446,100 @@ export class InvoicePdfService {
         ? store?.store_settings?.settings
         : org?.organization_settings?.settings;
     // `settings` is a Prisma Json column, untyped at runtime.
-    const fiscal = ((scoped_settings as any)?.fiscal_data ?? {}) as {
-      nit?: string;
-      nit_dv?: string;
-      legal_name?: string;
-      tax_regime?: string;
-      tax_responsibilities?: string[];
-      fiscal_address?: string;
-      city?: string;
-      department?: string;
-    };
+    const fiscal = ((scoped_settings as any)?.fiscal_data ?? null) as
+      | Record<string, unknown>
+      | null;
 
     const owner = scope === 'STORE' ? store : org;
     const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
 
-    const address_line =
-      [address?.address_line1, address?.city, address?.state_province]
-        .filter(Boolean)
-        .join(', ') ||
-      [fiscal.fiscal_address, fiscal.city, fiscal.department]
-        .filter(Boolean)
-        .join(', ') ||
-      undefined;
+    let identity;
+    try {
+      identity = resolveTenantFiscalIdentity({
+        nit: org?.tax_id || store?.tax_id || '',
+        fiscal_data: fiscal,
+        entity: org
+          ? { legal_name: org.legal_name, name: org.name }
+          : null,
+        organization: org
+          ? {
+              legal_name: org.legal_name,
+              name: org.name,
+              email: org.email,
+              phone: org.phone,
+              document_type: org.document_type,
+              person_type: org.person_type,
+            }
+          : null,
+        address: address
+          ? {
+              address_line1: address.address_line1,
+              city: address.city,
+              state_province: address.state_province,
+              municipality_code: address.municipality_code,
+              postal_code: address.postal_code,
+              phone_number: address.phone_number,
+            }
+          : null,
+        email: org?.email,
+      });
+    } catch {
+      // El PDF debe imprimirse aunque el resolvedor lance (ej: `municipality_code`
+      // ausente). En ese caso caemos a los datos crudos sin inventar NIT/DV.
+      identity = {
+        nit: (typeof fiscal?.['nit'] === 'string' && fiscal['nit']) ||
+          org?.tax_id || '',
+        nit_dv: typeof fiscal?.['nit_dv'] === 'string' ? fiscal['nit_dv'] : '',
+        legal_name:
+          (typeof fiscal?.['legal_name'] === 'string' && fiscal['legal_name']) ||
+          owner?.legal_name ||
+          org?.name ||
+          'N/A',
+        fiscal_address:
+          (typeof fiscal?.['fiscal_address'] === 'string' &&
+            fiscal['fiscal_address']) ||
+          address?.address_line1 ||
+          '',
+        city: address?.city || '',
+        department: address?.state_province || '',
+        country: 'CO',
+        email: org?.email || '',
+        phone: address?.phone_number || org?.phone || undefined,
+        tax_responsibilities: Array.isArray(fiscal?.['tax_responsibilities'])
+          ? (fiscal['tax_responsibilities'] as string[])
+          : [],
+        tax_regime: typeof fiscal?.['tax_regime'] === 'string'
+          ? fiscal['tax_regime']
+          : undefined,
+      };
+    }
 
-    const nit_base = fiscal.nit || org?.tax_id;
-    const nit = nit_base
-      ? fiscal.nit_dv
-        ? `${nit_base}-${fiscal.nit_dv}`
-        : nit_base
+    const address_line =
+      identity.fiscal_address && (identity.city || identity.department)
+        ? [identity.fiscal_address, identity.city, identity.department]
+            .filter(Boolean)
+            .join(', ')
+        : identity.fiscal_address || undefined;
+
+    const nit = identity.nit
+      ? identity.nit_dv
+        ? `${identity.nit}-${identity.nit_dv}`
+        : identity.nit
       : 'N/A';
 
-    const regime_key = (fiscal.tax_regime || '').toUpperCase();
-
     return {
-      legal_name:
-        fiscal.legal_name || owner?.legal_name || org?.name || 'N/A',
+      legal_name: identity.legal_name,
       nit,
       trade_name: owner?.name || undefined,
       address_line,
-      phone: address?.phone_number || org?.phone || undefined,
-      email: org?.email || undefined,
+      phone: identity.phone,
+      email: identity.email || org?.email || undefined,
       logo_url: store?.logo_url || org?.logo_url || undefined,
-      tax_regime: TAX_REGIME_LABELS[regime_key] || fiscal.tax_regime || undefined,
-      tax_responsibilities: Array.isArray(fiscal.tax_responsibilities)
-        ? fiscal.tax_responsibilities
-        : undefined,
+      tax_regime:
+        TAX_REGIME_LABELS[(identity.tax_regime || '').toUpperCase()] ||
+        identity.tax_regime ||
+        undefined,
+      tax_responsibilities: identity.tax_responsibilities,
     };
   }
 
