@@ -1352,6 +1352,14 @@
       "sessions": 13,
       "memories": 5,
       "prompts": 0
+    },
+    {
+      "id": "5ed7500d",
+      "created_by": "rzy",
+      "created_at": "2026-08-08T14:54:57Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
