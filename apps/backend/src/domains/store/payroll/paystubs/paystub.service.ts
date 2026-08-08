@@ -361,42 +361,31 @@ export class PaystubService {
   }
 
   /**
-   * Resuelve el NIT de la empresa para impresión en la colilla vía el resolvedor
-   * único. `fiscal_data` gana a `organizations.tax_id`, así que si la columna
-   * quedó vacía o con un NIT rancio (defecto que cerró el paso 2 del plan),
-   * el JSON es el que se imprime.
-   *
-   * Si el resolvedor lanza (ej: `municipality_code` ausente), cae a la columna
-   * como respaldo para no romper la generación de la colilla. La colilla
-   * igualmente debe poder emitirse aunque el emisor DIAN no pueda.
+   * Resuelve el NIT de la empresa para impresión en la colilla vía el
+   * resolvedor único. Es la ÚNICA fuente: si la identidad fiscal está
+   * incompleta, el resolvedor lanza y la generación de la colilla falla —
+   * preferible a imprimir un NIT de columna rancio o literal 'N/A' en
+   * un documento laboral entregado al empleado.
    */
   private resolveCompanyNit(org: any): string {
     const fiscalData = (
       (org?.organization_settings?.settings as any)?.fiscal_data ?? null
     ) as Record<string, unknown> | null;
 
-    try {
-      const identity = resolveTenantFiscalIdentity({
-        nit: org?.tax_id || '',
-        fiscal_data: fiscalData,
-        organization: org
-          ? {
-              legal_name: org.legal_name,
-              name: org.name,
-              email: org.email,
-              phone: org.phone,
-            }
-          : null,
-      });
-      return identity.nit
-        ? identity.nit_dv
-          ? `${identity.nit}-${identity.nit_dv}`
-          : identity.nit
-        : 'N/A';
-    } catch {
-      // Respaldo: la columna puede tener un NIT válido aunque `fiscal_data`
-      // esté incompleto. Imprimirlo es mejor que fallar la colilla.
-      return org?.tax_id || 'N/A';
-    }
+    const identity = resolveTenantFiscalIdentity({
+      nit: org?.tax_id || '',
+      fiscal_data: fiscalData,
+      organization: org
+        ? {
+            legal_name: org.legal_name,
+            name: org.name,
+            email: org.email,
+            phone: org.phone,
+          }
+        : null,
+    });
+    return identity.nit_dv
+      ? `${identity.nit}-${identity.nit_dv}`
+      : identity.nit;
   }
 }

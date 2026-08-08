@@ -453,66 +453,37 @@ export class InvoicePdfService {
     const owner = scope === 'STORE' ? store : org;
     const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
 
-    let identity;
-    try {
-      identity = resolveTenantFiscalIdentity({
-        nit: org?.tax_id || store?.tax_id || '',
-        fiscal_data: fiscal,
-        entity: org
-          ? { legal_name: org.legal_name, name: org.name }
-          : null,
-        organization: org
-          ? {
-              legal_name: org.legal_name,
-              name: org.name,
-              email: org.email,
-              phone: org.phone,
-              document_type: org.document_type,
-              person_type: org.person_type,
-            }
-          : null,
-        address: address
-          ? {
-              address_line1: address.address_line1,
-              city: address.city,
-              state_province: address.state_province,
-              municipality_code: address.municipality_code,
-              postal_code: address.postal_code,
-              phone_number: address.phone_number,
-            }
-          : null,
-        email: org?.email,
-      });
-    } catch {
-      // El PDF debe imprimirse aunque el resolvedor lance (ej: `municipality_code`
-      // ausente). En ese caso caemos a los datos crudos sin inventar NIT/DV.
-      identity = {
-        nit: (typeof fiscal?.['nit'] === 'string' && fiscal['nit']) ||
-          org?.tax_id || '',
-        nit_dv: typeof fiscal?.['nit_dv'] === 'string' ? fiscal['nit_dv'] : '',
-        legal_name:
-          (typeof fiscal?.['legal_name'] === 'string' && fiscal['legal_name']) ||
-          owner?.legal_name ||
-          org?.name ||
-          'N/A',
-        fiscal_address:
-          (typeof fiscal?.['fiscal_address'] === 'string' &&
-            fiscal['fiscal_address']) ||
-          address?.address_line1 ||
-          '',
-        city: address?.city || '',
-        department: address?.state_province || '',
-        country: 'CO',
-        email: org?.email || '',
-        phone: address?.phone_number || org?.phone || undefined,
-        tax_responsibilities: Array.isArray(fiscal?.['tax_responsibilities'])
-          ? (fiscal['tax_responsibilities'] as string[])
-          : [],
-        tax_regime: typeof fiscal?.['tax_regime'] === 'string'
-          ? fiscal['tax_regime']
-          : undefined,
-      };
-    }
+    // El resolvedor es la ÚNICA fuente. Si lanza (ej: `municipality_code`
+    // ausente), la impresión del PDF falla — preferible a un NIT fabricado
+    // o un 'N/A' literal en un documento entregado al cliente.
+    const identity = resolveTenantFiscalIdentity({
+      nit: org?.tax_id || store?.tax_id || '',
+      fiscal_data: fiscal,
+      entity: org
+        ? { legal_name: org.legal_name, name: org.name }
+        : null,
+      organization: org
+        ? {
+            legal_name: org.legal_name,
+            name: org.name,
+            email: org.email,
+            phone: org.phone,
+            document_type: org.document_type,
+            person_type: org.person_type,
+          }
+        : null,
+      address: address
+        ? {
+            address_line1: address.address_line1,
+            city: address.city,
+            state_province: address.state_province,
+            municipality_code: address.municipality_code,
+            postal_code: address.postal_code,
+            phone_number: address.phone_number,
+          }
+        : null,
+      email: org?.email,
+    });
 
     const address_line =
       identity.fiscal_address && (identity.city || identity.department)

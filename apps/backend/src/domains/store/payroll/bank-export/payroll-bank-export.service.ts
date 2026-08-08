@@ -123,10 +123,12 @@ export class PayrollBankExportService {
       );
     }
 
-    // 5. Get organization data + NIT resuelto por el resolvedor único
-    // (`resolveTenantFiscalIdentity`). `fiscal_data` gana a la columna
-    // `organizations.tax_id` — un archivo bancario con un NIT rancio o vacío
-    // es un dato legal falso entregado a un banco.
+    // 5. NIT del archivo bancario resuelto por el resolvedor único
+    // (`resolveTenantFiscalIdentity`). El resolvedor es la ÚNICA fuente — un
+    // archivo bancario con un NIT rancio o vacío es un dato legal falso
+    // entregado a un banco. Si la identidad fiscal está incompleta
+    // (`municipality_code` ausente, etc.) el resolvedor lanza y el export
+    // falla: preferible a un NIT fabricado.
     const context = RequestContextService.getContext();
     const organization = await this.prisma.organizations.findFirst({
       where: { id: context?.organization_id },
@@ -151,28 +153,19 @@ export class PayrollBankExportService {
         null
     ) as Record<string, unknown> | null;
 
-    let companyNit = organization.tax_id || '';
-    try {
-      const identity = resolveTenantFiscalIdentity({
-        nit: organization.tax_id || '',
-        fiscal_data: fiscalData,
-        organization: {
-          legal_name: organization.legal_name,
-          name: organization.name,
-        },
-      });
-      if (identity.nit) companyNit = identity.nit;
-    } catch {
-      // Si el resolvedor lanza, caemos al valor de la columna. El export
-      // bancario debe poder emitirse aunque `fiscal_data` esté incompleto.
-    }
-
-    if (!companyNit) {
-      throw new VendixHttpException(
-        ErrorCodes.PAYROLL_STATUS_001,
-        'Organization tax ID (NIT) is required for ACH export. Please configure it in organization settings.',
-      );
-    }
+    // El resolvedor resuelve el NIT desde `fiscal_data` (fuente única).
+    // No pasamos `organization.tax_id` como fallback: si `fiscal_data` está
+    // incompleto, la generación del archivo bancario debe fallar — preferible
+    // a un NIT de columna rancio entregado a un banco.
+    const identity = resolveTenantFiscalIdentity({
+      nit: '',
+      fiscal_data: fiscalData,
+      organization: {
+        legal_name: organization.legal_name,
+        name: organization.name,
+      },
+    });
+    const companyNit = identity.nit;
 
     const total_amount = employees.reduce((sum, e) => sum + e.net_pay, 0);
 

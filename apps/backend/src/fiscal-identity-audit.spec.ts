@@ -77,13 +77,6 @@ const EXPLICIT_EXCEPTIONS: Record<string, string[]> = {
   'src/common/services/operating-scope.service.ts': [
     // Resuelve el alcance operativo — usa la columna como contexto.
   ],
-  // fiscal-status: usa la columna como respaldo cuando el resolvedor devuelve
-  // valor vacío o lanza. La identidad real se resuelve arriba en la misma
-  // función; esta lectura es solo fallback contextual.
-  'src/common/services/fiscal-status.service.ts': [
-    // Fallback al valor de columna cuando el resolvedor devuelve cadena vacía
-    // (ej: tenant sin `fiscal_data` cargado).
-  ],
   // Superadmin de suscripciones: split de NIT en `subscription-fiscal.service`.
   // Compara `org.verification_digit` con el DV calculado del NIT partido para
   // detectar inconsistencia en la captura, no para emitir.
@@ -91,34 +84,22 @@ const EXPLICIT_EXCEPTIONS: Record<string, string[]> = {
     // Validación de NIT partido: compara DV calculado vs DV almacenado para
     // detectar si el split de Quickss se hizo bien.
   ],
-  // Consumers refactorizados en el paso 5: usan la columna como respaldo
-  // cuando el resolvedor devuelve cadena vacía o lanza. La identidad real se
-  // resuelve arriba; esta lectura es solo fallback contextual.
-  'src/domains/store/invoicing/services/invoice-pdf.service.ts': [
-    // `issuer.tax_regime` es el campo del resolvedor (DianIssuerData), no
-    // la columna de la tabla. La asignación al campo del PDF es legítima.
-  ],
-  'src/domains/store/payroll/bank-export/payroll-bank-export.service.ts': [
-    // `organization.tax_id` se usa como `nit` inicial del resolvedor y como
-    // respaldo si la identidad queda vacía. Respaldo explícito del paso 5.
-  ],
-  'src/domains/store/subscriptions/services/subscription-billing-profile.service.ts': [
-    // `org.tax_id/verification_digit/tax_regime` se usan como respaldo cuando
-    // el resolvedor devuelve cadena vacía. Respaldo explícito del paso 5.
-    // `org.tax_id` también se usa para inferir `document_type` cuando no se
-    // declaró en el formulario, no para emitir.
-  ],
-  'src/domains/store/subscriptions/services/subscription-invoice-pdf.service.ts': [
-    // `ctx.organization.tax_id` se setea desde el helper `resolveTaxId()` que
-    // ya consume el resolvedor. La lectura es del valor contextual, no de la
-    // columna de la tabla.
-  ],
   // Resolver de retenciones: usa `tax_regime` para clasificar al tenant en
   // SIMPLIFICADO (no responsable de IVA), no para construir identidad fiscal
   // del emisor. Es un predicado de cálculo, no de emisión.
   'src/domains/store/withholding-tax/withholding-resolver.service.ts': [
     // `isSimpleRegime` evalúa la columna para decidir si aplica retención en
     // la fuente, no para emitir un documento fiscal.
+  ],
+  // Subscription invoice PDF: `ctx.organization.tax_id` no es una lectura de
+  // columna — es el NIT ya resuelto por el helper `resolveFiscalIdentity`
+  // (que consume el resolvedor único) pasado a través del contexto del
+  // renderer PDF. El audit lo marca por el prefijo `organization`, pero la
+  // fuente es el JSON vía resolvedor.
+  'src/domains/store/subscriptions/services/subscription-invoice-pdf.service.ts': [
+    // `ctx.organization.tax_id` se setea desde `identity.nit` del resolvedor
+    // al construir el contexto del PDF — la lectura es del valor contextual,
+    // no de la columna de la tabla.
   ],
 };
 
@@ -177,9 +158,6 @@ const COLUMN_LIKE_PREFIXES = [
   'org',
   'organization',
   'store',
-  'entity',
-  'issuer',
-  'owner',
   'cfg',
   'config',
   'tenant',
