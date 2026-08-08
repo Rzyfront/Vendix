@@ -1,4 +1,4 @@
-import { Component, inject, computed, signal, OnInit } from '@angular/core';
+import { Component, inject, computed, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -21,16 +21,7 @@ import { ReportColumn } from '../../interfaces/report.interface';
  * `app-aging-report` con buckets coloreados (verde/amarillo/naranja/
  * rojo/rojo fuerte para 0-30/31-60/61-90/90+) + skeleton + empty
  * state. Envuelve también el `ReportViewerComponent` para stats cards,
- * filtro de fecha y botón export (los aging reports tienen 4 stats
- * como todos los demás).
- *
- * Mapper: convierte las filas que vienen del backend (con `aging_bucket`
- * como texto, ej '0-30' | '31-60' | '61-90' | '90+') en el shape que
- * espera `app-aging-report`: una columna numérica por bucket
- * (`current_amount`, `1_30_amount`, `31_60_amount`, `61_90_amount`,
- * `90_plus_amount`) con el `balance` (o `total_amount`) en el bucket
- * correspondiente. El componente AgingReportComponent colorea cada
- * celda con `isOverdue()` cuando el valor > 0.
+ * filtro de fecha y botón export.
  */
 @Component({
   selector: 'app-aging-report-page',
@@ -39,24 +30,21 @@ import { ReportColumn } from '../../interfaces/report.interface';
   template: `
     <div class="flex flex-col gap-6">
       <app-report-viewer
-        [report]="report()"
+        [report]="report() ?? null"
         [data]="[]"
-        [summaryData]="summaryData()"
-        [loading]="loading()"
-        [forbidden]="forbidden()"
+        [summaryData]="summaryData() ?? null"
+        [loading]="!!loading()"
+        [isForbidden]="!!forbidden()"
         [dateRange]="dateRange()"
         (dateRangeChange)="onDateRangeChange($event)"
         (exportClick)="onExportClick()"
-      >
-        <!-- El viewer renderiza stats cards, filtros y export button.
-             Reemplazamos la tabla interna con app-aging-report. -->
-      </app-report-viewer>
+      ></app-report-viewer>
 
-      @if (report() && data().length > 0) {
+      @if (report() && agingRows().length > 0) {
         <app-aging-report
           [data]="agingRows()"
           [columns]="agingColumns()"
-          [loading]="loading()"
+          [loading]="!!loading()"
           [entityLabel]="report()!.title"
         />
       }
@@ -75,64 +63,27 @@ export class AgingReportPageComponent implements OnInit {
   readonly forbidden = toSignal(this.store.select(selectIsForbidden));
   readonly dateRange = toSignal(this.store.select(selectDateRange));
 
-  /**
-   * Columnas que se le pasan a `app-aging-report`. Mapeamos las del
-   * registry a las 4 columnas de bucket + total, usando los labels
-   * existentes en español.
-   */
   readonly agingColumns = computed<ReportColumn[]>(() => {
     const report = this.report();
     if (!report) return [];
-    // Definimos 5 columnas: total + 4 buckets (0-30, 31-60, 61-90, 90+).
-    // El header de cada bucket se infiere del aging_bucket del registry.
     return [
       {
         key: 'entity_label',
         header: report.columns[0]?.header ?? 'Entidad',
         type: 'text',
       },
-      {
-        key: 'current_amount',
-        header: 'Corriente',
-        type: 'currency',
-      },
-      {
-        key: '1_30_amount',
-        header: '1-30 días',
-        type: 'currency',
-      },
-      {
-        key: '31_60_amount',
-        header: '31-60 días',
-        type: 'currency',
-      },
-      {
-        key: '61_90_amount',
-        header: '61-90 días',
-        type: 'currency',
-      },
-      {
-        key: '90_plus_amount',
-        header: '90+ días',
-        type: 'currency',
-      },
-      {
-        key: 'total_amount',
-        header: 'Total',
-        type: 'currency',
-        footer: 'sum',
-      },
+      { key: 'current_amount', header: 'Corriente', type: 'currency' },
+      { key: '1_30_amount', header: '1-30 días', type: 'currency' },
+      { key: '31_60_amount', header: '31-60 días', type: 'currency' },
+      { key: '61_90_amount', header: '61-90 días', type: 'currency' },
+      { key: '90_plus_amount', header: '90+ días', type: 'currency' },
+      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
     ];
   });
 
-  /**
-   * Transforma cada fila del backend en una fila con los buckets
-   * separados. El campo que representa "el monto" se infiere del
-   * registry (primera columna currency).
-   */
   readonly agingRows = computed<any[]>(() => {
     const rows = this.data();
-    if (!rows.length) return [];
+    if (!rows || !rows.length) return [];
     const amountKey = this.detectAmountKey(rows[0]);
     return rows.map((r) => this.toAgingRow(r, amountKey));
   });
@@ -145,8 +96,10 @@ export class AgingReportPageComponent implements OnInit {
   }
 
   onDateRangeChange(range: any): void {
-    this.store.dispatch(ReportsActions.setDateRange({ range }));
-    this.store.dispatch(ReportsActions.loadReportData({ reportId: this.route.snapshot.data['reportId'] }));
+    this.store.dispatch(ReportsActions.setDateRange({ dateRange: range }));
+    // loadReportData lee el reportId del state via loadReportData$
+    // effect, no necesita prop.
+    this.store.dispatch(ReportsActions.loadReportData());
   }
 
   onExportClick(): void {
@@ -154,8 +107,6 @@ export class AgingReportPageComponent implements OnInit {
   }
 
   private detectAmountKey(row: any): string {
-    // Las filas vienen con `balance` (QUI-540), `total_amount` (QUI-542),
-    // o `lifetime_value` (QUI-539). Buscamos el primer campo currency presente.
     for (const k of ['balance', 'total_amount', 'amount', 'lifetime_value', 'total_spent']) {
       if (typeof row[k] === 'number' || typeof row[k] === 'string') return k;
     }
@@ -165,7 +116,7 @@ export class AgingReportPageComponent implements OnInit {
   private toAgingRow(row: any, amountKey: string): any {
     const amount = Number(row[amountKey] ?? 0);
     const bucket = (row['aging_bucket'] ?? '').toString();
-    const rowOut: any = {
+    return {
       entity_label: this.buildEntityLabel(row),
       current_amount: bucket === '0-30' ? amount : 0,
       '1_30_amount': bucket === '0-30' ? amount : 0,
@@ -174,7 +125,6 @@ export class AgingReportPageComponent implements OnInit {
       '90_plus_amount': bucket === '90+' ? amount : 0,
       total_amount: amount,
     };
-    return rowOut;
   }
 
   private buildEntityLabel(row: any): string {
