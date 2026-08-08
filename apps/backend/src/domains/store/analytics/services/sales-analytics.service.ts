@@ -1008,9 +1008,10 @@ export class SalesAnalyticsService {
         status: { notIn: ['draft', 'cancelled'] },
       },
       select: {
+        id: true,
         created_by_user_id: true,
-        total_price: true,
         status: true,
+        sales_order_items: { select: { total_price: true } },
       },
       take: 10000,
     });
@@ -1029,7 +1030,11 @@ export class SalesAnalyticsService {
         total_revenue: 0,
       };
       bucket.order_count += 1;
-      bucket.total_revenue += Number(so.total_price || 0);
+      // sales_orders no tiene campo de total propio; se suma desde
+      // sales_order_items.total_price.
+      for (const item of so.sales_order_items ?? []) {
+        bucket.total_revenue += Number(item.total_price || 0);
+      }
       buckets.set(userId, bucket);
     }
 
