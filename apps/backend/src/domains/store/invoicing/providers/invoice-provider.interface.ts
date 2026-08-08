@@ -1,3 +1,5 @@
+import { DianInvoiceControl } from './dian-direct/interfaces/dian-config.interface';
+
 /**
  * Contract for electronic invoice providers (e.g., DIAN, mock, third-party).
  */
@@ -91,6 +93,25 @@ export interface ProviderInvoiceData {
   taxes: ProviderInvoiceTax[];
   resolution_number?: string;
   technical_key?: string;
+  /**
+   * Bloque `sts:DianExtensions/InvoiceControl`: autorización de numeración,
+   * período de vigencia y rango autorizado.
+   *
+   * Lo construye `resolveInvoiceControl` (common/helpers/invoice-control.helper.ts)
+   * desde la fila `invoice_resolutions`, y lo pueblan los DOS emisores — el de
+   * tenant en `invoice-flow.service.ts` y el de la plataforma en
+   * `subscription-fiscal.service.ts`—.
+   *
+   * Antes no existía este campo, y esa era la causa de que la emisión real saliera
+   * con el bloque vacío: `resolution_number` y `technical_key` por sí solos no
+   * llevan el prefijo ni el rango, así que ningún llamador tenía dónde ponerlos.
+   * Sin `sts:Prefix` desaparece el lado derecho de FAB10a y la DIAN rechaza en
+   * cascada por FAD05e, FAB24a y FAB27b.
+   *
+   * Opcional en el tipo porque el documento soporte no cuelga de una resolución
+   * de numeración (ver `dian-direct.provider.ts`, nota del documento soporte).
+   */
+  control?: DianInvoiceControl;
   notes?: string;
 
   // DIAN-enriched fields (optional — used by DianDirectProvider)

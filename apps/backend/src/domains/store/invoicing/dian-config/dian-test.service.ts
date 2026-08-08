@@ -32,6 +32,7 @@ import {
   localTimeString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import {
   buildDianXmlFileName,
   buildDianZipFileName,
@@ -656,19 +657,17 @@ export class DianTestService {
       ? await resolveStoreTimezone(this.prisma, store_id)
       : DEFAULT_STORE_TIMEZONE;
 
-    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
-    // numbering-resolution row so the AuthorizedInvoices range and authorization
-    // period rendered in the XML are the real habilitación values, not empty.
-    // The validity range is a civil date range: `toISOString()` would shift it a
-    // day whenever the stored instant falls before the zone's UTC offset.
-    const control = {
-      invoice_authorization: resolution.resolution_number,
-      authorization_start_date: localDateString(resolution.valid_from, timezone),
-      authorization_end_date: localDateString(resolution.valid_to, timezone),
-      prefix: resolution.prefix,
-      range_from: String(resolution.range_from),
-      range_to: String(resolution.range_to),
-    };
+    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — lo construye el
+    // RESOLVEDOR ÚNICO, no este archivo.
+    //
+    // Aquí vivía la única implementación del bloque, y por eso la emisión real
+    // salía sin él: no había nada compartido que consumir. Ahora ambos caminos
+    // llaman a `resolveInvoiceControl`, así que el set de pruebas y la producción
+    // declaran la misma autorización por construcción y no por coincidencia.
+    const control = resolveInvoiceControl(resolution, timezone, new Date(), {
+      resolution_id: resolution.id,
+      document_type: resolution.document_type,
+    });
 
     // ALCANCE FISCAL: `fiscal_data` vive en `store_settings` para entidades con
     // alcance de TIENDA y en `organization_settings` para las de ORGANIZACIÓN. Es

@@ -360,8 +360,38 @@ export class DianConfigService {
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined)
+    // `environment` NO SUBE A PRODUCCIÓN POR AQUÍ.
+    //
+    // El camino correcto es `promoteToProduction`, que exige `readiness.ready` y
+    // escribe TRES cosas: `environment`, `enablement_status: 'enabled'` y
+    // `enabled_at`. Este PATCH plano escribía solo la primera, así que dejaba la
+    // configuración apuntando a `vpfe.dian.gov.co` con `enablement_status` todavía
+    // en habilitación — y la emisión acepta ese estado. Resultado: cada documento
+    // se rechazaba por software no habilitado, gastando un consecutivo autorizado
+    // irrecuperable por intento.
+    //
+    // Bajar a 'test' sí se permite: apunta al endpoint de pruebas, no puede
+    // producir una emisión productiva falsa, y es el camino para repetir la
+    // habilitación.
+    //
+    // Y solo se bloquea el CAMBIO real: si ya está en producción, reenviar
+    // 'production' es un no-op. Rechazarlo sin esa condición rompería cualquier
+    // PATCH del formulario que devuelva el objeto completo con su valor actual.
+    if (dto.environment !== undefined) {
+      if (
+        dto.environment === 'production' &&
+        config.environment !== 'production'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_ENABLEMENT_001,
+          'El paso a producción no se hace editando la configuración. Usa ' +
+            'promoteToProduction, que verifica la habilitación (readiness) y marca ' +
+            'enablement_status antes de cambiar el ambiente.',
+          { dian_configuration_id: config.id, attempted: dto.environment },
+        );
+      }
       update_data.environment = dto.environment;
+    }
     if (dto.test_set_id !== undefined)
       update_data.test_set_id = dto.test_set_id;
     // Empty string means "go back to in-process custody", so it must reach the
@@ -498,9 +528,23 @@ export class DianConfigService {
     }
 
     if (status === 'enabled') {
+      // `shared_technical_key` se resuelve y se pasa explícitamente. No basta con
+      // que `ReadinessConfig` lo declare obligatorio: `config` viene de
+      // `StorePrismaService`, cuyos modelos cuelgan de un `scoped_client: any`, así
+      // que difundirlo compila sin el campo y llegaría como `undefined`. La
+      // comprobación falla cerrado ante `undefined`, pero marcar una configuración
+      // como habilitada es justo el momento en que el dato debe ser real.
+      const shared_technical_key =
+        await this.readiness.findResolutionsSharingTechnicalKey({
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type: config.configuration_type,
+        });
       this.readiness.assertProductionReady({
         ...config,
         enablement_status: status,
+        shared_technical_key,
       });
     }
 
@@ -614,10 +658,23 @@ export class DianConfigService {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    // La clave técnica del rango la asigna la DIAN por NIT: si está compartida con
+    // otro NIT, el CUFE que calculamos no coincide con el que la DIAN recomputa y
+    // el documento se rechaza con el consecutivo gastado. Se resuelve antes de
+    // evaluar porque el evaluador es sincrónico por diseño.
+    const shared_technical_key =
+      await this.readiness.findResolutionsSharingTechnicalKey({
+        organization_id: config.organization_id,
+        store_id: config.store_id,
+        accounting_entity_id: config.accounting_entity_id,
+        configuration_type: config.configuration_type,
+      });
+
     const report = this.readiness.evaluateProductionReadiness({
       ...config,
       environment: 'production',
       enablement_status: 'enabled',
+      shared_technical_key,
     });
 
     const resolutions = await this.prisma.invoice_resolutions.findMany({

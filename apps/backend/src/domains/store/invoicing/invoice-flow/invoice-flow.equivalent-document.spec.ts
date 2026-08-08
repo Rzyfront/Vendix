@@ -65,7 +65,23 @@ describe('InvoiceFlowService POS equivalent document', () => {
     ],
     // The DE range carries NO technical_key: the ClTec belongs to a FEV range and
     // the DE key is built with the Software-PIN instead.
-    resolution: { resolution_number: '18760000900', technical_key: null },
+    // Resolución COMPLETA: el bloque sts:InvoiceControl se construye desde esta
+    // fila, así que un fixture con solo el número describe una resolución que no
+    // puede respaldar una emisión — y antes pasaba porque nadie lo comprobaba.
+    // `technical_key` sigue en null a propósito: la clave técnica solo es
+    // obligatoria para la factura electrónica de venta, no para el DE POS.
+    resolution: {
+      id: 42,
+      resolution_number: '18760000900',
+      technical_key: null,
+      prefix: 'DE',
+      range_from: 1,
+      range_to: 5000,
+      valid_from: new Date('2026-01-01T05:00:00.000Z'),
+      valid_to: new Date('2030-01-01T05:00:00.000Z'),
+      is_active: true,
+      document_type: 'pos_equivalent_document',
+    },
     related_invoice: null,
     notes: null,
   };
