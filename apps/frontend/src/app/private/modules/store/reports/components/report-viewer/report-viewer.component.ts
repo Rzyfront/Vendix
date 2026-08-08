@@ -190,7 +190,13 @@ export class ReportViewerComponent {
       const ic = TYPE_ICONS[s.type] || TYPE_ICONS['number'];
       let value: string | number = '-';
 
-      if (hasSourceData && source[s.key] != null) {
+      // Caso especial: `_count` siempre es el conteo de filas, no un
+      // campo de la fila. Sin este branch, `Number(row['_count'])` da
+      // NaN y el card mostraba 0 aunque hubiera datos.
+      if (s.key === '_count') {
+        const rows = this.data() ?? [];
+        value = formatStatValue(rows.length, s.type);
+      } else if (hasSourceData && source[s.key] != null) {
         value = formatStatValue(source[s.key], s.type);
       } else if (data && data.length > 0) {
         const sum = data.reduce((acc, row) => {
