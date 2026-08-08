@@ -644,10 +644,23 @@ export class DianConfigService {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    // La clave técnica del rango la asigna la DIAN por NIT: si está compartida con
+    // otro NIT, el CUFE que calculamos no coincide con el que la DIAN recomputa y
+    // el documento se rechaza con el consecutivo gastado. Se resuelve antes de
+    // evaluar porque el evaluador es sincrónico por diseño.
+    const shared_technical_key =
+      await this.readiness.findResolutionsSharingTechnicalKey({
+        organization_id: config.organization_id,
+        store_id: config.store_id,
+        accounting_entity_id: config.accounting_entity_id,
+        configuration_type: config.configuration_type,
+      });
+
     const report = this.readiness.evaluateProductionReadiness({
       ...config,
       environment: 'production',
       enablement_status: 'enabled',
+      shared_technical_key,
     });
 
     const resolutions = await this.prisma.invoice_resolutions.findMany({

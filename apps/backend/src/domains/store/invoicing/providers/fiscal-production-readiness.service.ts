@@ -107,8 +107,23 @@ export interface ProductionReadinessReport {
   waiting_on_dian: ProductionReadinessCheck[];
 }
 
+/**
+ * Clave técnica compartida entre NIT distintos, si la hay.
+ *
+ * `null` significa COMPROBADO Y LIMPIO. Es obligatorio en `ReadinessConfig` para
+ * que un llamador no pueda omitirlo: un campo opcional ausente se leería como
+ * «sin hallazgo» y la comprobación fallaría en abierto, que es exactamente el
+ * modo de fallo que este archivo existe para evitar.
+ */
+export type SharedTechnicalKeyFinding = {
+  resolution_id: number;
+  foreign: Array<{ resolution_id: number; tax_id: string | null }>;
+};
+
 /** Shape `assertProductionReady` / `evaluateProductionReadiness` need. */
 type ReadinessConfig = {
+  /** Resultado de `findResolutionsSharingTechnicalKey`. `null` = comprobado y limpio. */
+  shared_technical_key: SharedTechnicalKeyFinding | null;
   id: number;
   operation_mode: string;
   environment: string;
@@ -392,7 +407,14 @@ export class FiscalProductionReadinessService {
     }
 
     if (requireProduction) {
-      this.assertProductionReady(config);
+      this.assertProductionReady({
+        ...config,
+        // Se consulta aquí, donde hay `params` y contexto async, y se pasa como
+        // dato: `assertProductionReady` y `evaluateProductionReadiness` son
+        // sincrónicos a propósito para que el gate y la lista no puedan divergir.
+        shared_technical_key:
+          await this.findResolutionsSharingTechnicalKey(params),
+      });
       // La DIAN no emite resolución de numeración para la nómina electrónica
       // (el DSPNE numera con su propio consecutivo NumNE, no con una
       // invoice_resolutions), por lo que exigir una resolución activa bloquearía
@@ -425,6 +447,18 @@ export class FiscalProductionReadinessService {
         }));
     const certValid =
       !!config.certificate_expiry && config.certificate_expiry > new Date();
+
+    // La clave técnica del rango está LIGADA AL NIT: la DIAN la asigna por cada
+    // rango de numeración de cada NIT, y alimenta el CUFE. Dos NIT distintos no
+    // pueden compartirla — si la comparten, al menos uno calcula un CUFE que la
+    // DIAN recomputa distinto y rechaza, con el consecutivo ya gastado.
+    //
+    // Llega COMO DATO en `config` y no se consulta aquí: esta función es sincrónica
+    // y pura a propósito, para que la lista que ve el comerciante no pueda divergir
+    // del gate que bloquea la emisión. El campo es OBLIGATORIO en `ReadinessConfig`
+    // justamente para que ningún llamador pueda omitirlo y dejar la comprobación
+    // fallando en abierto.
+    const shared_cltec = config.shared_technical_key;
 
     const checks: ProductionReadinessCheck[] = [
       {
@@ -545,6 +579,23 @@ export class FiscalProductionReadinessService {
           'los secretos DIAN están cifrados con la llave de respaldo visible en el repositorio.',
         owner: 'platform',
       },
+      {
+        key: 'technical_key_per_nit',
+        label: 'Clave técnica propia del rango (no compartida con otro NIT)',
+        satisfied: !shared_cltec,
+        action: shared_cltec
+          ? `La clave técnica de la resolución ${shared_cltec.resolution_id} está ` +
+            `compartida con ${shared_cltec.foreign.length} resolución(es) de otro NIT ` +
+            `(${shared_cltec.foreign
+              .map((f) => `res ${f.resolution_id} → NIT ${f.tax_id ?? 'sin NIT'}`)
+              .join('; ')}). La DIAN asigna una clave técnica por rango y por NIT, y ` +
+            'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
+            'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
+            'el consecutivo ya gastado. Copia del portal de habilitación la clave ' +
+            'técnica del rango de ESTE NIT y guárdala en la resolución.'
+          : '',
+        owner: 'tenant',
+      },
       this.buildSecretsEnvelopeWarning(config),
       this.buildPrivateKeyCustodyWarning(config),
       this.buildCertificateExpiryWarning(config.certificate_expiry),
@@ -623,6 +674,65 @@ export class FiscalProductionReadinessService {
     if (!lastTestResult || typeof lastTestResult !== 'object') return false;
     const data = lastTestResult as Record<string, any>;
     return data?.dian_response?.success === true || data?.success === true;
+  }
+
+  /**
+   * ¿La clave técnica de la resolución activa está compartida con otro NIT?
+   *
+   * La `ClTec` la asigna la DIAN **por cada rango de numeración de cada NIT** y
+   * alimenta el CUFE sin viajar en el XML, así que la DIAN la recompone de su lado
+   * a partir del NIT y el rango. Compartirla entre NIT distintos garantiza que al
+   * menos uno de ellos emita un CUFE que no coincide con el recomputado — y el
+   * consecutivo se gasta igual.
+   *
+   * No se valida la LONGITUD de la clave a propósito: el anexo no publica su
+   * formato, y afirmar un largo deducido es el error que ya costó una habilitación
+   * con la composición del set de pruebas. Lo que sí está publicado, y es lo que
+   * se comprueba, es que la clave pertenece a un único par (NIT, rango).
+   */
+  async findResolutionsSharingTechnicalKey(
+    params: ResolveConfigParams,
+  ): Promise<SharedTechnicalKeyFinding | null> {
+    const document_type =
+      params.document_type ?? this.defaultDocumentType(params.configuration_type);
+    const own = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          organization_id: params.organization_id,
+          accounting_entity_id: params.accounting_entity_id,
+          document_type,
+          is_active: true,
+        },
+        select: {
+          id: true,
+          technical_key: true,
+          accounting_entity: { select: { tax_id: true } },
+        },
+      });
+    if (!own?.technical_key) return null;
+
+    const others = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findMany({
+        where: { technical_key: own.technical_key, id: { not: own.id } },
+        select: {
+          id: true,
+          accounting_entity: { select: { tax_id: true } },
+        },
+      });
+
+    const own_nit = this.onlyDigits(own.accounting_entity?.tax_id);
+    const foreign = others
+      .filter(
+        (o) => this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
+      )
+      .map((o) => ({
+        resolution_id: o.id,
+        tax_id: o.accounting_entity?.tax_id ?? null,
+      }));
+
+    return foreign.length ? { resolution_id: own.id, foreign } : null;
   }
 
   private async assertResolutionReady(params: ResolveConfigParams): Promise<void> {
