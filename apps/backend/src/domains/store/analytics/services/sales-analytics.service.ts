@@ -1008,6 +1008,137 @@ export class SalesAnalyticsService {
   }
 
   /**
+   * QUI-549: variante flat-array de getSalesByChannel para exportación XLSX.
+   * mismo shape que la vista de pantalla. Como `orders.channel` es enum con
+   * máximo 5 valores (pos, ecommerce, agent, whatsapp, marketplace), el
+   * `take: 10000` es solo defensa — el groupBy retorna un row por valor.
+   */
+  /**
+   * QUI-551: ventas agregadas por vendedor (staff que creó la sales_order).
+   * Como `orders` no tiene `seller_id` directo, usamos
+   * `sales_orders.created_by_user_id` como proxy. Esto cubre ventas POS
+   * principalmente. Para ecommerce/whatsapp sin sales_order previa, el
+   * vendedor queda NULL y se omite.
+   */
+  async getSalesBySellerForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const salesOrders = await this.prisma.sales_orders.findMany({
+      where: {
+        created_at: { gte: startDate, lte: endDate },
+        created_by_user_id: { not: null },
+        status: { notIn: ['draft', 'cancelled'] },
+      },
+      select: {
+        id: true,
+        created_by_user_id: true,
+        status: true,
+        sales_order_items: { select: { total_price: true } },
+      },
+      take: 10000,
+    });
+
+    const buckets = new Map<number, {
+      seller_id: number;
+      order_count: number;
+      total_revenue: number;
+    }>();
+
+    for (const so of salesOrders) {
+      const userId = so.created_by_user_id as number;
+      const bucket = buckets.get(userId) ?? {
+        seller_id: userId,
+        order_count: 0,
+        total_revenue: 0,
+      };
+      bucket.order_count += 1;
+      // sales_orders no tiene campo de total propio; se suma desde
+      // sales_order_items.total_price.
+      for (const item of so.sales_order_items ?? []) {
+        bucket.total_revenue += Number(item.total_price || 0);
+      }
+      buckets.set(userId, bucket);
+    }
+
+    const sellerIds = Array.from(buckets.keys());
+    const users = await this.prisma.users.findMany({
+      where: { id: { in: sellerIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    return Array.from(buckets.values())
+      .map((b) => {
+        const user = userMap.get(b.seller_id);
+        const avgPerOrder =
+          b.order_count > 0
+            ? Math.round((b.total_revenue / b.order_count) * 100) / 100
+            : 0;
+        return {
+          seller_id: b.seller_id,
+          seller_name: user
+            ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+            : '',
+          email: user?.email || '',
+          order_count: b.order_count,
+          total_revenue: Math.round(b.total_revenue * 100) / 100,
+          avg_per_order: avgPerOrder,
+        };
+      })
+      .sort((a, b) => b.total_revenue - a.total_revenue);
+  }
+
+  async getSalesByChannelForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        ...(query.channel && { channel: query.channel }),
+      },
+      _sum: { grand_total: true },
+      _count: { id: true },
+    });
+
+    const labels: Record<string, string> = {
+      pos: 'Punto de Venta',
+      ecommerce: 'Tienda Online',
+      agent: 'Agente IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+
+    const total = results.reduce(
+      (sum, r) => sum + Number(r._sum.grand_total || 0),
+      0,
+    );
+
+    return results
+      .map((r) => ({
+        channel: r.channel,
+        display_name: labels[r.channel] || r.channel,
+        order_count: r._count.id,
+        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        percentage: total > 0
+          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }
+
+  /**
    * Raw dataset for the sales export, split into two coherent shapes so the
    * emission phase never double-counts:
    *
