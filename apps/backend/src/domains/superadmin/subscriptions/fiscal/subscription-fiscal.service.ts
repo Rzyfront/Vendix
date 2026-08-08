@@ -21,6 +21,10 @@ import {
   localDateString,
   localTimeString,
 } from '../../../../common/utils/store-timezone.util';
+import {
+  resolveInvoiceControl,
+  InvoiceControlSource,
+} from '../../../../common/helpers/invoice-control.helper';
 import { DianDirectProvider } from '../../../store/invoicing/providers/dian-direct/dian-direct.provider';
 import {
   DianSoapClient,
@@ -168,6 +172,19 @@ interface SubscriptionInvoiceForFiscal {
     };
   };
 }
+
+/**
+ * Fila de `invoice_resolutions` que la emisión de la plataforma necesita.
+ *
+ * Se declara sobre `InvoiceControlSource` para que el resolvedor único la acepte
+ * tal cual, y se le añade lo que el XML pide aparte del bloque de control: la
+ * clave técnica (`ClTec`, que alimenta el CUFE) y el número de resolución.
+ */
+type PlatformInvoiceResolution = InvoiceControlSource & {
+  id: number;
+  technical_key: string | null;
+  document_type: string;
+};
 
 @Injectable()
 export class SubscriptionFiscalService {
@@ -1082,6 +1099,11 @@ export class SubscriptionFiscalService {
       return { skipped: false, transmission, already_accepted: true };
     }
 
+    // La resolución que respalda el consecutivo de esta transmisión. Se carga aquí
+    // y no dentro de `buildProviderData` porque esa función es sincrónica y debe
+    // seguir siéndolo: armar el payload no debe poder tocar la base.
+    const resolution = await this.loadInvoiceResolution(settings);
+
     try {
       await this.markSubmitted(transmission.id);
       const response = await RequestContextService.runIsolated(
@@ -1095,7 +1117,14 @@ export class SubscriptionFiscalService {
           permissions: [],
           app_type: 'VENDIX_ADMIN',
         },
-        () => this.dianProvider.sendInvoice(this.buildProviderData(invoice, transmission.document_number)),
+        () =>
+          this.dianProvider.sendInvoice(
+            this.buildProviderData(
+              invoice,
+              transmission.document_number,
+              resolution,
+            ),
+          ),
       );
 
       if (response.success) {
@@ -2004,7 +2033,11 @@ export class SubscriptionFiscalService {
 
     return client.$transaction(async (tx: any) => {
       const number = await this.allocateFiscalNumber(tx, settings);
-      const providerData = this.buildProviderData(invoice, number.invoice_number);
+      const providerData = this.buildProviderData(
+        invoice,
+        number.invoice_number,
+        number.resolution,
+      );
       return tx.fiscal_transmissions.create({
         data: {
           organization_id: config.organization_id,
@@ -2026,10 +2059,46 @@ export class SubscriptionFiscalService {
     });
   }
 
+  /**
+   * Carga la resolución de numeración de la plataforma.
+   *
+   * NO filtra por `is_active` ni por vigencia a propósito: si la resolución está
+   * desactivada o vencida, `resolveInvoiceControl` lanza diciendo exactamente cuál
+   * de las dos cosas pasa y con qué fechas. Filtrarlo aquí lo convertiría en un
+   * «no encontrada» genérico, que es el mensaje que obliga a ir a la base a
+   * averiguar qué falló.
+   */
+  private async loadInvoiceResolution(
+    settings: SubscriptionFiscalSettings,
+  ): Promise<PlatformInvoiceResolution> {
+    if (!settings.invoice_resolution_id) {
+      throw new BadRequestException('A DIAN invoice resolution is required');
+    }
+    const resolution = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          id: settings.invoice_resolution_id,
+          accounting_entity_id: settings.accounting_entity_id ?? undefined,
+          document_type: 'sales_invoice',
+        },
+      });
+    if (!resolution) {
+      throw new BadRequestException(
+        `No existe la resolución ${settings.invoice_resolution_id} de factura de venta para la entidad contable de la plataforma`,
+      );
+    }
+    return resolution as PlatformInvoiceResolution;
+  }
+
   private async allocateFiscalNumber(
     tx: any,
     settings: SubscriptionFiscalSettings,
-  ): Promise<{ invoice_number: string; resolution_id: number }> {
+  ): Promise<{
+    invoice_number: string;
+    resolution_id: number;
+    resolution: PlatformInvoiceResolution;
+  }> {
     if (!settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
@@ -2070,6 +2139,9 @@ export class SubscriptionFiscalService {
     return {
       invoice_number: `${updated.prefix}${updated.current_number}`,
       resolution_id: updated.id,
+      // La fila RECARGADA, la misma cuyo `current_number` se acaba de consumir, para
+      // que la autorización declarada sea la de la resolución que dio el número.
+      resolution: updated as PlatformInvoiceResolution,
     };
   }
 
@@ -2142,6 +2214,7 @@ export class SubscriptionFiscalService {
   private buildProviderData(
     invoice: SubscriptionInvoiceForFiscal,
     fiscalNumber: string,
+    resolution: PlatformInvoiceResolution,
   ): ProviderInvoiceData {
     const issuedAt = invoice.issued_at ?? invoice.payments[0]?.paid_at ?? new Date();
     const org = invoice.store_subscription.store.organizations;
@@ -2214,6 +2287,23 @@ export class SubscriptionFiscalService {
       payment_form: '1',
       payment_method: invoice.payments[0]?.payment_method ?? 'subscription',
       order_reference: invoice.invoice_number,
+      // LOS TRES CAMPOS DE NUMERACIÓN, que antes no viajaban.
+      //
+      // `technical_key` es obligatorio para la factura electrónica de venta: el
+      // proveedor lanza sin ella (guarda de ClTec en `dian-direct.provider.ts`), así
+      // que la emisión SaaS moría antes de llegar a la DIAN. `control` es el bloque
+      // de autorización: sin su prefijo desaparece el lado derecho de FAB10a y la
+      // DIAN rechaza en cascada por FAD05e, FAB24a y FAB27b.
+      //
+      // Los tres salen de la MISMA fila de resolución que consumió el consecutivo,
+      // no de tres lecturas distintas, para que el número emitido y la autorización
+      // declarada no puedan pertenecer a resoluciones diferentes.
+      resolution_number: resolution.resolution_number ?? undefined,
+      technical_key: resolution.technical_key ?? undefined,
+      control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+        resolution_id: resolution.id,
+        document_type: resolution.document_type,
+      }),
     };
   }
 

@@ -29,6 +29,10 @@ import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
 import { DianResponseParserService } from './dian-response-parser.service';
+import {
+  certificateNitMatches,
+  normalizeNitDigits,
+} from '../../dian-config/certificates/nit-match.util';
 import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
 import { UblCreditNoteBuilder } from './xml/ubl-credit-note.builder';
 import { UblDebitNoteBuilder } from './xml/ubl-debit-note.builder';
@@ -202,6 +206,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cufe,
         environment: config.environment,
+        control: invoice_data.control,
         invoice_type_code: invoice_data.contingency_type
           ? DIAN_DOCUMENT_TYPES.CONTINGENCY_DIAN_INVOICE
           : undefined,
@@ -370,6 +375,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cude,
         environment: config.environment,
+        control: credit_note_data.control,
         original_invoice_number:
           credit_note_data.original_invoice_number ||
           credit_note_data.order_reference,
@@ -503,6 +509,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cude,
         environment: config.environment,
+        control: debit_note_data.control,
         original_invoice_number:
           debit_note_data.original_invoice_number ||
           debit_note_data.order_reference,
@@ -876,6 +883,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cude,
         environment: config.environment,
+        control: document_data.control,
         document_type_code: options.document_type_code,
       });
 
@@ -1408,6 +1416,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           organization: {
             include: {
               addresses: {
+                // LA DIRECCIÓN FISCAL ES LA FILA `type='billing'`, NO LA PRIMARIA.
+                //
+                // Sin este filtro ganaba cualquier fila con `is_primary=true` y el
+                // `id` más bajo. Medido en producción: la tienda 97 tiene DOS filas
+                // con `is_primary=true` — una `store_physical` de `id` menor y
+                // `municipality_code` NULL, y la `billing` con municipio '11001'—,
+                // así que el desempate caía a `id asc`, se elegía la de despacho, el
+                // municipio llegaba vacío y el resolvedor estricto abortaba la
+                // emisión. `is_primary` significa «la principal para el usuario», no
+                // «la fiscal»: son dos conceptos distintos que no siempre coinciden.
+                //
+                // Es el mismo criterio que ya aplicaba la ruta de habilitación en
+                // `dian-test.service.ts`, donde el filtro sí estaba.
+                where: { type: 'billing' },
                 orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
                 take: 1,
               },
@@ -1417,6 +1439,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           store: {
             include: {
               addresses: {
+                // LA DIRECCIÓN FISCAL ES LA FILA `type='billing'`, NO LA PRIMARIA.
+                //
+                // Sin este filtro ganaba cualquier fila con `is_primary=true` y el
+                // `id` más bajo. Medido en producción: la tienda 97 tiene DOS filas
+                // con `is_primary=true` — una `store_physical` de `id` menor y
+                // `municipality_code` NULL, y la `billing` con municipio '11001'—,
+                // así que el desempate caía a `id asc`, se elegía la de despacho, el
+                // municipio llegaba vacío y el resolvedor estricto abortaba la
+                // emisión. `is_primary` significa «la principal para el usuario», no
+                // «la fiscal»: son dos conceptos distintos que no siempre coinciden.
+                //
+                // Es el mismo criterio que ya aplicaba la ruta de habilitación en
+                // `dian-test.service.ts`, donde el filtro sí estaba.
+                where: { type: 'billing' },
                 orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
                 take: 1,
               },
@@ -1459,7 +1495,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     //     consultar `isVatResponsible`, así que un `tax_regime: ''` daba '48'.
     //   - `department_name` caía a `municipality_code.slice(0,2)` (código
     //     numérico en `cbc:CountrySubentity`, campo de nombre).
-    return resolveIssuerFiscalIdentity({
+    const identity = resolveIssuerFiscalIdentity({
       nit: config.nit,
       fiscal_data: fiscalData,
       entity: { legal_name: entity.legal_name, name: entity.name },
@@ -1485,6 +1521,46 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         : null,
       email: organization.email,
     });
+
+    // ASERCIÓN DE IDENTIDAD DEL EMISOR — un solo NIT en todo el documento.
+    //
+    // Hay DOS ejes que declaran el NIT emisor y no había nada que los atara:
+    //
+    //   CUFE  ->  onlyDigits(config.nit)          (`dian_configurations`)
+    //   XML   ->  identity.nit                    (fuente única; el resolvedor
+    //                                              prefiere `fiscal_data.nit`
+    //                                              sobre `config.nit`)
+    //
+    // Si divergen, la DIAN recomputa la clave desde el XML, obtiene otro hash y
+    // rechaza — con el consecutivo ya gastado. El terreno para que ocurra existe:
+    // en producción la organización de la plataforma tiene tres filas en
+    // `dian_configurations`, dos de ellas con el NIT anterior, y una guarda el NIT
+    // con guion y `nit_dv` vacío.
+    //
+    // `certificateNitMatches` en vez de comparar dígitos: es tolerante al DV en
+    // cualquiera de los dos lados, así que acepta `'900123456-7'` contra base
+    // `900123456` + dv `7` —que son el MISMO NIT— y sigue bloqueando un NIT
+    // distinto. Está escrito para certificados, pero lo que implementa es
+    // exactamente igualdad de NIT tolerante al DV.
+    if (
+      !certificateNitMatches({
+        certificateTaxId: config.nit,
+        nit: identity.nit,
+        dv: identity.nit_dv,
+      })
+    ) {
+      throw new Error(
+        `El NIT de la configuración DIAN y el de la identidad fiscal no coinciden: ` +
+          `dian_configurations declara '${config.nit}' ` +
+          `(${normalizeNitDigits(config.nit)}) y la fuente única declara ` +
+          `'${identity.nit}' con DV '${identity.nit_dv}'. El CUFE se hashea con el ` +
+          `primero y el XML declara el segundo, así que la DIAN recomputaría otra ` +
+          `clave y rechazaría el documento con el consecutivo ya gastado. ` +
+          `Alinea settings.fiscal_data.nit con dian_configurations.nit antes de emitir.`,
+      );
+    }
+
+    return identity;
   }
 
   /**

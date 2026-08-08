@@ -360,8 +360,38 @@ export class DianConfigService {
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined)
+    // `environment` NO SUBE A PRODUCCIÓN POR AQUÍ.
+    //
+    // El camino correcto es `promoteToProduction`, que exige `readiness.ready` y
+    // escribe TRES cosas: `environment`, `enablement_status: 'enabled'` y
+    // `enabled_at`. Este PATCH plano escribía solo la primera, así que dejaba la
+    // configuración apuntando a `vpfe.dian.gov.co` con `enablement_status` todavía
+    // en habilitación — y la emisión acepta ese estado. Resultado: cada documento
+    // se rechazaba por software no habilitado, gastando un consecutivo autorizado
+    // irrecuperable por intento.
+    //
+    // Bajar a 'test' sí se permite: apunta al endpoint de pruebas, no puede
+    // producir una emisión productiva falsa, y es el camino para repetir la
+    // habilitación.
+    //
+    // Y solo se bloquea el CAMBIO real: si ya está en producción, reenviar
+    // 'production' es un no-op. Rechazarlo sin esa condición rompería cualquier
+    // PATCH del formulario que devuelva el objeto completo con su valor actual.
+    if (dto.environment !== undefined) {
+      if (
+        dto.environment === 'production' &&
+        config.environment !== 'production'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_ENABLEMENT_001,
+          'El paso a producción no se hace editando la configuración. Usa ' +
+            'promoteToProduction, que verifica la habilitación (readiness) y marca ' +
+            'enablement_status antes de cambiar el ambiente.',
+          { dian_configuration_id: config.id, attempted: dto.environment },
+        );
+      }
       update_data.environment = dto.environment;
+    }
     if (dto.test_set_id !== undefined)
       update_data.test_set_id = dto.test_set_id;
     // Empty string means "go back to in-process custody", so it must reach the

@@ -22,6 +22,7 @@ import {
   resolveOrganizationTimezone,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 
 type InvoiceStatus =
   | 'draft'
@@ -653,6 +654,33 @@ export class InvoiceFlowService {
       configuration_type: this.configurationType(invoice.invoice_type),
     });
     this.assertProviderSupports(provider, invoice.invoice_type);
+
+    // sts:InvoiceControl — la autorización de numeración que respalda el
+    // consecutivo. Sale del RESOLVEDOR ÚNICO, el mismo que consume la ruta de
+    // habilitación, para que ambos caminos declaren lo mismo por construcción.
+    //
+    // SE RESUELVE AQUÍ Y NO AL ARMAR EL PAYLOAD, y el orden importa: las dos cosas
+    // lanzan, así que quien va primero decide el error que ve quien opera. Si el
+    // proveedor no puede emitir este tipo de documento, la causa es eso — no que su
+    // resolución esté inactiva, que mandaría a revisar la resolución equivocada. Y
+    // `assertProviderSupports` es la comprobación más barata de las dos, además de
+    // la que su propio comentario declara como el rechazo temprano.
+    //
+    // El documento soporte se excluye porque NO cuelga de una resolución de la
+    // DIAN: su consecutivo es interno del tenant, y el proveedor omite el bloque
+    // para él a propósito. Pedirlo aquí haría lanzar al resolvedor justo donde la
+    // ausencia del bloque es la respuesta correcta.
+    if (!this.isSupportDocumentType(invoice.invoice_type)) {
+      provider_data.control = resolveInvoiceControl(
+        invoice.resolution,
+        timezone,
+        new Date(),
+        {
+          resolution_id: invoice.resolution?.id,
+          document_type: invoice.invoice_type,
+        },
+      );
+    }
     const transmission = await this.fiscal_ledger.ensureInvoiceTransmission({
       invoice,
       provider_data,
