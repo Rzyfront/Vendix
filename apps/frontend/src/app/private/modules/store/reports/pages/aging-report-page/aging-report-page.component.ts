@@ -2,7 +2,7 @@ import { Component, inject, computed, signal, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { ReportsActions } from '../../../state/reports.actions';
+import { ReportsActions } from '../../state/reports.actions';
 import {
   selectSelectedReport,
   selectReportData,
@@ -10,10 +10,10 @@ import {
   selectLoading,
   selectIsForbidden,
   selectDateRange,
-} from '../../../state/reports.selectors';
-import { ReportViewerComponent } from '../../../components/report-viewer/report-viewer.component';
-import { AgingReportComponent } from '../../../components/aging-report/aging-report.component';
-import { ReportColumn } from '../../../interfaces/report.interface';
+} from '../../state/reports.selectors';
+import { ReportViewerComponent } from '../../components/report-viewer/report-viewer.component';
+import { AgingReportComponent } from '../../components/aging-report/aging-report.component';
+import { ReportColumn } from '../../interfaces/report.interface';
 
 /**
  * Wrapper para reports de tipo "aging" (QUI-539 cartera clientes,
