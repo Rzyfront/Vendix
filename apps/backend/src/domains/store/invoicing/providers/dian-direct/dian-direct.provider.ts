@@ -1385,29 +1385,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   }
 
   /**
-   * Maps the store/organization fiscal tax regime to its DIAN code.
-   * '48' = responsable de IVA; '49' = no responsable de IVA.
-   *
-   * @deprecated Desde el paso 4 del plan de SSOT, `loadIssuerData` delega en
-   *   `resolveIssuerFiscalIdentity` (ver `fiscal-issuer.util.ts`), que calcula
-   *   el régimen vía `isVatResponsible` (RUT casilla 53) en vez de mapear por
-   *   string. Conservada como `unused` para no romper extensiones que aún la
-   *   referencien; se elimina en el paso 7 junto con el resto del kill switch.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private static mapTaxRegimeToDianCode(regime?: string): string {
-    switch (regime) {
-      case 'COMUN':
-      case 'GRAN_CONTRIBUYENTE':
-        return '48';
-      case 'SIMPLIFICADO':
-        return '49';
-      default:
-        return '48';
-    }
-  }
-
-  /**
    * Loads issuer data from the fiscal accounting entity.
    */
   private async loadIssuerData(
