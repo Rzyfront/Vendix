@@ -28,6 +28,7 @@ import { SubscriptionTrialService } from '../../store/subscriptions/services/sub
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 import { SettingsService } from '../../store/settings/settings.service';
 import { SettingsService as OrgSettingsService } from '../settings/settings.service';
+import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
 import {
   normalizeFiscalStatusBlock,
   type FiscalStatusBlock,
@@ -439,6 +440,22 @@ export class OnboardingWizardService {
 
     // Update organization
     // Note: This step is only for ORG_ADMIN flow, so ensure account_type is MULTI_STORE_ORG
+    //
+    // `tax_id` en la columna `organizations.tax_id` YA NO se escribe desde este
+    // campo del DTO. La identidad fiscal pasa por `fiscal_data` y el proyector
+    // único (`buildTenantFiscalColumns`); permitir que `setupOrgDto.tax_id` se
+    // escriba como origen producía dos verdades cuando el RUT scanner llenaba
+    // `fiscal_data` después: el NIT en la columna podía quedar rancio y el del
+    // JSON correcto, explicando exactamente el estado defectuoso que se encontró
+    // en producción (organizations.tax_id = '900123456-7', un par NIT+DV
+    // imposible).
+    //
+    // Precedencia (ver §"Approach Chosen" del plan):
+    //   - Si el DTO trae `fiscal_data` → ese es el origen, `tax_id` del DTO se
+    //     ignora. La columna sale del proyector.
+    //   - Si solo trae `tax_id` → sembramos `fiscal_data.nit = tax_id` para que
+    //     pase por el mismo camino del proyector. La columna nunca se asigna
+    //     directa desde el DTO.
     let updatedOrg;
     try {
       updatedOrg = await this.prismaService.organizations.update({
@@ -449,7 +466,6 @@ export class OnboardingWizardService {
           email: setupOrgDto.email,
           phone: setupOrgDto.phone,
           website: setupOrgDto.website,
-          tax_id: setupOrgDto.tax_id,
           // account_type / operating_scope are intentionally NOT written here.
           // `selectAppType` is the single source of truth for scope and already
           // locked it to MULTI_STORE_ORG / ORGANIZATION before this step (the
@@ -540,11 +556,22 @@ export class OnboardingWizardService {
     // surface a clear error after the org/address writes have already committed
     // (they are independent statements, not a single tx, mirroring the existing
     // flow which already commits org + address separately).
-    if (setupOrgDto.fiscal_data) {
+    //
+    // Si el DTO solo trae `tax_id` (sin `fiscal_data`), sembramos
+    // `fiscal_data = { nit: tax_id }` para que la identidad pase por el
+    // proyector único y la columna salga derivada, no de una asignación
+    // directa. Esta es la única ruta por la que el `tax_id` del DTO llega a la
+    // columna, y va siempre a través del proyector.
+    const seededFiscalData = this.seedFiscalDataFromTaxId(setupOrgDto);
+    const effectiveFiscalData = setupOrgDto.fiscal_data
+      ? (setupOrgDto.fiscal_data as Record<string, unknown>)
+      : seededFiscalData;
+
+    if (effectiveFiscalData) {
       try {
         await this.persistWizardFiscalData(
           user.organization_id,
-          setupOrgDto.fiscal_data as Record<string, unknown>,
+          effectiveFiscalData,
         );
       } catch (err: any) {
         this.logger.error(
@@ -557,6 +584,24 @@ export class OnboardingWizardService {
     }
 
     return updatedOrg;
+  }
+
+  /**
+   * Si el DTO trae `tax_id` pero no trae `fiscal_data`, devuelve un `fiscal_data`
+   * mínimo `{ nit: tax_id }` para que la identidad pase por el proyector único.
+   * Si trae ambos o ninguno, devuelve `undefined` — el caller ya sabe qué hacer.
+   *
+   * Esta es la única forma en que `tax_id` del DTO llega a la columna
+   * `organizations.tax_id` durante el wizard: siempre vía `fiscal_data.nit`
+   * y el `buildTenantFiscalColumns`, nunca vía asignación directa. Eso cierra
+   * el defecto del estado rancio en producción.
+   */
+  private seedFiscalDataFromTaxId(
+    dto: SetupOrganizationWizardDto,
+  ): Record<string, unknown> | undefined {
+    if (dto.fiscal_data) return undefined;
+    if (!dto.tax_id) return undefined;
+    return { nit: dto.tax_id };
   }
 
   /**
@@ -955,7 +1000,9 @@ export class OnboardingWizardService {
     fiscalData: Record<string, unknown>,
     store_id?: number,
   ): Promise<void> {
-    // 1) Deep-merge fiscal_data into the resolved scope (reuses scope + audit).
+    // 1) Shallow-merge fiscal_data into the resolved scope via `mergeFiscalData`
+    //    (helper en `common/helpers/`). La fusión es superficial a propósito:
+    //    `tax_responsibilities` es un array y una fusión profunda lo concatenaría.
     await this.orgSettingsService.updateFiscalData(fiscalData, store_id);
 
     // 2) Flip the has_fiscal_identity detector signal on the SAME scope.
@@ -1685,7 +1732,7 @@ export class OnboardingWizardService {
       const baseMethods =
         await this.prismaService.system_payment_methods.findMany({
           where: {
-            name: { in: ['cash', 'payment_vouchers'] },
+            name: { in: [...BASE_SYSTEM_PAYMENT_METHOD_NAMES] },
             is_active: true,
           },
         });

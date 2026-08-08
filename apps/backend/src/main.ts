@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
@@ -10,6 +10,10 @@ import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
 import { isPwaIconVariant } from '@common/config/image-presets';
 import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
+import {
+  flattenBulkValidationErrors,
+  isBulkValidationError,
+} from '@common/validators/bulk-validation.util';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
 import { Server } from 'http';
@@ -62,6 +66,36 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+      // QUI-606: el `exceptionFactory` del ValidationPipe global detecta si
+      // el árbol de errores viene de una carga masiva (patrón
+      // `customers.<rowIndex>.<field>`) y, en ese caso, aplana los errores
+      // al shape canónico `BulkRowError` con `row`, `column`, `value`,
+      // `code` y `suggestion`. Para el resto de endpoints mantiene el
+      // formato estándar de NestJS.
+      exceptionFactory: (errors) => {
+        if (isBulkValidationError(errors)) {
+          const flat = flattenBulkValidationErrors(errors);
+          return new BadRequestException({
+            statusCode: 400,
+            message: `Se encontraron ${flat.length} error(es) de validación en la carga masiva`,
+            error_code: 'CUST_BULK_VALIDATION',
+            validationErrors: flat,
+          });
+        }
+        // Formato estándar NestJS: array de strings legible para humanos.
+        const messages = errors
+          .map((e) =>
+            e.constraints
+              ? Object.values(e.constraints).join(', ')
+              : 'Valor inválido',
+          )
+          .filter(Boolean);
+        return new BadRequestException({
+          statusCode: 400,
+          message: messages,
+          error: 'Bad Request',
+        });
       },
     }),
   ); // Build dynamic CORS origins based on base domain configuration

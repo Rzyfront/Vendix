@@ -9,6 +9,10 @@ import {
   PRINT_FORMATS,
   PrintFormat,
 } from '../../settings/interfaces/store-settings.interface';
+import {
+  resolveTenantFiscalIdentity,
+  tryResolveTenantFiscalIdentity,
+} from '@common/helpers/fiscal-identity.helper';
 
 const INVOICE_PDF_INCLUDE = {
   invoice_items: true,
@@ -86,7 +90,27 @@ export class InvoicePdfService {
 
     const org = invoice.organization;
     const store = invoice.store;
-    const issuer = this.resolveIssuer(org, store);
+
+    // DOCUMENTO ELECTRÓNICO vs RECIBO INTERNO — decide la severidad del emisor.
+    //
+    // `dian_status = 'not_applicable'` (el default de la columna) significa que
+    // esta factura NO es un documento electrónico: nunca se transmitió, no tiene
+    // CUFE y no hay XML firmado con el que el PDF deba cuadrar. Es un recibo
+    // interno, y negarle la impresión por falta de municipio DIAN es una
+    // regresión sin justificación fiscal.
+    //
+    // Medido en producción antes de este cambio: de 48 tiendas con `fiscal_data`
+    // cargado, UNA tiene municipio fiscal resoluble. Siete tiendas con alcance
+    // STORE y facturas ya emitidas —cinco de ellas SIN configuración DIAN, o sea
+    // con facturas que no son documentos electrónicos— habrían dejado de poder
+    // generar el PDF de facturas que ya existen.
+    //
+    // Cuando sí hay documento electrónico (pending/accepted/rejected/error), el
+    // PDF acompaña un XML firmado y debe declarar lo mismo que él: ahí el
+    // estricto es correcto y fallar antes de imprimir un dato fabricado es más
+    // barato que imprimirlo. Ver la nota de asimetría en `fiscal-identity.helper.ts`.
+    const is_electronic_document = invoice.dian_status !== 'not_applicable';
+    const issuer = this.resolveIssuer(org, store, is_electronic_document);
 
     // Optionally download logo
     const logo_url = issuer.logo_url;
@@ -272,7 +296,9 @@ export class InvoicePdfService {
         })
       : null;
 
-    const issuer = this.resolveIssuer(org, store);
+    // Vista previa de plantilla, no emisión: identidad incompleta debe RENDERIZAR
+    // con los huecos visibles, no lanzar. Ver `resolveIssuer`.
+    const issuer = this.resolveIssuer(org, store, false);
 
     let logo_buffer: Buffer | undefined;
     if (issuer.logo_url) {
@@ -431,64 +457,106 @@ export class InvoicePdfService {
   // ─── Private Helpers ─────────────────────────────────────────────
 
   /**
-   * Legal identity of whoever issues this invoice. Prefers the `fiscal_data`
-   * block of the scope that owns the DIAN habilitación (store under
-   * `fiscal_scope = STORE`, organization otherwise) and only falls back to the
-   * plain organization row, so the printed document cannot show a different
-   * razón social / NIT than the signed XML.
+   * Legal identity of whoever issues this invoice. Pasa por el resolvedor único
+   * (`resolveTenantFiscalIdentity`) — el mismo que consumen `dian-direct` y
+   * `dian-test` — para que la razón social y el NIT impresos en el PDF sean
+   * exactamente los que firmó el XML. Antes esta función duplicaba la cascada
+   * y podía imprimir un NIT rancio o 'N/A' si `fiscal_data` no estaba cargado,
+   * además de leer `nit_dv` directamente del JSON (que es una columna derivada).
+   *
+   * `strict` distingue los tres casos, y la distinción NO es cosmética:
+   *
+   * - `generatePdf` de un DOCUMENTO ELECTRÓNICO (`dian_status !== 'not_applicable'`)
+   *   → `strict: true`. El PDF acompaña un XML firmado y debe declarar lo mismo
+   *   que él; fallar antes de imprimir un dato fabricado es más barato.
+   * - `generatePdf` de un RECIBO INTERNO (`dian_status = 'not_applicable'`, el
+   *   default) → `strict: false`. No hay XML, no hay CUFE, no hay nada con lo que
+   *   cuadrar: negar el recibo por falta de municipio DIAN es una regresión sin
+   *   justificación fiscal.
+   * - `previewPdf` → `strict: false`. Vista previa de la PLANTILLA en
+   *   configuración: no consume numeración, no toca la DIAN, no persiste nada, y
+   *   existe justamente para que el comerciante compruebe si sus datos legales
+   *   caben en el formato. Con el resolvedor estricto, el tenant que aún no ha
+   *   cargado su identidad fiscal —el que más necesita esta pantalla— recibía
+   *   «No hay municipio DIAN para el NIT …» en vez de la vista previa.
+   *
+   * Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
    */
-  private resolveIssuer(org: any, store: any) {
+  private resolveIssuer(org: any, store: any, strict = true) {
     const scope: string = org?.fiscal_scope ?? 'STORE';
     const scoped_settings =
       scope === 'STORE'
         ? store?.store_settings?.settings
         : org?.organization_settings?.settings;
     // `settings` is a Prisma Json column, untyped at runtime.
-    const fiscal = ((scoped_settings as any)?.fiscal_data ?? {}) as {
-      nit?: string;
-      nit_dv?: string;
-      legal_name?: string;
-      tax_regime?: string;
-      tax_responsibilities?: string[];
-      fiscal_address?: string;
-      city?: string;
-      department?: string;
-    };
+    const fiscal = ((scoped_settings as any)?.fiscal_data ?? null) as
+      | Record<string, unknown>
+      | null;
 
     const owner = scope === 'STORE' ? store : org;
     const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
 
-    const address_line =
-      [address?.address_line1, address?.city, address?.state_province]
-        .filter(Boolean)
-        .join(', ') ||
-      [fiscal.fiscal_address, fiscal.city, fiscal.department]
-        .filter(Boolean)
-        .join(', ') ||
-      undefined;
+    // El resolvedor es la ÚNICA fuente en los dos modos: ambos deciden las mismas
+    // precedencias y solo difieren ante un campo obligatorio ausente.
+    const source = {
+      nit: org?.tax_id || store?.tax_id || '',
+      fiscal_data: fiscal,
+      entity: org
+        ? { legal_name: org.legal_name, name: org.name }
+        : null,
+      organization: org
+        ? {
+            legal_name: org.legal_name,
+            name: org.name,
+            email: org.email,
+            phone: org.phone,
+            document_type: org.document_type,
+            person_type: org.person_type,
+          }
+        : null,
+      address: address
+        ? {
+            address_line1: address.address_line1,
+            city: address.city,
+            state_province: address.state_province,
+            municipality_code: address.municipality_code,
+            postal_code: address.postal_code,
+            phone_number: address.phone_number,
+          }
+        : null,
+      email: org?.email,
+    };
 
-    const nit_base = fiscal.nit || org?.tax_id;
-    const nit = nit_base
-      ? fiscal.nit_dv
-        ? `${nit_base}-${fiscal.nit_dv}`
-        : nit_base
+    const identity = strict
+      ? resolveTenantFiscalIdentity(source)
+      : tryResolveTenantFiscalIdentity(source).identity;
+
+    const address_line =
+      identity.fiscal_address && (identity.city || identity.department)
+        ? [identity.fiscal_address, identity.city, identity.department]
+            .filter(Boolean)
+            .join(', ')
+        : identity.fiscal_address || undefined;
+
+    const nit = identity.nit
+      ? identity.nit_dv
+        ? `${identity.nit}-${identity.nit_dv}`
+        : identity.nit
       : 'N/A';
 
-    const regime_key = (fiscal.tax_regime || '').toUpperCase();
-
     return {
-      legal_name:
-        fiscal.legal_name || owner?.legal_name || org?.name || 'N/A',
+      legal_name: identity.legal_name,
       nit,
       trade_name: owner?.name || undefined,
       address_line,
-      phone: address?.phone_number || org?.phone || undefined,
-      email: org?.email || undefined,
+      phone: identity.phone,
+      email: identity.email || org?.email || undefined,
       logo_url: store?.logo_url || org?.logo_url || undefined,
-      tax_regime: TAX_REGIME_LABELS[regime_key] || fiscal.tax_regime || undefined,
-      tax_responsibilities: Array.isArray(fiscal.tax_responsibilities)
-        ? fiscal.tax_responsibilities
-        : undefined,
+      tax_regime:
+        TAX_REGIME_LABELS[(identity.tax_regime || '').toUpperCase()] ||
+        identity.tax_regime ||
+        undefined,
+      tax_responsibilities: identity.tax_responsibilities,
     };
   }
 

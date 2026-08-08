@@ -28,6 +28,7 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
 import { truncateLabel, compactCountAxis } from '../../../../../../../shared/utils/chart-labels.util';
+import { comparisonLabelFor } from '../../../utils/comparison-label.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
@@ -130,7 +131,9 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
   getGrowthText(growth?: number): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
-    return `${sign}${growth.toFixed(1)}% vs período anterior`;
+    // QUI-609: derive the comparison label from the active preset (was the
+    // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
   }
 
   private updateCharts(trends: SalesTrend[], granularity: string): void {

@@ -213,7 +213,7 @@ export class TenantSettingsController {
   @ApiOperation({
     summary: 'Actualizar la identidad legal/tributaria del tenant',
     description:
-      'Fusión parcial sobre `settings.fiscal_data`; el resto de secciones no se toca. En una organización de NIT único escribe en organization_settings, que es donde su propio panel lo lee.',
+      'Fusión superficial sobre `settings.fiscal_data` (mergeFiscalData en common/helpers/); el resto de secciones no se toca. En una organización de NIT único escribe en organization_settings, que es donde su propio panel lo lee.',
   })
   async updateFiscalData(
     @Param('scope') scope: TenantScopeSegment,

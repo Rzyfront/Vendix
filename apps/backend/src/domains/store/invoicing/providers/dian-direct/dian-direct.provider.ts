@@ -25,6 +25,7 @@ import {
   dianSum,
 } from '../../utils/dian-money.util';
 import { onlyDigits } from '../../../../../common/utils/nit.util';
+import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
 import { DianResponseParserService } from './dian-response-parser.service';
@@ -1384,22 +1385,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   }
 
   /**
-   * Maps the store/organization fiscal tax regime to its DIAN code.
-   * '48' = responsable de IVA; '49' = no responsable de IVA.
-   */
-  private static mapTaxRegimeToDianCode(regime?: string): string {
-    switch (regime) {
-      case 'COMUN':
-      case 'GRAN_CONTRIBUYENTE':
-        return '48';
-      case 'SIMPLIFICADO':
-        return '49';
-      default:
-        return '48';
-    }
-  }
-
-  /**
    * Loads issuer data from the fiscal accounting entity.
    */
   private async loadIssuerData(
@@ -1462,43 +1447,44 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     // so we cast to `any` only to read the optional fiscal_data sub-object.
     const fiscalData = (settings as any)?.fiscal_data ?? {};
 
-    if (!address?.municipality_code) {
-      throw new Error(
-        `Fiscal entity ${entity.id} requires a primary address with DIAN municipality_code.`,
-      );
-    }
-
-    const legal_name =
-      entity.legal_name ||
-      (entity.fiscal_scope === 'STORE'
-        ? store?.legal_name
-        : organization.legal_name) ||
-      entity.name;
-
-    return {
-      document_type: '31',
+    // Fuente única de la verdad fiscal: el resolvedor decide precedencias entre
+    // `fiscal_data`, las columnas de la organización/tienda, la dirección y la
+    // `dian_configurations`. Esta misma cascada la usa `dian-test.service.ts` y
+    // los consumidores no-DIAN (paso 5 del plan), así que habilitación y
+    // producción no pueden divergir sobre el mismo NIT. Antes esta función
+    // duplicaba la cascada con tres defectos conocidos que el plan cierra:
+    //   - `tax_scheme` por defecto era 'O-15' (autorretenedor) — afirma ante
+    //     la DIAN una responsabilidad que el emisor puede no tener.
+    //   - `tax_regime` se mapeaba por string ('COMUN'/'SIMPLIFICADO') sin
+    //     consultar `isVatResponsible`, así que un `tax_regime: ''` daba '48'.
+    //   - `department_name` caía a `municipality_code.slice(0,2)` (código
+    //     numérico en `cbc:CountrySubentity`, campo de nombre).
+    return resolveIssuerFiscalIdentity({
       nit: config.nit,
-      nit_dv: config.nit_dv || '0',
-      legal_name,
-      trade_name: entity.name,
-      address_line: address.address_line1,
-      city_code: address.municipality_code,
-      city_name: address.city,
-      department_code: address.municipality_code.slice(0, 2),
-      department_name:
-        address.state_province || address.municipality_code.slice(0, 2),
-      country_code: address.country_code,
-      postal_code: address.postal_code || undefined,
-      phone: address.phone_number || organization.phone || undefined,
+      fiscal_data: fiscalData,
+      entity: { legal_name: entity.legal_name, name: entity.name },
+      organization: organization
+        ? {
+            legal_name: organization.legal_name,
+            name: organization.name,
+            email: organization.email,
+            phone: organization.phone,
+            document_type: organization.document_type,
+            person_type: organization.person_type,
+          }
+        : null,
+      address: address
+        ? {
+            address_line1: address.address_line1,
+            city: address.city,
+            state_province: address.state_province,
+            municipality_code: address.municipality_code,
+            postal_code: address.postal_code,
+            phone_number: address.phone_number,
+          }
+        : null,
       email: organization.email,
-      tax_regime: DianDirectProvider.mapTaxRegimeToDianCode(
-        fiscalData?.tax_regime,
-      ),
-      tax_scheme:
-        typeof fiscalData?.tax_scheme === 'string' && fiscalData.tax_scheme
-          ? fiscalData.tax_scheme
-          : 'O-15',
-    };
+    });
   }
 
   /**

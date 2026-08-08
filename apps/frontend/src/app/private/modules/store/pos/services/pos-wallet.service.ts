@@ -28,19 +28,16 @@ export class PosWalletService {
     return this.http.get<any>(`${this.apiUrl}/${customerId}`).pipe(
       map((response) => {
         const data = response.data || response;
-        // Backend `WalletService.getBalance` returns
-        // { wallet_id, balance, held_balance, available } — there is NO `id`
-        // field. Guarding on `wallet_id` is what actually detects a real row;
-        // an older copy of this service guarded on `data.id` and always
-        // returned null, which surfaced as a false "no balance" toast in POS.
+        // Backend `WalletService.getBalance` returns { wallet_id, balance, held_balance, available }.
+        // Guard on `wallet_id` (NOT `id`) — the field is `wallet_id` in the response shape.
         if (!data || !data.wallet_id) return null;
         return {
           wallet_id: data.wallet_id,
           balance: Number(data.balance || 0),
           held_balance: Number(data.held_balance || 0),
           available: Number(data.balance || 0) - Number(data.held_balance || 0),
-          // Backend doesn't currently expose `is_active`; default true so a
-          // missing field doesn't silently disable an otherwise usable wallet.
+          // Backend doesn't currently expose `is_active`; default to true so a missing
+          // field doesn't silently disable an otherwise usable wallet.
           is_active: data.is_active !== false,
         };
       }),
