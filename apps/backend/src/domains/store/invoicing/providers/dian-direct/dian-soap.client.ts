@@ -737,6 +737,39 @@ export class DianSoapClient {
   /**
    * Builds the SOAP envelope for GetStatus.
    */
+  /**
+   * Consulta los rangos de numeración autorizados para un OFE.
+   *
+   * `accountCode` es el NIT del obligado; `accountCodeT` el del proveedor
+   * tecnológico, que en software propio es el MISMO NIT; `softwareCode` el GUID
+   * del software registrado.
+   *
+   * Devuelve la respuesta cruda a propósito: los nombres de campo del
+   * `NumberRangeResponse` se leen de lo que la DIAN conteste, no se adivinan. Ese
+   * es el punto — dejar de transcribir.
+   */
+  async getNumberingRange(
+    account_code: string,
+    account_code_t: string,
+    software_code: string,
+    environment: 'test' | 'production',
+    credentials?: WsSecurityCredentials,
+  ) {
+    const endpoint = DIAN_ENDPOINTS[environment].url;
+    const soap_action = DIAN_SOAP_ACTIONS.GetNumberingRange;
+    const soap_body = await this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:GetNumberingRange>
+      <wcf:accountCode>${account_code}</wcf:accountCode>
+      <wcf:accountCodeT>${account_code_t}</wcf:accountCodeT>
+      <wcf:softwareCode>${software_code}</wcf:softwareCode>
+    </wcf:GetNumberingRange>`,
+      credentials,
+    );
+    return this.executeWithRetry(endpoint, soap_action, soap_body);
+  }
+
   private async buildGetStatusEnvelope(
     tracking_id: string,
     endpoint: string,

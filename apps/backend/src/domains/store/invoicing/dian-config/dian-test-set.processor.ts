@@ -31,7 +31,8 @@ export class DianTestSetProcessor extends WorkerHost {
   }
 
   async process(job: Job<DianTestSetJob>): Promise<unknown> {
-    const { config_id, resolution_id, smoke, validate_only, context } = job.data;
+    const { config_id, resolution_id, smoke, validate_only, numbering_range, context } =
+      job.data;
 
     this.logger.log(
       `Procesando set de pruebas DIAN job=${job.id} config=${config_id} ` +
@@ -65,6 +66,7 @@ export class DianTestSetProcessor extends WorkerHost {
           this.dianTestService.executeTestSet(config_id, resolution_id, {
             smoke: smoke === true,
             validate_only: validate_only === true,
+            numbering_range: numbering_range === true,
           }),
       );
     } catch (error: any) {

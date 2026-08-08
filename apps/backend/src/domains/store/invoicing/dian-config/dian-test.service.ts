@@ -384,8 +384,45 @@ export class DianTestService {
   async executeTestSet(
     config_id: number,
     resolution_id: number,
-    options: { smoke?: boolean; validate_only?: boolean } = {},
+    options: {
+      smoke?: boolean;
+      validate_only?: boolean;
+      numbering_range?: boolean;
+    } = {},
   ) {
+    // CONSULTA DE RANGOS AUTORIZADOS — corta aquí, antes de tocar numeración.
+    //
+    // No emite ningún documento y no reserva ningún consecutivo: le pregunta a la
+    // DIAN qué resolución, prefijo, rango, VIGENCIA y clave técnica tiene
+    // registrados para este OFE. Es la fuente autoritativa de esos datos.
+    //
+    // Existe porque transcribirlos del portal a mano ya produjo dos defectos: un
+    // municipio de otro pueblo (44847 Uribia por 44001 Riohacha) y unas fechas de
+    // vigencia que la DIAN rechaza con FAB07b/FAB08b. La respuesta se devuelve
+    // CRUDA a propósito — los nombres de campo se leen de lo que la DIAN contesta.
+    if (options.numbering_range === true) {
+      const cfg = await this.getConfigById(config_id);
+      const credentials = await this.loadWsCredentials(cfg);
+      const nit = String(cfg.nit ?? '').replace(/\D/g, '');
+      // `accountCodeT` es el NIT del proveedor tecnológico. En software propio el
+      // obligado ES su propio proveedor, así que va el mismo NIT.
+      const response = await this.soap_client.getNumberingRange(
+        nit,
+        nit,
+        String(cfg.software_id ?? ''),
+        cfg.environment === 'production' ? 'production' : 'test',
+        credentials,
+      );
+      return {
+        numbering_range_query: true,
+        dian_configuration_id: config_id,
+        nit,
+        software_id: cfg.software_id,
+        environment: cfg.environment,
+        raw: response,
+      };
+    }
+
     // Una validación es por definición de UN documento: someter 50 a `SendBillSync`
     // no diría nada que el primero no diga y gastaría 50 consecutivos. Se deriva
     // aquí, una vez, para que el resto del método no tenga que recordar la regla.
