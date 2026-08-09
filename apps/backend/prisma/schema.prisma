@@ -90,6 +90,8 @@ model users {
   // Cash Register
   cash_register_sessions_opened cash_register_sessions[]  @relation("cash_register_sessions_opened_by")
   cash_register_sessions_closed cash_register_sessions[]  @relation("cash_register_sessions_closed_by")
+  kds_sessions_opened           kds_sessions[]            @relation("kds_sessions_opened_by")
+  kds_sessions_closed           kds_sessions[]            @relation("kds_sessions_closed_by")
   cash_register_movements       cash_register_movements[]
 
   // Promotions
@@ -805,6 +807,8 @@ model stores {
   // Cash Register
   cash_registers          cash_registers[]
   cash_register_sessions  cash_register_sessions[]  @relation("cash_register_sessions_store")
+  kds                     kds[]
+  kds_sessions            kds_sessions[]            @relation("kds_sessions_store")
   cash_register_movements cash_register_movements[]
 
   // Layaway
@@ -1145,14 +1149,37 @@ model inventory_transactions {
   notes              String?
   transaction_date   DateTime?                       @default(now()) @db.Timestamp(6)
   quantity_change    Int
+  /// QUI-651 — QUIÉN COCINÓ y consumió el insumo, frente a `user_id`, que es
+  /// quién PIDIÓ que se cocine (el mesero o cajero del POS). Son dos
+  /// responsables distintos y ambos reales; antes de esto el consumo de la
+  /// estación quedaba firmado por quien disparó el fire.
+  ///
+  /// NULL es un caso VÁLIDO: el fire consume inventario al disparar, que puede
+  /// ocurrir antes de que la estación abra sesión. Exigir sesión abierta
+  /// convertiría a la cocina en bloqueante del POS — si el cocinero no fichó,
+  /// el mesero no podría enviar el pedido. Se reporta como "consumo sin sesión".
+  kds_session_id     Int?
+  /// Costo del movimiento, persistido POR FILA. Antes de QUI-651 el costo solo
+  /// existía en memoria: `StockLevelManager.updateStock` lo devuelve en
+  /// `cost_snapshot` y nunca lo guardaba en la fila del movimiento.
+  /// `inventory_valuation_snapshots` sí persiste costo, pero su `total_value` es
+  /// el valor del stock ON-HAND después del movimiento, no el costo de lo
+  /// consumido — usarlo para el historial de la sesión daría otro número.
+  /// Sin estas dos columnas el historial y el resumen de consumo por turno no
+  /// se pueden construir, y recomputar en lectura no sirve porque las capas
+  /// FIFO ya se movieron. NULL en los movimientos históricos.
+  unit_cost          Decimal?                        @db.Decimal(12, 4)
+  total_cost         Decimal?                        @db.Decimal(18, 4)
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   order_items        order_items?                    @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   products           products                        @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   product_variants   product_variants?               @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users              users?                          @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  kds_session        kds_sessions?                   @relation(fields: [kds_session_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([organization_id, created_at(sort: Desc)])
+  @@index([kds_session_id])
 }
 
 model order_item_taxes {
@@ -1649,6 +1676,14 @@ model products {
   menu_section_items        menu_section_items[]
   kitchen_ticket_items      kitchen_ticket_items[]
 
+  /// QUI-651 — estación de preparación del plato. Solo significativo para
+  /// `product_type = 'prepared'`. NULL significa "cae en el KDS por defecto de
+  /// la tienda", que es lo que hace funcionar el caso de una sola estación sin
+  /// configurar nada. Las variantes NO sobrescriben esta estación: el ruteo es
+  /// una propiedad de cómo se cocina el plato, no de qué opción se vendió.
+  kds_id                    Int?
+  kds                       kds?                   @relation(fields: [kds_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
   @@unique([store_id, slug])
   @@unique([store_id, sku])
   @@unique([store_id, barcode])
@@ -1656,6 +1691,7 @@ model products {
   @@index([store_id, barcode])
   @@index([store_id, product_type])
   @@index([store_id, is_ingredient])
+  @@index([kds_id])
   @@index([stock_uom_id])
   @@index([purchase_uom_id])
   @@index([store_id, is_featured])
@@ -1930,6 +1966,7 @@ model inventory_locations {
   dispatch_notes_from_location  dispatch_notes[]                @relation("dispatch_notes_from_location")
   dispatch_notes_to_location    dispatch_notes[]                @relation("dispatch_notes_to_location")
   cash_registers                cash_registers[]
+  kds                           kds[]
   // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
   // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 
@@ -6390,6 +6427,82 @@ model cash_register_movements {
   @@index([order_id])
 }
 
+// ===== KDS (ESTACIONES DE PREPARACIÓN) =====
+//
+// QUI-651. Antes de esto el KDS era IMPLÍCITO: existía un solo tablero por
+// tienda y `kitchen_tickets` no apuntaba a ninguna estación, así que en un
+// restaurante con barra + cocina caliente + postres un pedido de 20 productos
+// caía completo en el mismo tablero y el personal filtraba a mano.
+//
+// El modelado es espejo deliberado de `cash_registers` / `cash_register_sessions`:
+// misma forma de entidad, mismo `@@unique([store_id, code])`, mismo índice
+// `[x_id, status]` que respalda el guard de una-sola-sesión-abierta, y mismo
+// `summary Json?` para el snapshot inmutable al cerrar el turno.
+//
+// La diferencia sustantiva: la sesión de caja custodia DINERO, la de KDS
+// custodia RESPONSABILIDAD SOBRE EL CONSUMO DE INSUMOS. Por eso `kds_sessions`
+// no tiene montos, y por eso `inventory_transactions` gana `kds_session_id`.
+
+enum kds_session_status_enum {
+  open
+  closed
+}
+
+model kds {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  name        String    @db.VarChar(100)
+  code        String    @db.VarChar(50)
+  description String?   @db.VarChar(255)
+  is_active   Boolean   @default(true)
+  /// Exactamente un KDS por defecto por tienda. La unicidad se refuerza con un
+  /// índice único PARCIAL (`WHERE is_default`) creado en la migración: Prisma no
+  /// sabe expresar índices parciales, así que vive en SQL.
+  is_default  Boolean   @default(false)
+  location_id Int?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores               @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  location inventory_locations? @relation(fields: [location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  sessions kds_sessions[]
+  products products[]
+  tickets  kitchen_tickets[]
+
+  @@unique([store_id, code])
+  @@index([store_id, is_active])
+  @@index([location_id])
+}
+
+model kds_sessions {
+  id            Int                     @id @default(autoincrement())
+  kds_id        Int
+  store_id      Int
+  opened_by     Int
+  closed_by     Int?
+  status        kds_session_status_enum @default(open)
+  opened_at     DateTime                @default(now()) @db.Timestamp(6)
+  closed_at     DateTime?               @db.Timestamp(6)
+  closing_notes String?
+  /// Snapshot inmutable del turno, persistido AL CERRAR (igual que caja):
+  /// tickets servidos, tiempo promedio de preparación, items cancelados y el
+  /// resumen de consumo de insumos con su costo total. Mientras la sesión está
+  /// abierta el resumen se calcula en vivo y esta columna sigue NULL.
+  summary       Json?
+  created_at    DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?               @default(now()) @db.Timestamp(6)
+
+  kds                    kds                      @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
+  store                  stores                   @relation("kds_sessions_store", fields: [store_id], references: [id], onUpdate: NoAction)
+  opened_by_user         users                    @relation("kds_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
+  closed_by_user         users?                   @relation("kds_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
+  inventory_transactions inventory_transactions[]
+
+  @@index([store_id, status])
+  @@index([kds_id, status])
+  @@index([opened_by, status])
+}
+
 // ===== LAYAWAY (PLAN SEPARÉ) =====
 
 enum layaway_plan_state_enum {
@@ -9093,6 +9206,10 @@ model kitchen_tickets {
   store_id      Int
   order_id      Int
   table_id      Int?
+  /// QUI-651 — estación que prepara este ticket. NOT NULL: un ticket sin
+  /// estación no se puede mostrar en ningún tablero. Se resuelve en el fire por
+  /// la cascada skip_kds -> products.kds_id -> KDS por defecto de la tienda.
+  kds_id        Int
   status        kitchen_ticket_state_enum @default(pending)
   daily_number  Int?
   business_date DateTime?                 @db.Date
@@ -9103,13 +9220,20 @@ model kitchen_tickets {
 
   store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  kds   kds                    @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
   items kitchen_ticket_items[]
 
-  @@unique([store_id, business_date, daily_number])
+  /// El consecutivo diario es POR ESTACIÓN, no por tienda: cada tablero cuenta
+  /// desde 1, así cocina canta #1 y barra canta #1 el mismo día. El número
+  /// identifica al ticket DENTRO de la estación donde se canta en voz alta.
+  /// Con el unique global anterior, un fire de dos estaciones consumía dos
+  /// números y cada tablero veía la secuencia con huecos (8, 10, 13...).
+  @@unique([store_id, kds_id, business_date, daily_number])
   @@index([store_id, status])
   @@index([store_id, order_id])
   @@index([store_id, fired_at])
   @@index([store_id, business_date])
+  @@index([kds_id, status])
 }
 
 /// A single line on a kitchen ticket. Tracks per-item state and optional

@@ -3427,6 +3427,15 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Todos los items ya fueron enviados a cocina (idempotente)',
   },
+  // QUI-651 — el fire rutea cada item a su estacion y cae en el KDS por defecto
+  // cuando el plato no declara uno. Sin KDS por defecto no hay a donde rutear:
+  // se falla fuerte en vez de mandar el ticket a un tablero que nadie mira.
+  KITCHEN_FIRE_NO_DEFAULT_KDS: {
+    code: 'KITCHEN_FIRE_NO_DEFAULT_KDS',
+    httpStatus: 422,
+    devMessage:
+      'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
+  },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',
     httpStatus: 422,

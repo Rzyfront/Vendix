@@ -77,11 +77,25 @@ export interface PreExplodedFireContext {
   firedItemIds: number[];
   skippedItemIds: number[];
   preparedItems: Array<{
-    orderItem: { id: number; product_id: number | null; product_name: string; quantity: any };
+    orderItem: {
+      id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: any;
+      // QUI-651 — el contexto ya arrastra el producto; se declara solo lo que
+      // el ruteo necesita. `kds_id` null significa "KDS por defecto".
+      products?: { kds_id: number | null } | null;
+    };
     recipeId: number;
     bomLines: BomExplosionLine[];
   }>;
-  recipeLessItems: Array<{ id: number; product_id: number | null; product_name: string; quantity: any }>;
+  recipeLessItems: Array<{
+    id: number;
+    product_id: number | null;
+    product_name: string;
+    quantity: any;
+    products?: { kds_id: number | null } | null;
+  }>;
   locationByProduct: Map<number, number>;
   businessDate: string;
   user_id?: number;
@@ -211,6 +225,8 @@ export class KitchenFireService {
                 product_type: true,
                 track_inventory: true,
                 store_id: true,
+                // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
+                kds_id: true,
               },
             },
           },
@@ -434,7 +450,10 @@ export class KitchenFireService {
     store_id: number,
     preComputed: PreExplodedFireContext,
   ): Promise<{
+    /** Ticket primario (estacion de menor id). Ver nota en el return. */
     ticketId: number;
+    /** Un id por estacion involucrada en el fire (QUI-651). */
+    ticketIds: number[];
     firedItemSnapshots: Array<{
       orderItemId: number;
       productId: number;
@@ -539,43 +558,106 @@ export class KitchenFireService {
       });
     }
 
-    // Serialize the daily correlative per (store, business_date) with a
-    // transaction-scoped advisory lock so concurrent fires can't collide
-    // on the same daily_number. The lock auto-releases at commit/rollback.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
-    const sameDayCount = await tx.kitchen_tickets.count({
-      where: {
-        store_id,
-        business_date: new Date(`${businessDate}T00:00:00.000Z`),
-      },
+    // ---------------------------------------------------------------- QUI-651
+    // RUTEO POR ESTACION. Antes esto creaba UN ticket por fire y todos los
+    // items caian en el mismo tablero. Ahora los items se agrupan por su KDS
+    // destino y se crea un ticket POR ESTACION involucrada.
+    //
+    // Cascada de resolucion (los `skip_kds = true` ya quedaron fuera aguas
+    // arriba, nunca llegan aca):
+    //   1. `products.kds_id` presente -> esa estacion
+    //   2. sin `kds_id`               -> KDS por defecto de la tienda
+    const defaultKds = await tx.kds.findFirst({
+      where: { store_id, is_default: true, is_active: true },
+      select: { id: true },
     });
-    const dailyNumber = sameDayCount + 1;
+    if (!defaultKds) {
+      // Precondicion real, no defensiva: toda tienda que cocina tiene un KDS
+      // por defecto — la migracion lo backfilleo y el bootstrap lo autocrea.
+      // Si falta, rutear a ciegas mandaria el ticket a un tablero que nadie
+      // mira, asi que es mejor fallar fuerte y visible.
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS,
+        `La tienda ${store_id} no tiene un KDS por defecto activo`,
+      );
+    }
 
-    // Create the kitchen_ticket + items (one ticket per fire call, one
-    // item per fired order_item). Status defaults to 'pending'; Fase F
-    // owns the KDS SSE controller that mutates these later.
-    const ticket = await tx.kitchen_tickets.create({
-      data: {
-        store_id,
-        order_id: order.id,
-        status: 'pending',
-        daily_number: dailyNumber,
-        business_date: new Date(`${businessDate}T00:00:00.000Z`),
-        fired_at: new Date(),
-        items: {
-          create: firedItemSnapshots.map((snap) => ({
-            order_item_id: snap.orderItemId,
-            product_id: snap.productId,
-            quantity: snap.quantity,
-            status: 'pending',
-          })),
+    const kdsByProduct = new Map<number, number>();
+    for (const ctxItem of preparedItems) {
+      kdsByProduct.set(
+        ctxItem.orderItem.product_id!,
+        ctxItem.orderItem.products?.kds_id ?? defaultKds.id,
+      );
+    }
+    for (const item of recipeLessItems) {
+      kdsByProduct.set(
+        item.product_id!,
+        (item as any).products?.kds_id ?? defaultKds.id,
+      );
+    }
+
+    const snapshotsByKds = new Map<number, typeof firedItemSnapshots>();
+    for (const snap of firedItemSnapshots) {
+      const kdsId = kdsByProduct.get(snap.productId) ?? defaultKds.id;
+      const bucket = snapshotsByKds.get(kdsId);
+      if (bucket) bucket.push(snap);
+      else snapshotsByKds.set(kdsId, [snap]);
+    }
+
+    const businessDateAsDate = new Date(`${businessDate}T00:00:00.000Z`);
+    const ticketIds: number[] = [];
+
+    // Orden estable por kds_id: hace el resultado determinista entre corridas
+    // y deja el ticket "primario" (el primero) siempre en la misma estacion.
+    for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
+      const snaps = snapshotsByKds.get(kdsId)!;
+
+      // El correlativo diario es POR ESTACION: cada tablero cuenta desde 1, asi
+      // cocina canta #1 y barra canta #1 el mismo dia. El advisory lock foldea
+      // la estacion en su segunda clave para que dos fires concurrentes de la
+      // MISMA estacion serialicen, y dos de estaciones distintas no se estorben.
+      // Se libera solo al commit/rollback.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate} || ':' || ${kdsId}::text)::int)`;
+      const sameDayCount = await tx.kitchen_tickets.count({
+        where: {
+          store_id,
+          kds_id: kdsId,
+          business_date: businessDateAsDate,
         },
-      },
-      include: { items: true },
-    });
+      });
+
+      const ticket = await tx.kitchen_tickets.create({
+        data: {
+          store_id,
+          order_id: order.id,
+          kds_id: kdsId,
+          status: 'pending',
+          daily_number: sameDayCount + 1,
+          business_date: businessDateAsDate,
+          fired_at: new Date(),
+          items: {
+            create: snaps.map((snap) => ({
+              order_item_id: snap.orderItemId,
+              product_id: snap.productId,
+              quantity: snap.quantity,
+              status: 'pending',
+            })),
+          },
+        },
+        include: { items: true },
+      });
+      ticketIds.push(ticket.id);
+    }
 
     return {
-      ticketId: ticket.id,
+      // `ticketId` es el ticket PRIMARIO del fire (la estacion de menor id).
+      // Se conserva porque el evento `kitchen.fired` y el payload SSE siguen
+      // siendo de un ticket, y migrar ese contrato a N tickets es el incremento
+      // siguiente de QUI-651. Los consumidores que solo necesitan "un id para
+      // notificar" no cambian; quien necesite todas las estaciones usa
+      // `ticketIds`.
+      ticketId: ticketIds[0],
+      ticketIds,
       firedItemSnapshots,
       cogsTotal,
       consumedLineCount,
@@ -652,6 +734,8 @@ export class KitchenFireService {
                 product_type: true,
                 track_inventory: true,
                 store_id: true,
+                // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
+                kds_id: true,
               },
             },
           },
