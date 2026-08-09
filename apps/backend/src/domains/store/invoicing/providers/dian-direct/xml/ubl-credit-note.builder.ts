@@ -154,10 +154,17 @@ export class UblCreditNoteBuilder {
     UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
+    // Payment means — mandatory group `1..N` (rule CAN01, «Rechazo si grupo no
+    // informado»). Goes here because UBL fixes the order
+    // `DeliveryTerms → PaymentMeans → PaymentTerms → TaxTotal → monetary total`.
+    UblCommonBuilder.buildPaymentMeans(doc, credit_note_data);
+
     // Tax totals
     UblCommonBuilder.buildTaxTotals(doc, credit_note_data.taxes, currency);
 
-    // Legal monetary total
+    // `cac:LegalMonetaryTotal` is correct HERE — rule CAU01 points at
+    // `/CreditNote/cac:LegalMonetaryTotal`. The debit note is the exception and
+    // uses `cac:RequestedMonetaryTotal`; do not unify the two.
     UblCommonBuilder.buildLegalMonetaryTotal(doc, credit_note_data, currency);
 
     // `cac:CreditNoteLine` comparte cuerpo con `cac:InvoiceLine`: en UBL los dos

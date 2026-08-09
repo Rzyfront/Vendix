@@ -1,10 +1,10 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
-import {
-  DIAN_DOCUMENT_TYPES,
-  DIAN_OPERATION_TYPES,
-} from '../constants/dian-document-types';
+// `DIAN_DOCUMENT_TYPES` is deliberately NOT imported: the debit note's type is
+// published through `cbc:CustomizationID` (operation type 30/32), never through
+// a `DebitNoteTypeCode` element — see the note where that element used to be.
+import { DIAN_OPERATION_TYPES } from '../constants/dian-document-types';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -19,8 +19,20 @@ import {
 
 /**
  * Builds UBL 2.1 Debit Note XML documents compliant with DIAN Colombia.
- * Structure mirrors the credit note builder but uses DebitNote root element
- * and includes BillingReference to the original invoice.
+ *
+ * THE DEBIT NOTE IS NOT A MIRROR OF THE CREDIT NOTE. This file used to say it
+ * was, and treating the two as the same shape with a renamed root cost the
+ * habilitación set all 10 of its debit notes. UBL 2.1 gives the `DebitNote` its
+ * own sequence, and it differs from `CreditNote` in two places that both matter:
+ *
+ *   - it defines NO `cbc:DebitNoteTypeCode`, while `CreditNote` does define
+ *     `cbc:CreditNoteTypeCode` (rejection ZB01)
+ *   - its totals group is `cac:RequestedMonetaryTotal`, while every other
+ *     document uses `cac:LegalMonetaryTotal` (rejections DAD06, DAU02/04/06)
+ *
+ * What the two notes DO share is the parts this builder delegates to
+ * `UblCommonBuilder`: extensions, parties, payment means, tax totals, the
+ * monetary arithmetic and the line body. Share the bodies, never the sequence.
  */
 export class UblDebitNoteBuilder {
   static build(params: {
@@ -104,10 +116,21 @@ export class UblDebitNoteBuilder {
       localTimeString(new Date(), DEFAULT_STORE_TIMEZONE);
     doc.ele(UBL_NAMESPACES.CBC, 'IssueTime').txt(issue_time);
 
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'DebitNoteTypeCode')
-      .txt(DIAN_DOCUMENT_TYPES.DEBIT_NOTE);
-
+    // NO `cbc:DebitNoteTypeCode` HERE — AND NOWHERE ELSE.
+    //
+    // UBL 2.1 does not define that element in the `DebitNote` sequence. The
+    // `CreditNote` DOES define `cbc:CreditNoteTypeCode`, so the two notes are
+    // NOT mirror images; assuming they were is what put it here. Emitting it
+    // failed schema validation before the DIAN read anything else:
+    //
+    //   ZB01  «Fallo en el esquema XML del archivo» — reported on all 10 debit
+    //         notes of the habilitación set, naming this element and listing
+    //         what the sequence does accept in this position (`Note`,
+    //         `TaxPointDate`, `DocumentCurrencyCode`, …).
+    //
+    // The document type '92' it used to publish is already carried by
+    // `cbc:CustomizationID` above (operation type 30/32), which is where the
+    // DIAN reads it for a note. Nothing is lost by its absence.
     if (debit_note_data.notes) {
       doc.ele(UBL_NAMESPACES.CBC, 'Note').txt(debit_note_data.notes);
     }
@@ -153,11 +176,23 @@ export class UblDebitNoteBuilder {
     UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
+    // Payment means — mandatory group `1..N` (rule DAN01, «Rechazo si grupo no
+    // informado»). Goes here because UBL fixes the order
+    // `DeliveryTerms → PaymentMeans → PaymentTerms → TaxTotal → monetary total`.
+    UblCommonBuilder.buildPaymentMeans(doc, debit_note_data);
+
     // Tax totals
     UblCommonBuilder.buildTaxTotals(doc, debit_note_data.taxes, currency);
 
-    // Legal monetary total
-    UblCommonBuilder.buildLegalMonetaryTotal(doc, debit_note_data, currency);
+    // `cac:RequestedMonetaryTotal`, NOT `cac:LegalMonetaryTotal`: UBL names the
+    // debit note's total group differently from every other document, and the
+    // DIAN reads the CUDE's ValFac/ValTot plus its three arithmetic rules
+    // through that exact path (DAU01, 1..1). See `buildMonetaryTotal`.
+    UblCommonBuilder.buildRequestedMonetaryTotal(
+      doc,
+      debit_note_data,
+      currency,
+    );
 
     // `cac:DebitNoteLine` comparte cuerpo con `cac:InvoiceLine` — ver el mismo
     // comentario en la nota crédito. Sin delegar, la línea salía sin

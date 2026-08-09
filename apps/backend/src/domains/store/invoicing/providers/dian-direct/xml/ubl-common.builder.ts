@@ -722,7 +722,57 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds `cac:LegalMonetaryTotal` so it satisfies the DIAN arithmetic rules.
+   * Builds `cac:PaymentMeans`, the payment group the DIAN requires on every
+   * document with cardinality `1..N`.
+   *
+   * WHY THIS IS SHARED AND NOT INLINE
+   *
+   * The invoice, the equivalent document and the support document each grew
+   * their own inline copy of this block, and the two notes grew NONE. The DIAN
+   * rejected all 20 notes of the habilitación set for exactly that:
+   *
+   *   CAN01  «Rechazo si grupo no informado»  /CreditNote/cac:PaymentMeans
+   *   DAN01  «Rechazo si grupo no informado»  /DebitNote/cac:PaymentMeans
+   *
+   * A group that four document types need is not a per-builder detail. The two
+   * notes consume it from here so a fifth omission cannot happen the same way.
+   *
+   * The three existing inline copies are deliberately NOT migrated in this
+   * change: they are the code path the DIAN accepted 30 times during the
+   * habilitación, and this ships against a live habilitación that must not
+   * regress. Migrating them is a separate, independently verifiable change.
+   *
+   * UBL fixes the order `Delivery → DeliveryTerms → PaymentMeans →
+   * PaymentTerms → AllowanceCharge → TaxTotal → (monetary total)`, so callers
+   * must invoke this AFTER the parties and BEFORE the tax totals.
+   *
+   * Field defaults follow the same convention the invoice builder already uses:
+   * `payment_form` '1' = contado, `payment_means` '10' = efectivo. `DAN04`
+   * makes `PaymentDueDate` mandatory on credit sales, so it is always emitted,
+   * falling back to the issue date when no due date exists.
+   */
+  static buildPaymentMeans(
+    parent: any,
+    data: {
+      payment_form?: string;
+      payment_means?: string;
+      due_date?: string;
+      issue_date: string;
+    },
+  ): void {
+    const payment_means = parent.ele(UBL_NAMESPACES.CAC, 'PaymentMeans');
+    payment_means.ele(UBL_NAMESPACES.CBC, 'ID').txt(data.payment_form || '1');
+    payment_means
+      .ele(UBL_NAMESPACES.CBC, 'PaymentMeansCode')
+      .txt(data.payment_means || '10');
+    payment_means
+      .ele(UBL_NAMESPACES.CBC, 'PaymentDueDate')
+      .txt(data.due_date || data.issue_date);
+  }
+
+  /**
+   * Builds the document's monetary-total group so it satisfies the DIAN
+   * arithmetic rules.
    *
    * The defect this replaces: the header published the GROSS subtotal as
    * `LineExtensionAmount` while every line published its NET amount
@@ -741,8 +791,31 @@ export class UblCommonBuilder {
    *
    * Shared by invoice, credit note, debit note and support document — the block
    * was duplicated four times and drifted independently.
+   *
+   * THE WRAPPER ELEMENT IS NOT THE SAME FOR EVERY DOCUMENT. UBL 2.1 names the
+   * debit note's group `cac:RequestedMonetaryTotal`; every other document uses
+   * `cac:LegalMonetaryTotal`. It is not a synonym and not a mirror — the DIAN
+   * publishes a different XPath per document type (Anexo Técnico 1.9 §11.4.6):
+   *
+   *   CAU01  /CreditNote/cac:LegalMonetaryTotal
+   *   DAU01  /DebitNote/cac:RequestedMonetaryTotal        <- 1..1, obligatorio
+   *
+   * Emitting `LegalMonetaryTotal` inside a `DebitNote` therefore publishes the
+   * amounts where nothing reads them. That single wrong name produced FOUR
+   * rejections at once on all 10 debit notes of the set, because the CUDE and
+   * the arithmetic rules both resolve through it:
+   *
+   *   DAD06  CUDE mal calculado — ValFac and ValTot resolve to
+   *          /DebitNote/cac:RequestedMonetaryTotal/{LineExtensionAmount,PayableAmount};
+   *          absent, the DIAN hashes empty strings and gets another key
+   *   DAU02  bruto no cuadra con las líneas
+   *   DAU04  base imponible no cuadra
+   *   DAU06  bruto + tributos no cuadra
+   *
+   * The arithmetic was never wrong: it is the same function that backed the 30
+   * accepted invoices. Only the envelope was misnamed.
    */
-  static buildLegalMonetaryTotal(
+  static buildMonetaryTotal(
     parent: any,
     data: {
       discount_amount: string;
@@ -750,6 +823,13 @@ export class UblCommonBuilder {
       items: ProviderInvoiceItem[];
     },
     currency: string,
+    /**
+     * UBL name of the group. Defaults to `LegalMonetaryTotal`, which is correct
+     * for every document type EXCEPT the debit note.
+     */
+    element_name:
+      | 'LegalMonetaryTotal'
+      | 'RequestedMonetaryTotal' = 'LegalMonetaryTotal',
   ): void {
     const line_extension = dianLineExtensionTotal(data.items);
     const document_discount = UblCommonBuilder.documentDiscount(data);
@@ -762,7 +842,7 @@ export class UblCommonBuilder {
       { value: document_discount, sign: -1 },
     ]);
 
-    const monetary = parent.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
+    const monetary = parent.ele(UBL_NAMESPACES.CAC, element_name);
     monetary
       .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
       .att('currencyID', currency)
@@ -783,6 +863,52 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'PayableAmount')
       .att('currencyID', currency)
       .txt(payable);
+  }
+
+  /**
+   * `cac:LegalMonetaryTotal` — the group name every document uses EXCEPT the
+   * debit note. Kept as the named entry point so the four callers that are
+   * legitimately `LegalMonetaryTotal` (invoice, credit note, equivalent document,
+   * support document) read as a statement of which group they emit rather than
+   * as a default they happen to inherit.
+   */
+  static buildLegalMonetaryTotal(
+    parent: any,
+    data: {
+      discount_amount: string;
+      tax_amount: string;
+      items: ProviderInvoiceItem[];
+    },
+    currency: string,
+  ): void {
+    UblCommonBuilder.buildMonetaryTotal(
+      parent,
+      data,
+      currency,
+      'LegalMonetaryTotal',
+    );
+  }
+
+  /**
+   * `cac:RequestedMonetaryTotal` — the debit note's group, and ONLY the debit
+   * note's. See `buildMonetaryTotal` for why using the wrong one costs four
+   * rejection rules (DAD06, DAU02, DAU04, DAU06) at once.
+   */
+  static buildRequestedMonetaryTotal(
+    parent: any,
+    data: {
+      discount_amount: string;
+      tax_amount: string;
+      items: ProviderInvoiceItem[];
+    },
+    currency: string,
+  ): void {
+    UblCommonBuilder.buildMonetaryTotal(
+      parent,
+      data,
+      currency,
+      'RequestedMonetaryTotal',
+    );
   }
 
   /**
