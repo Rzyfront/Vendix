@@ -99,6 +99,12 @@ export interface PreExplodedFireContext {
   locationByProduct: Map<number, number>;
   businessDate: string;
   user_id?: number;
+  /**
+   * QUI-655 — componentes excluidos por `order_item_id`, tal como los confirmo
+   * el modal de cocina. Ausente o vacio equivale a "todos los componentes
+   * marcados", que es el comportamiento previo al ticket.
+   */
+  exclusionsByOrderItem?: Map<number, number[]>;
 }
 
 /**
@@ -351,6 +357,15 @@ export class KitchenFireService {
       locationByProduct,
       businessDate,
       user_id,
+      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item. Se
+      // arman aca (fuera de la transaccion) porque el filtrado del BOM ocurre
+      // dentro y no debe pagar el costo de recorrer el DTO por linea.
+      exclusionsByOrderItem: new Map(
+        (dto.exclusions ?? []).map((e) => [
+          e.order_item_id,
+          e.component_product_ids ?? [],
+        ]),
+      ),
     };
     const result = await this.prisma.$transaction(async (tx) =>
       this.fireOrderItemsInTx(tx, store_id, preComputed),
@@ -465,6 +480,8 @@ export class KitchenFireService {
   }> {
     const { order, preparedItems, recipeLessItems, locationByProduct, businessDate, user_id } =
       preComputed;
+    const exclusionsByOrderItem =
+      preComputed.exclusionsByOrderItem ?? new Map<number, number[]>();
 
     const firedItemSnapshots: Array<{
       orderItemId: number;
@@ -525,6 +542,7 @@ export class KitchenFireService {
       openSessionByKds.set(kdsId, session?.id ?? null);
     }
 
+
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
       const orderQty = Number(orderItem.quantity || 0);
@@ -533,8 +551,39 @@ export class KitchenFireService {
         continue;
       }
 
+      // ------------------------------------------------------------- QUI-655
+      // Filtrado de exclusiones ANTES de consumir. Antes se recorrian todas las
+      // hojas del BOM sin excepcion, asi que un plato "sin papas" descontaba las
+      // papas igual y las cargaba al costo.
+      //
+      // Se valida server-side que cada componente excluido pertenezca realmente
+      // al BOM de ESTE item: el cliente no puede excluir un producto arbitrario,
+      // o el consumo dejaria de reflejar la receta.
+      //
+      // La exclusion de un NODO de sub-receta se expresa excluyendo sus hojas,
+      // que es lo que el modal manda tras expandir `path_recipe_ids`; por eso el
+      // filtro es por `component_product_id` y no necesita conocer el arbol.
+      const excludedIds = new Set(
+        (exclusionsByOrderItem.get(orderItem.id) ?? []).filter((componentId) => {
+          const belongs = bomLines.some(
+            (l) => l.component_product_id === componentId,
+          );
+          if (!belongs) {
+            throw new VendixHttpException(
+              ErrorCodes.KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM,
+              `El componente #${componentId} no pertenece a la receta del item #${orderItem.id}`,
+            );
+          }
+          return true;
+        }),
+      );
+
+      const effectiveBomLines = excludedIds.size
+        ? bomLines.filter((l) => !excludedIds.has(l.component_product_id))
+        : bomLines;
+
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
-      for (const line of bomLines) {
+      for (const line of effectiveBomLines) {
         const consumedQty = Math.round(line.quantity * orderQty);
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
           // Defensive: this should never happen if the recipe items have
@@ -620,6 +669,24 @@ export class KitchenFireService {
     // caian en el mismo tablero. Ahora se agrupan por su KDS destino — ya
     // resuelto arriba, porque el consumo de inventario necesitaba la estacion
     // antes de escribirse — y se crea un ticket POR ESTACION involucrada.
+    // QUI-655 — nota de texto libre capturada al TOMAR el pedido. Es el camino
+    // menos estructurado de los tres y el mas parecido a como funciona un
+    // restaurante real con prisa ("poca sal", "bien cocido"): el cocinero la lee
+    // en la estacion y desmarca en consecuencia. Se lee de la fuente de verdad
+    // (`order_items.notes`) y no del DTO, porque la nota se escribio al pedir y
+    // no al confirmar el envio.
+    const firedOrderItemIds = firedItemSnapshots.map((s) => s.orderItemId);
+    const notesByOrderItem = new Map<number, string>();
+    if (firedOrderItemIds.length > 0) {
+      const noted = await tx.order_items.findMany({
+        where: { id: { in: firedOrderItemIds }, notes: { not: null } },
+        select: { id: true, notes: true },
+      });
+      for (const row of noted) {
+        if (row.notes) notesByOrderItem.set(row.id, row.notes);
+      }
+    }
+
     const snapshotsByKds = new Map<number, typeof firedItemSnapshots>();
     for (const snap of firedItemSnapshots) {
       const kdsId = kdsByProduct.get(snap.productId) ?? defaultKds.id;
@@ -671,6 +738,41 @@ export class KitchenFireService {
         include: { items: true },
       });
       ticketIds.push(ticket.id);
+
+      // ----------------------------------------------------------- QUI-655
+      // Persistir LO CONSUMIDO y propagar la nota, ya con los
+      // `kitchen_ticket_items` creados y con id.
+      //
+      // Estos dos registros son lo que el cocinero LEE en la estacion. Sin
+      // ellos el plato sale mal: el ticket diria "pollo" sin decir "sin salsa",
+      // y el margen de ese plato no se podria explicar despues.
+      for (const ktItem of ticket.items) {
+        const excluded = exclusionsByOrderItem.get(ktItem.order_item_id) ?? [];
+        const note = notesByOrderItem.get(ktItem.order_item_id);
+
+        if (note) {
+          // `kitchen_ticket_items.notes` existia en el schema documentando
+          // exactamente este caso ("no onions", "allergy: gluten") y el codigo
+          // nunca la escribia: columna disenada y desconectada hasta aqui.
+          await tx.kitchen_ticket_items.update({
+            where: { id: ktItem.id },
+            data: { notes: note, updated_at: new Date() },
+          });
+        }
+
+        if (excluded.length > 0) {
+          await tx.kitchen_ticket_item_exclusions.createMany({
+            data: excluded.map((componentId) => ({
+              kitchen_ticket_item_id: ktItem.id,
+              component_product_id: componentId,
+              excluded_by_user_id: user_id ?? null,
+            })),
+            // El unique (kitchen_ticket_item_id, component_product_id) hace que
+            // un reintento no duplique la exclusion.
+            skipDuplicates: true,
+          });
+        }
+      }
     }
 
     return {

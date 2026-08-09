@@ -3436,6 +3436,15 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // QUI-655 — el cliente no puede excluir un producto arbitrario del consumo:
+  // el componente tiene que pertenecer al BOM explotado de ESE plato, o el
+  // consumo dejaría de reflejar la receta y el costeo se volvería inauditable.
+  KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM: {
+    code: 'KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM',
+    httpStatus: 422,
+    devMessage:
+      'El componente excluido no pertenece a la receta explotada de ese plato',
+  },
   // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
   KDS_NOT_FOUND: {
     code: 'KDS_NOT_FOUND',
