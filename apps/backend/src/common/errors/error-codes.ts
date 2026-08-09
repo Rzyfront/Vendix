@@ -3436,6 +3436,55 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
+  KDS_NOT_FOUND: {
+    code: 'KDS_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Estación de cocina no encontrada',
+  },
+  KDS_DUP_CODE: {
+    code: 'KDS_DUP_CODE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una estación de cocina con ese código',
+  },
+  // El fire rutea con `products.kds_id ?? <default>`, así que degradar o
+  // desactivar el default dejaría a la tienda sin destino para sus tickets.
+  KDS_DEFAULT_PROTECTED: {
+    code: 'KDS_DEFAULT_PROTECTED',
+    httpStatus: 409,
+    devMessage:
+      'No se puede desactivar ni degradar la estación por defecto sin promover otra antes',
+  },
+  KDS_DEFAULT_MUST_BE_ACTIVE: {
+    code: 'KDS_DEFAULT_MUST_BE_ACTIVE',
+    httpStatus: 422,
+    devMessage:
+      'La estación por defecto debe estar activa: el fire filtra por is_active',
+  },
+  KDS_HAS_OPEN_SESSION: {
+    code: 'KDS_HAS_OPEN_SESSION',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene una sesión abierta: ciérrala antes de desactivarla',
+  },
+  KDS_SESSION_NOT_FOUND: {
+    code: 'KDS_SESSION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Sesión de estación no encontrada',
+  },
+  // La sesión RECLAMA la estación. El índice único parcial
+  // `kds_sessions_one_open_per_kds` es la garantía real; este código traduce su
+  // P2002 para que dos operadores concurrentes reciban un mensaje legible.
+  KDS_SESSION_ALREADY_OPEN: {
+    code: 'KDS_SESSION_ALREADY_OPEN',
+    httpStatus: 409,
+    devMessage: 'La estación ya tiene una sesión abierta',
+  },
+  KDS_SESSION_ALREADY_CLOSED: {
+    code: 'KDS_SESSION_ALREADY_CLOSED',
+    httpStatus: 409,
+    devMessage: 'La sesión de estación ya está cerrada',
+  },
   // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
   // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
   // mesero marque entregado un plato sin cocinar haria mentir al KDS.
