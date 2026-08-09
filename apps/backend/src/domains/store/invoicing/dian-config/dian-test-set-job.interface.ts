@@ -29,6 +29,13 @@ export interface DianTestSetJob {
   /** Resolución de habilitación que aporta la numeración. */
   resolution_id: number;
   /**
+   * Consulta el veredicto del lote ya enviado (`GetStatusZip`) y NO emite nada.
+   *
+   * Corta antes de reservar numeración. Permite resolver el veredicto de un set en
+   * validación sin pasar por la UI ni gastar un consecutivo.
+   */
+  check_status?: boolean;
+  /**
    * Consulta a la DIAN los rangos autorizados y NO emite nada.
    *
    * Corta antes de reservar numeración: cuesta cero consecutivos. Es la vía para

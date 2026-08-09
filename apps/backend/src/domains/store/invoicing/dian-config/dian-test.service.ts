@@ -388,8 +388,15 @@ export class DianTestService {
       smoke?: boolean;
       validate_only?: boolean;
       numbering_range?: boolean;
+      check_status?: boolean;
     } = {},
   ) {
+    // CONSULTA DE VEREDICTO — corta aquí, sin emitir ni reservar numeración.
+    // Resuelve el estado de un lote ya enviado por `GetStatusZip`.
+    if (options.check_status === true) {
+      return this.checkTestSetStatus(config_id);
+    }
+
     // CONSULTA DE RANGOS AUTORIZADOS — corta aquí, antes de tocar numeración.
     //
     // No emite ningún documento y no reserva ningún consecutivo: le pregunta a la
