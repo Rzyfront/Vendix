@@ -30,7 +30,7 @@ import type {
   ReportColumn,
   ReportSheet,
 } from '@common/reports/report-column.types';
-import { paginatedOrAll } from '@common/responses/paginated-helper';
+import { paginatedOrAll, fetchAllThenPaginate } from '@common/responses/paginated-helper';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   resolveStoreTimezone,
@@ -126,46 +126,30 @@ export class AnalyticsController {
   @Get('sales/by-product')
   @Permissions('store:analytics:read')
   async getSalesByProduct(@Query() query: SalesAnalyticsQueryDto) {
-    const result = await this.sales_analytics_service.getSalesByProduct(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.sales_analytics_service.getSalesByProduct(q),
     );
   }
 
   @Get('sales/by-category')
   @Permissions('store:analytics:read')
   async getSalesByCategory(@Query() query: SalesAnalyticsQueryDto) {
-    const result = await this.sales_analytics_service.getSalesByCategory(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.sales_analytics_service.getSalesByCategory(q),
     );
   }
 
   @Get('sales/by-payment-method')
   @Permissions('store:analytics:read')
   async getSalesByPaymentMethod(@Query() query: SalesAnalyticsQueryDto) {
-    const result =
-      await this.sales_analytics_service.getSalesByPaymentMethod(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.sales_analytics_service.getSalesByPaymentMethod(q),
     );
   }
 
@@ -179,15 +163,10 @@ export class AnalyticsController {
   @Get('sales/by-customer')
   @Permissions('store:analytics:read')
   async getSalesByCustomer(@Query() query: SalesAnalyticsQueryDto) {
-    const result = await this.sales_analytics_service.getSalesByCustomer(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.sales_analytics_service.getSalesByCustomer(q),
     );
   }
 
@@ -382,32 +361,21 @@ export class AnalyticsController {
   @Get('products/performance')
   @Permissions('store:analytics:read')
   async getProductPerformance(@Query() query: ProductsAnalyticsQueryDto) {
-    const result =
-      await this.products_analytics_service.getProductPerformance(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.products_analytics_service.getProductPerformance(q),
     );
   }
 
   @Get('products/profitability')
   @Permissions('store:analytics:read')
   async getProductProfitability(@Query() query: ProductsAnalyticsQueryDto) {
-    const result =
-      await this.products_analytics_service.getProductProfitability(query);
-    if ((result as any).products) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      (result as any).data,
-      (result as any).meta.pagination.total,
-      (result as any).meta.pagination.page,
-      (result as any).meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.products_analytics_service.getProductProfitability(q),
+      (r) => r.products ?? r.data ?? [],
     );
   }
 
@@ -525,16 +493,10 @@ export class AnalyticsController {
   @Get('inventory/movements')
   @Permissions('store:analytics:read')
   async getStockMovements(@Query() query: InventoryAnalyticsQueryDto) {
-    const result =
-      await this.inventory_analytics_service.getStockMovements(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
+    return fetchAllThenPaginate(
+      this.response_service,
+      query,
+      (q) => this.inventory_analytics_service.getStockMovements(q),
     );
   }
 
