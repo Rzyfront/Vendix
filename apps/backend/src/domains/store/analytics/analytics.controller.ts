@@ -718,7 +718,7 @@ export class AnalyticsController {
       await this.inventory_analytics_service.getInventoryBySupplierForExport(
         query,
       );
-    return paginatedOrAll(this.response_service, query, rows);
+    return this.response_service.success(rows);
   }
 
   @Get('inventory/by-supplier/export')
@@ -1111,7 +1111,7 @@ export class AnalyticsController {
   async getReviewsByProduct(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.reviews_analytics_service.getReviewsByProduct(query);
-    return paginatedOrAll(this.response_service, query, rows);
+    return this.response_service.success(rows);
   }
 
   @Get('reviews/by-product/export')
