@@ -500,19 +500,20 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * El frontend slicea en memoria (no recarga el effect al cambiar página),
+   * así que devolvemos el array COMPLETO y dejamos que el paginator del
+   * frontend haga el slice. Usamos `getStockLevelsForExport` (que ignora
+   * page/limit y devuelve TODOS los items) en vez de `getStockLevels`
+   * (que pagina internamente — incompatible con el flujo de paginación
+   * in-memory del frontend).
+   */
   @Get('inventory/stock-levels')
   @Permissions('store:analytics:read')
   async getStockLevels(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getStockLevels(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
-    );
+    const rows =
+      await this.inventory_analytics_service.getStockLevelsForExport(query);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('inventory/low-stock')
