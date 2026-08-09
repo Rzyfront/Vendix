@@ -592,6 +592,12 @@ export class FiscalProductionReadinessService {
         // Con `!shared_cltec` ese caso daba `satisfied: true` y la comprobación
         // pasaba en vacío — el fallo en abierto que este archivo existe para evitar.
         satisfied: shared_cltec === null,
+        // El caso más común no es contaminación entre tenants: es seguir con la
+        // resolución de HABILITACIÓN. La DIAN reparte a todos el mismo rango de
+        // prueba (`SETP`), y ese rango NO es facturable. Producción exige una
+        // «Autorización de Numeración de Facturación» propia, solicitada en MUISCA,
+        // que trae su prefijo, su rango y SU clave técnica. Decirlo así convierte un
+        // mensaje desconcertante en el siguiente paso.
         action: shared_cltec === undefined
           ? 'No se comprobó si la clave técnica está compartida con otro NIT. ' +
             'El llamador debe resolver `shared_technical_key` con ' +
@@ -606,8 +612,13 @@ export class FiscalProductionReadinessService {
               .join('; ')}). La DIAN asigna una clave técnica por rango y por NIT, y ` +
             'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
             'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
-            'el consecutivo ya gastado. Copia del portal de habilitación la clave ' +
-            'técnica del rango de ESTE NIT y guárdala en la resolución.'
+            'el consecutivo ya gastado. ' +
+            'SI LA RESOLUCIÓN ES LA DE HABILITACIÓN (prefijo SETP), esto es lo ' +
+            'esperado y no hay nada que corregir en ella: ese rango es el sandbox de ' +
+            'la DIAN, lo comparten todos los contribuyentes y NO es facturable. Lo ' +
+            'que falta es la resolución de PRODUCCIÓN: solicítala en MUISCA (Formato ' +
+            '1876), asocia el rango en el portal, y regístrala aquí con su propio ' +
+            'prefijo y su propia clave técnica.'
           : '',
         owner: 'tenant',
       },
