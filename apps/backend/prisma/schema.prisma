@@ -1255,6 +1255,19 @@ model order_items {
   //   decide al final segun product_type='prepared' y existencia de receta activa.
   // Default false preserva el comportamiento actual para ordenes existentes.
   skip_kds                         Boolean                  @default(false)
+  // QUI-653 — el item se empaca y el cliente se lo lleva, aunque pertenezca al
+  // pedido de una mesa. Es una dimension POR ITEM, deliberadamente separada de
+  // `orders.delivery_type`, por dos razones:
+  //   1. `delivery_type` es order-level: un solo valor no puede expresar "estos
+  //      3 items en la mesa y este 1 para llevar".
+  //   2. Cambiarlo metaria la orden en los flujos de despacho. `stores.service`
+  //      y `orders.service` excluyen 'direct_delivery' y 'dine_in' del conjunto
+  //      que requiere remision; si una orden de mesa pasara a 'pickup' por
+  //      tener un item para llevar, empezaria a aparecer como pendiente de
+  //      remision, donde no tiene nada que hacer: el plato se entrega en mano.
+  // El indicador de "pedido mixto" es DERIVADO, no persistido: la orden es
+  // mixta cuando tiene items con y sin el flag.
+  is_takeaway                      Boolean                  @default(false)
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers sold on
   // this line. Persisted at emission time so legal documents (order voucher,
   // POS ticket) never read the live serial pool. The strong link lives in

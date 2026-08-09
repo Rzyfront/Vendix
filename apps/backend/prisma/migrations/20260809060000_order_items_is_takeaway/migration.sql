@@ -1,0 +1,38 @@
+-- DATA IMPACT:
+-- Tables affected: order_items (ADD COLUMN)
+-- Expected row changes: ninguna fila se muta. La columna nace con
+--   DEFAULT false, asi que todo item existente queda "consumo en el lugar",
+--   que es exactamente el comportamiento actual.
+-- Destructive operations: none.
+-- FK/cascade risk: none — columna booleana, sin FK.
+-- Idempotency: ADD COLUMN IF NOT EXISTS.
+-- Approval: QUI-653.
+--
+-- POR QUE UNA DIMENSION NUEVA Y NO `orders.delivery_type`
+-- =======================================================
+-- Caso real: el cliente esta comiendo en la mesa y ademas pide "un arroz chino
+-- entero para llevar". Ese plato es parte del pedido de esa mesa y de ese
+-- cliente, pero no se consume ahi.
+--
+-- `orders.delivery_type` no sirve, por dos razones:
+--   1. Es ORDER-LEVEL. Un solo valor por orden no puede expresar "estos 3 items
+--      en la mesa y este 1 para llevar".
+--   2. Cambiarlo METE LA ORDEN EN LOS FLUJOS DE DESPACHO. `stores.service.ts` y
+--      `orders.service.ts` excluyen 'direct_delivery' y 'dine_in' del conjunto
+--      de ordenes que requieren remision. Si una orden de mesa pasara a
+--      'pickup' por tener un item para llevar, empezaria a aparecer como
+--      pendiente de remision y se filtraria dentro de los flujos de despacho,
+--      donde no tiene nada que hacer: el plato se entrega en mano en el local.
+--
+-- Por eso `orders.delivery_type` NO se toca.
+--
+-- Se eligio Boolean sobre un enum `fulfillment_mode`: el enum deja espacio a
+-- modos futuros a costa de una migracion mayor, y el unico modo futuro plausible
+-- ("domicilio pedido desde la mesa") es otro problema — ese SI toca despacho,
+-- que es precisamente lo que este ticket quiere evitar.
+--
+-- El indicador de "pedido mixto" NO se persiste: es derivado (la orden es mixta
+-- cuando tiene items con y sin el flag). Persistirlo abriria la puerta a que
+-- quede desincronizado de sus propias lineas.
+
+ALTER TABLE "order_items" ADD COLUMN IF NOT EXISTS "is_takeaway" BOOLEAN NOT NULL DEFAULT false;

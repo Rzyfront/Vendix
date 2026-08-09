@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   Min,
@@ -66,6 +67,19 @@ export class TableSessionAddItemDto {
   @Type(() => Number)
   @Min(1)
   price_tier_id?: number;
+
+  /**
+   * QUI-653 — el plato se empaca y el cliente se lo lleva, aunque siga
+   * perteneciendo al pedido y a la cuenta de esta mesa. El resultado es un
+   * pedido mixto: parte se consume en la mesa, parte se lleva.
+   *
+   * NO se reinterpreta `orders.delivery_type`: es order-level y cambiarlo metria
+   * la orden en los flujos de remision, donde no tiene nada que hacer.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_takeaway?: boolean;
 }
 
 /**

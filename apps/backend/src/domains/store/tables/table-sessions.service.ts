@@ -41,6 +41,12 @@ export interface TableSessionView {
       first_name: string;
       last_name: string;
     } | null;
+    /**
+     * QUI-653 — la orden tiene items para consumo en la mesa Y items para
+     * llevar. Es DERIVADO de las lineas, no una columna: la cabecera de la mesa
+     * y el tiquete impreso lo usan para distinguir las dos partes del pedido.
+     */
+    is_mixed_order: boolean;
     order_items: Array<{
       id: number;
       product_id: number | null;
@@ -55,6 +61,9 @@ export interface TableSessionView {
       // UI to know whether an order_item is a `prepared` dish (kitchen
       // flow) or a non-dish like bottled water (no kitchen control).
       item_type: string | null;
+      // QUI-653 — para llevar, por item. La mesa muestra un badge en la fila y
+      // la cabecera marca "pedido mixto" cuando hay items de los dos tipos.
+      is_takeaway: boolean;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -594,6 +603,10 @@ export class TableSessionsService {
             cost_price: null,
             is_price_overridden: false,
             inventory_consumed_at_fire: false,
+            // QUI-653 — para llevar es una dimension por item. La orden sigue
+            // siendo de la mesa y `orders.delivery_type` no se toca, para no
+            // arrastrarla a los flujos de remision.
+            is_takeaway: item.is_takeaway ?? false,
             updated_at: new Date(),
           },
         });
@@ -1103,6 +1116,10 @@ export class TableSessionsService {
                 // Read-only projection: lets the table-session UI hide
                 // the kitchen controls for non-dish items.
                 item_type: true,
+                // QUI-653 — el item se empaca y el cliente se lo lleva. El
+                // derivado "pedido mixto" se calcula sobre estas lineas, no se
+                // persiste, para que no pueda desincronizarse de ellas.
+                is_takeaway: true,
                 // KDS state per dish — same include shape as
                 // orders.service.findOne (Gap 2). Ordered desc by id so
                 // the most recent ticket-item leads the array.
@@ -1160,6 +1177,12 @@ export class TableSessionsService {
                   last_name: order.users.last_name,
                 }
               : null,
+            // QUI-653 — DERIVADO, nunca persistido: la orden es mixta cuando
+            // tiene items de los dos tipos. Persistirlo permitiria que quedara
+            // desincronizado de sus propias lineas.
+            is_mixed_order:
+              order.order_items.some((it) => it.is_takeaway) &&
+              order.order_items.some((it) => !it.is_takeaway),
             order_items: order.order_items.map((it) => ({
               id: it.id,
               product_id: it.product_id,
@@ -1169,6 +1192,7 @@ export class TableSessionsService {
               total_price: it.total_price,
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
+              is_takeaway: it.is_takeaway,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,
                 status: kti.status,
