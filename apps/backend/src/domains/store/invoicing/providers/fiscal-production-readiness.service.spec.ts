@@ -295,7 +295,11 @@ describe('FiscalProductionReadinessService', () => {
       const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
       expect(check?.satisfied).toBe(false);
       expect(check?.action).toMatch(/902075738/);
-      expect(check?.action).toMatch(/portal de habilitación/);
+      // El mensaje debe nombrar el siguiente paso real: la resolución de
+      // producción en MUISCA. Decir solo «clave compartida» deja al operador
+      // buscando una contaminación que en habilitación no existe.
+      expect(check?.action).toMatch(/MUISCA/);
+      expect(check?.action).toMatch(/SETP/);
       // Bloqueante: emitir con una ClTec ajena gasta el consecutivo.
       expect(report.missing).toContain('technical_key_per_nit');
     });
