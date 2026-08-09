@@ -855,6 +855,143 @@ export class KitchenFireService {
    *     works (returns null if no recipes) but the caller should
    *     short-circuit with `storeIsRestaurant` for clarity.
    */
+  /**
+   * Previsualización del envío a cocina — QUI-655.
+   *
+   * Devuelve, por item elegible, el árbol de su receta con la procedencia de cada
+   * línea (`path_recipe_ids`), para que el modal de confirmación pueda mostrar los
+   * nodos de sub-receta como agrupadores colapsables y desmarcar un nodo entero
+   * ("sin salsa criolla") en vez de obligar al cocinero a desmarcar sus tres hojas
+   * y a saber de memoria cuáles venían de la salsa.
+   *
+   * NO consume nada ni crea tickets: es una lectura. Reutiliza
+   * `prepareFireContext`, que ya resuelve receta activa + explosión del BOM +
+   * partición prepared/sin-receta, así que la previsualización y el envío real
+   * NUNCA pueden discrepar sobre qué se va a consumir.
+   *
+   * Los `prepared` SIN receta activa se devuelven en la lista con
+   * `components: []`: el ticket pide que aparezcan en el modal aunque no haya nada
+   * que desglosar, para que el cocinero los vea y los envíe igual.
+   */
+  async previewFire(
+    orderId: number,
+    candidateOrderItemIds: number[],
+  ): Promise<{
+    order_id: number;
+    items: Array<{
+      order_item_id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: number;
+      notes: string | null;
+      has_active_recipe: boolean;
+      components: Array<{
+        component_product_id: number;
+        name: string;
+        sku: string | null;
+        stock_unit: string | null;
+        /** Cantidad total para ESTA línea (ya multiplicada por su cantidad). */
+        quantity: number;
+        depth: number;
+        path_recipe_ids: number[];
+      }>;
+    }>;
+    skipped_item_ids: number[];
+  }> {
+    const ctx = await this.prepareFireContext(orderId, candidateOrderItemIds);
+    // `prepareFireContext` devuelve null cuando NINGUN item es elegible (todos ya
+    // consumidos, o ninguno es prepared). Para una previsualizacion eso no es un
+    // error: es "no hay nada que confirmar", y el modal debe poder decirlo en vez
+    // de reventar.
+    if (!ctx) {
+      return { order_id: orderId, items: [], skipped_item_ids: candidateOrderItemIds };
+    }
+
+    // Un solo lookup de catálogo para todos los componentes de todos los items:
+    // resolver el nombre por línea haría N consultas donde una alcanza, y un
+    // envío de 10 platos son decenas de hojas.
+    const componentIds = new Set<number>();
+    for (const it of ctx.preparedItems) {
+      for (const line of it.bomLines) componentIds.add(line.component_product_id);
+    }
+    const components =
+      componentIds.size > 0
+        ? await this.prisma.products.findMany({
+            where: { id: { in: [...componentIds] } },
+            select: { id: true, name: true, sku: true, stock_unit: true },
+          })
+        : [];
+    // Tipo explicito por la misma razon que arriba: el Map inferido desde un
+    // `map` sobre tuplas ensancha el valor a `{}` y los accesos fallan.
+    type ComponentMeta = {
+      id: number;
+      name: string;
+      sku: string | null;
+      stock_unit: string | null;
+    };
+    const byId = new Map<number, ComponentMeta>(
+      components.map((c) => [c.id, c as ComponentMeta]),
+    );
+
+    // La nota se lee de `order_items.notes`: es el camino de captura que el
+    // cocinero traduce a exclusiones cuando la petición no calza con un
+    // ingrediente exacto ("poca sal", "bien cocido").
+    const allItemIds = [
+      ...ctx.preparedItems.map((i) => i.orderItem.id),
+      ...ctx.recipeLessItems.map((i) => i.id),
+    ];
+    const notesRows =
+      allItemIds.length > 0
+        ? await this.prisma.order_items.findMany({
+            where: { id: { in: allItemIds } },
+            select: { id: true, notes: true },
+          })
+        : [];
+    // Tipo explicito: con el `?? null`, TS ensancha el valor del Map a `{}`.
+    const notesById = new Map<number, string | null>(
+      notesRows.map((r) => [r.id, r.notes ?? null]),
+    );
+
+    return {
+      order_id: orderId,
+      items: [
+        ...ctx.preparedItems.map((it) => ({
+          order_item_id: it.orderItem.id,
+          product_id: it.orderItem.product_id,
+          product_name: it.orderItem.product_name,
+          quantity: Number(it.orderItem.quantity || 0),
+          notes: notesById.get(it.orderItem.id) ?? null,
+          has_active_recipe: true,
+          components: it.bomLines.map((line) => {
+            const meta = byId.get(line.component_product_id);
+            return {
+              component_product_id: line.component_product_id,
+              name: meta?.name ?? `#${line.component_product_id}`,
+              sku: meta?.sku ?? null,
+              stock_unit: meta?.stock_unit ?? null,
+              // `explodeBom` ya aplicó merma y yield en cada nivel; se multiplica
+              // por la cantidad de la línea para que el modal muestre lo que
+              // realmente se va a descontar y no la receta unitaria.
+              quantity: line.quantity * Number(it.orderItem.quantity || 0),
+              depth: line.depth,
+              path_recipe_ids: line.path_recipe_ids,
+            };
+          }),
+        })),
+        ...ctx.recipeLessItems.map((it) => ({
+          order_item_id: it.id,
+          product_id: it.product_id,
+          product_name: it.product_name,
+          quantity: Number(it.quantity || 0),
+          notes: notesById.get(it.id) ?? null,
+          has_active_recipe: false,
+          components: [],
+        })),
+      ],
+      skipped_item_ids: ctx.skippedItemIds,
+    };
+  }
+
   async prepareFireContext(
     orderId: number,
     candidateOrderItemIds: number[],

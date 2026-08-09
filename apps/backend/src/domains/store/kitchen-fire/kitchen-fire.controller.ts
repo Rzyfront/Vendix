@@ -57,6 +57,26 @@ export class KitchenFireController {
     private readonly responseService: ResponseService,
   ) {}
 
+  /**
+   * Previsualización del envío — QUI-655. Alimenta el modal de confirmación con el
+   * árbol de receta de cada item para que el cocinero desmarque lo que no se usa.
+   *
+   * NO consume inventario ni crea tickets: es una lectura. Va con permiso de
+   * LECTURA de cocina, no de `create`, precisamente porque no escribe nada.
+   *
+   * Comparte `prepareFireContext` con el envío real, así que la previsualización y
+   * lo que efectivamente se consume nunca pueden discrepar.
+   */
+  @Post('preview')
+  @Permissions('store:kitchen_fire:read')
+  async preview(@Body() dto: FireOrderItemsDto) {
+    const result = await this.kitchenFireService.previewFire(
+      dto.order_id,
+      dto.order_item_ids,
+    );
+    return this.responseService.success(result);
+  }
+
   @Post()
   @Permissions('store:kitchen_fire:create')
   async fire(@Body() dto: FireOrderItemsDto) {
