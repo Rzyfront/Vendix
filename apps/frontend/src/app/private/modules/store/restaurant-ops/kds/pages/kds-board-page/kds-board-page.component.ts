@@ -33,6 +33,8 @@ import {
   KitchenMutationError,
   KitchenTicketsService,
 } from '../../services';
+import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
@@ -68,6 +70,8 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
     BadgeComponent,
     KdsTicketCardComponent,
     KdsTicketDetailModalComponent,
+    ModalComponent,
+    ButtonComponent,
   ],
   templateUrl: './kds-board-page.component.html',
   styleUrl: './kds-board-page.component.scss',
@@ -81,6 +85,14 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    * gestion tiene que pedir apertura de turno.
    */
   readonly stationsService = inject(KdsStationsService);
+  /**
+   * QUI-651 — gate de turno. `sessionGatePending` recuerda QUE ticket se quiso
+   * gestionar para reintentarlo tras abrir la sesion, en vez de obligar al
+   * operador a volver a buscarlo en el tablero.
+   */
+  readonly sessionGateOpen = signal(false);
+  readonly sessionGatePending = signal<number | null>(null);
+  readonly openingSession = signal(false);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -621,10 +633,89 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    *    SSE nunca llega, para no dejar el spinner colgado.
    * En `error` limpiamos el id + toast (como antes).
    */
+  /**
+   * Abre el turno de la estacion y REINTENTA la accion que disparo el gate.
+   *
+   * Reintentar importa: sin esto el operador abre el turno y su clic original se
+   * perdio, asi que tiene que volver a buscar el ticket en el tablero. El
+   * reintento se resuelve por id y no guardando el observable, porque el estado
+   * del ticket pudo cambiar por SSE mientras el modal estaba abierto.
+   */
+  confirmOpenSession(): void {
+    const kdsId = this.stationsService.selectedStationId();
+    if (kdsId == null) return;
+
+    this.openingSession.set(true);
+    this.stationsService
+      .openSessionFor(kdsId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.openingSession.set(false);
+          this.sessionGateOpen.set(false);
+          const pending = this.sessionGatePending();
+          this.sessionGatePending.set(null);
+          this.toastService.success('Turno abierto');
+          if (pending != null) {
+            const ticket = this.tickets().find((t) => t.id === pending);
+            // Se re-deriva la accion del estado ACTUAL del ticket: entre el gate y
+            // la apertura, el SSE pudo haberlo movido.
+            if (ticket) this.advanceTicket(ticket);
+          }
+        },
+        error: (err: unknown) => {
+          this.openingSession.set(false);
+          // KDS_SESSION_ALREADY_OPEN cuando otro operador reclamo la estacion
+          // primero. El mensaje del backend ya lo dice; se muestra tal cual.
+          this.toastService.error(
+            typeof err === 'string' ? err : 'No se pudo abrir el turno',
+          );
+        },
+      });
+  }
+
+  cancelOpenSession(): void {
+    this.sessionGateOpen.set(false);
+    this.sessionGatePending.set(null);
+  }
+
+  /**
+   * Avanza el ticket al siguiente estado segun donde este. Se usa para el
+   * reintento post-apertura de turno, donde solo se conserva el id.
+   */
+  private advanceTicket(ticket: KitchenTicket): void {
+    if (ticket.status === 'pending') {
+      this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+    } else if (ticket.status === 'in_preparation') {
+      this.runMutation(ticket.id, () =>
+        this.ticketsService.markReady(ticket.id),
+      );
+    }
+    // `ready` no se avanza automaticamente: entregar es una decision de servicio
+    // y la toma el operador desde su boton, no un reintento silencioso.
+  }
+
   private runMutation(
     ticketId: number,
     obsFactory: () => import('rxjs').Observable<KitchenTicket>,
   ): void {
+    // ------------------------------------------------------------- QUI-651
+    // GATE DE TURNO. Este es el embudo unico de TODAS las mutaciones de ticket
+    // (start, ready, delivered, cancel), asi que la guarda va aca y no en cada
+    // handler: poner el chequeo en los cinco handlers deja el hueco abierto en el
+    // sexto que alguien agregue.
+    //
+    // Convencion de caja, que el ticket pide respetar: la sesion se exige AL
+    // ACTUAR, no al entrar. El tablero se LEE sin turno abierto — leer no genera
+    // dato que necesite dueno — pero gestionar un ticket consume inventario y
+    // genera COGS, y eso necesita un responsable.
+    //
+    // Y no muta NADA hasta que el turno se abra: se pide apertura y se corta.
+    if (!this.stationsService.canManageTickets()) {
+      this.sessionGatePending.set(ticketId);
+      this.sessionGateOpen.set(true);
+      return;
+    }
     this.beginMutation(ticketId);
     obsFactory()
       .pipe(takeUntilDestroyed(this.destroyRef))

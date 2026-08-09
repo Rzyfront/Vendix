@@ -232,3 +232,19 @@
   color: var(--color-text-tertiary, #9ca3af);
   font-style: italic;
 }
+
+/* QUI-651 — cuerpo del gate de turno. El segundo párrafo explica POR QUÉ se pide
+   el turno: sin esa frase el operador lo lee como burocracia y no como lo que es
+   — el registro de quién consumió los insumos de la estación. */
+.session-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+
+  .session-gate-why {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+}

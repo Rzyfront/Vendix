@@ -122,4 +122,51 @@
     (createRecipeClicked)="onCreateRecipe($event)"
     (closed)="closeDetail()"
   />
+
+  <!--
+    QUI-651 — gate de turno. El tablero se LEE sin turno abierto; gestionar un
+    ticket consume inventario y genera COGS, y eso necesita un responsable. Misma
+    convencion que caja: la sesion se exige AL ACTUAR, no al entrar.
+
+    Nada se muto al llegar aca: la accion quedo pendiente y se reintenta sola tras
+    abrir el turno, para que el operador no tenga que volver a buscar el ticket.
+  -->
+  <app-modal
+    [isOpen]="sessionGateOpen()"
+    size="sm"
+    title="Abrir turno de estación"
+    [showCloseButton]="true"
+    (cancel)="cancelOpenSession()"
+  >
+    <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
+
+    <div class="session-gate">
+      <p>
+        Para gestionar tickets de
+        <strong>{{ stationsService.selectedStation()?.name ?? 'esta estación' }}</strong>
+        necesitas un turno abierto.
+      </p>
+      <p class="session-gate-why">
+        El turno registra quién consumió los insumos de la estación, no solo quién
+        pidió que se cocine.
+      </p>
+    </div>
+
+    <app-button
+      slot="footer"
+      variant="secondary"
+      (clicked)="cancelOpenSession()"
+      [disabled]="openingSession()"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      slot="footer"
+      variant="primary"
+      [loading]="openingSession()"
+      (clicked)="confirmOpenSession()"
+    >
+      Abrir turno
+    </app-button>
+  </app-modal>
 </div>
