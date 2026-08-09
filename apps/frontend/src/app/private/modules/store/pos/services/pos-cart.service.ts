@@ -1365,6 +1365,10 @@ export class PosCartService {
     // two lines of the same product with different skipKds decisions
     // must NOT collapse into a single cart line, otherwise we lose the
     // decision when filtering `skipKds` for the fire-to-kitchen call.
+    // QUI-653: `isTakeaway` tiene la MISMA propiedad y por eso entra en la
+    // misma clave. Dos líneas del mismo plato, una para llevar y otra para
+    // consumo en la mesa, son líneas distintas: fusionarlas perdería una de las
+    // dos decisiones en silencio — exactamente el Bug 1 con otro flag.
     // QUI-431: serialized lines carry per-unit serial selections, so they must
     // NOT collapse into an existing cart line (merging would lose the mapping
     // between units and serials). A request with serials always starts a new line.
@@ -1379,6 +1383,7 @@ export class PosCartService {
               item.product.id === request.product.id &&
               (item.variant_id || null) === (request.variant?.id || null) &&
               (item.skipKds ?? false) === (request.skipKds === true) &&
+              (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
               !(item.serial_ids?.length || item.serial_numbers?.length),
           );
 
@@ -1446,6 +1451,11 @@ export class PosCartService {
         // "usar stock" choice on the cart item. Filtered out of the
         // kitchen-fire call by the POS component.
         skipKds: request.skipKds === true,
+        // QUI-653 — se persiste en la línea porque viaja a
+        // `order_items.is_takeaway`: el ticket de cocina y el tiquete impreso lo
+        // necesitan después del cobro, a diferencia de `skipKds`, que es
+        // cart-local.
+        isTakeaway: request.isTakeaway === true,
         // QUI-431: serials chosen for this serialized line (pool ids +
         // free-text). Threaded onto the order payload at checkout.
         serial_ids: request.serial_ids?.length ? request.serial_ids : undefined,

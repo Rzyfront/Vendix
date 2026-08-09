@@ -1605,7 +1605,7 @@ export class PosComponent {
     }
 
     const cart = this.cartState();
-    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number }> = [];
+    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean }> = [];
     for (const it of cart?.items ?? []) {
       if (it.itemType === 'custom') continue;
       const productId = parseInt(
@@ -1615,10 +1615,16 @@ export class PosComponent {
         10,
       );
       if (!Number.isFinite(productId)) continue;
-      const line: { product_id: number; quantity: number; product_variant_id?: number } = {
+      const line: { product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean } = {
         product_id: productId,
         quantity: it.quantity,
       };
+      // QUI-653 — la decision "para llevar" viaja desde la linea del carrito
+      // hasta `order_items.is_takeaway`. Solo se envia cuando esta marcada: el
+      // backend ya tiene default false.
+      if (it.isTakeaway) {
+        line.is_takeaway = true;
+      }
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;
       }
