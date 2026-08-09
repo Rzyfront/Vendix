@@ -845,7 +845,7 @@ export class AnalyticsController {
   async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.customers_analytics_service.getAccountsReceivableForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
+    return this.response_service.success(rows);
   }
 
   @Get('customers/receivable/export')
@@ -888,7 +888,7 @@ export class AnalyticsController {
   async getCustomersAging(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.customers_analytics_service.getCustomersAgingForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
+    return this.response_service.success(rows);
   }
 
   @Get('customers/aging/export')
@@ -1037,7 +1037,7 @@ export class AnalyticsController {
   async getAccountsPayable(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.purchases_analytics_service.getAccountsPayableForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
+    return this.response_service.success(rows);
   }
 
   @Get('purchases/aging/export')
