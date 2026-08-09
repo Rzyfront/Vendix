@@ -479,9 +479,8 @@ export class InventoryAnalyticsService {
     const links = await this.prisma.supplier_products.findMany({
       where: {
         // supplier_products no tiene organization_id propio; el scope
-        // viene del suppliers (plural). El schema define `suppliers`
-        // como la relation correcta (no `supplier`).
-        suppliers: { store_id: storeId },
+        // viene del supplier (que sí filtra por store_id).
+        supplier: { store_id: storeId },
         products: {
           state: 'active',
           track_inventory: true,
