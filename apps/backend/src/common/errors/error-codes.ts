@@ -3436,6 +3436,15 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
+  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
+  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
+    code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
+    httpStatus: 409,
+    devMessage:
+      'El plato preparado debe estar listo en cocina antes de marcarse entregado',
+  },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',
     httpStatus: 422,

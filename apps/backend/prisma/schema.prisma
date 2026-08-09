@@ -92,6 +92,7 @@ model users {
   cash_register_sessions_closed cash_register_sessions[]  @relation("cash_register_sessions_closed_by")
   kds_sessions_opened           kds_sessions[]            @relation("kds_sessions_opened_by")
   kds_sessions_closed           kds_sessions[]            @relation("kds_sessions_closed_by")
+  order_items_delivered         order_items[]             @relation("order_items_delivered_by")
   cash_register_movements       cash_register_movements[]
 
   // Promotions
@@ -1268,6 +1269,20 @@ model order_items {
   // El indicador de "pedido mixto" es DERIVADO, no persistido: la orden es
   // mixta cuando tiene items con y sin el flag.
   is_takeaway                      Boolean                  @default(false)
+  // QUI-652 — LA ENTREGA ES UN HECHO DE SERVICIO, NO DE COCINA.
+  // Antes el estado de entrega vivia SOLO en `kitchen_ticket_items.status`
+  // ('delivered'), y el fire excluye explicitamente todo lo que no sea
+  // `product_type='prepared'`. Consecuencia: una cerveza en botella nunca
+  // obtenia fila en kitchen_ticket_items, `kitchenStatusFor()` devolvia null
+  // para siempre, y el item se quedaba en "Sin enviar" sin poder marcarse
+  // entregado — se perdia la trazabilidad de que recibio el cliente.
+  //
+  // Una cerveza necesita trazabilidad de entrega y nunca necesita cocinarse, y
+  // un plato para llevar tambien se entrega (empacado). Por eso el hecho vive
+  // aqui, independiente del ticket de cocina, y la UI muestra dos dimensiones
+  // separadas: cocina (solo cuando aplica) y entrega (siempre).
+  delivered_at                     DateTime?                @db.Timestamp(6)
+  delivered_by_user_id             Int?
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers sold on
   // this line. Persisted at emission time so legal documents (order voucher,
   // POS ticket) never read the live serial pool. The strong link lives in
@@ -1281,6 +1296,7 @@ model order_items {
   products                         products?                @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variants                 product_variants?        @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   applied_price_tier               price_tiers?             @relation("order_items_applied_price_tier", fields: [applied_price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delivered_by_user                users?                   @relation("order_items_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   refund_items                     refund_items[]
 
   // Restaurant Suite Foundation (Fase A) — back-relation
