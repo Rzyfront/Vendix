@@ -120,4 +120,115 @@ export class ReviewsAnalyticsService {
       'Votos Útiles': review.helpful_count,
     }));
   }
+
+  /**
+   * QUI-548: reseñas agregadas por producto. Una fila por producto con:
+   * - product_id, name, sku
+   * - total_reviews
+   * - average_rating (redondeado a 1 decimal para legibilidad)
+   * - distribución de estrellas (1..5)
+   * - verified_count y pending_count (para filtrar reseñas reales)
+   * - last_review_date (Date cruda)
+   *
+   * Ordenado por total_reviews desc. Si un producto no tiene reseñas en
+   * el período, NO aparece (es un reporte del período, no del catálogo).
+   */
+  async getReviewsByProduct(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const reviews = await this.prisma.reviews.findMany({
+      where: {
+        store_id: storeId,
+        created_at: { gte: startDate, lte: endDate },
+        // El `include: products` abajo ya hace inner join — Prisma solo
+        // retorna reviews con product_id no nulo. No hace falta `not: null`
+        // explícito (Prisma 7.4.1 rechaza `not: null` con "Argument `not`
+        // must not be null" para Int? fields).
+      },
+      include: {
+        products: { select: { name: true, sku: true } },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10000,
+    });
+
+    const buckets = new Map<
+      number,
+      {
+        product_id: number;
+        product_name: string;
+        sku: string;
+        total_reviews: number;
+        rating_sum: number;
+        stars_1: number;
+        stars_2: number;
+        stars_3: number;
+        stars_4: number;
+        stars_5: number;
+        verified_count: number;
+        pending_count: number;
+        last_review_date: Date | null;
+      }
+    >();
+
+    for (const r of reviews) {
+      const productId = r.product_id as number;
+      const bucket = buckets.get(productId) ?? {
+        product_id: productId,
+        product_name: r.products?.name ?? '',
+        sku: r.products?.sku ?? '',
+        total_reviews: 0,
+        rating_sum: 0,
+        stars_1: 0,
+        stars_2: 0,
+        stars_3: 0,
+        stars_4: 0,
+        stars_5: 0,
+        verified_count: 0,
+        pending_count: 0,
+        last_review_date: null,
+      };
+      bucket.total_reviews += 1;
+      bucket.rating_sum += r.rating;
+      if (r.rating === 1) bucket.stars_1 += 1;
+      else if (r.rating === 2) bucket.stars_2 += 1;
+      else if (r.rating === 3) bucket.stars_3 += 1;
+      else if (r.rating === 4) bucket.stars_4 += 1;
+      else if (r.rating === 5) bucket.stars_5 += 1;
+      if (r.verified_purchase) bucket.verified_count += 1;
+      if (r.state === 'pending') bucket.pending_count += 1;
+      if (r.created_at && (!bucket.last_review_date || r.created_at > bucket.last_review_date)) {
+        bucket.last_review_date = r.created_at;
+      }
+      buckets.set(productId, bucket);
+    }
+
+    return Array.from(buckets.values())
+      .map((b) => ({
+        product_id: b.product_id,
+        product_name: b.product_name,
+        sku: b.sku,
+        total_reviews: b.total_reviews,
+        average_rating:
+          b.total_reviews > 0
+            ? Math.round((b.rating_sum / b.total_reviews) * 10) / 10
+            : 0,
+        stars_1: b.stars_1,
+        stars_2: b.stars_2,
+        stars_3: b.stars_3,
+        stars_4: b.stars_4,
+        stars_5: b.stars_5,
+        verified_count: b.verified_count,
+        pending_count: b.pending_count,
+        last_review_date: b.last_review_date,
+      }))
+      .sort((a, b) => b.total_reviews - a.total_reviews);
+  }
 }
