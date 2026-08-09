@@ -476,6 +476,55 @@ export class KitchenFireService {
     let cogsTotal = 0;
     let consumedLineCount = 0;
 
+    // ---------------------------------------------------------------- QUI-651
+    // La estación destino se resuelve ANTES de consumir, no al crear el ticket,
+    // porque el movimiento de inventario tiene que nacer firmado con la sesión
+    // de la estación que lo consumió. Resolverlo después obligaría a un UPDATE
+    // posterior sobre `inventory_transactions`.
+    //
+    // Cascada: `products.kds_id` presente -> esa estación; sin él -> el KDS por
+    // defecto de la tienda. Los `skip_kds = true` ya quedaron fuera aguas arriba.
+    const defaultKds = await tx.kds.findFirst({
+      where: { store_id, is_default: true, is_active: true },
+      select: { id: true },
+    });
+    if (!defaultKds) {
+      // Precondición real, no defensiva: la migración backfilleó un default por
+      // tienda restaurante y el bootstrap lo autocrea. Si falta, rutear a ciegas
+      // mandaría el ticket a un tablero que nadie mira.
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS,
+        `La tienda ${store_id} no tiene un KDS por defecto activo`,
+      );
+    }
+
+    const kdsByProduct = new Map<number, number>();
+    for (const ctxItem of preparedItems) {
+      kdsByProduct.set(
+        ctxItem.orderItem.product_id!,
+        ctxItem.orderItem.products?.kds_id ?? defaultKds.id,
+      );
+    }
+    for (const item of recipeLessItems) {
+      kdsByProduct.set(
+        item.product_id!,
+        item.products?.kds_id ?? defaultKds.id,
+      );
+    }
+
+    // Sesión abierta por estación involucrada. Se resuelve UNA vez por estación
+    // y no por línea de BOM: un plato con 15 ingredientes haría 15 consultas
+    // idénticas. NULL es un resultado válido y esperado — el fire no se bloquea
+    // porque la estación no haya abierto turno.
+    const openSessionByKds = new Map<number, number | null>();
+    for (const kdsId of new Set(kdsByProduct.values())) {
+      const session = await tx.kds_sessions.findFirst({
+        where: { kds_id: kdsId, status: 'open' },
+        select: { id: true },
+      });
+      openSessionByKds.set(kdsId, session?.id ?? null);
+    }
+
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
       const orderQty = Number(orderItem.quantity || 0);
@@ -514,6 +563,14 @@ export class KitchenFireService {
             order_item_id: orderItem.id,
             create_movement: true,
             validate_availability: false,
+            // QUI-651 — dueño del consumo por estación. Se firma con la sesión
+            // abierta del KDS destino de ESTE plato, no con una sesión global:
+            // en un fire de dos estaciones cada movimiento pertenece al turno
+            // de la suya.
+            kds_session_id:
+              openSessionByKds.get(
+                kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
+              ) ?? null,
           },
           tx,
         );
@@ -559,43 +616,10 @@ export class KitchenFireService {
     }
 
     // ---------------------------------------------------------------- QUI-651
-    // RUTEO POR ESTACION. Antes esto creaba UN ticket por fire y todos los
-    // items caian en el mismo tablero. Ahora los items se agrupan por su KDS
-    // destino y se crea un ticket POR ESTACION involucrada.
-    //
-    // Cascada de resolucion (los `skip_kds = true` ya quedaron fuera aguas
-    // arriba, nunca llegan aca):
-    //   1. `products.kds_id` presente -> esa estacion
-    //   2. sin `kds_id`               -> KDS por defecto de la tienda
-    const defaultKds = await tx.kds.findFirst({
-      where: { store_id, is_default: true, is_active: true },
-      select: { id: true },
-    });
-    if (!defaultKds) {
-      // Precondicion real, no defensiva: toda tienda que cocina tiene un KDS
-      // por defecto — la migracion lo backfilleo y el bootstrap lo autocrea.
-      // Si falta, rutear a ciegas mandaria el ticket a un tablero que nadie
-      // mira, asi que es mejor fallar fuerte y visible.
-      throw new VendixHttpException(
-        ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS,
-        `La tienda ${store_id} no tiene un KDS por defecto activo`,
-      );
-    }
-
-    const kdsByProduct = new Map<number, number>();
-    for (const ctxItem of preparedItems) {
-      kdsByProduct.set(
-        ctxItem.orderItem.product_id!,
-        ctxItem.orderItem.products?.kds_id ?? defaultKds.id,
-      );
-    }
-    for (const item of recipeLessItems) {
-      kdsByProduct.set(
-        item.product_id!,
-        (item as any).products?.kds_id ?? defaultKds.id,
-      );
-    }
-
+    // RUTEO POR ESTACION. Antes esto creaba UN ticket por fire y todos los items
+    // caian en el mismo tablero. Ahora se agrupan por su KDS destino — ya
+    // resuelto arriba, porque el consumo de inventario necesitaba la estacion
+    // antes de escribirse — y se crea un ticket POR ESTACION involucrada.
     const snapshotsByKds = new Map<number, typeof firedItemSnapshots>();
     for (const snap of firedItemSnapshots) {
       const kdsId = kdsByProduct.get(snap.productId) ?? defaultKds.id;

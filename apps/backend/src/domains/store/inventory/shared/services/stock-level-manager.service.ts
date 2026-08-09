@@ -65,6 +65,16 @@ export interface UpdateStockParams {
    * ya lo conoce (e.g. `PurchaseOrdersService` en recepción).
    */
   costing_method?: ResolvedCostingMethod;
+  /**
+   * QUI-651 — sesión de la estación de KDS que consumió el insumo. Solo la pasa
+   * el fire; el resto de los flujos la dejan sin definir.
+   *
+   * Se persiste en `inventory_transactions.kds_session_id` y responde una
+   * pregunta distinta a `user_id`: ese es quién PIDIÓ que se cocine, esta es
+   * quién COCINÓ. NULL es un caso válido — el fire consume al disparar, que
+   * puede ocurrir antes de que la estación abra sesión.
+   */
+  kds_session_id?: number | null;
 }
 
 export interface StockUpdateResult {
@@ -251,6 +261,13 @@ export class StockLevelManager {
         reason: params.reason,
         userId: params.user_id,
         orderItemId: params.order_item_id,
+        // QUI-651 — dueño del consumo por estación, y el costo del movimiento.
+        // `movementCostSnapshot` ya está calculado en este punto (se resuelve
+        // antes, para los cost layers), así que la fila nace con su costo en vez
+        // de necesitar un UPDATE posterior.
+        kdsSessionId: params.kds_session_id ?? null,
+        unitCost: movementCostSnapshot?.unit_cost ?? null,
+        totalCost: movementCostSnapshot?.total_cost ?? null,
       },
       prisma,
     );
