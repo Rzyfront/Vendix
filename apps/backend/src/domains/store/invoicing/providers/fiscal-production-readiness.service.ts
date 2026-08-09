@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
+import { resolveTestSetProof } from '../dian-config/test-set-wait.util';
 import { EncryptionService } from '@common/services/encryption.service';
 
 type DianConfigurationType =
@@ -473,7 +474,10 @@ export class FiscalProductionReadinessService {
       {
         key: 'test_set_evidence',
         label: 'Set de pruebas aprobado por la DIAN',
-        satisfied: this.hasPassedTestSet(config.last_test_result),
+        // Sobre la prueba DURABLE, no sobre el último lote: un reenvío posterior
+        // sobrescribe `last_test_result` y borraría un hecho ya ocurrido. Ver
+        // `resolveTestSetProof`.
+        satisfied: this.hasPassedTestSetForConfig(config),
         action: 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
         owner: 'tenant',
         blocked_by: 'dian',
@@ -712,6 +716,25 @@ export class FiscalProductionReadinessService {
    */
   hasPassedTestSetPublic(lastTestResult: unknown): boolean {
     return this.hasPassedTestSet(lastTestResult);
+  }
+
+  /**
+   * ¿Pasó el set de pruebas, según la prueba DURABLE y no según el último lote?
+   *
+   * Preferir esta sobre `hasPassedTestSetPublic` cuando se tenga la configuración
+   * entera. `last_test_result` es a la vez el puntero al lote en vuelo y la prueba
+   * de la habilitación, así que un intento posterior la sobrescribe: el 2026-08-09
+   * un reenvío accidental y su posterior descarte dejaron la plataforma leyéndose
+   * como «habilitación pendiente» catorce horas después de que la DIAN la
+   * habilitara. `resolveTestSetProof` antepone `enablement_evidence`, que solo se
+   * escribe en éxito.
+   */
+  hasPassedTestSetForConfig(config: {
+    enablement_status?: string | null;
+    enablement_evidence?: unknown;
+    last_test_result?: unknown;
+  }): boolean {
+    return this.hasPassedTestSet(resolveTestSetProof(config));
   }
 
   private hasPassedTestSet(lastTestResult: unknown): boolean {

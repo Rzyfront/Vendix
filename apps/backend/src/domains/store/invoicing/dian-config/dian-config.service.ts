@@ -542,7 +542,10 @@ export class DianConfigService {
       // La compuerta de emisión productiva no se relaja: sigue en
       // `promoteToProduction`, que exige `readiness.ready`, y en el gate que corre
       // antes de cada emisión. Lo que se separa es el REGISTRO del hecho.
-      if (!this.readiness.hasPassedTestSetPublic(config.last_test_result)) {
+      // Sobre la prueba DURABLE. Con el último lote, un reenvío fallido posterior
+      // impedía marcar `enabled` una configuración que la DIAN ya había aprobado —
+      // y descartar ese lote la degradaba, que es lo que pasó el 2026-08-09.
+      if (!this.readiness.hasPassedTestSetForConfig(config)) {
         throw new VendixHttpException(
           ErrorCodes.DIAN_ENABLEMENT_001,
           'No se puede marcar la configuración como habilitada: la DIAN todavía no ' +
