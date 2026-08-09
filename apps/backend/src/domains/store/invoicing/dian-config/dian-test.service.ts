@@ -47,6 +47,7 @@ import {
   TestSetZipVerdict,
 } from './test-set-zip-aggregate.util';
 import {
+  canWriteEnablementStatus,
   decideNotePhase,
   NOTE_PHASE_MAX_POLLS,
   NOTE_PHASE_POLL_DELAY_MS,
@@ -858,7 +859,15 @@ export class DianTestService {
     // Las vías de diagnóstico NO lo tocan: un documento suelto no es un intento de
     // habilitación, y marcar `testing` por él dejaría la guía de habilitación
     // afirmando que hay un set en curso cuando no lo hay.
-    if (!diagnostic) {
+    //
+    // Y una config ya `enabled` TAMPOCO: ninguna rama de este método vuelve nunca
+    // a `enabled`, así que reenviar el set para probar las notas degradaría una
+    // habilitación que la DIAN ya concedió y que su portal solo devuelve a mano.
+    // Ver `canWriteEnablementStatus`.
+    const may_write_enablement = canWriteEnablementStatus(
+      config.enablement_status,
+    );
+    if (!diagnostic && may_write_enablement) {
       await this.prisma.dian_configurations.update({
         where: { id: config_id },
         data: { enablement_status: 'testing' },
@@ -1647,14 +1656,22 @@ export class DianTestService {
         // haciéndolo: una vía de humo sobre una config `not_started` la dejaba en
         // `testing`, y un éxito suelto habría escrito `test_set_passed` —
         // habilitando con un documento donde la DIAN exige 50.
+        //
+        // Una config ya `enabled` conserva su estado y solo SUMA evidencia: la
+        // habilitación la concedió la DIAN y este método no tiene rama que la
+        // devuelva. Ver `canWriteEnablementStatus`.
         ...(diagnostic
           ? {}
-          : {
-              enablement_status: success
-                ? ('test_set_passed' as const)
-                : ('testing' as const),
-              enablement_evidence: success ? result_data : undefined,
-            }),
+          : may_write_enablement
+            ? {
+                enablement_status: success
+                  ? ('test_set_passed' as const)
+                  : ('testing' as const),
+                enablement_evidence: success ? result_data : undefined,
+              }
+            : {
+                enablement_evidence: success ? result_data : undefined,
+              }),
       },
     });
 
@@ -1717,12 +1734,14 @@ export class DianTestService {
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
       // Las vías de diagnóstico NO escriben `enablement_status`, así que tampoco
-      // pueden afirmarlo: devuelven el que la config tiene de verdad.
-      enablement_status: diagnostic
-        ? config.enablement_status
-        : success
-          ? 'test_set_passed'
-          : 'testing',
+      // pueden afirmarlo: devuelven el que la config tiene de verdad. Igual una
+      // config ya `enabled`, que este método no degrada.
+      enablement_status:
+        diagnostic || !may_write_enablement
+          ? config.enablement_status
+          : success
+            ? 'test_set_passed'
+            : 'testing',
       // Se devuelven para que la UI pueda distinguir un veredicto de validación de
       // un veredicto de habilitación sin inferirlo de la ausencia de `zip_key`.
       validate_only: options.validate_only === true,

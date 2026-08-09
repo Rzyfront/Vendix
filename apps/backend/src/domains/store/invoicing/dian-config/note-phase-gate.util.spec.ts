@@ -1,7 +1,36 @@
 import {
+  canWriteEnablementStatus,
   decideNotePhase,
   NOTE_PHASE_MAX_POLLS,
 } from './note-phase-gate.util';
+
+/**
+ * `enabled` es TERMINAL y lo concede la DIAN. Ninguna rama de `executeTestSet`
+ * vuelve a él, así que si una corrida pudiera escribirlo degradaría una
+ * habilitación que solo el portal devuelve a mano.
+ */
+describe('canWriteEnablementStatus', () => {
+  it('niega la escritura sobre una config ya habilitada', () => {
+    expect(canWriteEnablementStatus('enabled')).toBe(false);
+  });
+
+  it('permite la escritura en los estados que sí son de tránsito', () => {
+    for (const state of [
+      'not_started',
+      'testing',
+      'test_set_passed',
+      'rejected',
+    ]) {
+      expect(canWriteEnablementStatus(state)).toBe(true);
+    }
+  });
+
+  it('permite la escritura cuando el estado falta', () => {
+    // Una config sin estado todavía no ha ganado nada que perder.
+    expect(canWriteEnablementStatus(null)).toBe(true);
+    expect(canWriteEnablementStatus(undefined)).toBe(true);
+  });
+});
 
 /**
  * Cada decisión de esta puerta cuesta consecutivos autorizados irrecuperables si

@@ -259,9 +259,14 @@ describe('UblDebitNoteBuilder', () => {
     expect(credit).toContain('<cbc:CreditNoteTypeCode>91</cbc:CreditNoteTypeCode>');
     expect(debit).not.toContain('TypeCode>92<');
 
-    // 2. The credit note's totals group is LegalMonetaryTotal (rule CAU01).
+    // 2. Each note's totals group, asserted on BOTH sides. Checking only the
+    //    credit side let a mutation that reverted the debit note to
+    //    `LegalMonetaryTotal` pass this test while four others caught it — the
+    //    name promised an asymmetry it was only half verifying.
     expect(credit).toContain('<cac:LegalMonetaryTotal>');
     expect(credit).not.toContain('RequestedMonetaryTotal');
+    expect(debit).toContain('<cac:RequestedMonetaryTotal>');
+    expect(debit).not.toContain('LegalMonetaryTotal');
 
     // And they agree everywhere else that matters: both carry the payment group.
     expect(credit).toContain('<cac:PaymentMeans>');

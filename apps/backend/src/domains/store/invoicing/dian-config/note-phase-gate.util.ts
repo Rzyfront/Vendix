@@ -34,6 +34,33 @@
 export const NOTE_PHASE_MAX_POLLS = 20;
 export const NOTE_PHASE_POLL_DELAY_MS = 30_000;
 
+/**
+ * ¿Puede una corrida del set escribir `enablement_status`, o hacerlo degradaría
+ * una habilitación ya ganada?
+ *
+ * EL DEFECTO QUE CIERRA
+ *
+ * `executeTestSet` escribe `enablement_status: 'testing'` antes de enviar y
+ * `'test_set_passed' | 'testing'` al terminar. Ninguna de las dos ramas vuelve
+ * nunca a `enabled`. La plataforma quedó `enabled` el 2026-08-09 tras aprobar su
+ * set —la DIAN por correo: «actualmente se encuentra en estado habilitado»—, así
+ * que reenviar el set para probar las notas la habría degradado a `testing` y de
+ * ahí, con suerte, a `test_set_passed`. Nunca de vuelta.
+ *
+ * Eso no es cosmético: `hasPassedTestSetPublic` y el gate de promoción a
+ * producción leen este campo. Un reenvío legítimo —justo el del paso siguiente de
+ * este trabajo— habría tirado el estado que costó semanas conseguir, y la DIAN no
+ * lo devuelve: lo devuelve su portal, a mano.
+ *
+ * `enabled` es TERMINAL y lo declara la DIAN, no nosotros. Un set posterior puede
+ * añadir evidencia, nunca quitar la habilitación.
+ */
+export function canWriteEnablementStatus(
+  current: string | null | undefined,
+): boolean {
+  return current !== 'enabled';
+}
+
 export type NotePhaseAction = 'send_notes' | 'keep_waiting' | 'defer_notes';
 
 export interface NotePhaseDecision {
