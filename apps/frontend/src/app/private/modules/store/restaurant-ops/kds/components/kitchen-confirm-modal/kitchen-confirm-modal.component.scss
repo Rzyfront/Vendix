@@ -167,3 +167,39 @@
   font-size: 0.78rem;
   font-weight: 600;
 }
+
+/* QUI-655 — selector de unidades. Botones y no un <select> porque en una pantalla
+   de cocina el rango es corto (1..quantity) y un toque directo gana a abrir un
+   desplegable con las manos ocupadas. */
+.kc-units {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+}
+
+.kc-units-label,
+.kc-units-of {
+  font-weight: 600;
+}
+
+.kc-unit-btn {
+  min-width: 1.5rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &.is-on {
+    background: var(--color-primary, #3b82f6);
+    border-color: var(--color-primary, #3b82f6);
+    color: #fff;
+  }
+}

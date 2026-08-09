@@ -46,6 +46,33 @@
               Sin receta activa: no hay ingredientes que descontar. Se envía igual.
             </p>
           } @else {
+            <!--
+              QUI-655 — ¿a cuántas unidades aplica la excepción? Solo con
+              `quantity > 1` y algo desmarcado: con una unidad la pregunta no tiene
+              respuestas distintas, y sin exclusión no hay nada que acotar.
+
+              Al confirmar con menos que el total, el backend PARTE la línea: 3
+              pollos con la excepción en 1 quedan como 2 completos + 1 sin el
+              insumo. Las otras 2 consumen su receta entera y el inventario refleja
+              exactamente eso.
+            -->
+            @if (item.quantity > 1 && excludedCountFor(item.order_item_id) > 0) {
+              <div class="kc-units">
+                <span class="kc-units-label">Aplicar a</span>
+                @for (n of unitOptions(item); track n) {
+                  <button
+                    type="button"
+                    class="kc-unit-btn"
+                    [class.is-on]="unitsFor(item) === n"
+                    (click)="setUnitsFor(item, n)"
+                  >
+                    {{ n }}
+                  </button>
+                }
+                <span class="kc-units-of">de {{ item.quantity }}</span>
+              </div>
+            }
+
             <ul class="kc-tree">
               @for (node of treeFor(item.order_item_id); track trackNode($index, node)) {
                 <li class="kc-node">

@@ -41,6 +41,24 @@ export class FireItemExclusionDto {
   @IsInt({ each: true })
   @Type(() => Number)
   component_product_ids!: number[];
+
+  /**
+   * QUI-655 — a cuantas unidades de la linea aplica la exclusion.
+   *
+   * Omitido o >= `quantity` significa TODA la linea, que es el caso simple. Cuando
+   * es menor, el backend PARTE la linea antes de consumir: `quantity: 3` con la
+   * excepcion en 1 pasa a `quantity: 2` (receta completa) + `quantity: 1` (con la
+   * exclusion). Asi cada linea queda HOMOGENEA y todo el pipeline sigue funcionando
+   * sin aprender a iterar unidades.
+   *
+   * Es el caso normal y no el borde: una mesa pide tres del mismo plato y solo un
+   * comensal tiene la restriccion.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  applies_to_units?: number;
 }
 
 export class FireOrderItemsDto {

@@ -63,6 +63,15 @@ export class KitchenConfirmModalComponent {
   /** Nodos de sub-receta colapsados, por `key`. */
   private readonly collapsed = signal<Set<string>>(new Set());
 
+  /**
+   * QUI-655 — a cuántas unidades aplica la exclusión, por item. Solo se pregunta
+   * cuando la línea tiene `quantity > 1`: con una sola unidad la pregunta no tiene
+   * respuestas distintas.
+   *
+   * Default = toda la línea, porque es lo que el operador espera si no toca nada.
+   */
+  private readonly unitsByItem = signal<Map<number, number>>(new Map());
+
   constructor() {
     // Reset al reabrir: sin esto las exclusiones del envío anterior se filtran al
     // siguiente y se excluye un insumo que nadie desmarcó en ESTE envío.
@@ -70,6 +79,7 @@ export class KitchenConfirmModalComponent {
       if (this.isOpen()) {
         this.excluded.set(new Map());
         this.collapsed.set(new Set());
+        this.unitsByItem.set(new Map());
       }
     });
   }
@@ -174,13 +184,44 @@ export class KitchenConfirmModalComponent {
     });
   }
 
+  /** Cuántos componentes están excluidos en ESTE item. Gatea el selector de unidades. */
+  excludedCountFor(itemId: number): number {
+    return this.excluded().get(itemId)?.size ?? 0;
+  }
+
+  /** Unidades a las que aplica la exclusión de este item. Default: todas. */
+  unitsFor(item: FirePreviewItem): number {
+    return this.unitsByItem().get(item.order_item_id) ?? item.quantity;
+  }
+
+  setUnitsFor(item: FirePreviewItem, units: number): void {
+    const clamped = Math.max(1, Math.min(item.quantity, Math.floor(units)));
+    this.unitsByItem.update((prev) => {
+      const next = new Map(prev);
+      next.set(item.order_item_id, clamped);
+      return next;
+    });
+  }
+
+  /** Rango de unidades para el selector: 1..quantity. */
+  unitOptions(item: FirePreviewItem): number[] {
+    return Array.from({ length: item.quantity }, (_, i) => i + 1);
+  }
+
   onConfirm(): void {
     const payload: FireItemExclusion[] = [];
     for (const [orderItemId, set] of this.excluded()) {
       if (set.size > 0) {
+        const item = this.items().find((i) => i.order_item_id === orderItemId);
+        const units = item ? this.unitsFor(item) : undefined;
         payload.push({
           order_item_id: orderItemId,
           component_product_ids: [...set],
+          // Se manda solo cuando es PARCIAL: mandar `applies_to_units === quantity`
+          // haria que el backend evalue una particion que no va a ocurrir.
+          ...(item && units != null && units < item.quantity && {
+            applies_to_units: units,
+          }),
         });
       }
     }

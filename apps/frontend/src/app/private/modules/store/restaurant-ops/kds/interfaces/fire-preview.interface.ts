@@ -52,6 +52,14 @@ export interface FirePreview {
 export interface FireItemExclusion {
   order_item_id: number;
   component_product_ids: number[];
+  /**
+   * QUI-655 — a cuántas unidades de la línea aplica la exclusión.
+   *
+   * Omitido = toda la línea. Cuando es menor que la cantidad, el backend PARTE la
+   * línea antes de consumir: 3 pollos con la excepción en 1 quedan como 2
+   * completos + 1 sin el insumo, y el inventario refleja exactamente eso.
+   */
+  applies_to_units?: number;
 }
 
 /**

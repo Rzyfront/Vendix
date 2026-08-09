@@ -204,6 +204,21 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    // ------------------------------------------------------------- QUI-655
+    // PARTICION DE LINEA POR PREPARACION, antes de cualquier explosion de BOM.
+    //
+    // Se hace ACA y no mas abajo a proposito: `prepareFireContext` explota la
+    // receta multiplicando por la cantidad de la linea, asi que si la particion
+    // ocurriera despues habria que rehacer la explosion. Partiendo primero, todo
+    // el pipeline aguas abajo (explosion, consumo, COGS, tickets, impresion)
+    // sigue viendo lineas HOMOGENEAS y no cambia una sola linea de codigo.
+    //
+    // Eso es exactamente el argumento por el que se eligio partir sobre
+    // `unit_index`: la invariante "una linea = una especificacion de preparacion"
+    // se preserva en vez de romperse en cuatro lugares.
+    const { orderItemIds: effectiveItemIds, exclusions: remappedExclusions } =
+      await this.splitLinesForExclusions(dto);
+
     // Plan KDS fire-flows (B8): gate the manual fire endpoint to
     // `restaurant` stores. Non-restaurant stores don't have a kitchen;
     // allowing fire would create kitchen_tickets rows for them and
@@ -225,7 +240,7 @@ export class KitchenFireService {
         store_id: true,
         order_number: true,
         order_items: {
-          where: { id: { in: dto.order_item_ids } },
+          where: { id: { in: effectiveItemIds } },
           include: {
             products: {
               select: {
@@ -364,7 +379,7 @@ export class KitchenFireService {
       // arman aca (fuera de la transaccion) porque el filtrado del BOM ocurre
       // dentro y no debe pagar el costo de recorrer el DTO por linea.
       exclusionsByOrderItem: new Map(
-        (dto.exclusions ?? []).map((e) => [
+        remappedExclusions.map((e) => [
           e.order_item_id,
           e.component_product_ids ?? [],
         ]),
@@ -1866,4 +1881,128 @@ export class KitchenFireService {
 
     return { data, total };
   }
+  /**
+   * Parte las lineas cuya exclusion aplica a MENOS unidades que su cantidad.
+   * QUI-655.
+   *
+   * `quantity: 3` con la excepcion en 1 pasa a `quantity: 2` (receta completa) +
+   * `quantity: 1` (con la exclusion). Devuelve los ids efectivos a firear y las
+   * exclusiones REMAPEADAS a la linea nueva — la que lleva la excepcion es la
+   * nueva, no la original, porque la original se queda con el resto homogeneo.
+   *
+   * Corre en su propia transaccion: la particion tiene que ser atomica (o se
+   * parten las dos lineas o ninguna), pero NO debe compartir transaccion con el
+   * consumo. Si el fire falla despues, la particion ya persistida sigue siendo
+   * correcta: refleja lo que el cliente pidio, y reintentar el envio consume sobre
+   * lineas ya homogeneas.
+   *
+   * Idempotencia: una linea ya partida llega con `quantity` igual a
+   * `applies_to_units`, asi que la condicion no se cumple y no se vuelve a partir.
+   */
+  private async splitLinesForExclusions(dto: FireOrderItemsDto): Promise<{
+    orderItemIds: number[];
+    exclusions: Array<{ order_item_id: number; component_product_ids: number[] }>;
+  }> {
+    const exclusions = (dto.exclusions ?? []).map((e) => ({
+      order_item_id: e.order_item_id,
+      component_product_ids: e.component_product_ids ?? [],
+      applies_to_units: e.applies_to_units,
+    }));
+
+    const partial = exclusions.filter(
+      (e) => e.applies_to_units != null && e.component_product_ids.length > 0,
+    );
+    if (partial.length === 0) {
+      return {
+        orderItemIds: dto.order_item_ids,
+        exclusions: exclusions.map((e) => ({
+          order_item_id: e.order_item_id,
+          component_product_ids: e.component_product_ids,
+        })),
+      };
+    }
+
+    const originals = await this.prisma.order_items.findMany({
+      where: { id: { in: partial.map((e) => e.order_item_id) } },
+    });
+    // Tipo explicito: el Map inferido desde tuplas ensancha el valor a `{}` y todo
+    // acceso a propiedades falla. Cuarta vez que aparece este patron en el repo.
+    type OriginalItem = (typeof originals)[number];
+    const byId = new Map<number, OriginalItem>(
+      originals.map((o) => [o.id, o] as [number, OriginalItem]),
+    );
+
+    const resultIds = [...dto.order_item_ids];
+    const remapped = new Map<number, number[]>();
+    for (const e of exclusions) {
+      remapped.set(e.order_item_id, e.component_product_ids);
+    }
+
+    await (this.prisma as any).$transaction(async (tx: Prisma.TransactionClient) => {
+      for (const e of partial) {
+        const original = byId.get(e.order_item_id);
+        if (!original) continue;
+        const units = Number(e.applies_to_units);
+        const qty = Number(original.quantity);
+        // Aplica a todas (o mas): no hay nada que partir, la linea ya es homogenea.
+        if (!Number.isFinite(units) || units <= 0 || units >= qty) continue;
+
+        const unitPrice = Number(original.unit_price);
+        const remaining = qty - units;
+
+        // La linea ORIGINAL se queda con el resto SIN exclusion, y la nueva lleva
+        // la excepcion. Al reves obligaria a mover la exclusion capturada al pedir
+        // y a reescribir la fila que el cliente ya vio en su cuenta.
+        await tx.order_items.update({
+          where: { id: original.id },
+          data: {
+            quantity: remaining,
+            total_price: new Prisma.Decimal(unitPrice * remaining),
+            updated_at: new Date(),
+          },
+        });
+
+        const created = await tx.order_items.create({
+          data: {
+            order_id: original.order_id,
+            product_id: original.product_id,
+            product_variant_id: original.product_variant_id,
+            product_name: original.product_name,
+            quantity: units,
+            unit_price: original.unit_price,
+            total_price: new Prisma.Decimal(unitPrice * units),
+            item_type: original.item_type,
+            cost_price: original.cost_price,
+            is_price_overridden: original.is_price_overridden,
+            // La parte nueva NO hereda el consumo: es justamente la que todavia
+            // no se cocino.
+            inventory_consumed_at_fire: false,
+            inventory_committed: false,
+            is_takeaway: original.is_takeaway,
+            notes: original.notes,
+            skip_kds: original.skip_kds,
+            // Puntero de agrupacion visual: la UI reagrupa las partes para que el
+            // cliente siga viendo "3 pollos" y no dos filas sueltas.
+            split_from_order_item_id:
+              original.split_from_order_item_id ?? original.id,
+            updated_at: new Date(),
+          },
+        });
+
+        // La exclusion viaja a la linea NUEVA; la original queda completa.
+        remapped.delete(original.id);
+        remapped.set(created.id, e.component_product_ids);
+        resultIds.push(created.id);
+      }
+    });
+
+    return {
+      orderItemIds: [...new Set(resultIds)],
+      exclusions: [...remapped.entries()].map(([order_item_id, ids]) => ({
+        order_item_id,
+        component_product_ids: ids,
+      })),
+    };
+  }
+
 }
