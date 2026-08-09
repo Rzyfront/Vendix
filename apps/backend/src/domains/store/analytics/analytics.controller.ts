@@ -505,20 +505,20 @@ export class AnalyticsController {
     );
   }
 
+  /**
+   * El frontend slicea en memoria (no recarga el effect al cambiar página),
+   * así que devolvemos el array COMPLETO y dejamos que el paginator del
+   * frontend haga el slice. Usamos `getLowStockForExport` (que ignora
+   * page/limit y devuelve TODOS los items) en vez de `getLowStockAlerts`
+   * (que pagina internamente — incompatible con el flujo de paginación
+   * in-memory del frontend).
+   */
   @Get('inventory/low-stock')
   @Permissions('store:analytics:read')
   async getLowStockAlerts(@Query() query: InventoryAnalyticsQueryDto) {
-    const result =
-      await this.inventory_analytics_service.getLowStockAlerts(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
-    );
+    const rows =
+      await this.inventory_analytics_service.getLowStockForExport(query);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('inventory/movements')
@@ -734,20 +734,19 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * El frontend slicea en memoria (no recarga el effect al cambiar página),
+   * así que devolvemos el array COMPLETO. Usamos `getTopCustomersForExport`
+   * (que ignora page/limit y devuelve TODOS los clientes ordenados por gasto,
+   * no solo top 10) en vez de `getTopCustomers` (que pagina internamente y
+   * solo devuelve 10 por defecto).
+   */
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
-    const result =
-      await this.customers_analytics_service.getTopCustomers(query);
-    if (Array.isArray(result)) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      result.data,
-      result.meta.pagination.total,
-      result.meta.pagination.page,
-      result.meta.pagination.limit,
-    );
+    const rows =
+      await this.customers_analytics_service.getTopCustomersForExport(query);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   /**
