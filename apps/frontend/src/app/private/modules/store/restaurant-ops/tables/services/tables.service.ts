@@ -229,6 +229,32 @@ export class TablesService {
       );
   }
 
+  /**
+   * QUI-652 — marca un item de la cuenta como entregado al cliente.
+   *
+   * La entrega es un hecho de SERVICIO, no de cocina, así que este endpoint
+   * aplica a cualquier tipo de producto. Un plato preparado sigue exigiendo
+   * estado `ready` en cocina (409 `TABLE_SESSION_ITEM_NOT_DELIVERABLE`); una
+   * cerveza en botella se entrega directo, porque nunca pasa por cocina y por
+   * eso nunca tuvo un estado de entrega alcanzable.
+   *
+   * Idempotente: re-marcar devuelve la sesión sin mover la fecha de entrega.
+   */
+  markItemDelivered(
+    sessionId: number,
+    orderItemId: number,
+  ): Observable<TableSession> {
+    return this.http
+      .patch<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/deliver`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   closeSession(sessionId: number): Observable<TableSession> {
     return this.http
       .post<ApiResponse<TableSession>>(

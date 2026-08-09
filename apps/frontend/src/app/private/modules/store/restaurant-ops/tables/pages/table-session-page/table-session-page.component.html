@@ -355,7 +355,21 @@
 
                   <!-- Name + price -->
                   <div class="item-main">
-                    <span class="name">{{ item.product_name }}</span>
+                    <span class="name">
+                      {{ item.product_name }}
+                      <!--
+                        QUI-653 — el item se empaca y el cliente se lo lleva,
+                        aunque siga en la cuenta de esta mesa. Cambia el
+                        emplatado y el empaque, así que tiene que verse en la
+                        fila y no solo en el ticket de cocina.
+                      -->
+                      @if (item.is_takeaway) {
+                        <span class="item-takeaway" title="Este plato va empacado para llevar">
+                          <app-icon name="shopping-bag" [size]="12"></app-icon>
+                          Para llevar
+                        </span>
+                      }
+                    </span>
                     <span class="price">{{ +item.total_price | currency }}</span>
                   </div>
 
@@ -403,10 +417,18 @@
                     wait). The fallback `else if` (third branch) renders
                     the "Entregado" / "Cancelado" terminal chip.
                   -->
+                  <!--
+                    QUI-652 — la condición incluye `!isDelivered(item)` para los
+                    no preparados: antes bastaba `isPrepared(item) ||
+                    canRemoveItem(item)`, y un no-preparado ya no eliminable
+                    (porque se envió/pagó) desaparecía sin dejar rastro de si se
+                    entregó. Ahora la fila conserva su acción de entrega, o su
+                    chip "Entregado", en los dos casos.
+                  -->
                   @if (
                     !isClosed() &&
                     !selectionMode() &&
-                    (isPrepared(item) || canRemoveItem(item))
+                    (isPrepared(item) || canRemoveItem(item) || canDeliver(item) || isDelivered(item))
                   ) {
                     <div class="item-action" (click)="$event.stopPropagation()">
                       @if (isPrepared(item)) {
@@ -429,8 +451,10 @@
                             variant="success"
                             size="sm"
                             [loading]="
-                              deliveringTicketId() != null &&
-                              kitchenStatusFor(item) !== 'delivered'
+                              deliveringItemId() === item.id ||
+                              (deliveringTicketId() != null &&
+                                needsKitchen(item) &&
+                                kitchenStatusFor(item) !== 'delivered')
                             "
                             [attr.title]="deliverHint(item)"
                             (clicked)="markDelivered(item)"
@@ -442,7 +466,7 @@
                             ></app-icon>
                             Marcar entregado
                           </app-button>
-                        } @else if (kitchenStatusFor(item) === 'delivered') {
+                        } @else if (isDelivered(item)) {
                           <span
                             class="item-done"
                             [attr.title]="deliverHint(item)"
@@ -461,6 +485,46 @@
                             <app-icon name="x-circle" [size]="14"></app-icon>
                             Cancelado
                           </span>
+                        }
+                      } @else {
+                        <!--
+                          QUI-652 — items que NO pasan por cocina (una cerveza en
+                          botella, un agua, algo de nevera). Antes esta rama no
+                          existía: todo el grupo de acciones estaba dentro de
+                          `@if (isPrepared(item))`, así que un no-preparado nunca
+                          renderizaba botón y se quedaba en "Sin enviar" para
+                          siempre, sin forma de registrar que se le entregó al
+                          cliente.
+
+                          La entrega es un hecho de SERVICIO: aquí no hay estado
+                          de cocina que esperar, se entrega directo.
+                        -->
+                        @if (isDelivered(item)) {
+                          <span
+                            class="item-done"
+                            [attr.title]="deliverHint(item)"
+                          >
+                            <app-icon
+                              name="circle-check"
+                              [size]="14"
+                            ></app-icon>
+                            Entregado
+                          </span>
+                        } @else {
+                          <app-button
+                            variant="success"
+                            size="sm"
+                            [loading]="deliveringItemId() === item.id"
+                            [attr.title]="deliverHint(item)"
+                            (clicked)="markDelivered(item)"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="check"
+                              [size]="14"
+                            ></app-icon>
+                            Marcar entregado
+                          </app-button>
                         }
                       }
 
