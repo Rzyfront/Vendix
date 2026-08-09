@@ -1,9 +1,48 @@
 import {
   canWriteEnablementStatus,
   decideNotePhase,
+  isTestSetClosedByDian,
   resolveRegisteredInvoiceReferences,
   NOTE_PHASE_MAX_POLLS,
 } from './note-phase-gate.util';
+
+/**
+ * ESTE PREDICADO EXISTE PORQUE SU AUSENCIA COSTÓ 30 CONSECUTIVOS.
+ *
+ * La DIAN no acepta documentos contra un set que ya aprobó: responde status 2 con
+ * «Set de prueba … se encuentra Aceptado» a cada uno. Medido el 2026-08-09 sobre
+ * la plataforma — 30 facturas enviadas, 30 rechazadas con esa frase, y los
+ * documentos estaban bien (el humo sincrónico del mismo código dio `is_valid`).
+ */
+describe('isTestSetClosedByDian', () => {
+  it('considera cerrado un set aprobado y una config habilitada', () => {
+    // `test_set_passed` es nuestra lectura del veredicto; `enabled` es el hecho que
+    // la DIAN reporta. Si el set pasó, la DIAN lo cerró: el orden entre los dos no
+    // cambia la consecuencia.
+    expect(isTestSetClosedByDian('test_set_passed')).toBe(true);
+    expect(isTestSetClosedByDian('enabled')).toBe(true);
+  });
+
+  it('deja pasar los estados en los que el set sigue abierto', () => {
+    for (const state of ['not_started', 'testing', 'rejected']) {
+      expect(isTestSetClosedByDian(state)).toBe(false);
+    }
+  });
+
+  it('deja pasar un estado ausente', () => {
+    // Una config sin estado no ha aprobado nada, así que su set sigue abierto.
+    expect(isTestSetClosedByDian(null)).toBe(false);
+    expect(isTestSetClosedByDian(undefined)).toBe(false);
+  });
+
+  /**
+   * `rejected` NO cierra el set: un set rechazado es exactamente el caso en que hay
+   * que corregir y reenviar. Bloquearlo dejaría al tenant sin salida.
+   */
+  it('un set RECHAZADO sigue abierto — es el caso que necesita reenviar', () => {
+    expect(isTestSetClosedByDian('rejected')).toBe(false);
+  });
+});
 
 /**
  * Diagnosticar una nota necesita una factura que exista DEL LADO DE LA DIAN. Si
