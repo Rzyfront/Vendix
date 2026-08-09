@@ -87,6 +87,10 @@ export class UblCreditNoteBuilder {
           ? DIAN_OPERATION_TYPES.CREDIT_NOTE_WITH_REF
           : DIAN_OPERATION_TYPES.CREDIT_NOTE_NO_REF,
       );
+    // DEUDA CONOCIDA: la DIAN observa esto con CAD03 y espera
+    // `UBL_CONSTANTS.PROFILE_ID_CREDIT_NOTE`. Es NOTIFICACIÓN, no rechazo, así que
+    // quedó fuera del alcance del arreglo de las notas —limitado a lo que bloquea—,
+    // pero el literal ya está capturado en `xml-namespaces.ts` con su procedencia.
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(credit_note_data.invoice_number);
@@ -154,10 +158,17 @@ export class UblCreditNoteBuilder {
     UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
+    // Payment means — mandatory group `1..N` (rule CAN01, «Rechazo si grupo no
+    // informado»). Goes here because UBL fixes the order
+    // `DeliveryTerms → PaymentMeans → PaymentTerms → TaxTotal → monetary total`.
+    UblCommonBuilder.buildPaymentMeans(doc, credit_note_data);
+
     // Tax totals
     UblCommonBuilder.buildTaxTotals(doc, credit_note_data.taxes, currency);
 
-    // Legal monetary total
+    // `cac:LegalMonetaryTotal` is correct HERE — rule CAU01 points at
+    // `/CreditNote/cac:LegalMonetaryTotal`. The debit note is the exception and
+    // uses `cac:RequestedMonetaryTotal`; do not unify the two.
     UblCommonBuilder.buildLegalMonetaryTotal(doc, credit_note_data, currency);
 
     // `cac:CreditNoteLine` comparte cuerpo con `cac:InvoiceLine`: en UBL los dos

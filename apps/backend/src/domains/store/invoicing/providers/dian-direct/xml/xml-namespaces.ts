@@ -58,6 +58,27 @@ export const UBL_CONSTANTS = {
   /** Profile ID for standard invoicing */
   PROFILE_ID: 'DIAN 2.1: Factura Electrónica de Venta',
   /**
+   * `cbc:ProfileID` de la NOTA CRÉDITO — ⚠️ DECLARADO Y TODAVÍA NO EMITIDO.
+   *
+   * `UblCreditNoteBuilder` emite hoy `PROFILE_ID`, el de la factura, y la DIAN lo
+   * observa con **CAD03** — NOTIFICACIÓN, no rechazo, así que no bloquea el set ni
+   * la emisión. Por eso quedó fuera del alcance del arreglo de las notas, que se
+   * limitó a los rechazos.
+   *
+   * El literal se captura AQUÍ y no en un plan porque es el dato caro: viene del
+   * texto que la DIAN nos devolvió en el veredicto del lote de habilitación
+   * (2026-08-09, ZipKey e2d19623-3d0a-4cc9-9954-8a70886ab9a7). Un aviso no urge,
+   * pero ensucia el diagnóstico de la corrida siguiente: cada regla observada que
+   * ya conocemos es ruido sobre las que no.
+   */
+  PROFILE_ID_CREDIT_NOTE:
+    'DIAN 2.1: Nota Crédito de Factura Electrónica de Venta',
+  /**
+   * `cbc:ProfileID` de la NOTA DÉBITO — ⚠️ DECLARADO Y TODAVÍA NO EMITIDO.
+   * Mismo estado que el de la nota crédito; su regla es **DAD03**.
+   */
+  PROFILE_ID_DEBIT_NOTE: 'DIAN 2.1: Nota Débito de Factura Electrónica de Venta',
+  /**
    * `cbc:ProfileID` of the POS electronic equivalent document.
    *
    * ✅ CONFIRMED against **Anexo Técnico de documento equivalente electrónico v1.0

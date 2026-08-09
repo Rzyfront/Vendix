@@ -21,8 +21,28 @@ import { DianTestSetJob } from './dian-test-set-job.interface';
  * política de reintentos vive en la persona que mira el resultado, no en BullMQ.
  * El productor (`DianTestService.enqueueTestSet`) fija esa política; este
  * comentario existe para que nadie la "mejore" a 3 intentos por costumbre.
+ *
+ * `attempts: 1` NO ERA SUFICIENTE, y `maxStalledCount: 0` cierra el hueco.
+ *
+ * En BullMQ la recuperación de un job ESTANCADO es un mecanismo APARTE del contador
+ * de intentos. Lo dicen sus propios tipos sobre `WorkerOptions.maxStalledCount`,
+ * cuyo default es 1: «Amount of times a job can be recovered from a stalled state
+ * to the `wait` state». Un job cuyo lock caduca vuelve a `wait` y se procesa otra
+ * vez — sin consultar `attempts`.
+ *
+ * Y caducar el lock no es hipotético: pasa cuando el contenedor se reinicia a mitad
+ * del job, que es exactamente lo que hace un deploy. Con el default, un deploy en
+ * medio de un envío habría hecho que `executeTestSet` corriera de nuevo, reservara
+ * OTRO bloque de 50 consecutivos y mandara un segundo lote a la DIAN. En silencio.
+ *
+ * El envío en dos fases agrava la exposición: el job pasó de ~2 minutos a hasta ~12,
+ * porque ahora espera a que la DIAN registre las facturas antes de mandar las notas.
+ *
+ * Con `maxStalledCount: 0` un job estancado va a `failed` y el operador lo ve. Falla
+ * ruidosa en vez de duplicar 50 números autorizados irrecuperables — el mismo
+ * criterio que el resto de este flujo: preferir fallar antes de gastar.
  */
-@Processor('dian-test-set')
+@Processor('dian-test-set', { maxStalledCount: 0 })
 export class DianTestSetProcessor extends WorkerHost {
   private readonly logger = new Logger(DianTestSetProcessor.name);
 
@@ -38,6 +58,7 @@ export class DianTestSetProcessor extends WorkerHost {
       validate_only,
       numbering_range,
       check_status,
+      validate_kind,
       context,
     } = job.data;
 
@@ -45,9 +66,9 @@ export class DianTestSetProcessor extends WorkerHost {
       `Procesando set de pruebas DIAN job=${job.id} config=${config_id} ` +
         `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}` +
         (validate_only
-          ? ' [VALIDACIÓN: SendBillSync, 1 documento, sin testSetId]'
+          ? ` [VALIDACIÓN: SendBillSync, 1 ${validate_kind ?? 'invoice'}, sin testSetId]`
           : smoke
-            ? ' [HUMO: 1 documento]'
+            ? ` [HUMO: 1 ${validate_kind ?? 'invoice'}]`
             : ''),
     );
 
@@ -75,6 +96,9 @@ export class DianTestSetProcessor extends WorkerHost {
             validate_only: validate_only === true,
             numbering_range: numbering_range === true,
             check_status: check_status === true,
+            // Se pasa tal cual, sin default: `executeTestSet` resuelve el suyo
+            // (`invoice`). Poner uno aquí duplicaría la decisión en dos sitios.
+            ...(validate_kind ? { validate_kind } : {}),
           }),
       );
     } catch (error: any) {
