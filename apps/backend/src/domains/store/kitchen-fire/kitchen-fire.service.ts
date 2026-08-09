@@ -1220,6 +1220,33 @@ export class KitchenFireService {
       data: { status: 'delivered', updated_at: new Date() },
     });
 
+    // QUI-652 — el ticket de cocina alimenta el HECHO DE SERVICIO en
+    // `order_items`, que es donde vive la entrega desde que se desacoplo de
+    // cocina. Sin esto habria dos verdades: el plato preparado quedaria
+    // 'delivered' en el ticket y sin marca de entrega en su linea de pedido,
+    // mientras una cerveza (que nunca pasa por cocina) solo tendria la marca.
+    //
+    // Se estampa solo donde esta NULL: la primera entrega es la que ocurrio, y
+    // un re-delivery no debe mover la fecha hacia adelante.
+    const deliveredItems = await this.prisma.kitchen_ticket_items.findMany({
+      where: { kitchen_ticket_id: ticketId },
+      select: { order_item_id: true },
+    });
+    if (deliveredItems.length > 0) {
+      await this.prisma.order_items.updateMany({
+        where: {
+          id: { in: deliveredItems.map((it) => it.order_item_id) },
+          delivered_at: null,
+        },
+        data: {
+          delivered_at: new Date(),
+          delivered_by_user_id:
+            RequestContextService.getContext()?.user_id ?? null,
+          updated_at: new Date(),
+        },
+      });
+    }
+
     const full = await this.getTicketForStore(ticketId);
     this.pushKitchenEvent(store_id, {
       type: 'ticket.delivered',
