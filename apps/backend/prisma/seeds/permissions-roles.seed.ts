@@ -2685,6 +2685,53 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/cash-registers/:id/unique-delete',
       method: 'DELETE',
     },
+    // Estaciones de preparación (KDS) — QUI-651.
+    // Espejo de los permisos de caja, con una separación deliberada: la estación
+    // y su turno son recursos distintos. Un jefe de cocina puede configurar
+    // estaciones sin operar turnos, y un cocinero opera turnos sin poder crear
+    // ni borrar estaciones.
+    {
+      name: 'store:kds:read',
+      description: 'Leer estaciones de cocina',
+      path: '/api/store/kds/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:kds:create',
+      description: 'Crear estación de cocina',
+      path: '/api/store/kds/unique-create',
+      method: 'POST',
+    },
+    {
+      name: 'store:kds:update',
+      description: 'Actualizar estación de cocina',
+      path: '/api/store/kds/:id/unique-update',
+      method: 'PUT',
+    },
+    {
+      name: 'store:kds:delete',
+      description: 'Desactivar estación de cocina',
+      path: '/api/store/kds/:id/unique-delete',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:kds_sessions:read',
+      description: 'Leer turnos de estación y su consumo de insumos',
+      path: '/api/store/kds-sessions/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:kds_sessions:create',
+      description: 'Abrir turno de estación',
+      path: '/api/store/kds-sessions/open',
+      method: 'POST',
+    },
+    {
+      name: 'store:kds_sessions:update',
+      description: 'Cerrar turno de estación',
+      path: '/api/store/kds-sessions/:id/close',
+      method: 'POST',
+    },
     {
       name: 'store:cash_registers:open_session',
       description: 'Abrir sesión de caja',
