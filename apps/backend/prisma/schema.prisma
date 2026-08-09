@@ -93,6 +93,8 @@ model users {
   kds_sessions_opened           kds_sessions[]            @relation("kds_sessions_opened_by")
   kds_sessions_closed           kds_sessions[]            @relation("kds_sessions_closed_by")
   order_items_delivered         order_items[]             @relation("order_items_delivered_by")
+  order_item_exclusions_created order_item_exclusions[]   @relation("order_item_exclusions_created_by")
+  kti_exclusions_excluded       kitchen_ticket_item_exclusions[] @relation("kti_exclusions_excluded_by")
   cash_register_movements       cash_register_movements[]
 
   // Promotions
@@ -1283,6 +1285,35 @@ model order_items {
   // separadas: cocina (solo cuando aplica) y entrega (siempre).
   delivered_at                     DateTime?                @db.Timestamp(6)
   delivered_by_user_id             Int?
+  // QUI-655 — nota de texto libre al TOMAR el pedido ("sin cebolla", "poca sal",
+  // "bien cocido"). No existía ningún campo así: `order_items` solo tenía
+  // `quantity`, así que no había dónde poner ni la nota ni la exclusión.
+  //
+  // Es uno de los tres caminos OPCIONALES que convergen en el modal de
+  // confirmación de cocina, y el que mejor refleja cómo funciona un restaurante
+  // real cuando hay prisa o cuando la petición no calza con un ingrediente
+  // exacto. El fire la propaga a `kitchen_ticket_items.notes`, columna que ya
+  // existía en el schema documentando este caso y que el código nunca escribía.
+  notes                            String?
+  // QUI-655 — línea partida por PREPARACIÓN. Cuando una línea de 3 unidades
+  // necesita una excepción en solo 1, se parte en 2 + 1 para que cada línea
+  // quede HOMOGÉNEA: "una línea = una especificación de preparación".
+  //
+  // Se preserva así la invariante que todo el pipeline ya asume — `explodeBom`
+  // multiplica por la cantidad de la línea, `updateStock` consume por línea, el
+  // COGS suma por línea, `kitchen_ticket_items` es una fila por línea. La
+  // alternativa (`unit_index`) rompe esa aritmética en cuatro lugares a la vez.
+  //
+  // `split_from_order_item_id` apunta a la línea original para que la UI pueda
+  // reagrupar las partes y el cliente siga viendo "3 pollos" en vez de dos filas
+  // sueltas. NULL = línea nunca partida.
+  split_from_order_item_id         Int?
+  /// SET NULL y no CASCADE: si la linea original se elimina, las partes NO deben
+  /// desaparecer — son consumo real que ya paso por cocina. Pierden el puntero de
+  /// agrupacion visual y nada mas.
+  split_from_order_item            order_items?             @relation("order_item_preparation_split", fields: [split_from_order_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  split_parts                      order_items[]            @relation("order_item_preparation_split")
+  order_item_exclusions            order_item_exclusions[]
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers sold on
   // this line. Persisted at emission time so legal documents (order voucher,
   // POS ticket) never read the live serial pool. The strong link lives in
@@ -1712,6 +1743,11 @@ model products {
   /// una propiedad de cómo se cocina el plato, no de qué opción se vendió.
   kds_id                    Int?
   kds                       kds?                   @relation(fields: [kds_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  /// QUI-655 — back-relations de exclusion: este producto figura como el
+  /// COMPONENTE excluido de la receta de otro plato.
+  excluded_in_order_items   order_item_exclusions[]          @relation("order_item_exclusion_component")
+  excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -9281,11 +9317,74 @@ model kitchen_ticket_items {
   kitchen_ticket kitchen_tickets @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   order_item     order_items     @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product        products        @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  exclusions     kitchen_ticket_item_exclusions[]
 
   @@index([kitchen_ticket_id])
   @@index([order_item_id])
   @@index([product_id])
   @@index([status])
+}
+
+// ===== EXCLUSIONES DE INSUMOS (QUI-655) =====
+//
+// Un plato pedido sin un ingrediente CONSUMIA ese ingrediente del inventario y
+// lo cargaba al costo igual: `fireOrderItems` explotaba la receta y consumia
+// TODAS las hojas del BOM sin punto donde alguien dijera "este plato va sin
+// papas". El inventario quedaba descuadrado contra la realidad fisica y el
+// margen del plato subestimado.
+//
+// Son DOS registros con roles distintos, y la diferencia entre ambos es dato de
+// auditoria:
+//
+//   - LA INTENCION (`order_item_exclusions`): lo que el cliente pidio al
+//     ordenar, cuando alguien lo capturo. Es OPCIONAL y puede estar vacia — la
+//     captura al pedir no es obligatoria y la nota de texto libre requiere que
+//     el cocinero la traduzca.
+//
+//   - LO CONSUMIDO (`kitchen_ticket_item_exclusions`): lo que efectivamente se
+//     excluyo al confirmar el modal de cocina. Es lo que se costeo y lo que
+//     explica el margen. SIEMPRE existe cuando hubo exclusion.
+//
+// Ninguna de las dos necesita `unit_index`: con la particion de linea la linea
+// ya es homogenea y la exclusion aplica a TODA la linea. Ese es buena parte del
+// atractivo de partir.
+
+model order_item_exclusions {
+  id                  Int       @id @default(autoincrement())
+  order_item_id       Int
+  component_product_id Int
+  /// Procedencia de la linea del BOM, root-first, tal como la expone
+  /// `BomExplosionLine.path_recipe_ids`. Permite excluir un NODO de sub-receta
+  /// completo ("sin salsa criolla") en vez de obligar a desmarcar sus tres hojas
+  /// y a saber de memoria cuales venian de la salsa.
+  path_recipe_ids     Int[]
+  created_by_user_id  Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  order_item        order_items @relation(fields: [order_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product products    @relation("order_item_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?      @relation("order_item_exclusions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([order_item_id, component_product_id])
+  @@index([order_item_id])
+  @@index([component_product_id])
+}
+
+model kitchen_ticket_item_exclusions {
+  id                    Int       @id @default(autoincrement())
+  kitchen_ticket_item_id Int
+  component_product_id  Int
+  path_recipe_ids       Int[]
+  excluded_by_user_id   Int?
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  kitchen_ticket_item kitchen_ticket_items @relation(fields: [kitchen_ticket_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product   products             @relation("kti_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  excluded_by_user    users?               @relation("kti_exclusions_excluded_by", fields: [excluded_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([kitchen_ticket_item_id, component_product_id])
+  @@index([kitchen_ticket_item_id])
+  @@index([component_product_id])
 }
 
 /// A named menu that bundles sections of products. Multiple menus per store
