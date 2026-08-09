@@ -1,0 +1,169 @@
+/* Modal de confirmación de cocina — QUI-655.
+   Denso a propósito: se usa en hora pico y el cocinero necesita ver el envío
+   completo sin scrollear más de lo necesario. */
+
+.kc-loading,
+.kc-empty {
+  padding: 1rem 0;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.kc-hint {
+  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.kc-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  /* Acotado para que el footer con los botones siempre quede visible: en un envío
+     de 10 platos el árbol crece y el botón no debe irse fuera de pantalla. */
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.kc-item {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, #fff);
+}
+
+.kc-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.kc-item-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.kc-qty {
+  margin-left: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+/* La nota del pedido: resaltada porque es la instrucción que el cocinero traduce
+   a exclusiones. Si se ve como texto secundario, se ignora. */
+.kc-note {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+  background-color: var(--color-warning-100, #fef3c7);
+  color: var(--color-warning-700, #b45309);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.kc-no-recipe {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.kc-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.kc-tree-nested {
+  margin-left: 1.4rem;
+  padding-left: 0.5rem;
+  border-left: 1px dashed var(--color-border, #e5e7eb);
+}
+
+.kc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0;
+}
+
+/* El check es un botón con aria-pressed y no un <input type=checkbox> porque el
+   estado PARCIAL (subárbol a medias) no es representable con un checkbox nativo
+   sin recurrir a `indeterminate` imperativo, que en zoneless obliga a tocar el DOM
+   fuera del ciclo de señales. */
+.kc-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-primary, #3b82f6);
+  border-radius: 0.25rem;
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+
+  &.is-partial {
+    background: var(--color-warning, #fb923c);
+    border-color: var(--color-warning, #fb923c);
+  }
+
+  &.is-off {
+    background: transparent;
+    border-color: var(--color-error, #ef4444);
+    color: var(--color-error, #ef4444);
+  }
+}
+
+.kc-collapse {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.kc-label {
+  flex: 1 1 auto;
+  font-size: 0.82rem;
+  color: var(--color-text-primary);
+
+  /* Tachado cuando está excluido: el cocinero tiene que poder barrer la lista y
+     ver de un vistazo qué NO va, sin comparar checkboxes. */
+  &.is-off {
+    text-decoration: line-through;
+    color: var(--color-text-secondary);
+  }
+}
+
+.kc-amount {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kc-warn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  background-color: var(--color-warning-100, #fef3c7);
+  color: var(--color-warning-700, #b45309);
+  font-size: 0.78rem;
+  font-weight: 600;
+}

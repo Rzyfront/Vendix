@@ -7,6 +7,7 @@ import {
   KitchenTicket,
   KitchenTicketStatus,
   KdsSnapshotResponse,
+  FirePreview,
 } from '../interfaces';
 
 /** Result of `POST /store/kitchen-fire` (fire-to-kitchen). */
@@ -105,10 +106,41 @@ export class KitchenTicketsService {
    * `kitchen_ticket` and triggers the inventory + COGS seam in
    * Phase D). Returns the new ticket summary.
    */
+  /**
+   * Previsualiza el envío: devuelve el árbol de receta de cada item elegible para
+   * que el modal de confirmación pueda desmarcar ingredientes. QUI-655.
+   *
+   * NO consume nada. Comparte el seam de explosión con el envío real, así que lo
+   * que el modal muestra y lo que se consume no pueden discrepar.
+   */
+  previewFire(payload: {
+    order_id: number;
+    order_item_ids: number[];
+  }): Observable<FirePreview> {
+    return this.http
+      .post<ApiResponse<FirePreview>>(
+        `${this.apiUrl}${this.basePath}/preview`,
+        payload,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   fireOrderItems(payload: {
     order_id: number;
     order_item_ids: number[];
     notes?: string;
+    /**
+     * QUI-655 — exclusiones confirmadas en el modal, por item. Ausente equivale a
+     * "todos los componentes marcados": el backend tiene ese default y no hay que
+     * mandar recetas completas en el camino rápido.
+     */
+    exclusions?: Array<{
+      order_item_id: number;
+      component_product_ids: number[];
+    }>;
   }): Observable<FireOrderItemsResult> {
     return this.http
       .post<ApiResponse<FireOrderItemsResult>>(
