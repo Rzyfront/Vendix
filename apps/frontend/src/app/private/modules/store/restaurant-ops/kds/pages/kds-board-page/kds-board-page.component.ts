@@ -29,6 +29,7 @@ import {
 import {
   KdsConnectionState,
   KdsSseService,
+  KdsStationsService,
   KitchenMutationError,
   KitchenTicketsService,
 } from '../../services';
@@ -74,6 +75,12 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
 export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly kdsSse = inject(KdsSseService);
   private readonly ticketsService = inject(KitchenTicketsService);
+  /**
+   * QUI-651 — el board es de UNA estacion. `selectedStationId` alimenta el filtro
+   * de `visibleTickets`, y `canManageTickets` decide si la primera accion de
+   * gestion tiene que pedir apertura de turno.
+   */
+  readonly stationsService = inject(KdsStationsService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -138,7 +145,21 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    */
   readonly visibleTickets = computed<KitchenTicket[]>(() => {
     const businessDate = this.currentBusinessDate();
+    // QUI-651 — el tablero es DE UNA ESTACION. Sin este filtro, un restaurante
+    // con barra + cocina caliente + postres muestra los tres flujos mezclados en
+    // cada pantalla y el personal filtra a mano, que es justo el problema que el
+    // ticket resuelve.
+    //
+    // El filtro es cliente-side sobre el stream por tienda en vez de un endpoint
+    // SSE por estacion: el backend ya empuja `ticket.created` de CADA estacion
+    // (los N tickets del fire), asi que cada tablero recibe todo y descarta lo
+    // ajeno. Cuesta ancho de banda y no correccion; partir el canal por estacion
+    // es una optimizacion posterior que no cambia lo que ve el operador.
+    const stationId = this.stationsService.selectedStationId();
     return this.tickets().filter((t) => {
+      if (stationId != null && t.kds_id != null && t.kds_id !== stationId) {
+        return false;
+      }
       const raw = t.business_date;
       if (raw == null) return true; // legacy fallback: keep
       const prefix =

@@ -69,7 +69,13 @@ export interface KitchenTicket {
   id: number;
   store_id: number;
   order_id: number;
+  /**
+   * QUI-651 — el consecutivo diario es POR ESTACION: cada tablero cuenta desde 1,
+   * asi cocina canta #1 y barra canta #1 el mismo dia.
+   */
   daily_number?: number | null;
+  /** QUI-651 — estacion que prepara este ticket. NOT NULL en la DB. */
+  kds_id?: number;
   order?: { order_number: string } | null;
   table_id?: number | null;
   status: KitchenTicketStatus;
