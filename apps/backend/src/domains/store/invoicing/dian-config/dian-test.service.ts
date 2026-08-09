@@ -39,7 +39,10 @@ import {
   softwareCodeForOperationMode,
   DianDocumentKind,
 } from '../utils/dian-file-naming.util';
-import { analyzeTestSetWait } from './test-set-wait.util';
+import {
+  analyzeTestSetWait,
+  resolveTestSetProof,
+} from './test-set-wait.util';
 import {
   aggregateZipVerdicts,
   TestSetZipAggregate,
@@ -2764,7 +2767,12 @@ export class DianTestService {
       last_result: config.last_test_result,
       // Derived on read, never stored: `pending` + `executed_at` are the facts,
       // and a persisted "stalled" flag would go stale the moment DIAN answers.
-      wait: analyzeTestSetWait(config.last_test_result),
+      //
+      // Y sobre la prueba DURABLE, no sobre el último lote: `last_test_result` es
+      // a la vez el puntero al lote en vuelo y la prueba de la habilitación, así
+      // que un intento posterior borraba un hecho ya ocurrido. Ver
+      // `resolveTestSetProof`.
+      wait: analyzeTestSetWait(resolveTestSetProof(config)),
       // Cuántos documentos y consecutivos implica un envío en ESTE modo de
       // operación. Sin esto la UI imprimía 50, la composición de 2019.
       composition: buildTestSetCompositionView(config.operation_mode),
