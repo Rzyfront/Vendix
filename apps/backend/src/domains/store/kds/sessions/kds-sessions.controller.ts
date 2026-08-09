@@ -76,6 +76,46 @@ export class KdsSessionsController {
    * (a) Historial de consumos: una fila por insumo POR PEDIDO, con cantidad y
    * costo. Permite navegar del resumen al detalle.
    */
+  /**
+   * Reporte de consumo de insumos por estación, agregable por KDS y por rango.
+   *
+   * Rutas literales ANTES de las paramétricas: `:id/...` capturaría `report` como
+   * id si se declararan al revés.
+   */
+  @Get('report/consumption')
+  @Permissions('store:kds_sessions:read')
+  async consumptionReport(
+    @Query('kds_id') kdsId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const parsedKds = kdsId != null ? Number(kdsId) : undefined;
+    const result = await this.sessionsService.getConsumptionReport({
+      kds_id: Number.isFinite(parsedKds) ? parsedKds : undefined,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+    return this.responseService.success(result);
+  }
+
+  /**
+   * Consumo sin turno atribuido. Se expone aparte y no se esconde: es un caso
+   * válido (el fire nunca se bloquea por falta de sesión), pero omitirlo haría
+   * que el reporte por estación pareciera cuadrar contra el COGS total.
+   */
+  @Get('report/unattributed')
+  @Permissions('store:kds_sessions:read')
+  async unattributedConsumption(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const result = await this.sessionsService.getUnattributedConsumption({
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+    return this.responseService.success(result);
+  }
+
   @Get(':id/consumption-history')
   @Permissions('store:kds_sessions:read')
   async consumptionHistory(@Param('id', ParseIntPipe) id: number) {

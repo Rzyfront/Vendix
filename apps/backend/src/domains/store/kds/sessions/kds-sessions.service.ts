@@ -179,6 +179,194 @@ export class KdsSessionsService {
   }
 
   /**
+   * REPORTE de consumo de insumos por estación, agregable por KDS y por rango de
+   * fechas. QUI-651.
+   *
+   * Se apoya en la misma fuente que las dos vistas por sesión — no hay una
+   * segunda verdad. Filtra por `kds_session_id IN (sesiones que cumplen el
+   * criterio)` en vez de por fecha del movimiento, y esa distinción es
+   * deliberada: el turno es la unidad de responsabilidad. Un movimiento
+   * disparado a las 00:30 pertenece al turno que estaba abierto, no al día
+   * calendario en que cayó su timestamp — el mismo razonamiento que la fecha de
+   * negocio del ticket con su hora de corte.
+   *
+   * Los movimientos con `kds_session_id = NULL` quedan FUERA por construcción, y
+   * eso es correcto: son consumo sin dueño de turno. Se reportan aparte con
+   * `getUnattributedConsumption`, porque esconderlos haría que el reporte
+   * pareciera cuadrar cuando no cuadra.
+   */
+  async getConsumptionReport(params: {
+    kds_id?: number;
+    from?: Date;
+    to?: Date;
+  }) {
+    const sessions = await this.prisma.kds_sessions.findMany({
+      where: {
+        ...(params.kds_id != null && { kds_id: params.kds_id }),
+        ...((params.from || params.to) && {
+          opened_at: {
+            ...(params.from && { gte: params.from }),
+            ...(params.to && { lte: params.to }),
+          },
+        }),
+      },
+      select: {
+        id: true,
+        kds_id: true,
+        opened_at: true,
+        closed_at: true,
+        status: true,
+        kds: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: { opened_at: 'asc' },
+    });
+
+    if (sessions.length === 0) {
+      return { sessions: [], by_station: [], total_cost: 0 };
+    }
+
+    // Un solo barrido de movimientos para todo el rango: consultar por sesión
+    // haría N consultas donde una alcanza, y un mes de turnos son decenas.
+    const rows = await this.prisma.inventory_transactions.findMany({
+      where: { kds_session_id: { in: sessions.map((s) => s.id) } },
+      select: {
+        kds_session_id: true,
+        quantity_change: true,
+        total_cost: true,
+        products: { select: { id: true, name: true, sku: true } },
+      },
+    });
+
+    // Tipo explícito: con el `??` de fallback, TS ensancha el valor del Map a
+    // `{}` y todos los accesos a `.id`/`.name` fallan.
+    type StationRef = { id: number; name: string; code: string };
+    const stationBySession = new Map<number, StationRef>(
+      sessions.map((s) => [
+        s.id,
+        (s.kds ?? { id: s.kds_id, name: '—', code: '—' }) as StationRef,
+      ]),
+    );
+
+    const byStation = new Map<
+      number,
+      {
+        kds_id: number;
+        name: string;
+        code: string;
+        session_count: number;
+        movement_count: number;
+        total_cost: number;
+        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }>;
+      }
+    >();
+
+    for (const s of sessions) {
+      const station = stationBySession.get(s.id)!;
+      const acc = byStation.get(station.id) ?? {
+        kds_id: station.id,
+        name: station.name,
+        code: station.code,
+        session_count: 0,
+        movement_count: 0,
+        total_cost: 0,
+        ingredients: new Map(),
+      };
+      acc.session_count += 1;
+      byStation.set(station.id, acc);
+    }
+
+    for (const r of rows) {
+      const station = stationBySession.get(r.kds_session_id!);
+      if (!station) continue;
+      const acc = byStation.get(station.id);
+      if (!acc || !r.products) continue;
+
+      acc.movement_count += 1;
+      const cost = Number(r.total_cost ?? 0);
+      acc.total_cost += cost;
+
+      const ing = acc.ingredients.get(r.products.id) ?? {
+        product_id: r.products.id,
+        name: r.products.name,
+        sku: r.products.sku ?? null,
+        quantity: 0,
+        total_cost: 0,
+      };
+      // El consumo se registra negativo; se expone en positivo porque la vista es
+      // "cuánto se consumió", no "cuánto varió el stock".
+      ing.quantity += Math.abs(r.quantity_change);
+      ing.total_cost += cost;
+      acc.ingredients.set(r.products.id, ing);
+    }
+
+    const by_station = [...byStation.values()]
+      .map((s) => ({
+        ...s,
+        ingredients: [...s.ingredients.values()].sort(
+          (a, b) => b.total_cost - a.total_cost,
+        ),
+      }))
+      .sort((a, b) => b.total_cost - a.total_cost);
+
+    return {
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        kds: s.kds,
+        opened_at: s.opened_at,
+        closed_at: s.closed_at,
+        status: s.status,
+      })),
+      by_station,
+      total_cost: by_station.reduce((sum, s) => sum + s.total_cost, 0),
+    };
+  }
+
+  /**
+   * Consumo SIN sesión atribuida: movimientos del fire cuya estación no tenía
+   * turno abierto al disparar. Es un caso válido y decidido (el fire nunca se
+   * bloquea), pero tiene que ser visible: si se omitiera, el reporte por
+   * estación parecería cuadrar contra el COGS total cuando no cuadra.
+   */
+  async getUnattributedConsumption(params: { from?: Date; to?: Date }) {
+    const rows = await this.prisma.inventory_transactions.findMany({
+      where: {
+        kds_session_id: null,
+        // Solo consumo de cocina: el resto de los movimientos sin sesión son
+        // ventas, ajustes y transferencias, que nunca tuvieron estación.
+        order_item_id: { not: null },
+        order_items: { inventory_consumed_at_fire: true },
+        ...((params.from || params.to) && {
+          created_at: {
+            ...(params.from && { gte: params.from }),
+            ...(params.to && { lte: params.to }),
+          },
+        }),
+      },
+      select: {
+        id: true,
+        created_at: true,
+        quantity_change: true,
+        total_cost: true,
+        products: { select: { id: true, name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 500,
+    });
+
+    return {
+      movement_count: rows.length,
+      total_cost: rows.reduce((s, r) => s + Number(r.total_cost ?? 0), 0),
+      movements: rows.map((r) => ({
+        transaction_id: r.id,
+        consumed_at: r.created_at,
+        quantity: Math.abs(r.quantity_change),
+        total_cost: r.total_cost,
+        ingredient: r.products,
+      })),
+    };
+  }
+
+  /**
    * (b) RESUMEN de consumos — una fila por insumo, colapsando todos los pedidos.
    *
    * Se agrega en memoria y no con `groupBy` de Prisma porque hace falta el
