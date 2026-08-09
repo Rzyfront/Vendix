@@ -98,6 +98,9 @@ export class UblDebitNoteBuilder {
           ? DIAN_OPERATION_TYPES.DEBIT_NOTE_WITH_REF
           : DIAN_OPERATION_TYPES.DEBIT_NOTE_NO_REF,
       );
+    // DEUDA CONOCIDA: la DIAN observa esto con DAD03 y espera
+    // `UBL_CONSTANTS.PROFILE_ID_DEBIT_NOTE`. Es NOTIFICACIÓN, no rechazo — ver la
+    // misma nota en la nota crédito y el literal en `xml-namespaces.ts`.
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(debit_note_data.invoice_number);
