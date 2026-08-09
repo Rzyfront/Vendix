@@ -52,7 +52,10 @@ const KITCHEN_TICKET_INCLUDE = {
  * accepted and which items were actually consumed.
  */
 export interface FireOrderItemsResult {
+  /** Ticket primario (estacion de menor id). Lo consumen 6 llamadores externos. */
   kitchen_ticket_id: number;
+  /** QUI-651 — un id por estacion involucrada en el envio. */
+  kitchen_ticket_ids: number[];
   order_id: number;
   fired_item_ids: number[];
   skipped_item_ids: number[];
@@ -376,6 +379,11 @@ export class KitchenFireService {
     try {
       this.eventEmitter.emit('kitchen.fired', {
         kitchen_ticket_id: result.ticketId,
+        // QUI-651 — el asiento DR 6135 / CR 1435 es UNO por fire y cubre el COGS
+        // de todas las estaciones (`total_cost` ya viene sumado), asi que el
+        // listener contable no cambia. Se expone la lista para que quien audite
+        // el asiento pueda rastrear a que tickets corresponde.
+        kitchen_ticket_ids: result.ticketIds,
         order_id: order.id,
         organization_id,
         store_id,
@@ -407,9 +415,30 @@ export class KitchenFireService {
           ts: Date.now(),
         });
       }
+
+      // QUI-651 — un fire de dos estaciones produce DOS tickets, y cada tablero
+      // solo escucha el suyo. Empujar unicamente el primario dejaba a la segunda
+      // estacion sin enterarse hasta el siguiente refresco: el pedido existia en
+      // su cola y su pantalla no lo mostraba.
+      const secondaryTicketIds = result.ticketIds.filter(
+        (id) => id !== result.ticketId,
+      );
+      if (secondaryTicketIds.length > 0) {
+        const others = await this.prisma.kitchen_tickets.findMany({
+          where: { id: { in: secondaryTicketIds }, store_id },
+          include: KITCHEN_TICKET_INCLUDE,
+        });
+        for (const other of others) {
+          this.pushKitchenEvent(store_id, {
+            type: 'ticket.created',
+            ticket: other,
+            ts: Date.now(),
+          });
+        }
+      }
     } catch (err) {
       this.logger.warn(
-        `Failed to build SSE payload for ticket #${result.ticketId}: ${
+        `Failed to build SSE payload for tickets ${result.ticketIds.join(', ')}: ${
           (err as Error).message
         }`,
       );
@@ -417,6 +446,10 @@ export class KitchenFireService {
 
     return {
       kitchen_ticket_id: result.ticketId,
+      // QUI-651 — todos los tickets del envio, uno por estacion involucrada. Se
+      // agrega en vez de reemplazar `kitchen_ticket_id` porque 6 consumidores
+      // externos leen ese campo; quien necesite las estaciones usa este.
+      kitchen_ticket_ids: result.ticketIds,
       order_id: order.id,
       fired_item_ids: result.firedItemSnapshots.map((s) => s.orderItemId),
       skipped_item_ids: skippedItemIds,
@@ -970,6 +1003,8 @@ export class KitchenFireService {
     organization_id: number | undefined,
     result: {
       ticketId: number;
+      /** QUI-651 — un id por estacion involucrada; el SSE los empuja todos. */
+      ticketIds: number[];
       firedItemSnapshots: Array<{
         orderItemId: number;
         productId: number;
@@ -1013,26 +1048,31 @@ export class KitchenFireService {
       );
     }
     try {
-      const fullTicket = await this.prisma.kitchen_tickets.findFirst({
-        where: { id: result.ticketId, store_id },
+      // QUI-651 — este es el segundo camino de fire (auto-fire desde pago / cierre
+      // de mesa / split) y tenia el MISMO defecto que el manual: empujaba solo el
+      // ticket primario, asi que en un envio de dos estaciones la segunda no se
+      // enteraba hasta el siguiente refresco.
+      const allTickets = await this.prisma.kitchen_tickets.findMany({
+        where: { id: { in: result.ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
-      if (fullTicket) {
+      for (const ticket of allTickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
-          ticket: fullTicket,
+          ticket,
           ts: Date.now(),
         });
       }
     } catch (err) {
       this.logger.warn(
-        `Failed to build SSE payload for ticket #${result.ticketId}: ${
+        `Failed to build SSE payload for tickets ${result.ticketIds.join(', ')}: ${
           (err as Error).message
         }`,
       );
     }
     return {
       kitchen_ticket_id: result.ticketId,
+      kitchen_ticket_ids: result.ticketIds,
       order_id: orderId,
       fired_item_ids,
       skipped_item_ids: [],

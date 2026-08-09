@@ -1506,6 +1506,12 @@ export class PaymentsService {
             undefined,
             {
               ticketId: result.kitchen_fire.kitchen_ticket_id,
+              // QUI-651 — todos los tickets del envio, para que el SSE llegue a
+              // cada estacion. Fallback al primario si el resultado viene de un
+              // camino que todavia no los expone.
+              ticketIds: result.kitchen_fire.kitchen_ticket_ids ?? [
+                result.kitchen_fire.kitchen_ticket_id,
+              ],
               firedItemSnapshots: [],
               cogsTotal: result.kitchen_fire.cogs_total || 0,
               consumedLineCount: 0,
