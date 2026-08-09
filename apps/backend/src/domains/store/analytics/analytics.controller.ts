@@ -801,6 +801,14 @@ export class AnalyticsController {
    * QUI-540: cuentas por cobrar de clientes (open + partial) con
    * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
    */
+  @Get('customers/receivable')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.customers_analytics_service.getAccountsReceivableForExport(query);
+    return this.response_service.success(rows);
+  }
+
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(
@@ -836,6 +844,14 @@ export class AnalyticsController {
    * por cliente: última orden, días desde, total órdenes, lifetime
    * value y bucket de antigüedad.
    */
+  @Get('customers/aging')
+  @Permissions('store:analytics:read')
+  async getCustomersAging(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.customers_analytics_service.getCustomersAgingForExport(query);
+    return this.response_service.success(rows);
+  }
+
   @Get('customers/aging/export')
   @Permissions('store:analytics:read')
   async exportCustomersAging(
@@ -977,6 +993,14 @@ export class AnalyticsController {
    * antigüedad. purchase_orders con payment_status IN ('unpaid',
    * 'partial') y payment_due_date no nulo.
    */
+  @Get('purchases/aging')
+  @Permissions('store:analytics:read')
+  async getAccountsPayable(@Query() query: AnalyticsQueryDto) {
+    const rows =
+      await this.purchases_analytics_service.getAccountsPayableForExport(query);
+    return this.response_service.success(rows);
+  }
+
   @Get('purchases/aging/export')
   @Permissions('store:analytics:read')
   async exportAccountsPayable(
