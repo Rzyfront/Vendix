@@ -503,6 +503,11 @@ effect(() => {
 	          null,
 	        isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
 	        unitsPerPackage,
+	        // QUI-653 — viaja desde `order_items.is_takeaway` para que el tiquete
+	        // distinga la parte del pedido que se empaca. Sin esto un pedido mixto
+	        // se imprime idéntico a uno de consumo en el lugar y el mesero no sabe
+	        // qué entregar empacado.
+	        isTakeaway: !!item.is_takeaway,
 	        serials: (() => {
 	          const raw = item.serial_numbers_snapshot ?? item.serials ?? item.serial_numbers ?? null;
 	          if (Array.isArray(raw)) return raw.map((s: any) => String(s).trim()).filter((s: string) => s.length > 0);
@@ -585,6 +590,11 @@ effect(() => {
 	        appliedPriceTierName: item.appliedPriceTierName,
 	        isPackageUnit: item.isPackageUnit,
 	        unitsPerPackage: item.unitsPerPackage,
+	        // QUI-653 — se propaga en este camino también: si solo lo llevara el
+	        // mapeo desde la orden persistida, el tiquete que se imprime justo tras
+	        // cobrar saldría sin la marca y el de una reimpresión sí, con la misma
+	        // venta imprimiéndose distinto según el momento.
+	        isTakeaway: item.isTakeaway,
 	        serials: item.serials })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,
