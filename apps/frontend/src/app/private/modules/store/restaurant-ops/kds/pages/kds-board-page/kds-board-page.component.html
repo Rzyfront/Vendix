@@ -37,6 +37,37 @@
     </app-badge>
   </app-sticky-header>
 
+  <!--
+    QUI-651 — SELECCION DE ESTACION. Solo aparece cuando la tienda tiene mas de una
+    estacion activa Y todavia no se eligio: con una sola se entra directo al
+    tablero, que es el caso de la mayoria de los restaurantes y no debe costar un
+    clic extra.
+  -->
+  @if (stationsService.needsStationChoice() && stationsService.selectedStationId() === null) {
+    <div class="kds-station-picker">
+      <h2 class="kds-station-picker__title">¿En qué estación vas a trabajar?</h2>
+      <p class="kds-station-picker__hint">
+        Cada tablero muestra solo los tickets de su estación.
+      </p>
+      <div class="kds-station-picker__grid">
+        @for (station of stationsService.activeStations(); track station.id) {
+          <button
+            type="button"
+            class="kds-station-card"
+            (click)="selectStation(station.id)"
+          >
+            <app-icon name="chef-hat" [size]="22" />
+            <span class="kds-station-card__name">{{ station.name }}</span>
+            <span class="kds-station-card__code">{{ station.code }}</span>
+            @if (station.is_default) {
+              <app-badge variant="primary">Por defecto</app-badge>
+            }
+          </button>
+        }
+      </div>
+    </div>
+  } @else {
+
   @if (lastError()) {
     <div class="kds-board__error" role="alert">
       <app-icon name="alert-triangle" [size]="16" />
@@ -169,4 +200,5 @@
       Abrir turno
     </app-button>
   </app-modal>
+  }
 </div>

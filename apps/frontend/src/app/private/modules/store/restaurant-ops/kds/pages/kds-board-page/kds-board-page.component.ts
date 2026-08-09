@@ -439,6 +439,23 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       /* el SSE/polling reconciliará */
     });
     this.kdsSse.connect(120);
+
+    // QUI-651 — cargar estaciones y, si ya hay una elegida, su turno abierto.
+    // `loadStations` autoselecciona cuando hay UNA sola activa, asi que el caso
+    // comun entra directo al tablero sin pantalla intermedia.
+    this.stationsService
+      .loadStations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          const id = this.stationsService.selectedStationId();
+          if (id != null) this.refreshStationSession(id);
+        },
+        // Silencioso: sin estaciones el tablero sigue leyendose; lo que se cae es
+        // la gestion, y de eso ya avisa el gate de turno con su propio mensaje.
+        error: () => {},
+      });
+
     this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
 
     // Deep-link `?ticket=<kitchen_ticket_id>` desde el detalle de orden.
@@ -672,6 +689,24 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
           );
         },
       });
+  }
+
+  /**
+   * Elegir estacion. Recarga el turno de la elegida: el gate depende de esa
+   * lectura, y arrastrar el turno de la estacion anterior dejaria gestionar
+   * tickets de una estacion con la sesion de otra.
+   */
+  selectStation(kdsId: number): void {
+    this.stationsService.selectedStationId.set(kdsId);
+    this.stationsService.openSession.set(null);
+    this.refreshStationSession(kdsId);
+  }
+
+  private refreshStationSession(kdsId: number): void {
+    this.stationsService
+      .refreshOpenSession(kdsId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ error: () => {} });
   }
 
   cancelOpenSession(): void {
