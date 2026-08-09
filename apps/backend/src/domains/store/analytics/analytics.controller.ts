@@ -30,6 +30,7 @@ import type {
   ReportColumn,
   ReportSheet,
 } from '@common/reports/report-column.types';
+import { paginatedOrAll } from '@common/responses/paginated-helper';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   resolveStoreTimezone,
@@ -263,7 +264,7 @@ export class AnalyticsController {
   async getSalesBySeller(@Query() query: SalesAnalyticsQueryDto) {
     const rows =
       await this.sales_analytics_service.getSalesBySellerForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('sales/export')
@@ -688,7 +689,7 @@ export class AnalyticsController {
       await this.inventory_analytics_service.getInventoryBySupplierForExport(
         query,
       );
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('inventory/by-supplier/export')
@@ -816,7 +817,7 @@ export class AnalyticsController {
   async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.customers_analytics_service.getAccountsReceivableForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('customers/receivable/export')
@@ -859,7 +860,7 @@ export class AnalyticsController {
   async getCustomersAging(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.customers_analytics_service.getCustomersAgingForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('customers/aging/export')
@@ -972,7 +973,7 @@ export class AnalyticsController {
   async getPurchasesTrends(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.purchases_analytics_service.getPurchasesTrendsForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('purchases/trends/export')
@@ -1008,7 +1009,7 @@ export class AnalyticsController {
   async getAccountsPayable(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.purchases_analytics_service.getAccountsPayableForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('purchases/aging/export')
@@ -1082,7 +1083,7 @@ export class AnalyticsController {
   async getReviewsByProduct(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.reviews_analytics_service.getReviewsByProduct(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('reviews/by-product/export')

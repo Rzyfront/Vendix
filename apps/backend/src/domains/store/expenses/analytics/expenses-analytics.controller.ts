@@ -17,6 +17,7 @@ import {
 import { formatCellDate } from '@common/reports/report-builder';
 import { ExpensesAnalyticsService } from './expenses-analytics.service';
 import { ResponseService } from '../../../../common/responses/response.service';
+import { paginatedOrAll } from '../../../../common/responses/paginated-helper';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
@@ -55,7 +56,7 @@ export class ExpensesAnalyticsController {
   async getExpensesSummary(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.expenses_analytics_service.getExpensesSummaryForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('summary/export')
@@ -91,7 +92,7 @@ export class ExpensesAnalyticsController {
   async getExpensesByCategory(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.expenses_analytics_service.getExpensesByCategoryForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('by-category/export')
@@ -123,7 +124,7 @@ export class ExpensesAnalyticsController {
   async getExpensesDetail(@Query() query: AnalyticsQueryDto) {
     const rows =
       await this.expenses_analytics_service.getExpensesDetailForExport(query);
-    return this.response_service.success(rows);
+    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('detail/export')
@@ -160,6 +161,7 @@ export class ExpensesAnalyticsController {
     tz: string,
     columns: ReportColumn[],
     rows: any[],
+    options?: { dateFrom?: Date; dateTo?: Date },
   ): Promise<void> {
     const sheet: ReportSheet = {
       name: base,
@@ -167,7 +169,7 @@ export class ExpensesAnalyticsController {
       rows,
     };
     const buffer = await buildReportBuffer({ sheets: [sheet] });
-    const filename = buildReportFilename(base, { tz });
+    const filename = buildReportFilename(base, { tz, ...options });
     sendXlsxReport(res, buffer, filename);
   }
 }
