@@ -72,8 +72,11 @@ export class AgingReportPageComponent implements OnInit {
         header: report.columns[0]?.header ?? 'Entidad',
         type: 'text',
       },
-      { key: 'current_amount', header: 'Corriente', type: 'currency' },
-      { key: '1_30_amount', header: '1-30 días', type: 'currency' },
+      // El backend usa bucket '0-30' (no hay 'current' separado), así
+      // que mostramos "Corriente (0-30)" como única columna para ese
+      // rango. Antes había dos columnas (current_amount + 1_30_amount)
+      // que recibían el mismo valor → el usuario veía duplicado.
+      { key: '1_30_amount', header: 'Corriente (0-30)', type: 'currency' },
       { key: '31_60_amount', header: '31-60 días', type: 'currency' },
       { key: '61_90_amount', header: '61-90 días', type: 'currency' },
       { key: '90_plus_amount', header: '90+ días', type: 'currency' },
@@ -118,7 +121,10 @@ export class AgingReportPageComponent implements OnInit {
     const bucket = (row['aging_bucket'] ?? '').toString();
     return {
       entity_label: this.buildEntityLabel(row),
-      current_amount: bucket === '0-30' ? amount : 0,
+      // El backend usa bucket '0-30' (no hay 'current' separado), así
+      // que el rango 0-30 es "corriente" por definición. Lo mapeamos
+      // una sola vez a 1_30_amount — antes también llenaba
+      // current_amount, lo que duplicaba el valor en pantalla.
       '1_30_amount': bucket === '0-30' ? amount : 0,
       '31_60_amount': bucket === '31-60' ? amount : 0,
       '61_90_amount': bucket === '61-90' ? amount : 0,

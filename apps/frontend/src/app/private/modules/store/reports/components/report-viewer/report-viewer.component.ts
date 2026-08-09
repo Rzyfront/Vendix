@@ -102,10 +102,12 @@ function formatStatValue(value: any, type: string): string | number {
             @if (report()?.requiresDateRange) {
               <vendix-date-range-filter [value]="dateRange()" (valueChange)="dateRangeChange.emit($event)" />
             }
-            <vendix-export-button
-              [loading]="exportLoading()"
-              (export)="exportClick.emit()"
-            />
+            @if (report()?.exportEndpoint) {
+              <vendix-export-button
+                [loading]="exportLoading()"
+                (export)="exportClick.emit()"
+              />
+            }
           </div>
         </div>
 

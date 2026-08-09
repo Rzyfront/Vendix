@@ -45,6 +45,9 @@ export class ExpensesAnalyticsService {
         state: true,
         expense_date: true,
       },
+      // Defense cap: un export no debería agotar memoria. 100k es muy
+      // por encima del rango realista para un solo período de gastos.
+      take: 100000,
     });
 
     const totalExpenses = expenses.reduce(
@@ -58,23 +61,33 @@ export class ExpensesAnalyticsService {
       (sum, e) => sum + Number(e.amount || 0),
       0,
     );
-    const totalPending = expenses
-      .filter((e) => e.state === 'pending')
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const pendingExpenses = expenses.filter((e) => e.state === 'pending');
+    const totalPending = pendingExpenses.reduce(
+      (sum, e) => sum + Number(e.amount || 0),
+      0,
+    );
 
     return [
       {
         period_start: startDate,
         period_end: endDate,
+        // total_expenses = suma BRUTA de TODOS los gastos del período
+        // (incluyendo pending y cualquier estado). Coherente con
+        // total_count. Para el total "que sí cuenta como gasto del
+        // período" (per docstring) usar `total_recognized`.
         total_expenses: Math.round(totalExpenses * 100) / 100,
         total_recognized: Math.round(totalRecognized * 100) / 100,
         total_pending: Math.round(totalPending * 100) / 100,
         total_count: expenses.length,
         recognized_count: recognizedExpenses.length,
-        pending_count: expenses.filter((e) => e.state === 'pending').length,
+        pending_count: pendingExpenses.length,
+        // average_expense usa el total recognized y el conteo recognized,
+        // NO el total bruto — si no, promediaría gastos no aprobados
+        // dentro del "promedio del período" y mostraría una cifra
+        // artificialmente baja.
         average_expense:
-          expenses.length > 0
-            ? Math.round((totalExpenses / expenses.length) * 100) / 100
+          recognizedExpenses.length > 0
+            ? Math.round((totalRecognized / recognizedExpenses.length) * 100) / 100
             : 0,
       },
     ];
@@ -105,6 +118,8 @@ export class ExpensesAnalyticsService {
         category_id: true,
         expense_categories: { select: { name: true } },
       },
+      // Defense cap (mismo rationale que getExpensesSummaryForExport)
+      take: 100000,
     });
 
     const recognized = expenses.filter((e) =>

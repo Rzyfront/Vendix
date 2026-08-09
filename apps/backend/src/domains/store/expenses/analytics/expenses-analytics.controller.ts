@@ -14,11 +14,11 @@ import {
   ReportColumn,
   ReportSheet,
 } from '@common/reports/report-column.types';
-import { formatCellDate } from '@common/reports/report-builder';
 import { ExpensesAnalyticsService } from './expenses-analytics.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { paginatedOrAll } from '../../../../common/responses/paginated-helper';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 /**
@@ -40,11 +40,19 @@ export class ExpensesAnalyticsController {
 
   private async resolveReportTz(): Promise<string> {
     // Reutilizamos el patrón de analytics.controller.ts: tomar la TZ de
-    // la tienda vía resolveStoreTimezone.
-    const { RequestContextService } = await import('@common/context/request-context.service');
+    // la tienda vía resolveStoreTimezone. Si no hay contexto de tienda
+    // (request mal autenticado, bug en el guard, etc.) lanzamos un 500
+    // explícito en vez de fabricar silenciosamente una TZ — un reporte
+    // con TZ incorrecta corrompe TODAS las fechas para tiendas no-CO.
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
-    if (!storeId) return 'America/Bogota';
+    if (!storeId) {
+      throw new Error(
+        'resolveReportTz(): no store_id in request context. ' +
+          'Esto indica que el guard de auth no pobló el contexto — ' +
+          'revisar JwtAuthGuard / StoreContextGuard.',
+      );
+    }
     return resolveStoreTimezone(this.prisma, storeId);
   }
 

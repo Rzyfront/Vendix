@@ -485,7 +485,9 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         location: { store_id: storeId },
-        order_date: { gte: startDate, lte: endDate },
+        // order_date es DateTime? — filtrar nulls aquí evita que POs sin
+        // fecha caigan en el bucket 1970-01-01 al truncar en JS.
+        order_date: { not: null, gte: startDate, lte: endDate },
       },
       select: {
         status: true,
