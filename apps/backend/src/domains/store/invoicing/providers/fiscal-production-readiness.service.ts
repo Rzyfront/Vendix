@@ -696,6 +696,24 @@ export class FiscalProductionReadinessService {
     }
   }
 
+  /**
+   * ¿La DIAN aprobó el set de pruebas?
+   *
+   * Público porque `enablement_status: 'enabled'` lo necesita, y NO debe exigir
+   * readiness de producción: son dos cosas distintas y la DIAN las separa. Su
+   * correo de habilitación dice «ha finalizado el proceso de pruebas y actualmente
+   * se encuentra en estado habilitado», y en la MISMA carta pide, como paso
+   * posterior, «asociar y crear la numeración necesaria». O sea: habilitado ocurre
+   * ANTES de tener numeración de producción.
+   *
+   * Se expone el predicado en vez de duplicarlo para que el registro del estado y
+   * el checklist no puedan divergir — el mismo criterio que protege al resto del
+   * archivo.
+   */
+  hasPassedTestSetPublic(lastTestResult: unknown): boolean {
+    return this.hasPassedTestSet(lastTestResult);
+  }
+
   private hasPassedTestSet(lastTestResult: unknown): boolean {
     if (!lastTestResult || typeof lastTestResult !== 'object') return false;
     const data = lastTestResult as Record<string, any>;
