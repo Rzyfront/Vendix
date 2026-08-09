@@ -3,8 +3,8 @@ import {
   InvoiceControlSource,
 } from './invoice-control.helper';
 
-// Zona del emisor colombiano: UTC-5. Es la que hace visible el desplazamiento de
-// fecha civil, que es el motivo de que el resolvedor use `localDateString`.
+// Zona del emisor colombiano: UTC-5. Se pasa a propósito en cada llamada para
+// afirmar que NO influye en el período de autorización, que es fecha-sólo.
 const TZ = 'America/Bogota';
 
 /** Resolución completa y vigente, con los valores reales de la plataforma. */
@@ -48,22 +48,59 @@ describe('resolveInvoiceControl', () => {
     expect(typeof control.range_to).toBe('string');
   });
 
-  it('no desplaza un día las fechas civiles del período de autorización', () => {
-    // El instante almacenado es medianoche local de Bogotá, o sea 05:00 UTC.
-    // `toISOString().slice(0,10)` daría la fecha correcta aquí, pero para un
-    // instante guardado antes del desplazamiento —23:00 UTC del día anterior—
-    // daría el día equivocado. Se afirma el caso que rompe.
+  it('formatea el período como FECHA-SÓLO, sin desplazarlo por zona', () => {
+    // Forma REAL de producción: Postgres guarda la fecha civil como medianoche UTC.
+    // Convertirla a America/Bogota (UTC-5) daba el día ANTERIOR, y la DIAN lo
+    // rechazaba con FAB07b/FAB08b: enviábamos 2019-01-18 para un rango que la DIAN
+    // tiene desde el 2019-01-19.
     const control = resolveInvoiceControl(
       makeResolution({
-        valid_from: new Date('2019-01-19T03:00:00.000Z'), // 22:00 del 18 en Bogotá
-        valid_to: new Date('2030-01-20T03:00:00.000Z'), // 22:00 del 19 en Bogotá
+        valid_from: new Date('2019-01-19T00:00:00.000Z'),
+        valid_to: new Date('2030-01-19T00:00:00.000Z'),
+      }),
+      TZ, // zona del emisor: NO debe influir en una fecha-sólo
+      NOW,
+    );
+
+    expect(control.authorization_start_date).toBe('2019-01-19');
+    expect(control.authorization_end_date).toBe('2030-01-19');
+  });
+
+  it('da el mismo período sea cual sea la zona del emisor', () => {
+    const r = makeResolution({
+      valid_from: new Date('2019-01-19T00:00:00.000Z'),
+      valid_to: new Date('2030-01-19T00:00:00.000Z'),
+    });
+
+    // Una fecha-sólo no depende de la zona. Si dos zonas dieran distinto, el valor
+    // estaría recibiendo un desplazamiento que no le corresponde.
+    for (const tz of ['America/Bogota', 'UTC', 'Asia/Tokyo']) {
+      const c = resolveInvoiceControl(r, tz, NOW);
+      expect(c.authorization_start_date).toBe('2019-01-19');
+      expect(c.authorization_end_date).toBe('2030-01-19');
+    }
+  });
+
+  it('lee la fecha tal como se guardó, sin reinterpretarla en otra zona', () => {
+    // Este test afirmaba lo contrario: que un instante `2019-01-19T03:00Z` debía
+    // salir como `2019-01-18` porque en Bogotá son las 22:00 del día anterior. Ese
+    // razonamiento vale para un INSTANTE —la hora de emisión del documento— y es
+    // erróneo para una columna FECHA-SÓLO, que es lo que `valid_from` guarda. La
+    // DIAN lo rechazaba con FAB07b/FAB08b.
+    //
+    // Ahora la fecha se lee tal como está almacenada. Un valor a 03:00Z pertenece
+    // al día 19 en el almacenamiento, y 19 es lo que se declara.
+    const control = resolveInvoiceControl(
+      makeResolution({
+        valid_from: new Date('2019-01-19T03:00:00.000Z'),
+        valid_to: new Date('2030-01-20T03:00:00.000Z'),
       }),
       TZ,
       NOW,
     );
 
-    expect(control.authorization_start_date).toBe('2019-01-18');
-    expect(control.authorization_end_date).toBe('2030-01-19');
+    expect(control.authorization_start_date).toBe('2019-01-19');
+    expect(control.authorization_end_date).toBe('2030-01-20');
   });
 
   it('recorta los espacios del número de autorización y del prefijo', () => {

@@ -535,12 +535,15 @@ export class DianConfigService {
       // comprobación falla cerrado ante `undefined`, pero marcar una configuración
       // como habilitada es justo el momento en que el dato debe ser real.
       const shared_technical_key =
-        await this.readiness.findResolutionsSharingTechnicalKey({
-          organization_id: config.organization_id,
-          store_id: config.store_id,
-          accounting_entity_id: config.accounting_entity_id,
-          configuration_type: config.configuration_type,
-        });
+        await this.readiness.findResolutionsSharingTechnicalKey(
+          {
+            organization_id: config.organization_id,
+            store_id: config.store_id,
+            accounting_entity_id: config.accounting_entity_id,
+            configuration_type: config.configuration_type,
+          },
+          config.environment,
+        );
       this.readiness.assertProductionReady({
         ...config,
         enablement_status: status,
@@ -663,12 +666,17 @@ export class DianConfigService {
     // el documento se rechaza con el consecutivo gastado. Se resuelve antes de
     // evaluar porque el evaluador es sincrónico por diseño.
     const shared_technical_key =
-      await this.readiness.findResolutionsSharingTechnicalKey({
-        organization_id: config.organization_id,
-        store_id: config.store_id,
-        accounting_entity_id: config.accounting_entity_id,
-        configuration_type: config.configuration_type,
-      });
+      await this.readiness.findResolutionsSharingTechnicalKey(
+        {
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type: config.configuration_type,
+        },
+        // La evaluación se hace COMO SI fuera producción, así que el detector
+        // también: en habilitación la ClTec compartida es lo normal.
+        'production',
+      );
 
     const report = this.readiness.evaluateProductionReadiness({
       ...config,
