@@ -1634,6 +1634,18 @@ export class DianTestService {
       validate_only: options.validate_only === true,
       ...(options.validate_only ? { is_valid: success } : {}),
       total_documents: files.length,
+      // GENERADOS ≠ TRANSMITIDOS desde que el envío va en dos fases: si la fase 2
+      // se difiere, se generan 50 y salen 30. `total_documents` se conserva con su
+      // significado de siempre —lo generado— para no romper a quien ya lo lee, y
+      // los dos números van explícitos al lado. Es el mismo cuidado que este
+      // archivo ya se aplicó cuando `total_documents` devolvía 50 en una vía de
+      // humo de 1 documento: un número que el cliente no puede derivar es un
+      // número que el cliente va a malinterpretar.
+      // Nombres en plural-primero a propósito: la respuesta de este método ya
+      // expone un `documents_generated` BOOLEANO («llegamos a generar»), y dos
+      // campos con el mismo nombre y distinto tipo es una trampa garantizada.
+      generated_documents: files.length,
+      transmitted_documents: submissions.length,
       // Derivados de `composition`, no literales. Estaban escritos a mano como
       // 30/10/10, así que en cualquier modo con otra composición el registro
       // mentía sobre lo que se había enviado — justo el dato con el que se
@@ -1769,6 +1781,12 @@ export class DianTestService {
       // sí eran correctos. Lo persistido (`result_data.total_documents`) siempre
       // usó `files.length`: la mentira vivía solo en la respuesta.
       total_documents: files.length,
+      // Con dos fases, generado y transmitido pueden diferir: si la fase 2 se
+      // difiere se generan 50 y salen 30. Se dicen los dos en vez de dejar que se
+      // deduzcan. OJO: `documents_generated` de arriba es un BOOLEANO con otro
+      // significado («llegamos a generar»), y no es lo mismo que estos recuentos.
+      generated_documents: files.length,
+      transmitted_documents: submissions.length,
       invoices_count: composition.invoices,
       debit_notes_count: composition.debit_notes,
       credit_notes_count: composition.credit_notes,
