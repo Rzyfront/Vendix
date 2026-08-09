@@ -10,6 +10,8 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { KdsStationsService } from '../../../restaurant-ops/kds/services';
+import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
 import { map, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
@@ -478,6 +480,8 @@ export class ProductCreatePageComponent {
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
+  /** QUI-651 — estaciones de KDS para el selector del plato preparado. */
+  private readonly kdsStationsService = inject(KdsStationsService);
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
   private readonly fiscalGate = inject(FiscalGateService);
@@ -1366,7 +1370,12 @@ export class ProductCreatePageComponent {
     // autogenramos si el slug está vacío, así un edit manual gana sin tener
     // que trackear un flag `dirty` separado.
     this.setupAutoSlugGeneration();
-  }
+  
+    // QUI-651 — cargar estaciones para el selector del plato preparado. Va aca y no
+    // en un ngOnInit porque el componente no implementa OnInit: el resto de su
+    // inicializacion tambien vive en el constructor.
+    this.loadKdsStations();
+}
 
   /**
    * Autogen del slug desde el nombre del producto.
@@ -1631,6 +1640,11 @@ export class ProductCreatePageComponent {
         consultation_template_id: [null],
         preconsultation_template_id: [null],
         preparation_time_minutes: [null as number | null],
+        // QUI-651 — estacion de preparacion del plato. NULL significa "cae en el
+        // KDS por defecto de la tienda", que es lo que hace funcionar el caso de
+        // una sola estacion sin configurar nada. Solo significativo para
+        // product_type='prepared'.
+        kds_id: [null as number | null],
         // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
         // ===== Restaurant Suite toggles (Fase B) =====
@@ -1870,6 +1884,7 @@ export class ProductCreatePageComponent {
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
       preparation_time_minutes: product.preparation_time_minutes || null,
+      kds_id: (product as any).kds_id ?? null,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
       // Restaurant Suite toggles (Fase B)
@@ -3161,6 +3176,7 @@ export class ProductCreatePageComponent {
       service_pricing_type: 'Tipo de precio del servicio',
       service_instructions: 'Instrucciones del servicio',
       preparation_time_minutes: 'Tiempo de preparación',
+      kds_id: 'Estación de preparación',
     };
 
     // (a) Errores de FormControl ------------------------------------------
@@ -3589,6 +3605,10 @@ export class ProductCreatePageComponent {
       product_type: formValue.is_ingredient
         ? 'physical'
         : formValue.product_type || 'physical',
+      // QUI-651 — se envia explicitamente null cuando no hay estacion elegida, no
+      // se omite: omitirlo en una edicion dejaria la estacion anterior pegada al
+      // plato aunque el operador la haya limpiado.
+      kds_id: formValue.kds_id ? Number(formValue.kds_id) : null,
       preparation_time_minutes: formValue.preparation_time_minutes
         ? Number(formValue.preparation_time_minutes)
         : undefined,
@@ -4631,4 +4651,44 @@ export class ProductCreatePageComponent {
         },
       });
   }
+  // ------------------------------------------------------------- QUI-651
+  /**
+   * Estaciones de KDS de la tienda, para el selector del plato preparado.
+   *
+   * Se cargan solo cuando la tienda es restaurante: pedirlas en una tienda retail
+   * seria una llamada garantizada a devolver vacio.
+   */
+  readonly kdsStations = signal<KdsStation[]>([]);
+
+  readonly kdsStationOptions = computed<SelectorOption[]>(() =>
+    this.kdsStations()
+      .filter((s) => s.is_active)
+      .map((s) => ({
+        value: s.id,
+        label: s.is_default ? `${s.name} (por defecto)` : s.name,
+      })),
+  );
+
+  /**
+   * El campo de estacion solo aplica a platos preparados: el fire excluye
+   * explicitamente todo lo que no sea `prepared`, asi que en cualquier otro tipo
+   * la estacion no se leeria nunca.
+   */
+  isPreparedProduct(): boolean {
+    return this.productForm.get('product_type')?.value === 'prepared';
+  }
+
+  private loadKdsStations(): void {
+    if (!this.isRestaurant()) return;
+    this.kdsStationsService
+      .loadStations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (stations) => this.kdsStations.set(stations),
+        // Silencioso: sin estaciones el selector no se muestra y el plato cae en el
+        // KDS por defecto, que es el comportamiento correcto.
+        error: () => {},
+      });
+  }
+
 }

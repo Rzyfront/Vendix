@@ -78,6 +78,13 @@ export interface Product {
   consultation_template_id?: number;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   online_purchase_url?: string | null;
   online_purchase_qr_code?: string | null;
   online_purchase_domain_id?: number | null;
@@ -194,6 +201,13 @@ export interface ProductVariant {
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   image_id?: number;
   created_at: Date;
   updated_at: Date;
@@ -347,6 +361,13 @@ export interface CreateProductDto {
   consultation_template_id?: number | null;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   // ===== Restaurant Suite toggles (Fase B) =====
   is_sellable?: boolean;
   is_ingredient?: boolean;
@@ -450,6 +471,13 @@ export interface CreateProductVariantDto {
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
 }
 
 export interface CreateProductImageDto {

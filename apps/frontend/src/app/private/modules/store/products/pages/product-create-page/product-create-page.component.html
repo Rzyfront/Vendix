@@ -2568,6 +2568,25 @@
             tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
             customWrapperClass="!mt-0"
           ></app-input>
+
+          <!--
+            QUI-651 — estación de preparación. Solo se muestra para platos
+            preparados: para el resto no significa nada, porque el fire excluye
+            todo lo que no sea `prepared`.
+
+            Vacío = KDS por defecto de la tienda. Eso NO es un fallback defensivo:
+            es lo que hace que una tienda con una sola estación funcione sin
+            configurar un solo plato.
+          -->
+          @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+            <app-selector
+              label="Estación de preparación"
+              formControlName="kds_id"
+              placeholder="KDS por defecto de la tienda"
+              [options]="kdsStationOptions()"
+              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejás vacío, cae en la estación por defecto."
+            ></app-selector>
+          }
         </div>
       } @else {
         <app-input
