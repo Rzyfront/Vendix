@@ -530,6 +530,24 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   /**
+   * QUI-653 — ¿la cuenta mezcla consumo en la mesa con items para llevar?
+   *
+   * `computed` sobre la señal de sesión: el backend ya envía `is_mixed_order`
+   * derivado, pero se recalcula localmente como respaldo para que el badge
+   * responda al instante cuando la sesión se reemplaza tras agregar items, sin
+   * depender de que ese campo viaje en cada respuesta.
+   */
+  readonly isMixedOrder = computed(() => {
+    const items = this.session()?.order?.order_items ?? [];
+    if (this.session()?.order?.is_mixed_order != null) {
+      return this.session()!.order!.is_mixed_order === true;
+    }
+    return (
+      items.some((it) => it.is_takeaway) && items.some((it) => !it.is_takeaway)
+    );
+  });
+
+  /**
    * ¿Ya se le entregó al cliente? Lee el hecho de servicio en la línea de
    * pedido. Se acepta además el `delivered` del ticket como respaldo, porque el
    * reconciliador SSE puede adelantar el estado de cocina en vivo antes de que

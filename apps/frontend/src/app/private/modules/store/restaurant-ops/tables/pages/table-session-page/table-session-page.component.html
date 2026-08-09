@@ -47,6 +47,19 @@
                 ></app-icon>
                 {{ isClosed() ? 'Pagada / Cerrada' : 'Pago pendiente' }}
               </app-badge>
+              <!--
+                QUI-653 — la cuenta tiene items de consumo en la mesa Y items para
+                llevar. Va en la cabecera porque cambia cómo se cierra el pedido:
+                una parte se sirve y otra se empaca, y el tiquete debe distinguir
+                las dos. El valor lo deriva el backend de las líneas, no es una
+                columna, así que no puede quedar desincronizado de ellas.
+              -->
+              @if (isMixedOrder()) {
+                <app-badge class="hero-badge" variant="warning">
+                  <app-icon name="shopping-bag" [size]="12"></app-icon>
+                  Pedido mixto
+                </app-badge>
+              }
             </div>
 
             <!-- Detail rows -->

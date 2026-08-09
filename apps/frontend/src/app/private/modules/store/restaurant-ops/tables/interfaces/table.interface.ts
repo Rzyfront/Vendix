@@ -240,6 +240,13 @@ export interface TableSessionAddItem {
   product_variant_id?: number;
   quantity: number;
   price_tier_id?: number;
+  /**
+   * QUI-653 — el plato se empaca y el cliente se lo lleva, aunque siga
+   * perteneciendo a la cuenta de esta mesa. No se reinterpreta
+   * `orders.delivery_type`: es order-level y cambiarlo metería la orden en los
+   * flujos de remisión, donde no tiene nada que hacer.
+   */
+  is_takeaway?: boolean;
 }
 
 export type SplitMode = 'equal' | 'custom';

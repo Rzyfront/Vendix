@@ -165,6 +165,33 @@ export class AddItemsModalComponent {
     return this.selectedQty().get(productId) ?? 0;
   }
 
+  /**
+   * QUI-653 — productos marcados "para llevar" en esta tanda.
+   *
+   * Se lleva en un Set aparte y NO dentro de `selectedQty`, porque son dos
+   * dimensiones independientes: la cantidad decide si la línea existe, el flag
+   * decide cómo se entrega. Mezclarlos obligaría a un Map de objetos y a
+   * reconstruirlo en cada `bumpQty`.
+   *
+   * El flag aplica a TODA la línea. Marcar solo algunas unidades de una línea
+   * con cantidad > 1 exigiría partir la línea, que es el eje de QUI-655 y no de
+   * este ticket.
+   */
+  readonly takeawayIds = signal<Set<number>>(new Set());
+
+  isTakeaway(productId: number): boolean {
+    return this.takeawayIds().has(productId);
+  }
+
+  toggleTakeaway(product: SellableProductOption): void {
+    this.takeawayIds.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(product.id)) next.delete(product.id);
+      else next.add(product.id);
+      return next;
+    });
+  }
+
   increment(product: SellableProductOption): void {
     this.bumpQty(product, 1);
   }
@@ -181,7 +208,15 @@ export class AddItemsModalComponent {
   onSubmit(): void {
     const items: TableSessionAddItem[] = [];
     for (const [productId, qty] of this.selectedQty()) {
-      if (qty > 0) items.push({ product_id: productId, quantity: qty });
+      if (qty > 0)
+        items.push({
+          product_id: productId,
+          quantity: qty,
+          // Solo se envía cuando está marcado: el backend ya tiene default
+          // false, y mandar `false` explícito en cada línea ensucia el payload
+          // sin cambiar nada.
+          ...(this.isTakeaway(productId) && { is_takeaway: true }),
+        });
     }
     if (items.length === 0) {
       this.toastService.error('Agrega al menos un producto con cantidad > 0');
@@ -203,6 +238,9 @@ export class AddItemsModalComponent {
   // --- Private helpers ---------------------------------------------------
   private resetAndLoad(): void {
     this.selectedQty.set(new Map());
+    // QUI-653 — sin esto un "para llevar" de la tanda anterior sobrevive al
+    // cierre y se filtra a la siguiente, marcando un plato que nadie pidió así.
+    this.takeawayIds.set(new Set());
     this.productById.set(new Map());
     this.searchTerm.set('');
     this.form.controls.search.setValue('', { emitEvent: false });
@@ -217,6 +255,15 @@ export class AddItemsModalComponent {
     const map = new Map(this.selectedQty());
     if (next === 0) {
       map.delete(product.id);
+      // QUI-653 — al sacar el producto de la selección se limpia su flag. Si no,
+      // volver a agregarlo lo traeria marcado "para llevar" sin que nadie lo
+      // pidiera: la linea seria nueva pero el flag viejo.
+      this.takeawayIds.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Set(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
     } else {
       map.set(product.id, next);
     }
