@@ -147,7 +147,10 @@ export class ReviewsAnalyticsService {
       where: {
         store_id: storeId,
         created_at: { gte: startDate, lte: endDate },
-        product_id: { not: null },
+        // El `include: products` abajo ya hace inner join — Prisma solo
+        // retorna reviews con product_id no nulo. No hace falta `not: null`
+        // explícito (Prisma 7.4.1 rechaza `not: null` con "Argument `not`
+        // must not be null" para Int? fields).
       },
       include: {
         products: { select: { name: true, sku: true } },
