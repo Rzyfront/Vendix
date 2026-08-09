@@ -528,27 +528,28 @@ export class DianConfigService {
     }
 
     if (status === 'enabled') {
-      // `shared_technical_key` se resuelve y se pasa explícitamente. No basta con
-      // que `ReadinessConfig` lo declare obligatorio: `config` viene de
-      // `StorePrismaService`, cuyos modelos cuelgan de un `scoped_client: any`, así
-      // que difundirlo compila sin el campo y llegaría como `undefined`. La
-      // comprobación falla cerrado ante `undefined`, pero marcar una configuración
-      // como habilitada es justo el momento en que el dato debe ser real.
-      const shared_technical_key =
-        await this.readiness.findResolutionsSharingTechnicalKey(
-          {
-            organization_id: config.organization_id,
-            store_id: config.store_id,
-            accounting_entity_id: config.accounting_entity_id,
-            configuration_type: config.configuration_type,
-          },
-          config.environment,
+      // `enabled` REGISTRA UN HECHO DE LA DIAN, no concede permiso de emitir.
+      //
+      // Aquí se exigía `assertProductionReady`, que incluye tener la resolución de
+      // numeración de PRODUCCIÓN. La DIAN separa las dos cosas y su propio correo de
+      // habilitación lo dice: «ha finalizado el proceso de pruebas y actualmente se
+      // encuentra en estado habilitado», y a continuación pide, como paso
+      // POSTERIOR, «asociar y crear la numeración necesaria». Exigir la numeración
+      // para registrar el estado dejaba al campo incapaz de expresar la realidad:
+      // la plataforma estaba habilitada por la DIAN y en base seguía en
+      // `test_set_passed`.
+      //
+      // La compuerta de emisión productiva no se relaja: sigue en
+      // `promoteToProduction`, que exige `readiness.ready`, y en el gate que corre
+      // antes de cada emisión. Lo que se separa es el REGISTRO del hecho.
+      if (!this.readiness.hasPassedTestSetPublic(config.last_test_result)) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_ENABLEMENT_001,
+          'No se puede marcar la configuración como habilitada: la DIAN todavía no ' +
+            'aprobó el set de pruebas. Ejecuta el set y espera su veredicto.',
+          { dian_configuration_id: config.id },
         );
-      this.readiness.assertProductionReady({
-        ...config,
-        enablement_status: status,
-        shared_technical_key,
-      });
+      }
     }
 
     return this.prisma.dian_configurations.update({
