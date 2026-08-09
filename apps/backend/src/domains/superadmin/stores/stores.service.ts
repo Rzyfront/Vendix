@@ -15,12 +15,14 @@ import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
+import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 
 @Injectable()
 export class StoresService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly subscriptionTrialService: SubscriptionTrialService,
+    private readonly storeBootstrapHelper: StoreBootstrapHelper,
   ) {}
 
   async create(createStoreDto: CreateStoreDto) {
@@ -71,6 +73,16 @@ export class StoresService {
       store.id,
       organization_id,
     );
+
+    // Default cash register (QUI-654). This is the THIRD store-creation path:
+    // it writes `stores` directly instead of going through
+    // StoreBootstrapHelper.createStoreWithDefaultLocation, so it does not
+    // inherit the bootstrap's defaults. Reusing the helper's idempotent method
+    // keeps a single implementation across the three paths without having to
+    // make this non-transactional flow transactional.
+    await this.storeBootstrapHelper.ensureDefaultCashRegister({
+      store_id: store.id,
+    });
 
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
