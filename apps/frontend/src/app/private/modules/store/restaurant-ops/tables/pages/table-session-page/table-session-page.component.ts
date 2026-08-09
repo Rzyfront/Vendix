@@ -46,6 +46,11 @@ import {
   KdsSseService,
   KitchenMutationError,
 } from '../../../kds/services';
+import type {
+  FireItemExclusion,
+  FirePreview,
+} from '../../../kds/interfaces';
+import { KitchenConfirmModalComponent } from '../../../kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
@@ -95,6 +100,7 @@ import { AssignCustomerModalComponent } from '../../components/assign-customer-m
     SplitOrderModalComponent,
     TablePaymentModalComponent,
     AssignCustomerModalComponent,
+    KitchenConfirmModalComponent,
   ],
   templateUrl: './table-session-page.component.html',
   styleUrl: './table-session-page.component.scss',
@@ -127,6 +133,17 @@ export class TableSessionPageComponent implements OnInit {
    * reutilizar esa señal dejaría el botón sin spinner o marcaría otra fila.
    */
   readonly deliveringItemId = signal<number | null>(null);
+  /**
+   * QUI-655 — estado del modal de confirmacion de cocina. `pendingFireIds`
+   * sobrevive al modal porque el confirm necesita los MISMOS ids que se
+   * previsualizaron: recalcularlos desde la seleccion podria dar otro conjunto si
+   * el operador toco algo mientras el modal estaba abierto.
+   */
+  readonly kitchenConfirmOpen = signal(false);
+  readonly kitchenPreview = signal<FirePreview | null>(null);
+  readonly kitchenPreviewLoading = signal(false);
+  private readonly pendingFireIds = signal<number[]>([]);
+  private readonly pendingFireSingleId = signal<number | null>(null);
   readonly isSplitting = signal(false);
   readonly isClosing = signal(false);
   readonly isPaying = signal(false);
@@ -833,13 +850,72 @@ export class TableSessionPageComponent implements OnInit {
     this.fire(ids, null);
   }
 
+  /**
+   * QUI-655 — enviar a cocina pasa SIEMPRE por el modal de confirmacion.
+   *
+   * Este es el embudo unico de los dos disparadores (fireItem por fila y
+   * fireSelected por seleccion multiple), asi que interceptar aca cubre ambos. No
+   * se escribe NADA antes de confirmar: primero se previsualiza el arbol de receta,
+   * y el consumo de inventario ocurre solo tras el confirm.
+   */
   private fire(orderItemIds: number[], singleItemId: number | null): void {
+    const order = this.session()?.order;
+    if (!order) return;
+
+    this.pendingFireIds.set(orderItemIds);
+    this.pendingFireSingleId.set(singleItemId);
+    this.kitchenPreviewLoading.set(true);
+    this.kitchenConfirmOpen.set(true);
+
+    this.kitchenService
+      .previewFire({ order_id: order.id, order_item_ids: orderItemIds })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.kitchenPreview.set(preview);
+          this.kitchenPreviewLoading.set(false);
+        },
+        error: (err: unknown) => {
+          this.kitchenPreviewLoading.set(false);
+          this.kitchenConfirmOpen.set(false);
+          this.onKitchenMutationError(err);
+        },
+      });
+  }
+
+  /** Confirma el envio con las exclusiones que dejo el modal. */
+  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+    const ids = this.pendingFireIds();
+    if (ids.length === 0) return;
+    this.kitchenConfirmOpen.set(false);
+    this.executeFire(ids, this.pendingFireSingleId(), exclusions);
+  }
+
+  /** Cancelar no consume inventario ni crea tickets: el modal abre ANTES de escribir. */
+  onKitchenCancelled(): void {
+    this.kitchenConfirmOpen.set(false);
+    this.kitchenPreview.set(null);
+    this.pendingFireIds.set([]);
+    this.pendingFireSingleId.set(null);
+  }
+
+  private executeFire(
+    orderItemIds: number[],
+    singleItemId: number | null,
+    exclusions: FireItemExclusion[],
+  ): void {
     const order = this.session()?.order;
     if (!order) return;
     this.isFiring.set(true);
     this.firingItemId.set(singleItemId);
     this.kitchenService
-      .fireOrderItems({ order_id: order.id, order_item_ids: orderItemIds })
+      .fireOrderItems({
+        order_id: order.id,
+        order_item_ids: orderItemIds,
+        // Solo se manda cuando hay algo excluido: el backend trata la ausencia
+        // como "todos los componentes marcados", que es el camino rapido.
+        ...(exclusions.length > 0 && { exclusions }),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

@@ -627,4 +627,17 @@
     (isOpenChange)="isAssignCustomerOpen.set($event)"
     (assign)="onAssignCustomer($event)"
   />
+
+  <!--
+    QUI-655 — el envio a cocina pasa SIEMPRE por aca. Se abre ANTES de cualquier
+    escritura: cancelar no consume inventario ni crea tickets.
+  -->
+  <app-kitchen-confirm-modal
+    [isOpen]="kitchenConfirmOpen()"
+    [preview]="kitchenPreview()"
+    [isLoading]="kitchenPreviewLoading()"
+    [isSubmitting]="isFiring()"
+    (confirmed)="onKitchenConfirmed($event)"
+    (cancelled)="onKitchenCancelled()"
+  />
 </div>
