@@ -38,6 +38,7 @@ export class DianTestSetProcessor extends WorkerHost {
       validate_only,
       numbering_range,
       check_status,
+      validate_kind,
       context,
     } = job.data;
 
@@ -45,9 +46,9 @@ export class DianTestSetProcessor extends WorkerHost {
       `Procesando set de pruebas DIAN job=${job.id} config=${config_id} ` +
         `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}` +
         (validate_only
-          ? ' [VALIDACIÓN: SendBillSync, 1 documento, sin testSetId]'
+          ? ` [VALIDACIÓN: SendBillSync, 1 ${validate_kind ?? 'invoice'}, sin testSetId]`
           : smoke
-            ? ' [HUMO: 1 documento]'
+            ? ` [HUMO: 1 ${validate_kind ?? 'invoice'}]`
             : ''),
     );
 
@@ -75,6 +76,9 @@ export class DianTestSetProcessor extends WorkerHost {
             validate_only: validate_only === true,
             numbering_range: numbering_range === true,
             check_status: check_status === true,
+            // Se pasa tal cual, sin default: `executeTestSet` resuelve el suyo
+            // (`invoice`). Poner uno aquí duplicaría la decisión en dos sitios.
+            ...(validate_kind ? { validate_kind } : {}),
           }),
       );
     } catch (error: any) {

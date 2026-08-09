@@ -49,6 +49,7 @@ import {
 import {
   canWriteEnablementStatus,
   decideNotePhase,
+  resolveRegisteredInvoiceReferences,
   NOTE_PHASE_MAX_POLLS,
   NOTE_PHASE_POLL_DELAY_MS,
 } from './note-phase-gate.util';
@@ -395,6 +396,15 @@ export class DianTestService {
       validate_only?: boolean;
       numbering_range?: boolean;
       check_status?: boolean;
+      /**
+       * Qué documento emite la vía de diagnóstico. Por defecto una factura.
+       *
+       * Existe porque los rechazos que quedaban vivos eran de NOTA, y un humo que
+       * solo puede emitir facturas no puede medirlos: había que gastar los 50
+       * consecutivos del set completo para ver si una nota había quedado bien.
+       * Con esto la pregunta cuesta 1.
+       */
+      validate_kind?: DianDocumentKind;
     } = {},
   ) {
     // CONSULTA DE VEREDICTO — corta aquí, sin emitir ni reservar numeración.
@@ -646,8 +656,18 @@ export class DianTestService {
     // VÍA DE VALIDACIÓN — `options.validate_only`: la misma factura, sometida a
     // `SendBillSync` en vez de `SendTestSetAsync`. Comparte la composición de 1
     // documento por la razón de arriba.
+    //
+    // `validate_kind` elige QUÉ documento emite el diagnóstico. Sigue siendo UN
+    // consecutivo; lo que cambia es cuál de los tres tipos se pone a prueba. Una
+    // nota emitida así referencia una factura de un lote ANTERIOR que la DIAN ya
+    // aceptó (ver más abajo), no una de este lote: si no, el humo arrastraría
+    // CBG04a/DBG04a y no distinguiría «la nota está mal» de «su factura no existe».
     const composition = diagnostic
-      ? { invoices: 1, debit_notes: 0, credit_notes: 0 }
+      ? options.validate_kind === 'debit_note'
+        ? { invoices: 0, debit_notes: 1, credit_notes: 0 }
+        : options.validate_kind === 'credit_note'
+          ? { invoices: 0, debit_notes: 0, credit_notes: 1 }
+          : { invoices: 1, debit_notes: 0, credit_notes: 0 }
       : resolveTestSetComposition(config.operation_mode);
     const TEST_SET_SIZE = testSetSize(composition);
 
@@ -1018,6 +1038,35 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+    }
+
+    // 6a-bis. Cuando el lote NO emite facturas propias —el humo de una nota— la
+    // referencia sale de un lote ANTERIOR, de entre las facturas que la DIAN
+    // ACEPTÓ y por tanto tiene registradas.
+    //
+    // Es lo que hace que el humo de una nota sea una medición limpia: si la DIAN
+    // vuelve a objetar, la objeción es del documento y no de una factura que aún
+    // no existe de su lado. Sin esto el diagnóstico arrastraría CBG04a/DBG04a y
+    // volvería a mezclar las dos causas — el ruido que costó un mes separar.
+    if (
+      invoice_cufes.length === 0 &&
+      composition.debit_notes + composition.credit_notes > 0
+    ) {
+      const registered = resolveRegisteredInvoiceReferences(previous_result);
+      if (registered.length === 0) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_TEST_SET_003,
+          'No hay ninguna factura aceptada por la DIAN a la que la nota pueda referenciar. ' +
+            'Emite primero un set (o un humo de factura) y espera su veredicto: una nota ' +
+            'contra una factura no registrada se rechaza con CBG04a/DBG04a y gasta el consecutivo.',
+          { dian_configuration_id: config_id, resolution_id },
+        );
+      }
+      invoice_cufes.push(...registered);
+      this.logger.log(
+        `[DIAN test-set] la nota referenciará una factura ya aceptada: ` +
+          `${registered[0].number} (${registered.length} disponibles).`,
+      );
     }
 
     // 6b. Generate the debit notes, each referencing an invoice of this same set

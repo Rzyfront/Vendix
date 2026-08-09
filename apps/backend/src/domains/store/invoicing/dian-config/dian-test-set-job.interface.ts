@@ -69,6 +69,22 @@ export interface DianTestSetJob {
    */
   validate_only?: boolean;
   /**
+   * Qué tipo de documento emite la vía de diagnóstico: `invoice` (defecto),
+   * `debit_note` o `credit_note`. Sigue costando UN consecutivo.
+   *
+   * Existe porque los rechazos que quedaban vivos tras la habilitación eran todos
+   * de NOTA, y un humo que solo sabe emitir facturas no puede medirlos: para saber
+   * si una nota había quedado bien había que gastar los 50 consecutivos del set
+   * completo y esperar horas su veredicto. Con esto la pregunta cuesta 1 número y
+   * se responde en la misma llamada.
+   *
+   * Una nota emitida por esta vía referencia una factura de un lote ANTERIOR que
+   * la DIAN ya ACEPTÓ, no una de este lote — si no, arrastraría CBG04a/DBG04a
+   * («documento referenciado no existe») y el diagnóstico no distinguiría entre
+   * «la nota está mal armada» y «la factura a la que apunta no ha nacido».
+   */
+  validate_kind?: 'invoice' | 'debit_note' | 'credit_note';
+  /**
    * Snapshot del contexto tomado al encolar. El worker lo restaura con
    * `RequestContextService.run(...)` porque `StorePrismaService` lee el scope de
    * AsyncLocalStorage, que NO existe naturalmente dentro de un worker de BullMQ.

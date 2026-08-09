@@ -61,6 +61,64 @@ export function canWriteEnablementStatus(
   return current !== 'enabled';
 }
 
+/** Factura que la DIAN YA tiene registrada, apta para que una nota la referencie. */
+export interface RegisteredInvoiceReference {
+  number: string;
+  cufe: string;
+  date: string;
+}
+
+/**
+ * Facturas de un lote anterior que la DIAN ACEPTÓ, y por tanto tiene en sus
+ * registros.
+ *
+ * PARA QUÉ SIRVE
+ *
+ * Diagnosticar una nota necesita una factura que exista del lado de la DIAN. Sin
+ * esto, un humo de nota débito arrastraría CBG04a/DBG04a —«documento referenciado
+ * no existe»— y el diagnóstico no distinguiría entre «la nota está mal armada» y
+ * «la factura a la que apunta no ha nacido». Ese es justo el ruido que hizo falta
+ * un mes para separar la primera vez.
+ *
+ * Referenciar una factura YA aceptada convierte el humo en una medición limpia: si
+ * la DIAN sigue objetando, la objeción es del documento.
+ *
+ * LA ACEPTACIÓN SE CRUZA, NO SE SUPONE. `documents[]` dice qué se envió, y no si
+ * la DIAN lo aceptó: la aceptación vive en `zip_verdicts`, indexada por ZipKey, y
+ * el puente entre ambos es `submissions[].file_name`. Leer `documents` a secas
+ * devolvería también las rechazadas, que es el error que este cruce evita.
+ */
+export function resolveRegisteredInvoiceReferences(
+  last_test_result: unknown,
+): RegisteredInvoiceReference[] {
+  const result = (last_test_result ?? {}) as Record<string, any>;
+  const documents = Array.isArray(result.documents) ? result.documents : [];
+  const submissions = Array.isArray(result.submissions)
+    ? result.submissions
+    : [];
+  const verdicts = (result.zip_verdicts ?? {}) as Record<string, any>;
+
+  const zip_key_by_file = new Map<string, string>();
+  for (const s of submissions) {
+    if (s?.file_name && s?.zip_key) zip_key_by_file.set(s.file_name, s.zip_key);
+  }
+
+  const accepted: RegisteredInvoiceReference[] = [];
+  for (const doc of documents) {
+    if (doc?.kind !== 'invoice') continue;
+    if (!doc.number || !doc.cufe || !doc.issue_date) continue;
+    const zip_key = zip_key_by_file.get(doc.file_name);
+    if (!zip_key) continue;
+    if (verdicts[zip_key]?.success !== true) continue;
+    accepted.push({
+      number: doc.number,
+      cufe: doc.cufe,
+      date: doc.issue_date,
+    });
+  }
+  return accepted;
+}
+
 export type NotePhaseAction = 'send_notes' | 'keep_waiting' | 'defer_notes';
 
 export interface NotePhaseDecision {

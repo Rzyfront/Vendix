@@ -1,8 +1,89 @@
 import {
   canWriteEnablementStatus,
   decideNotePhase,
+  resolveRegisteredInvoiceReferences,
   NOTE_PHASE_MAX_POLLS,
 } from './note-phase-gate.util';
+
+/**
+ * Diagnosticar una nota necesita una factura que exista DEL LADO DE LA DIAN. Si
+ * se elige una rechazada, el humo arrastra CBG04a/DBG04a y vuelve a mezclar las
+ * dos causas que costó un mes separar: «la nota está mal armada» y «la factura a
+ * la que apunta no ha nacido».
+ */
+describe('resolveRegisteredInvoiceReferences', () => {
+  /** Lote con 3 facturas y 1 nota: dos facturas aceptadas, una rechazada. */
+  const batch = {
+    documents: [
+      { number: 'SETP1', cufe: 'a'.repeat(96), kind: 'invoice', file_name: 'f1.xml', issue_date: '2026-08-08' },
+      { number: 'SETP2', cufe: 'b'.repeat(96), kind: 'invoice', file_name: 'f2.xml', issue_date: '2026-08-08' },
+      { number: 'SETP3', cufe: 'c'.repeat(96), kind: 'invoice', file_name: 'f3.xml', issue_date: '2026-08-08' },
+      { number: 'SETP4', cufe: 'd'.repeat(96), kind: 'debit_note', file_name: 'f4.xml', issue_date: '2026-08-08' },
+    ],
+    submissions: [
+      { file_name: 'f1.xml', zip_key: 'zip-1' },
+      { file_name: 'f2.xml', zip_key: 'zip-2' },
+      { file_name: 'f3.xml', zip_key: 'zip-3' },
+      { file_name: 'f4.xml', zip_key: 'zip-4' },
+    ],
+    zip_verdicts: {
+      'zip-1': { success: true },
+      'zip-2': { success: false },
+      'zip-3': { success: true },
+      'zip-4': { success: true },
+    },
+  };
+
+  it('devuelve solo las facturas que la DIAN aceptó', () => {
+    const refs = resolveRegisteredInvoiceReferences(batch);
+    expect(refs.map((r) => r.number)).toEqual(['SETP1', 'SETP3']);
+  });
+
+  it('excluye la factura rechazada — leer documents a secas la incluiría', () => {
+    // SETP2 se envió y tiene ZipKey, así que aparece en `documents`. Lo que la
+    // descalifica es su veredicto, que vive en otro sitio.
+    const refs = resolveRegisteredInvoiceReferences(batch);
+    expect(refs.map((r) => r.number)).not.toContain('SETP2');
+  });
+
+  it('excluye las notas: una nota no puede referenciar otra nota', () => {
+    const refs = resolveRegisteredInvoiceReferences(batch);
+    expect(refs.map((r) => r.number)).not.toContain('SETP4');
+  });
+
+  it('devuelve número, CUFE y fecha — los tres que exige BillingReference', () => {
+    const [first] = resolveRegisteredInvoiceReferences(batch);
+    expect(first).toEqual({
+      number: 'SETP1',
+      cufe: 'a'.repeat(96),
+      date: '2026-08-08',
+    });
+  });
+
+  it('excluye una factura sin veredicto todavía', () => {
+    const refs = resolveRegisteredInvoiceReferences({
+      ...batch,
+      zip_verdicts: { 'zip-1': { success: true } },
+    });
+    expect(refs.map((r) => r.number)).toEqual(['SETP1']);
+  });
+
+  it('excluye una factura cuyo envío no obtuvo ZipKey', () => {
+    const refs = resolveRegisteredInvoiceReferences({
+      ...batch,
+      submissions: [{ file_name: 'f1.xml', zip_key: null }],
+    });
+    expect(refs).toEqual([]);
+  });
+
+  it('devuelve vacío sobre un lote ausente o vacío, sin lanzar', () => {
+    // El llamador convierte el vacío en un error con instrucciones; esta función
+    // no decide, solo informa.
+    expect(resolveRegisteredInvoiceReferences(null)).toEqual([]);
+    expect(resolveRegisteredInvoiceReferences({})).toEqual([]);
+    expect(resolveRegisteredInvoiceReferences({ documents: 'no-es-lista' })).toEqual([]);
+  });
+});
 
 /**
  * `enabled` es TERMINAL y lo concede la DIAN. Ninguna rama de `executeTestSet`
