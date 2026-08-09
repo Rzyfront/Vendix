@@ -77,11 +77,27 @@ function describe(ctx?: InvoiceControlContext): string {
 /**
  * Construye `DianInvoiceControl` desde la resolución de numeración.
  *
- * Las dos fechas del período de autorización son fechas CIVILES del emisor, así
- * que se derivan en su zona con `localDateString`. Serializar el instante con
- * `toISOString()` las desplazaría un día siempre que el instante almacenado caiga
- * antes del desplazamiento UTC de la zona — que es el caso de toda Colombia
- * (UTC-5) para cualquier fecha guardada a medianoche local.
+ * LAS DOS FECHAS DEL PERÍODO SON FECHA-SÓLO, NO INSTANTES — y por eso se
+ * formatean en UTC y NO en la zona del emisor.
+ *
+ * `valid_from` y `valid_to` guardan una fecha civil sin hora: Postgres las
+ * almacena como medianoche UTC (`2019-01-19T00:00:00.000Z`). Convertir eso a
+ * America/Bogota (UTC-5) da las 19:00 del día ANTERIOR, así que
+ * `localDateString(valid_from, 'America/Bogota')` devolvía `2019-01-18` para una
+ * resolución que la DIAN tiene registrada desde el `2019-01-19`. Medido en
+ * producción, y es exactamente lo que la DIAN rechazaba:
+ *
+ *   FAB07b  «Fecha inicial del rango de numeración informado no corresponde a la
+ *            fecha inicial de los rangos vigente para el contribuyente»
+ *   FAB08b  igual con la fecha final
+ *
+ * El razonamiento que había aquí —derivar en la zona del emisor porque
+ * `toISOString()` desplaza un día— es correcto para un INSTANTE, como la fecha y
+ * hora de emisión del documento. Aplicado a una columna fecha-sólo hace justo el
+ * daño que pretende evitar: le mete un desplazamiento de zona a un valor que no
+ * tiene hora que desplazar.
+ *
+ * Regla: instante → zona del emisor. Fecha-sólo → UTC, tal como se guardó.
  *
  * @param resolution Fila de `invoice_resolutions` de la que cuelga la numeración.
  * @param timezone   Zona del emisor (`resolveStoreTimezone`, o el default).
@@ -152,16 +168,17 @@ export function resolveInvoiceControl(
   if (now < resolution.valid_from || now > resolution.valid_to) {
     throw new Error(
       `La resolución no está vigente${where}: su período va de ` +
-        `${localDateString(resolution.valid_from, timezone)} a ` +
-        `${localDateString(resolution.valid_to, timezone)}. No se emite fuera del ` +
+        `${localDateString(resolution.valid_from, 'UTC')} a ` +
+        `${localDateString(resolution.valid_to, 'UTC')}. No se emite fuera del ` +
         'período que la DIAN autorizó.',
     );
   }
 
   return {
     invoice_authorization,
-    authorization_start_date: localDateString(resolution.valid_from, timezone),
-    authorization_end_date: localDateString(resolution.valid_to, timezone),
+    // UTC, no `timezone`: ver la nota de fecha-sólo en la cabecera del archivo.
+    authorization_start_date: localDateString(resolution.valid_from, 'UTC'),
+    authorization_end_date: localDateString(resolution.valid_to, 'UTC'),
     prefix,
     range_from: String(resolution.range_from),
     range_to: String(resolution.range_to),

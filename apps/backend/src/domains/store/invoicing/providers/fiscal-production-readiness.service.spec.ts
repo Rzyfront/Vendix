@@ -213,7 +213,10 @@ describe('FiscalProductionReadinessService', () => {
         ],
       );
 
-      const finding = await service.findResolutionsSharingTechnicalKey(PARAMS);
+      const finding = await service.findResolutionsSharingTechnicalKey(
+        PARAMS,
+        'production',
+      );
 
       expect(finding).not.toBeNull();
       expect(finding!.resolution_id).toBe(10);
@@ -237,7 +240,10 @@ describe('FiscalProductionReadinessService', () => {
       // Mismo NIT con el DV pegado: `onlyDigits` no basta, así que se compara la
       // base. Aquí se afirma el comportamiento actual — comparación por dígitos—
       // para que un cambio futuro sea visible.
-      const finding = await service.findResolutionsSharingTechnicalKey(PARAMS);
+      const finding = await service.findResolutionsSharingTechnicalKey(
+        PARAMS,
+        'production',
+      );
       expect(finding?.foreign.map((f) => f.resolution_id)).toEqual([9]);
     });
 
@@ -248,7 +254,30 @@ describe('FiscalProductionReadinessService', () => {
       );
 
       await expect(
-        service.findResolutionsSharingTechnicalKey(PARAMS),
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
+    it('NO reporta nada en habilitación: la DIAN da a todos el mismo rango', async () => {
+      // Verificado contra el portal de habilitación de dos NIT distintos: prefijo
+      // SETP, resolución 18760000001, rango 990000000-995000000 y la MISMA clave
+      // técnica. Compartirla ahí no es contaminación entre tenants, es cómo
+      // funciona el ambiente de pruebas. La primera versión de este check no lo
+      // distinguía y habría bloqueado a todo tenant en habilitación.
+      const service = withResolutions(
+        {
+          id: 10,
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'test'),
+      ).resolves.toBeNull();
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, undefined),
       ).resolves.toBeNull();
     });
 

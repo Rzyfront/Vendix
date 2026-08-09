@@ -412,8 +412,10 @@ export class FiscalProductionReadinessService {
         // Se consulta aquí, donde hay `params` y contexto async, y se pasa como
         // dato: `assertProductionReady` y `evaluateProductionReadiness` son
         // sincrónicos a propósito para que el gate y la lista no puedan divergir.
-        shared_technical_key:
-          await this.findResolutionsSharingTechnicalKey(params),
+        shared_technical_key: await this.findResolutionsSharingTechnicalKey(
+          params,
+          config.environment,
+        ),
       });
       // La DIAN no emite resolución de numeración para la nómina electrónica
       // (el DSPNE numera con su propio consecutivo NumNE, no con una
@@ -705,7 +707,22 @@ export class FiscalProductionReadinessService {
    */
   async findResolutionsSharingTechnicalKey(
     params: ResolveConfigParams,
+    environment?: string,
   ): Promise<SharedTechnicalKeyFinding | null> {
+    // SOLO APLICA A PRODUCCIÓN, y esto es una corrección de la primera versión.
+    //
+    // En habilitación la DIAN asigna a TODO contribuyente el MISMO rango de
+    // prueba: prefijo `SETP`, resolución `18760000001`, rango 990000000-995000000
+    // y la MISMA clave técnica. Verificado contra el portal de habilitación de dos
+    // NIT distintos. Compartirla ahí no es contaminación entre tenants — es cómo
+    // funciona el ambiente de pruebas.
+    //
+    // La primera versión de este check no lo distinguía y habría bloqueado a todo
+    // tenant en habilitación, que es justo cuando más necesita emitir. La regla de
+    // «una ClTec por (NIT, rango)» rige la numeración de PRODUCCIÓN, que sí sale de
+    // una resolución propia solicitada en MUISCA.
+    if (environment !== 'production') return null;
+
     const document_type =
       params.document_type ?? this.defaultDocumentType(params.configuration_type);
     const own = await this.prisma
