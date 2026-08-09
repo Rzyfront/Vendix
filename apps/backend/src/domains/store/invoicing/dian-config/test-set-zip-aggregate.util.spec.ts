@@ -14,8 +14,16 @@ import {
  * 1 mientras el portal mostraba Recibidos 0, y nadie podía saber si la DIAN había
  * rechazado el 37.
  *
- * Lo que se fija acá es la REGLA DE AGREGACIÓN: un rechazo gana sobre lo
- * pendiente, y el éxito exige que TODOS resuelvan.
+ * Lo que se fija acá es la REGLA DE AGREGACIÓN, y CAMBIÓ el 9-ago-2026 porque la
+ * DIAN falseó su premisa. Decía «un rechazo gana sobre lo pendiente, y el éxito
+ * exige que TODOS resuelvan», con el argumento de que la DIAN exige la composición
+ * completa. No es así: aprobó el set de la plataforma —«Su empresa ha superado
+ * satisfactoriamente las pruebas de validación»— con 30 facturas aceptadas y 167
+ * documentos rechazados acumulados.
+ *
+ * El criterio real es el «Total de documentos aceptados requeridos» del portal:
+ * 1 documento, 1 factura, 0 notas. Por eso el éxito se decide por el MÍNIMO
+ * ACEPTADO y el rechazo solo cuando ya no queda nada por resolver.
  */
 describe('aggregateZipVerdicts', () => {
   const RESOLVED_AT = '2026-08-07T12:00:00.000Z';
@@ -46,44 +54,74 @@ describe('aggregateZipVerdicts', () => {
       return acc;
     }, {});
 
-  it('un solo rechazo entre 50 rechaza el lote completo, aunque falten por resolver', () => {
+  it('APRUEBA con rechazos si se alcanzó el mínimo aceptado — el caso real', () => {
     const all = keys(50);
-    // 20 aceptados, 1 rechazado, 29 sin veredicto todavía.
+    // El lote real de la plataforma: 30 aceptadas, 20 rechazadas, 0 pendientes.
+    // El portal lo declaró superado. La regla anterior lo daba por rechazado y
+    // bloqueaba una habilitación ya ganada.
     const verdicts = byKey([
-      ...all.slice(0, 20).map(accepted),
-      rejected('zip-37'),
+      ...all.slice(0, 30).map(accepted),
+      ...all.slice(30, 50).map(rejected),
     ]);
 
     const result = aggregateZipVerdicts(all, verdicts);
 
-    expect(result.rejected).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.rejected).toBe(false);
     expect(result.pending).toBe(false);
-    expect(result.success).toBe(false);
-    // El primary apunta al RECHAZO: es lo que el operador necesita leer.
-    expect(result.primary_key).toBe('zip-37');
     expect(result.counts).toEqual({
       total: 50,
-      resolved: 21,
-      rejected: 1,
-      accepted: 20,
-      pending: 29,
+      resolved: 50,
+      rejected: 20,
+      accepted: 30,
+      pending: 0,
     });
   });
 
-  it('sigue pendiente mientras quede uno sin veredicto y no haya rechazos', () => {
+  it('declara éxito EN CUANTO se alcanza el mínimo, sin esperar al resto', () => {
     const all = keys(50);
-    const verdicts = byKey(all.slice(0, 49).map(accepted));
+    // Una aceptada y 49 sin veredicto: la DIAN ya no puede quitar esa aceptación,
+    // así que esperar solo alarga una espera cuyo resultado está decidido.
+    const result = aggregateZipVerdicts(all, byKey([accepted('zip-0')]));
 
-    const result = aggregateZipVerdicts(all, verdicts);
+    expect(result.success).toBe(true);
+    expect(result.pending).toBe(false);
+    expect(result.primary_key).toBe('zip-0');
+    expect(result.counts.pending).toBe(49);
+  });
+
+  it('RECHAZA solo cuando todo resolvió y el mínimo no se alcanzó', () => {
+    const all = keys(50);
+    const result = aggregateZipVerdicts(all, byKey(all.map(rejected)));
+
+    expect(result.rejected).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.pending).toBe(false);
+    expect(result.primary_key).toBe('zip-0');
+  });
+
+  it('sigue pendiente mientras no se alcance el mínimo y falte por resolver', () => {
+    const all = keys(50);
+    // 20 rechazadas, ninguna aceptada, 30 sin veredicto: todavía puede aprobar.
+    const result = aggregateZipVerdicts(
+      all,
+      byKey(all.slice(0, 20).map(rejected)),
+    );
 
     expect(result.pending).toBe(true);
     expect(result.success).toBe(false);
     expect(result.rejected).toBe(false);
-    expect(result.primary_key).toBeNull();
-    expect(result.counts.pending).toBe(1);
   });
 
-  it('aprueba solo cuando los 50 resolvieron con éxito', () => {
+  it('respeta un mínimo distinto del predeterminado', () => {
+    const all = keys(50);
+    const verdicts = byKey(all.slice(0, 3).map(accepted));
+
+    expect(aggregateZipVerdicts(all, verdicts, 3).success).toBe(true);
+    expect(aggregateZipVerdicts(all, verdicts, 4).success).toBe(false);
+  });
+
+  it('aprueba cuando los 50 resolvieron con éxito', () => {
     const all = keys(50);
 
     const result = aggregateZipVerdicts(all, byKey(all.map(accepted)));
@@ -101,7 +139,7 @@ describe('aggregateZipVerdicts', () => {
     });
   });
 
-  it('un lote de un solo ZipKey se comporta igual que antes del cambio', () => {
+  it('un lote de un solo ZipKey: aceptado aprueba, rechazado rechaza', () => {
     expect(aggregateZipVerdicts(['solo'], {}).pending).toBe(true);
     expect(aggregateZipVerdicts(['solo'], byKey([accepted('solo')])).success).toBe(
       true,
@@ -121,13 +159,16 @@ describe('aggregateZipVerdicts', () => {
 
     expect(result.counts.total).toBe(2);
     expect(result.counts.resolved).toBe(1);
+    // `zip-a` está aceptada, así que con mínimo 1 el lote ya aprueba. Lo que este
+    // caso fija es que los huérfanos NO entran en el recuento: sin la guarda,
+    // `resolved` sería 3 sobre un total de 2.
+    expect(result.success).toBe(true);
     expect(result.rejected).toBe(false);
-    expect(result.pending).toBe(true);
   });
 
   it('no declara éxito sobre un lote sin ZipKeys', () => {
-    // Sin la guarda de `total > 0`, `resolved === total` sería `0 === 0` y esto
-    // devolvería un set aprobado sin que se haya enviado nada.
+    // Sin la guarda de `total > 0`, un lote vacío con mínimo 0 devolvería un set
+    // aprobado sin que se haya enviado nada.
     const result = aggregateZipVerdicts([], {});
 
     expect(result.success).toBe(false);

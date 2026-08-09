@@ -1,3 +1,5 @@
+import { DIAN_TEST_SET_MIN_ACCEPTED_DOCUMENTS } from './dian-test-set-composition';
+
 /**
  * Agregación del veredicto de un lote de habilitación repartido en N ZipKeys.
  *
@@ -60,17 +62,28 @@ export interface TestSetZipAggregate {
 /**
  * Combina los veredictos conocidos de un lote en un estado único.
  *
- * REGLA DE AGREGACIÓN — un lote de habilitación es atómico frente al operador:
+ * REGLA DE AGREGACIÓN — la decide el MÍNIMO ACEPTADO, no la ausencia de rechazos:
  *
- *   · cualquier ZipKey terminal sin éxito  ⇒ RECHAZADO
- *   · todos resueltos y todos con éxito    ⇒ APROBADO
+ *   · aceptados >= mínimo                  ⇒ APROBADO
+ *   · todos resueltos y aceptados < mínimo ⇒ RECHAZADO
  *   · en cualquier otro caso               ⇒ PENDIENTE
  *
- * El rechazo gana sobre lo pendiente a propósito. La DIAN exige la composición
- * completa del set, así que un documento rechazado invalida el lote entero: dar
- * «pendiente» mientras se sabe que hay un rechazo alarga una espera cuyo
- * resultado ya está decidido — que es exactamente el fallo que esta función
- * existe para cerrar.
+ * ⚠️ ESTO CORRIGE UNA REGLA ANTERIOR QUE BLOQUEÓ UNA HABILITACIÓN YA GANADA.
+ *
+ * Decía «cualquier ZipKey terminal sin éxito ⇒ RECHAZADO», con el razonamiento de
+ * que «la DIAN exige la composición completa del set, así que un documento
+ * rechazado invalida el lote entero». La DIAN falseó esa premisa: aprobó el set de
+ * la plataforma —«Su empresa ha superado satisfactoriamente las pruebas de
+ * validación»— con 30 facturas aceptadas y 167 documentos rechazados acumulados.
+ *
+ * Su criterio real es el de «Total de documentos aceptados requeridos» del portal:
+ * 1 documento, 1 factura electrónica, 0 notas. Ver
+ * `DIAN_TEST_SET_MIN_ACCEPTED_DOCUMENTS`.
+ *
+ * El éxito se declara EN CUANTO se alcanza el mínimo, sin esperar a que el resto
+ * resuelva: es lo que hace la DIAN, y esperar de más alarga una espera cuyo
+ * resultado ya está decidido — el mismo argumento de la regla anterior, aplicado
+ * al criterio correcto.
  *
  * `zip_keys` manda sobre `verdicts`: un veredicto huérfano (de un lote anterior
  * que quedó en el JSON) no cuenta, y un ZipKey sin veredicto cuenta como
@@ -79,6 +92,7 @@ export interface TestSetZipAggregate {
 export function aggregateZipVerdicts(
   zip_keys: string[],
   verdicts: Record<string, TestSetZipVerdict>,
+  min_accepted: number = DIAN_TEST_SET_MIN_ACCEPTED_DOCUMENTS,
 ): TestSetZipAggregate {
   const unique = Array.from(
     new Set(zip_keys.filter((k) => typeof k === 'string' && k.length > 0)),
@@ -96,20 +110,21 @@ export function aggregateZipVerdicts(
     pending: unique.length - resolved.length,
   };
 
-  const rejected = rejected_keys.length > 0;
   // Un lote sin ZipKeys no está aprobado: no hay nada que aprobar. Sin esta
-  // guarda `resolved === total` sería `0 === 0` y devolvería éxito sobre la nada.
-  const success =
-    !rejected && counts.total > 0 && counts.resolved === counts.total;
-  const pending = !rejected && !success;
+  // guarda `accepted >= 1` sobre un lote vacío devolvería éxito sobre la nada.
+  const success = counts.total > 0 && counts.accepted >= min_accepted;
+  const all_resolved = counts.total > 0 && counts.resolved === counts.total;
+  // Rechazado solo cuando ya no queda nada por resolver y el mínimo no se alcanzó.
+  const rejected = !success && all_resolved;
+  const pending = !success && !all_resolved;
 
   return {
     counts,
-    primary_key: rejected
-      ? rejected_keys[0]
-      : success
-        ? accepted_keys[0]
-        : null,
+    primary_key: success
+      ? accepted_keys[0]
+      : rejected
+        ? rejected_keys[0]
+        : (rejected_keys[0] ?? null),
     success,
     pending,
     rejected,
