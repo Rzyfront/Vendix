@@ -1,7 +1,122 @@
 import {
   TEST_SET_STALL_AFTER_MS,
   analyzeTestSetWait,
+  resolveTestSetProof,
 } from './test-set-wait.util';
+
+/**
+ * ESTE RESOLVEDOR EXISTE PORQUE SU AUSENCIA BORRÓ UNA HABILITACIÓN EN LA UI.
+ *
+ * `last_test_result` cumple dos papeles incompatibles: puntero al lote en vuelo y
+ * prueba de que la DIAN aprobó el set. El 2026-08-09 la plataforma quedó habilitada
+ * a las 05:59Z, un reenvío accidental sobrescribió el registro a las 18:53Z, y
+ * descartar ese lote a las 19:41Z dejó la UI diciendo «habilitación pendiente».
+ */
+describe('resolveTestSetProof', () => {
+  const evidence = { zip_key: 'aprobado', dian_response: { success: true } };
+  const latest = { zip_key: 'fallido', rejected: true, abandoned: true };
+
+  it('antepone la evidencia durable cuando la config está habilitada', () => {
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: evidence,
+        last_test_result: latest,
+      }),
+    ).toBe(evidence);
+  });
+
+  it('la antepone también con el set aprobado pero aún sin habilitar', () => {
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'test_set_passed',
+        enablement_evidence: evidence,
+        last_test_result: latest,
+      }),
+    ).toBe(evidence);
+  });
+
+  it('DURANTE la habilitación devuelve el último lote — es la única fuente', () => {
+    // Anteponer una evidencia vieja aquí esconderÍa el intento en curso, que es
+    // justo lo que el operador necesita ver.
+    for (const status of ['not_started', 'testing', 'rejected']) {
+      expect(
+        resolveTestSetProof({
+          enablement_status: status,
+          enablement_evidence: evidence,
+          last_test_result: latest,
+        }),
+      ).toBe(latest);
+    }
+  });
+
+  it('cae al último lote si la evidencia falta, aun estando habilitada', () => {
+    // Configuraciones habilitadas antes de que `enablement_evidence` existiera.
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: null,
+        last_test_result: latest,
+      }),
+    ).toBe(latest);
+  });
+
+  /**
+   * Una evidencia SIN veredicto no puede anteponerse: haría lo contrario de lo que
+   * esta función busca — leer «no pasó» sobre una habilitación real, perdiendo el
+   * respaldo del último lote. La primera versión de este resolvedor rompió cinco
+   * casos del spec de readiness por eso, y el spec tenía razón.
+   */
+  it('ignora una evidencia que no lleva veredicto', () => {
+    const stub = { track_id: 'track-1' };
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: stub,
+        last_test_result: { success: true },
+      }),
+    ).toEqual({ success: true });
+  });
+
+  it('acepta la evidencia con veredicto en cualquiera de sus dos formas', () => {
+    const plano = { success: true };
+    const anidado = { dian_response: { success: true } };
+    for (const ev of [plano, anidado]) {
+      expect(
+        resolveTestSetProof({
+          enablement_status: 'enabled',
+          enablement_evidence: ev,
+          last_test_result: latest,
+        }),
+      ).toBe(ev);
+    }
+  });
+
+  it('antepone también una evidencia que registra un veredicto NEGATIVO', () => {
+    // `success: false` sigue siendo un veredicto: si el estado dice que el set
+    // pasó y la evidencia dice lo contrario, esa contradicción debe ser visible,
+    // no taparse con el último lote.
+    const negativa = { success: false, zip_key: 'raro' };
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: negativa,
+        last_test_result: latest,
+      }),
+    ).toBe(negativa);
+  });
+
+  it('un lote descartado ya no puede tapar una habilitación concedida', () => {
+    // El caso exacto del 2026-08-09: `abandoned: true` hacía que
+    // `analyzeTestSetWait` devolviera «descartado, ejecuta un set nuevo».
+    const proof = resolveTestSetProof({
+      enablement_status: 'enabled',
+      enablement_evidence: evidence,
+      last_test_result: { abandoned: true, zip_key: null },
+    });
+    expect(proof).toBe(evidence);
+  });
+});
 
 /**
  * Estos casos existen por un bug de producción, no por cobertura.
