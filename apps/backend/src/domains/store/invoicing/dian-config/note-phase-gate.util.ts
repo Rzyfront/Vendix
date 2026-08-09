@@ -61,6 +61,43 @@ export function canWriteEnablementStatus(
   return current !== 'enabled';
 }
 
+/**
+ * ¿La DIAN ya CERRÓ el set de pruebas de esta configuración?
+ *
+ * EL DEFECTO QUE CIERRA — medido, y costó 30 consecutivos
+ *
+ * La DIAN no vuelve a aceptar documentos contra un set que ya aprobó. Responde
+ * status **2** a CADA documento, con este texto literal:
+ *
+ *   «Set de prueba con identificador 16bea3b2-eb83-40fe-a7cc-8d0f968b0713
+ *    se encuentra Aceptado.»
+ *
+ * Medido el 2026-08-09 sobre la plataforma (NIT 902056589): un reenvío del set
+ * mandó 30 facturas y la DIAN rechazó las 30 con ese mensaje. No rechazó los
+ * documentos —estaban bien, el humo sincrónico de ese mismo código dio
+ * `is_valid: true`—: rechazó el ENVÍO, porque el set está cerrado.
+ *
+ * Nada lo impedía. `enqueueTestSet` ya bloqueaba por ambiente de producción y por
+ * lote en validación, pero no por «el set ya está aprobado», así que 30
+ * consecutivos autorizados se gastaron para obtener 30 veces la misma frase.
+ *
+ * NO BLOQUEA LAS VÍAS DE DIAGNÓSTICO. `validate_only` y `smoke` deben seguir
+ * abiertas: son precisamente cómo se comprueba un arreglo DESPUÉS de la
+ * habilitación, van por `SendBillSync` sin `testSetId` y no tocan el set. El humo
+ * de las dos notas corrigidas se hizo así, con la habilitación ya concedida.
+ *
+ * Los dos estados cuentan como cerrado: `test_set_passed` es nuestra lectura del
+ * veredicto y `enabled` es el hecho que la DIAN reporta. Si el set pasó, la DIAN
+ * lo cerró — el orden entre los dos no cambia la consecuencia.
+ */
+export function isTestSetClosedByDian(
+  enablement_status: string | null | undefined,
+): boolean {
+  return (
+    enablement_status === 'test_set_passed' || enablement_status === 'enabled'
+  );
+}
+
 /** Factura que la DIAN YA tiene registrada, apta para que una nota la referencie. */
 export interface RegisteredInvoiceReference {
   number: string;

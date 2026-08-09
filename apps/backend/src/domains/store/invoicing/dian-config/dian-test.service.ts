@@ -49,6 +49,7 @@ import {
 import {
   canWriteEnablementStatus,
   decideNotePhase,
+  isTestSetClosedByDian,
   resolveRegisteredInvoiceReferences,
   NOTE_PHASE_MAX_POLLS,
   NOTE_PHASE_POLL_DELAY_MS,
@@ -288,6 +289,33 @@ export class DianTestService {
     // bloque de consecutivos en un set que la DIAN todavía debe juzgar, y una
     // validación sincrónica no se envía al set. Sin esta exención el diagnóstico
     // sería inalcanzable justo cuando más se necesita — con un lote atascado.
+    // LA DIAN NO ACEPTA DOCUMENTOS CONTRA UN SET QUE YA APROBÓ.
+    //
+    // Responde status 2 a cada uno: «Set de prueba con identificador … se
+    // encuentra Aceptado.» Medido el 2026-08-09: un reenvío gastó 30 consecutivos
+    // autorizados para cosechar 30 veces esa frase. Los documentos estaban bien —
+    // el humo sincrónico del mismo código dio `is_valid: true`.
+    //
+    // Las vías de diagnóstico quedan EXENTAS: `validate_only` y `smoke` van por
+    // `SendBillSync` sin `testSetId`, no tocan el set, y son justamente cómo se
+    // comprueba un arreglo después de la habilitación.
+    if (
+      !options.validate_only &&
+      !options.smoke &&
+      isTestSetClosedByDian(config.enablement_status)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya aprobó el set de pruebas de esta configuración y no acepta más documentos contra él: ' +
+          'responde «Set de prueba … se encuentra Aceptado» y cada consecutivo enviado se pierde. ' +
+          'Para comprobar un arreglo usa la vía de validación sincrónica, que cuesta 1 consecutivo y no toca el set.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
+      );
+    }
+
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
     if (
       !options.validate_only &&
@@ -459,6 +487,31 @@ export class DianTestService {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
+      );
+    }
+
+    // SET YA APROBADO POR LA DIAN — copia de la guarda de `enqueueTestSet`, y por
+    // la misma razón que el comentario de abajo da para la guarda de lote pendiente:
+    // las dos copias tienen que existir o ninguna sirve. La cola se puede alimentar
+    // directamente sin pasar por `enqueueTestSet` —así se ejecutaron todos los
+    // envíos de operador de esta habilitación—, y ese camino se salta la primera.
+    //
+    // Va ANTES de reservar numeración: el objeto es no gastar consecutivos que la
+    // DIAN va a devolver con «Set de prueba … se encuentra Aceptado».
+    if (
+      !options.validate_only &&
+      !options.smoke &&
+      isTestSetClosedByDian(config.enablement_status)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya aprobó el set de pruebas de esta configuración y no acepta más documentos contra él: ' +
+          'responde «Set de prueba … se encuentra Aceptado» y cada consecutivo enviado se pierde. ' +
+          'Para comprobar un arreglo usa la vía de validación sincrónica, que cuesta 1 consecutivo y no toca el set.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
       );
     }
 
@@ -1491,6 +1544,18 @@ export class DianTestService {
       deferred?: { name: string; consecutive: number; content: string }[];
     } | null = null;
 
+    /**
+     * Veredictos que la DIAN dio sobre las facturas durante la espera entre fases.
+     *
+     * Se guardan aquí para persistirlos con el lote. La primera corrida real los
+     * perdió —vivían solo dentro del bucle de espera—, así que el registro quedó
+     * sin `zip_verdicts` y la razón del rechazo hubo que recuperarla con un
+     * re-sondeo. La razón era que la DIAN CIERRA el set al aprobarlo: «Set de
+     * prueba … se encuentra Aceptado». Ese dato decide si reintentar tiene
+     * sentido, y no debería costar una consulta extra averiguarlo.
+     */
+    let phase_one_verdicts: Record<string, TestSetZipVerdict> = {};
+
     if (!two_phase) {
       await transmit(files, 1);
     } else {
@@ -1530,6 +1595,8 @@ export class DianTestService {
         ws_credentials,
         poll_history,
       );
+
+      phase_one_verdicts = wait.verdicts;
 
       if (wait.ready) {
         await transmit(note_files, 2);
@@ -1613,14 +1680,34 @@ export class DianTestService {
     // state (no numeric StatusCode / fault / error list). A terminal non-success
     // (e.g. DIAN StatusCode 2 "set Rechazado") is a REJECTION, not pending.
     const terminal = zip_key ? this.isTerminalZipStatus(verdict) : true;
-    const still_processing = !!zip_key && !success && !terminal;
+    // LA ESPERA DE LA FASE 1 YA SABE LA RESPUESTA — y sin esto se descartaba.
+    //
+    // `verdict` viene de las respuestas de ENVÍO (`submit`), que solo dicen «la
+    // DIAN acusó recibo». Cuando hubo dos fases, la espera además CONSULTÓ
+    // `GetStatusZip` y tiene veredictos terminales. La primera corrida real
+    // escribió `pending: true` sobre un lote cuyas 30 facturas la DIAN ya había
+    // rechazado, y hubo que re-sondear para corregirlo: el dato estaba en la mano
+    // y se tiraba.
+    const phase_one = Object.keys(phase_one_verdicts).length
+      ? aggregateZipVerdicts(
+          Object.keys(phase_one_verdicts),
+          phase_one_verdicts,
+        )
+      : null;
+    const still_processing = phase_one
+      ? phase_one.pending
+      : !!zip_key && !success && !terminal;
     // `rejected` significa «la DIAN rechazó el SET de habilitación», y eso es lo
     // que leen la guía y el gate de emisión. Una validación sincrónica que sale
     // inválida NO es eso: no se envió al set, no consumió un intento y no cambia
     // el estado de la habilitación. Marcarla `rejected` haría que un diagnóstico
     // exitoso —encontrar los defectos— se leyera como un fracaso de habilitación.
     const rejected =
-      options.validate_only === true ? false : !success && !still_processing;
+      options.validate_only === true
+        ? false
+        : phase_one
+          ? phase_one.rejected
+          : !success && !still_processing;
 
     // 10. Persist result + raw evidence (DIAN's exact status XML for diagnosis).
     const result_data = {
@@ -1687,6 +1774,14 @@ export class DianTestService {
       // `deferred` las lleva enteras para que reenviarlas no exija regenerarlas
       // (regenerar cambia la fecha de emisión y con ella el CUDE).
       ...(note_phase ? { note_phase } : {}),
+      // Veredictos que la DIAN dio sobre las facturas DURANTE la espera. Se
+      // persisten en la misma clave que usan el cron de repoll y
+      // `checkTestSetStatus`, así que un lote diferido llega con su razón ya
+      // escrita en vez de exigir una consulta más para averiguarla.
+      ...(Object.keys(phase_one_verdicts).length
+        ? { zip_verdicts: phase_one_verdicts }
+        : {}),
+      ...(phase_one ? { zip_counts: phase_one.counts } : {}),
       pending: still_processing,
       rejected,
       tracking_id: zip_key ?? verdict.status_code,
@@ -2204,9 +2299,24 @@ export class DianTestService {
     delete result_data.zip_key;
     delete result_data.tracking_id;
 
+    // `enablement_status: 'testing'` SOLO si no hay una habilitación que perder.
+    //
+    // Descartar un lote deja la configuración libre para reenviar, y por eso baja el
+    // estado a `testing`. Sobre una config ya `enabled` eso sería tirar lo que la
+    // DIAN concedió —y que su portal solo devuelve a mano— por una operación de
+    // limpieza de un puntero. Es el mismo defecto que `executeTestSet` tenía y que
+    // `canWriteEnablementStatus` cierra; esta era la tercera copia.
+    //
+    // El descarte SÍ sigue ocurriendo: se borra `zip_key` y se registra el lote en
+    // `abandoned_batches`. Lo único que no pasa es la degradación.
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
-      data: { last_test_result: result_data, enablement_status: 'testing' },
+      data: {
+        last_test_result: result_data,
+        ...(canWriteEnablementStatus(config.enablement_status)
+          ? { enablement_status: 'testing' as const }
+          : {}),
+      },
     });
 
     await this.createAuditLog(config.id, {
@@ -2359,7 +2469,25 @@ export class DianTestService {
     environment: 'test' | 'production',
     ws_credentials: WsSecurityCredentials | undefined,
     poll_history: TestSetPollAttempt[],
-  ): Promise<{ ready: boolean; reason: string; polls: number }> {
+  ): Promise<{
+    ready: boolean;
+    reason: string;
+    polls: number;
+    /**
+     * Veredictos TERMINALES que la DIAN dio sobre las facturas durante la espera.
+     *
+     * SE DEVUELVEN PORQUE PERDERLOS COSTÓ EL DIAGNÓSTICO UNA VEZ. La primera
+     * corrida real de esta espera vio «30 de 30 rechazadas», difirió las notas
+     * correctamente… y tiró los mensajes: vivían solo en el mapa local de este
+     * bucle, así que `last_test_result` quedó sin `zip_verdicts` y la razón de la
+     * DIAN hubo que recuperarla con un re-sondeo aparte.
+     *
+     * La razón era «Set de prueba … se encuentra Aceptado», es decir que la DIAN
+     * cierra el set al aprobarlo y no admite más documentos — un dato que decide
+     * si tiene sentido volver a intentarlo, y que no debería costar otra consulta.
+     */
+    verdicts: Record<string, TestSetZipVerdict>;
+  }> {
     // Sin ZipKey no hay nada que sondear: la decisión se resuelve sin red y sin
     // gastar los 10 minutos del tope.
     if (invoice_zip_keys.length === 0) {
@@ -2369,7 +2497,7 @@ export class DianTestService {
         rejected: 0,
         poll: 0,
       });
-      return { ready: false, reason: decision.reason, polls: 0 };
+      return { ready: false, reason: decision.reason, polls: 0, verdicts: {} };
     }
 
     let verdicts: Record<string, TestSetZipVerdict> = {};
@@ -2404,6 +2532,7 @@ export class DianTestService {
           ready: decision.action === 'send_notes',
           reason: decision.reason,
           polls: poll,
+          verdicts,
         };
       }
     }
@@ -2416,6 +2545,7 @@ export class DianTestService {
       ready: false,
       reason: `Tope de espera agotado tras ${NOTE_PHASE_MAX_POLLS} consultas.`,
       polls: NOTE_PHASE_MAX_POLLS,
+      verdicts,
     };
   }
 
