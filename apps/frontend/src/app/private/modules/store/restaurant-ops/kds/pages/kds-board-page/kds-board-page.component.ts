@@ -3,11 +3,13 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   OnDestroy,
   OnInit,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -365,6 +367,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
+    this.watchFullscreenChanges();
+
     // Toast when the stream recovers from a failure. We track the previous
     // state in a signal and only fire on (error|reconnecting) → open, never
     // on the initial idle/connecting → open handshake.
@@ -520,12 +524,12 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     // header incluidos) porque un KDS vive en una pantalla colgada en la cocina y
     // cada pixel de cromo administrativo es espacio que no muestra tickets.
     //
-    // Se hace con una clase en <body> y no con la Fullscreen API del navegador: esa
-    // exige un gesto del usuario, se cae al recargar y en una pantalla dedicada de
-    // cocina el navegador ya suele estar en kiosco. La clase sobrevive al refresco
-    // del tablero y no depende de permisos del navegador.
+    // El detalle de COMO se hace vive en `toggleFullscreen`: el clic de este boton
+    // es el gesto de usuario que la Fullscreen API exige, y por eso el toggle no
+    // puede dispararse desde ningun otro lado (un efecto o un temporizador seria
+    // rechazado por el navegador).
     if (id === 'fullscreen') {
-      this.toggleFullscreen();
+      void this.toggleFullscreen();
       return;
     }
     // QUI-651 — cerrar el turno DESDE el tablero, que es donde esta el cocinero.
@@ -705,13 +709,88 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     { id: 'config', label: 'Configuración', icon: 'chef-hat', route: '/admin/restaurant-ops/kds/configuracion' },
   ];
 
+  // ------------------------------------------------------- pantalla completa
+  /**
+   * PANTALLA COMPLETA DEL KDS.
+   *
+   * Usa la Fullscreen API sobre el elemento del tablero, no una clase que colapse
+   * el layout. Tres razones concretas:
+   *
+   *  1. El navegador promueve el elemento al TOP LAYER: queda por encima del
+   *     documento entero e ignora por definicion el `overflow`, el `z-index` y los
+   *     bloques contenedores de sus ancestros. La alternativa (`position: fixed`)
+   *     funciona hoy solo porque ningun ancestro tiene `transform`, `filter` ni
+   *     `contain`; el dia que alguien le ponga un `backdrop-filter` al layout, el
+   *     `fixed` se ancla ahi y el tablero sale recortado SIN error de consola.
+   *  2. NO mueve el DOM. Portar el tablero a un `<dialog>` via `ng-template` lo
+   *     desmontaria y remontaria, y este tablero vive de un stream SSE: cada
+   *     toggle reconectaria la cocina.
+   *  3. Da el 100% de la PANTALLA, no del viewport — en una pantalla de cocina
+   *     tambien desaparece la barra del navegador.
+   *
+   * Respaldo: si `requestFullscreen()` es rechazado (webview embebida, permiso
+   * denegado por politica) se cae a `position: fixed`, que es lo mejor disponible
+   * sin la API.
+   */
   readonly isFullscreen = signal(false);
+  /** Respaldo activo: la API fue rechazada y se posiciona con `fixed`. */
+  readonly fixedFallback = signal(false);
 
-  private toggleFullscreen(): void {
-    const next = !this.isFullscreen();
-    this.isFullscreen.set(next);
-    // La clase la consume el layout admin para colapsar sidebar y header.
-    document.body.classList.toggle('kds-fullscreen', next);
+  private readonly boardRoot =
+    viewChild.required<ElementRef<HTMLElement>>('boardRoot');
+
+  private async toggleFullscreen(): Promise<void> {
+    if (this.isFullscreen()) {
+      // Salir por el mismo camino por el que se entro.
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => undefined);
+      } else {
+        this.fixedFallback.set(false);
+        this.isFullscreen.set(false);
+        this.applyBackdropLock(false);
+      }
+      return;
+    }
+
+    try {
+      await this.boardRoot().nativeElement.requestFullscreen({
+        navigationUI: 'hide',
+      });
+      // `isFullscreen` NO se setea aqui: lo hace el listener de
+      // `fullscreenchange`, que es la unica fuente que tambien cubre el Esc.
+    } catch {
+      this.fixedFallback.set(true);
+      this.isFullscreen.set(true);
+      this.applyBackdropLock(true);
+    }
+  }
+
+  /**
+   * Solo para el respaldo `fixed`: sin esto el fondo sigue haciendo scroll detras
+   * del tablero y el dock de Vexi tapa una columna de tickets. En modo top layer
+   * no hace falta — el layout entero queda debajo de la capa superior.
+   */
+  private applyBackdropLock(on: boolean): void {
+    document.body.classList.toggle('kds-fullscreen', on);
+  }
+
+  /**
+   * El Esc del navegador sale de pantalla completa sin pasar por nuestro boton.
+   * Sin escuchar `fullscreenchange` la señal se queda en `true` y el boton miente:
+   * dice "Salir de pantalla completa" cuando ya se salio.
+   */
+  private watchFullscreenChanges(): void {
+    const onChange = () => {
+      const active = document.fullscreenElement === this.boardRoot().nativeElement;
+      this.isFullscreen.set(active || this.fixedFallback());
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('fullscreenchange', onChange);
+      // Salir del modulo con la clase puesta dejaria el resto del panel sin
+      // scroll y sin Vexi.
+      this.applyBackdropLock(false);
+    });
   }
 
   // ---------------------------------------------------- resumen del turno

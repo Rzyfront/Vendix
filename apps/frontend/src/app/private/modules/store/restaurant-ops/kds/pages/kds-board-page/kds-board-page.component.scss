@@ -11,6 +11,37 @@
   min-height: 100%;
 }
 
+/* ------------------------------------------------- PANTALLA COMPLETA (top layer)
+   El navegador saca este elemento del flujo y lo pinta en la capa superior, asi
+   que aqui no hay nada que ocultar del layout: el sidebar y el header quedan
+   debajo de la capa, no hay que colapsarlos ni tocarlos.
+
+   Chrome le da al elemento en pantalla completa un fondo negro y lo centra a su
+   tamaño intrinseco: sin el 100%/100% explicito el tablero aparece flotando en
+   medio de una pantalla negra en vez de ocuparla. */
+.kds-board:fullscreen {
+  width: 100%;
+  height: 100%;
+  min-height: 0; /* anula el `min-height: 100%` heredado del modo embebido */
+  overflow-y: auto;
+  background: var(--color-background);
+  padding: 0.75rem;
+}
+
+/* Respaldo cuando `requestFullscreen()` fue rechazado. Medido: hoy ningun
+   ancestro del tablero crea bloque contenedor (sin transform/filter/contain), asi
+   que el `fixed` se ancla al viewport. Si eso cambia, este respaldo se degrada —
+   por eso es el respaldo y no la estrategia principal. */
+.kds-board.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-background);
+  padding: 0.75rem;
+}
+
 .kds-board__error {
   display: flex;
   align-items: center;

@@ -1,4 +1,13 @@
-<div class="kds-board">
+<!--
+  `#boardRoot` es el elemento que se promueve al top layer con la Fullscreen API.
+  `is-fullscreen` solo se aplica en el respaldo `fixed`, cuando el navegador
+  rechazo la API — ver `toggleFullscreen`.
+-->
+<div
+  class="kds-board"
+  #boardRoot
+  [class.is-fullscreen]="fixedFallback()"
+>
   <!-- Header -->
   <app-sticky-header
     title="KDS — Pantalla de Cocina"
