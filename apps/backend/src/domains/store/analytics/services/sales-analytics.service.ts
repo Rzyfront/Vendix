@@ -19,7 +19,11 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
-import { computeOperatingRevenue } from '../analytics-metrics.contract';
+import {
+  COMPLETED_SALE_STATES,
+  computeOperatingRevenue,
+  sqlStateList,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   formatQuantityInSaleUnit,
@@ -594,51 +598,54 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    const payments = await this.prisma.payments.findMany({
-      where: {
-        orders: {
-          state: { in: this.COMPLETED_STATES },
-          created_at: {
-            gte: startDate,
-            lte: endDate,
-          },
-        },
-        state: 'succeeded',
-      },
-      include: {
-        store_payment_method: {
-          include: {
-            system_payment_method: true,
-          },
-        },
-      },
-    });
+    // QUI-615: aggregate in SQL via groupBy (channel filter honored, no N+1,
+    // no pulling all payments into memory). The COUNT is the number of
+    // successful payments (orders tied to that method), and the SUM is the
+    // actual amount received — this INCLUDES VAT because the customer paid
+    // it, which is intentionally distinct from operating_revenue. The card
+    // label documents this so the operator doesn't confuse it with the
+    // Resumen General (operating_revenue ex-VAT) figure.
+    const storeId = RequestContextService.getContext()?.store_id;
+    const completedStates = sqlStateList(COMPLETED_SALE_STATES);
+    const rows = await (this.prisma as any).withoutScope().$queryRaw<
+      Array<{
+        method_name: string;
+        display_name: string;
+        count: bigint;
+        amount: string | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        spm.system_payment_method_id AS method_name,
+        MAX(spm.display_name) AS display_name,
+        COUNT(*)::bigint AS count,
+        COALESCE(SUM(p.amount), 0)::decimal AS amount
+      FROM payments p
+      INNER JOIN orders o ON o.id = p.order_id
+      INNER JOIN store_payment_methods spm ON spm.id = p.store_payment_method_id
+      WHERE o.store_id = ${storeId ?? 0}
+        AND o.state IN (${completedStates})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+        AND p.state = 'succeeded'
+        ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
+      GROUP BY spm.system_payment_method_id
+      ORDER BY amount DESC
+    `);
 
     const methodMap = new Map<
       string,
       { displayName: string; count: number; amount: number }
     >();
     let totalAmount = 0;
-
-    for (const payment of payments) {
-      const amount = Number(payment.amount || 0);
+    for (const r of rows) {
+      const amount = Number(r.amount);
       totalAmount += amount;
-
-      const methodName =
-        payment.store_payment_method?.system_payment_method?.name || 'unknown';
-      const displayName =
-        payment.store_payment_method?.display_name ||
-        payment.store_payment_method?.system_payment_method?.display_name ||
-        'Desconocido';
-
-      const existing = methodMap.get(methodName) || {
-        displayName,
-        count: 0,
-        amount: 0,
-      };
-      existing.count += 1;
-      existing.amount += amount;
-      methodMap.set(methodName, existing);
+      methodMap.set(r.method_name, {
+        displayName: r.display_name,
+        count: Number(r.count),
+        amount,
+      });
     }
 
     const allResults = Array.from(methodMap.entries())
