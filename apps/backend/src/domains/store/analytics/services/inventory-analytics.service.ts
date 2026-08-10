@@ -226,9 +226,55 @@ export class InventoryAnalyticsService {
       },
     });
 
+    // QUI-617: cost_per_unit comes from `stock_levels.cost_per_unit` (the
+    // per-location cost recorded by the StockLevelManager at write time) —
+    // not from `products.cost_price` (the current catalog price). Using the
+    // catalog price here would re-evaluate historical on-hand at today's
+    // catalog price; the stock-level cost is auditable per write event.
+    //
+    // We aggregate stock_levels.cost_per_unit per product via a single raw
+    // query (no N+1). The result for a product is the WEIGHTED-AVERAGE cost
+    // across locations, weighted by quantity_on_hand. For a product that
+    // has zero on-hand the cost stays at the catalog price as a fallback.
+    const costRows = await (this.prisma as any).withoutScope().$queryRaw<
+      Array<{
+        product_id: number;
+        cost_per_unit: string | number;
+        reserved_qty: string | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        sl.product_id AS product_id,
+        CASE WHEN SUM(sl.quantity_on_hand) > 0
+             THEN SUM(sl.quantity_on_hand * sl.cost_per_unit) / SUM(sl.quantity_on_hand)
+             ELSE 0::decimal
+        END AS cost_per_unit,
+        COALESCE(SUM(sl.quantity_reserved), 0)::decimal AS reserved_qty
+      FROM stock_levels sl
+      INNER JOIN inventory_locations il ON il.id = sl.location_id
+      WHERE il.organization_id = ${RequestContextService.getContext()?.organization_id ?? 0}
+        AND il.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+      GROUP BY sl.product_id
+    `);
+    const costByProduct = new Map<
+      number,
+      { cost: number; reserved: number }
+    >();
+    for (const r of costRows) {
+      costByProduct.set(Number(r.product_id), {
+        cost: Number(r.cost_per_unit),
+        reserved: Number(r.reserved_qty),
+      });
+    }
+
     let results: StockLevelExportRow[] = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
-      const cost = Number(product.cost_price || 0);
+      const snapshot = costByProduct.get(product.id);
+      const cost =
+        snapshot && snapshot.cost > 0
+          ? snapshot.cost
+          : Number(product.cost_price || 0);
+      const quantityReserved = snapshot?.reserved ?? 0;
       const reorderPoint = resolveProductLowStockThreshold(settings, product);
       const maxStock = Number(product.max_stock_level || 1000);
 
@@ -249,8 +295,12 @@ export class InventoryAnalyticsService {
         sku: product.sku,
         image_url: product.product_images?.[0]?.image_url || null,
         quantity_on_hand: qty,
-        quantity_reserved: 0, // TODO: Calculate from stock_reservations
-        quantity_available: qty,
+        // QUI-617: was hard-coded 0. Now sums stock_levels.quantity_reserved
+        // (the per-location soft-reservation count surfaced by StockLevelManager)
+        // for the same store universe as the on-hand read. Net available
+        // reflects what is actually free to sell, not just what is on the shelf.
+        quantity_reserved: quantityReserved,
+        quantity_available: Math.max(0, qty - quantityReserved),
         reorder_point: reorderPoint,
         cost_per_unit: cost,
         total_value: qty * cost,
