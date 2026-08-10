@@ -403,7 +403,13 @@
                           [attr.aria-label]="deliverHint(item)"
                         >
                           <app-icon name="chef-hat" [size]="12"></app-icon>
-                          {{ kitchenStatusLabel(status) }}
+                          <!--
+                            QUI-652 — el estado se nombra "Cocina ·" porque un plato
+                            entregado por cocina al pase y un plato entregado al
+                            cliente son dos hechos distintos que antes se leían con
+                            la misma palabra en la misma fila ("Entregado Entregado").
+                          -->
+                          Cocina · {{ kitchenStatusLabel(status) }}
                         </app-badge>
                       } @else {
                         <span
@@ -488,7 +494,7 @@
                               name="circle-check"
                               [size]="14"
                             ></app-icon>
-                            Entregado
+                            Entregado al cliente
                           </span>
                         } @else if (kitchenStatusFor(item) === 'cancelled') {
                           <span

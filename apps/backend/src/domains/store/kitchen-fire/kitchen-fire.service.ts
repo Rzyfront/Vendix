@@ -26,6 +26,11 @@ const KITCHEN_TICKET_INCLUDE = {
       exclusions: {
         select: { component_product_id: true, path_recipe_ids: true },
       },
+      // QUI-653 — "para llevar" viaja con el ticket porque QUIEN EMPACA es la
+      // cocina, no el mesero. El flag vivia en `order_items` y se mostraba en la
+      // fila de la mesa, pero el KDS nunca lo veia: el plato se servia en loza y
+      // el dato solo existia del lado que no lo ejecuta.
+      order_item: { select: { is_takeaway: true } },
       product: {
         select: {
           id: true,

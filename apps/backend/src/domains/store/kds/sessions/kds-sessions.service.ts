@@ -38,6 +38,10 @@ export class KdsSessionsService {
     return this.prisma.kds_sessions.findFirst({
       where: { kds_id: kdsId, status: 'open' },
       include: {
+        // La estación va incluida porque la UI nombra el turno con ella. Sin esto
+        // `session.kds` llega undefined y la pantalla muestra "Estación" genérico,
+        // que es justo el dato que el turno existe para identificar.
+        kds: { select: { id: true, name: true, code: true } },
         opened_by_user: { select: { id: true, first_name: true, last_name: true } },
       },
     });

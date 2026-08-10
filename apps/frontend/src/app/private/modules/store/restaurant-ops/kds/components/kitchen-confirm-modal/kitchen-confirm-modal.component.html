@@ -42,6 +42,21 @@
             <p class="kc-no-recipe">
               Sin receta activa: no hay ingredientes que descontar. Se envía igual.
             </p>
+          } @else if (item.components.length === 0) {
+            <!--
+              QUI-655 — receta ACTIVA que explota a cero componentes. Ocurre cuando
+              la receta se guardó mal: merma del 100%, o rendimiento en cero, dejan
+              el rendimiento efectivo en 0 y la explosión de BOM devuelve vacío.
+              Sin este aviso el modal mostraba el plato con la lista de ingredientes
+              en blanco y el botón intacto: el cocinero no podía distinguir "este
+              plato no lleva insumos" de "la receta está rota", y el envío salía sin
+              descontar nada, en silencio.
+            -->
+            <p class="kc-no-recipe">
+              La receta está activa pero no arroja ingredientes — revisá su
+              rendimiento y su merma (una merma del 100% deja el rendimiento en
+              cero). Si se envía así, no se descuenta inventario.
+            </p>
           } @else {
             <!--
               QUI-655 — ¿a cuántas unidades aplica la excepción? Solo con

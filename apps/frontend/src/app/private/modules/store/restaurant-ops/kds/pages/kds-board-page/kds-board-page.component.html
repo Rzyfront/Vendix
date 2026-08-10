@@ -227,7 +227,9 @@
 
     @if (stationsService.openSession(); as s) {
       <p class="kds-sum-head">
-        <strong>{{ s.kds?.name ?? 'Estación' }}</strong>
+        <strong>{{
+          s.kds?.name ?? stationsService.selectedStation()?.name ?? 'Estación'
+        }}</strong>
         · {{ s.opened_by_user?.first_name }} {{ s.opened_by_user?.last_name }}
         · desde {{ s.opened_at | date: 'shortTime' }}
       </p>

@@ -49,6 +49,12 @@ export interface KitchenTicketItem {
     component_product_id: number;
     path_recipe_ids: number[];
   }>;
+  /**
+   * QUI-653 — el plato va empacado para llevar. Lo decide quien toma el pedido
+   * pero lo EJECUTA la cocina, asi que el flag viaja con el ticket: sin esto el
+   * cocinero emplata en loza algo que debia salir en caja.
+   */
+  order_item?: { is_takeaway: boolean } | null;
   id: number;
   kitchen_ticket_id: number;
   order_item_id: number;
