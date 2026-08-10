@@ -687,7 +687,12 @@ export class InventoryAnalyticsService {
     // Aggregate by location
     const locationMap = new Map<
       number,
-      { name: string; quantity: number; value: number }
+      {
+        name: string;
+        quantity: number;
+        value: number;
+        unauditable_quantity: number;
+      }
     >();
     let totalValue = 0;
     let totalQuantity = 0;
@@ -705,11 +710,27 @@ export class InventoryAnalyticsService {
         sl.product_variant_id,
       );
       const layerValue = layerValueByStockKey.get(stockKey);
-      const cost =
-        Number(sl.cost_per_unit || 0) ||
-        Number(sl.product_variants?.cost_price || 0) ||
-        Number(sl.products?.cost_price || 0);
-      const value = layerValue !== undefined ? layerValue : qty * cost;
+
+      // QUI-619: the previous code used a silent fallback to
+      // products.cost_price (current catalog price) when no cost layer
+      // existed. That mixed historical and current prices silently — a
+      // closed period would change retroactively when the catalog price
+      // was edited, which is unauditable for accounting. Now:
+      //  - if a cost layer exists -> use it (auditable, CPP/FIFO snapshot)
+      //  - else if stock_levels.cost_per_unit is set -> use it (auditable,
+      //    set by an inventory write that recorded the cost at the time)
+      //  - else -> mark as UNAUDITABLE; contribute 0 to the value, roll the
+      //    qty into `unauditable_quantity` so the UI can render an explicit
+      //    "X unidades sin costo registrado — este valor no es auditable".
+      let value = 0;
+      let unauditableQty = 0;
+      if (layerValue !== undefined) {
+        value = layerValue;
+      } else if (sl.cost_per_unit) {
+        value = qty * Number(sl.cost_per_unit);
+      } else {
+        unauditableQty = qty;
+      }
       totalValue += value;
       totalQuantity += qty;
       if (layerValue === undefined && !(cost > 0) && qty > 0) {
@@ -720,9 +741,11 @@ export class InventoryAnalyticsService {
         name: locationName,
         quantity: 0,
         value: 0,
+        unauditable_quantity: 0,
       };
       existing.quantity += qty;
       existing.value += value;
+      existing.unauditable_quantity += unauditableQty;
       locationMap.set(locationId, existing);
     }
 
@@ -732,6 +755,11 @@ export class InventoryAnalyticsService {
         location_name: data.name,
         total_quantity: data.quantity,
         total_value: data.value,
+        // QUI-619: rows with no cost layer AND no stock_levels.cost_per_unit
+        // contribute 0 to value but roll their qty into unauditable_quantity
+        // so the UI can warn instead of presenting a mixed/unauditable
+        // number silently.
+        unauditable_quantity: data.unauditable_quantity,
         average_cost: data.quantity > 0 ? data.value / data.quantity : 0,
         percentage_of_total:
           totalValue > 0 ? (data.value / totalValue) * 100 : 0,
