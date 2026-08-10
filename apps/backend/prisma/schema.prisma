@@ -1778,6 +1778,10 @@ model price_tiers {
   discount_percentage Decimal   @default(0) @db.Decimal(5, 2)
   is_active           Boolean   @default(true)
   is_default          Boolean   @default(false)
+  // Discriminador de los dos ejes que conviven en esta tabla: tarifa de
+  // cliente (a quién le vendo) vs unidad de venta (en qué presentación
+  // vendo). Los selectores filtran por este campo para no mezclarlos.
+  kind                price_tier_kind_enum @default(customer_tier)
   // When true, applying this tier is interpreted as selling by package
   // (caja/bulto). Derived from units_per_package: it is set true whenever
   // units_per_package >= 2.
@@ -1800,6 +1804,7 @@ model price_tiers {
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
+  @@index([store_id, kind, is_active])
 }
 
 model product_price_tier_overrides {
@@ -1814,6 +1819,11 @@ model product_price_tier_overrides {
   // Per-product override of the tier packaging quantity. Optional. Wins over
   // price_tiers.units_per_package in the packSize cascade.
   override_units_per_package Int?
+  // Margen de la presentación, en porcentaje. Se deriva contra
+  // `cost_price * packSize` (el costo del paquete completo), no contra el
+  // costo unitario. Criterio cost-anchor: si llegan precio y margen juntos,
+  // el precio explícito gana y el margen se recalcula a partir de él.
+  override_profit_margin     Decimal?  @db.Decimal(5, 2)
   created_at                 DateTime? @default(now()) @db.Timestamp(6)
   updated_at                 DateTime? @default(now()) @db.Timestamp(6)
 
@@ -1828,6 +1838,19 @@ model product_price_tier_overrides {
 model product_price_tier_assignments {
   product_id    Int
   price_tier_id Int
+  /// Presentación por defecto del producto: la que rige en TODA superficie de
+  /// venta (tienda online, POS, cotizaciones). Elegir entre varias es una
+  /// capacidad exclusiva del POS; el storefront usa esta y no expone selector.
+  ///
+  /// La unicidad la garantiza un índice único PARCIAL que Prisma no puede
+  /// expresar en el schema y vive solo en la migración:
+  ///   CREATE UNIQUE INDEX ... ON product_price_tier_assignments (product_id)
+  ///   WHERE is_default;
+  /// No lo borres al regenerar: un `@@unique([product_id, is_default])` NO
+  /// sirve (dejaría un solo `false` por producto). El índice no puede filtrar
+  /// además por `kind` porque vive en otra tabla — que solo un `sale_unit`
+  /// pueda marcarse lo garantiza el servicio.
+  is_default    Boolean   @default(false)
   created_at    DateTime? @default(now()) @db.Timestamp(6)
 
   product    products    @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -3421,6 +3444,20 @@ enum product_state_enum {
   active
   inactive
   archived
+}
+
+/// Los dos sentidos que conviven sobre `price_tiers`.
+///
+/// `customer_tier` — a QUIEN le vendo: mayorista, minorista, distribuidor.
+/// `sale_unit`     — EN QUE PRESENTACION vendo: rollo, metro, bulto, kilo,
+///                   palada. El factor vive en `units_per_package` y se
+///                   ajusta por producto vía `override_units_per_package`.
+///
+/// El default es `customer_tier` porque es lo que la tabla significaba antes
+/// de existir este enum: toda fila previa es una tarifa de cliente.
+enum price_tier_kind_enum {
+  customer_tier
+  sale_unit
 }
 
 enum pricing_type_enum {
