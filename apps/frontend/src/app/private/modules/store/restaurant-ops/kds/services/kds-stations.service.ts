@@ -75,6 +75,21 @@ export class KdsStationsService {
           if (this.selectedStationId() == null && active.length === 1) {
             this.selectedStationId.set(active[0].id);
           }
+          // El turno se resuelve ACA y no en el callback de cada consumidor.
+          // Depender de que el board lo pidiera dejaba `openSession` en null cuando
+          // ese callback no corria, y de esa senal cuelgan el badge del turno activo
+          // y la accion de cerrarlo: el cocinero no veia ninguno de los dos.
+          //
+          // Quien conoce la estacion conoce su turno: es responsabilidad del
+          // servicio, no de la pantalla.
+          const selected = this.selectedStationId();
+          if (selected != null) {
+            this.refreshOpenSession(selected).subscribe({
+              error: () => {
+                // Sin turno el tablero se sigue leyendo; el gate avisa al actuar.
+              },
+            });
+          }
         }),
         catchError((err) => {
           this.isLoading.set(false);
