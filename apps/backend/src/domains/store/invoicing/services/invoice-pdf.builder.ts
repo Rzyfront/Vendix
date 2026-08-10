@@ -144,6 +144,16 @@ export const GEOMETRY: Record<
     font_scale: 1,
     footer_gap: 1.5,
   },
+  a4: {
+    // 210 × 297 mm. Narrower and taller than letter, so the same margin leaves
+    // less printable width; the rest of the rhythm matches letter.
+    width: 210 * MM,
+    height: 297 * MM,
+    margin: 40,
+    roll: false,
+    font_scale: 1,
+    footer_gap: 1.5,
+  },
   half_letter: {
     // Half of a letter sheet, the usual pre-printed invoice stationery.
     width: 612,

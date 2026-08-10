@@ -24,6 +24,7 @@ const TICKET_PAGE: Record<
   thermal_58: { width_mm: 58, page_size: '58mm auto', type: 'thermal' },
   letter: { width_mm: 216, page_size: 'letter', type: 'standard' },
   half_letter: { width_mm: 216, page_size: '216mm 140mm', type: 'standard' },
+  a4: { width_mm: 210, page_size: 'A4', type: 'standard' },
 };
 
 /**
