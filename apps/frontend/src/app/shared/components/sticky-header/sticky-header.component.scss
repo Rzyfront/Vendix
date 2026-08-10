@@ -34,7 +34,9 @@
   min-height: 1px; /* ISSUE-09: prevents 0-height flash on first paint */
   padding: 0.1875rem;
   border: 1px solid rgba(var(--color-muted-rgb), 0.16);
-  border-radius: var(--radius-pill);
+  /* Semi-rounded, not a pill: the rail radius is the tab radius plus its own
+     3px padding, so the inner and outer curves stay concentric. */
+  border-radius: var(--radius-lg);
   background: rgba(var(--color-muted-rgb), 0.1);
   overscroll-behavior-x: contain;
   scroll-padding-inline: 16px;
@@ -84,7 +86,7 @@
   min-height: 1.875rem;
   padding: 0.3125rem 0.6875rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   background-color: transparent;
   color: color-mix(in srgb, var(--color-text-primary) 66%, transparent);
   font-size: 0.6875rem;
