@@ -58,6 +58,32 @@ export class KitchenConfirmModalComponent {
    * el punto de partida, no una orden.
    */
   readonly initialExclusions = input<Map<number, number[]> | null>(null);
+  /**
+   * Contexto de uso. El mismo componente sirve dos momentos distintos y la copia
+   * NO puede ser la misma: en `fire` el mesero decide que enviar; en `cook` el
+   * cocinero VERIFICA lo que va a preparar. Decirle "enviar a cocina" a alguien
+   * que ya esta en la cocina lo desorienta.
+   */
+  readonly mode = input<'fire' | 'cook'>('fire');
+
+  readonly title = computed(() =>
+    this.mode() === 'cook'
+      ? 'Verificar ticket para cocinar'
+      : 'Confirmar envío a cocina',
+  );
+
+  readonly hintText = computed(() =>
+    this.mode() === 'cook'
+      ? 'Verificá los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; podés quitar más antes de empezar.'
+      : 'Todos los ingredientes vienen marcados. Desmarcá lo que no se va a usar: eso evita su descuento del inventario y su costo.',
+  );
+
+  readonly confirmLabel = computed(() => {
+    if (this.mode() === 'cook') {
+      return this.hasAnyExclusion() ? 'Confirmar y cocinar' : 'Cocinar sin cambios';
+    }
+    return this.hasAnyExclusion() ? 'Confirmar y enviar' : 'Enviar sin cambios';
+  });
 
   readonly confirmed = output<FireItemExclusion[]>();
   readonly cancelled = output<void>();

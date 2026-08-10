@@ -177,6 +177,7 @@
     [preview]="cookPreview()"
     [isLoading]="cookPreviewLoading()"
     [initialExclusions]="cookSeed()"
+    mode="cook"
     (confirmed)="onCookConfirmed($event)"
     (cancelled)="onCookCancelled()"
   />

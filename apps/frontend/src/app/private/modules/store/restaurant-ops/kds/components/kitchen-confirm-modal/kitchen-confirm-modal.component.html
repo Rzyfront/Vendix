@@ -1,7 +1,7 @@
 <app-modal
   [isOpen]="isOpen()"
   size="lg"
-  title="Confirmar envío a cocina"
+  [title]="title()"
   [showCloseButton]="true"
   (cancel)="onCancel()"
 >
@@ -14,10 +14,7 @@
          Se dice explícitamente en vez de mostrar un modal vacío. -->
     <p class="kc-empty">No hay platos elegibles para enviar a cocina.</p>
   } @else {
-    <p class="kc-hint">
-      Todos los ingredientes vienen marcados. Desmarcá lo que no se va a usar: eso
-      evita su descuento del inventario y su costo.
-    </p>
+    <p class="kc-hint">{{ hintText() }}</p>
 
     <div class="kc-items">
       @for (item of items(); track trackItem($index, item)) {
@@ -201,6 +198,6 @@
     <app-icon slot="icon" name="flame" [size]="14" />
     <!-- Camino rápido: mientras nadie desmarque nada el botón dice "sin cambios",
          para que el envío de hora pico sea un solo toque. -->
-    {{ hasAnyExclusion() ? 'Confirmar y enviar' : 'Enviar sin cambios' }}
+    {{ confirmLabel() }}
   </app-button>
 </app-modal>
