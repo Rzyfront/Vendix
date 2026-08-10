@@ -84,6 +84,15 @@ export class StoresService {
       store_id: store.id,
     });
 
+    // Default KDS station for restaurant stores (QUI-654). No-op for any other
+    // industry. Without it a restaurant created from here could take orders and
+    // never send them to the kitchen: the fire refuses to route without a
+    // default station.
+    await this.storeBootstrapHelper.ensureDefaultKds({
+      store_id: store.id,
+      industries: store.industries as unknown as string[],
+    });
+
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
       await this.prisma.store_settings.create({

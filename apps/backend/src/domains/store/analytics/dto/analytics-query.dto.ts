@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   IsNumber,
@@ -87,6 +88,20 @@ export class ProductsAnalyticsQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+}
+
+export class PurchasesBySupplierQueryDto extends AnalyticsQueryDto {
+  /**
+   * Include suppliers with ZERO purchases in the window.
+   *
+   * Defaults to `false`: a ranking of purchase volume is polluted by every
+   * supplier the store ever registered but did not buy from this period. Set to
+   * `true` only when the caller genuinely wants the full supplier roster.
+   */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  include_zero?: boolean;
 }
 
 export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {

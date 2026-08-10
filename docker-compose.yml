@@ -42,6 +42,10 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_backend
     restart: unless-stopped
+    # Sin límite, el backend crecía libre (~2.3 GB observados) y empujaba a la
+    # VM al OOM global, cuya víctima siempre acababa siendo `ng serve` por RSS.
+    mem_limit: 2560m
+    memswap_limit: 3g
     env_file:
       - ./apps/backend/.env
     environment:
@@ -78,12 +82,25 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
-    mem_limit: 6g
-    memswap_limit: 7g
+    # Presupuesto del contenedor en build en frío, medido en dmesg:
+    #   ng serve (heap V8)  ~2.5 GB
+    #   esbuild (binario Go) ~1.5 GB   <-- NO lo gobierna NODE_OPTIONS
+    #   overhead de Node     ~0.3 GB
+    # Total ~4.3 GB, por eso 4g moría con CONSTRAINT_MEMCG. Requiere VM de
+    # colima con 10 GB (5.5g frontend + 2.5g backend + resto).
+    mem_limit: 5632m
+    memswap_limit: 6656m
     environment:
       - NODE_ENV=development
       - BACKEND_URL=http://api.vendix.com
-      - NODE_OPTIONS=--max-old-space-size=4096
+      # Ojo: este límite lo hereda también el *worker* de compilación de
+      # Angular, no sólo el proceso de ng serve. Con 2048 el worker moría con
+      # "Worker terminated due to reaching memory limit: JS heap out of memory"
+      # y el compiler-plugin quedaba con compilation=null, lo que se manifiesta
+      # como un críptico assert(compilation) en el ciclo siguiente.
+      # 3072 le alcanza y sigue por debajo del 4096 original que dejaba al GC
+      # crecer hasta reventar la VM.
+      - NODE_OPTIONS=--max-old-space-size=3072
       - CHOKIDAR_USEPOLLING="true"
     depends_on:
       - backend

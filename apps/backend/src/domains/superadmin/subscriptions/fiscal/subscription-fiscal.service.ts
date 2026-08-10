@@ -37,10 +37,12 @@ import {
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
 import {
-  analyzeTestSetWait,
-  resolveTestSetProof,
-} from '../../../store/invoicing/dian-config/test-set-wait.util';
+  buildNotePhaseView,
+  canWriteEnablementStatus,
+} from '../../../store/invoicing/dian-config/note-phase-gate.util';
 import { assertPlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
@@ -206,6 +208,10 @@ export class SubscriptionFiscalService {
     // Reused so the platform checklist raises the SAME early alerts, with the
     // same thresholds and copy, as the tenant one.
     private readonly readiness: FiscalProductionReadinessService,
+    // Reutilizado tal cual bajo contexto de plataforma, igual que
+    // `DianTestService`: el reporte de readiness y la guarda de promoción tienen
+    // que ser LOS MISMOS que ve un tenant.
+    private readonly dianConfigService: DianConfigService,
   ) {}
 
   async getStatus() {
@@ -241,12 +247,26 @@ export class SubscriptionFiscalService {
             enablement_status: config.enablement_status,
             test_set_id: config.test_set_id,
             environment: config.environment,
-            last_test_result: config.last_test_result,
+            // SIN el `note_phase` crudo: lleva cada nota retenida ENTERA, con su
+            // XML firmado. Este panel sondea el estado, así que un lote diferido
+            // mandaba 20 documentos firmados al navegador en cada consulta —datos
+            // que la UI no puede usar y que no deberían salir del servidor.
+            //
+            // El recuento y la razón van abajo, en la vista.
+            last_test_result: this.stripNotePhase(config.last_test_result),
+            // Generados ≠ transmitidos con el envío en dos fases: si las notas se
+            // difieren se generan 50 y salen 30. Sin estos tres campos la UI decía
+            // «50 documentos» sobre un lote del que salieron 30, y las notas
+            // retenidas eran invisibles.
+            note_phase: buildNotePhaseView(
+              (config.last_test_result as Record<string, any> | null)
+                ?.note_phase,
+            ),
             // Sobre la prueba DURABLE, no sobre el último lote. Un reenvío
             // posterior sobrescribe `last_test_result`, así que este panel decía
             // «habilitación pendiente» sobre una config que la DIAN había
             // habilitado catorce horas antes. Ver `resolveTestSetProof`.
-            wait: analyzeTestSetWait(resolveTestSetProof(config)),
+            wait: resolveTestSetWait(config),
             // Viaja al cliente porque la UI imprimía "50 documentos", la
             // composición de 2019, y con eso desinformaba sobre cuántos
             // consecutivos de la resolución consume cada envío.
@@ -716,17 +736,37 @@ export class SubscriptionFiscalService {
       nextSettings.last_test_result = null;
     }
 
-    if (dto.environment === 'production' && dto.is_enabled) {
-      if (!config.certificate_s3_key) {
-        throw new BadRequestException(
-          'Production activation requires a validated DIAN certificate',
-        );
-      }
-      this.assertFreshProductionTest(nextSettings, fingerprint, dto.confirm_production);
-      await this.prisma.withoutScope().dian_configurations.update({
-        where: { id: config.id },
-        data: { enablement_status: 'enabled', updated_at: new Date() },
-      });
+    // ESTE `PATCH` YA NO ACTIVA PRODUCCIÓN. LA VÍA ES `promote-to-production`.
+    //
+    // Aquí vivía la única guarda de la promoción de la plataforma: certificado
+    // presente + confirmación explícita + una prueba de CONEXIÓN de producción de
+    // la última hora. Ninguna de las tres mira `enablement_status`, así que este
+    // endpoint podía poner la plataforma a emitir en producción —y escribir
+    // `enablement_status: 'enabled'` de paso— sin que la DIAN hubiera aprobado su
+    // set de habilitación.
+    //
+    // El riel de tienda nunca permitió eso: su promoción exige `readiness.ready`,
+    // que incluye `test_set_evidence`. Cerrar esta vía es lo que hace que las dos
+    // tengan la misma guarda, en vez de que la de plataforma dependa de que la
+    // DIAN rechace por su cuenta una conexión de software no habilitado —un
+    // control real, pero externo y que no controlamos.
+    // Se bloquea el AMBIENTE, no la combinación ambiente+`is_enabled`.
+    //
+    // La guarda anterior solo miraba `environment === 'production' && is_enabled`,
+    // y eso dejaba abierta la puerta grande: `updateDianConfig` escribe
+    // `environment: dto.environment` sin condición, así que un PATCH con
+    // `is_enabled: false` volteaba `dian_configurations.environment` a producción
+    // —el ambiente con el que el proveedor firma y transmite— sin pasar por
+    // ninguna comprobación. La activación era un baile de dos pasos donde el
+    // primero ya había hecho el daño.
+    if (dto.environment === 'production') {
+      throw new BadRequestException(
+        'El paso a producción no se hace por este endpoint: usa POST ' +
+          'superadmin/subscriptions/fiscal/promote-to-production, que exige el ' +
+          'reporte de readiness completo (incluida la aprobación del set de ' +
+          'pruebas por la DIAN). Consúltalo en GET ' +
+          'superadmin/subscriptions/fiscal/production-readiness.',
+      );
     }
 
     await this.saveSettings(nextSettings);
@@ -889,6 +929,27 @@ export class SubscriptionFiscalService {
    * way to submit the 50-document test set that DIAN requires before enabling
    * production — the platform rail stopped one step short of usable.
    */
+  /**
+   * Quita `note_phase` del registro del lote antes de mandarlo al cliente.
+   *
+   * `note_phase.deferred[]` guarda cada nota retenida con su XML FIRMADO, porque su
+   * consecutivo ya está reservado dentro de ese XML y regenerarla daría otro CUDE.
+   * Imprescindible en base, y pésimo en una respuesta que el panel sondea: 20
+   * documentos firmados por consulta, que la UI no puede usar.
+   *
+   * El recuento y la razón viajan aparte, vía `buildNotePhaseView`.
+   */
+  private stripNotePhase(last_test_result: unknown): unknown {
+    if (!last_test_result || typeof last_test_result !== 'object') {
+      return last_test_result;
+    }
+    const { note_phase: _omitted, ...rest } = last_test_result as Record<
+      string,
+      any
+    >;
+    return rest;
+  }
+
   private async runInPlatformContext<T>(
     settings: SubscriptionFiscalSettings,
     fn: () => Promise<T>,
@@ -980,6 +1041,79 @@ export class SubscriptionFiscalService {
     return this.runInPlatformContext(settings, () =>
       this.dianTestService.abandonTestSet(configId),
     );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Paso a producción — el mismo reporte y la misma guarda que un tenant
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Qué falta para que la PLATAFORMA pueda emitir en producción.
+   *
+   * POR QUÉ ESTE ENDPOINT NO EXISTÍA Y POR QUÉ IMPORTA
+   *
+   * Este riel tenía `habilitation_readiness` —«¿puedo siquiera empezar?»— y no el
+   * reporte de producción —«¿puedo salir a producción?»—, que es el que contiene
+   * el chequeo `test_set_evidence`. Sin él, la única guarda de la promoción era
+   * una prueba de conexión reciente, que no dice nada sobre si la DIAN aprobó el
+   * set de habilitación.
+   *
+   * Delega en la implementación de tienda bajo contexto de plataforma, igual que
+   * `runTestSet` delega en `DianTestService`. Un segundo reporte se habría
+   * desviado del primero, que es exactamente el defecto que este método cierra.
+   *
+   * NO exige la resolución de numeración por adelantado: este reporte existe para
+   * DECIR qué falta, y su chequeo `production_resolution` ya lo cubre con un texto
+   * que explica el trámite en Muisca. Pedirla antes lo haría inalcanzable justo
+   * cuando más sirve.
+   */
+  async getProductionReadiness() {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+    return this.runInPlatformContext(settings, () =>
+      this.dianConfigService.getProductionReadiness(config.id),
+    );
+  }
+
+  /**
+   * Pasa la plataforma a producción, con la guarda completa de readiness.
+   *
+   * EL AMBIENTE DE LA PLATAFORMA VIVE EN DOS SITIOS, Y LOS DOS SE ESCRIBEN
+   *
+   * `dian_configurations.environment` es el que lee el proveedor DIAN al firmar y
+   * transmitir; `platform_settings.value.environment` es el que lee este riel para
+   * decidir si emite factura de suscripción. Escribir solo uno deja la plataforma
+   * firmando contra producción mientras su propio panel se cree en sandbox, o al
+   * revés. `promoteToProduction` de tienda cubre el primero; el segundo es propio
+   * de este riel y se escribe acá.
+   */
+  async promoteToProduction() {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+
+    // La guarda vive en la implementación de tienda: lanza con la lista completa
+    // de faltantes si el readiness no está listo, así que acá no se repite ninguna
+    // condición. Si esto devuelve, la promoción de la configuración ya ocurrió.
+    const promoted = await this.runInPlatformContext(settings, () =>
+      this.dianConfigService.promoteToProduction(config.id),
+    );
+
+    await this.saveSettings({
+      ...settings,
+      environment: 'production',
+      // La promoción es la afirmación de que la plataforma emite: dejar
+      // `is_enabled` en falso produciría una configuración en producción que este
+      // riel no usa, y el operador no tendría dónde ver la contradicción.
+      is_enabled: true,
+      updated_by_user_id: RequestContextService.getUserId() ?? null,
+      updated_at: new Date().toISOString(),
+    });
+
+    this.logger.log(
+      `Platform DIAN config ${config.id} promoted to production via promote-to-production`,
+    );
+
+    return { promoted, status: await this.getStatus() };
   }
 
   async listTransmissions(query: SubscriptionFiscalQueryDto) {
@@ -1787,16 +1921,43 @@ export class SubscriptionFiscalService {
     dto: UpsertSubscriptionFiscalConfigDto,
     options?: { realign_accounting_entity_id?: number | null },
   ) {
+    // El estado actual se lee ACÁ, no se recibe por parámetro.
+    //
+    // Un parámetro opcional que el llamador puede omitir es exactamente cómo este
+    // defecto se volvió invisible las otras tres veces. Con la lectura dentro del
+    // método no hay forma de olvidarla.
+    const current = await this.prisma
+      .withoutScope()
+      .dian_configurations.findUnique({
+        where: { id },
+        select: { enablement_status: true },
+      });
+
     const data: Prisma.dian_configurationsUpdateInput = {
       name: dto.name,
       nit: dto.nit,
       nit_dv: dto.nit_dv,
       software_id: dto.software_id,
       environment: dto.environment,
-      enablement_status: this.nextEnablementStatus(dto),
       test_set_id: dto.test_set_id,
       updated_at: new Date(),
     };
+
+    // CUARTA COPIA DEL MISMO DEFECTO: una escritura de `enablement_status` sin
+    // guarda podía degradar una habilitación concedida.
+    //
+    // `nextEnablementStatus` devuelve `not_started` para todo lo que no sea
+    // «habilitado y en test», así que editar el NOMBRE de una configuración ya
+    // `enabled` borraba el registro de que la DIAN la había habilitado. Es el
+    // mismo fallo que `abandonTestSet` producía el 2026-08-09, y las otras dos
+    // copias ya las cierra `canWriteEnablementStatus` en `dian-test.service`.
+    //
+    // `enabled` REGISTRA UN HECHO DE LA DIAN. Ningún guardado de formulario puede
+    // retirarlo: eso solo lo hace la DIAN, y se refleja por otras vías
+    // (`suspended`, `expired`).
+    if (canWriteEnablementStatus(current?.enablement_status ?? null)) {
+      data.enablement_status = this.nextEnablementStatus(dto);
+    }
     if (dto.software_pin && dto.software_pin !== '****') {
       data.software_pin_encrypted = this.encryption.encrypt(dto.software_pin);
     }
@@ -1883,6 +2044,22 @@ export class SubscriptionFiscalService {
     }
   }
 
+  /**
+   * SIN REFERENCIAS DESDE QUE `PATCH config` RECHAZA PRODUCCIÓN. NO SE BORRA AÚN.
+   *
+   * Era la única guarda de la vieja activación: exigía `last_test_result.ok` con
+   * `environment === 'production'` en la última hora. El problema es que
+   * `testConnection` graba el ambiente leyéndolo de `config.environment`, así que
+   * un resultado con `environment: 'production'` solo existe DESPUÉS de que la
+   * configuración ya está en producción. Como pre-requisito para promover era
+   * insatisfacible: el flujo real era voltear el ambiente primero con un PATCH
+   * —sin guarda ninguna— y recién entonces poder cumplirla.
+   *
+   * Cerrada esa vía, la guarda no puede cumplirse nunca antes de promover. Queda
+   * acá, sin llamar y documentada, en vez de borrada en silencio: una verificación
+   * de conexión POSTERIOR a la promoción sigue teniendo sentido y esta función es
+   * la pieza para ello, pero eso es una decisión de flujo que nadie ha pedido.
+   */
   private assertFreshProductionTest(
     settings: SubscriptionFiscalSettings,
     fingerprint: string,

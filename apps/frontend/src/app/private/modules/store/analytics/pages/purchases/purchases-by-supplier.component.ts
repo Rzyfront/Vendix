@@ -2,7 +2,7 @@ import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -13,14 +13,16 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
-import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
+import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe, ResponsiveDataViewComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
@@ -43,8 +45,9 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
         ></app-stats>
 
         <app-stats
-          title="Total Gastado"
+          title="Comprado (sin IVA)"
           [value]="getTotalSpent()"
+          smallText="Cuadra con el Resumen de Compras"
           iconName="dollar-sign"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -102,6 +105,45 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
             <app-chart [options]="chartOptions()" size="large"></app-chart>
           </div>
         </app-card>
+
+        <!-- Detalle. La fila de totales debe coincidir EXACTAMENTE con las
+             tarjetas del Resumen de Compras: mismo universo, mismos estados,
+             misma base sin IVA. Si difieren, una de las dos miente. -->
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por proveedor</span>
+            <span class="text-xs text-[var(--color-text-secondary)]">
+              El total cuadra con el Resumen de Compras
+            </span>
+          </div>
+          <div class="p-4">
+            <app-responsive-data-view
+              [data]="chartData()"
+              [columns]="supplierColumns"
+              [cardConfig]="supplierCardConfig"
+              [loading]="chartLoading()"
+              [hoverable]="true"
+              emptyTitle="Sin compras"
+              emptyMessage="Sin compras a proveedores en el período."
+              (rowClick)="openSupplier($event)"
+            ></app-responsive-data-view>
+            <!--
+              La fila de totales queda fuera de la tabla del sistema: es un
+              agregado de la vista, no un registro. Es la prueba visual de que
+              esta pantalla cuadra con el Resumen de Compras.
+            -->
+            @if (chartData().length > 0) {
+              <div class="mt-3 pt-3 border-t-2 border-border flex flex-wrap gap-x-6 gap-y-1 text-sm font-bold">
+                <span class="text-[var(--color-text-primary)]">Total</span>
+                <span>{{ getTotalOrders() }} órdenes</span>
+                <span>{{ totalSpentValue() | currency }}</span>
+                <span class="text-[var(--color-text-secondary)]">IVA {{ totalTaxValue() | currency }}</span>
+                <span>{{ totalPendingOrders() }} pendientes</span>
+                <span>{{ totalPercentage() }} %</span>
+              </div>
+            }
+          </div>
+        </app-card>
       }
       </div>
     </div>
@@ -113,6 +155,7 @@ export class PurchasesBySupplierComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private readonly route = inject(ActivatedRoute);
   private currencyService = inject(CurrencyFormatService);
+  private readonly router = inject(Router);
 
   chartLoading = signal(false);
   chartData = signal<PurchasesBySupplier[]>([]);
@@ -229,13 +272,151 @@ legend: {
     });
   }
 
+  readonly supplierColumns: TableColumn[] = [
+    { key: 'supplier_name', label: 'Proveedor', priority: 1 },
+    { key: 'order_count', label: 'Órdenes', align: 'right', priority: 2 },
+    {
+      key: 'total_spent',
+      label: 'Comprado (sin IVA)',
+      align: 'right',
+      priority: 1,
+      transform: (value: any) => this.currencyService.format(Number(value)),
+    },
+    {
+      key: 'tax_amount',
+      label: 'IVA',
+      align: 'right',
+      priority: 3,
+      transform: (value: any) => this.currencyService.format(Number(value)),
+    },
+    { key: 'pending_orders', label: 'Pendientes', align: 'right', priority: 3 },
+    {
+      key: 'percentage_of_total',
+      label: '% del total',
+      align: 'right',
+      priority: 2,
+      transform: (value: any) => `${value} %`,
+    },
+    {
+      key: 'growth',
+      label: 'vs. anterior',
+      align: 'right',
+      priority: 3,
+      // `defaultValue` y no `transform` para el caso nulo: la celda de
+      // `app-table` corta antes del transform cuando el valor es null y pinta
+      // `defaultValue || "No data"`. Acá el null SIGNIFICA algo — el proveedor
+      // no tuvo compras en la ventana previa — así que debe decirlo.
+      defaultValue: 'Sin base',
+      transform: (value: any) => this.growthLabel(value as number | null),
+    },
+    {
+      key: 'last_order_date',
+      label: 'Última compra',
+      priority: 3,
+      defaultValue: 'Sin compras',
+      transform: (value: any) => this.formatLastOrder(value as string | null),
+    },
+  ];
+
+  readonly supplierCardConfig: ItemListCardConfig = {
+    titleKey: 'supplier_name',
+    detailKeys: [
+      { key: 'order_count', label: 'Órdenes', icon: 'file-text' },
+      {
+        key: 'percentage_of_total',
+        label: '% del total',
+        icon: 'percent',
+        transform: (value: any) => `${value} %`,
+      },
+      {
+        key: 'growth',
+        label: 'vs. anterior',
+        icon: 'trending-up',
+        transform: (value: any) => this.growthLabel(value as number | null),
+      },
+      {
+        key: 'last_order_date',
+        label: 'Última compra',
+        icon: 'calendar',
+        transform: (value: any) => this.formatLastOrder(value as string | null),
+      },
+    ],
+    footerKey: 'total_spent',
+    footerLabel: 'Comprado (sin IVA)',
+    footerTransform: (value: any) => this.currencyService.format(Number(value)),
+  };
+
+  /**
+   * Un proveedor listado tiene que llevar a su perfil (QUI-656), que es donde
+   * está su deuda, su historial y sus documentos.
+   */
+  openSupplier(row: PurchasesBySupplier): void {
+    this.router.navigate(['/admin/inventory/suppliers', row.supplier_id]);
+  }
+
   getTotalOrders(): number {
     return this.chartData().reduce((sum, s) => sum + (s.order_count || 0), 0);
   }
 
+  /** Raw total, for the footer cell that goes through the currency pipe. */
+  totalSpentValue(): number {
+    return this.chartData().reduce((sum, s) => sum + (s.total_spent || 0), 0);
+  }
+
+  totalTaxValue(): number {
+    return this.chartData().reduce((sum, s) => sum + (s.tax_amount || 0), 0);
+  }
+
+  totalPendingOrders(): number {
+    return this.chartData().reduce((sum, s) => sum + (s.pending_orders || 0), 0);
+  }
+
+  /**
+   * Rounded to 1 decimal because the shares are already rounded per row; the
+   * column is expected to read 100 and any drift is a rounding artefact, not a
+   * reconciliation failure.
+   */
+  totalPercentage(): number {
+    const total = this.chartData().reduce(
+      (sum, s) => sum + (s.percentage_of_total || 0),
+      0,
+    );
+    return Math.round(total * 10) / 10;
+  }
+
   getTotalSpent(): string {
-    const total = this.chartData().reduce((sum, s) => sum + (s.total_spent || 0), 0);
-    return '$' + total.toLocaleString('es-CO', { maximumFractionDigits: 0 });
+    return (
+      '$' +
+      this.totalSpentValue().toLocaleString('es-CO', {
+        maximumFractionDigits: 0,
+      })
+    );
+  }
+
+  /** `null` = the supplier had no purchases in the previous window. */
+  growthLabel(growth: number | null | undefined): string {
+    if (growth === null || growth === undefined) return 'Sin base';
+    const sign = growth > 0 ? '+' : '';
+    return `${sign}${growth.toFixed(1)} %`;
+  }
+
+  /**
+   * `last_order_date` arrives as a raw ISO INSTANT (the backend emits it
+   * unconverted on purpose), so it must be rendered in a local calendar, never
+   * with `formatDateOnlyUTC` — that helper is for business-dates and would show
+   * a 20:51 purchase on the following day.
+   *
+   * The browser's own zone is used rather than a hardcoded `America/Bogota`:
+   * the operator reading this table is physically at the store, and hardcoding
+   * a country would be wrong for any tenant outside Colombia.
+   */
+  formatLastOrder(iso: string | null): string {
+    if (!iso) return 'Sin compras';
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
   }
 
   getTopSupplier(): string {

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   StoreBootstrapHelper,
   DEFAULT_CASH_REGISTER,
+  DEFAULT_KDS,
 } from './store-bootstrap.helper';
 import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 
@@ -28,9 +29,15 @@ describe('StoreBootstrapHelper — default cash register (QUI-654)', () => {
     txMock = {
       addresses: { create: jest.fn() },
       stores: {
-        create: jest
-          .fn()
-          .mockResolvedValue({ id: STORE_ID, slug: 'mi-tienda', name: 'Mi Tienda' }),
+        // Echoes `industries` back the way the real row does, applying the same
+        // `['retail']` default when the caller passes none. The KDS gate reads
+        // the PERSISTED value, so the mock has to model that default.
+        create: jest.fn().mockImplementation(({ data }: any) => ({
+          id: STORE_ID,
+          slug: 'mi-tienda',
+          name: 'Mi Tienda',
+          industries: data?.industries ?? ['retail'],
+        })),
         update: jest
           .fn()
           .mockResolvedValue({ id: STORE_ID, slug: 'mi-tienda', name: 'Mi Tienda' }),
@@ -42,6 +49,13 @@ describe('StoreBootstrapHelper — default cash register (QUI-654)', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockImplementation(({ data }: any) => ({
           id: 900,
+          ...data,
+        })),
+      },
+      kds: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(({ data }: any) => ({
+          id: 700,
           ...data,
         })),
       },
@@ -165,5 +179,97 @@ describe('StoreBootstrapHelper — default cash register (QUI-654)', () => {
     expect(txMock.cash_registers.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ name: 'Caja Barra', code: 'BARRA' }),
     });
+  });
+
+  // ------------------------------------------------------- KDS por defecto
+  // `fireOrderItemsInTx` resuelve la estacion destino con
+  // `products.kds_id ?? <default>` y falla con KITCHEN_FIRE_NO_DEFAULT_KDS si no
+  // hay default. Sin esta fila una tienda restaurante toma pedidos y no puede
+  // mandarlos a cocina, asi que el gate y la idempotencia van cubiertos.
+
+  it('creates the default station for a restaurant store', async () => {
+    const helper = await buildHelper();
+
+    const result = await helper.createStoreWithDefaultLocation({
+      organization_id: ORG_ID,
+      store_data: {
+        name: 'Mi Tienda',
+        slug: 'mi-tienda',
+        industries: ['retail', 'restaurant'] as any,
+      },
+    });
+
+    expect(txMock.kds.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        store_id: STORE_ID,
+        name: DEFAULT_KDS.name,
+        code: DEFAULT_KDS.code,
+        is_active: true,
+        // El indice unico parcial `kds_one_default_per_store` depende de esto.
+        is_default: true,
+      }),
+    });
+    expect(result.default_kds).not.toBeNull();
+  });
+
+  it('creates NO station for a store that does not cook', async () => {
+    const helper = await buildHelper();
+
+    const result = await helper.createStoreWithDefaultLocation({
+      organization_id: ORG_ID,
+      store_data: { name: 'Mi Tienda', slug: 'mi-tienda', industries: ['retail'] as any },
+    });
+
+    expect(txMock.kds.create).not.toHaveBeenCalled();
+    // null es un resultado VALIDO, no un fallo: una tienda retail no cocina y
+    // un tablero vacio le dejaria un modulo muerto en el panel.
+    expect(result.default_kds).toBeNull();
+  });
+
+  it('creates no station when industries defaults to retail', async () => {
+    const helper = await buildHelper();
+
+    // Sin `industries` la fila persiste ['retail']. El gate lee el valor
+    // PERSISTIDO, no el input, justamente para no perderse este default.
+    const result = await helper.createStoreWithDefaultLocation({
+      organization_id: ORG_ID,
+      store_data: { name: 'Mi Tienda', slug: 'mi-tienda' },
+    });
+
+    expect(txMock.kds.create).not.toHaveBeenCalled();
+    expect(result.default_kds).toBeNull();
+  });
+
+  it('is idempotent — respects a station the operator already created', async () => {
+    const helper = await buildHelper();
+    txMock.kds.findFirst.mockResolvedValue({
+      id: 3,
+      store_id: STORE_ID,
+      code: 'BARRA',
+      is_default: true,
+    });
+
+    const station = await helper.ensureDefaultKds({
+      store_id: STORE_ID,
+      industries: ['restaurant'],
+    });
+
+    expect(txMock.kds.create).not.toHaveBeenCalled();
+    expect(station?.code).toBe('BARRA');
+  });
+
+  it('resolves a concurrent P2002 on the one-default index by reading the winner', async () => {
+    const helper = await buildHelper();
+    txMock.kds.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 88, store_id: STORE_ID, code: 'COCINA' });
+    txMock.kds.create.mockRejectedValueOnce({ code: 'P2002' });
+
+    const station = await helper.ensureDefaultKds({
+      store_id: STORE_ID,
+      industries: ['restaurant'],
+    });
+
+    expect(station?.id).toBe(88);
   });
 });

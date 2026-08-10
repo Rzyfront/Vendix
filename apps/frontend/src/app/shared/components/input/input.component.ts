@@ -16,6 +16,9 @@ import {
 } from '@angular/forms';
 
 import { FormStyleVariant } from '../../types/form.types';
+// Mensajes de los validadores DIAN. Un solo mapa para que las cuatro superficies
+// de configuración DIAN expliquen el mismo rechazo con el mismo texto.
+import { DIAN_VALIDATION_MESSAGES } from '../../utils/dian-validators';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
@@ -503,6 +506,20 @@ export class InputComponent implements ControlValueAccessor {
     }
     if (errors['max']) {
       return `El valor máximo es ${errors['max'].max}.`;
+    }
+
+    // Claves de los validadores DIAN, leídas del mapa COMPARTIDO.
+    //
+    // Sin esto caían al genérico de abajo, y «El valor es inválido» sobre un
+    // `software_id` no le dice a nadie que ese identificador es el UUID del correo
+    // de habilitación. Un formulario que bloquea el botón sin explicar por qué es
+    // peor que uno que no valida: el usuario no sabe qué corregir.
+    //
+    // Se resuelve por mapa y no con un `if` por clave para que añadir un validador
+    // DIAN nuevo no exija tocar este componente.
+    for (const key of Object.keys(errors)) {
+      const dianMessage = DIAN_VALIDATION_MESSAGES[key];
+      if (dianMessage) return dianMessage;
     }
 
     // Fallback para otros errores

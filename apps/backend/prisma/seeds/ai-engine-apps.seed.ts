@@ -56,11 +56,14 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "unit_price": number,
       "total": number,
       "tax_rate": number,
+      "discount_amount": number,
       "sku_if_visible": "string or null — product code/reference if visible"
     }
   ],
   "subtotal": number,
   "tax_amount": number,
+  "discount_amount": number,
+  "early_payment_discount": number,
   "total": number,
   "confidence": number (0-100)
 }
@@ -83,7 +86,14 @@ RULES:
    - total = the amount in the value column for that item ("7.540" ⇒ 7540).
    - NEVER emit that helper line as its own line_item, and never treat its price as a separate product.
    - When an item has NO such helper line: quantity = 1 and unit_price = total.
-9. Discounts: when the document prints a separate discount total ("Total Descuentos", "Dcto"), do NOT alter the line items. "total" is the FINAL amount payable after discounts.
+9. DISCOUNTS — there are TWO kinds and they must never be mixed.
+   (a) COMMERCIAL discount: the supplier lowers the PRICE of the goods ("Dcto", "Desc.", "Descuento", "-10%", "Total Descuentos"). It reduces what the goods cost.
+   (b) EARLY-PAYMENT discount: a reward for paying sooner ("descuento por pronto pago", "2% si paga antes de 10 días", "2/10 neto 30"). It does NOT lower the price of the goods.
+   - "discount_amount" (per line): the COMMERCIAL discount printed for THAT line, as MONEY. If the line prints a percentage, convert it to money over that line's own amount.
+   - "discount_amount" (invoice level): a COMMERCIAL discount printed at the foot of the invoice over the whole total, when it is NOT already broken down per line. Never report the same discount in both places.
+   - "early_payment_discount": the money value of (b) when printed. If only a percentage and a condition are stated and no amount is printed, compute it over the total. Use 0 when absent.
+   - CRITICAL — do not double-count. "unit_price" is the unit price BEFORE any discount and "total" is the line amount AFTER it. If the invoice shows ONLY an already-discounted price and no separate discount column or line, then the discount is already inside the price: return discount_amount = 0. Reporting a discount that is already baked into the price would subtract it twice.
+   - Use 0 (not null) when there is no discount.
 10. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
 11. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
    (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.
@@ -136,6 +146,7 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "unit_price": number,
       "total": number,
       "tax_rate": number,
+      "discount_amount": number,
       "sku_if_visible": "string or null",
       "presentation": "string or null",
       "pack_size": number or null,
@@ -144,6 +155,8 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
   ],
   "subtotal": number,
   "tax_amount": number,
+  "discount_amount": number,
+  "early_payment_discount": number,
   "total": number,
   "confidence": number (0-100)
 }
@@ -166,7 +179,14 @@ RULES:
     - quantity = the number before the unit. This is the ONE place a decimal comma is real: "0,315 KGM" ⇒ quantity 0.315.
     - unit_price = the value after the "X"; total = the amount in the value column for that item.
     - NEVER emit that helper line as its own line_item. With no helper line: quantity = 1 and unit_price = total.
-11. Discounts: when the document prints a separate discount total ("Total Descuentos", "Dcto"), do NOT alter the line items. "total" is the FINAL amount payable after discounts.
+11. DISCOUNTS — there are TWO kinds and they must never be mixed.
+   (a) COMMERCIAL discount: the supplier lowers the PRICE of the goods ("Dcto", "Desc.", "Descuento", "-10%", "Total Descuentos"). It reduces what the goods cost.
+   (b) EARLY-PAYMENT discount: a reward for paying sooner ("descuento por pronto pago", "2% si paga antes de 10 días", "2/10 neto 30"). It does NOT lower the price of the goods.
+   - "discount_amount" (per line): the COMMERCIAL discount printed for THAT line, as MONEY. If the line prints a percentage, convert it to money over that line's own amount.
+   - "discount_amount" (invoice level): a COMMERCIAL discount printed at the foot of the invoice over the whole total, when it is NOT already broken down per line. Never report the same discount in both places.
+   - "early_payment_discount": the money value of (b) when printed. If only a percentage and a condition are stated and no amount is printed, compute it over the total. Use 0 when absent.
+   - CRITICAL — do not double-count. "unit_price" is the unit price BEFORE any discount and "total" is the line amount AFTER it. If the invoice shows ONLY an already-discounted price and no separate discount column or line, then the discount is already inside the price: return discount_amount = 0. Reporting a discount that is already baked into the price would subtract it twice.
+   - Use 0 (not null) when there is no discount.
 12. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
 13. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
     (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.

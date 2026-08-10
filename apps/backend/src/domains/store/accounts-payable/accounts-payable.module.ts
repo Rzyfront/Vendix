@@ -7,6 +7,7 @@ import { ApBankExportService } from './services/ap-bank-export.service';
 import { ApEventsListener } from './listeners/ap-events.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { ApDueNotificationsJob } from './jobs/ap-due-notifications.job';
 
 @Module({
   imports: [PrismaModule, ResponseModule],
@@ -17,6 +18,8 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     ApSchedulingService,
     ApBankExportService,
     ApEventsListener,
+    // QUI-647 Fase 3 — barrido diario de vencimientos de cuotas de CxP.
+    ApDueNotificationsJob,
   ],
   exports: [AccountsPayableService],
 })

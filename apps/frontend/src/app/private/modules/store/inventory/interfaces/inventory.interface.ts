@@ -692,6 +692,14 @@ export interface CostPreviewItem {
   // `null` when the new cost is 0 (e.g. reactivation of orphaned stock) so
   // the UI can avoid a divide-by-zero display.
   resulting_margin: number | null;
+  /**
+   * QUI-645 — row synthesized on the CLIENT for a product that does not exist
+   * yet (prebulk). The backend never emits it: a new product has no stock, no
+   * previous cost and no catalog price to look up. It carries `product_id` as
+   * a NEGATIVE index-derived value so the override map can key on it without
+   * colliding with a real product.
+   */
+  is_new_product?: boolean;
 }
 
 export interface CostPreviewResponse {
@@ -742,4 +750,58 @@ export interface PaginatedApiResponse<T> {
     hasNextPage: boolean;
     hasPreviousPage: boolean;
   };
+}
+
+/**
+ * QUI-656 — resumen del perfil del proveedor.
+ *
+ * `outstanding_debt` y `committed_amount` van SEPARADOS a propósito: el primero
+ * es deuda formalizada en `accounts_payable` (cuadra contra contabilidad); el
+ * segundo son OCs aprobadas que todavía no generaron CxP, porque la CxP nace
+ * atada a la recepción. Sumarlos daría un número que no cuadra con ningún libro.
+ */
+export interface SupplierSummary {
+    supplier_id: number;
+    supplier_name: string;
+    /** Identidad completa; viaja acá porque `GET /:id` no alcanza a los de organización. */
+    supplier: Supplier;
+    total_orders: number;
+    /** SUM(subtotal_amount) — SIN IVA, igual que el Resumen de Compras. */
+    total_purchased: number;
+    average_order_value: number;
+    outstanding_debt: number;
+    overdue_debt: number;
+    max_days_overdue: number;
+    committed_amount: number;
+    committed_orders: number;
+    last_order_date: string | null;
+    /** Universo agregado: ORGANIZATION suma todas las tiendas. */
+    scope: 'ORGANIZATION' | 'STORE';
+}
+
+export interface SupplierPurchaseOrderRow {
+    id: number;
+    order_number: string;
+    status: string;
+    payment_status: string;
+    subtotal_amount: string | number;
+    tax_amount: string | number;
+    total_amount: string | number;
+    supplier_invoice_number: string | null;
+    order_date: string | null;
+    expected_date: string | null;
+    received_date: string | null;
+}
+
+export interface SupplierPayableRow {
+    id: number;
+    document_number: string | null;
+    source_type: string;
+    source_id: number | null;
+    original_amount: string | number;
+    paid_amount: string | number;
+    balance: string | number;
+    due_date: string;
+    status: string;
+    days_overdue: number;
 }

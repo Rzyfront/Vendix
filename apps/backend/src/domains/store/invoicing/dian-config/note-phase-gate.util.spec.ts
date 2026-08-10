@@ -1,10 +1,106 @@
 import {
+  buildNotePhaseView,
   canWriteEnablementStatus,
   decideNotePhase,
   isTestSetClosedByDian,
   resolveRegisteredInvoiceReferences,
   NOTE_PHASE_MAX_POLLS,
 } from './note-phase-gate.util';
+
+/**
+ * ESTA VISTA EXISTE PORQUE EL DIFERIMIENTO ERA INVISIBLE.
+ *
+ * El backend guardaba `note_phase` con las notas retenidas enteras, y las dos
+ * proyecciones de estado —`checkTestSetStatus` y `testSetStatusFromStoredResult`—
+ * lo descartaban campo por campo. Así que el asistente decía «50 documentos»
+ * —`total_documents` conserva el significado de generados— sobre un lote del que
+ * salieron 30, sin decir que 20 notas estaban retenidas ni por qué.
+ *
+ * La vista lleva los números y la razón; el XML firmado se queda en base. Un
+ * sondeo cada 15 s no puede arrastrar 20 documentos firmados.
+ */
+describe('buildNotePhaseView', () => {
+  /** El caso real: 30 facturas transmitidas, 20 notas retenidas por el tope. */
+  const deferred_phase = {
+    sent: false,
+    reason:
+      'Tope de espera agotado: tras 20 consultas la DIAN había registrado 12 de 30 facturas. ' +
+      'Las notas quedan generadas y sin transmitir.',
+    invoice_zip_keys: ['zip-1', 'zip-2'],
+    polls: 20,
+    deferred: Array.from({ length: 20 }, (_, i) => ({
+      name: `nota-${i}.xml`,
+      consecutive: 990000300 + i,
+      // El XML firmado. Es lo que NO debe viajar.
+      content: '<DebitNote>…firmado…</DebitNote>',
+    })),
+  };
+
+  it('cuenta las notas retenidas y lleva sus consecutivos', () => {
+    const view = buildNotePhaseView(deferred_phase);
+    expect(view?.sent).toBe(false);
+    expect(view?.deferred_count).toBe(20);
+    expect(view?.deferred_consecutives).toHaveLength(20);
+    expect(view?.deferred_consecutives[0]).toBe(990000300);
+    expect(view?.polls).toBe(20);
+    expect(view?.reason).toContain('Tope de espera agotado');
+  });
+
+  it('NO lleva el contenido firmado de las notas', () => {
+    // Es la mitad del punto de esta función: si el XML viaja, un sondeo cada 15 s
+    // arrastra 20 documentos firmados que nadie lee.
+    const view = buildNotePhaseView(deferred_phase);
+    expect(JSON.stringify(view)).not.toContain('DebitNote');
+    expect(JSON.stringify(view)).not.toContain('firmado');
+  });
+
+  it('una fase que SÍ envió no reporta notas retenidas', () => {
+    const view = buildNotePhaseView({
+      sent: true,
+      reason: '30 de 30 facturas registradas tras 4 consultas.',
+      invoice_zip_keys: ['zip-1'],
+      polls: 4,
+    });
+    expect(view?.sent).toBe(true);
+    expect(view?.deferred_count).toBe(0);
+    expect(view?.deferred_consecutives).toEqual([]);
+  });
+
+  it('sin fase de notas devuelve null, que es «no hubo diferimiento»', () => {
+    for (const empty of [null, undefined, 'no', 42]) {
+      expect(buildNotePhaseView(empty)).toBeNull();
+    }
+  });
+
+  it('tolera un lote anterior a que estos campos existieran', () => {
+    // `last_test_result` es JSON en base: hay lotes guardados antes del envío en
+    // dos fases. Devolver la vista con ceros es correcto; romper no.
+    const view = buildNotePhaseView({});
+    expect(view).toEqual({
+      sent: false,
+      reason: '',
+      polls: 0,
+      deferred_count: 0,
+      deferred_consecutives: [],
+    });
+  });
+
+  it('descarta un consecutivo que no es número en vez de emitir NaN', () => {
+    const view = buildNotePhaseView({
+      sent: false,
+      reason: 'x',
+      polls: 1,
+      deferred: [
+        { name: 'a.xml', consecutive: 990000300, content: 'x' },
+        { name: 'b.xml', consecutive: null, content: 'x' },
+        { name: 'c.xml', content: 'x' },
+      ],
+    });
+    // `deferred_count` cuenta lo retenido (3); los consecutivos solo los legibles.
+    expect(view?.deferred_count).toBe(3);
+    expect(view?.deferred_consecutives).toEqual([990000300]);
+  });
+});
 
 /**
  * ESTE PREDICADO EXISTE PORQUE SU AUSENCIA COSTÓ 30 CONSECUTIVOS.

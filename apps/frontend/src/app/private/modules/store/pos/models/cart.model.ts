@@ -54,6 +54,19 @@ export interface CartItem {
   // no DB migration is required. Defaults to false (legacy
   // behaviour: send to kitchen).
   skipKds?: boolean;
+  // QUI-653 — la línea se empaca y el cliente se la lleva. A diferencia de
+  // `skipKds`, este flag SÍ se persiste: viaja a `order_items.is_takeaway` vía
+  // `TableSessionAddItem`, porque el ticket de cocina y el tiquete impreso lo
+  // necesitan después del cobro.
+  //
+  // Solo tiene sentido en el camino POS -> mesa. En una venta directa del POS
+  // (sin sesión de mesa) "para llevar" no significa nada.
+  //
+  // ATENCIÓN: participa en la identidad de la línea igual que `skipKds` (ver la
+  // clave de fusión en pos-cart.service.ts). Dos líneas del mismo plato, una
+  // para llevar y otra para la mesa, son líneas DISTINTAS; fusionarlas perdería
+  // una de las dos decisiones en silencio.
+  isTakeaway?: boolean;
   // QUI-431 — Serial numbers chosen by the cashier for a serialized
   // product (`requires_serial_numbers=true`). `serial_ids` are existing
   // pool rows picked from the selector; `serial_numbers` are free-text
@@ -158,6 +171,12 @@ export interface AddToCartRequest {
    * inventory and have stock > 0.
    */
   skipKds?: boolean;
+  /**
+   * QUI-653 — la línea se agrega marcada "para llevar". Participa en la
+   * identidad de la línea, así que un mismo plato pedido para llevar y para la
+   * mesa produce DOS líneas y no una fusionada.
+   */
+  isTakeaway?: boolean;
   // QUI-431 — Pre-selected serials for serialized products. The POS opens a
   // selector modal before calling addToCart and passes the cashier's choice
   // here. `serial_ids` are pool rows; `serial_numbers` are free-text entries.

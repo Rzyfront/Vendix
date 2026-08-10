@@ -253,3 +253,70 @@ export function decideNotePhase(params: {
       `consulta${poll === 1 ? '' : 's'}.`,
   };
 }
+
+/**
+ * La fase de notas TAL COMO SE LE MUESTRA AL OPERADOR.
+ *
+ * NO ES EL REGISTRO PERSISTIDO, Y LA DIFERENCIA ES DELIBERADA
+ *
+ * `note_phase.deferred[]` guarda cada nota retenida ENTERA, con su XML firmado,
+ * porque su consecutivo ya está reservado dentro de ese XML y regenerarla mañana
+ * daría otro CUDE. Eso la hace imprescindible en base y pésima en una respuesta
+ * HTTP: el asistente sondea el estado cada 15 s, y 20 documentos firmados por
+ * sondeo es tráfico que nadie va a leer.
+ *
+ * Esta vista lleva lo que la UI necesita para explicar la diferencia entre
+ * generados y transmitidos: si se envió, por qué no, y qué consecutivos quedaron
+ * retenidos. Los números sí, el contenido no.
+ */
+export interface TestSetNotePhaseView {
+  sent: boolean;
+  reason: string;
+  polls: number;
+  /** Cuántas notas quedaron generadas, firmadas y sin transmitir. */
+  deferred_count: number;
+  /**
+   * Los consecutivos retenidos. Viajan porque son numeración autorizada que ya
+   * está reservada: el operador tiene que poder saber cuáles, no solo cuántos.
+   */
+  deferred_consecutives: number[];
+}
+
+/**
+ * Proyecta el `note_phase` persistido a su vista, o `null` si no hubo dos fases.
+ *
+ * Tolerante con la forma a propósito: lee de `last_test_result`, que es JSON en
+ * base y puede venir de un envío anterior a que estos campos existieran. Un lote
+ * viejo devuelve `null`, que es exactamente «no hubo diferimiento».
+ */
+export function buildNotePhaseView(
+  note_phase: unknown,
+): TestSetNotePhaseView | null {
+  if (!note_phase || typeof note_phase !== 'object') return null;
+  const data = note_phase as Record<string, any>;
+
+  const deferred = Array.isArray(data.deferred) ? data.deferred : [];
+
+  return {
+    sent: data.sent === true,
+    reason: typeof data.reason === 'string' ? data.reason : '',
+    polls: Number.isFinite(data.polls) ? Number(data.polls) : 0,
+    deferred_count: deferred.length,
+    // Se descarta ANTES de coercer, no después.
+    //
+    // `Number(null)` es `0` y `Number.isFinite(0)` es `true`, así que coercer
+    // primero convertía una nota sin consecutivo en «el consecutivo 0» y lo
+    // presentaba al operador como un número reservado. Sobre numeración autorizada
+    // eso no es un cero cosmético: es afirmar que existe un consecutivo que no
+    // existe. El `> 0` cierra también el cero literal.
+    deferred_consecutives: deferred
+      .map((note: any) => note?.consecutive)
+      .filter(
+        (raw: unknown) => raw !== null && raw !== undefined && raw !== '',
+      )
+      .map((raw: unknown) => Number(raw))
+      .filter(
+        (consecutive: number) => Number.isFinite(consecutive) && consecutive > 0,
+      ),
+  };
+}

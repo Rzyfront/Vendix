@@ -420,6 +420,21 @@ export class CreateProductDto {
   @Type(() => Number)
   preparation_time_minutes?: number;
 
+  /**
+   * QUI-651 — estacion de preparacion del plato. Solo significativo para
+   * `product_type = 'prepared'`.
+   *
+   * NULL significa "cae en el KDS por defecto de la tienda", que es lo que hace
+   * funcionar el caso de una sola estacion sin configurar nada. Se acepta null
+   * explicito para poder LIMPIAR la estacion en una edicion: sin eso, un plato
+   * asignado a barra no podria volver a "la que sea".
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  kds_id?: number | null;
+
   // Consultation-specific fields
   @IsOptional()
   @IsBoolean()
@@ -700,6 +715,21 @@ export class UpdateProductDto {
   @Max(10080)
   @Type(() => Number)
   preparation_time_minutes?: number;
+
+  /**
+   * QUI-651 — estacion de preparacion del plato. Solo significativo para
+   * `product_type = 'prepared'`.
+   *
+   * NULL significa "cae en el KDS por defecto de la tienda", que es lo que hace
+   * funcionar el caso de una sola estacion sin configurar nada. Se acepta null
+   * explicito para poder LIMPIAR la estacion en una edicion: sin eso, un plato
+   * asignado a barra no podria volver a "la que sea".
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  kds_id?: number | null;
 
   // Consultation-specific fields
   @IsOptional()

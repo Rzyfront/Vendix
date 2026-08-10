@@ -308,6 +308,12 @@ export class SplitOrderService {
       .map((it) => it.id);
     type SplitFireResult = {
       ticketId: number;
+      /**
+       * QUI-651 — un id por estacion involucrada en el envio. El split financiero
+       * no rutea nada por si mismo: solo reenvia lo que `fireOrderItemsInTx`
+       * resolvio, para que el SSE llegue a cada tablero.
+       */
+      ticketIds: number[];
       firedItemSnapshots: Array<{
         orderItemId: number;
         productId: number;

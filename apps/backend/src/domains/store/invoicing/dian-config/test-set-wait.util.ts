@@ -48,11 +48,26 @@ export const TEST_SET_STALL_AFTER_MS = 6 * 60 * 60 * 1000;
  * Pura, como el resto de este archivo: las cinco superficies tienen que coincidir
  * en la respuesta, y una función compartida sin E/S es la única forma de
  * garantizarlo.
+ *
+ * LOS TRES CAMPOS SON OBLIGATORIOS, Y ESO ES LA MITAD DEL ARREGLO
+ *
+ * La primera versión los declaró opcionales. Con eso, un `select` de Prisma que
+ * no pidiera `enablement_evidence` typecheaba limpio, la función recibía
+ * `undefined`, `looksLikeVerdict` devolvía `false` y caía al último lote — el
+ * comportamiento exacto que esta función existe para evitar. Pasó en
+ * `getTestResults`, que seleccionaba cinco columnas y no esa: el arreglo quedó
+ * inerte en esa ruta durante todo su despliegue.
+ *
+ * Obligatorios, un `select` incompleto no compila. Es el mismo criterio que
+ * `SharedTechnicalKeyFinding` ya aplica en `fiscal-production-readiness`: «un
+ * campo opcional ausente se leería como “sin hallazgo” y la comprobación fallaría
+ * en abierto». Aquí el fallo en abierto es leer «no pasó» sobre una habilitación
+ * concedida.
  */
 export function resolveTestSetProof(config: {
-  enablement_status?: string | null;
-  enablement_evidence?: unknown;
-  last_test_result?: unknown;
+  enablement_status: string | null;
+  enablement_evidence: unknown;
+  last_test_result: unknown;
 }): unknown {
   const passed =
     config.enablement_status === 'test_set_passed' ||
@@ -76,6 +91,32 @@ export function resolveTestSetProof(config: {
     return config.enablement_evidence;
   }
   return config.last_test_result;
+}
+
+/**
+ * La lectura de la espera SOBRE LA PRUEBA CORRECTA, en un solo paso.
+ *
+ * POR QUÉ EXISTE ESTA COMPOSICIÓN Y NO CUATRO COPIAS DE ELLA
+ *
+ * `analyzeTestSetWait(resolveTestSetProof(config))` estaba escrito a mano en
+ * cuatro superficies, y en dos de ellas faltaba la mitad de dentro: el sondeo del
+ * asistente y la salida del lote descartado llamaban a `analyzeTestSetWait` a
+ * secas. Una composición correcta pero opcional es una composición que alguien va
+ * a olvidar; ya se olvidó dos veces.
+ *
+ * A partir de acá, quien necesite el estado de la espera llama a ESTO. Llamar a
+ * `analyzeTestSetWait` directo sigue siendo válido —el cron lo usa sobre un
+ * registro que ya trae resuelto— pero deja de ser el camino por defecto.
+ */
+export function resolveTestSetWait(
+  config: {
+    enablement_status: string | null;
+    enablement_evidence: unknown;
+    last_test_result: unknown;
+  },
+  now: number = Date.now(),
+): TestSetWaitAnalysis {
+  return analyzeTestSetWait(resolveTestSetProof(config), now);
 }
 
 /** ¿Este registro lleva un veredicto de la DIAN, o es solo un objeto cualquiera? */

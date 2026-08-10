@@ -459,9 +459,18 @@ export class PosTicketService {
         Array.isArray(item.serials) && item.serials.length
           ? `<br><span style="font-size: 10px; color: #6b7280;">Serial: ${item.serials.join(', ')}</span>`
           : '';
+      // QUI-653 — un pedido de mesa puede ser MIXTO: parte se consume ahí y
+      // parte se empaca. El tiquete tiene que distinguir las dos partes, porque
+      // es lo que el cliente revisa al pagar y lo que el mesero usa para saber
+      // qué entregar empacado. Se marca por línea en vez de agrupar en dos
+      // bloques para no reordenar el tiquete respecto a lo que el cliente vio
+      // en la cuenta.
+      const takeawayLine = item.isTakeaway
+        ? `<br><span style="font-size: 10px; color: #b45309; font-weight: 600;">** PARA LLEVAR **</span>`
+        : '';
       html += `
         <tr>
-          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}</td>
+          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>

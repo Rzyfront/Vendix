@@ -116,6 +116,90 @@ export class SuppliersController {
     }
   }
 
+  /**
+   * QUI-656 — resumen del perfil del proveedor.
+   *
+   * Permiso de LECTURA de proveedores, el mismo que ya gobierna `GET /:id`: el
+   * perfil no expone nada que el listado y el detalle no expusieran ya, solo lo
+   * reúne. Pedir un permiso nuevo dejaría el perfil invisible para roles que hoy
+   * sí pueden ver al proveedor.
+   */
+  @Get(':id/summary')
+  @Permissions('store:inventory:suppliers:read')
+  async getSupplierSummary(@Param('id') id: string) {
+    try {
+      const result = await this.suppliersService.getSupplierSummary(+id);
+      return this.responseService.success(
+        result,
+        'Resumen del proveedor obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener el resumen del proveedor',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  /** QUI-656 — historial paginado de órdenes de compra del proveedor. */
+  @Get(':id/purchase-orders')
+  @Permissions('store:inventory:suppliers:read')
+  async getSupplierPurchaseOrders(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      const result = await this.suppliersService.getSupplierPurchaseOrders(
+        +id,
+        page ? +page : 1,
+        limit ? +limit : 20,
+      );
+      return this.responseService.paginated(
+        result.data,
+        result.total,
+        result.page,
+        result.limit,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las órdenes del proveedor',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  /** QUI-656 — documentos de cuentas por pagar del proveedor. */
+  @Get(':id/payables')
+  @Permissions('store:inventory:suppliers:read')
+  async getSupplierPayables(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      const result = await this.suppliersService.getSupplierPayables(
+        +id,
+        page ? +page : 1,
+        limit ? +limit : 20,
+      );
+      return this.responseService.paginated(
+        result.data,
+        result.total,
+        result.page,
+        result.limit,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las cuentas por pagar del proveedor',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id')
   @Permissions('store:inventory:suppliers:update')
   async update(

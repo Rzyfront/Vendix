@@ -9,8 +9,14 @@ import {
   viewChildren,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import type {
+  FirePreview,
+  FireItemExclusion,
+} from '../restaurant-ops/kds/interfaces';
+import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
+import { take, switchMap } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, Observable, Subject } from 'rxjs';
 import {
   VexiPosBridgeService,
   type VexiPosActionResult,
@@ -117,6 +123,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   selector: 'app-pos',
   standalone: true,
   imports: [
+    KitchenConfirmModalComponent,
     FormsModule,
     ButtonComponent,
     IconComponent,
@@ -709,6 +716,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         ></app-layaway-config-modal>
       }
     </div>
+    <!--
+      QUI-655 — el POS es el SEGUNDO camino de envio a cocina. Sin este modal, un
+      envio hecho desde el POS consumia la receta completa sin darle al cajero la
+      chance de excluir.
+    -->
+    <app-kitchen-confirm-modal
+      [isOpen]="kitchenConfirmOpen()"
+      [preview]="kitchenPreview()"
+      [isLoading]="kitchenPreviewLoading()"
+      [isSubmitting]="loading()"
+      (confirmed)="onKitchenConfirmed($event)"
+      (cancelled)="onKitchenCancelled()"
+    />
   `,
   styles: [
     `
@@ -1605,7 +1625,7 @@ export class PosComponent {
     }
 
     const cart = this.cartState();
-    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number }> = [];
+    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean }> = [];
     for (const it of cart?.items ?? []) {
       if (it.itemType === 'custom') continue;
       const productId = parseInt(
@@ -1615,10 +1635,16 @@ export class PosComponent {
         10,
       );
       if (!Number.isFinite(productId)) continue;
-      const line: { product_id: number; quantity: number; product_variant_id?: number } = {
+      const line: { product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean } = {
         product_id: productId,
         quantity: it.quantity,
       };
+      // QUI-653 — la decision "para llevar" viaja desde la linea del carrito
+      // hasta `order_items.is_takeaway`. Solo se envia cuando esta marcada: el
+      // backend ya tiene default false.
+      if (it.isTakeaway) {
+        line.is_takeaway = true;
+      }
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;
       }
@@ -1651,8 +1677,7 @@ export class PosComponent {
             this.toastService.success('Items enviados a la mesa');
             return;
           }
-          this.restaurantIntegration
-            .fireOrderItems(session.order_id, orderItemIds)
+          this.fireWithKitchenConfirm(session.order_id, orderItemIds)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (fireResult) => {
@@ -1757,8 +1782,7 @@ export class PosComponent {
             this.toastService.error('La orden de mostrador no generó ítems');
             return;
           }
-          this.restaurantIntegration
-            .fireOrderItems(order.id, orderItemIds)
+          this.fireWithKitchenConfirm(order.id, orderItemIds)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (fireResult) => {
@@ -3318,4 +3342,79 @@ export class PosComponent {
   onMovementCreated(_movement: any): void {
     this.showCashMovementModal.set(false);
   }
+  // ------------------------------------------------------------------ QUI-655
+  /**
+   * Envoltorio que interpone el modal de confirmacion de cocina ANTES de
+   * consumir. Devuelve un Observable con la misma forma que
+   * `restaurantIntegration.fireOrderItems`, asi que los dos call sites del POS
+   * conservan intactos sus handlers de next/error.
+   *
+   * El POS es el SEGUNDO camino de envio a cocina. Sin esto, un envio hecho
+   * desde el POS consumia la receta completa sin darle al cajero la chance de
+   * excluir — y el ticket pide el modal en AMBOS caminos.
+   */
+  readonly kitchenConfirmOpen = signal(false);
+  readonly kitchenPreview = signal<FirePreview | null>(null);
+  readonly kitchenPreviewLoading = signal(false);
+  private kitchenConfirmBridge: Subject<FireItemExclusion[]> | null = null;
+
+  private fireWithKitchenConfirm(
+    orderId: number,
+    orderItemIds: number[],
+  ): Observable<any> {
+    this.kitchenPreview.set(null);
+    this.kitchenPreviewLoading.set(true);
+    this.kitchenConfirmOpen.set(true);
+
+    const bridge = new Subject<FireItemExclusion[]>();
+    this.kitchenConfirmBridge = bridge;
+
+    this.restaurantIntegration
+      .previewFire(orderId, orderItemIds)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.kitchenPreview.set(preview);
+          this.kitchenPreviewLoading.set(false);
+        },
+        error: () => {
+          // Si la previsualizacion falla se cierra el modal y se corta: NO se
+          // dispara a ciegas, porque eso consumiria inventario sin que nadie
+          // haya confirmado nada.
+          this.kitchenPreviewLoading.set(false);
+          this.kitchenConfirmOpen.set(false);
+          bridge.error('No se pudieron leer las recetas del envio');
+        },
+      });
+
+    // El fire real ocurre cuando el bridge emite las exclusiones confirmadas.
+    return bridge.pipe(
+      take(1),
+      switchMap((exclusions) =>
+        this.restaurantIntegration.fireOrderItems(
+          orderId,
+          orderItemIds,
+          undefined,
+          exclusions,
+        ),
+      ),
+    );
+  }
+
+  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+    this.kitchenConfirmOpen.set(false);
+    this.kitchenConfirmBridge?.next(exclusions);
+    this.kitchenConfirmBridge = null;
+  }
+
+  /** Cancelar no consume nada: el modal abre ANTES de cualquier escritura. */
+  onKitchenCancelled(): void {
+    this.kitchenConfirmOpen.set(false);
+    this.kitchenPreview.set(null);
+    // `complete` sin emitir: el switchMap nunca corre, asi que no hay fire.
+    this.kitchenConfirmBridge?.complete();
+    this.kitchenConfirmBridge = null;
+    this.loading.set(false);
+  }
+
 }
