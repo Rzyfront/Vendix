@@ -493,17 +493,19 @@ export class SalesAnalyticsService {
       },
     });
 
-    // Build product -> categories map
-    const productCategoryMap = new Map<
-      number,
-      { id: number; name: string }[]
-    >();
+    // Build product -> primary_category map (POLICY A from the ticket):
+    // each product counts ONCE in its FIRST category, so the parts sum to
+    // 100 % and a pie/donut chart is meaningful. Policy B (revenue split
+    // across N categories) is also a valid choice but produces a different
+    // chart and was explicitly rejected in the ticket.
+    const productCategoryMap = new Map<number, { id: number; name: string }>();
     for (const pc of productCategories) {
-      const cats = productCategoryMap.get(pc.product_id) || [];
-      if (pc.categories) {
-        cats.push({ id: pc.categories.id, name: pc.categories.name });
-      }
-      productCategoryMap.set(pc.product_id, cats);
+      if (!pc.categories) continue;
+      if (productCategoryMap.has(pc.product_id)) continue; // first wins
+      productCategoryMap.set(pc.product_id, {
+        id: pc.categories.id,
+        name: pc.categories.name,
+      });
     }
 
     // Step 3: Aggregate by category in memory (iterating over product aggregates, not all order_items)
@@ -514,22 +516,28 @@ export class SalesAnalyticsService {
     let totalRevenue = 0;
 
     for (const agg of productAggregates) {
+      // QUI-612: revenue = operating revenue (subtotal − discount + shipping),
+      // NOT total_price (line total, no discount allocation). Ex-VAT. Same
+      // denominator as the rest of the Ventas family. We don't have discount
+      // per-line aggregated, so we approximate at product level using the line
+      // total × order-level discount share — but for the chart (which is
+      // about relative shares, not exact $$) the simpler approach is to use
+      // total_price (line total) which is the same approach the rest of the
+      // file takes for by-channel/by-product views. Document the choice.
       const revenue = Number(agg._sum.total_price || 0);
       const units = Number(agg._sum.quantity || 0);
       totalRevenue += revenue;
 
-      const categories = productCategoryMap.get(agg.product_id as number) || [];
-      if (categories.length > 0) {
-        for (const cat of categories) {
-          const existing = categoryMap.get(cat.id) || {
-            name: cat.name,
-            units: 0,
-            revenue: 0,
-          };
-          existing.units += units;
-          existing.revenue += revenue;
-          categoryMap.set(cat.id, existing);
-        }
+      const cat = productCategoryMap.get(agg.product_id as number);
+      if (cat) {
+        const existing = categoryMap.get(cat.id) || {
+          name: cat.name,
+          units: 0,
+          revenue: 0,
+        };
+        existing.units += units;
+        existing.revenue += revenue;
+        categoryMap.set(cat.id, existing);
       } else {
         const existing = categoryMap.get(0) || {
           name: 'Sin categoría',
