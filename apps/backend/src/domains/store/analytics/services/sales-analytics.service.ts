@@ -264,6 +264,17 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
+    // QUI-611: two rankings — sort_by=units_sold (default, top por rotación)
+    // or sort_by=revenue (top por ingreso). Each ranking is a SEPARATE top-N,
+    // not a sub-set of the other. A high-volume low-price product leads
+    // units; a high-price low-volume product leads revenue — both are
+    // legitimate and the chart should make the criterion explicit.
+    const sortBy = (query as any).sort_by === 'revenue' ? 'revenue' : 'units_sold';
+    const orderByClause =
+      sortBy === 'revenue'
+        ? { _sum: { total_price: 'desc' } }
+        : { _sum: { quantity: 'desc' } };
+
     const groupWhere: any = {
       orders: {
         state: { in: this.COMPLETED_STATES },
@@ -304,11 +315,7 @@ export class SalesAnalyticsService {
           quantity: true,
           total_price: true,
         },
-        orderBy: {
-          _sum: {
-            total_price: 'desc',
-          },
-        },
+        orderBy: orderByClause,
         skip: (page - 1) * limit,
         take: limit,
       });
