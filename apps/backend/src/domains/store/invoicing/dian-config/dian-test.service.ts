@@ -41,7 +41,7 @@ import {
 } from '../utils/dian-file-naming.util';
 import {
   analyzeTestSetWait,
-  resolveTestSetProof,
+  resolveTestSetWait,
 } from './test-set-wait.util';
 import {
   aggregateZipVerdicts,
@@ -1894,6 +1894,17 @@ export class DianTestService {
       zip_key,
       pending: still_processing,
       rejected,
+      // ESTE SITIO NO USA `resolveTestSetWait`, Y ES A PROPÓSITO.
+      //
+      // Es la respuesta de «acabo de enviar esto»: el `wait` describe el lote que
+      // se acaba de transmitir, no la habilitación. Anteponer la prueba durable
+      // acá haría que un humo o una validación sincrónica sobre una configuración
+      // ya `enabled` contestara con el veredicto del set aprobado meses atrás, en
+      // lugar del documento que el operador acaba de mandar.
+      //
+      // En una corrida real de habilitación da lo mismo —la configuración no está
+      // cerrada, así que `resolveTestSetProof` caería igual a este registro—, pero
+      // en las vías de diagnóstico no, y son justo las que se usan para depurar.
       wait: analyzeTestSetWait(result_data),
       executed_at: result_data.executed_at,
       number_from: next_number,
@@ -2095,7 +2106,20 @@ export class DianTestService {
       },
     });
 
-    const wait = analyzeTestSetWait(result_data);
+    // Sobre la prueba DURABLE, con los valores que ACABAN de escribirse.
+    //
+    // `config` se leyó antes del update, así que usarlo tal cual describiría el
+    // estado anterior. Y sin `resolveTestSetProof` esta ruta —la que el asistente
+    // sondea cada 15 s— seguía leyendo el último lote: una configuración
+    // `enabled` cuyo lote posterior fue rechazado o descartado recibía
+    // `wait.state: 'abandoned'` junto a su insignia «Habilitado», y la tarjeta de
+    // espera le ofrecía ejecutar un set nuevo sobre una habilitación concedida.
+    // Es el defecto del 2026-08-09, que quedó vivo en esta ruta.
+    const wait = resolveTestSetWait({
+      enablement_status: success ? 'test_set_passed' : config.enablement_status,
+      enablement_evidence: success ? result_data : config.enablement_evidence,
+      last_test_result: result_data,
+    });
 
     await this.createAuditLog(config.id, {
       action: 'check_test_set_status',
@@ -2346,11 +2370,25 @@ export class DianTestService {
    * los rompe en compilación o, peor, en runtime con `undefined`.
    */
   private testSetStatusFromStoredResult(
-    config: { environment: string; enablement_status: string },
+    config: {
+      environment: string;
+      enablement_status: string;
+      // Obligatoria: esta salida es la del lote DESCARTADO, y es precisamente
+      // donde un descarte tapaba una habilitación concedida. Sin la evidencia el
+      // `wait` volvería a describir el lote descartado.
+      enablement_evidence: unknown;
+    },
     result: Record<string, any>,
     message: string,
   ) {
-    const wait = analyzeTestSetWait(result);
+    // Sobre la prueba durable. Con el lote a secas, una configuración `enabled`
+    // que descartó un lote posterior leía `state: 'abandoned'` y la UI le decía
+    // «ejecuta un set de pruebas nuevo». Ver `resolveTestSetProof`.
+    const wait = resolveTestSetWait({
+      enablement_status: config.enablement_status,
+      enablement_evidence: config.enablement_evidence,
+      last_test_result: result,
+    });
     return {
       success: false,
       pending: result.pending === true,
@@ -2753,6 +2791,18 @@ export class DianTestService {
         environment: true,
         test_set_id: true,
         last_test_result: true,
+        // Las dos columnas de abajo se LEÍAN sin pedirse, y por eso este método
+        // estuvo devolviendo dos datos equivocados en silencio:
+        //
+        //   · `enablement_evidence` → `resolveTestSetProof` recibía `undefined` y
+        //     caía al último lote, justo lo que esa función existe para evitar.
+        //     Su firma ya es obligatoria, así que quitarla de acá no compila.
+        //   · `operation_mode` → `buildTestSetCompositionView(undefined)`, así que
+        //     la composición que la UI imprime no correspondía al modo real.
+        //
+        // Un `select` es un contrato con el resto del método, no una optimización.
+        enablement_evidence: true,
+        operation_mode: true,
       },
     });
 
@@ -2772,7 +2822,7 @@ export class DianTestService {
       // a la vez el puntero al lote en vuelo y la prueba de la habilitación, así
       // que un intento posterior borraba un hecho ya ocurrido. Ver
       // `resolveTestSetProof`.
-      wait: analyzeTestSetWait(resolveTestSetProof(config)),
+      wait: resolveTestSetWait(config),
       // Cuántos documentos y consecutivos implica un envío en ESTE modo de
       // operación. Sin esto la UI imprimía 50, la composición de 2019.
       composition: buildTestSetCompositionView(config.operation_mode),

@@ -2,6 +2,7 @@ import {
   TEST_SET_STALL_AFTER_MS,
   analyzeTestSetWait,
   resolveTestSetProof,
+  resolveTestSetWait,
 } from './test-set-wait.util';
 
 /**
@@ -115,6 +116,118 @@ describe('resolveTestSetProof', () => {
       last_test_result: { abandoned: true, zip_key: null },
     });
     expect(proof).toBe(evidence);
+  });
+});
+
+/**
+ * ESTA COMPOSICIÓN ES LA QUE CUATRO SUPERFICIES CONSUMEN, Y DOS LA HACÍAN MAL.
+ *
+ * `analyzeTestSetWait(resolveTestSetProof(config))` estaba escrito a mano en
+ * cuatro sitios. En dos —el sondeo del asistente cada 15 s y la salida del lote
+ * descartado— faltaba la mitad de dentro: llamaban a `analyzeTestSetWait` a secas
+ * sobre `last_test_result`. El resultado era una configuración `enabled`
+ * respondiendo `wait.state: 'abandoned'`, con la insignia diciendo «Habilitado» y
+ * la tarjeta de espera ofreciendo ejecutar un set nuevo.
+ *
+ * Los casos de abajo prueban la composición, no sus mitades: cada mitad ya tiene
+ * los suyos, y las dos estaban bien por separado. Lo que falló fue juntarlas.
+ */
+describe('resolveTestSetWait', () => {
+  const NOW = new Date('2026-08-09T20:00:00.000Z').getTime();
+
+  /** La evidencia que la DIAN dejó el 2026-08-09 a las 05:59Z. */
+  const evidence = {
+    zip_key: 'e2d19623-aprobado',
+    dian_response: { success: true },
+  };
+
+  /** El lote de las 18:53Z, rechazado y descartado a las 19:41Z. */
+  const discarded = {
+    zip_key: null,
+    abandoned: true,
+    pending: false,
+    rejected: true,
+    abandoned_batches: [{ zip_key: '16bea3b2-rechazado' }],
+  };
+
+  it('una habilitación concedida NO se lee como lote descartado', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'enabled',
+        enablement_evidence: evidence,
+        last_test_result: discarded,
+      },
+      NOW,
+    );
+
+    // Antes daba 'abandoned' con next_actions ['run_test_set']: la UI le pedía
+    // rehacer la habilitación a una configuración que la DIAN ya había habilitado.
+    expect(wait.state).toBe('passed');
+    expect(wait.next_actions).toEqual([]);
+  });
+
+  it('vale igual con el set aprobado y la producción todavía sin habilitar', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'test_set_passed',
+        enablement_evidence: evidence,
+        last_test_result: discarded,
+      },
+      NOW,
+    );
+    expect(wait.state).toBe('passed');
+  });
+
+  it('DURANTE la habilitación describe el lote en vuelo, no una evidencia vieja', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'testing',
+        enablement_evidence: evidence,
+        last_test_result: {
+          zip_key: 'en-vuelo',
+          pending: true,
+          executed_at: new Date(NOW - 60_000).toISOString(),
+          documents: [{ cufe: 'c1', number: 'SETP1' }],
+        },
+      },
+      NOW,
+    );
+
+    // Esconder el intento en curso detrás de una evidencia anterior sería el
+    // defecto opuesto, y es el que el operador necesita ver.
+    expect(wait.state).toBe('processing');
+    expect(wait.reason).toContain('en-vuelo');
+  });
+
+  it('respeta el reloj inyectado, así que el estancamiento es medible', () => {
+    const executed_at = new Date(NOW - TEST_SET_STALL_AFTER_MS - 1).toISOString();
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'testing',
+        enablement_evidence: null,
+        last_test_result: {
+          zip_key: 'viejo',
+          pending: true,
+          executed_at,
+          documents: [{ cufe: 'c1', number: 'SETP1' }],
+        },
+      },
+      NOW,
+    );
+    expect(wait.state).toBe('stalled');
+  });
+
+  it('sin evidencia se comporta exactamente como la composición manual', () => {
+    // Garantiza que extraer la composición no cambió nada para las dos
+    // superficies que ya la hacían bien.
+    const config = {
+      enablement_status: 'enabled' as string | null,
+      enablement_evidence: null as unknown,
+      last_test_result: discarded as unknown,
+    };
+    expect(resolveTestSetWait(config, NOW)).toEqual(
+      analyzeTestSetWait(resolveTestSetProof(config), NOW),
+    );
   });
 });
 

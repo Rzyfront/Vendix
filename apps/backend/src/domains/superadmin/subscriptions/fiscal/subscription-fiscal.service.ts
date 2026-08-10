@@ -37,10 +37,7 @@ import {
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
-import {
-  analyzeTestSetWait,
-  resolveTestSetProof,
-} from '../../../store/invoicing/dian-config/test-set-wait.util';
+import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
 import { assertPlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
@@ -246,7 +243,7 @@ export class SubscriptionFiscalService {
             // posterior sobrescribe `last_test_result`, así que este panel decía
             // «habilitación pendiente» sobre una config que la DIAN había
             // habilitado catorce horas antes. Ver `resolveTestSetProof`.
-            wait: analyzeTestSetWait(resolveTestSetProof(config)),
+            wait: resolveTestSetWait(config),
             // Viaja al cliente porque la UI imprimía "50 documentos", la
             // composición de 2019, y con eso desinformaba sobre cuántos
             // consecutivos de la resolución consume cada envío.

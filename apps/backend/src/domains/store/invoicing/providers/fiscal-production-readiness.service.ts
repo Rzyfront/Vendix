@@ -138,7 +138,13 @@ type ReadinessConfig = {
   certificate_expiry: Date | null;
   certificate_fingerprint?: string | null;
   certificate_nit?: string | null;
-  enablement_evidence?: unknown;
+  /**
+   * Obligatorio por la misma razón que `shared_technical_key`: ausente se leería
+   * como «sin evidencia» y `resolveTestSetProof` caería al último lote, leyendo
+   * «no pasó» sobre una habilitación que la DIAN concedió. Un `select` que no la
+   * pida debe romper en compilación, no en producción.
+   */
+  enablement_evidence: unknown;
   test_set_id: string | null;
   last_test_result: unknown;
   nit?: string | null;
@@ -730,9 +736,9 @@ export class FiscalProductionReadinessService {
    * escribe en éxito.
    */
   hasPassedTestSetForConfig(config: {
-    enablement_status?: string | null;
-    enablement_evidence?: unknown;
-    last_test_result?: unknown;
+    enablement_status: string | null;
+    enablement_evidence: unknown;
+    last_test_result: unknown;
   }): boolean {
     return this.hasPassedTestSet(resolveTestSetProof(config));
   }
