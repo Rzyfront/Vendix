@@ -494,7 +494,9 @@ export class PopCartService {
         product: request.product,
         quantity: request.quantity,
         unit_cost: request.unit_cost,
-        discount: 0,
+        // QUI-661 Fase 4: el escáner de facturas llega con descuento; el alta
+        // manual sigue en 0.
+        discount: request.discount ?? 0,
         // IVA cycle (F1/F3): defaults sembrados salvo override del request
         // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
@@ -563,7 +565,9 @@ export class PopCartService {
         variant: request.variant,
         quantity: request.quantity,
         unit_cost: request.unit_cost,
-        discount: 0,
+        // QUI-661 Fase 4: el escáner de facturas llega con descuento; el alta
+        // manual sigue en 0.
+        discount: request.discount ?? 0,
         // IVA cycle (F1/F3): defaults salvo override del request (escáner).
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
         tax_type: request.tax_type ?? 'iva',

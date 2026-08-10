@@ -324,6 +324,12 @@ export interface AddToPopCartRequest {
    * caso count→masa/volumen. El carrito lo transporta preferentemente dentro
    * de `prebulk_data`; este campo top-level queda listo para propagación futura.
    */
+  /**
+   * QUI-661 Fase 4 — descuento comercial de la línea, en PORCENTAJE (10 = 10%).
+   * El carrito trabaja en porcentaje; el escáner de facturas extrae un MONTO y
+   * lo convierte al agregar, porque la factura imprime pesos, no porcentajes.
+   */
+  discount?: number;
   contentPerPackage?: number;
   /**
    * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner

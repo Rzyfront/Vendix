@@ -849,6 +849,20 @@ export class PopComponent implements OnInit, OnDestroy {
         item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
       const scannedIncludeMode = scannedRate != null ? false : undefined;
 
+      // QUI-661 Fase 4: la factura imprime el descuento en PESOS y el carrito
+      // trabaja en PORCENTAJE, así que se convierte acá contra el importe neto
+      // de la línea. Se hace en este punto y no en el backend porque es el
+      // carrito el que necesita el porcentaje para su preview; el backend
+      // recibe después el porcentaje y resuelve el monto otra vez, que es su
+      // fuente de verdad.
+      const lineGross =
+        (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+      const scannedDiscountAmount = Number(item.discount_amount) || 0;
+      const scannedDiscountPct =
+        lineGross > 0 && scannedDiscountAmount > 0
+          ? Math.min(100, (scannedDiscountAmount / lineGross) * 100)
+          : undefined;
+
       if (candidate) {
         this.popCartService
           .addToCart({
@@ -868,6 +882,7 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            discount: scannedDiscountPct,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -890,6 +905,10 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            // QUI-661 Fase 4: también en el producto NUEVO. El descuento no
+            // depende de que el producto exista en el catálogo — depende de lo
+            // que imprimió la factura.
+            discount: scannedDiscountPct,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',

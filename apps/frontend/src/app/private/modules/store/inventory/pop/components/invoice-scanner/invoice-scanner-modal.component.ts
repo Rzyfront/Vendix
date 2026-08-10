@@ -366,6 +366,7 @@ import {
                     <th class="pb-2 pr-3 text-text-secondary font-medium">Descripcion</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-20">Cant.</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit.</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">Dcto</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Total</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Estado</th>
                     <th class="pb-2 pl-3 text-text-secondary font-medium">Producto</th>
@@ -407,8 +408,25 @@ import {
                           step="0.01"
                         />
                       </td>
+                      <!--
+                        QUI-661 Fase 4: el descuento que extrajo la IA es
+                        editable ANTES de confirmar. Es el punto donde el
+                        usuario lo verifica: una vez confirmado baja la base
+                        gravable, el IVA descontable y el costo capitalizado, y
+                        corregirlo después implica anular la orden.
+                      -->
+                      <td class="py-2 px-3">
+                        <input
+                          type="number"
+                          [value]="item.discount_amount || 0"
+                          (change)="updateItemDiscount(i, $event)"
+                          class="w-20 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                          min="0"
+                          step="0.01"
+                        />
+                      </td>
                       <td class="py-2 px-3 text-text-primary font-medium">
-                        {{ item.quantity * item.unit_price | currency: 0 }}
+                        {{ lineTotal(item) | currency: 0 }}
                       </td>
                       <td class="py-2 px-3">
                         <app-badge
@@ -1171,6 +1189,27 @@ export class InvoiceScannerModalComponent {
     const items = [...this.editableItems()];
     items[index] = { ...items[index], quantity: value };
     this.editableItems.set(items);
+  }
+
+  /**
+   * QUI-661 Fase 4 — descuento comercial de la línea. Se acota a [0, importe]:
+   * un descuento mayor que la línea dejaría el costo negativo y envenenaría la
+   * capa FIFO que la recepción va a crear.
+   */
+  updateItemDiscount(index: number, event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    const items = [...this.editableItems()];
+    const line = items[index];
+    const gross = (Number(line.quantity) || 0) * (Number(line.unit_price) || 0);
+    const value = Math.min(Math.max(0, raw || 0), gross);
+    items[index] = { ...line, discount_amount: value };
+    this.editableItems.set(items);
+  }
+
+  /** Importe de la línea ya neto del descuento, para el preview. */
+  lineTotal(item: { quantity: number; unit_price: number; discount_amount?: number | null }): number {
+    const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+    return Math.max(0, gross - (Number(item.discount_amount) || 0));
   }
 
   updateItemPrice(index: number, event: Event): void {
