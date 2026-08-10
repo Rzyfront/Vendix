@@ -29,6 +29,30 @@ import { Prisma } from '@prisma/client';
 export const COMPLETED_SALE_STATES = ['delivered', 'finished'] as const;
 
 /**
+ * Revenue-recognition order states. Adds `refunded` to the completed set so
+ * the matching refunds.tax_refund / refunds.subtotal_refund row can
+ * subtract the tax collected at delivery. Using only COMPLETED_SALE_STATES
+ * here was a latent double-exclusion (QUI-630 review): an order created and
+ * refunded inside the same period would leave the collected bucket and the
+ * refund would subtract its tax again, driving net_tax negative. With
+ * `refunded` included, the gross/net pair balances to zero in the same
+ * period. Shared by `financial/tax-summary` and `financial/refunds`.
+ */
+export const REVENUE_STATES = [...COMPLETED_SALE_STATES, 'refunded'] as const;
+
+/**
+ * Refund states that count as a recognized refund OF THE PERIOD (accrual /
+ * causación): the refund is recognized when it completes (completed / approved),
+ * NOT when it's pending operator action.
+ *
+ * Shared by `financial/refunds` (QUI-631) and `products/performance` — both
+ * must use the SAME list so the per-product return rate and the totals
+ * reported in financial reconcile (defect of QUI-631 catalog: they were
+ * hand-rolled in each service and had already drifted apart).
+ */
+export const REFUND_RECOGNIZED_STATES = ['completed', 'approved'] as const;
+
+/**
  * Expense states that count as an expense OF THE PERIOD (accrual / causación):
  * the expense is recognized when it is approved, not when the cash leaves.
  * `pending` is excluded — an unapproved capture is not yet a recognized expense,
