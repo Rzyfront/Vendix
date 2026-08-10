@@ -19,6 +19,7 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
+import { computeOperatingRevenue } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
@@ -811,10 +812,15 @@ export class SalesAnalyticsService {
       const results = await this.prisma.orders.groupBy({
         by: ['customer_id'],
         where,
-        _sum: { grand_total: true },
+        _sum: {
+          subtotal_amount: true,
+          discount_amount: true,
+          shipping_cost: true,
+          tax_amount: true,
+        },
         _count: { id: true },
         _max: { created_at: true },
-        orderBy: { _sum: { grand_total: 'desc' } },
+        orderBy: { _max: { created_at: 'desc' } },
         skip: (page - 1) * limit,
         take: limit,
       });
@@ -836,7 +842,16 @@ export class SalesAnalyticsService {
 
       const data = results.map((r) => {
         const customer = customerMap.get(r.customer_id as number);
-        const totalSpent = Number(r._sum.grand_total || 0);
+        // QUI-614: total_spent = operating revenue (subtotal − discount +
+        // shipping). Previously the code summed grand_total which folds VAT in
+        // — so the panel reported more than the customer effectively left in
+        // the store and disagreed with Resumen General.
+        const operatingRevenue = computeOperatingRevenue({
+          subtotal: Number(r._sum.subtotal_amount || 0),
+          discounts: Number(r._sum.discount_amount || 0),
+          shipping: Number(r._sum.shipping_cost || 0),
+          tax: Number(r._sum.tax_amount || 0),
+        });
         const totalOrders = r._count.id || 0;
         const customerName = customer
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -849,8 +864,9 @@ export class SalesAnalyticsService {
           customer_name: customerName,
           email: customer?.email || '',
           total_orders: totalOrders,
-          total_spent: totalSpent,
-          average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
+          total_spent: operatingRevenue,
+          average_order_value:
+            totalOrders > 0 ? operatingRevenue / totalOrders : 0,
           last_order_date: r._max.created_at?.toISOString() || null,
         };
       });
@@ -872,10 +888,15 @@ export class SalesAnalyticsService {
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where,
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
+      },
       _count: { id: true },
       _max: { created_at: true },
-      orderBy: { _sum: { grand_total: 'desc' } },
+      orderBy: { _max: { created_at: 'desc' } },
       take: query.limit || 50,
     });
 
@@ -896,7 +917,14 @@ export class SalesAnalyticsService {
 
     return results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
-      const totalSpent = Number(r._sum.grand_total || 0);
+      // QUI-614: total_spent = operating revenue (ex-VAT). See the
+      // paginated branch above for rationale.
+      const operatingRevenue = computeOperatingRevenue({
+        subtotal: Number(r._sum.subtotal_amount || 0),
+        discounts: Number(r._sum.discount_amount || 0),
+        shipping: Number(r._sum.shipping_cost || 0),
+        tax: Number(r._sum.tax_amount || 0),
+      });
       const totalOrders = r._count.id || 0;
       const customerName = customer
         ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -909,8 +937,9 @@ export class SalesAnalyticsService {
         customer_name: customerName,
         email: customer?.email || '',
         total_orders: totalOrders,
-        total_spent: totalSpent,
-        average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
+        total_spent: operatingRevenue,
+        average_order_value:
+          totalOrders > 0 ? operatingRevenue / totalOrders : 0,
         last_order_date: r._max.created_at?.toISOString() || null,
       };
     });
