@@ -40,7 +40,6 @@ apps/frontend/src/app/private/modules/store/withholding-tax/services/withholding
 apps/frontend/src/app/private/modules/ecommerce/services/guest-order-print\.service\.ts|
 apps/frontend/src/app/private/modules/store/restaurant-ops/tables/pages/tables-manage-page/tables-manage-page\.component\.ts|
 apps/frontend/src/app/private/modules/store/restaurant-ops/tables/components/table-qr-modal/table-qr-modal\.component\.ts|
-apps/frontend/src/app/private/modules/store/pos/components/pos-ticket-printer\.component\.ts|
 apps/frontend/src/app/private/modules/store/pos/components/pos-customer-modal\.component\.ts|
 apps/frontend/src/app/private/modules/store/pos/components/pos-order-confirmation\.component\.ts
 )'
