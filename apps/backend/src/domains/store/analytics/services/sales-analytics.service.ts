@@ -607,14 +607,19 @@ export class SalesAnalyticsService {
     // Resumen General (operating_revenue ex-VAT) figure.
     const storeId = RequestContextService.getContext()?.store_id;
     const completedStates = sqlStateList(COMPLETED_SALE_STATES);
-    const rows = await (this.prisma as any).withoutScope().$queryRaw<
-      Array<{
-        method_name: string;
-        display_name: string;
-        count: bigint;
-        amount: string | number;
-      }>
-    >(Prisma.sql`
+    // QUI-615: typed handle for the raw query — same TS2347 fix as
+    // inventory-analytics.withoutScope() returns `any` after the cast, which
+    // prevents the generic on $queryRaw<T> from resolving.
+    const untypedPayment = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const rows = await untypedPayment.$queryRaw<Array<{
+      method_name: string;
+      display_name: string;
+      count: bigint;
+      amount: string | number;
+    }>>(
+      Prisma.sql`
       SELECT
         spm.system_payment_method_id AS method_name,
         MAX(spm.display_name) AS display_name,
