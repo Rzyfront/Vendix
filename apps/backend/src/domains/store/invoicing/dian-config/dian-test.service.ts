@@ -50,6 +50,7 @@ import {
   TestSetZipVerdict,
 } from './test-set-zip-aggregate.util';
 import {
+  buildNotePhaseView,
   canWriteEnablementStatus,
   decideNotePhase,
   isTestSetClosedByDian,
@@ -1885,6 +1886,11 @@ export class DianTestService {
       // significado («llegamos a generar»), y no es lo mismo que estos recuentos.
       generated_documents: files.length,
       transmitted_documents: submissions.length,
+      // El rastro de la fase de notas, en su VISTA: los números y la razón, no los
+      // XML firmados que lleva el registro persistido. Va en esta respuesta porque
+      // es la que el asistente lee al terminar el job, y quien acaba de enviar el
+      // set es exactamente quien necesita saber que 20 notas quedaron retenidas.
+      note_phase: buildNotePhaseView(note_phase),
       invoices_count: composition.invoices,
       debit_notes_count: composition.debit_notes,
       credit_notes_count: composition.credit_notes,
@@ -2149,6 +2155,16 @@ export class DianTestService {
       executed_at: previous.executed_at ?? null,
       rechecked_at: result_data.rechecked_at,
       total_documents: previous.total_documents ?? null,
+      // GENERADOS Y TRANSMITIDOS, porque desde el envío en dos fases no son el
+      // mismo número y `total_documents` conserva el significado de generados.
+      //
+      // Sin estos tres campos el asistente decía «50 documentos» sobre un lote
+      // del que salieron 30, y las 20 notas retenidas eran invisibles: el backend
+      // las guardaba en `note_phase` y esta proyección las descartaba. Un dato que
+      // el cliente no recibe es indistinguible de un dato que no existe.
+      generated_documents: previous.generated_documents ?? null,
+      transmitted_documents: previous.transmitted_documents ?? null,
+      note_phase: buildNotePhaseView(previous.note_phase),
       invoices_count: previous.invoices ?? null,
       debit_notes_count: previous.debit_notes ?? null,
       credit_notes_count: previous.credit_notes ?? null,
@@ -2402,6 +2418,12 @@ export class DianTestService {
       executed_at: result.executed_at ?? null,
       rechecked_at: result.rechecked_at ?? null,
       total_documents: result.total_documents ?? null,
+      // Misma forma EXACTA que el retorno normal. Es la razón de ser de este
+      // método: la UI lee campos concretos y una unión con propiedades ausentes
+      // la rompe en compilación o, peor, en runtime con `undefined`.
+      generated_documents: result.generated_documents ?? null,
+      transmitted_documents: result.transmitted_documents ?? null,
+      note_phase: buildNotePhaseView(result.note_phase),
       invoices_count: result.invoices ?? null,
       debit_notes_count: result.debit_notes ?? null,
       credit_notes_count: result.credit_notes ?? null,
