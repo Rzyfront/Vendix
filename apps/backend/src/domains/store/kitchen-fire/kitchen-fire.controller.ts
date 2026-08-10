@@ -67,6 +67,17 @@ export class KitchenFireController {
    * Comparte `prepareFireContext` con el envío real, así que la previsualización y
    * lo que efectivamente se consume nunca pueden discrepar.
    */
+  /**
+   * Verificacion del ticket antes de cocinar. Lectura: no consume ni muta nada.
+   * Alimenta el modal OBLIGATORIO para pasar de pendiente a en preparacion.
+   */
+  @Get('tickets/:id/verification')
+  @Permissions('store:kitchen_fire:read')
+  async verification(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.kitchenFireService.getTicketVerification(id);
+    return this.responseService.success(result);
+  }
+
   @Post('preview')
   @Permissions('store:kitchen_fire:read')
   async preview(@Body() dto: FireOrderItemsDto) {

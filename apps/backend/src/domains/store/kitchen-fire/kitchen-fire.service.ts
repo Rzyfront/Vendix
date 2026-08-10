@@ -1012,6 +1012,123 @@ export class KitchenFireService {
     };
   }
 
+  /**
+   * VERIFICACION DE TICKET — QUI-655.
+   *
+   * Devuelve, por cada platillo del ticket, su receta con los insumos que va a
+   * consumir y cuales vienen EXCLUIDOS. Es lo que alimenta el modal obligatorio
+   * para pasar de pendiente a en preparacion.
+   *
+   * Por que NO reusa `/preview`: el preview parte de `prepareFireContext`, que
+   * descarta los items con `inventory_consumed_at_fire = true` — una condicion del
+   * ENVIO. Al verificar, el item ya paso por el fire, asi que el preview lo excluia
+   * y el modal llegaba vacio. Esta lectura parte del TICKET, no de la elegibilidad
+   * para enviar.
+   *
+   * Contrato identico al del preview a proposito, para que el modal se reutilice
+   * sin bifurcar su codigo.
+   */
+  async getTicketVerification(ticketId: number): Promise<{
+    order_id: number;
+    items: Array<{
+      order_item_id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: number;
+      notes: string | null;
+      has_active_recipe: boolean;
+      excluded_component_ids: number[];
+      components: Array<{
+        component_product_id: number;
+        name: string;
+        sku: string | null;
+        stock_unit: string | null;
+        quantity: number;
+        depth: number;
+        path_recipe_ids: number[];
+      }>;
+    }>;
+    skipped_item_ids: number[];
+  }> {
+    const { ticket } = await this.getTicketForStore(ticketId);
+    const rawItems: any[] = (ticket as any).items ?? [];
+
+    const items: any[] = [];
+    const componentIds = new Set<number>();
+    const perItem: Array<{ item: any; bom: BomExplosionLine[] }> = [];
+
+    for (const it of rawItems) {
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { product_id: it.product_id, is_active: true },
+        select: { id: true },
+      });
+      // Sin receta activa se devuelve igual, con `components: []`: el cocinero debe
+      // verlo en el modal y poder confirmarlo, no que desaparezca.
+      const bom = recipe
+        ? await this.recipesService.explodeBom(recipe.id)
+        : [];
+      for (const l of bom) componentIds.add(l.component_product_id);
+      perItem.push({ item: it, bom });
+    }
+
+    const meta =
+      componentIds.size > 0
+        ? await this.prisma.products.findMany({
+            where: { id: { in: [...componentIds] } },
+            select: { id: true, name: true, sku: true, stock_unit: true },
+          })
+        : [];
+    type Meta = { id: number; name: string; sku: string | null; stock_unit: string | null };
+    const byId = new Map<number, Meta>(meta.map((m) => [m.id, m as Meta]));
+
+    const orderItemIds = rawItems
+      .map((i) => i.order_item_id)
+      .filter((v): v is number => typeof v === 'number');
+    const orderItems =
+      orderItemIds.length > 0
+        ? await this.prisma.order_items.findMany({
+            where: { id: { in: orderItemIds } },
+            select: { id: true, notes: true },
+          })
+        : [];
+    const notesById = new Map<number, string | null>(
+      orderItems.map((r) => [r.id, r.notes ?? null]),
+    );
+
+    for (const { item, bom } of perItem) {
+      const qty = Number(item.quantity || 0);
+      items.push({
+        order_item_id: item.order_item_id,
+        product_id: item.product_id,
+        product_name: item.product?.name ?? `#${item.product_id}`,
+        quantity: qty,
+        notes: notesById.get(item.order_item_id) ?? item.notes ?? null,
+        has_active_recipe: bom.length > 0,
+        // Lo que ya venia excluido: el modal los arranca desmarcados y por lo tanto
+        // TACHADOS, para que el cocinero vea "sin papas" sin leer una nota.
+        excluded_component_ids: (item.exclusions ?? []).map(
+          (e: any) => e.component_product_id,
+        ),
+        components: bom.map((line) => {
+          const m = byId.get(line.component_product_id);
+          return {
+            component_product_id: line.component_product_id,
+            name: m?.name ?? `#${line.component_product_id}`,
+            sku: m?.sku ?? null,
+            stock_unit: m?.stock_unit ?? null,
+            // Multiplicado por la cantidad de la linea: la receta cruda es unitaria
+            // y mostrarla asi haria que el cocinero vea menos de lo que se gasta.
+            quantity: line.quantity * qty,
+            depth: line.depth,
+            path_recipe_ids: line.path_recipe_ids,
+          };
+        }),
+      });
+    }
+
+    return { order_id: ticket.order_id, items, skipped_item_ids: [] };
+  }
+
   async prepareFireContext(
     orderId: number,
     candidateOrderItemIds: number[],

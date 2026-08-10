@@ -617,12 +617,23 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.cookPreviewLoading.set(true);
     this.cookConfirmOpen.set(true);
 
+    // Verificacion por TICKET: `/preview` filtra por "no consumido todavia" — una
+    // condicion del envio — y al verificar el item ya paso por el fire, asi que el
+    // modal llegaba vacio.
     this.ticketsService
-      .previewFire({ order_id: ticket.order_id, order_item_ids: orderItemIds })
+      .getTicketVerification(ticket.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (preview) => {
           this.cookPreview.set(preview);
+          // La exclusion capturada viene EN la respuesta, asi que se siembra desde
+          // ahi en vez de depender de que el payload del ticket la traiga.
+          const seedFromApi = new Map<number, number[]>();
+          for (const it of preview.items ?? []) {
+            const ids = (it as any).excluded_component_ids ?? [];
+            if (ids.length > 0) seedFromApi.set(it.order_item_id, ids);
+          }
+          if (seedFromApi.size > 0) this.cookSeed.set(seedFromApi);
           this.cookPreviewLoading.set(false);
         },
         error: () => {

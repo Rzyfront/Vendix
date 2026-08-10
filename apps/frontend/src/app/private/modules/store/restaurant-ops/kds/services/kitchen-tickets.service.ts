@@ -113,6 +113,29 @@ export class KitchenTicketsService {
    * NO consume nada. Comparte el seam de explosión con el envío real, así que lo
    * que el modal muestra y lo que se consume no pueden discrepar.
    */
+  /**
+   * Verificacion del ticket antes de cocinar — QUI-655.
+   *
+   * Parte del TICKET y no de la elegibilidad para enviar, que es lo que dejaba al
+   * modal vacio: `/preview` descarta items ya consumidos, y al verificar el item ya
+   * paso por el fire.
+   *
+   * Devuelve el MISMO contrato que el preview mas `excluded_component_ids`, para
+   * que el modal se reutilice sin bifurcar.
+   */
+  getTicketVerification(ticketId: number): Observable<FirePreview & {
+    items: Array<FirePreview['items'][number] & { excluded_component_ids: number[] }>;
+  }> {
+    return this.http
+      .get<ApiResponse<any>>(
+        `${this.apiUrl}${this.basePath}/tickets/${ticketId}/verification`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   previewFire(payload: {
     order_id: number;
     order_item_ids: number[];
