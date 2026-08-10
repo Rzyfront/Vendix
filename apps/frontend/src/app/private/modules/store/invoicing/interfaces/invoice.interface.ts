@@ -285,7 +285,22 @@ export interface DianTestResult {
   message: string;
   dian_status?: string;
   tracking_id?: string;
+  /**
+   * Documentos GENERADOS. Conserva ese significado por compatibilidad, así que
+   * NO es lo que salió: con el envío en dos fases se generan 50 y pueden salir 30.
+   * Para el reparto real, leer `generated_documents` / `transmitted_documents`.
+   */
   total_documents?: number;
+  /**
+   * El reparto explícito, porque generado ≠ transmitido desde el envío en dos
+   * fases. La UI decía «50 documentos» sobre un lote del que salieron 30 y las 20
+   * notas retenidas eran invisibles: el backend las guardaba y su proyección de
+   * estado las descartaba.
+   */
+  generated_documents?: number | null;
+  transmitted_documents?: number | null;
+  /** Rastro de la fase de notas. `null` cuando no hubo dos fases. */
+  note_phase?: DianTestSetNotePhase | null;
   invoices_count?: number;
   debit_notes_count?: number;
   credit_notes_count?: number;
@@ -326,6 +341,30 @@ export interface DianTestResult {
    * even possible for this batch.
    */
   wait?: DianTestSetWait;
+}
+
+/**
+ * La fase de notas del set, en la VISTA que el backend expone.
+ *
+ * Una nota solo puede referenciar una factura que la DIAN ya tenga registrada, así
+ * que el set transmite primero las facturas, sondea, y solo entonces manda las
+ * notas. Si la DIAN no las registra dentro del tope de espera, las notas quedan
+ * generadas, firmadas y sin transmitir — con su consecutivo ya reservado dentro
+ * del XML, que es la razón por la que no se regeneran.
+ *
+ * El XML firmado NO viaja acá: el backend lo guarda y expone solo los recuentos.
+ * El asistente sondea cada 15 s y 20 documentos firmados por sondeo es tráfico que
+ * nadie lee.
+ */
+export interface DianTestSetNotePhase {
+  /** `false` = las notas quedaron retenidas. */
+  sent: boolean;
+  /** Texto del backend. La UI lo muestra, no lo reescribe. */
+  reason: string;
+  polls: number;
+  deferred_count: number;
+  /** Numeración autorizada que quedó reservada y sin usar. */
+  deferred_consecutives: number[];
 }
 
 export type DianTestSetWaitState =
