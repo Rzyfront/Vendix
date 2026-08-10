@@ -157,6 +157,22 @@
   }
 }
 
+/* Dark theme needs a stronger tint: 14% of the accent over a near-black
+   surface reads almost like the rail itself, so the selected pill leans on
+   more fill and a brighter edge to stay obvious at a glance. */
+:host-context([data-theme="dark"]) .sticky-header-tab--active {
+  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
+
+  &:hover {
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 28%,
+      var(--color-surface)
+    );
+  }
+}
+
 .sticky-header-tab--disabled {
   cursor: not-allowed;
   opacity: 0.55;
