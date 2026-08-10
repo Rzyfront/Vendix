@@ -945,6 +945,9 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         };
 
         const toVariantInput = (variant: any) => ({
+          // `id` lo usa resolveWithTier para elegir la fila de override de esta
+          // variante; sin él caería a la fila base del producto.
+          id: variant.id,
           price_override: toNumberOrNull(variant.price_override),
           is_on_sale: variant.is_on_sale === true,
           sale_price: toNumberOrNull(variant.sale_price),
@@ -1015,9 +1018,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             ]);
 
             tiers = tierRows.map((tier) => {
-              // Pre-filtered on purpose: `resolveWithTier` picks the first row
-              // with a non-null variant_id, so only rows for THIS tier and
-              // THIS variant (plus the base row) may reach it.
+              // Filtrado por tarifa. `resolveWithTier` ya compara el
+              // `variant_id` real contra `variant.id`, así que el pre-filtro por
+              // variante dejó de ser obligatorio; se mantiene por eficiencia
+              // (menos filas que recorrer por tarifa).
               const relevantOverrides = overrideRows
                 .filter(
                   (row) =>

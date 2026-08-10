@@ -200,9 +200,17 @@ export async function resolveTierSnapshotsForItems(
       throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
     }
     const variantId = item.product_variant_id ?? null;
-    const override = overrideByKey.get(
-      overrideKey(productId, variantId, Number(tierId)),
-    );
+    // Lookup con fallback a la fila base: un override definido a nivel producto
+    // (`variant_id = null`) aplica a todas sus variantes salvo que exista una
+    // fila específica de esa variante. Sin el fallback, una línea con variante
+    // cuyo override vive a nivel producto perdía tanto el precio como el
+    // `stock_units_consumed`, mientras el frontend sí lo aplicaba — el precio y
+    // el descuento de stock tienen que resolver con la misma regla.
+    const override =
+      (variantId != null
+        ? overrideByKey.get(overrideKey(productId, variantId, Number(tierId)))
+        : undefined) ??
+      overrideByKey.get(overrideKey(productId, null, Number(tierId)));
     const override_units_per_package =
       override?.override_units_per_package ?? null;
     // packSize = override ?? tier ?? 1 (collapses to 1 when <= 1).

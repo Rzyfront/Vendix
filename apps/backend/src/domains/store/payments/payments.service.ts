@@ -2172,6 +2172,9 @@ export class PaymentsService {
           },
           variant: variant
             ? {
+                // `id` es lo que permite al resolver elegir la fila de override
+                // de ESTA variante en vez de caer a la del producto.
+                id: variant.id,
                 price_override:
                   variant.price_override != null
                     ? Number(variant.price_override)
