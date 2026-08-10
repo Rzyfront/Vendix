@@ -24,6 +24,8 @@ import {
   SpinnerComponent,
   ToastService,
   AiReviewAckComponent,
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
 } from '../../../../../../shared/components';
 import {ExpenseCategoryQuickCreateComponent} from '../expense-category-quick-create.component';
 import {CurrencyPipe} from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -46,6 +48,7 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
     ExpenseCategoryQuickCreateComponent,
     CurrencyPipe,
     AiReviewAckComponent,
+    AiDiscardToggleComponent,
   ],
   template: `
     <app-modal
@@ -329,7 +332,13 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
                   </thead>
                   <tbody>
                     @for (item of editableItems(); track $index; let i = $index) {
-                      <tr class="border-b border-border/50 hover:bg-muted/20">
+                      <!--
+                        QUI-644: descarte reversible. Reemplaza el borrado
+                        irreversible: la línea sigue visible, tachada, para que
+                        el usuario verifique qué deja fuera y pueda devolverla.
+                      -->
+                      <tr class="border-b border-border/50 hover:bg-muted/20"
+                          [class]="isDiscarded(i) ? discardedRowClasses : ''">
                         <td class="py-2 pr-3">
                           <input
                             type="text"
@@ -362,14 +371,12 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
                           {{ item.amount | currency: 0 }}
                         </td>
                         <td class="py-2 pl-3">
-                          <button
-                            type="button"
-                            (click)="removeItem(i)"
-                            class="text-red-500 hover:text-red-700 p-1"
-                            title="Eliminar"
-                          >
-                            <app-icon name="trash-2" [size]="14"></app-icon>
-                          </button>
+                          <app-ai-discard-toggle
+                            [discarded]="isDiscarded(i)"
+                            [label]="item.description"
+                            size="sm"
+                            (toggled)="toggleDiscard(i)"
+                          ></app-ai-discard-toggle>
                         </td>
                       </tr>
                     }
@@ -380,7 +387,8 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
               <!-- Mobile cards -->
               <div class="sm:hidden space-y-3">
                 @for (item of editableItems(); track $index; let i = $index) {
-                  <div class="bg-surface border border-border rounded-lg p-3 space-y-2">
+                  <div class="bg-surface border border-border rounded-lg p-3 space-y-2"
+                       [class]="isDiscarded(i) ? discardedRowClasses : ''">
                     <input
                       type="text"
                       [value]="item.description"
@@ -417,13 +425,17 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      (click)="removeItem(i)"
-                      class="text-xs text-red-500 hover:text-red-700 font-medium"
-                    >
-                      Eliminar
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <app-ai-discard-toggle
+                        [discarded]="isDiscarded(i)"
+                        [label]="item.description"
+                        size="sm"
+                        (toggled)="toggleDiscard(i)"
+                      ></app-ai-discard-toggle>
+                      <span class="text-xs text-text-secondary">
+                        {{ isDiscarded(i) ? 'Descartado' : 'Descartar' }}
+                      </span>
+                    </div>
                   </div>
                 }
               </div>
@@ -620,6 +632,41 @@ export class ExpenseScannerModalComponent {
    * `requestAttention()` en vez de ejecutar la carga.
    */
   readonly aiAck = signal(false);
+
+  // ===== QUI-644: descarte de ítems de la precarga =====
+  /**
+   * Índices de `editableItems()` marcados para NO cargarse. Por posición y no
+   * por id porque las líneas escaneadas no tienen uno estable. Se reinicia en
+   * `resetWizard` — obligatorio, el contenido proyectado en `app-modal` no se
+   * destruye al cerrar (QUI-438).
+   */
+  readonly discardedIndexes = signal<Set<number>>(new Set());
+  protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
+
+  isDiscarded(index: number): boolean {
+    return this.discardedIndexes().has(index);
+  }
+
+  toggleDiscard(index: number): void {
+    const next = new Set(this.discardedIndexes());
+    if (next.has(index)) {
+      next.delete(index);
+    } else {
+      next.add(index);
+    }
+    this.discardedIndexes.set(next);
+  }
+
+  /** Ítems que sí se cargan. Es lo único que viaja al backend. */
+  readonly keptItems = computed(() =>
+    this.editableItems().filter((_, i) => !this.discardedIndexes().has(i)),
+  );
+
+  readonly keptCount = computed(() => this.keptItems().length);
+
+  readonly allDiscarded = computed(
+    () => this.editableItems().length > 0 && this.keptCount() === 0,
+  );
   private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly showCategoryQuickCreate = signal(false);
 
@@ -911,7 +958,10 @@ export class ExpenseScannerModalComponent {
         expense_date: this.editInvoiceDate() || toLocalDateString(),
         notes: this.editNotes() || undefined,
         receipt_url: receiptKey,
-        items: this.editableItems().map((it, idx) => ({
+        // QUI-644: solo los ítems no descartados. `line_index` se reindexa
+        // sobre los conservados para no dejar huecos que el consumidor del
+        // gasto interpretaría como líneas perdidas.
+        items: this.keptItems().map((it, idx) => ({
           description: it.description,
           quantity: it.quantity,
           unit_price: it.unit_price,
@@ -998,6 +1048,8 @@ export class ExpenseScannerModalComponent {
   }
 
   resetWizard(): void {
+    // QUI-644: el descarte del escaneo anterior no debe sobrevivir al siguiente.
+    this.discardedIndexes.set(new Set());
     this.currentStep.set(0);
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);

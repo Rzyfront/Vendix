@@ -1,5 +1,9 @@
 // Components
 export { AiReviewAckComponent } from './ai-review-ack/ai-review-ack.component';
+export {
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
+} from './ai-discard-toggle/ai-discard-toggle.component';
 export { AlertBannerComponent } from './alert-banner/alert-banner.component';
 export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
 export { DianResolutionScannerModalComponent } from './dian-resolution-scanner/dian-resolution-scanner-modal.component';

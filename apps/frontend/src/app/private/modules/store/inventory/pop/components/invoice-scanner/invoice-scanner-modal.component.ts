@@ -5,6 +5,10 @@ import { FormsModule } from '@angular/forms';
 import { switchMap, catchError, of, Subject } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
+import {
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
+} from '../../../../../../../shared/components/ai-discard-toggle/ai-discard-toggle.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
@@ -48,6 +52,7 @@ import {
     CurrencyPipe,
     PopSupplierQuickCreateComponent,
     AiReviewAckComponent,
+    AiDiscardToggleComponent,
   ],
   template: `
     <app-modal
@@ -364,11 +369,19 @@ import {
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Total</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Estado</th>
                     <th class="pb-2 pl-3 text-text-secondary font-medium">Producto</th>
+                    <th class="pb-2 pl-3 text-text-secondary font-medium w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (item of editableItems(); track $index; let i = $index) {
-                    <tr class="border-b border-border/50 hover:bg-muted/20">
+                    <!--
+                      QUI-644: la fila descartada se tacha y se atenúa en vez de
+                      desaparecer. Sigue visible a propósito: el usuario tiene
+                      que poder verificar QUÉ está dejando fuera y devolverlo si
+                      se equivocó, y una fila que se esfuma parece un borrado.
+                    -->
+                    <tr class="border-b border-border/50 hover:bg-muted/20"
+                        [class]="isDiscarded(i) ? discardedRowClasses : ''">
                       <td class="py-2 pr-3">
                         <span class="text-text-primary line-clamp-1" [title]="item.description">
                           {{ item.description }}
@@ -411,6 +424,14 @@ import {
                           [ngTemplateOutletContext]="{ item: item, i: i }"
                         ></ng-container>
                       </td>
+                      <td class="py-2 pl-3">
+                        <app-ai-discard-toggle
+                          [discarded]="isDiscarded(i)"
+                          [label]="item.description"
+                          size="sm"
+                          (toggled)="toggleDiscard(i)"
+                        ></app-ai-discard-toggle>
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -420,7 +441,8 @@ import {
             <!-- Mobile cards -->
             <div class="sm:hidden space-y-3">
               @for (item of editableItems(); track $index; let i = $index) {
-                <div class="bg-surface border border-border rounded-lg p-3 space-y-2">
+                <div class="bg-surface border border-border rounded-lg p-3 space-y-2"
+                     [class]="isDiscarded(i) ? discardedRowClasses : ''">
                   <div class="flex items-start justify-between gap-2">
                     <span class="text-sm font-medium text-text-primary line-clamp-2 flex-1">
                       {{ item.description }}
@@ -431,6 +453,12 @@ import {
                     >
                       {{ item.match_status === 'matched' ? 'OK' : (item.match_status === 'partial' ? '~' : 'Nuevo') }}
                     </app-badge>
+                    <app-ai-discard-toggle
+                      [discarded]="isDiscarded(i)"
+                      [label]="item.description"
+                      size="sm"
+                      (toggled)="toggleDiscard(i)"
+                    ></app-ai-discard-toggle>
                   </div>
                   <div class="grid grid-cols-3 gap-2">
                     <div>
@@ -612,12 +640,21 @@ import {
             </app-button>
           }
           @if (currentStep() === 3) {
+            <!--
+              QUI-644: el contador refleja SOLO los activos, y el botón se
+              deshabilita si todo quedó descartado — confirmar una carga vacía
+              no es una operación, es un no-op disfrazado de éxito.
+            -->
             <app-button
               variant="primary"
-              [disabled]="editableItems().length === 0"
+              [disabled]="editableItems().length === 0 || allDiscarded()"
               (clicked)="onConfirm()"
             >
-              Agregar al Carrito
+              @if (keptCount() < editableItems().length) {
+                Agregar {{ keptCount() }} de {{ editableItems().length }}
+              } @else {
+                Agregar al Carrito
+              }
             </app-button>
           }
         </div>
@@ -677,6 +714,49 @@ export class InvoiceScannerModalComponent {
    */
   readonly aiAck = signal(false);
   private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
+
+  // ===== QUI-644: descarte de ítems de la precarga =====
+  /**
+   * Índices de `editableItems()` que el usuario marcó para NO cargar.
+   *
+   * Se indexa por posición y no por id porque las líneas escaneadas no tienen
+   * uno estable: la IA devuelve texto libre y varias líneas de una factura
+   * pueden describir el mismo producto. El conjunto se reinicia junto con el
+   * wizard — obligatorio, porque el contenido proyectado en `app-modal` NO se
+   * destruye al cerrar (precedente QUI-438) y el descarte sobreviviría al
+   * siguiente escaneo.
+   */
+  readonly discardedIndexes = signal<Set<number>>(new Set());
+
+  /** Clases de la fila descartada, compartidas con las otras superficies. */
+  protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
+
+  isDiscarded(index: number): boolean {
+    return this.discardedIndexes().has(index);
+  }
+
+  toggleDiscard(index: number): void {
+    const next = new Set(this.discardedIndexes());
+    if (next.has(index)) {
+      next.delete(index);
+    } else {
+      next.add(index);
+    }
+    this.discardedIndexes.set(next);
+  }
+
+  /** Ítems que SÍ se van a cargar. Es lo único que viaja al backend. */
+  readonly keptItems = computed(() =>
+    this.editableItems().filter((_, i) => !this.discardedIndexes().has(i)),
+  );
+
+  /** Cuántos quedan activos, para el contador del footer. */
+  readonly keptCount = computed(() => this.keptItems().length);
+
+  /** Todo descartado: no hay nada que cargar. */
+  readonly allDiscarded = computed(
+    () => this.editableItems().length > 0 && this.keptCount() === 0,
+  );
   selectedFile = signal<File | null>(null);
   filePreviewUrl = signal<string | null>(null);
   fileError = signal<string | null>(null);
@@ -1240,10 +1320,16 @@ export class InvoiceScannerModalComponent {
       return;
     }
 
+    // QUI-644: el filtrado ocurre acá, en el submit del consumidor. El backend
+    // no se entera de los descartados — nunca los recibe. Si el usuario
+    // descartó todo, no hay nada que cargar y el clic no debe emitir.
+    const kept = this.keptItems();
+    if (kept.length === 0) return;
+
     this.confirmed.emit({
       scanResult: scan,
       matchResult: match,
-      editedItems: this.editableItems(),
+      editedItems: kept,
       invoiceNumber: this.editInvoiceNumber || undefined,
       invoiceDate: this.editInvoiceDate || undefined,
       // Punto 2: proveedor elegido por el usuario (null = no cambiar).
@@ -1278,6 +1364,10 @@ export class InvoiceScannerModalComponent {
     this.scanResult.set(null);
     this.matchResult.set(null);
     this.editableItems.set([]);
+    // QUI-644: obligatorio. El contenido proyectado en `app-modal` no se
+    // destruye al cerrar (QUI-438), así que sin esto el descarte del escaneo
+    // anterior se aplicaría a las líneas del siguiente.
+    this.discardedIndexes.set(new Set());
     this.editInvoiceNumber = '';
     this.editInvoiceDate = '';
     // Punto 2 + 3/4: limpia estado de proveedor y del picker de productos.
