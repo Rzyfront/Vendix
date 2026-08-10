@@ -13,6 +13,8 @@ import { DateRangeFilterComponent } from '../../components/date-range-filter/dat
 import { PurchasesSummary, PurchasesBySupplier, AnalyticsService } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
+import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
@@ -32,6 +34,7 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
     ExportButtonComponent,
     DateRangeFilterComponent,
     AnalyticsCardComponent,
+    ResponsiveDataViewComponent,
   ],
   template: `
     <div class="pb-6">
@@ -189,43 +192,15 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
             Solo los estados marcados como comprometidos suman al gasto
           </span>
         </div>
-        <div class="p-4 overflow-x-auto">
-          @if (loading()) {
-            <div class="h-24 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-          } @else if (statusRows().length === 0) {
-            <p class="text-sm text-[var(--color-text-secondary)] py-4 text-center">
-              Sin órdenes de compra en el período.
-            </p>
-          } @else {
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-xs text-[var(--color-text-secondary)] border-b border-border">
-                  <th class="py-2 pr-4 font-medium">Estado</th>
-                  <th class="py-2 pr-4 font-medium text-right">Órdenes</th>
-                  <th class="py-2 font-medium">Cuenta al gasto</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of statusRows(); track row.status) {
-                  <tr class="border-b border-border/50 last:border-0">
-                    <td class="py-2 pr-4 text-[var(--color-text-primary)]">{{ row.label }}</td>
-                    <td class="py-2 pr-4 text-right tabular-nums text-[var(--color-text-primary)]">
-                      {{ row.count }}
-                    </td>
-                    <td class="py-2">
-                      @if (row.committed) {
-                        <span class="text-xs font-medium text-green-600">Sí</span>
-                      } @else {
-                        <span class="text-xs font-medium text-[var(--color-text-secondary)]">No</span>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          }
+        <div class="p-4">
+          <app-responsive-data-view
+            [data]="statusRows()"
+            [columns]="statusColumns"
+            [cardConfig]="statusCardConfig"
+            [loading]="loading()"
+            emptyTitle="Sin órdenes"
+            emptyMessage="Sin órdenes de compra en el período."
+          ></app-responsive-data-view>
         </div>
       </app-card>
 
@@ -319,6 +294,41 @@ export class PurchaseSummaryComponent implements OnInit {
     if (units <= 0) return 'Sin unidades faltantes';
     return `${units.toLocaleString('es-CO')} unidades faltantes`;
   });
+
+  /**
+   * Columnas del desglose por estado. Se usa el sistema de tablas y no markup
+   * propio: en móvil una tabla cruda obliga a scroll horizontal, y acá el dato
+   * clave —si el estado cuenta al gasto— es justo el que se perdía de vista.
+   */
+  readonly statusColumns: TableColumn[] = [
+    { key: 'label', label: 'Estado', priority: 1 },
+    { key: 'count', label: 'Órdenes', align: 'right', priority: 1 },
+    {
+      key: 'committed',
+      label: 'Cuenta al gasto',
+      priority: 1,
+      badge: true,
+      transform: (value: any) => (value ? 'Sí' : 'No'),
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { true: '#16a34a', false: '#6b7280' },
+        size: 'sm',
+      },
+    },
+  ];
+
+  readonly statusCardConfig: ItemListCardConfig = {
+    titleKey: 'label',
+    badgeKey: 'committed',
+    badgeTransform: (value: any) => (value ? 'Cuenta al gasto' : 'Fuera del gasto'),
+    badgeConfig: {
+      type: 'custom',
+      colorMap: { true: '#16a34a', false: '#6b7280' },
+      size: 'sm',
+    },
+    footerKey: 'count',
+    footerLabel: 'Órdenes',
+  };
 
   readonly statusRows = computed(() => {
     const s = this.summary();

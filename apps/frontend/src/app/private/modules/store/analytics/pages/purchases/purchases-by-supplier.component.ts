@@ -2,7 +2,7 @@ import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -16,11 +16,13 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
+import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe, ResponsiveDataViewComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
@@ -114,62 +116,31 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
               El total cuadra con el Resumen de Compras
             </span>
           </div>
-          <div class="p-4 overflow-x-auto">
-            @if (chartData().length === 0) {
-              <p class="text-sm text-[var(--color-text-secondary)] py-4 text-center">
-                Sin compras a proveedores en el período.
-              </p>
-            } @else {
-              <table class="w-full text-sm min-w-[720px]">
-                <thead>
-                  <tr class="text-left text-xs text-[var(--color-text-secondary)] border-b border-border">
-                    <th class="py-2 pr-4 font-medium">Proveedor</th>
-                    <th class="py-2 pr-4 font-medium text-right">Órdenes</th>
-                    <th class="py-2 pr-4 font-medium text-right">Comprado (sin IVA)</th>
-                    <th class="py-2 pr-4 font-medium text-right">IVA</th>
-                    <th class="py-2 pr-4 font-medium text-right">Pendientes</th>
-                    <th class="py-2 pr-4 font-medium text-right">% del total</th>
-                    <th class="py-2 pr-4 font-medium text-right">vs. anterior</th>
-                    <th class="py-2 font-medium">Última compra</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of chartData(); track row.supplier_id) {
-                    <tr class="border-b border-border/50">
-                      <td class="py-2 pr-4 text-[var(--color-text-primary)]">{{ row.supplier_name }}</td>
-                      <td class="py-2 pr-4 text-right tabular-nums">{{ row.order_count }}</td>
-                      <td class="py-2 pr-4 text-right tabular-nums text-[var(--color-text-primary)]">
-                        {{ row.total_spent | currency }}
-                      </td>
-                      <td class="py-2 pr-4 text-right tabular-nums text-[var(--color-text-secondary)]">
-                        {{ row.tax_amount | currency }}
-                      </td>
-                      <td class="py-2 pr-4 text-right tabular-nums">{{ row.pending_orders }}</td>
-                      <td class="py-2 pr-4 text-right tabular-nums">{{ row.percentage_of_total }} %</td>
-                      <td class="py-2 pr-4 text-right tabular-nums text-xs">
-                        {{ growthLabel(row.growth) }}
-                      </td>
-                      <td class="py-2 text-[var(--color-text-secondary)] text-xs">
-                        {{ formatLastOrder(row.last_order_date) }}
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-                <tfoot>
-                  <tr class="border-t-2 border-border font-bold">
-                    <td class="py-2 pr-4 text-[var(--color-text-primary)]">Total</td>
-                    <td class="py-2 pr-4 text-right tabular-nums">{{ getTotalOrders() }}</td>
-                    <td class="py-2 pr-4 text-right tabular-nums text-[var(--color-text-primary)]">
-                      {{ totalSpentValue() | currency }}
-                    </td>
-                    <td class="py-2 pr-4 text-right tabular-nums">{{ totalTaxValue() | currency }}</td>
-                    <td class="py-2 pr-4 text-right tabular-nums">{{ totalPendingOrders() }}</td>
-                    <td class="py-2 pr-4 text-right tabular-nums">{{ totalPercentage() }} %</td>
-                    <td class="py-2 pr-4"></td>
-                    <td class="py-2"></td>
-                  </tr>
-                </tfoot>
-              </table>
+          <div class="p-4">
+            <app-responsive-data-view
+              [data]="chartData()"
+              [columns]="supplierColumns"
+              [cardConfig]="supplierCardConfig"
+              [loading]="chartLoading()"
+              [hoverable]="true"
+              emptyTitle="Sin compras"
+              emptyMessage="Sin compras a proveedores en el período."
+              (rowClick)="openSupplier($event)"
+            ></app-responsive-data-view>
+            <!--
+              La fila de totales queda fuera de la tabla del sistema: es un
+              agregado de la vista, no un registro. Es la prueba visual de que
+              esta pantalla cuadra con el Resumen de Compras.
+            -->
+            @if (chartData().length > 0) {
+              <div class="mt-3 pt-3 border-t-2 border-border flex flex-wrap gap-x-6 gap-y-1 text-sm font-bold">
+                <span class="text-[var(--color-text-primary)]">Total</span>
+                <span>{{ getTotalOrders() }} órdenes</span>
+                <span>{{ totalSpentValue() | currency }}</span>
+                <span class="text-[var(--color-text-secondary)]">IVA {{ totalTaxValue() | currency }}</span>
+                <span>{{ totalPendingOrders() }} pendientes</span>
+                <span>{{ totalPercentage() }} %</span>
+              </div>
             }
           </div>
         </app-card>
@@ -184,6 +155,7 @@ export class PurchasesBySupplierComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private readonly route = inject(ActivatedRoute);
   private currencyService = inject(CurrencyFormatService);
+  private readonly router = inject(Router);
 
   chartLoading = signal(false);
   chartData = signal<PurchasesBySupplier[]>([]);
@@ -298,6 +270,88 @@ legend: {
         barMaxWidth: 50,
       }],
     });
+  }
+
+  readonly supplierColumns: TableColumn[] = [
+    { key: 'supplier_name', label: 'Proveedor', priority: 1 },
+    { key: 'order_count', label: 'Órdenes', align: 'right', priority: 2 },
+    {
+      key: 'total_spent',
+      label: 'Comprado (sin IVA)',
+      align: 'right',
+      priority: 1,
+      transform: (value: any) => this.currencyService.format(Number(value)),
+    },
+    {
+      key: 'tax_amount',
+      label: 'IVA',
+      align: 'right',
+      priority: 3,
+      transform: (value: any) => this.currencyService.format(Number(value)),
+    },
+    { key: 'pending_orders', label: 'Pendientes', align: 'right', priority: 3 },
+    {
+      key: 'percentage_of_total',
+      label: '% del total',
+      align: 'right',
+      priority: 2,
+      transform: (value: any) => `${value} %`,
+    },
+    {
+      key: 'growth',
+      label: 'vs. anterior',
+      align: 'right',
+      priority: 3,
+      // `defaultValue` y no `transform` para el caso nulo: la celda de
+      // `app-table` corta antes del transform cuando el valor es null y pinta
+      // `defaultValue || "No data"`. Acá el null SIGNIFICA algo — el proveedor
+      // no tuvo compras en la ventana previa — así que debe decirlo.
+      defaultValue: 'Sin base',
+      transform: (value: any) => this.growthLabel(value as number | null),
+    },
+    {
+      key: 'last_order_date',
+      label: 'Última compra',
+      priority: 3,
+      defaultValue: 'Sin compras',
+      transform: (value: any) => this.formatLastOrder(value as string | null),
+    },
+  ];
+
+  readonly supplierCardConfig: ItemListCardConfig = {
+    titleKey: 'supplier_name',
+    detailKeys: [
+      { key: 'order_count', label: 'Órdenes', icon: 'file-text' },
+      {
+        key: 'percentage_of_total',
+        label: '% del total',
+        icon: 'percent',
+        transform: (value: any) => `${value} %`,
+      },
+      {
+        key: 'growth',
+        label: 'vs. anterior',
+        icon: 'trending-up',
+        transform: (value: any) => this.growthLabel(value as number | null),
+      },
+      {
+        key: 'last_order_date',
+        label: 'Última compra',
+        icon: 'calendar',
+        transform: (value: any) => this.formatLastOrder(value as string | null),
+      },
+    ],
+    footerKey: 'total_spent',
+    footerLabel: 'Comprado (sin IVA)',
+    footerTransform: (value: any) => this.currencyService.format(Number(value)),
+  };
+
+  /**
+   * Un proveedor listado tiene que llevar a su perfil (QUI-656), que es donde
+   * está su deuda, su historial y sus documentos.
+   */
+  openSupplier(row: PurchasesBySupplier): void {
+    this.router.navigate(['/admin/inventory/suppliers', row.supplier_id]);
   }
 
   getTotalOrders(): number {
