@@ -588,10 +588,16 @@ export type PrintingSettings = Partial<
  * System defaults, taken from what the desktop build already does today so a
  * store that never opens this screen keeps printing exactly as before.
  *
- * The two exceptions are deliberate: `invoice` moves to an 80 mm roll (its
- * previous `invoice_format` setting was never read by anything), and
  * `dispatch_route` keeps its deliberately thin margin — it needs printable
  * width, and its builder already used a 24 pt margin for that reason.
+ *
+ * `invoice` is the one entry that CHANGES live behaviour rather than recording
+ * it. `invoice_format` is read by `invoice-pdf.service.ts` (`resolveInvoiceFormat`)
+ * and defaults to `letter` in `default-store-settings.ts`, so stores already
+ * issuing electronic invoices print letter today. Moving the default to an
+ * 80 mm roll is a deliberate product decision, not a formalisation — and the
+ * graphic representation carries mandatory DIAN content (issuer data, CUFE,
+ * QR), so the roll layout must still fit all of it.
  */
 export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
   pos_ticket: { format: 'thermal_80', copies: 1 },

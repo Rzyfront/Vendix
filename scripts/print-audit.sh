@@ -21,8 +21,13 @@ fail() { echo "❌ $1"; FAILED=1; }
 ok() { echo "✅ $1"; }
 warn() { echo "⚠️  $1"; }
 
-# ─── The one legitimate engine ───────────────────────────────────────────
-ENGINE='apps/frontend/src/app/shared/services/print/'
+# ─── The legitimate engines ──────────────────────────────────────────────
+# One contract, two runtimes. The mobile app is a separate Expo build with no
+# shared library between them today, so it carries its own implementation of the
+# same contract rather than importing the web one. Both are engines: code inside
+# either is allowed to touch iframes, window.print and Print.printAsync.
+# Anything OUTSIDE them must route through its runtime's engine.
+ENGINE='(apps/frontend/src/app/shared/services/print/|apps/mobile/src/shared/print/)'
 
 # ─── Allowlists: emitters not migrated yet ───────────────────────────────
 # Each entry is a file that still prints on its own. Remove it the moment it
@@ -80,7 +85,7 @@ offenders() {
   allow=$(squash "$2")
   shift 2
   rg -l "$pattern" "$@" 2>/dev/null \
-    | grep -vF "$ENGINE" \
+    | grep -vE "$ENGINE" \
     | { if [ -n "$allow" ]; then grep -vE "$allow"; else cat; fi; } \
     | sort || true
 }

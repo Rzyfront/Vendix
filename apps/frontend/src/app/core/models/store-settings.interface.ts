@@ -620,8 +620,10 @@ export interface ReceiptsSettings {
    */
   deliver_printed?: boolean;
   /**
-   * @deprecated Superseded by `printing.invoice`. Kept so rows written before
-   * the per-document block stay valid; no printer ever read it.
+   * @deprecated Superseded by `printing.invoice`. Still LIVE: the backend reads
+   * it in `invoice-pdf.service.ts` (`resolveInvoiceFormat`) and it defaults to
+   * `letter`, so it governs what already-invoicing stores print today. The
+   * settings screen mirrors `printing.invoice` into it while consumers migrate.
    */
   invoice_format?: PrintFormat;
   /**
