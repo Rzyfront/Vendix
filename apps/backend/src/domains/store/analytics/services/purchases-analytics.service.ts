@@ -33,6 +33,16 @@ interface PurchaseWindowAggregate {
   unitsOrdered: number;
   /** Received units, expressed in the MINIMUM STOCK unit. */
   unitsReceived: number;
+  /**
+   * Units the suppliers still owe, in the MINIMUM STOCK unit.
+   *
+   * Computed PER LINE as `GREATEST(ordered - received, 0)`, never as the
+   * difference of the two totals. Measured on store 10: item 488 has 1 unit
+   * ordered and 99 received on a product whose `purchase_to_stock_factor` is
+   * 1 000 000, so a totals-difference turned the store's real backlog into
+   * -86 999 981 — one over-received line erasing every genuine shortfall.
+   */
+  unitsPending: number;
   /** Order count per status, including the states left out of the spend. */
   ordersByStatus: Record<string, number>;
 }
@@ -108,13 +118,15 @@ export class PurchasesAnalyticsService {
         tax_capitalized: number;
         units_ordered: number;
         units_received: number;
+        units_pending: number;
       }>
     >`
       SELECT COALESCE(sum(i.tax_amount), 0)::float8 AS tax_charged,
              COALESCE(sum(i.deductible_tax_amount), 0)::float8 AS tax_deductible,
              COALESCE(sum(i.capitalized_tax_amount), 0)::float8 AS tax_capitalized,
              COALESCE(sum(i.quantity_ordered * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS units_ordered,
-             COALESCE(sum(i.quantity_received * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS units_received
+             COALESCE(sum(i.quantity_received * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS units_received,
+             COALESCE(sum(GREATEST(i.quantity_ordered - i.quantity_received, 0) * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS units_pending
       FROM purchase_order_items i
       JOIN purchase_orders po ON po.id = i.purchase_order_id
       JOIN inventory_locations l ON l.id = po.location_id
@@ -147,6 +159,7 @@ export class PurchasesAnalyticsService {
       taxCapitalized: Number(items?.tax_capitalized ?? 0),
       unitsOrdered: Number(items?.units_ordered ?? 0),
       unitsReceived: Number(items?.units_received ?? 0),
+      unitsPending: Number(items?.units_pending ?? 0),
       ordersByStatus,
     };
   }
@@ -210,7 +223,7 @@ export class PurchasesAnalyticsService {
       completed_orders: completedOrders,
       total_items_ordered: round2(current.unitsOrdered),
       total_items_received: round2(current.unitsReceived),
-      pending_units: round2(current.unitsOrdered - current.unitsReceived),
+      pending_units: round2(current.unitsPending),
       // Three VAT figures, not one: what the suppliers charged, how much of it
       // is recoverable in the declaration, and how much went into the cost of
       // the goods. A store that is not VAT-responsible (O-49) has

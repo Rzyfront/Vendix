@@ -64,13 +64,33 @@ import { PaginatedResponse } from '../interfaces/analytics.interface';
 // Purchases interfaces
 export interface PurchasesSummary {
   total_orders: number;
+  /** SUM(subtotal_amount) of committed orders — spend WITHOUT VAT. */
   total_spent: number;
   pending_orders: number;
   completed_orders: number;
+  /** Ordered units in the MINIMUM STOCK unit (purchase_to_stock_factor applied). */
   total_items_ordered: number;
+  /** Received units in the MINIMUM STOCK unit. */
   total_items_received: number;
+  /** Units still owed, computed per line so an over-received line contributes 0. */
+  pending_units: number;
+  /** VAT the suppliers charged, summed from the LINES (never the order header). */
   total_tax_amount: number;
+  /** Portion recoverable in the DIAN declaration (O-48 responsible stores). */
+  deductible_tax_amount: number;
+  /** Portion sealed into inventory cost (O-49 non-responsible stores). */
+  capitalized_tax_amount: number;
   average_order_value: number;
+  /** `null` = the previous window had no base; render "sin base", never 0 %. */
+  total_spent_growth: number | null;
+  total_orders_growth: number | null;
+  average_order_value_growth: number | null;
+  /** Order count per status, including states excluded from the spend. */
+  orders_by_status: Record<string, number>;
+  /** The states that counted as spend, straight from the metric contract. */
+  committed_states: string[];
+  /** Which universe the view aggregated over (`location` = destination store). */
+  store_scope: string;
 }
 
 export interface PurchasesBySupplier {
