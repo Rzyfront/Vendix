@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -18,6 +19,11 @@ import {
   localPeriodSql,
   localBucketSql,
 } from '@common/utils/store-timezone.util';
+import {
+  COMPLETED_SALE_STATES,
+  computeGrowth,
+  computeOperatingRevenue,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -58,62 +64,86 @@ export class CustomersAnalyticsService {
       user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
     };
 
-    // Total customers in the store (via users with customer role)
+    // Total customers in the store (via users with customer role).
+    // This is a STOCK snapshot as of `now()` — not a flow — so we don't
+    // apply a date filter.
     const totalCustomers = await this.prisma.users.count({
       where: customerRoleFilter,
     });
 
-    // Active customers: distinct customers with at least 1 completed order in period
+    // Active customers: distinct customers with at least 1 completed order
+    // in the period. The active count is a FLOW (counts the period's
+    // shoppers, not a perpetual photo).
     const activeCustomers = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where: {
-        state: { in: this.COMPLETED_STATES },
+        state: { in: [...COMPLETED_SALE_STATES] },
         customer_id: { not: null },
         created_at: { gte: startDate, lte: endDate },
       },
     });
 
-    // New customers in period (store_users created in date range with customer role)
-    const newCustomers = await this.prisma.users.count({
+    // QUI-626 defect 1: new customers of THIS store use store_users.createdAt,
+    // not users.created_at (the global sign-up date). A user can register on
+    // another tenant and link to this store later; their global sign-up
+    // isn't their link-to-this-store date.
+    //
+    // store_users is the join table; we filter by store_id AND by the user
+    // having the customer role (via user_roles).
+    const newCustomerWhere: Prisma.store_usersWhereInput = {
+      store_id: storeId,
+      createdAt: { gte: startDate, lte: endDate },
+      user: {
+        user_roles: {
+          some: { roles: { name: UserRole.CUSTOMER } },
+        },
+      },
+    };
+    const newCustomers = await this.prisma.store_users.count({
+      where: newCustomerWhere,
+    });
+
+    const previousNewCustomers = await this.prisma.store_users.count({
       where: {
-        ...customerRoleFilter,
-        created_at: { gte: startDate, lte: endDate },
+        ...newCustomerWhere,
+        createdAt: { gte: previousStartDate, lte: previousEndDate },
       },
     });
 
-    // New customers in previous period (for growth calculation)
-    const previousNewCustomers = await this.prisma.users.count({
-      where: {
-        ...customerRoleFilter,
-        created_at: { gte: previousStartDate, lte: previousEndDate },
-      },
-    });
-
-    // Total revenue from completed orders (for average spend calculation)
+    // QUI-626 defect 2: revenue uses OPERATING revenue (subtotal - discount +
+    // shipping) per the contract, NOT grand_total (which folds VAT in and
+    // would make the panel disagree with the other views of the same period).
     const revenueAgg = await this.prisma.orders.aggregate({
       where: {
-        state: { in: this.COMPLETED_STATES },
+        state: { in: [...COMPLETED_SALE_STATES] },
         customer_id: { not: null },
         created_at: { gte: startDate, lte: endDate },
       },
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
+      },
     });
-
-    // Previous period revenue for average spend growth
     const previousRevenueAgg = await this.prisma.orders.aggregate({
       where: {
-        state: { in: this.COMPLETED_STATES },
+        state: { in: [...COMPLETED_SALE_STATES] },
         customer_id: { not: null },
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
+      },
     });
 
-    // Previous active customers count
     const previousActiveCustomers = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where: {
-        state: { in: this.COMPLETED_STATES },
+        state: { in: [...COMPLETED_SALE_STATES] },
         customer_id: { not: null },
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
@@ -121,31 +151,43 @@ export class CustomersAnalyticsService {
 
     const activeCount = activeCustomers.length;
     const previousActiveCount = previousActiveCustomers.length;
-    const totalRevenue = Number(revenueAgg._sum.grand_total || 0);
-    const previousRevenue = Number(previousRevenueAgg._sum.grand_total || 0);
+    // Operating revenue (contract) — same definition as Resumen General and
+    // Estado de Resultados, so the three views reconcile.
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(revenueAgg._sum.subtotal_amount || 0),
+      discounts: Number(revenueAgg._sum.discount_amount || 0),
+      shipping: Number(revenueAgg._sum.shipping_cost || 0),
+      tax: Number(revenueAgg._sum.tax_amount || 0),
+    });
+    const previousRevenue = computeOperatingRevenue({
+      subtotal: Number(previousRevenueAgg._sum.subtotal_amount || 0),
+      discounts: Number(previousRevenueAgg._sum.discount_amount || 0),
+      shipping: Number(previousRevenueAgg._sum.shipping_cost || 0),
+      tax: Number(previousRevenueAgg._sum.tax_amount || 0),
+    });
 
     const averageSpend = activeCount > 0 ? totalRevenue / activeCount : 0;
     const previousAverageSpend =
       previousActiveCount > 0 ? previousRevenue / previousActiveCount : 0;
 
-    const newCustomersGrowth =
-      previousNewCustomers > 0
-        ? ((newCustomers - previousNewCustomers) / previousNewCustomers) * 100
-        : 0;
-
-    const averageSpendGrowth =
-      previousAverageSpend > 0
-        ? ((averageSpend - previousAverageSpend) / previousAverageSpend) * 100
-        : 0;
+    // QUI-626 defect 4: computeGrowth returns null when the previous base
+    // is 0, instead of a misleading 0 % (which falsely read as "no change").
+    const newCustomersGrowth = computeGrowth(newCustomers, previousNewCustomers);
+    const averageSpendGrowth = computeGrowth(averageSpend, previousAverageSpend);
 
     return {
       total_customers: totalCustomers,
       active_customers: activeCount,
-      inactive_customers: totalCustomers - activeCount,
+      // QUI-626 defect 3: `inactive = total - active` mixed a stock with a
+      // flow. Removed from the response. If the operator wants inactive, it
+      // must be defined as "no orders in the last N days" and declared as such
+      // (separate ticket).
       new_customers: newCustomers,
-      new_customers_growth: newCustomersGrowth,
-      average_spend: averageSpend,
-      average_spend_growth: averageSpendGrowth,
+      new_customers_growth:
+        newCustomersGrowth === null ? null : Math.round(newCustomersGrowth * 10) / 10,
+      average_spend: Math.round(averageSpend * 100) / 100,
+      average_spend_growth:
+        averageSpendGrowth === null ? null : Math.round(averageSpendGrowth * 10) / 10,
     };
   }
 
