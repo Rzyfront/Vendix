@@ -19,6 +19,16 @@ import {
   Validators,
 } from '@angular/forms';
 import { map, switchMap, timer, type Subscription } from 'rxjs';
+// Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
+// Son el espejo del DTO del backend: lo que el DTO rechaza, se rechaza acá antes
+// de gastar un viaje a la DIAN.
+import {
+  DIAN_VALIDATION_MESSAGES,
+  dianSoftwarePinValidator,
+  dianUuidValidator,
+  nitFormatValidator,
+} from '../../../../../../shared/utils/dian-validators';
+import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
@@ -280,6 +290,21 @@ interface PersistedTestResult {
                 placeholder="Ej: 7"
               ></app-input>
             </div>
+            <!--
+              El error del DV es de GRUPO: compara nit con nit_dv, y ningun
+              validador de control puede ver a su hermano. Por eso app-input no lo
+              pinta y se muestra aca. Se exige touched en los dos para no gritarle
+              al usuario mientras todavia esta escribiendo el NIT.
+              (Sin acentos ni backticks: este comentario vive dentro del template
+              literal del componente, y un backtick lo corta.)
+            -->
+            @if (
+              credentialsForm.hasError('nitDv') &&
+              nitControl.touched &&
+              nitDvControl.touched
+            ) {
+              <p class="text-xs text-error font-medium">{{ nitDvMessage }}</p>
+            }
             <app-input
               label="Software ID"
               formControlName="software_id"
@@ -1260,18 +1285,52 @@ export class DianConfigWizardComponent {
 
   // ── Typed Forms ───────────────────────────────────────────
   readonly credentialsForm: FormGroup<CredentialsForm> = this.fb.nonNullable.group({
+    // VALIDADORES DE FORMATO, NO SOLO `required`.
+    //
+    // Este formulario tenía siete `required` pelados y ningún validador de forma,
+    // mientras el riel de plataforma —un operador interno, una configuración—
+    // tenía seis. La validación estaba invertida respecto al riesgo: acá un
+    // `software_id` mal copiado no lo rechaza nadie, y si llega a la DIAN el
+    // documento nunca clasifica, indistinguible de una cola atascada, con el
+    // consecutivo del set ya gastado.
+    //
+    // Son el espejo del DTO del backend (`@IsUUID`, forma del NIT). Viven en
+    // `shared/utils/dian-validators` para que las cuatro puertas de entrada
+    // rechacen lo mismo.
     name: ['', [Validators.required]],
     nit_type: ['NIT'],
-    nit: ['', [Validators.required]],
+    nit: ['', [Validators.required, nitFormatValidator]],
     nit_dv: [''],
-    software_id: ['', [Validators.required]],
-    software_pin: ['', [Validators.required]],
-    test_set_id: [''],
+    software_id: ['', [Validators.required, dianUuidValidator]],
+    software_pin: ['', [Validators.required, dianSoftwarePinValidator]],
+    test_set_id: ['', [dianUuidValidator]],
+  }, {
+    // `nitDvValidator` es de GRUPO, no de control: compara `nit` con `nit_dv`, y
+    // un validador de control no puede ver a su hermano. Ya existía en
+    // `shared/utils/nit.util.ts` y ninguna de las tres superficies lo usaba.
+    //
+    // Importa porque el DV no es decorativo: entra en el CUFE, así que un dígito
+    // equivocado hace que la DIAN recompute un hash distinto y rechace cada
+    // documento emitido, con su consecutivo ya gastado.
+    validators: [nitDvValidator],
   });
 
   readonly certificateForm: FormGroup<CertificateForm> = this.fb.nonNullable.group({
     certificate_password: ['', [Validators.required]],
   });
+
+  /**
+   * Texto del desajuste NIT↔DV.
+   *
+   * Constante y no `computed`: el mensaje no depende del estado, solo su
+   * visibilidad, y esa la decide el `@if` del template leyendo el formulario —el
+   * mismo patrón que ya usa `[disabled]="credentialsForm.invalid"`, que funciona
+   * porque la validez cambia por eventos del DOM y esos disparan detección.
+   *
+   * Se toma del mapa compartido para que este formulario no redacte su propia
+   * versión del mismo rechazo.
+   */
+  readonly nitDvMessage = DIAN_VALIDATION_MESSAGES['nitDv'];
 
   // ── Typed getters (per vendix-angular-forms skill) ───────
   get nameControl(): FormControl<string> { return this.credentialsForm.controls.name; }
