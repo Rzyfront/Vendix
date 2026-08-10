@@ -3257,6 +3257,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PRODUCT_TIERS_VARIANTS_EXCLUSIVE: {
+    code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
+    httpStatus: 409,
+    devMessage:
+      'Multi-tarifa y variantes son excluyentes: un producto que se vende en varias presentaciones no puede tener variantes. Elimina las variantes o desactiva multi-tarifa.',
+  },
   PRICE_TIER_KIND_LOCKED: {
     code: 'PRICE_TIER_KIND_LOCKED',
     httpStatus: 409,

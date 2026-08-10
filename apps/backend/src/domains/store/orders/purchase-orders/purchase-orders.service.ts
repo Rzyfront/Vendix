@@ -40,6 +40,7 @@ import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { resolvePackSize } from '../../products/services/packaging.util';
 import { resolveTierPricingCostAnchor } from '../../products/services/tier-margin.util';
+import { assertTiersAllowed } from '../../products/services/tiers-variants-exclusive.util';
 
 /**
  * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
@@ -1839,6 +1840,15 @@ export class PurchaseOrdersService {
     // venta. La rama de insumo del create fuerza `has_multiple_price_tiers=false`
     // por la misma razón; esta guarda evita reactivarlo por la puerta de atrás.
     if (product.is_ingredient && product.is_sellable === false) return;
+
+    // Multi-tarifa ⊕ variantes: configurar una presentación desde la compra es
+    // una tercera puerta a la misma regla. Lanza (no silencia) para que el
+    // comprador sepa por qué su configuración no se aplicó — la OC entera se
+    // revierte con la transacción y él decide si quita las variantes o la
+    // presentación.
+    await assertTiersAllowed(tx, productId, {
+      action: 'purchase_order_sale_unit_config',
+    });
 
     // 1. La presentación. `(store_id, name)` es único, así que un nombre repetido
     //    reutiliza la tarifa en vez de fallar. `is_package_unit` se deriva del

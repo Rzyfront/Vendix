@@ -265,6 +265,24 @@ export type { PopProductConfigResult };
                  otra: bulto de 50 kg vendido por bulto y por kilo. Alcanza a
                  retail, ferretería y distribuidora — a diferencia del bloque de
                  insumo, NO se gatea por restaurante. -->
+            @if (saleUnitBlockedByVariants()) {
+              <div
+                class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  size="14"
+                  class="text-amber-600 shrink-0 mt-0.5"
+                ></app-icon>
+                <span>
+                  Este producto usa variantes, así que no puede venderse en
+                  presentaciones: el precio y el descuento de stock no pueden
+                  depender de dos ejes a la vez. Quita las variantes desde el
+                  producto si necesitas venderlo por bulto y por unidad.
+                </span>
+              </div>
+            }
+
             @if (canConfigureSaleUnit()) {
               <div class="rounded-lg border border-border p-3 space-y-3">
                 <div>
@@ -809,7 +827,26 @@ export class PopProductConfigModalComponent {
   readonly saleUnitIsDefault = signal(false);
 
   /** El bloque solo aplica a productos que se venden. */
-  readonly canConfigureSaleUnit = computed(() => !this.ingredientMode());
+  /**
+   * Multi-tarifa ⊕ variantes. Un insumo puro no se vende (no tiene presentación
+   * de venta) y un producto con variantes tampoco puede tenerla: son dos ejes de
+   * precio y de descuento de stock que ninguna superficie de venta sabe
+   * combinar. `hasVariantsToggle` entra en la cuenta porque el operador puede
+   * estar creando las variantes en la pestaña de al lado, en esta misma compra.
+   */
+  readonly canConfigureSaleUnit = computed(
+    () =>
+      !this.ingredientMode() &&
+      !this.productHasVariants &&
+      !this.hasVariantsToggle(),
+  );
+
+  /** Solo para explicar la ausencia del bloque cuando la causa son variantes. */
+  readonly saleUnitBlockedByVariants = computed(
+    () =>
+      !this.ingredientMode() &&
+      (this.productHasVariants || this.hasVariantsToggle()),
+  );
 
   /** Costo del paquete = costo unitario × factor, para derivar el margen. */
   readonly saleUnitPackageCost = computed(() => {

@@ -11,6 +11,7 @@ import {
 } from './dto';
 import { resolvePackSize } from '../products/services/packaging.util';
 import { resolveTierPricingCostAnchor } from '../products/services/tier-margin.util';
+import { assertTiersAllowed } from '../products/services/tiers-variants-exclusive.util';
 
 /**
  * PriceTiersService
@@ -306,6 +307,14 @@ export class PriceTiersService {
       throw new VendixHttpException(
         ErrorCodes.PRICE_TIER_OVERRIDE_PRODUCT_001,
       );
+    }
+
+    // Multi-tarifa ⊕ variantes: habilitar una presentación sobre un producto
+    // con variantes queda prohibido en el punto de escritura, no solo en la UI.
+    if (tier.kind === 'sale_unit') {
+      await assertTiersAllowed(this.prisma as any, productId, {
+        action: 'upsert_sale_unit_override',
+      });
     }
 
     // Solo una unidad de venta puede ser la presentación por defecto. El índice

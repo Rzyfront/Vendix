@@ -25,6 +25,10 @@ import { InventoryIntegrationService } from '../inventory/shared/services/invent
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
+import {
+  assertTiersAllowed,
+  assertVariantsAllowed,
+} from './services/tiers-variants-exclusive.util';
 import { S3Service } from '@common/services/s3.service';
 import { QrService } from '@common/services/qr.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
@@ -570,6 +574,15 @@ export class ProductsService {
           seenBarcodes.add(code);
           await this.assertBarcodeUnique(code);
         }
+      }
+
+      // Multi-tarifa ⊕ variantes: excluyentes. El producto todavía no existe,
+      // así que la cuenta de variantes sale del payload.
+      if (sanitizedDto.has_multiple_price_tiers === true) {
+        await assertTiersAllowed(this.prisma as any, null, {
+          incomingVariantCount: sanitizedDto.variants?.length ?? 0,
+          action: 'create_product_with_price_tiers',
+        });
       }
 
       // Verificar que el brand_id exista y esté activo
@@ -2022,6 +2035,41 @@ export class ProductsService {
             ErrorCodes.PROD_SVC_HAS_VARIANTS_001,
             'No se puede cambiar a SERVICE un producto con variantes existentes',
           );
+        }
+      }
+
+      // BLOCK: multi-tarifa ⊕ variantes. Se bloquea la petición que CREA el
+      // conflicto, no la que lo arrastra: un producto legacy que ya tiene ambos
+      // debe poder editarse (y reducir variantes) para salir del estado
+      // inconsistente. La UI informa el conflicto en ese caso.
+      {
+        const wasTiers =
+          (existingProduct as any).has_multiple_price_tiers === true;
+        const willBeTiers =
+          sanitizedDto.has_multiple_price_tiers !== undefined
+            ? sanitizedDto.has_multiple_price_tiers === true
+            : wasTiers;
+        const effectiveVariantCount =
+          sanitizedDto.variants !== undefined
+            ? sanitizedDto.variants.length
+            : await this.prisma.product_variants.count({
+                where: { product_id: id },
+              });
+
+        if (willBeTiers && !wasTiers && effectiveVariantCount > 0) {
+          // Prender multi-tarifa sobre un producto con variantes.
+          await assertTiersAllowed(this.prisma as any, null, {
+            incomingVariantCount: effectiveVariantCount,
+            action: 'enable_price_tiers',
+          });
+        } else if (
+          willBeTiers &&
+          sanitizedDto.variants?.some((v: any) => !v.id)
+        ) {
+          // Agregar variantes nuevas a un producto que se vende por presentación.
+          await assertVariantsAllowed(this.prisma as any, id, {
+            action: 'add_variants',
+          });
         }
       }
 

@@ -2071,6 +2071,27 @@ export class ProductCreatePageComponent {
 
   toggleVariants(isChecked: boolean): void {
     if (isChecked) {
+      // Multi-tarifa ⊕ variantes. Multi-tarifa gana: si el producto ya se vende
+      // en presentaciones, el camino para usar variantes es desactivarla, no
+      // apilar los dos ejes. El backend lo rechaza igual
+      // (PRODUCT_TIERS_VARIANTS_EXCLUSIVE); acá se dice ANTES de perder el
+      // trabajo de configurar atributos.
+      if (this.isMultiTierEnabled) {
+        this.dialogService
+          .confirm({
+            title: 'Multi-tarifa desactiva variantes',
+            message:
+              'Este producto se vende en presentaciones (multi-tarifa): bulto y kilo, rollo y metro. ' +
+              'Las variantes y las presentaciones son excluyentes porque el precio y el descuento de stock ' +
+              'no pueden depender de dos ejes a la vez. Desactiva multi-tarifa si necesitas variantes.',
+            confirmText: 'Entendido',
+            cancelText: 'Cancelar',
+            confirmVariant: 'primary',
+          })
+          .then(() => {});
+        return;
+      }
+
       const currentSku = this.productForm.get('sku')?.value;
       if (!currentSku || currentSku.trim() === '') {
         this.dialogService
@@ -4151,7 +4172,59 @@ export class ProductCreatePageComponent {
    * Handler for the "Activar precios multi-tarifa" toggle. Lazy-loads the
    * tier catalog the first time it's enabled.
    */
+  /**
+   * ¿Activar multi-tarifa costaría variantes? Gobierna el aviso permanente de la
+   * sección; el diálogo de `onMultiTierToggle` es la confirmación del costo.
+   */
+  get multiTierWouldRemoveVariants(): boolean {
+    return this.hasVariants && !this.isMultiTierEnabled;
+  }
+
+  /** Multi-tarifa activa ⇒ la sección de variantes queda cerrada e informada. */
+  get variantsBlockedByMultiTier(): boolean {
+    return this.isMultiTierEnabled;
+  }
+
   onMultiTierToggle(enabled: boolean): void {
+    // Multi-tarifa ⊕ variantes: activar presentaciones sobre un producto con
+    // variantes las elimina. Se pide confirmación explícita con el costo en
+    // números (cuántas variantes y cuánto stock vuelve al stock base) en vez de
+    // dejar que el backend lo rechace al guardar.
+    if (enabled && this.hasVariants) {
+      const count = this.generatedVariants.length;
+      const stock = this.totalVariantStock;
+      this.dialogService
+        .confirm({
+          title: 'Multi-tarifa desactiva variantes',
+          message:
+            'Las presentaciones de venta y las variantes son excluyentes: el precio y el descuento de ' +
+            'stock no pueden depender de dos ejes a la vez. ' +
+            (count > 0
+              ? `Al activar multi-tarifa se eliminarán las ${count} variante${
+                  count === 1 ? '' : 's'
+                } de este producto` +
+                (stock > 0
+                  ? ` y sus ${stock} unidades volverán al stock base.`
+                  : '.')
+              : 'Al activar multi-tarifa se desactivará la configuración de variantes.'),
+          confirmText: 'Activar multi-tarifa',
+          cancelText: 'Cancelar',
+          confirmVariant: 'danger',
+        })
+        .then((confirmed: boolean) => {
+          if (!confirmed) {
+            // El toggle ya se pintó encendido: hay que devolverlo a su estado.
+            this.productForm
+              .get('has_multiple_price_tiers')
+              ?.setValue(false, { emitEvent: false });
+            return;
+          }
+          this.applyVariantToggle(false);
+          this.onMultiTierToggle(true);
+        });
+      return;
+    }
+
     this.productForm
       .get('has_multiple_price_tiers')
       ?.setValue(enabled, { emitEvent: false });

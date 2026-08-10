@@ -395,6 +395,24 @@
             (changed)="onMultiTierToggle($event)"
           ></app-setting-toggle>
 
+          <!-- Multi-tarifa ⊕ variantes: el costo se dice antes de cobrarlo. -->
+          @if (multiTierWouldRemoveVariants) {
+            <div
+              class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="16"
+                class="text-amber-600 shrink-0 mt-0.5"
+              ></app-icon>
+              <span>
+                Este producto tiene variantes. Multi-tarifa y variantes son
+                excluyentes: al activar multi-tarifa se eliminarán las variantes
+                y su stock volverá al stock base.
+              </span>
+            </div>
+          }
+
           @if (isMultiTierEnabled) {
             <!-- Create-mode warning: product must be saved first -->
             @if (!productId) {
@@ -1042,14 +1060,25 @@
                 [ngModel]="hasVariants"
                 (ngModelChange)="toggleVariants($event)"
                 [ngModelOptions]="{ standalone: true }"
+                [disabled]="variantsBlockedByMultiTier"
                 label="Este producto tiene variantes"
                 [description]="
-                  isService
-                    ? 'Agrega opciones como duración o precio'
-                    : 'Agrega opciones como tamaño, color o material'
+                  variantsBlockedByMultiTier
+                    ? 'No disponible: el producto se vende en presentaciones (multi-tarifa)'
+                    : isService
+                      ? 'Agrega opciones como duración o precio'
+                      : 'Agrega opciones como tamaño, color o material'
                 "
               >
               </app-setting-toggle>
+              @if (variantsBlockedByMultiTier) {
+                <p
+                  class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
+                >
+                  <app-icon name="alert-triangle" size="10"></app-icon>
+                  Multi-tarifa desactiva variantes — desactívala para usarlas
+                </p>
+              }
               @if (
                 !hasVariants &&
                 (!productForm.get("sku")?.value ||

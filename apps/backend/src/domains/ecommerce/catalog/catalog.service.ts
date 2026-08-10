@@ -1063,6 +1063,16 @@ export class CatalogService {
     const variants = product.product_variants || [];
     if (variants.length === 0) return [];
 
+    // Multi-tarifa ⊕ variantes: si el producto se publica en una presentación
+    // por defecto, la vitrina NO expone variantes. No es cosmético — las dos
+    // proyecciones resuelven el precio por caminos distintos (el producto con
+    // `calculateFinalPrice`, tier-aware; la variante con `resolvePrice`, cascada
+    // legacy), y el detalle público muestra el mínimo de variante. Un producto
+    // legacy con ambos ejes publicaba el precio de la unidad mínima ($1.000) en
+    // vez del de la presentación ($2.000). La regla es excluyente en escritura;
+    // acá se cierra la lectura para los datos que ya nacieron mezclados.
+    if (product.__default_sale_unit) return [];
+
     return Promise.all(
       variants.map(async (variant: any) => {
         const priceResult = this.resolvePrice(product, variant);
