@@ -30,14 +30,6 @@ ENGINE='apps/frontend/src/app/shared/services/print/'
 
 # Browser emitters: hidden iframe or popup window + window.print().
 PENDING_BROWSER_EMITTERS='(
-apps/frontend/src/app/private/modules/store/orders/services/order-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/orders/purchase-orders/services/purchase-order-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/dispatch-notes/services/dispatch-note-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/quotations/services/quotation-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/reservations/services/reservation-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/layaway/services/layaway-print\.service\.ts|
-apps/frontend/src/app/private/modules/store/withholding-tax/services/withholding-certificate-print\.service\.ts|
-apps/frontend/src/app/private/modules/ecommerce/services/guest-order-print\.service\.ts|
 apps/frontend/src/app/private/modules/store/restaurant-ops/tables/pages/tables-manage-page/tables-manage-page\.component\.ts|
 apps/frontend/src/app/private/modules/store/restaurant-ops/tables/components/table-qr-modal/table-qr-modal\.component\.ts|
 apps/frontend/src/app/private/modules/store/pos/components/pos-customer-modal\.component\.ts|
