@@ -178,6 +178,15 @@ export class NotificationsDropdownComponent {
       case 'installment_paid':
       case 'credit_completed':
         return '/admin/orders/sales';
+      // QUI-647 — cuotas de Cuentas por Pagar (lado proveedor). No hay pantalla
+      // propia de CxP; el perfil del proveedor (QUI-656) es donde vive su deuda
+      // con vencimientos, así que la notificación aterriza ahí. Sin
+      // `supplier_id` se cae al listado, que es lo único que sabemos.
+      case 'ap_installment_due_soon':
+      case 'ap_installment_overdue':
+        return d?.supplier_id
+          ? `/admin/inventory/suppliers/${d.supplier_id}`
+          : '/admin/inventory/suppliers';
       case 'booking_created':
       case 'booking_confirmed':
       case 'booking_cancelled':
@@ -245,6 +254,9 @@ export class NotificationsDropdownComponent {
       installment_overdue: 'alert-triangle',
       installment_paid: 'check-circle',
       credit_completed: 'trophy',
+      // QUI-647 — espejo de installment_* del lado proveedor.
+      ap_installment_due_soon: 'clock',
+      ap_installment_overdue: 'alert-triangle',
       // Bookings — arrival & attending are the most urgent
       booking_created: 'calendar-plus',
       booking_confirmed: 'calendar-check',
