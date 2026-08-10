@@ -693,9 +693,17 @@ export class FinancialAnalyticsService {
     endDate: Date,
   ): Promise<{ cogs: number; coverage: CostCoverage }> {
     const states = sqlStateList(this.REVENUE_STATES);
-    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+    // QUI-631: typed handle for the raw query — same TS2347 fix as
+    // inventory-analytics and sales-analytics. The scoped client's
+    // withoutScope() returns `any` after the cast, which prevents the
+    // generic on $queryRaw<T> from resolving.
+    const untypedFinancial = (this.prisma.withoutScope() as any) as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const rows = await untypedFinancial.$queryRaw<
       Array<{ cogs: unknown; units: unknown; units_without_cost: unknown }>
-    >`
+    >(
+      Prisma.sql`
       SELECT
         COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
         COALESCE(SUM(oi.quantity), 0) AS units,
