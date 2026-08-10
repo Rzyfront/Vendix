@@ -11,18 +11,31 @@
   position: relative;
   max-width: 1600px;
   margin: 0 auto 0.125rem;
-  padding: 0 0.375rem;
-  border-bottom: 1px solid rgba(var(--color-muted-rgb), 0.16);
+  padding: 0.375rem 0.375rem 0.3125rem;
+  border-bottom: 1px solid rgba(var(--color-muted-rgb), 0.12);
 }
 
+/* Segmented-control track: the pill rail the tabs live inside.
+   `width: fit-content` keeps the rail hugging its tabs instead of
+   stretching edge to edge when there are only two or three sections. */
 .sticky-header-tabs {
+  /* Edge-fade stops. 0px = no fade; the fade modifier classes below are
+     bound to the component's existing overflow signals so the first and
+     last tab are only dimmed when there is actually something to scroll to. */
+  --fade-start: 0px;
+  --fade-end: 0px;
+
   display: flex;
-  align-items: flex-end;
-  gap: 0.125rem;
+  align-items: center;
+  gap: 0.1875rem;
   overflow-x: auto;
+  width: fit-content;
   max-width: 100%;
   min-height: 1px; /* ISSUE-09: prevents 0-height flash on first paint */
-  padding: 0;
+  padding: 0.1875rem;
+  border: 1px solid rgba(var(--color-muted-rgb), 0.16);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-muted-rgb), 0.1);
   overscroll-behavior-x: contain;
   scroll-padding-inline: 16px;
   scroll-behavior: smooth;
@@ -33,20 +46,20 @@
   scroll-snap-type: x mandatory; /* ISSUE-09: always park on a tab */
   /* ISSUE-09: edge-fade indicator — replaces the absolute arrow buttons.
      Composites against the actual content (so it adapts to dark mode
-     automatically) and adds zero DOM. 24px stops match the prior
-     visual depth. */
+     automatically) and adds zero DOM. Now driven by custom properties so
+     it stays inert while the strip fits. */
   mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 24px,
-    #000 calc(100% - 24px),
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 24px,
-    #000 calc(100% - 24px),
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
     transparent 100%
   );
 
@@ -55,48 +68,12 @@
   }
 }
 
-.sticky-header-tabs-arrow {
-  position: absolute;
-  top: 0;
-  bottom: 1px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  border: 0;
-  padding: 0;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  opacity: 0.88;
-  transition:
-    color 150ms ease,
-    opacity 150ms ease,
-    transform 150ms ease;
-
-  &:hover {
-    color: var(--color-primary);
-    opacity: 1;
-  }
-
-  &:active {
-    transform: scale(0.96);
-  }
-
-  &:focus-visible {
-    outline: 2px solid rgba(var(--color-primary-rgb), 0.45);
-    outline-offset: -2px;
-  }
+.sticky-header-tabs--fade-left {
+  --fade-start: 28px;
 }
 
-.sticky-header-tabs-arrow--left {
-  left: 0.375rem;
-  background: linear-gradient(to right, var(--color-surface) 34%, transparent);
-}
-
-.sticky-header-tabs-arrow--right {
-  right: 0.375rem;
-  background: linear-gradient(to left, var(--color-surface) 34%, transparent);
+.sticky-header-tabs--fade-right {
+  --fade-end: 28px;
 }
 
 .sticky-header-tab {
@@ -105,76 +82,74 @@
   justify-content: center;
   gap: 0.25rem;
   min-height: 1.875rem;
-  padding: 0.3125rem 0.625rem;
+  padding: 0.3125rem 0.6875rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-radius: var(--radius-pill);
   background-color: transparent;
-  color: var(--color-text-secondary);
+  color: color-mix(in srgb, var(--color-text-primary) 66%, transparent);
   font-size: 0.6875rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
-  opacity: 0.78;
+  opacity: 1;
   cursor: pointer;
   position: relative;
   scroll-margin-inline: 16px;
   scroll-snap-align: center; /* ISSUE-09: centers the active tab in the strip */
   transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    border-color 150ms ease,
-    opacity 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 
   &:hover {
-    background-color: rgba(var(--color-primary-rgb), 0.06);
+    background-color: rgba(var(--color-muted-rgb), 0.18);
     color: var(--color-text-primary);
-    opacity: 1;
+
+    app-icon {
+      color: var(--color-primary);
+    }
   }
 
   &:active {
-    transform: scale(0.98);
+    transform: scale(0.97);
   }
 
   &:focus-visible {
     outline: 2px solid rgba(var(--color-primary-rgb), 0.45);
-    outline-offset: 2px;
-  }
-
-  &::after {
-    content: "";
-    position: absolute;
-    right: 0.625rem;
-    bottom: -1px;
-    left: 0.625rem;
-    height: 2px;
-    border-radius: var(--radius-pill);
-    background: var(--color-primary);
-    opacity: 0;
-    transform: scaleX(0.35);
-    transform-origin: center;
-    transition:
-      opacity 150ms ease,
-      transform 150ms ease;
+    outline-offset: -1px; /* inset so the ring stays inside the pill rail */
   }
 
   app-icon {
+    color: color-mix(in srgb, var(--color-text-primary) 48%, transparent);
     flex-shrink: 0;
+    transition: color 160ms ease;
   }
 }
 
 .sticky-header-tab--active {
-  background-color: transparent !important;
-  border-color: transparent;
-  color: var(--color-text-primary) !important;
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
+  color: var(--color-text-primary);
+  font-weight: 700;
   opacity: 1;
-  box-shadow: none;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 8px 16px -10px color-mix(in srgb, var(--color-primary) 60%, transparent);
 
-  &::after {
-    opacity: 1;
-    transform: scaleX(1);
+  /* Keeps the brand tint on hover; without this the generic
+     `.sticky-header-tab:hover` rule (equal specificity, earlier in source)
+     would repaint the selected pill muted grey. */
+  &:hover {
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 20%,
+      var(--color-surface)
+    );
+    color: var(--color-text-primary);
   }
 
   app-icon {
@@ -214,21 +189,27 @@
 
 @media (min-width: 768px) {
   .sticky-header-tabs-row {
-    padding: 0 1.5rem;
+    padding: 0.375rem 1.5rem 0.3125rem;
   }
 
-  .sticky-header-tabs-arrow--left {
-    left: 1.5rem;
-  }
-
-  .sticky-header-tabs-arrow--right {
-    right: 1.5rem;
+  .sticky-header-tabs {
+    gap: 0.375rem;
   }
 
   .sticky-header-tab {
     gap: 0.375rem;
     min-height: 2rem;
-    padding: 0.375rem 0.75rem;
+    padding: 0.375rem 0.875rem;
     font-size: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sticky-header-tab {
+    transition: none;
+  }
+
+  .sticky-header-tab:active {
+    transform: none;
   }
 }

@@ -10,6 +10,8 @@
       <nav
         #tabsScrollContainer
         class="sticky-header-tabs"
+        [class.sticky-header-tabs--fade-left]="showLeftArrow()"
+        [class.sticky-header-tabs--fade-right]="showRightArrow()"
         role="tablist"
         [attr.aria-label]="tabsAriaLabel()"
         (scroll)="onTabsScroll()"
@@ -42,7 +44,7 @@
               (click)="onTabClick(tab, $event)"
             >
               @if (tab.icon) {
-                <app-icon [name]="tab.icon" size="13"></app-icon>
+                <app-icon [name]="tab.icon" size="14"></app-icon>
               }
               @if (tab.shortLabel) {
                 <span class="sm:hidden">{{ tab.shortLabel }}</span>
@@ -67,7 +69,7 @@
               (click)="onTabClick(tab)"
             >
               @if (tab.icon) {
-                <app-icon [name]="tab.icon" size="13"></app-icon>
+                <app-icon [name]="tab.icon" size="14"></app-icon>
               }
               @if (tab.shortLabel) {
                 <span class="sm:hidden">{{ tab.shortLabel }}</span>
