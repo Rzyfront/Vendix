@@ -519,52 +519,50 @@ export class ProductsAnalyticsService {
       },
     });
 
-    // Get refunded quantities per product via refunds -> refund_items relation
-    const refundsWithItems = await this.prisma.refunds.findMany({
-      where: {
-        state: { in: ['completed', 'approved'] as any },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      select: {
-        refund_items: {
-          select: {
-            order_item_id: true,
-            quantity: true,
-            refund_amount: true,
-          },
-        },
-      },
-    });
+    // QUI-621: refund-rate uses POLICY A — refunds of orders SOLD in the
+    // period, even when the refund itself happens later. The previous code
+    // used `refunds.created_at` (Policy B) — refunds PROCESSED in the period —
+    // which divided refunds of OTHER periods by sales of THIS period. When
+    // the two ranges didn't match, the rate was meaningless (e.g. negative
+    // when a refund-heavy month had low sales).
+    //
+    // Policy A: join refund_items → order_items → orders filtered by sales
+    // window. The SQL below does that join in one pass.
+    const rawClient = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const refundByProduct = await rawClient.$queryRaw<
+      Array<{
+        product_id: number;
+        refunded_qty: string | number;
+        refunded_amount: string | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        oi.product_id AS product_id,
+        COALESCE(SUM(ri.quantity), 0)::decimal AS refunded_qty,
+        COALESCE(SUM(ri.refund_amount), 0)::decimal AS refunded_amount
+      FROM refund_items ri
+      JOIN refunds r ON r.id = ri.refund_id
+      JOIN order_items oi ON oi.id = ri.order_item_id
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+        AND o.state IN ('delivered', 'finished')
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+        AND r.state IN ('completed', 'approved')
+      GROUP BY oi.product_id
+    `);
 
-    // Collect all order_item_ids from refund_items
-    const refundedOrderItemIds = refundsWithItems
-      .flatMap((r) => r.refund_items.map((ri) => ri.order_item_id))
-      .filter(Boolean);
-
-    const refundedOrderItems =
-      refundedOrderItemIds.length > 0
-        ? await this.prisma.order_items.findMany({
-            where: { id: { in: refundedOrderItemIds } },
-            select: { id: true, product_id: true },
-          })
-        : [];
-
-    const refundByProduct = new Map<
-      number | null,
+    const refundsByProduct = new Map<
+      number,
       { quantity: number; amount: number }
     >();
-    for (const refund of refundsWithItems) {
-      for (const ri of refund.refund_items) {
-        const oi = refundedOrderItems.find((o) => o.id === ri.order_item_id);
-        if (!oi?.product_id) continue;
-        const existing = refundByProduct.get(oi.product_id) || {
-          quantity: 0,
-          amount: 0,
-        };
-        existing.quantity += Number(ri.quantity || 0);
-        existing.amount += Number(ri.refund_amount || 0);
-        refundByProduct.set(oi.product_id, existing);
-      }
+    for (const r of refundByProduct) {
+      refundsByProduct.set(Number(r.product_id), {
+        quantity: Number(r.refunded_qty),
+        amount: Number(r.refunded_amount),
+      });
     }
 
     const productIds = completedItems
@@ -594,7 +592,7 @@ export class ProductsAnalyticsService {
         const unitsSold = Number(r._sum.quantity || 0);
         const revenue = Number(r._sum.total_price || 0);
         const orderCount = r._count.id || 0;
-        const refunds = refundByProduct.get(r.product_id) || {
+        const refunds = refundsByProduct.get(r.product_id) || {
           quantity: 0,
           amount: 0,
         };
