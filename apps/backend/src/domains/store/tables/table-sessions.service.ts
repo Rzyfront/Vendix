@@ -595,7 +595,7 @@ export class TableSessionsService {
         const unitPrice = Number(product.base_price ?? 0);
         const totalPrice = unitPrice * item.quantity;
 
-        await tx.order_items.create({
+        const createdItem = await tx.order_items.create({
           data: {
             order_id: session.order_id,
             product_id: item.product_id,
@@ -615,6 +615,27 @@ export class TableSessionsService {
             updated_at: new Date(),
           },
         });
+
+        // QUI-655 — LA INTENCION, no el consumo. Se registra lo que el cliente
+        // pidio sin, para que el KDS lo muestre tachado y el cocinero no tenga que
+        // deducirlo de una nota. El consumo real se decide al confirmar en cocina y
+        // puede diferir; esa diferencia es dato de auditoria.
+        //
+        // NO se valida contra el BOM aca a proposito: al tomar el pedido la receta
+        // puede cambiar antes de cocinar, y rechazar la captura por eso le quitaria
+        // al mesero la unica via rapida que tiene. La validacion dura vive en el
+        // fire, que es donde la exclusion se vuelve consumo.
+        const excluded = item.excluded_component_ids ?? [];
+        if (excluded.length > 0) {
+          await tx.order_item_exclusions.createMany({
+            data: excluded.map((componentId) => ({
+              order_item_id: createdItem.id,
+              component_product_id: componentId,
+              created_by_user_id: RequestContextService.getContext()?.user_id ?? null,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       // 3. Recompute order totals. The retail OrdersService stores
