@@ -9,6 +9,7 @@ import {
   IsDateString,
   IsArray,
   IsBoolean,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { IsIn } from 'class-validator';
@@ -255,6 +256,67 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Use price tiers flag (for new products)' })
   @IsOptional()
   has_multiple_price_tiers?: any;
+
+  // ===== Unidad de venta (QUI-648) ================================================
+  // Configurar la presentación en la que se venderá el producto, sin salir del
+  // flujo de compra: compro bultos de 50 kg y acá defino que se vende por bulto
+  // y por kilo. Espeja el patrón del bloque de insumo (purchase_uom_id /
+  // stock_uom_id / purchase_to_stock_factor), que ya configura el producto desde
+  // la orden de compra.
+  //
+  // El servicio persiste las TRES filas de forma coordinada o ninguna:
+  // `price_tiers` (kind='sale_unit'), `product_price_tier_assignments` (allowlist
+  // que consulta la venta) y `product_price_tier_overrides` (factor + precio).
+
+  @ApiProperty({
+    description:
+      'Nombre libre de la presentación de venta (Bulto 50 kg, Kilo, Rollo, Metro).',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sale_unit_name?: string;
+
+  @ApiProperty({
+    description:
+      'Unidades de stock que consume una unidad de esa presentación (50 para un bulto de 50 kg). Entero >= 2.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  sale_unit_units_per_package?: number;
+
+  @ApiProperty({
+    description: 'Precio de la presentación completa. Gana sobre el margen.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_price?: number;
+
+  @ApiProperty({
+    description:
+      'Margen de la presentación (markup sobre el costo del paquete). Se ignora si llega precio explícito.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_profit_margin?: number;
+
+  @ApiProperty({
+    description:
+      'Marca la presentación como la que rige por defecto en toda superficie de venta.',
+    required: false,
+  })
+  @IsOptional()
+  sale_unit_is_default?: any;
 
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()

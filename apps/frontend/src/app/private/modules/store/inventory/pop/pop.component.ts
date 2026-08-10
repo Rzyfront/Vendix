@@ -1498,6 +1498,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, draftState);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1852,6 +1854,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -2016,6 +2020,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     return this.purchaseOrdersService.createPurchaseOrder(request).pipe(
       switchMap((response) =>
@@ -2182,6 +2188,45 @@ export class PopComponent implements OnInit, OnDestroy {
       const content = Number(raw);
       if (Number.isFinite(content) && content >= 1) {
         (reqItem as any).purchase_to_stock_factor = Math.round(content);
+      }
+    });
+  }
+
+  /**
+   * QUI-648: mapea la unidad de venta capturada en el modal → campos
+   * `sale_unit_*` del ítem de compra. El backend usa `sale_unit_name` como
+   * interruptor: sin nombre no configura nada.
+   *
+   * Mismo patrón que `attachPurchaseToStockFactor`: el carrito copia
+   * `prebulk_data` completo, así que el dato puede venir de ahí o del ítem.
+   */
+  private attachSaleUnitConfig(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    request.items.forEach((reqItem, i) => {
+      const cartItem: any = state.items[i];
+      if (!cartItem) return;
+      const source = cartItem.prebulk_data ?? cartItem;
+      const name = String(source.sale_unit_name ?? '').trim();
+      if (!name) return;
+
+      const target = reqItem as any;
+      target.sale_unit_name = name;
+      const factor = Number(source.sale_unit_units_per_package);
+      if (Number.isFinite(factor) && factor >= 2) {
+        target.sale_unit_units_per_package = Math.round(factor);
+      }
+      const price = Number(source.sale_unit_price);
+      if (Number.isFinite(price) && price > 0) {
+        target.sale_unit_price = price;
+      }
+      const margin = Number(source.sale_unit_profit_margin);
+      if (Number.isFinite(margin)) {
+        target.sale_unit_profit_margin = margin;
+      }
+      if (source.sale_unit_is_default === true) {
+        target.sale_unit_is_default = true;
       }
     });
   }

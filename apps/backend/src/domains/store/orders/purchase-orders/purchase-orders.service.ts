@@ -38,6 +38,8 @@ import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
+import { resolvePackSize } from '../../products/services/packaging.util';
+import { resolveTierPricingCostAnchor } from '../../products/services/tier-margin.util';
 
 /**
  * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
@@ -1039,6 +1041,18 @@ export class PurchaseOrdersService {
           await this.persistIngredientConfigToProduct(finalProductId, item, tx);
         }
 
+        // Unidad de venta (QUI-648): configurar en qué presentación se venderá
+        // el producto sin salir del flujo de compra. Corre para productos
+        // nuevos y existentes por igual, y NUNCA para un insumo puro (un insumo
+        // no se vende, de ahí que su rama fuerce has_multiple_price_tiers=false).
+        if (
+          finalProductId &&
+          item.sale_unit_name &&
+          orderType !== 'ingredient'
+        ) {
+          await this.persistSaleUnitConfigToProduct(finalProductId, item, tx);
+        }
+
         processedItems.push({
           ...item,
           product_id: finalProductId,
@@ -1777,6 +1791,163 @@ export class PurchaseOrdersService {
    * multiplicar stock = qty × factor. Rellena cuando está vacío o difiere; nunca
    * sobreescribe con vacío. Gatea por industria (solo restaurant soporta insumos).
    */
+  /**
+   * Persiste la configuración de UNIDAD DE VENTA del producto desde la orden de
+   * compra (QUI-648). Espeja `persistIngredientConfigToProduct`: el flujo de
+   * compra ya sabía configurar un producto como insumo mientras se lo cargaba a
+   * la orden; esto hace lo mismo para la presentación en la que se venderá.
+   *
+   * Escribe TRES filas coordinadas dentro de la transacción de la OC, o ninguna:
+   *
+   *   1. `price_tiers` — la presentación, por tienda y de nombre libre
+   *      (`kind = 'sale_unit'`). Se reutiliza si ya existe con ese nombre.
+   *   2. `product_price_tier_assignments` — habilita el par (producto,
+   *      presentación). Es el allowlist que consulta la venta.
+   *   3. `product_price_tier_overrides` — factor, precio y margen del producto
+   *      para esa presentación.
+   *
+   * Escribir solo una o dos es el modo de fallo peligroso: prender
+   * `has_multiple_price_tiers` sin el assignment guarda sin error y falla recién
+   * AL VENDER con `PRICE_TIER_NOT_ALLOWED`, muy lejos de la causa.
+   */
+  private async persistSaleUnitConfigToProduct(
+    productId: number,
+    item: {
+      sale_unit_name?: string;
+      sale_unit_units_per_package?: number;
+      sale_unit_price?: number;
+      sale_unit_profit_margin?: number;
+      sale_unit_is_default?: any;
+    },
+    tx: any,
+  ): Promise<void> {
+    const name = item.sale_unit_name?.trim();
+    if (!name) return;
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        store_id: true,
+        cost_price: true,
+        is_ingredient: true,
+        is_sellable: true,
+      },
+    });
+    if (!product?.store_id) return;
+    // Un insumo puro no se vende, así que no puede tener presentaciones de
+    // venta. La rama de insumo del create fuerza `has_multiple_price_tiers=false`
+    // por la misma razón; esta guarda evita reactivarlo por la puerta de atrás.
+    if (product.is_ingredient && product.is_sellable === false) return;
+
+    // 1. La presentación. `(store_id, name)` es único, así que un nombre repetido
+    //    reutiliza la tarifa en vez de fallar. `is_package_unit` se deriva del
+    //    factor igual que en PriceTiersService, para no dejar el flag inconsistente.
+    const unitsPerPackage = item.sale_unit_units_per_package ?? null;
+    let tier = await tx.price_tiers.findFirst({
+      where: { store_id: product.store_id, name },
+      select: { id: true, kind: true, units_per_package: true },
+    });
+    if (!tier) {
+      tier = await tx.price_tiers.create({
+        data: {
+          store_id: product.store_id,
+          name,
+          kind: 'sale_unit',
+          discount_percentage: 0,
+          is_active: true,
+          is_default: false,
+          is_package_unit: (unitsPerPackage ?? 0) >= 2,
+          units_per_package: unitsPerPackage,
+          updated_at: new Date(),
+        },
+        select: { id: true, kind: true, units_per_package: true },
+      });
+    }
+
+    // 2. Allowlist del par (producto, presentación). El default se aplica solo si
+    //    la tarifa es una unidad de venta, y desmarcando el anterior ANTES de
+    //    marcar el nuevo: el índice único parcial no tolera dos `true` a la vez.
+    const wantsDefault =
+      item.sale_unit_is_default === true ||
+      item.sale_unit_is_default === 'true';
+    const canBeDefault = wantsDefault && tier.kind === 'sale_unit';
+    if (canBeDefault) {
+      await tx.product_price_tier_assignments.updateMany({
+        where: {
+          product_id: productId,
+          is_default: true,
+          NOT: { price_tier_id: tier.id },
+        },
+        data: { is_default: false },
+      });
+    }
+    await tx.product_price_tier_assignments.upsert({
+      where: {
+        product_id_price_tier_id: {
+          product_id: productId,
+          price_tier_id: tier.id,
+        },
+      },
+      update: canBeDefault ? { is_default: true } : {},
+      create: {
+        product_id: productId,
+        price_tier_id: tier.id,
+        is_default: canBeDefault,
+      },
+    });
+
+    // 3. Override del producto: factor + precio/margen con criterio cost-anchor.
+    const packSize = resolvePackSize(
+      tier.units_per_package,
+      unitsPerPackage,
+    );
+    const { override_price, override_profit_margin } =
+      resolveTierPricingCostAnchor({
+        unitCost: Number(product.cost_price ?? 0),
+        packSize,
+        overridePrice: item.sale_unit_price,
+        overrideMargin: item.sale_unit_profit_margin,
+      });
+
+    const existingOverride = await tx.product_price_tier_overrides.findFirst({
+      where: {
+        product_id: productId,
+        variant_id: null,
+        price_tier_id: tier.id,
+      },
+      select: { id: true },
+    });
+    const overrideData = {
+      override_price,
+      override_profit_margin,
+      override_units_per_package: unitsPerPackage,
+      updated_at: new Date(),
+    };
+    if (existingOverride) {
+      await tx.product_price_tier_overrides.update({
+        where: { id: existingOverride.id },
+        data: overrideData,
+      });
+    } else {
+      await tx.product_price_tier_overrides.create({
+        data: {
+          product_id: productId,
+          variant_id: null,
+          price_tier_id: tier.id,
+          ...overrideData,
+        },
+      });
+    }
+
+    // El master switch: sin él `resolveWithTier` delega a la cascada legacy y la
+    // presentación quedaría configurada pero inerte.
+    await tx.products.update({
+      where: { id: productId },
+      data: { has_multiple_price_tiers: true },
+    });
+  }
+
   private async persistIngredientConfigToProduct(
     productId: number,
     item: {
