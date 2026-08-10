@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsEnum,
   IsDateString,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
@@ -87,6 +88,19 @@ export class ProductsAnalyticsQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /**
+   * QUI-622: Top Sellers ranking criterion. The two rankings (units sold vs
+   * revenue generated) are distinct and almost never coincide — products with
+   * high unit volume and low price, and vice versa.
+   *
+   * Applied in DB via the `orderBy` on the groupBy so the LIMIT caps the right
+   * ranking. Defaults to `units_sold` for backwards compatibility with the
+   * previous behaviour.
+   */
+  @IsOptional()
+  @IsIn(['units_sold', 'revenue'])
+  top_sellers_sort_by?: 'units_sold' | 'revenue';
 }
 
 export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {
