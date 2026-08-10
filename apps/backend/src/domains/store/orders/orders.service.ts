@@ -22,7 +22,7 @@ import { ScheduleValidationService } from '../settings/schedule-validation.servi
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
-import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import {
   assertCanChargeVat,
   isVatResponsible,
@@ -126,7 +126,8 @@ export class OrdersService {
 
     // Multi-tarifa: si alguna línea trae applied_price_tier_id, validar
     // permiso server-side ANTES de crear la orden. UI no es fuente de verdad.
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
       createOrderDto.items,
       context,
     );
@@ -830,7 +831,8 @@ export class OrdersService {
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
     const ctx = RequestContextService.getContext();
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
       dto.items,
       ctx,
     );
@@ -1245,153 +1247,6 @@ export class OrdersService {
     await this.findOne(id);
     // Use scoped client (implicit via this.prisma)
     return this.prisma.orders.delete({ where: { id } });
-  }
-
-  /**
-   * Multi-tarifa: resuelve snapshots por línea (id, nombre, stock_units_consumed).
-   *
-   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna `[]` (sin overhead).
-   * - Si AL MENOS UNA línea lo trae, valida que el usuario tenga el permission
-   *   `store:products:apply_pricing_tier`. Si no, lanza
-   *   `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)` (403).
-   * - Carga tarifas (auto-scoped por store) y el override de empaque por
-   *   producto (para resolver `quantity × packSize` cuando aplica empaque real).
-   *
-   * El packSize sigue la cascada `override ?? tier ?? 1` resuelta por
-   * `resolveStockUnitsConsumed` (helper puro en products/services/packaging.util).
-   *
-   * Devuelve un array alineado por índice con `items` para que el caller
-   * mapee la línea ↔ snapshot sin re-buscar.
-   */
-  private async resolveTierSnapshotsForItems(
-    items: Array<{
-      product_id?: number;
-      product_variant_id?: number;
-      quantity: number;
-      applied_price_tier_id?: number;
-    }>,
-    context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<
-    Array<{
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null>
-  > {
-    const tierIdsInUse = new Set<number>();
-    for (const item of items) {
-      if (
-        item.applied_price_tier_id !== undefined &&
-        item.applied_price_tier_id !== null
-      ) {
-        tierIdsInUse.add(Number(item.applied_price_tier_id));
-      }
-    }
-
-    if (tierIdsInUse.size === 0) {
-      return items.map(() => null);
-    }
-
-    // Permission gate (server-side; UI cannot bypass).
-    const permissions = context?.permissions ?? [];
-    const isSuperAdmin = !!context?.is_super_admin;
-    const isOwner = !!context?.is_owner;
-    if (
-      !isSuperAdmin &&
-      !isOwner &&
-      !permissions.includes('store:products:apply_pricing_tier')
-    ) {
-      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
-    }
-
-    const tiers = await this.prisma.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
-      select: {
-        id: true,
-        name: true,
-        units_per_package: true,
-      },
-    });
-    type TierRow = (typeof tiers)[number];
-    const tierById = new Map<number, TierRow>(
-      tiers.map((t): [number, TierRow] => [t.id, t]),
-    );
-
-    const productIds = Array.from(
-      new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
-    );
-
-    // Per-product packaging overrides keyed by (product_id, variant_id|null,
-    // price_tier_id). Auto-scoped relacionalmente por product.store_id.
-    const overrides = productIds.length
-      ? await this.prisma.product_price_tier_overrides.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: {
-            product_id: true,
-            variant_id: true,
-            price_tier_id: true,
-            override_units_per_package: true,
-          },
-        })
-      : [];
-    const overrideKey = (
-      productId: number,
-      variantId: number | null,
-      tierId: number,
-    ): string => `${productId}:${variantId ?? 'null'}:${tierId}`;
-    const overrideUnitsByKey = new Map<string, number | null>(
-      overrides.map((o): [string, number | null] => [
-        overrideKey(o.product_id, o.variant_id ?? null, o.price_tier_id),
-        o.override_units_per_package ?? null,
-      ]),
-    );
-
-    const assignments = productIds.length
-      ? await this.prisma.product_price_tier_assignments.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: { product_id: true, price_tier_id: true },
-        })
-      : [];
-    const allowedTierKeys = new Set(
-      assignments.map((assignment) =>
-        `${assignment.product_id}:${assignment.price_tier_id}`,
-      ),
-    );
-
-    return items.map((item) => {
-      const tierId = item.applied_price_tier_id;
-      if (tierId === undefined || tierId === null) return null;
-      const tier = tierById.get(Number(tierId));
-      if (!tier) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const productId = item.product_id;
-      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const variantId = item.product_variant_id ?? null;
-      const overrideUnits =
-        overrideUnitsByKey.get(
-          overrideKey(productId, variantId, Number(tierId)),
-        ) ?? null;
-      // packSize = override ?? tier ?? 1 (collapses to 1 when <= 1).
-      const stock_units_consumed = resolveStockUnitsConsumed(
-        Number(item.quantity),
-        tier.units_per_package,
-        overrideUnits,
-      );
-      return {
-        tier_id: tier.id,
-        tier_name: tier.name,
-        stock_units_consumed,
-      };
-    });
   }
 
   private async generateOrderNumber(storeId: number): Promise<string> {

@@ -30,7 +30,10 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
-import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import {
+  resolveTierSnapshotsForItems,
+  type TierSnapshot,
+} from '../products/services/tier-snapshot.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -69,16 +72,11 @@ import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-t
  * `PriceResolverService.resolveWithTier` y así validar el override manual
  * contra el precio de tarifa — no contra el precio base del catálogo.
  */
-type PosTierSnapshot = {
-  tier_id: number;
-  tier_name: string;
-  stock_units_consumed: number | null;
-  discount_percentage: number;
-  units_per_package: number | null;
-  is_package_unit: boolean;
-  override_price: number | null;
-  override_units_per_package: number | null;
-};
+/**
+ * El snapshot POS es el contrato canónico de `tier-snapshot.util`. Se mantiene
+ * el alias local porque el resto del servicio lo referencia por este nombre.
+ */
+type PosTierSnapshot = TierSnapshot;
 
 @Injectable()
 export class PaymentsService {
@@ -2035,170 +2033,6 @@ export class PaymentsService {
     };
   }
 
-  /**
-   * Multi-tarifa (Fase 5.5): resuelve snapshots por línea POS.
-   *
-   * Patrón espejo de `OrdersService.resolveTierSnapshotsForItems`:
-   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna `[]` (no overhead).
-   * - Si AL MENOS UNA línea lo trae, valida server-side el permission
-   *   `store:products:apply_pricing_tier`. Bypass para super_admin / owner.
-   *   Si denegado, lanza `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)`.
-   * - Pre-carga tarifas (price_tiers.units_per_package) y los overrides por
-   *   producto (product_price_tier_overrides.override_units_per_package) para
-   *   computar `stock_units_consumed` siguiendo la cascada de packSize
-   *   (override ?? tier ?? 1). Si packSize <= 1, no hay empaque y el snapshot
-   *   queda en null.
-   * - Lenient: si la tarifa no existe en esta tienda, snapshot = null (no
-   *   crashea la venta).
-   *
-   * Devuelve un array alineado por índice con `items`.
-   */
-  private async resolveTierSnapshotsForItems(
-    tx: any,
-    items: Array<{
-      product_id?: number;
-      product_variant_id?: number | null;
-      quantity: number;
-      applied_price_tier_id?: number;
-    }>,
-    context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<Array<PosTierSnapshot | null>> {
-    const tierIdsInUse = new Set<number>();
-    for (const item of items) {
-      if (
-        item.applied_price_tier_id !== undefined &&
-        item.applied_price_tier_id !== null
-      ) {
-        tierIdsInUse.add(Number(item.applied_price_tier_id));
-      }
-    }
-
-    if (tierIdsInUse.size === 0) {
-      return items.map(() => null);
-    }
-
-    // Permission gate (server-side; UI cannot bypass).
-    const permissions = context?.permissions ?? [];
-    const isSuperAdmin = !!context?.is_super_admin;
-    const isOwner = !!context?.is_owner;
-    if (
-      !isSuperAdmin &&
-      !isOwner &&
-      !permissions.includes('store:products:apply_pricing_tier')
-    ) {
-      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
-    }
-
-    const tiers = await tx.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
-      select: {
-        id: true,
-        name: true,
-        is_package_unit: true,
-        units_per_package: true,
-        discount_percentage: true,
-      },
-    });
-    type TierRow = (typeof tiers)[number];
-    const tierById = new Map<number, TierRow>(
-      tiers.map((t: TierRow): [number, TierRow] => [t.id, t]),
-    );
-
-    const productIds = Array.from(
-      new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
-    );
-    const assignments = productIds.length
-      ? await tx.product_price_tier_assignments.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: { product_id: true, price_tier_id: true },
-        })
-      : [];
-    const allowedTierKeys = new Set(
-      assignments.map(
-        (assignment: { product_id: number; price_tier_id: number }) =>
-          `${assignment.product_id}:${assignment.price_tier_id}`,
-      ),
-    );
-
-    // Per-product packaging overrides (override_units_per_package wins over
-    // tier.units_per_package in the packSize cascade). Keyed by
-    // product_id:variant_id:price_tier_id (variant null → "null").
-    const overrides = productIds.length
-      ? await tx.product_price_tier_overrides.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: {
-            product_id: true,
-            variant_id: true,
-            price_tier_id: true,
-            override_price: true,
-            override_units_per_package: true,
-          },
-        })
-      : [];
-    type OverrideInfo = {
-      override_price: number | null;
-      override_units_per_package: number | null;
-    };
-    const overrideByKey = new Map<string, OverrideInfo>(
-      overrides.map(
-        (o: {
-          product_id: number;
-          variant_id: number | null;
-          price_tier_id: number;
-          override_price: number | null;
-          override_units_per_package: number | null;
-        }): [string, OverrideInfo] => [
-          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
-          {
-            override_price:
-              o.override_price != null ? Number(o.override_price) : null,
-            override_units_per_package: o.override_units_per_package,
-          },
-        ],
-      ),
-    );
-
-    return items.map((item) => {
-      const tierId = item.applied_price_tier_id;
-      if (tierId === undefined || tierId === null) return null;
-      const tier = tierById.get(Number(tierId));
-      if (!tier) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const productId = item.product_id;
-      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const variantId = item.product_variant_id ?? null;
-      const override = overrideByKey.get(
-        `${productId}:${variantId ?? 'null'}:${Number(tierId)}`,
-      );
-      const override_units_per_package =
-        override?.override_units_per_package ?? null;
-      const stock_units_consumed = resolveStockUnitsConsumed(
-        Number(item.quantity),
-        tier?.units_per_package,
-        override_units_per_package,
-      );
-      return {
-        tier_id: tier.id,
-        tier_name: tier.name,
-        stock_units_consumed,
-        discount_percentage: Number(tier.discount_percentage ?? 0),
-        units_per_package: tier.units_per_package ?? null,
-        is_package_unit: !!tier.is_package_unit,
-        override_price: override?.override_price ?? null,
-        override_units_per_package,
-      };
-    });
-  }
-
   private async buildPosOrderItem(
     tx: any,
     item: any,
@@ -2703,7 +2537,7 @@ export class PaymentsService {
     const context = RequestContextService.getContext();
     const tierSnapshots =
       dto.items && dto.items.length > 0
-        ? await this.resolveTierSnapshotsForItems(tx, dto.items, context)
+        ? await resolveTierSnapshotsForItems(tx, dto.items, context)
         : [];
 
     // Build the new order_items from the POS payload (if any).
@@ -3099,7 +2933,7 @@ export class PaymentsService {
     // validar permiso server-side ANTES de armar items. Patrón espejo de
     // OrdersService.resolveTierSnapshotsForItems.
     const context = RequestContextService.getContext();
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
       tx,
       items,
       context,
