@@ -39,7 +39,10 @@ import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-co
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
 import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
-import { canWriteEnablementStatus } from '../../../store/invoicing/dian-config/note-phase-gate.util';
+import {
+  buildNotePhaseView,
+  canWriteEnablementStatus,
+} from '../../../store/invoicing/dian-config/note-phase-gate.util';
 import { assertPlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
@@ -244,7 +247,21 @@ export class SubscriptionFiscalService {
             enablement_status: config.enablement_status,
             test_set_id: config.test_set_id,
             environment: config.environment,
-            last_test_result: config.last_test_result,
+            // SIN el `note_phase` crudo: lleva cada nota retenida ENTERA, con su
+            // XML firmado. Este panel sondea el estado, así que un lote diferido
+            // mandaba 20 documentos firmados al navegador en cada consulta —datos
+            // que la UI no puede usar y que no deberían salir del servidor.
+            //
+            // El recuento y la razón van abajo, en la vista.
+            last_test_result: this.stripNotePhase(config.last_test_result),
+            // Generados ≠ transmitidos con el envío en dos fases: si las notas se
+            // difieren se generan 50 y salen 30. Sin estos tres campos la UI decía
+            // «50 documentos» sobre un lote del que salieron 30, y las notas
+            // retenidas eran invisibles.
+            note_phase: buildNotePhaseView(
+              (config.last_test_result as Record<string, any> | null)
+                ?.note_phase,
+            ),
             // Sobre la prueba DURABLE, no sobre el último lote. Un reenvío
             // posterior sobrescribe `last_test_result`, así que este panel decía
             // «habilitación pendiente» sobre una config que la DIAN había
@@ -912,6 +929,27 @@ export class SubscriptionFiscalService {
    * way to submit the 50-document test set that DIAN requires before enabling
    * production — the platform rail stopped one step short of usable.
    */
+  /**
+   * Quita `note_phase` del registro del lote antes de mandarlo al cliente.
+   *
+   * `note_phase.deferred[]` guarda cada nota retenida con su XML FIRMADO, porque su
+   * consecutivo ya está reservado dentro de ese XML y regenerarla daría otro CUDE.
+   * Imprescindible en base, y pésimo en una respuesta que el panel sondea: 20
+   * documentos firmados por consulta, que la UI no puede usar.
+   *
+   * El recuento y la razón viajan aparte, vía `buildNotePhaseView`.
+   */
+  private stripNotePhase(last_test_result: unknown): unknown {
+    if (!last_test_result || typeof last_test_result !== 'object') {
+      return last_test_result;
+    }
+    const { note_phase: _omitted, ...rest } = last_test_result as Record<
+      string,
+      any
+    >;
+    return rest;
+  }
+
   private async runInPlatformContext<T>(
     settings: SubscriptionFiscalSettings,
     fn: () => Promise<T>,

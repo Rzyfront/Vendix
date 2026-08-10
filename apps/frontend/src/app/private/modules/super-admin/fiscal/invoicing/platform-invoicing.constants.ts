@@ -13,6 +13,25 @@ export const ENVIRONMENT_OPTIONS = [
   { value: 'production', label: 'Producción DIAN' },
 ];
 
+/**
+ * Ambientes que ofrece el formulario de CONFIGURACIÓN DIAN. Solo sandbox.
+ *
+ * POR QUÉ NO INCLUYE PRODUCCIÓN
+ *
+ * `PATCH superadmin/subscriptions/fiscal/config` rechaza con 400 cualquier
+ * `environment: 'production'`: la vía es `POST promote-to-production`, que exige el
+ * reporte de readiness completo —incluida la aprobación del set de pruebas por la
+ * DIAN—. Ofrecer producción en este selector solo produciría un 400 después de que
+ * el operador llenó el formulario.
+ *
+ * `ENVIRONMENT_OPTIONS` se conserva con los dos porque las pestañas de
+ * resoluciones y documento soporte la usan para filtrar y para formularios que no
+ * escriben `dian_configurations.environment`.
+ */
+export const DIAN_CONFIG_ENVIRONMENT_OPTIONS = [
+  { value: 'test', label: 'Sandbox DIAN' },
+];
+
 export const FILTER_ENVIRONMENT_OPTIONS = [
   { value: '', label: 'Todos los ambientes' },
   { value: 'test', label: 'Sandbox' },

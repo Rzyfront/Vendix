@@ -868,6 +868,41 @@ interface PersistedTestResult {
                     </div>
                   </div>
 
+                  <!--
+                    Notas retenidas por el envio en dos fases.
+
+                    Una nota solo puede referenciar una factura que la DIAN ya
+                    tenga registrada, asi que el set manda primero las facturas y
+                    espera. Si no las registra dentro del tope, las notas quedan
+                    generadas y firmadas sin transmitir, con su consecutivo ya
+                    reservado dentro del XML.
+
+                    Esto era invisible: el backend lo guardaba, la proyeccion de
+                    estado lo descartaba, y el operador veia un lote de 30 con una
+                    etiqueta de 50 y ninguna explicacion.
+                  -->
+                  @if (hasDeferredNotes()) {
+                    <div class="p-3 rounded-lg bg-warning-light border border-warning">
+                      <div class="flex items-start gap-2">
+                        <app-icon name="clock" [size]="16" class="text-warning mt-0.5 shrink-0"></app-icon>
+                        <div class="min-w-0 space-y-1">
+                          <p class="text-xs font-semibold text-warning">
+                            {{ notePhase()!.deferred_count }} nota(s) quedaron sin transmitir
+                          </p>
+                          <!-- El texto viene del backend: es quien sabe cuantas
+                               facturas registro la DIAN y en cuantas consultas. -->
+                          <p class="text-xs text-text-secondary">{{ notePhase()!.reason }}</p>
+                          @if (deferredConsecutivesLabel()) {
+                            <p class="text-xs text-text-secondary">
+                              Numeracion reservada y sin usar: {{ deferredConsecutivesLabel() }}.
+                              Se conservan firmadas, asi que reenviarlas no exige regenerarlas.
+                            </p>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  }
+
                   <!-- Fiscal tips: turn dead wait time into something useful.
                        Se ocultan cuando el lote está estancado: ahí el usuario no
                        necesita entretenimiento, necesita decidir. -->
@@ -1428,9 +1463,46 @@ export class DianConfigWizardComponent {
    * leía: un número escrito a mano en la UI envejece sin que nada lo delate.
    */
   readonly testSetDocumentsLabel = computed(() => {
-    const total = this.testSetResult()?.total_documents ?? null;
+    const result = this.testSetResult();
+    // GENERADOS ≠ TRANSMITIDOS con el envío en dos fases: las notas solo salen
+    // después de que la DIAN registre las facturas que referencian, y si no las
+    // registra dentro del tope quedan retenidas. `total_documents` conserva el
+    // significado de generados, así que decir «50 documentos» sobre un lote del
+    // que salieron 30 era exacto y engañoso a la vez.
+    const transmitted = result?.transmitted_documents ?? null;
+    const generated = result?.generated_documents ?? result?.total_documents ?? null;
+
+    if (transmitted !== null && generated !== null && transmitted !== generated) {
+      return `${transmitted} de ${generated} documentos`;
+    }
+    const total = generated;
     if (!total) return 'los documentos de habilitación';
     return `${total} documento${total === 1 ? '' : 's'}`;
+  });
+
+  /** El rastro de la fase de notas, o `null` si no hubo dos fases. */
+  readonly notePhase = computed(() => this.testSetResult()?.note_phase ?? null);
+
+  /**
+   * ¿Quedaron notas generadas y sin transmitir?
+   *
+   * Es el estado que la UI no sabía nombrar. Sin esto el operador veía un lote de
+   * 30 con una etiqueta de 50 y ninguna explicación, y las 20 notas retenidas
+   * —con su numeración autorizada ya reservada dentro de un XML firmado— eran
+   * invisibles.
+   */
+  readonly hasDeferredNotes = computed(() => {
+    const phase = this.notePhase();
+    return !!phase && phase.sent === false && phase.deferred_count > 0;
+  });
+
+  /** Rango de consecutivos retenidos, para que se sepan CUÁLES, no solo cuántos. */
+  readonly deferredConsecutivesLabel = computed(() => {
+    const list = this.notePhase()?.deferred_consecutives ?? [];
+    if (!list.length) return null;
+    const from = Math.min(...list);
+    const to = Math.max(...list);
+    return from === to ? `${from}` : `${from} – ${to}`;
   });
 
   /**
