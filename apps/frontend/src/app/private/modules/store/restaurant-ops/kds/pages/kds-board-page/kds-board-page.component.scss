@@ -308,3 +308,62 @@
     letter-spacing: 0.03em;
   }
 }
+
+/* QUI-651 — resumen del turno en modal. Tabular y denso: se consulta de reojo
+   mientras la cocina corre, no se lee con calma. */
+.kds-sum-head {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.kds-sum-title {
+  margin: 0.8rem 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.kds-sum-empty {
+  padding: 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.kds-sum-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.6rem;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.8rem;
+    border-radius: 0.25rem;
+
+    &:nth-child(odd) {
+      background: var(--color-surface-alt, #f9fafb);
+    }
+
+    span:not(:first-child) {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.kds-sum-total {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}

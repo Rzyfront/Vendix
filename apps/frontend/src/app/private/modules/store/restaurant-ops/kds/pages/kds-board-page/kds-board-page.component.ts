@@ -26,7 +26,12 @@ import {
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
-import type { FirePreview, FireItemExclusion } from '../../interfaces';
+import type {
+  FirePreview,
+  FireItemExclusion,
+  KdsConsumptionSummary,
+  KdsConsumptionHistoryRow,
+} from '../../interfaces';
 import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
 import {
@@ -511,8 +516,16 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   onHeaderAction(id: string): void {
     // QUI-651 — acceso a la configuracion de estaciones y turnos. Sin esta
     // entrada la pantalla existe y nadie llega a ella.
-    if (id === 'config') {
-      this.router.navigate(['/admin/restaurant-ops/kds/configuracion']);
+    // QUI-651 — pantalla completa real: se oculta el layout entero (sidebar y
+    // header incluidos) porque un KDS vive en una pantalla colgada en la cocina y
+    // cada pixel de cromo administrativo es espacio que no muestra tickets.
+    //
+    // Se hace con una clase en <body> y no con la Fullscreen API del navegador: esa
+    // exige un gesto del usuario, se cae al recargar y en una pantalla dedicada de
+    // cocina el navegador ya suele estar en kiosco. La clase sobrevive al refresco
+    // del tablero y no depende de permisos del navegador.
+    if (id === 'fullscreen') {
+      this.toggleFullscreen();
       return;
     }
     // QUI-651 — cerrar el turno DESDE el tablero, que es donde esta el cocinero.
@@ -682,6 +695,69 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     // este punto es la fase siguiente, y este confirm es su disparador.
     this.runMutation(ticketId, () => this.ticketsService.start(ticketId));
     this.cookTicketId.set(null);
+  }
+
+  /** Pestañas del sticky header. El tablero y su configuración son secciones del
+   * mismo módulo, no destinos sueltos: como pestañas el operador ve que existe la
+   * configuración sin tener que descubrir un botón. */
+  readonly headerTabs = [
+    { id: 'board', label: 'Comandas', icon: 'flame', route: '/admin/restaurant-ops/kds', exact: true },
+    { id: 'config', label: 'Configuración', icon: 'chef-hat', route: '/admin/restaurant-ops/kds/configuracion' },
+  ];
+
+  readonly isFullscreen = signal(false);
+
+  private toggleFullscreen(): void {
+    const next = !this.isFullscreen();
+    this.isFullscreen.set(next);
+    // La clase la consume el layout admin para colapsar sidebar y header.
+    document.body.classList.toggle('kds-fullscreen', next);
+  }
+
+  // ---------------------------------------------------- resumen del turno
+  readonly sessionSummaryOpen = signal(false);
+  readonly sessionSummary = signal<KdsConsumptionSummary | null>(null);
+  readonly sessionHistory = signal<KdsConsumptionHistoryRow[]>([]);
+  readonly loadingSessionSummary = signal(false);
+
+  /**
+   * Abre el resumen del turno ACTUAL en un modal.
+   *
+   * Antes mandaba a la pantalla de configuración: sacar al cocinero del tablero para
+   * ver su propio turno es perder el contexto de la cocina justo cuando la está
+   * operando.
+   */
+  openSessionSummary(): void {
+    const session = this.stationsService.openSession();
+    if (!session) return;
+
+    this.sessionSummaryOpen.set(true);
+    this.loadingSessionSummary.set(true);
+    this.sessionSummary.set(null);
+    this.sessionHistory.set([]);
+
+    this.stationsService
+      .getConsumptionSummary(session.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (sum) => {
+          this.sessionSummary.set(sum);
+          this.loadingSessionSummary.set(false);
+        },
+        error: () => this.loadingSessionSummary.set(false),
+      });
+
+    this.stationsService
+      .getConsumptionHistory(session.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.sessionHistory.set(rows),
+        error: () => {},
+      });
+  }
+
+  closeSessionSummary(): void {
+    this.sessionSummaryOpen.set(false);
   }
 
   onCookCancelled(): void {

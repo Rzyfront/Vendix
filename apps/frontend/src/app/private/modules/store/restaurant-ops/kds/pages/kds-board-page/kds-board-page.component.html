@@ -5,12 +5,15 @@
     subtitle="Tickets activos en tiempo real"
     icon="flame"
     variant="glass"
+    [tabs]="headerTabs"
+    [activeTab]="'board'"
+    tabsAriaLabel="Secciones del KDS"
     [actions]="[
       {
-        id: 'config',
-        label: 'Configuración de KDS',
-        icon: 'chef-hat',
-        variant: 'outline',
+        id: 'fullscreen',
+        label: isFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa',
+        icon: isFullscreen() ? 'minimize' : 'maximize',
+        variant: 'ghost',
       },
       {
         id: 'refresh',
@@ -24,13 +27,6 @@
         icon: 'wifi',
         variant: 'ghost',
         visible: isManualMode(),
-      },
-      {
-        id: 'close-session',
-        label: 'Cerrar turno',
-        icon: 'lock',
-        variant: 'ghost',
-        visible: stationsService.canManageTickets(),
       }
     ]"
     (actionClicked)="onHeaderAction($event)"
@@ -105,7 +101,7 @@
     [session]="stationsService.openSession()"
     [station]="stationsService.selectedStation()"
     (closeClicked)="onHeaderAction('close-session')"
-    (detailClicked)="onHeaderAction('config')"
+    (detailClicked)="openSessionSummary()"
   />
 
   @if (lastError()) {
@@ -215,6 +211,70 @@
     (confirmed)="onCookConfirmed($event)"
     (cancelled)="onCookCancelled()"
   />
+
+  <!--
+    QUI-651 — resumen del turno ACTUAL, en modal. Sacar al cocinero del tablero para
+    ver su propio turno es perder el contexto de la cocina mientras la opera.
+  -->
+  <app-modal
+    [isOpen]="sessionSummaryOpen()"
+    size="lg"
+    title="Mi turno"
+    [showCloseButton]="true"
+    (cancel)="closeSessionSummary()"
+  >
+    <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
+
+    @if (stationsService.openSession(); as s) {
+      <p class="kds-sum-head">
+        <strong>{{ s.kds?.name ?? 'Estación' }}</strong>
+        · {{ s.opened_by_user?.first_name }} {{ s.opened_by_user?.last_name }}
+        · desde {{ s.opened_at | date: 'shortTime' }}
+      </p>
+    }
+
+    @if (loadingSessionSummary()) {
+      <p class="kds-sum-empty">Cargando consumo…</p>
+    } @else if (sessionSummary(); as sum) {
+      @if (sum.ingredients.length === 0) {
+        <p class="kds-sum-empty">Este turno todavía no consumió insumos.</p>
+      } @else {
+        <h4 class="kds-sum-title">Resumen por insumo</h4>
+        <ul class="kds-sum-list">
+          @for (ing of sum.ingredients; track ing.product_id) {
+            <li>
+              <span>{{ ing.name }}</span>
+              <span>{{ ing.quantity }}</span>
+              <span>{{ ing.total_cost | currency }}</span>
+            </li>
+          }
+        </ul>
+        <p class="kds-sum-total">
+          Total del turno: <strong>{{ sum.total_cost | currency }}</strong>
+          · {{ sum.movement_count }} movimiento(s)
+        </p>
+
+        <!-- El detalle por pedido es lo que explica de dónde salió cada peso del
+             resumen; sin él el total es un número que hay que creer. -->
+        @if (sessionHistory().length > 0) {
+          <h4 class="kds-sum-title">Detalle por pedido</h4>
+          <ul class="kds-sum-list">
+            @for (r of sessionHistory(); track r.transaction_id) {
+              <li>
+                <span>{{ r.order_number ?? '—' }} · {{ r.dish_name ?? '—' }}</span>
+                <span>{{ r.quantity }}</span>
+                <span>{{ +(r.total_cost ?? 0) | currency }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+    }
+
+    <app-button slot="footer" variant="secondary" (clicked)="closeSessionSummary()">
+      Cerrar
+    </app-button>
+  </app-modal>
 
   <app-modal
     [isOpen]="sessionGateOpen()"

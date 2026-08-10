@@ -1900,3 +1900,35 @@ html[data-theme="light"][data-theme-preset="monocromo"] {
   color: var(--color-primary);
   font-weight: 600;
 }
+
+/* ── KDS a pantalla completa (QUI-651) ─────────────────────────────────────
+   Un KDS vive en una pantalla colgada en la cocina: cada pixel de cromo
+   administrativo es espacio que no muestra tickets. Con `body.kds-fullscreen`
+   se colapsa el layout entero y queda solo el tablero.
+
+   Se hace con una clase y no con la Fullscreen API del navegador porque esa
+   exige un gesto del usuario, se pierde al recargar, y en una pantalla dedicada
+   el navegador ya suele estar en modo kiosco. La clase sobrevive al refresco del
+   tablero y no depende de permisos. */
+body.kds-fullscreen {
+  app-store-admin-layout {
+    /* Sidebar y topbar fuera: no se ocultan con visibility para que no dejen
+       hueco reservado en el grid del layout. */
+    nav[aria-label='Desktop navigation sidebar'],
+    > div > div > div:first-child > div:first-child {
+      display: none !important;
+    }
+  }
+
+  /* El contenedor del contenido toma toda la ventana. */
+  app-store-admin-layout main {
+    padding: 0 !important;
+    max-height: 100vh;
+  }
+
+  /* El dock de Vexi tapa una columna de tickets en una pantalla de cocina. */
+  app-vexi-dock,
+  button[aria-label^='Abrir Vexi'] {
+    display: none !important;
+  }
+}
