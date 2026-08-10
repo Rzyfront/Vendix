@@ -77,6 +77,24 @@
   -->
   @if (stationsService.needsStationChoice() && stationsService.selectedStationId() === null) {
     <div class="kds-station-picker">
+      <!--
+        Se puede entrar a pantalla completa ESTANDO en el picker: el botón vive en
+        el sticky header, que en el picker todavía se dibuja. Sin esta salida aquí,
+        ocultar el header dejaría al operador sin ningún control para volver,
+        porque la barra de turno solo existe en la otra rama.
+      -->
+      @if (isFullscreen()) {
+        <button
+          type="button"
+          class="kds-station-picker__exit"
+          title="Salir de pantalla completa"
+          aria-label="Salir de pantalla completa"
+          (click)="exitFullscreen()"
+        >
+          <app-icon name="minimize" [size]="14" />
+          Salir de pantalla completa
+        </button>
+      }
       <h2 class="kds-station-picker__title">¿En qué estación vas a trabajar?</h2>
       <p class="kds-station-picker__hint">
         Cada tablero muestra solo los tickets de su estación.
@@ -109,8 +127,10 @@
   <app-kds-session-status-bar
     [session]="stationsService.openSession()"
     [station]="stationsService.selectedStation()"
+    [canExitFullscreen]="isFullscreen()"
     (closeClicked)="onHeaderAction('close-session')"
     (detailClicked)="openSessionSummary()"
+    (exitFullscreenClicked)="exitFullscreen()"
   />
 
   @if (lastError()) {

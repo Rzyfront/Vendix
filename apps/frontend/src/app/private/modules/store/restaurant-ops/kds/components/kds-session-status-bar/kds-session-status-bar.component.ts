@@ -60,6 +60,23 @@ import type { KdsSession, KdsStation } from '../../interfaces';
           <app-icon name="lock" [size]="12" />
           Cerrar turno
         </button>
+
+        <!--
+          En pantalla completa el sticky header está oculto, y con él el botón por
+          el que se entró. Sin esta salida el cocinero quedaría dependiendo del Esc
+          del navegador, que no está escrito en ninguna parte de la pantalla.
+        -->
+        @if (canExitFullscreen()) {
+          <button
+            type="button"
+            class="kds-bar__btn kds-bar__btn--icon"
+            title="Salir de pantalla completa"
+            aria-label="Salir de pantalla completa"
+            (click)="exitFullscreenClicked.emit()"
+          >
+            <app-icon name="minimize" [size]="12" />
+          </button>
+        }
       </div>
     } @else {
       <div class="kds-bar kds-bar--closed">
@@ -71,6 +88,24 @@ import type { KdsSession, KdsStation } from '../../interfaces';
           }
           — se pedirá al gestionar el primer ticket
         </span>
+
+        <!--
+          La salida va TAMBIÉN en esta rama: sin turno abierto y a pantalla completa
+          no habría ningún control visible para volver, y eso es dejar al operador
+          encerrado.
+        -->
+        @if (canExitFullscreen()) {
+          <span class="kds-bar__spacer"></span>
+          <button
+            type="button"
+            class="kds-bar__btn kds-bar__btn--icon"
+            title="Salir de pantalla completa"
+            aria-label="Salir de pantalla completa"
+            (click)="exitFullscreenClicked.emit()"
+          >
+            <app-icon name="minimize" [size]="12" />
+          </button>
+        }
       </div>
     }
   `,
@@ -137,6 +172,12 @@ import type { KdsSession, KdsStation } from '../../interfaces';
       .kds-bar__btn--danger {
         color: var(--color-error, #ef4444);
       }
+
+      /* Solo icono: es un control de VISTA, no una acción del turno, y en una
+         pantalla de cocina compite por el mismo espacio que los tickets. */
+      .kds-bar__btn--icon {
+        padding: 0.15rem 0.3rem;
+      }
     `,
   ],
 })
@@ -144,9 +185,15 @@ export class KdsSessionStatusBarComponent {
   readonly session = input<KdsSession | null>(null);
   /** Estación seleccionada, para nombrarla incluso sin turno abierto. */
   readonly station = input<KdsStation | null>(null);
+  /**
+   * ¿El tablero está a pantalla completa? En ese modo el sticky header no se
+   * dibuja, así que esta barra pasa a ser el único sitio desde donde volver.
+   */
+  readonly canExitFullscreen = input(false);
 
   readonly closeClicked = output<void>();
   readonly detailClicked = output<void>();
+  readonly exitFullscreenClicked = output<void>();
 
   operatorName(): string {
     const u = this.session()?.opened_by_user;

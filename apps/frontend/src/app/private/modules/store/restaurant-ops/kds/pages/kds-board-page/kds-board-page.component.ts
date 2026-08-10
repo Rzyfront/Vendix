@@ -739,6 +739,16 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly boardRoot =
     viewChild.required<ElementRef<HTMLElement>>('boardRoot');
 
+  /**
+   * Salida desde la barra de turno. Existe porque en pantalla completa el sticky
+   * header no se dibuja, y con él desaparece el botón por el que se entró: la
+   * barra pasa a ser el único control visible. El clic sigue siendo un gesto de
+   * usuario, que es lo que la Fullscreen API exige.
+   */
+  exitFullscreen(): void {
+    void this.toggleFullscreen();
+  }
+
   private async toggleFullscreen(): Promise<void> {
     if (this.isFullscreen()) {
       // Salir por el mismo camino por el que se entro.

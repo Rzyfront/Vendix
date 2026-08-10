@@ -28,6 +28,17 @@
   padding: 0.75rem;
 }
 
+/* El sticky header tampoco va: titulo, subtitulo, pestañas y acciones son cromo
+   administrativo, y una pantalla colgada en la cocina no navega — muestra tickets.
+   Se oculta con `display: none` y no con un `@if` en la plantilla a proposito: un
+   `@if` desmontaria y remontaria el header en cada toggle, y la salida de este modo
+   ya vive en la barra de turno (ver `canExitFullscreen`).
+   El selector es de componente, no estructural: no depende de la forma del layout. */
+.kds-board:fullscreen app-sticky-header,
+.kds-board.is-fullscreen app-sticky-header {
+  display: none;
+}
+
 /* Respaldo cuando `requestFullscreen()` fue rechazado. Medido: hoy ningun
    ancestro del tablero crea bloque contenedor (sin transform/filter/contain), asi
    que el `fixed` se ancla al viewport. Si eso cambia, este respaldo se degrada —
@@ -285,6 +296,24 @@
 .kds-station-picker {
   padding: 2rem 1rem;
   text-align: center;
+
+  /* Salida de pantalla completa cuando se entró estando en el picker. Lleva texto
+     y no solo icono porque aquí no hay barra de turno que dé contexto: es el único
+     control de vista en pantalla y tiene que nombrarse. */
+  &__exit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
 
   &__title {
     font-size: 1.1rem;
