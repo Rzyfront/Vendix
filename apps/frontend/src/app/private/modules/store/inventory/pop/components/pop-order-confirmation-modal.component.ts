@@ -323,22 +323,138 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
                 </span>
               </span>
             </label>
-            <label class="flex items-start gap-3 p-3 cursor-pointer select-none hover:bg-[var(--color-surface-elevated)] transition-colors">
-              <input
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 shrink-0 rounded border-[var(--color-border)] accent-[var(--color-primary)] cursor-pointer"
-                [checked]="ackPay()"
-                (change)="onAckPayToggle($event)"
-              />
-              <span class="flex flex-col gap-0.5 min-w-0">
-                <span class="text-sm font-medium text-[var(--color-text-primary)]">
-                  He pagado esta orden
-                </span>
-                <span class="text-xs text-[var(--color-text-muted)]">
-                  Registra el pago total y marca la orden como pagada
-                </span>
+            <!--
+              QUI-647 Fase 1 — configuración del pago.
+              Reemplaza el checkbox binario "He pagado esta orden": o se pagaba
+              todo o nada, y registrar un abono, un crédito o unas cuotas
+              obligaba a ir después a mano a Cuentas por Pagar.
+            -->
+            <div class="p-3 space-y-3">
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">
+                ¿Cómo se paga esta orden?
               </span>
-            </label>
+              <div class="grid grid-cols-2 gap-2">
+                @for (mode of paymentModes; track mode.value) {
+                  <button
+                    type="button"
+                    class="text-left rounded-lg border p-2.5 transition-colors"
+                    [class]="paymentPlan() === mode.value
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
+                      : 'border-[var(--color-border)] hover:bg-[var(--color-surface-elevated)]'"
+                    [attr.aria-pressed]="paymentPlan() === mode.value"
+                    (click)="onPaymentPlanChange(mode.value)"
+                  >
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]">
+                      {{ mode.label }}
+                    </span>
+                    <span class="block text-[11px] text-[var(--color-text-muted)]">
+                      {{ mode.hint }}
+                    </span>
+                  </button>
+                }
+              </div>
+
+              @if (paymentPlan() === 'partial') {
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-[var(--color-text-secondary)] w-28">Monto abonado</span>
+                  <input
+                    type="number"
+                    class="flex-1 px-2 py-1 text-right text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                    [ngModel]="downPayment()"
+                    (ngModelChange)="onDownPaymentChange($event)"
+                    min="0"
+                  />
+                </div>
+              }
+
+              @if (paymentPlan() === 'deferred') {
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-[var(--color-text-secondary)] w-28">Vence el</span>
+                  <input
+                    type="date"
+                    class="flex-1 px-2 py-1 text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                    [ngModel]="paymentDueDate()"
+                    (ngModelChange)="paymentDueDate.set($event)"
+                  />
+                </div>
+              }
+
+              @if (paymentPlan() === 'installments') {
+                <!--
+                  Plantilla generadora + edición manual, según la decisión de
+                  negocio del ticket: ni solo-plantilla (no cubre el calendario
+                  irregular que impone un proveedor) ni solo-manual (tedioso
+                  para el caso regular).
+                -->
+                <div class="flex items-end gap-2">
+                  <div class="flex flex-col">
+                    <span class="text-[10px] uppercase text-[var(--color-text-secondary)]">Cuotas</span>
+                    <input
+                      type="number"
+                      class="w-20 px-2 py-1 text-right text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                      [ngModel]="installmentCount()"
+                      (ngModelChange)="installmentCount.set(+$event || 1)"
+                      min="1"
+                    />
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="text-[10px] uppercase text-[var(--color-text-secondary)]">Cada (días)</span>
+                    <input
+                      type="number"
+                      class="w-24 px-2 py-1 text-right text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                      [ngModel]="installmentEveryDays()"
+                      (ngModelChange)="installmentEveryDays.set(+$event || 30)"
+                      min="1"
+                    />
+                  </div>
+                  <app-button variant="outline" size="sm" (clicked)="generateInstallments()">
+                    Generar
+                  </app-button>
+                </div>
+
+                @if (installments().length > 0) {
+                  <div class="space-y-1.5">
+                    @for (row of installments(); track $index; let i = $index) {
+                      <div class="flex items-center gap-2">
+                        <input
+                          type="date"
+                          class="flex-1 px-2 py-1 text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                          [ngModel]="row.scheduled_date"
+                          (ngModelChange)="updateInstallmentDate(i, $event)"
+                        />
+                        <input
+                          type="number"
+                          class="w-28 px-2 py-1 text-right text-sm border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
+                          [ngModel]="row.amount"
+                          (ngModelChange)="updateInstallmentAmount(i, $event)"
+                          min="0"
+                        />
+                        <button
+                          type="button"
+                          class="text-xs text-red-600 hover:underline"
+                          (click)="removeInstallment(i)"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    }
+                    <!--
+                      La validación se muestra ACÁ y no solo al confirmar: un
+                      calendario que no cierra la deuda no se puede programar, y
+                      descubrirlo al final obliga a rehacer todo el paso.
+                    -->
+                    <p
+                      class="text-xs"
+                      [class]="installmentsBalanced() ? 'text-emerald-600' : 'text-red-600'"
+                    >
+                      Cuotas: {{ installmentsTotal() | currency }} · Saldo:
+                      {{ pendingBalance() | currency }}
+                      {{ installmentsBalanced() ? '· cuadra' : '· deben coincidir' }}
+                    </p>
+                  </div>
+                }
+              }
+            </div>
           </section>
         }
 
@@ -347,7 +463,11 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
-          <app-button variant="primary" (clicked)="onConfirm()">
+          <app-button
+            variant="primary"
+            [disabled]="paymentPlan() === 'installments' && !installmentsBalanced()"
+            (clicked)="onConfirm()"
+          >
             <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
             {{ actionType() === 'create-receive' ? 'Confirmar' : 'Crear Orden' }}
           </app-button>
@@ -387,6 +507,151 @@ export class PopOrderConfirmationModalComponent {
   readonly ackPay = signal(false);
   readonly ackReceiveChange = output<boolean>();
   readonly ackPayChange = output<boolean>();
+
+  // ===== QUI-647 Fase 1: configuración del pago =====
+
+  readonly paymentModes = [
+    {
+      value: 'immediate' as const,
+      label: 'Pago inmediato',
+      hint: 'Se paga completa ahora',
+    },
+    {
+      value: 'partial' as const,
+      label: 'Abono parcial',
+      hint: 'Se paga una parte, el resto queda debiendo',
+    },
+    {
+      value: 'deferred' as const,
+      label: 'Pago diferido',
+      hint: 'No se paga ahora; una sola fecha',
+    },
+    {
+      value: 'installments' as const,
+      label: 'Crédito con cuotas',
+      hint: 'No se paga ahora; calendario',
+    },
+  ];
+
+  /**
+   * `immediate` por defecto para preservar el comportamiento previo: quien no
+   * toque nada obtiene lo mismo que daba el checkbox `ackPay` marcado.
+   */
+  readonly paymentPlan = signal<
+    'immediate' | 'partial' | 'deferred' | 'installments'
+  >('immediate');
+  readonly downPayment = signal(0);
+  readonly paymentDueDate = signal('');
+  readonly installments = signal<
+    Array<{ scheduled_date: string; amount: number }>
+  >([]);
+  readonly installmentCount = signal(2);
+  readonly installmentEveryDays = signal(30);
+
+  readonly paymentPlanChange = output<{
+    payment_plan: 'immediate' | 'partial' | 'deferred' | 'installments';
+    down_payment_amount: number;
+    payment_due_date?: string;
+    payment_installments: Array<{ scheduled_date: string; amount: number }>;
+  }>();
+
+  /** Total bruto de la orden, tal como lo muestra el resumen del modal. */
+  readonly orderTotal = computed(() =>
+    Number(this.cartState()?.summary?.total ?? 0),
+  );
+
+  /** Lo que queda debiendo tras el abono: es lo que las cuotas deben cubrir. */
+  readonly pendingBalance = computed(() =>
+    Math.round((this.orderTotal() - this.downPayment()) * 100) / 100,
+  );
+
+  readonly installmentsTotal = computed(
+    () =>
+      Math.round(
+        this.installments().reduce((s, i) => s + Number(i.amount || 0), 0) * 100,
+      ) / 100,
+  );
+
+  readonly installmentsBalanced = computed(
+    () => Math.abs(this.installmentsTotal() - this.pendingBalance()) <= 0.01,
+  );
+
+  onPaymentPlanChange(
+    plan: 'immediate' | 'partial' | 'deferred' | 'installments',
+  ): void {
+    this.paymentPlan.set(plan);
+    // `ackPay` sigue existiendo porque el padre lo usa para decidir si registra
+    // el pago total al confirmar. Ahora lo deriva el modo, no un checkbox.
+    this.ackPay.set(plan === 'immediate');
+    this.ackPayChange.emit(plan === 'immediate');
+    if (plan === 'installments' && this.installments().length === 0) {
+      this.generateInstallments();
+    }
+    this.emitPaymentPlan();
+  }
+
+  onDownPaymentChange(value: number): void {
+    this.downPayment.set(Math.max(0, Number(value) || 0));
+    this.emitPaymentPlan();
+  }
+
+  /**
+   * Genera N cuotas cada X días repartiendo el saldo. El residuo de redondeo va
+   * en la ÚLTIMA cuota para que la suma dé exacto: si se repartiera parejo, un
+   * saldo de 100 en 3 cuotas daría 99,99 y el backend rechazaría el plan.
+   */
+  generateInstallments(): void {
+    const count = Math.max(1, this.installmentCount());
+    const everyDays = Math.max(1, this.installmentEveryDays());
+    const balance = this.pendingBalance();
+    const base = Math.round((balance / count) * 100) / 100;
+
+    const rows: Array<{ scheduled_date: string; amount: number }> = [];
+    let assigned = 0;
+    const start = new Date();
+    for (let i = 0; i < count; i++) {
+      const date = new Date(start);
+      date.setDate(date.getDate() + everyDays * (i + 1));
+      const amount =
+        i === count - 1 ? Math.round((balance - assigned) * 100) / 100 : base;
+      assigned += base;
+      rows.push({
+        scheduled_date: date.toISOString().slice(0, 10),
+        amount,
+      });
+    }
+    this.installments.set(rows);
+    this.emitPaymentPlan();
+  }
+
+  updateInstallmentDate(index: number, value: string): void {
+    const rows = [...this.installments()];
+    rows[index] = { ...rows[index], scheduled_date: value };
+    this.installments.set(rows);
+    this.emitPaymentPlan();
+  }
+
+  updateInstallmentAmount(index: number, value: number): void {
+    const rows = [...this.installments()];
+    rows[index] = { ...rows[index], amount: Math.max(0, Number(value) || 0) };
+    this.installments.set(rows);
+    this.emitPaymentPlan();
+  }
+
+  removeInstallment(index: number): void {
+    this.installments.set(this.installments().filter((_, i) => i !== index));
+    this.emitPaymentPlan();
+  }
+
+  private emitPaymentPlan(): void {
+    this.paymentPlanChange.emit({
+      payment_plan: this.paymentPlan(),
+      down_payment_amount: this.downPayment(),
+      payment_due_date: this.paymentDueDate() || undefined,
+      payment_installments:
+        this.paymentPlan() === 'installments' ? this.installments() : [],
+    });
+  }
 
   onAckReceiveToggle(event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
@@ -575,9 +840,16 @@ export class PopOrderConfirmationModalComponent {
   }
 
   onConfirm(): void {
+    // QUI-647: un calendario que no cierra la deuda no se puede programar. Se
+    // bloquea acá y no solo en el backend para que el usuario lo corrija donde
+    // lo está escribiendo, en vez de recibir un 400 después de confirmar.
+    if (this.paymentPlan() === 'installments' && !this.installmentsBalanced()) {
+      return;
+    }
     // Forward the current overrides so the parent can grab them in the same
     // tick without subscribing to the output (cheaper than toSignal here).
     this.pricingOverridesChange.emit(this.pricingOverrides());
+    this.emitPaymentPlan();
     this.confirmed.emit();
   }
 

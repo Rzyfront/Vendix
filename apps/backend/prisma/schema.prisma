@@ -3121,6 +3121,10 @@ enum notification_type_enum {
   payment_received
   layaway_payment_received
   layaway_payment_reminder
+  /// QUI-647 — cuotas de Cuentas por Pagar (lado proveedor). Espejo de
+  /// `installment_*`, que es el lado cliente.
+  ap_installment_due_soon
+  ap_installment_overdue
   layaway_overdue
   layaway_completed
   layaway_cancelled

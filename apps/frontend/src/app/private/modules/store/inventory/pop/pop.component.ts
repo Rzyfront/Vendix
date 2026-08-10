@@ -208,6 +208,7 @@ import {
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (ackPayChange)="ackPay.set($event)"
+      (paymentPlanChange)="paymentPlan.set($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -376,6 +377,18 @@ export class PopComponent implements OnInit, OnDestroy {
    * ver `_buildReceptionViaDispatch$`.
    */
   pricingOverrides = signal<PricingOverridesMap>(new Map());
+
+  /**
+   * QUI-647 — configuración de pago elegida en el modal. Viaja al backend en
+   * el payload de creación; el backend valida que las cuotas cierren el saldo
+   * y las persiste como plan contra la orden hasta que exista la CxP.
+   */
+  paymentPlan = signal<{
+    payment_plan: 'immediate' | 'partial' | 'deferred' | 'installments';
+    down_payment_amount: number;
+    payment_due_date?: string;
+    payment_installments: Array<{ scheduled_date: string; amount: number }>;
+  } | null>(null);
 
   cartState = signal<PopCartState | null>(null);
   cartSummary = signal<PopCartSummary | null>(null);
@@ -1747,6 +1760,28 @@ export class PopComponent implements OnInit, OnDestroy {
    * modal back onto the cart line, so the create payload persists it and the
    * product is born already priced instead of landing in the catalog at 0.
    */
+  /**
+   * QUI-647 — adjunta el plan de pago al payload de creación.
+   *
+   * Solo viaja cuando el operador eligió algo distinto de `immediate`: así una
+   * orden creada sin tocar el paso de pago produce exactamente el mismo payload
+   * que antes del ticket.
+   */
+  private attachPaymentPlan(request: any): void {
+    const plan = this.paymentPlan();
+    if (!plan || plan.payment_plan === 'immediate') return;
+    request.payment_plan = plan.payment_plan;
+    if (plan.down_payment_amount > 0) {
+      request.down_payment_amount = plan.down_payment_amount;
+    }
+    if (plan.payment_due_date) {
+      request.payment_due_date = plan.payment_due_date;
+    }
+    if (plan.payment_installments.length > 0) {
+      request.payment_installments = plan.payment_installments;
+    }
+  }
+
   private applyNewProductPricing(): void {
     const overrides = this.pricingOverrides();
     if (!overrides || overrides.size === 0) return;
@@ -1781,6 +1816,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // QUI-647: adjunta la configuración de pago elegida en el modal.
+    this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
 
@@ -1943,6 +1980,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // QUI-647: adjunta la configuración de pago elegida en el modal.
+    this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
 
