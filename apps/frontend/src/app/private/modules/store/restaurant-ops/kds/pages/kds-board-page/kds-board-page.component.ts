@@ -513,6 +513,24 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       this.router.navigate(['/admin/restaurant-ops/kds/configuracion']);
       return;
     }
+    // QUI-651 — cerrar el turno DESDE el tablero, que es donde esta el cocinero.
+    // Obligarlo a navegar a configuracion para cerrar su propio turno seria absurdo,
+    // y era el hueco que quedaba: la apertura estaba y el cierre no.
+    if (id === 'close-session') {
+      const session = this.stationsService.openSession();
+      if (!session) return;
+      this.stationsService
+        .closeSession(session.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => this.toastService.success('Turno cerrado'),
+          error: (err: unknown) =>
+            this.toastService.error(
+              typeof err === 'string' ? err : 'No se pudo cerrar el turno',
+            ),
+        });
+      return;
+    }
     if (id === 'refresh') {
       this.forceRefresh();
     } else if (id === 'reconnect') {

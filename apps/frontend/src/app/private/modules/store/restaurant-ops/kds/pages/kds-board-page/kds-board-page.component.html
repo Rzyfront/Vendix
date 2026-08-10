@@ -24,10 +24,31 @@
         icon: 'wifi',
         variant: 'ghost',
         visible: isManualMode(),
+      },
+      {
+        id: 'close-session',
+        label: 'Cerrar turno',
+        icon: 'lock',
+        variant: 'ghost',
+        visible: stationsService.canManageTickets(),
       }
     ]"
     (actionClicked)="onHeaderAction($event)"
   >
+    <!--
+      QUI-651 — quien tiene el turno abierto en ESTA estacion. Antes el unico rastro
+      de sesion era el modal de apertura: el cocinero abria turno y despues no tenia
+      forma de saber si seguia abierto ni de cerrarlo desde el tablero.
+    -->
+    @if (stationsService.openSession(); as session) {
+      <app-badge slot="badge" variant="success" size="sm" badgeStyle="outline">
+        <app-icon name="chef-hat" [size]="12" />
+        Turno de
+        {{ session.opened_by_user?.first_name ?? 'operador' }}
+        · {{ session.opened_at | date: 'shortTime' }}
+      </app-badge>
+    }
+
     <app-badge
       slot="badge"
       [variant]="isManualMode() ? 'warning' : connectionVariant()"
