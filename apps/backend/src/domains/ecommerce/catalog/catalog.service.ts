@@ -7,6 +7,7 @@ import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { resolveDefaultSaleUnit } from '../../store/products/services/default-sale-unit.util';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import {
   MenuAvailabilityCheckerService,
@@ -883,6 +884,7 @@ export class CatalogService {
   ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+    await this.hydrateDefaultSaleUnit(product);
 
     const variantCount = product._count?.product_variants || 0;
     const effectiveTracking = this.resolveEffectiveTracking(product);
@@ -911,6 +913,16 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      // Presentación en la que se publica y se vende. `null` = unidad principal.
+      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      sale_unit: product.__default_sale_unit
+        ? {
+            price_tier_id: product.__default_sale_unit.tier.id,
+            name: product.__default_sale_unit.tier.name,
+            units_per_package:
+              product.__default_sale_unit.tier.units_per_package,
+          }
+        : null,
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
@@ -942,6 +954,7 @@ export class CatalogService {
     activePromotion: ActiveProductPromotion | null = null,
     availability: ProductAvailability | null = null,
   ) {
+    await this.hydrateDefaultSaleUnit(product);
     const reviews = reviews_enabled ? product.reviews || [] : [];
     let avg_rating = 0;
     let review_count = 0;
@@ -997,6 +1010,16 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      // Presentación en la que se publica y se vende. `null` = unidad principal.
+      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      sale_unit: product.__default_sale_unit
+        ? {
+            price_tier_id: product.__default_sale_unit.tier.id,
+            name: product.__default_sale_unit.tier.name,
+            units_per_package:
+              product.__default_sale_unit.tier.units_per_package,
+          }
+        : null,
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: ahora reflejan stock_levels.
@@ -1092,9 +1115,65 @@ export class CatalogService {
    */
   private calculateFinalPrice(product: any, variant?: any): number {
     const totalTaxRate = this.getTotalTaxRate(product);
+    // QUI-648 — cuando el producto tiene presentación por defecto, el precio
+    // publicado es el del PAQUETE. Tiene que coincidir con lo que cobra el
+    // checkout: si la vitrina mostrara el precio unitario, el total cambiaría al
+    // pagar. El default se hidrata en los mapeadores (`__default_sale_unit`).
+    const saleUnit = product?.__default_sale_unit;
+    if (saleUnit) {
+      const tierResult = this.priceResolverService.resolveWithTier({
+        product: {
+          base_price: Number(product.base_price),
+          is_on_sale: product.is_on_sale,
+          sale_price:
+            product.sale_price != null ? Number(product.sale_price) : null,
+          track_inventory: product.track_inventory,
+          has_multiple_price_tiers: true,
+        },
+        variant: variant
+          ? {
+              id: variant.id,
+              price_override:
+                variant.price_override != null
+                  ? Number(variant.price_override)
+                  : null,
+              is_on_sale: variant.is_on_sale,
+              sale_price:
+                variant.sale_price != null ? Number(variant.sale_price) : null,
+              track_inventory_override: variant.track_inventory_override ?? null,
+            }
+          : undefined,
+        priceTier: saleUnit.tier,
+        tierOverrides: saleUnit.overrides,
+        taxRate: totalTaxRate,
+      });
+      return Math.round(tierResult.unitPriceWithTax * 100) / 100;
+    }
     const priceResult = this.resolvePrice(product, variant, totalTaxRate);
     const finalPrice = priceResult.unitPriceWithTax;
     return Math.round(finalPrice * 100) / 100;
+  }
+
+  /**
+   * Hidrata `product.__default_sale_unit` para que la proyección sincrónica
+   * (`calculateFinalPrice`) pueda usar la presentación por defecto sin volverse
+   * asíncrona. Devuelve el mismo objeto recibido.
+   */
+  private async hydrateDefaultSaleUnit(product: any): Promise<any> {
+    if (!product?.id || product.__default_sale_unit !== undefined) {
+      return product;
+    }
+    try {
+      product.__default_sale_unit = await resolveDefaultSaleUnit(
+        this.prisma as any,
+        Number(product.id),
+      );
+    } catch {
+      // Una falla leyendo la presentación no debe tumbar la vitrina: sin default
+      // el producto se publica en su unidad principal (cascada legacy).
+      product.__default_sale_unit = null;
+    }
+    return product;
   }
 
   private getTotalTaxRate(product: any): number {

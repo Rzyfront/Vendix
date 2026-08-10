@@ -212,6 +212,18 @@ export class EcommercePrismaService extends BasePrismaService {
   get product_variants() {
     return this.scoped_client.product_variants;
   }
+  /**
+   * Presentación de venta por defecto del producto (QUI-648). El storefront las
+   * lee para vender en la presentación marcada por defecto. Se scopean
+   * relacionalmente a través de `product.store_id`, igual que
+   * `product_price_tier_overrides`.
+   */
+  get product_price_tier_assignments() {
+    return this.scoped_client.product_price_tier_assignments;
+  }
+  get product_price_tier_overrides() {
+    return this.scoped_client.product_price_tier_overrides;
+  }
   get cart_items() {
     return this.scoped_client.cart_items;
   }
