@@ -1,5 +1,5 @@
-import { IsInt, IsNumber, IsOptional, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 /**
  * DTO for upserting a product (or variant) override for a specific price tier.
@@ -29,4 +29,28 @@ export class UpsertProductPriceTierOverrideDto {
   @IsInt()
   @Min(2)
   override_units_per_package?: number;
+
+  /**
+   * Margen de la presentación, en porcentaje. Markup sobre el costo del PAQUETE
+   * (`cost_price * packSize`), igual que `profit_margin` en el producto base.
+   *
+   * Cost-anchor: si llega junto con `override_price`, el precio gana y este
+   * valor se ignora — el servidor lo recalcula a partir del precio.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  override_profit_margin?: number;
+
+  /**
+   * Marca esta presentación como la que rige por defecto en toda superficie de
+   * venta. Es por PRODUCTO + PRESENTACIÓN (no por variante): marcarla desmarca
+   * la anterior del mismo producto en la misma transacción, y solo una tarifa
+   * de tipo `sale_unit` puede serlo.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => (typeof value === 'string' ? value === 'true' : value))
+  is_default?: boolean;
 }

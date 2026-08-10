@@ -3257,6 +3257,18 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PRICE_TIER_KIND_LOCKED: {
+    code: 'PRICE_TIER_KIND_LOCKED',
+    httpStatus: 409,
+    devMessage:
+      'La presentación ya tiene ventas con descuento de stock por empaque: no puede convertirse en tarifa de cliente',
+  },
+  PRICE_TIER_DEFAULT_NOT_SALE_UNIT: {
+    code: 'PRICE_TIER_DEFAULT_NOT_SALE_UNIT',
+    httpStatus: 422,
+    devMessage:
+      'Solo una unidad de venta puede marcarse como presentación por defecto del producto',
+  },
 
   // notification sounds
   NOTIFICATION_SOUND_INVALID: {
