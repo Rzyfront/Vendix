@@ -1647,20 +1647,121 @@ export class PopComponent implements OnInit, OnDestroy {
         })),
     };
 
+    // QUI-645 — los productos NUEVOS (prebulk) no tienen nada que consultar en
+    // el backend: no hay stock, ni costo previo, ni precio de catálogo. Pero
+    // sí tienen que aparecer en el modal de confirmación, porque hoy es el
+    // único punto del flujo donde el operador puede fijarles margen y precio
+    // de venta antes de que el producto exista. Se arman filas sintéticas con
+    // la misma forma que devuelve el backend para que la UX de margen de
+    // QUI-425 las trate igual que a las existentes.
+    const newRows = this.buildNewProductPreviewRows();
+
     if (request.items.length === 0) {
+      // Solo hay productos nuevos: no hay nada que pedirle al backend, pero el
+      // modal igual debe mostrarlos para poder fijarles precio.
+      this.costPreview.set(
+        newRows.length
+          ? ({ costing_method: null, items: newRows } as any)
+          : null,
+      );
       this.loadingCostPreview.set(false);
       return;
     }
 
     this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.costPreview.set(response.success ? response.data : null);
+        const data = response.success ? response.data : null;
+        this.costPreview.set(
+          data
+            ? ({ ...data, items: [...(data.items ?? []), ...newRows] } as any)
+            : newRows.length
+              ? ({ costing_method: null, items: newRows } as any)
+              : null,
+        );
         this.loadingCostPreview.set(false);
       },
       error: () => {
-        this.costPreview.set(null);
+        this.costPreview.set(
+          newRows.length
+            ? ({ costing_method: null, items: newRows } as any)
+            : null,
+        );
         this.loadingCostPreview.set(false);
       },
+    });
+  }
+
+  /**
+   * QUI-645 — synthetic cost-preview rows for products that do not exist yet.
+   *
+   * `product_id` is a NEGATIVE index-derived id: the modal keys its pricing
+   * overrides by `${product_id}-${variant_id || 0}`, and a new product has no
+   * id to key on. Negative values can never collide with a real product id and
+   * stay stable while the cart is untouched, which is what the override map
+   * needs. `applyNewProductPricing` maps them back to the cart line.
+   */
+  private buildNewProductPreviewRows(): any[] {
+    const state = this.popCartService.currentState;
+    return state.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.is_prebulk && item.prebulk_data)
+      .map(({ item, index }) => {
+        // Cost the product will be born with: the NET unit cost of the line,
+        // discount included (QUI-661). `item.subtotal` is already Σ neto.
+        const qty = Number(item.quantity) || 1;
+        const netUnitCost = qty > 0 ? Number(item.subtotal || 0) / qty : 0;
+        const margin = Number(item.prebulk_data?.profit_margin ?? 0);
+        return {
+          product_id: -(index + 1),
+          product_variant_id: null,
+          product_name: item.prebulk_data?.name || 'Producto nuevo',
+          current_stock: 0,
+          current_cost_per_unit: 0,
+          global_stock: 0,
+          global_cost_per_unit: 0,
+          new_stock: qty,
+          new_cost_per_unit: Math.round(netUnitCost * 100) / 100,
+          incoming_quantity: qty,
+          incoming_cost: Number(item.subtotal || 0),
+          incoming_gross_cost: Number(item.unit_cost || 0) * qty,
+          unit_price_net: netUnitCost,
+          incoming_tax_per_unit:
+            qty > 0 ? Number(item.tax_amount || 0) / qty : 0,
+          incoming_tax_amount: Number(item.tax_amount || 0),
+          effective_include: !!item.prices_include_tax,
+          // A brand-new product is not a "reactivation" — it never had stock.
+          is_reactivation: false,
+          current_base_price: Number(item.prebulk_data?.base_price ?? 0),
+          current_profit_margin: margin,
+          // Decisión de negocio (QUI-645): margen 0 % por defecto. El producto
+          // nace al costo y el operador lo sube si quiere, en vez de heredar
+          // un margen implícito que nadie eligió.
+          resulting_margin: margin,
+          is_new_product: true,
+        };
+      });
+  }
+
+  /**
+   * QUI-645 — carries the margin/price the operator set in the confirmation
+   * modal back onto the cart line, so the create payload persists it and the
+   * product is born already priced instead of landing in the catalog at 0.
+   */
+  private applyNewProductPricing(): void {
+    const overrides = this.pricingOverrides();
+    if (!overrides || overrides.size === 0) return;
+
+    const state = this.popCartService.currentState;
+    state.items.forEach((item, index) => {
+      if (!item.is_prebulk || !item.prebulk_data) return;
+      const override = overrides.get(`${-(index + 1)}-0`);
+      if (!override) return;
+      if (override.new_base_price !== undefined) {
+        item.prebulk_data.base_price = override.new_base_price;
+      }
+      if (override.new_profit_margin !== undefined) {
+        item.prebulk_data.profit_margin = override.new_profit_margin;
+      }
     });
   }
 
@@ -1675,6 +1776,9 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     const userId = this.authFacade.getUserId() || 0;
+    // QUI-645: baja al carrito el margen/precio fijado en el modal para los
+    // productos nuevos, antes de armar el payload.
+    this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
@@ -1834,6 +1938,9 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   private _createApprovedOrder$(state: PopCartState): Observable<any> {
     const userId = this.authFacade.getUserId() || 0;
+    // QUI-645: baja al carrito el margen/precio que el operador fijó en el
+    // modal para los productos nuevos, antes de armar el payload.
+    this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.

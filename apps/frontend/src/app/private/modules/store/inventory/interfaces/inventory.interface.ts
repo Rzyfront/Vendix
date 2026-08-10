@@ -692,6 +692,14 @@ export interface CostPreviewItem {
   // `null` when the new cost is 0 (e.g. reactivation of orphaned stock) so
   // the UI can avoid a divide-by-zero display.
   resulting_margin: number | null;
+  /**
+   * QUI-645 — row synthesized on the CLIENT for a product that does not exist
+   * yet (prebulk). The backend never emits it: a new product has no stock, no
+   * previous cost and no catalog price to look up. It carries `product_id` as
+   * a NEGATIVE index-derived value so the override map can key on it without
+   * colliding with a real product.
+   */
+  is_new_product?: boolean;
 }
 
 export interface CostPreviewResponse {

@@ -134,6 +134,17 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
                       @if (item.variant_name) {
                         <span class="text-[var(--color-text-muted)]"> · {{ item.variant_name }}</span>
                       }
+                      <!--
+                        QUI-645: el producto todavía no existe en el catálogo.
+                        Se marca porque el margen que se fije acá es el precio
+                        con el que NACE — no hay un precio anterior que revisar,
+                        y si nadie lo toca entra al costo (margen 0 %).
+                      -->
+                      @if (item.is_new_product) {
+                        <span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          Nuevo
+                        </span>
+                      }
                     </div>
                     @if (item.is_reactivation) {
                       <div class="text-[var(--color-text-secondary)]">

@@ -753,16 +753,30 @@ export class PurchaseOrdersService {
           }
 
           // Price calculation
+          //
+          // QUI-661 + QUI-645: the cost a NEW product is born with must be the
+          // same NET, discounted figure the line persists in `unit_cost` — not
+          // the gross `unit_price`. Using the gross price anchored the product's
+          // margin to a cost it never had: with IVA included or a supplier
+          // discount, `cost_price` came out above what the FIFO layer would
+          // capitalize, so the product was born with an understated margin.
+          // The header discount is prorated in the totals pass below; here we
+          // honour the line's own discount and the include/added VAT mode,
+          // which is what `deriveLineTax` owns.
           let basePrice = item.base_price || 0;
-          const cost = item.unit_price || 0;
+          const cost = this.deriveLineTax(
+            item,
+            createPurchaseOrderDto,
+          ).unit_price_net;
           let margin = item.profit_margin || 0;
           if (margin > 0 && margin < 1) margin = margin * 100;
 
-          if (
-            margin > 0 &&
-            cost > 0 &&
-            (!item.base_price || item.base_price === 0)
-          ) {
+          // QUI-645: a NEW product with margin 0 is a deliberate decision, not
+          // a missing value — it is born priced at cost and the operator can
+          // raise it later. So the price is derived whenever a base price was
+          // not pinned, including `margin === 0`, instead of leaving
+          // `base_price = 0` (which read as "free" in the catalog).
+          if (cost > 0 && (!item.base_price || item.base_price === 0)) {
             basePrice = cost * (1 + margin / 100);
           }
 
