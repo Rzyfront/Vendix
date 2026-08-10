@@ -1,0 +1,58 @@
+<div class="print-formats-form" [formGroup]="form">
+  <p class="print-formats-form__intro">
+    Cada documento se imprime con su propio formato. La configuración es de esta
+    tienda: no se hereda de la organización. En los formatos de rollo el margen no
+    aplica, porque el papel es continuo y solo su ancho está fijo.
+  </p>
+
+  <div class="print-rows">
+    @for (row of rows; track row.doc) {
+      <div class="print-row" [formGroupName]="row.doc">
+        <div class="print-row__head">
+          <span class="print-row__label">{{ row.label }}</span>
+          <span class="print-row__meta">
+            @if (rollByDocument()[row.doc]) {
+              Rollo de {{ widthByDocument()[row.doc] }} mm · sin margen
+            } @else {
+              Hoja de {{ widthByDocument()[row.doc] }} mm de ancho
+            }
+          </span>
+        </div>
+
+        <div class="print-row__fields">
+          <app-selector
+            label="Formato"
+            formControlName="format"
+            [options]="formatOptions"
+            (valueChange)="onFormatChange(row.doc)"
+          ></app-selector>
+
+          @if (!rollByDocument()[row.doc]) {
+            <app-input
+              label="Margen (mm)"
+              type="number"
+              formControlName="margin_mm"
+              [min]="minMargin"
+              [max]="maxMargin"
+              step="1"
+              customWrapperClass="!mt-0"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          } @else {
+            <div class="print-row__na">
+              <span class="print-row__na-label">Margen (mm)</span>
+              <span class="print-row__na-value">No aplica en rollo</span>
+            </div>
+          }
+
+          <app-selector
+            label="Copias"
+            formControlName="copies"
+            [options]="copiesOptions"
+            (valueChange)="onFieldChange()"
+          ></app-selector>
+        </div>
+      </div>
+    }
+  </div>
+</div>

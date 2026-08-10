@@ -39,12 +39,6 @@
             description="Segundo canal de entrega válido ante la DIAN"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
-          <app-selector
-            label="Copias impresas de la factura"
-            [formControl]="invoiceCopiesControl"
-            [options]="copiesOptions"
-            (valueChange)="onFieldChange()"
-          ></app-selector>
         </div>
 
         @if (deliveryFallbackApplied()) {
@@ -95,8 +89,10 @@
       </div>
     }
 
-    <!-- Print formats. The POS ticket format always applies; the invoice format
-         only matters once the store issues electronic invoices. -->
+    <!-- Print formats. Read-only here: the format, the margin and the copies of
+         every printable document are configured in the "Formatos de Impresión"
+         section, which is the single source of truth for `receipts.printing`.
+         This block only previews what that configuration produces. -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
         Formato de impresión
@@ -104,12 +100,10 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         @if (isLive()) {
           <div class="format-with-preview">
-            <app-selector
-              label="Formato de la factura"
-              [formControl]="invoiceFormatControl"
-              [options]="formatOptions"
-              (valueChange)="onFieldChange()"
-            ></app-selector>
+            <div class="format-readout">
+              <span class="format-readout__label">Formato de la factura</span>
+              <span class="format-readout__value">{{ invoiceFormatLabel() }}</span>
+            </div>
             <button
               type="button"
               class="preview-button"
@@ -128,12 +122,10 @@
           </div>
         }
         <div class="format-with-preview">
-          <app-selector
-            label="Formato del tiquete POS"
-            [formControl]="posTicketFormatControl"
-            [options]="formatOptions"
-            (valueChange)="onFieldChange()"
-          ></app-selector>
+          <div class="format-readout">
+            <span class="format-readout__label">Formato del tiquete POS</span>
+            <span class="format-readout__value">{{ posTicketFormatLabel() }}</span>
+          </div>
           <button
             type="button"
             class="preview-button"
@@ -150,12 +142,6 @@
             }}</span>
           </button>
         </div>
-        <app-selector
-          label="Copias del tiquete POS"
-          [formControl]="posTicketCopiesControl"
-          [options]="copiesOptions"
-          (valueChange)="onFieldChange()"
-        ></app-selector>
         <app-setting-toggle
           [formControl]="posAutoPrintControl"
           label="Imprimir el tiquete automáticamente"
@@ -174,6 +160,11 @@
       @if (previewError()) {
         <p class="preview-error">{{ previewError() }}</p>
       }
+      <p class="format-hint">
+        El formato, el margen y las copias de cada documento se configuran en
+        <strong>Formatos de Impresión</strong>, donde cada tipo de documento tiene
+        su propia fila.
+      </p>
       <p class="format-hint">
         La factura impresa siempre lleva los datos legales vigentes del emisor
         (razón social, NIT, régimen, resolución de numeración), el CUFE y la URL de

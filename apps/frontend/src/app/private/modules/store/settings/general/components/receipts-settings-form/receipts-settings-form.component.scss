@@ -76,6 +76,27 @@
   gap: 0.5rem;
 }
 
+// Read-only echo of the format configured in "Formatos de Impresión". Styled as
+// a field rather than plain text so the preview button below it keeps reading as
+// the action of a control, not as a stray link.
+.format-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  &__label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+
+  &__value {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+  }
+}
+
 .preview-button {
   display: inline-flex;
   align-items: center;

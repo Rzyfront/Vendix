@@ -250,8 +250,26 @@
               [pendingReason]="emissionReason()"
               [pendingBlockers]="emissionBlockers()"
               [posAutoPrint]="posAutoPrint()"
-              (settingsChange)="onSectionChange('receipts', $event)"
+              [posTicketPrintFormat]="posTicketPrintFormat()"
+              [invoicePrintFormat]="invoicePrintFormat()"
+              (settingsChange)="onReceiptsChange($event)"
               (posAutoPrintChange)="onPosAutoPrintChange($event)" />
+          </div>
+        </section>
+
+        <!-- Print Formats Section (QUI-641) — one row per printable document.
+             Persisted under `receipts.printing`, per store, no inheritance. -->
+        <section id="section-printing" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--indigo">
+              <app-icon name="printer" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Formatos de Impresión</h2>
+          </div>
+          <div class="section-body">
+            <app-print-formats-settings-form
+              [receipts]="receiptsSettings()"
+              (printingChange)="onPrintingChange($event)" />
           </div>
         </section>
       </div>

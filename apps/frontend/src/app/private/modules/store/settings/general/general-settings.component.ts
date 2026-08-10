@@ -3,7 +3,13 @@ import { FormGroup } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService, StoreSettingsRequestOptions } from './services/store-settings.service';
-import { StoreSettings } from '../../../../../core/models/store-settings.interface';
+import {
+  PRINT_DEFAULTS,
+  PrintFormat,
+  PrintingSettings,
+  ReceiptsSettings,
+  StoreSettings,
+} from '../../../../../core/models/store-settings.interface';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { DianEmissionStatus } from '../../invoicing/interfaces/invoice.interface';
 import { EmissionStage } from './components/receipts-settings-form/receipts-settings-form.component';
@@ -15,6 +21,7 @@ import { InventorySettingsForm } from './components/inventory-settings-form/inve
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
+import { PrintFormatsSettingsForm } from './components/print-formats-settings-form/print-formats-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
 import { DispatchSettingsForm } from './components/dispatch-settings-form/dispatch-settings-form.component';
@@ -44,6 +51,7 @@ import { firstValueFrom } from 'rxjs';
     NotificationsSettingsForm,
     PosSettingsForm,
     ReceiptsSettingsForm,
+    PrintFormatsSettingsForm,
     AppSettingsForm,
     OperationsSettingsForm,
     DispatchSettingsForm,
@@ -211,6 +219,7 @@ export class GeneralSettingsComponent implements OnInit {
         label: this.electronicInvoicingActive() ? 'Facturación' : 'Recibos',
         icon: 'file-text',
       },
+      { id: 'printing', label: 'Impresión', icon: 'printer' },
     ];
     if (this.isRestaurant()) {
       // Insert "Mesas" right after "Operaciones" for restaurants only.
@@ -347,6 +356,77 @@ export class GeneralSettingsComponent implements OnInit {
     this.onSectionChange('pos', {
       ...(this.settings().pos ?? {}),
       auto_print_receipt: value,
+    });
+  }
+
+  /** The `receipts` block as the two forms that edit it expect to receive it. */
+  readonly receiptsSettings = computed<ReceiptsSettings | undefined>(
+    () => this.settings().receipts,
+  );
+
+  /**
+   * Format the POS-ticket preview must render, resolved through the same cascade
+   * the print screen uses: `printing.pos_ticket` → deprecated flat key →
+   * `PRINT_DEFAULTS`. The Recibos section no longer edits the format — it only
+   * previews it — so a stale local copy there would show a document the printer
+   * would never produce.
+   */
+  readonly posTicketPrintFormat = computed<PrintFormat>(() => {
+    const receipts = this.settings().receipts;
+    return (
+      receipts?.printing?.pos_ticket?.format ??
+      receipts?.pos_ticket_format ??
+      PRINT_DEFAULTS.pos_ticket.format
+    );
+  });
+
+  readonly invoicePrintFormat = computed<PrintFormat>(() => {
+    const receipts = this.settings().receipts;
+    return (
+      receipts?.printing?.invoice?.format ??
+      receipts?.invoice_format ??
+      PRINT_DEFAULTS.invoice.format
+    );
+  });
+
+  /**
+   * `receipts` is edited by two sibling forms — the Recibos section and the
+   * Impresión section — so it is MERGED instead of replaced. Replacing it (what
+   * `onSectionChange` does) meant whichever form emitted last erased the other's
+   * keys, and `printing` would silently disappear on the next receipt toggle.
+   */
+  onReceiptsChange(value: Partial<ReceiptsSettings>): void {
+    this.onSectionChange('receipts', {
+      ...(this.settings().receipts ?? {}),
+      ...value,
+    });
+  }
+
+  /**
+   * Persists the full per-document block and mirrors the two documents that
+   * still have deprecated flat keys.
+   *
+   * The mirror is not redundancy for its own sake: `pos_ticket_format` /
+   * `pos_ticket_copies` are read by the POS ticket service and the bulk print
+   * flow, and `invoice_format` by the backend invoice PDF builder. Writing them
+   * alongside `printing` makes this screen take effect for those consumers
+   * immediately, instead of only after each of them migrates its read path.
+   */
+  onPrintingChange(printing: PrintingSettings): void {
+    const posTicket = printing.pos_ticket;
+    const invoice = printing.invoice;
+
+    this.onReceiptsChange({
+      printing,
+      ...(posTicket
+        ? {
+            pos_ticket_format: posTicket.format,
+            pos_ticket_copies: posTicket.copies,
+          }
+        : {}),
+      ...(invoice
+        ? { invoice_format: invoice.format, invoice_copies: invoice.copies }
+        : {}),
     });
   }
 

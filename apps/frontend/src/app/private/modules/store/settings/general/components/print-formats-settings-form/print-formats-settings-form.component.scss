@@ -1,0 +1,87 @@
+:host {
+  display: block;
+}
+
+.print-formats-form {
+  &__intro {
+    margin: 0 0 1rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+  }
+}
+
+.print-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+// Mobile-first: the row stacks its head over its fields, and the fields only
+// spread into three columns once there is width for them.
+.print-row {
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background-color: var(--color-surface);
+
+  &__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.25rem 0.75rem;
+    margin-bottom: 0.625rem;
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__meta {
+    font-size: 0.6875rem;
+    color: var(--color-text-secondary);
+  }
+
+  &__fields {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.625rem;
+  }
+
+  // Placeholder that keeps the grid from reflowing when the margin field is
+  // withdrawn on a roll format: the row must not jump as the user compares
+  // formats in the selector right next to it.
+  &__na {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+  }
+
+  &__na-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+
+  &__na-value {
+    font-size: 0.75rem;
+    font-style: italic;
+    color: var(--color-text-muted, var(--color-text-secondary));
+  }
+}
+
+@media (min-width: 768px) {
+  .print-row {
+    padding: 0.875rem 1rem;
+
+    &__fields {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.75rem;
+      align-items: end;
+    }
+  }
+}

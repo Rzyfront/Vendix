@@ -14,7 +14,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import {
-  PRINT_FORMATS,
   PRINT_FORMAT_LABELS,
   PrintFormat,
 } from '../../../../../../../core/models/store-settings.interface';
@@ -24,10 +23,6 @@ import { SettingToggleComponent } from '../../../../../../../shared/components/s
 import { TextareaComponent } from '../../../../../../../shared/components';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
-import {
-  SelectorComponent,
-  SelectorOption,
-} from '../../../../../../../shared/components/selector/selector.component';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -60,7 +55,6 @@ export type EmissionStage = 'receipts' | 'pending' | 'live';
     SettingToggleComponent,
     TextareaComponent,
     IconComponent,
-    SelectorComponent,
     ModalComponent,
   ],
   templateUrl: './receipts-settings-form.component.html',
@@ -87,39 +81,47 @@ export class ReceiptsSettingsForm {
   readonly pendingBlockers = input<Array<{ label: string; action: string }>>([]);
   /** `pos.auto_print_receipt`, which lives in the POS block, not in receipts. */
   readonly posAutoPrint = input<boolean>(false);
+  /**
+   * Formats to preview, resolved by the parent from `receipts.printing`.
+   *
+   * They are inputs rather than controls because the format is no longer edited
+   * here: it belongs to the "Formatos de Impresión" section, which configures
+   * all 12 printable documents. Keeping an editor in both places made
+   * `receipts.pos_ticket_format` and `receipts.printing.pos_ticket.format` two
+   * competing sources of truth, decided by whichever form emitted last.
+   */
+  readonly posTicketPrintFormat = input<PrintFormat>('thermal_80');
+  readonly invoicePrintFormat = input<PrintFormat>('letter');
   readonly settingsChange = output<ReceiptsSettings>();
   readonly posAutoPrintChange = output<boolean>();
 
   readonly isLive = computed(() => this.emissionStage() === 'live');
   readonly isPending = computed(() => this.emissionStage() === 'pending');
 
+  /**
+   * Format and copies are deliberately absent: they are owned by the "Formatos
+   * de Impresión" section. Anything this form does not declare is left
+   * untouched, because the parent MERGES this payload into `receipts` instead of
+   * replacing the block.
+   */
   form: FormGroup = new FormGroup({
     print_receipt: new FormControl(true),
     email_receipt: new FormControl(false),
     receipt_header: new FormControl(''),
     receipt_footer: new FormControl('¡Gracias por su compra!'),
     auto_issue_invoice: new FormControl(true),
-    invoice_copies: new FormControl(1),
     send_invoice_email: new FormControl(true),
     print_pos_ticket: new FormControl(false),
     deliver_printed: new FormControl(false),
-    invoice_format: new FormControl<PrintFormat>('letter'),
-    pos_ticket_format: new FormControl<PrintFormat>('thermal_80'),
-    pos_ticket_copies: new FormControl(1),
   });
 
-  /** 0 is a real choice: some merchants only send the invoice by email. */
-  readonly copiesOptions: SelectorOption[] = [
-    { value: 0, label: 'No imprimir' },
-    { value: 1, label: '1 copia' },
-    { value: 2, label: '2 copias' },
-    { value: 3, label: '3 copias' },
-  ];
-
-  readonly formatOptions: SelectorOption[] = PRINT_FORMATS.map((format) => ({
-    value: format,
-    label: PRINT_FORMAT_LABELS[format],
-  }));
+  /** Label of the format each preview will render, for the section hint. */
+  readonly posTicketFormatLabel = computed(
+    () => PRINT_FORMAT_LABELS[this.posTicketPrintFormat()],
+  );
+  readonly invoiceFormatLabel = computed(
+    () => PRINT_FORMAT_LABELS[this.invoicePrintFormat()],
+  );
 
   readonly contentSectionTitle = computed(() =>
     this.isLive() ? 'Contenido de la factura impresa' : 'Contenido Personalizado',
@@ -185,9 +187,6 @@ export class ReceiptsSettingsForm {
   get autoIssueInvoiceControl() {
     return this.form.get('auto_issue_invoice') as FormControl;
   }
-  get invoiceCopiesControl() {
-    return this.form.get('invoice_copies') as FormControl;
-  }
   get sendInvoiceEmailControl() {
     return this.form.get('send_invoice_email') as FormControl;
   }
@@ -196,15 +195,6 @@ export class ReceiptsSettingsForm {
   }
   get deliverPrintedControl() {
     return this.form.get('deliver_printed') as FormControl;
-  }
-  get invoiceFormatControl() {
-    return this.form.get('invoice_format') as FormControl;
-  }
-  get posTicketFormatControl() {
-    return this.form.get('pos_ticket_format') as FormControl;
-  }
-  get posTicketCopiesControl() {
-    return this.form.get('pos_ticket_copies') as FormControl;
   }
 
   constructor() {
@@ -256,7 +246,7 @@ export class ReceiptsSettingsForm {
     this.previewError.set(null);
 
     this.invoicingService
-      .previewInvoicePdf(this.invoiceFormatControl.value ?? 'letter')
+      .previewInvoicePdf(this.invoicePrintFormat())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => this.showPreview(blob),
@@ -281,7 +271,7 @@ export class ReceiptsSettingsForm {
 
     try {
       const html = await this.posTicketService.buildSampleTicketHTML(
-        this.posTicketFormatControl.value ?? 'thermal_80',
+        this.posTicketPrintFormat(),
         // A live store prints the ticket as the informative copy of the invoice,
         // so that is what its preview must show.
         { asInvoiceCopy: this.isLive() },
