@@ -828,6 +828,19 @@ export class PopComponent implements OnInit, OnDestroy {
       this.popCartService.setHasVat(true);
     }
 
+    // QUI-661 Fase 4 — descuento GENERAL de pie de factura. Va al carrito, no a
+    // las líneas: el backend lo prorratea contra el peso de cada una. Se aplica
+    // sólo si el escáner lo detectó; un escaneo sin descuento no debe pisar el
+    // que el usuario haya tecleado a mano antes de escanear.
+    //
+    // El descuento POR LÍNEA no pasa por acá: viaja en cada `editedItems` y se
+    // convierte a porcentaje al agregar al carrito. Nunca se reportan los dos
+    // sobre el mismo dinero — el prompt lo prohíbe explícitamente.
+    const scannedHeaderDiscount = Number(data.scanResult?.discount_amount) || 0;
+    if (scannedHeaderDiscount > 0) {
+      this.popCartService.setDiscountAmount(scannedHeaderDiscount);
+    }
+
     let addedCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
