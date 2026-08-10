@@ -67,6 +67,9 @@ export class PriceTiersService {
     if (query.is_active != null) {
       params = params.set('is_active', String(query.is_active));
     }
+    // Sin `kind` el backend devuelve los dos ejes. Los selectores lo pasan para
+    // no mezclar tarifas de cliente con presentaciones de venta.
+    if (query.kind) params = params.set('kind', query.kind);
     if (query.sort_by) params = params.set('sort_by', query.sort_by);
     if (query.sort_order) params = params.set('sort_order', query.sort_order);
 

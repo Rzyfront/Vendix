@@ -15,6 +15,16 @@
  * carries how many stock units a package consumes (packaging cascade), with an
  * optional per-product/per-variant `override_units_per_package`.
  */
+/**
+ * Los dos ejes que conviven sobre `price_tiers`:
+ *  - `customer_tier`: a QUIÉN le vendo (mayorista, minorista, distribuidor).
+ *  - `sale_unit`: EN QUÉ PRESENTACIÓN vendo (rollo, metro, bulto, kilo).
+ *
+ * Los selectores filtran por este campo para no mezclarlos: el selector de
+ * tarifa del POS pide `customer_tier`, el editor de presentaciones `sale_unit`.
+ */
+export type PriceTierKind = 'customer_tier' | 'sale_unit';
+
 export interface PriceTier {
   id: number;
   store_id: number;
@@ -22,7 +32,11 @@ export interface PriceTier {
   code?: string | null;
   description?: string | null;
   discount_percentage?: number | null;
+  kind: PriceTierKind;
   is_active: boolean;
+  /** Tarifa por defecto de la TIENDA. No confundir con la presentación por
+   * defecto del PRODUCTO, que vive en el override
+   * (`ProductPriceTierOverride.is_default`). */
   is_default: boolean;
   is_package_unit: boolean;
   /**
@@ -53,6 +67,18 @@ export interface ProductPriceTierOverride {
   override_price: number | null;
   /** Per-product/per-variant override of units-per-package (packaging cascade). */
   override_units_per_package?: number | null;
+  /**
+   * Margen de la presentación (markup sobre el costo del PAQUETE). Lo deriva el
+   * backend a partir del precio con criterio cost-anchor; el editor lo muestra
+   * pero no es la fuente de verdad.
+   */
+  override_profit_margin?: number | null;
+  /**
+   * Presentación por defecto del PRODUCTO: la que rige en toda superficie de
+   * venta. Se persiste en `product_price_tier_assignments` y el backend la
+   * proyecta en esta lectura para que el editor lea una sola forma por fila.
+   */
+  is_default?: boolean;
   created_at: string | Date;
   updated_at: string | Date;
 
@@ -65,6 +91,8 @@ export interface CreatePriceTierDto {
   code?: string;
   description?: string;
   discount_percentage?: number;
+  /** Omitirlo equivale a `customer_tier` (default del backend). */
+  kind?: PriceTierKind;
   is_active?: boolean;
   is_default?: boolean;
   is_package_unit?: boolean;
@@ -83,6 +111,9 @@ export interface PriceTierQuery {
   limit?: number;
   search?: string;
   is_active?: boolean;
+  /** Filtra por eje. Sin él vienen los dos, que es lo que quiere la lista de
+   * administración; los selectores siempre lo pasan. */
+  kind?: PriceTierKind;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -97,4 +128,12 @@ export interface UpsertProductPriceTierOverrideDto {
   override_price?: number;
   /** Per-product/per-variant override of units-per-package (packaging cascade). */
   override_units_per_package?: number;
+  /**
+   * Margen explícito. Normalmente se omite: el editor deriva el precio del
+   * margen y el backend recalcula el margen desde ese precio (cost-anchor), así
+   * que enviar ambos es redundante y el precio siempre gana.
+   */
+  override_profit_margin?: number;
+  /** Marca esta presentación como la que rige por defecto en el producto. */
+  is_default?: boolean;
 }

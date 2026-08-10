@@ -483,8 +483,16 @@
                             row.tier.name
                           }}</span>
                           @if (row.tier.is_default) {
+                            <!-- Default de la TIENDA. No es la presentación por
+                                 defecto del producto (esa es el botón Por
+                                 defecto del header, sobre el assignment). -->
+                            <app-badge variant="neutral" size="sm"
+                              >Tarifa base de la tienda</app-badge
+                            >
+                          }
+                          @if (row.is_default) {
                             <app-badge variant="primary" size="sm"
-                              >Por defecto</app-badge
+                              >Presentación por defecto</app-badge
                             >
                           }
                           @if (getRowPackSize(row) > 1) {
@@ -499,15 +507,41 @@
                             >
                           }
                         </div>
-                        <button
-                          type="button"
-                          (click)="toggleTierAssignment(row.tier.id, false)"
-                          class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-rose-600 font-medium shrink-0"
-                          aria-label="Quitar tarifa"
-                        >
-                          <app-icon name="x" size="14"></app-icon>
-                          Quitar
-                        </button>
+                        <div class="flex items-center gap-3 shrink-0">
+                          <!-- Presentación por defecto: la que rige en tienda
+                               online, POS y cotizaciones. Elegir entre varias al
+                               vender es exclusivo del POS. Solo aplica a
+                               unidades de venta, no a tarifas de cliente. -->
+                          @if (canBeDefaultRow(row)) {
+                            <button
+                              type="button"
+                              (click)="toggleDefaultTierRow(row.tier.id)"
+                              [class]="
+                                row.is_default
+                                  ? 'inline-flex items-center gap-1 text-xs font-medium text-primary-600'
+                                  : 'inline-flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-primary-600'
+                              "
+                              [attr.aria-pressed]="row.is_default"
+                              [title]="
+                                row.is_default
+                                  ? 'Esta presentación se usa por defecto en tienda online, POS y cotizaciones. Pulsa para quitarla.'
+                                  : 'Usar esta presentación por defecto en tienda online, POS y cotizaciones.'
+                              "
+                            >
+                              <app-icon name="star" size="14"></app-icon>
+                              Por defecto
+                            </button>
+                          }
+                          <button
+                            type="button"
+                            (click)="toggleTierAssignment(row.tier.id, false)"
+                            class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-rose-600 font-medium shrink-0"
+                            aria-label="Quitar tarifa"
+                          >
+                            <app-icon name="x" size="14"></app-icon>
+                            Quitar
+                          </button>
+                        </div>
                       </div>
 
                       <!-- Inputs grid: price ↔ margin (bidirectional) + units -->

@@ -48,18 +48,38 @@
             </p>
           </div>
 
+          <!-- Eje de la tarifa. Los dos conviven en la misma tabla, así que se
+               pide explícitamente: sin esto "Mayorista" y "Kilo" se leen igual
+               en los selectores de venta. -->
+          <div class="mb-3">
+            <app-selector
+              label="¿Qué estás configurando? *"
+              formControlName="kind"
+              [options]="kindOptions"
+              [errorText]="getError('kind')"
+            />
+          </div>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <app-input
               label="Nombre *"
               formControlName="name"
-              placeholder="Ej: Mayorista"
+              [placeholder]="
+                form.get('kind')?.value === 'sale_unit'
+                  ? 'Ej: Bulto 50 kg'
+                  : 'Ej: Mayorista'
+              "
               [required]="true"
               [error]="getError('name')"
             />
             <app-input
               label="Código"
               formControlName="code"
-              placeholder="Ej: WHOLESALE"
+              [placeholder]="
+                form.get('kind')?.value === 'sale_unit'
+                  ? 'Ej: BULTO50'
+                  : 'Ej: WHOLESALE'
+              "
               [error]="getError('code')"
             />
           </div>

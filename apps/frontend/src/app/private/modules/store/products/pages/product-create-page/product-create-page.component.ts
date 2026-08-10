@@ -147,6 +147,13 @@ interface PriceTierOverrideRow {
   override_units_per_package: number | null;
   // Snapshot of the persisted units-per-package to detect dirty edits on save.
   initial_override_units_per_package: number | null;
+  /**
+   * Presentación por defecto del producto: la que rige en TODA superficie de
+   * venta (tienda online, POS, cotizaciones). Solo una fila puede tenerlo, y
+   * solo si la tarifa es `sale_unit` — elegir entre varias es exclusivo del POS.
+   */
+  is_default: boolean;
+  initial_is_default: boolean;
 }
 
 @Component({
@@ -4213,6 +4220,7 @@ export class ProductCreatePageComponent {
                 ? Number(override.override_units_per_package)
                 : null;
             const enabled = enabledSet.has(tier.id);
+            const isDefault = override?.is_default === true;
             return {
               tier,
               enabled,
@@ -4221,6 +4229,8 @@ export class ProductCreatePageComponent {
               initial_override_price: existingPrice,
               override_units_per_package: existingUnits,
               initial_override_units_per_package: existingUnits,
+              is_default: isDefault,
+              initial_is_default: isDefault,
             };
           });
 
@@ -4257,6 +4267,8 @@ export class ProductCreatePageComponent {
             initial_override_price: null,
             override_units_per_package: null,
             initial_override_units_per_package: null,
+            is_default: false,
+            initial_is_default: false,
           }));
         this.priceTierRows.set(rows);
         this.hasLoadedPriceTiers.set(true);
@@ -4333,6 +4345,33 @@ export class ProductCreatePageComponent {
           };
     });
     this.priceTierRows.set(next);
+  }
+
+  /**
+   * Marca una presentación como la por defecto del producto. Se comporta como
+   * un radio: marcar una desmarca el resto en el mismo set, porque el backend
+   * garantiza un único default por producto vía índice único parcial y enviar
+   * dos sería un conflicto garantizado.
+   *
+   * Volver a pulsar la que ya estaba marcada la desmarca (queda sin default y
+   * el producto vuelve a venderse en su unidad principal).
+   */
+  toggleDefaultTierRow(tierId: number): void {
+    const current = this.priceTierRows();
+    const alreadyDefault = current.some(
+      (row) => row.tier.id === tierId && row.is_default,
+    );
+    this.priceTierRows.set(
+      current.map((row) => ({
+        ...row,
+        is_default: alreadyDefault ? false : row.tier.id === tierId,
+      })),
+    );
+  }
+
+  /** Solo una unidad de venta puede ser la presentación por defecto. */
+  canBeDefaultRow(row: PriceTierOverrideRow): boolean {
+    return row.tier.kind === 'sale_unit';
   }
 
   // ─── Pack size + price/margin helpers ───────────────────────────────────
@@ -4492,7 +4531,8 @@ export class ProductCreatePageComponent {
       const unitsChanged =
         row.initial_override_units_per_package !==
         row.override_units_per_package;
-      if (!priceChanged && !unitsChanged) continue;
+      const defaultChanged = row.initial_is_default !== row.is_default;
+      if (!priceChanged && !unitsChanged && !defaultChanged) continue;
 
       const hasPrice =
         row.override_price !== null && row.override_price !== undefined;
@@ -4500,7 +4540,10 @@ export class ProductCreatePageComponent {
         row.override_units_per_package !== null &&
         row.override_units_per_package !== undefined;
 
-      if (!hasPrice && !hasUnits) {
+      // Un cambio de default se persiste aunque no haya precio ni empaque: el
+      // default vive en el assignment, no en el override, así que borrar la fila
+      // perdería la marca.
+      if (!hasPrice && !hasUnits && !row.is_default) {
         // Nothing left to persist → delete the override (variant_id omitted).
         operations.push(
           this.priceTiersService
@@ -4522,6 +4565,10 @@ export class ProductCreatePageComponent {
               override_units_per_package: hasUnits
                 ? Number(row.override_units_per_package)
                 : undefined,
+              // El margen NO se envía: el backend lo deriva del precio con
+              // criterio cost-anchor, así que mandarlo sería redundante y el
+              // precio ganaría igual. Enviar solo el default cuando cambió.
+              ...(defaultChanged ? { is_default: row.is_default } : {}),
             })
             .toPromise()
             .catch((err) => {
@@ -4546,6 +4593,7 @@ export class ProductCreatePageComponent {
           ...row,
           initial_override_price: row.override_price,
           initial_override_units_per_package: row.override_units_per_package,
+          initial_is_default: row.is_default,
         }));
         this.priceTierRows.set(refreshed);
       })
