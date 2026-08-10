@@ -236,13 +236,19 @@ export class InventoryAnalyticsService {
     // query (no N+1). The result for a product is the WEIGHTED-AVERAGE cost
     // across locations, weighted by quantity_on_hand. For a product that
     // has zero on-hand the cost stays at the catalog price as a fallback.
-    const costRows = await (this.prisma as any).withoutScope().$queryRaw<
-      Array<{
-        product_id: number;
-        cost_per_unit: string | number;
-        reserved_qty: string | number;
-      }>
-    >(Prisma.sql`
+    // Cast through a typed handle for $queryRaw: the scoped client's
+    // withoutScope() returns the base PrismaClient which exposes $queryRaw
+    // with a generic T; the previous `(this.prisma as any).withoutScope()`
+    // lost the generic and TS rejected the call (TS2347).
+    const untyped = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const costRows = await untyped.$queryRaw<Array<{
+      product_id: number;
+      cost_per_unit: string | number;
+      reserved_qty: string | number;
+    }>>(
+      Prisma.sql`
       SELECT
         sl.product_id AS product_id,
         CASE WHEN SUM(sl.quantity_on_hand) > 0
@@ -938,14 +944,17 @@ export class InventoryAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
-    // storeId is validated above and used in the WHERE clause.
-    const results = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{
-        movement_type: string;
-        count: bigint;
-        total_quantity: any;
-      }>
-    >`
+    // storeId is validated above and used in the WHERE clause. Cast through
+    // a typed handle for $queryRaw<T>: same TS2347 fix as in buildStockLevelRows.
+    const untypedMovement = (this.prisma.withoutScope() as any) as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const results = await untypedMovement.$queryRaw<Array<{
+      movement_type: string;
+      count: bigint;
+      total_quantity: any;
+    }>>(
+      Prisma.sql`
       SELECT
         im.movement_type,
         COUNT(*)::bigint AS count,
@@ -958,7 +967,7 @@ export class InventoryAnalyticsService {
         ${query.location_id ? Prisma.sql`AND (im.from_location_id = ${query.location_id} OR im.to_location_id = ${query.location_id})` : Prisma.empty}
       GROUP BY im.movement_type
       ORDER BY count DESC
-    `;
+    `);
 
     const totalCount = results.reduce((sum, r) => sum + Number(r.count), 0);
 
