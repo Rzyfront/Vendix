@@ -504,6 +504,12 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   }
 
   onHeaderAction(id: string): void {
+    // QUI-651 — acceso a la configuracion de estaciones y turnos. Sin esta
+    // entrada la pantalla existe y nadie llega a ella.
+    if (id === 'config') {
+      this.router.navigate(['/admin/restaurant-ops/kds/configuracion']);
+      return;
+    }
     if (id === 'refresh') {
       this.forceRefresh();
     } else if (id === 'reconnect') {

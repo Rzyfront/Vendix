@@ -19,4 +19,14 @@ export const kdsRoutes: Routes = [
       ).then((c) => c.KdsBoardPageComponent),
     data: { permission: 'store:kitchen_fire:read' },
   },
+  {
+    // Configuración de estaciones y turnos. Permiso propio (`store:kds:read`) y
+    // no el del fire: configurar estaciones es una acción distinta de cocinar.
+    path: 'configuracion',
+    loadComponent: () =>
+      import(
+        '../pages/kds-manage-page/kds-manage-page.component'
+      ).then((c) => c.KdsManagePageComponent),
+    data: { permission: 'store:kds:read' },
+  },
 ];

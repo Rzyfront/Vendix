@@ -131,6 +131,23 @@ export class KdsStationsService {
       );
   }
 
+  /**
+   * Historial de turnos. Sin `kdsId` devuelve los de TODAS las estaciones, que es
+   * lo que la vista de gestión necesita — a diferencia del tablero, que es de una.
+   */
+  listSessions(kdsId?: number): Observable<KdsSession[]> {
+    let params = new HttpParams();
+    if (kdsId != null) params = params.set('kds_id', String(kdsId));
+    return this.http
+      .get<ApiResponse<KdsSession[]>>(`${this.apiUrl}/store/kds-sessions`, {
+        params,
+      })
+      .pipe(
+        map((res) => res.data ?? []),
+        catchError((err) => this.fail(err, 'No se pudo cargar el historial')),
+      );
+  }
+
   openSessionFor(kdsId: number): Observable<KdsSession> {
     return this.http
       .post<ApiResponse<KdsSession>>(`${this.apiUrl}/store/kds-sessions/open`, {
