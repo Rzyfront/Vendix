@@ -689,7 +689,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(o.grand_total), 0) AS revenue,
+        COALESCE(SUM(o.subtotal_amount - o.discount_amount + o.shipping_cost), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
