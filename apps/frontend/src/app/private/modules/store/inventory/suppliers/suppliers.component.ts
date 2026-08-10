@@ -1,6 +1,7 @@
 import { Component, OnInit, signal, computed, DestroyRef, inject } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 
 // Shared Components
 import {
@@ -113,6 +114,7 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         (filter)="onFilterChange($event)"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
+        (view)="openSupplierProfile($event)"
         (delete)="confirmDelete($event)"
         (sort)="onSort($event)"
         (pageChange)="onPageChange($event)"
@@ -164,6 +166,7 @@ export class SuppliersComponent implements OnInit {
   });
 
   private destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
   private authFacade = inject(AuthFacade);
 
   /**
@@ -280,6 +283,11 @@ export class SuppliersComponent implements OnInit {
     if (!this.canMutate()) return;
     this.selected_supplier.set(null);
     this.is_modal_open.set(true);
+  }
+
+  /** QUI-656 — navega al perfil del proveedor (ruta lazy, URL compartible). */
+  openSupplierProfile(supplier: Supplier): void {
+    this.router.navigate(['/admin/inventory/suppliers', supplier.id]);
   }
 
   openEditModal(supplier: Supplier): void {

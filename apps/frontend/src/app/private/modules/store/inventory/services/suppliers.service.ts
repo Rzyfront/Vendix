@@ -8,6 +8,9 @@ import {
     CreateSupplierDto,
     UpdateSupplierDto,
     SupplierQueryDto,
+    SupplierSummary,
+    SupplierPurchaseOrderRow,
+    SupplierPayableRow,
     ApiResponse,
     PaginatedResponse,
 } from '../interfaces';
@@ -34,6 +37,52 @@ export class SuppliersService {
     getSupplierById(id: number): Observable<ApiResponse<Supplier>> {
         return this.http
             .get<ApiResponse<Supplier>>(`${this.api_url}/${id}`)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // QUI-656 — Perfil del proveedor
+    // ============================================================
+
+    /**
+     * Resumen del perfil. Los agregados salen del contrato de métrica del
+     * backend, así que estas cifras cuadran con Compras por Proveedor.
+     */
+    getSupplierSummary(id: number): Observable<ApiResponse<SupplierSummary>> {
+        return this.http
+            .get<ApiResponse<SupplierSummary>>(`${this.api_url}/${id}/summary`)
+            .pipe(catchError(this.handleError));
+    }
+
+    getSupplierPurchaseOrders(
+        id: number,
+        page = 1,
+        limit = 10,
+    ): Observable<PaginatedResponse<SupplierPurchaseOrderRow>> {
+        const params = new HttpParams()
+            .set('page', String(page))
+            .set('limit', String(limit));
+        return this.http
+            .get<PaginatedResponse<SupplierPurchaseOrderRow>>(
+                `${this.api_url}/${id}/purchase-orders`,
+                { params },
+            )
+            .pipe(catchError(this.handleError));
+    }
+
+    getSupplierPayables(
+        id: number,
+        page = 1,
+        limit = 10,
+    ): Observable<PaginatedResponse<SupplierPayableRow>> {
+        const params = new HttpParams()
+            .set('page', String(page))
+            .set('limit', String(limit));
+        return this.http
+            .get<PaginatedResponse<SupplierPayableRow>>(
+                `${this.api_url}/${id}/payables`,
+                { params },
+            )
             .pipe(catchError(this.handleError));
     }
 

@@ -14,6 +14,10 @@ import {
   TERMINAL_PURCHASE_ORDER_STATUS,
   TERMINAL_DISPATCH_NOTE_STATUS,
 } from '@common/constants/supplier-lifecycle.constants';
+// QUI-656: el perfil CONSUME el contrato de métrica, no define su propio
+// criterio de "compra reconocida". Agregar una tercera definición garantizaría
+// un tercer desacuerdo — que es exactamente el bug de QUI-625.
+import { PURCHASE_COMMITTED_STATES } from '../../analytics/analytics-metrics.contract';
 
 @Injectable()
 export class SuppliersService {
@@ -192,6 +196,267 @@ export class SuppliersService {
         created_at: 'desc',
       },
     });
+  }
+
+  /**
+   * QUI-656 — resuelve el universo de compras del proveedor según el alcance
+   * operativo de la organización.
+   *
+   * `ORGANIZATION`: la deuda y las compras son de TODA la organización, porque
+   * el proveedor es único y compartido. `STORE`: se agrega por la tienda
+   * activa, o un proveedor compartido entre tiendas mostraría deuda ajena.
+   *
+   * El filtro sale de `location.store_id` y no de `suppliers.store_id`: el
+   * primero es NOT NULL y siempre resuelve a tienda; el segundo es nullable, y
+   * filtrar por él borraría toda compra a proveedores de nivel organización.
+   * Es el mismo universo que usan las analíticas de compras (QUI-624/625), que
+   * es lo que hace que las cifras del perfil cuadren con ellas.
+   */
+  private async resolvePurchaseScope(): Promise<{
+    organizationId: number;
+    storeId: number | null;
+  }> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new BadRequestException('Organization context is missing');
+    }
+    const scope = await this.operatingScopeService.getOperatingScope(
+      context.organization_id,
+    );
+    return {
+      organizationId: context.organization_id,
+      storeId: scope === 'ORGANIZATION' ? null : (context.store_id ?? null),
+    };
+  }
+
+  /**
+   * QUI-656 — resuelve el proveedor para el PERFIL, aceptando también los de
+   * nivel organización (`suppliers.store_id IS NULL`).
+   *
+   * `findOne` usa `getSupplierScopeWhere`, que en alcance STORE exige
+   * `store_id = <tienda>` y por lo tanto no alcanza a un proveedor de
+   * organización. Medido en la organización 6: el proveedor 109 tiene
+   * `store_id NULL` y 22 órdenes — el de MAYOR volumen —, así que el perfil del
+   * proveedor más importante era inalcanzable.
+   *
+   * El arreglo se limita al perfil a propósito: cambiar `getSupplierScopeWhere`
+   * afectaría listado, edición y borrado, que tienen sus propias reglas de
+   * aislamiento. Acá solo se LEE, y una compra a un proveedor de organización
+   * aterriza igual en la tienda, así que su perfil le corresponde ver.
+   */
+  private async findSupplierForProfile(id: number) {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new BadRequestException('Organization context is missing');
+    }
+    const supplier = await this.prisma.suppliers.findFirst({
+      where: {
+        id,
+        organization_id: context.organization_id,
+        ...(context.store_id
+          ? { OR: [{ store_id: context.store_id }, { store_id: null }] }
+          : {}),
+      },
+    });
+    if (!supplier) {
+      throw new VendixHttpException(ErrorCodes.SUPPLIER_FIND_001);
+    }
+    return supplier;
+  }
+
+  /** `where` de purchase_orders para el universo resuelto arriba. */
+  private buildPurchaseOrderWhere(
+    organizationId: number,
+    storeId: number | null,
+    supplierId: number,
+  ) {
+    return {
+      organization_id: organizationId,
+      supplier_id: supplierId,
+      ...(storeId !== null ? { location: { store_id: storeId } } : {}),
+    };
+  }
+
+  /**
+   * QUI-656 — resumen del perfil del proveedor.
+   *
+   * Las dos cifras de deuda van SEPARADAS a propósito:
+   *
+   * - `outstanding_debt` sale de `accounts_payable`: es la deuda formalizada,
+   *   la que cuadra contra contabilidad y contra el aging de QUI-542.
+   * - `committed_amount` son OCs aprobadas que todavía no generaron CxP. La
+   *   CxP nace atada a la RECEPCIÓN (`ap_reception_links`), no a la aprobación,
+   *   así que entre aprobar y recibir existe un compromiso real que no está en
+   *   `accounts_payable`.
+   *
+   * Sumarlas en un solo número mostraría una deuda que no cuadra con ningún
+   * libro. Mostrar solo la primera subestima la exposición con el proveedor.
+   */
+  async getSupplierSummary(supplierId: number) {
+    const supplier = await this.findSupplierForProfile(supplierId);
+    const { organizationId, storeId } = await this.resolvePurchaseScope();
+    const baseWhere = this.buildPurchaseOrderWhere(
+      organizationId,
+      storeId,
+      supplierId,
+    );
+
+    const [committed, lastOrder, payables, pendingReception] =
+      await Promise.all([
+        // Compras reconocidas: mismos estados que el contrato de métrica, para
+        // que el perfil no invente un cuarto criterio de "cuánto le compré".
+        this.prisma.purchase_orders.aggregate({
+          where: {
+            ...baseWhere,
+            status: { in: [...PURCHASE_COMMITTED_STATES] },
+          },
+          _count: { _all: true },
+          _sum: { subtotal_amount: true },
+        }),
+        this.prisma.purchase_orders.findFirst({
+          where: baseWhere,
+          orderBy: { order_date: 'desc' },
+          select: { order_date: true, status: true },
+        }),
+        this.prisma.accounts_payable.findMany({
+          where: {
+            organization_id: organizationId,
+            supplier_id: supplierId,
+            ...(storeId !== null ? { store_id: storeId } : {}),
+            status: 'open',
+          },
+          select: { balance: true, days_overdue: true, due_date: true },
+        }),
+        // Compromiso sin CxP: aprobadas/parciales que aún no formalizaron deuda.
+        this.prisma.purchase_orders.aggregate({
+          where: {
+            ...baseWhere,
+            status: { in: ['approved', 'partial'] },
+          },
+          _count: { _all: true },
+          _sum: { total_amount: true },
+        }),
+      ]);
+
+    const orderCount = committed._count._all ?? 0;
+    const totalPurchased = Number(committed._sum.subtotal_amount ?? 0);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    let outstanding = 0;
+    let overdue = 0;
+    let maxDaysOverdue = 0;
+    for (const ap of payables) {
+      const balance = Number(ap.balance ?? 0);
+      outstanding += balance;
+      if ((ap.days_overdue ?? 0) > 0) {
+        overdue += balance;
+        maxDaysOverdue = Math.max(maxDaysOverdue, ap.days_overdue ?? 0);
+      }
+    }
+
+    return {
+      supplier_id: supplier.id,
+      supplier_name: supplier.name,
+      /**
+       * La identidad viaja DENTRO del resumen a propósito: `GET /:id` resuelve
+       * con `findOne`, que en alcance STORE no alcanza a un proveedor de
+       * organización. Pedirla aparte obligaba al frontend a un forkJoin que
+       * moría entero por ese 404 y dejaba el perfil en blanco.
+       */
+      supplier,
+      /** Órdenes que cuentan como compra reconocida. */
+      total_orders: orderCount,
+      /** SUM(subtotal_amount) — SIN IVA, igual que el Resumen de Compras. */
+      total_purchased: round2(totalPurchased),
+      /** Derivado, no persistido. */
+      average_order_value: orderCount > 0 ? round2(totalPurchased / orderCount) : 0,
+      /** Deuda formalizada en accounts_payable. Cuadra con contabilidad. */
+      outstanding_debt: round2(outstanding),
+      overdue_debt: round2(overdue),
+      max_days_overdue: maxDaysOverdue,
+      /** OCs aprobadas/parciales sin CxP todavía: compromiso, no deuda. */
+      committed_amount: round2(Number(pendingReception._sum.total_amount ?? 0)),
+      committed_orders: pendingReception._count._all ?? 0,
+      last_order_date: lastOrder?.order_date ?? null,
+      /** El universo agregado, para que la UI pueda declararlo. */
+      scope: storeId === null ? 'ORGANIZATION' : 'STORE',
+    };
+  }
+
+  /** QUI-656 — historial paginado de OCs del proveedor. */
+  async getSupplierPurchaseOrders(
+    supplierId: number,
+    page = 1,
+    limit = 20,
+  ) {
+    await this.findSupplierForProfile(supplierId);
+    const { organizationId, storeId } = await this.resolvePurchaseScope();
+    const where = this.buildPurchaseOrderWhere(
+      organizationId,
+      storeId,
+      supplierId,
+    );
+
+    const [total, data] = await Promise.all([
+      this.prisma.purchase_orders.count({ where }),
+      this.prisma.purchase_orders.findMany({
+        where,
+        orderBy: { order_date: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          order_number: true,
+          status: true,
+          payment_status: true,
+          subtotal_amount: true,
+          tax_amount: true,
+          total_amount: true,
+          supplier_invoice_number: true,
+          order_date: true,
+          expected_date: true,
+          received_date: true,
+        },
+      }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  /** QUI-656 — documentos de CxP del proveedor con saldo y vencimiento. */
+  async getSupplierPayables(supplierId: number, page = 1, limit = 20) {
+    await this.findSupplierForProfile(supplierId);
+    const { organizationId, storeId } = await this.resolvePurchaseScope();
+    const where = {
+      organization_id: organizationId,
+      supplier_id: supplierId,
+      ...(storeId !== null ? { store_id: storeId } : {}),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.accounts_payable.count({ where }),
+      this.prisma.accounts_payable.findMany({
+        where,
+        // Lo vencido primero: es lo que exige acción.
+        orderBy: [{ status: 'asc' }, { due_date: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          document_number: true,
+          source_type: true,
+          source_id: true,
+          original_amount: true,
+          paid_amount: true,
+          balance: true,
+          due_date: true,
+          status: true,
+          days_overdue: true,
+        },
+      }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async update(id: number, updateSupplierDto: UpdateSupplierDto) {
