@@ -105,6 +105,47 @@ export class SubscriptionFiscalController {
     );
   }
 
+  /**
+   * Qué falta para que la plataforma emita en producción.
+   *
+   * Espeja `GET store/invoicing/dian-config/:id/production-readiness`. Este riel
+   * tenía `habilitation_readiness` —«¿puedo empezar?»— y no este reporte —«¿puedo
+   * salir a producción?»—, que es el que trae el chequeo `test_set_evidence`.
+   * Solo lectura: no muta nada y se puede consultar en cualquier estado.
+   */
+  @Get('production-readiness')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary: 'Production readiness checklist for the platform DIAN config',
+  })
+  async getProductionReadiness(): Promise<any> {
+    const report = await this.fiscalService.getProductionReadiness();
+    return this.responseService.success(
+      report,
+      'Production readiness retrieved',
+    );
+  }
+
+  /**
+   * Pasa la plataforma a producción, con la guarda completa de readiness.
+   *
+   * Es la ÚNICA vía. `PATCH config` rechaza `environment: 'production'` desde que
+   * se descubrió que volteaba el ambiente de la configuración —el que usa el
+   * proveedor para firmar y transmitir— sin comprobar que la DIAN hubiera
+   * aprobado el set de habilitación.
+   */
+  @Post('promote-to-production')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Promote the platform DIAN config to production' })
+  async promoteToProduction(): Promise<any> {
+    const result = await this.fiscalService.promoteToProduction();
+    return this.responseService.updated(
+      result,
+      'Plataforma promovida a producción',
+    );
+  }
+
   // ─────────────────────────────────────────────────────────
   // DIAN test set (habilitación) for the platform's own NIT
   // ─────────────────────────────────────────────────────────
