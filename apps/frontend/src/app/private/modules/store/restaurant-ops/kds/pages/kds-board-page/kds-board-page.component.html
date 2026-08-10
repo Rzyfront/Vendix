@@ -95,6 +95,19 @@
     </div>
   } @else {
 
+  <!--
+    QUI-651 — barra de turno, espejo de la de caja en el POS. Dice en que estacion
+    estas, quien tiene el turno y desde cuando, y ofrece cerrarlo sin salir del
+    tablero. Cuando no hay turno lo dice en vez de desaparecer: una barra ausente
+    no distingue "sin turno" de "no cargo".
+  -->
+  <app-kds-session-status-bar
+    [session]="stationsService.openSession()"
+    [station]="stationsService.selectedStation()"
+    (closeClicked)="onHeaderAction('close-session')"
+    (detailClicked)="onHeaderAction('config')"
+  />
+
   @if (lastError()) {
     <div class="kds-board__error" role="alert">
       <app-icon name="alert-triangle" [size]="16" />

@@ -28,6 +28,7 @@ import {
 } from '../../interfaces';
 import type { FirePreview, FireItemExclusion } from '../../interfaces';
 import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
+import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
 import {
   KdsConnectionState,
   KdsSseService,
@@ -75,6 +76,7 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
     ModalComponent,
     ButtonComponent,
     KitchenConfirmModalComponent,
+    KdsSessionStatusBarComponent,
   ],
   templateUrl: './kds-board-page.component.html',
   styleUrl: './kds-board-page.component.scss',
