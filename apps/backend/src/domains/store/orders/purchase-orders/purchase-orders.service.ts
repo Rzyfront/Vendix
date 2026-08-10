@@ -116,13 +116,24 @@ export class PurchaseOrdersService {
       quantity?: number | null;
       tax_rate?: number | null;
       prices_include_tax?: boolean | null;
+      discount_percentage?: number | null;
+      discount_amount?: number | null;
     },
     header: { prices_include_tax?: boolean | null },
+    /**
+     * QUI-661 — share of the HEADER discount that belongs to this line, already
+     * prorated by `prorateHeaderDiscount`. Kept as an explicit argument instead
+     * of a field on `item` so a caller can never accidentally double-count it
+     * by also leaving it inside `discount_amount`.
+     */
+    proratedHeaderDiscount = 0,
   ): {
     unit_price_net: number;
     tax_amount_per_unit: number;
     tax_amount: number;
     effective_include: boolean;
+    /** Total commercial discount applied to the line (own + prorated header). */
+    discount_total: number;
   } {
     const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
     const quantity = Number(item.quantity ?? 0);
@@ -130,20 +141,43 @@ export class PurchaseOrdersService {
     const effective_include =
       item.prices_include_tax ?? header.prices_include_tax ?? false;
 
+    // QUI-661 — the commercial discount is subtracted from the GROSS unit price
+    // BEFORE the VAT split. In Colombia an unconditional commercial discount
+    // reduces the taxable base, so deriving the VAT from the undiscounted price
+    // inflates the deductible VAT that reaches the declaration.
+    //
+    // `discount_amount` wins over `discount_percentage`: the user may type
+    // either, but the resolved money figure is what gets persisted and what the
+    // accounting reads. Re-deriving from the percentage at read time would give
+    // a different number the day the price changes.
+    const ownDiscount =
+      item.discount_amount != null && Number(item.discount_amount) > 0
+        ? Number(item.discount_amount)
+        : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
+    const discount_total = Math.max(
+      0,
+      ownDiscount + Number(proratedHeaderDiscount || 0),
+    );
+    // Never let a discount drive the line negative: a rebate larger than the
+    // line is a data error, and a negative cost would poison the FIFO layer.
+    const discountPerUnit =
+      quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
+    const grossAfterDiscount = gross - discountPerUnit;
+
     let unit_price_net: number;
     let tax_amount_per_unit: number;
     if (!(r > 0)) {
       // No (or invalid) tax rate → line is tax-free, cost stays as entered.
-      unit_price_net = gross;
+      unit_price_net = grossAfterDiscount;
       tax_amount_per_unit = 0;
     } else if (effective_include) {
       // Price already includes IVA: strip it out to get the net cost.
-      unit_price_net = gross / (1 + r);
-      tax_amount_per_unit = gross - unit_price_net;
+      unit_price_net = grossAfterDiscount / (1 + r);
+      tax_amount_per_unit = grossAfterDiscount - unit_price_net;
     } else {
       // IVA added on top: entered price is already net.
-      unit_price_net = gross;
-      tax_amount_per_unit = gross * r;
+      unit_price_net = grossAfterDiscount;
+      tax_amount_per_unit = grossAfterDiscount * r;
     }
 
     return {
@@ -151,7 +185,56 @@ export class PurchaseOrdersService {
       tax_amount_per_unit,
       tax_amount: tax_amount_per_unit * quantity,
       effective_include,
+      discount_total: discountPerUnit * quantity,
     };
+  }
+
+  /**
+   * QUI-661 — splits a HEADER discount across the lines, proportionally to each
+   * line's weight in the gross subtotal.
+   *
+   * The header discount cannot stay in the header. FIFO cost layers are written
+   * per line (`resolveUoMConversion` → `calculateCostOnReceipt`), so a figure
+   * that only exists on `purchase_orders.discount_amount` has no physical way to
+   * reach the product's cost — which is exactly why the pre-QUI-661 behaviour
+   * left the CxP rebated while the inventory capitalized the full price.
+   *
+   * The rounding remainder lands on the LAST line so that
+   * `Σ prorated === headerDiscount` exactly and the order total never drifts by
+   * a cent against what the supplier invoiced.
+   */
+  private prorateHeaderDiscount(
+    items: Array<{
+      unit_price?: number | null;
+      unit_cost?: number | null;
+      quantity?: number | null;
+    }>,
+    headerDiscount: number,
+  ): number[] {
+    const shares = new Array(items.length).fill(0);
+    const discount = Number(headerDiscount || 0);
+    if (!(discount > 0) || items.length === 0) return shares;
+
+    const grossPerLine = items.map(
+      (i) =>
+        Number(i.unit_price ?? i.unit_cost ?? 0) * Number(i.quantity ?? 0),
+    );
+    const grossTotal = grossPerLine.reduce((s, v) => s + v, 0);
+    // A discount over a zero-value order has nothing to attach to; dropping it
+    // is safer than dividing by zero and emitting NaN into the cost engine.
+    if (!(grossTotal > 0)) return shares;
+
+    // Never discount more than the order is worth.
+    const effective = Math.min(discount, grossTotal);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    let assigned = 0;
+    for (let i = 0; i < items.length - 1; i++) {
+      shares[i] = round2((grossPerLine[i] / grossTotal) * effective);
+      assigned += shares[i];
+    }
+    shares[items.length - 1] = round2(effective - assigned);
+    return shares;
   }
 
   /**
@@ -962,20 +1045,34 @@ export class PurchaseOrdersService {
       // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
       // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
       // consistente frente a los pagos (que pagan el bruto de factura).
+      //
+      // QUI-661: el descuento comercial YA NO se resta al final. Antes era
+      //   total = subtotal − descuento + IVA + flete
+      // con `lineTax` derivado del subtotal SIN descontar, lo que inflaba el
+      // IVA descontable que llega a la declaración. Ahora el descuento de
+      // cabecera se prorratea por línea y entra DENTRO de `deriveLineTax`, que
+      // baja `unit_price_net` antes de derivar el IVA. Como consecuencia
+      // `subtotal_amount` ya viene neto de descuento y restarlo otra vez sería
+      // contarlo dos veces.
       const round2 = (n: number) => Math.round(n * 100) / 100;
+      const headerShares = this.prorateHeaderDiscount(
+        processedItems,
+        Number(createPurchaseOrderDto.discount_amount || 0),
+      );
       let netSubtotal = 0;
       let lineTax = 0;
-      for (const item of processedItems) {
-        const d = this.deriveLineTax(item, createPurchaseOrderDto);
-        netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+      for (let i = 0; i < processedItems.length; i++) {
+        const d = this.deriveLineTax(
+          processedItems[i],
+          createPurchaseOrderDto,
+          headerShares[i],
+        );
+        netSubtotal += d.unit_price_net * Number(processedItems[i].quantity ?? 0);
         lineTax += d.tax_amount;
       }
       const subtotal = round2(netSubtotal);
       const totalAmount = round2(
-        subtotal -
-          (createPurchaseOrderDto.discount_amount || 0) +
-          round2(lineTax) +
-          (createPurchaseOrderDto.shipping_cost || 0),
+        subtotal + round2(lineTax) + (createPurchaseOrderDto.shipping_cost || 0),
       );
 
       // Generate order number
@@ -1047,16 +1144,32 @@ export class PurchaseOrdersService {
           organization_id,
           order_number,
           subtotal_amount: subtotal,
+          // QUI-661: `create()` nunca escribía el `tax_amount` de cabecera y lo
+          // dejaba en 0 mientras `total_amount` sí incluía el IVA — cabecera
+          // internamente incoherente. `update()` sí lo escribía. La métrica de
+          // compras lee la LÍNEA (ver QUI-624), pero dejar el header mintiendo
+          // es la trampa que hace caer al próximo lector.
+          tax_amount: round2(lineTax),
           total_amount: totalAmount,
           order_date: new Date(),
           purchase_order_items: {
-            create: processedItems.map((item) => {
+            create: processedItems.map((item, index) => {
               // F1 IVA lifecycle: derive net/tax from the entered unit_price
               // and the effective include-tax mode (line override ?? header).
               // `unit_cost` persists the NET price (single source of truth for
               // costing); the VAT treatment for inventory cost is decided later
               // in receive() by fiscal responsibility.
-              const derived = this.deriveLineTax(item, createPurchaseOrderDto);
+              //
+              // QUI-661: the SAME prorated header share used for the order
+              // totals is passed here, so the persisted `unit_cost` — the value
+              // the FIFO engine capitalizes at reception — already carries the
+              // commercial discount. This is what closes the old gap where the
+              // CxP was rebated but the inventory was not.
+              const derived = this.deriveLineTax(
+                item,
+                createPurchaseOrderDto,
+                headerShares[index],
+              );
               return {
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
@@ -1069,6 +1182,11 @@ export class PurchaseOrdersService {
                   tax_type_enum.iva,
                 prices_include_tax: item.prices_include_tax ?? null,
                 tax_amount: derived.tax_amount,
+                // Total discount actually applied (own + prorated header), and
+                // the percentage the user typed to get there. The amount is the
+                // source of truth; the percentage is provenance only.
+                discount_amount: derived.discount_total,
+                discount_percentage: item.discount_percentage ?? 0,
                 notes: item.notes,
                 batch_number: item.batch_number,
                 manufacturing_date: toDate(item.manufacturing_date),
@@ -1306,20 +1424,28 @@ export class PurchaseOrdersService {
           stage: 'create',
         });
 
+        // QUI-661 — mismo cambio de orden que create(): el descuento entra
+        // DENTRO de la derivación (baja la base gravable) en vez de restarse
+        // al final sobre un IVA ya calculado sin descontar.
         const round2 = (n: number) => Math.round(n * 100) / 100;
+        const headerShares = this.prorateHeaderDiscount(
+          items,
+          Number(updatePurchaseOrderDto.discount_amount || 0),
+        );
         let netSubtotal = 0;
         let lineTax = 0;
-        for (const item of items) {
-          const d = this.deriveLineTax(item, updatePurchaseOrderDto);
-          netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+        for (let i = 0; i < items.length; i++) {
+          const d = this.deriveLineTax(
+            items[i],
+            updatePurchaseOrderDto,
+            headerShares[i],
+          );
+          netSubtotal += d.unit_price_net * Number(items[i].quantity ?? 0);
           lineTax += d.tax_amount;
         }
         const subtotal = round2(netSubtotal);
         const totalAmount = round2(
-          subtotal -
-            (updatePurchaseOrderDto.discount_amount || 0) +
-            round2(lineTax) +
-            (updatePurchaseOrderDto.shipping_cost || 0),
+          subtotal + round2(lineTax) + (updatePurchaseOrderDto.shipping_cost || 0),
         );
 
         data.subtotal_amount = subtotal;
@@ -1332,8 +1458,13 @@ export class PurchaseOrdersService {
         await tx.purchase_order_items.deleteMany({
           where: { purchase_order_id: id },
         });
-        for (const item of items) {
-          const derived = this.deriveLineTax(item, updatePurchaseOrderDto);
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const derived = this.deriveLineTax(
+            item,
+            updatePurchaseOrderDto,
+            headerShares[i],
+          );
           await tx.purchase_order_items.create({
             data: {
               purchase_order_id: id,
@@ -1342,6 +1473,8 @@ export class PurchaseOrdersService {
               quantity_ordered: item.quantity,
               unit_cost: derived.unit_price_net,
               unit_price_net: derived.unit_price_net,
+              discount_amount: derived.discount_total,
+              discount_percentage: item.discount_percentage ?? 0,
               tax_rate: item.tax_rate ?? null,
               tax_type:
                 (item.tax_type as tax_type_enum | undefined) ??
@@ -3255,12 +3388,21 @@ export class PurchaseOrdersService {
       // F1 IVA lifecycle: derive the NET cost from the entered (possibly
       // gross) unit_cost + tax_rate + effective include-tax mode. The NET is
       // the cost basis for CPP/FIFO — mirrors what create/receive persist.
+      // QUI-661 — the preview must carry the line discount too, or the margin
+      // it shows is computed against a cost the order will never have. The
+      // HEADER discount is deliberately NOT prorated here: the preview runs per
+      // item without the sibling lines in scope, and guessing a share would
+      // show a cost that does not match what create() will persist.
       const derivedTax = this.deriveLineTax(
         {
           unit_cost: item.unit_cost,
           quantity: item.quantity,
           tax_rate: item.tax_rate,
           prices_include_tax: item.prices_include_tax,
+          discount_percentage: (item as { discount_percentage?: number })
+            .discount_percentage,
+          discount_amount: (item as { discount_amount?: number })
+            .discount_amount,
         },
         dto,
       );

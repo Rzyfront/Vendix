@@ -112,10 +112,27 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   is_sellable?: boolean;
 
-  @ApiProperty({ description: 'Discount percentage (optional)' })
+  /**
+   * QUI-661 — commercial discount granted by the supplier on THIS line.
+   *
+   * The user may type either the percentage or the money amount and the UI
+   * derives the other. When both arrive, `discount_amount` wins: it is the
+   * figure that gets persisted, that lowers the taxable base, and that the
+   * costing engine capitalizes. The percentage travels only as provenance.
+   */
+  @ApiProperty({ description: 'Line discount percentage (optional)' })
   @IsNumber()
   @IsOptional()
   discount_percentage?: number;
+
+  @ApiProperty({
+    description:
+      'QUI-661: line discount as a money amount. Wins over discount_percentage.',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  discount_amount?: number;
 
   @ApiProperty({ description: 'Tax rate (optional)' })
   @IsNumber()

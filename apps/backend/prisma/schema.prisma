@@ -2441,6 +2441,19 @@ model purchase_order_items {
   tax_rate               Decimal?                         @db.Decimal(5, 2)
   tax_type               tax_type_enum?                   @default(iva)
   prices_include_tax     Boolean?
+  /// QUI-661 commercial discount granted by the supplier ON THIS LINE.
+  /// `discount_percentage` is what the user typed when the deal is percentual;
+  /// `discount_amount` is the RESOLVED money figure and the single source of
+  /// truth for the calculation (the percentage is kept only to reproduce how
+  /// the number was reached). The discount is subtracted from the gross unit
+  /// price BEFORE the VAT is derived, so it lowers the taxable base, the
+  /// deductible VAT and the cost capitalized into the inventory layers.
+  /// A header-level discount (`purchase_orders.discount_amount`) is prorated
+  /// into these same columns at write time — it never stays in the header,
+  /// because FIFO cost layers are written per line and a header-only figure
+  /// has no way to reach the product's cost.
+  discount_percentage    Decimal?                         @default(0) @db.Decimal(5, 2)
+  discount_amount        Decimal?                         @default(0) @db.Decimal(12, 2)
   unit_price_net         Decimal?                         @db.Decimal(12, 4)
   tax_amount             Decimal?                         @db.Decimal(12, 2)
   deductible_tax_amount  Decimal?                         @db.Decimal(12, 2)

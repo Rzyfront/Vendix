@@ -50,6 +50,7 @@ const INITIAL_STATE: PopCartState = {
   summary: {
     subtotal: 0,
     tax_amount: 0,
+    discount_amount: 0,
     shipping_cost: 0,
     total: 0,
     itemCount: 0,
@@ -69,6 +70,7 @@ const INITIAL_STATE: PopCartState = {
   expectedDate: new Date(),
   shippingMethod: 'pickup',
   shippingCost: 0,
+  discountAmount: 0,
   paymentTerms: undefined,
   notes: '',
   internalNotes: '',
@@ -306,6 +308,37 @@ export class PopCartService {
    */
   setShippingCost(cost: number) {
     this.updateState({ shippingCost: cost });
+  }
+
+  /**
+   * QUI-661 — set the GENERAL commercial discount for the invoice, in money.
+   *
+   * It is clamped at 0: a negative "discount" is a surcharge and would have to
+   * travel as freight, not as a rebate that lowers the taxable base.
+   */
+  setDiscountAmount(amount: number) {
+    this.updateState({ discountAmount: Math.max(0, Number(amount) || 0) });
+  }
+
+  /**
+   * QUI-661 — set the per-line commercial discount, as a percentage.
+   *
+   * Clamped to 0..100 so a typo can never drive a line's cost negative and
+   * poison the FIFO layer it will later create.
+   */
+  setItemDiscount(itemId: string, discountPercentage: number) {
+    const pct = Math.min(100, Math.max(0, Number(discountPercentage) || 0));
+    const items = this.currentState.items.map((item) =>
+      item.id === itemId ? { ...item, discount: pct } : item,
+    );
+    for (const item of items) {
+      this.recalculateItemTotals(
+        item,
+        this.currentState.prices_include_tax,
+        this.currentState.has_vat,
+      );
+    }
+    this.updateState({ items, summary: this.calculateSummary(items) });
   }
 
   /**
@@ -765,31 +798,66 @@ export class PopCartService {
   /**
    * Calculate summary from items
    */
-  private calculateSummary(items: PopCartItem[]): PopCartSummary {
+  /**
+   * @param state the state the summary belongs to. It is an ARGUMENT, not a
+   *   read of `this.currentState`, because `updateState` calls this while the
+   *   transition is still in flight: reading the service's signal there returns
+   *   the PREVIOUS state, which left shipping (and now the discount) one update
+   *   behind — the total showed the value before the last keystroke.
+   */
+  private calculateSummary(
+    items: PopCartItem[],
+    state: Pick<PopCartState, 'shippingCost' | 'discountAmount' | 'summary'> = this
+      .currentState,
+  ): PopCartSummary {
     // Preserve the last backend-resolved withholding so the line does not flash
     // to 0 between an item change and the debounced preview recompute. The
     // reactive preview re-fires whenever subtotal/IVA/supplier change.
-    const previousSummary = this.currentState.summary;
+    const previousSummary = state.summary;
 
-    return items.reduce(
+    const base = items.reduce(
       (acc, item) => {
         acc.subtotal += item.subtotal;
         acc.tax_amount += item.tax_amount;
-        acc.total += item.total;
         acc.itemCount += item.quantity;
+        // Gross AFTER the per-line discount — the base the header discount is
+        // prorated against, exactly like `prorateHeaderDiscount` does server-side.
+        acc.gross += item.subtotal + item.tax_amount;
+        // Money already rebated line by line, for the visible discount figure.
+        acc.lineDiscount +=
+          Number(item.unit_cost || 0) *
+          Number(item.quantity || 0) *
+          (Number(item.discount || 0) / 100);
         return acc;
       },
-      {
-        subtotal: 0,
-        tax_amount: 0,
-        shipping_cost: this.currentState.shippingCost,
-        total: this.currentState.shippingCost,
-        itemCount: 0,
-        totalItems: 0,
-        withholding_amount: previousSummary?.withholding_amount ?? 0,
-        withholding_lines: previousSummary?.withholding_lines,
-      },
+      { subtotal: 0, tax_amount: 0, itemCount: 0, gross: 0, lineDiscount: 0 },
     );
+
+    // QUI-661 — the general discount is prorated proportionally to each line's
+    // weight in the gross subtotal. Because the split is proportional, a single
+    // scaling factor reproduces the server's per-line result exactly, without
+    // duplicating the proration loop on the client.
+    const headerDiscount = Math.min(
+      Number(state.discountAmount || 0),
+      base.gross,
+    );
+    const factor = base.gross > 0 ? (base.gross - headerDiscount) / base.gross : 1;
+
+    const subtotal = base.subtotal * factor;
+    const taxAmount = base.tax_amount * factor;
+    const shipping = state.shippingCost;
+
+    return {
+      subtotal,
+      tax_amount: taxAmount,
+      discount_amount: base.lineDiscount + headerDiscount,
+      shipping_cost: shipping,
+      total: subtotal + taxAmount + shipping,
+      itemCount: base.itemCount,
+      totalItems: 0,
+      withholding_amount: previousSummary?.withholding_amount ?? 0,
+      withholding_lines: previousSummary?.withholding_lines,
+    };
   }
 
   /**
@@ -799,9 +867,15 @@ export class PopCartService {
     const currentState = this.currentState;
     const newState = { ...currentState, ...partialState, updatedAt: new Date() };
 
-    // Always recalculate summary if items changed
-    if (partialState.items || partialState.shippingCost !== undefined) {
-      newState.summary = this.calculateSummary(newState.items);
+    // Recalculate whenever anything the summary depends on moved. The summary
+    // is passed `newState`, not read off the service, so it never lags one
+    // update behind (QUI-661).
+    if (
+      partialState.items ||
+      partialState.shippingCost !== undefined ||
+      partialState.discountAmount !== undefined
+    ) {
+      newState.summary = this.calculateSummary(newState.items, newState);
     }
 
     this._cartState.set(newState);
@@ -898,6 +972,7 @@ export class PopCartService {
       expectedDate: order.expected_date ? new Date(order.expected_date) : undefined,
       shippingMethod: order.shipping_method as any || undefined,
       shippingCost: order.shipping_cost || 0,
+      discountAmount: order.discount_amount || 0,
       paymentTerms: order.payment_terms,
       notes: order.notes || '',
       internalNotes: '',
