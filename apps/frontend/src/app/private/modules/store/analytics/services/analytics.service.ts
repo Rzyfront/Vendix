@@ -97,9 +97,16 @@ export interface PurchasesBySupplier {
   supplier_id: number;
   supplier_name: string;
   order_count: number;
+  /** SUM(subtotal_amount) of committed orders — same base as the summary. */
   total_spent: number;
+  /** VAT the supplier charged, summed from the order LINES. */
+  tax_amount: number;
   pending_orders: number;
   last_order_date: string | null;
+  /** Share of the window's total spend; the column always sums to 100. */
+  percentage_of_total: number;
+  /** `null` = this supplier had no purchases in the previous window. */
+  growth: number | null;
 }
 
 // Reviews interfaces

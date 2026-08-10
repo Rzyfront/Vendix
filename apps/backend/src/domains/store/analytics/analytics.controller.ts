@@ -12,6 +12,7 @@ import { PurchasesAnalyticsService } from './services/purchases-analytics.servic
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import {
   AnalyticsQueryDto,
+  PurchasesBySupplierQueryDto,
   SalesAnalyticsQueryDto,
   InventoryAnalyticsQueryDto,
   ProductsAnalyticsQueryDto,
@@ -693,7 +694,7 @@ export class AnalyticsController {
 
   @Get('purchases/by-supplier')
   @Permissions('store:analytics:read')
-  async getPurchasesBySupplier(@Query() query: AnalyticsQueryDto) {
+  async getPurchasesBySupplier(@Query() query: PurchasesBySupplierQueryDto) {
     const result = await this.purchases_analytics_service.getPurchasesBySupplier(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);

@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
+import {
+  AnalyticsQueryDto,
+  PurchasesBySupplierQueryDto,
+} from '../dto/analytics-query.dto';
 import { getPreviousPeriod, parseDateRange } from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -252,8 +255,93 @@ export class PurchasesAnalyticsService {
     };
   }
 
+  /**
+   * Per-supplier purchase volume for ONE window, aggregated in DB.
+   *
+   * The query is driven FROM `purchase_orders`, not from `suppliers`. The old
+   * implementation listed `suppliers WHERE store_id = :storeId` and hung the
+   * orders off each row, which silently dropped every purchase made to an
+   * organization-level supplier (`suppliers.store_id IS NULL`) — measured on
+   * store 10: 24 of the 39 committed orders and $20 427 387,15 of $30 637 514,88
+   * (67 % of the spend) were invisible here while the summary counted them.
+   * Same universe as `aggregatePurchaseWindow` so the two views reconcile.
+   */
+  private async aggregateSupplierWindow(
+    organizationId: number,
+    storeId: number,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<
+    Array<{
+      supplier_id: number;
+      supplier_name: string;
+      order_count: number;
+      total_spent: number;
+      tax_amount: number;
+      pending_orders: number;
+      last_order_date: Date | null;
+    }>
+  > {
+    const rawClient = this.prisma.withoutScope() as any;
+
+    // The supplier's own `state` is deliberately NOT filtered: excluding
+    // archived suppliers would erase purchases that really happened and break
+    // reconciliation against accounting. What IS filtered is the ORDER status.
+    const rows = await rawClient.$queryRaw<
+      Array<{
+        supplier_id: number;
+        supplier_name: string;
+        order_count: bigint;
+        total_spent: number;
+        tax_amount: number;
+        pending_orders: bigint;
+        last_order_date: Date | null;
+      }>
+    >`
+      SELECT s.id AS supplier_id,
+             s.name AS supplier_name,
+             count(DISTINCT po.id)::bigint AS order_count,
+             COALESCE(sum(po.subtotal_amount), 0)::float8 AS total_spent,
+             COALESCE((
+               SELECT sum(i.tax_amount)
+               FROM purchase_order_items i
+               WHERE i.purchase_order_id IN (
+                 SELECT po2.id FROM purchase_orders po2
+                 JOIN inventory_locations l2 ON l2.id = po2.location_id
+                 WHERE po2.supplier_id = s.id
+                   AND po2.organization_id = ${organizationId}
+                   AND l2.store_id = ${storeId}
+                   AND po2.status::text IN (${sqlStateList(PURCHASE_COMMITTED_STATES)})
+                   AND po2.order_date >= ${startDate}
+                   AND po2.order_date <= ${endDate}
+               )
+             ), 0)::float8 AS tax_amount,
+             count(DISTINCT po.id) FILTER (WHERE po.status::text <> 'received')::bigint AS pending_orders,
+             max(po.order_date) AS last_order_date
+      FROM purchase_orders po
+      JOIN inventory_locations l ON l.id = po.location_id
+      JOIN suppliers s ON s.id = po.supplier_id
+      WHERE po.organization_id = ${organizationId}
+        AND l.store_id = ${storeId}
+        AND po.status::text IN (${sqlStateList(PURCHASE_COMMITTED_STATES)})
+        AND po.order_date >= ${startDate}
+        AND po.order_date <= ${endDate}
+      GROUP BY s.id, s.name
+    `;
+
+    return rows.map((r) => ({
+      supplier_id: Number(r.supplier_id),
+      supplier_name: r.supplier_name,
+      order_count: Number(r.order_count),
+      total_spent: Number(r.total_spent),
+      tax_amount: Number(r.tax_amount),
+      pending_orders: Number(r.pending_orders),
+      last_order_date: r.last_order_date ?? null,
+    }));
+  }
+
   async getPurchasesBySupplier(
-    query: AnalyticsQueryDto & { page?: number; limit?: number },
+    query: PurchasesBySupplierQueryDto & { page?: number; limit?: number },
   ) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
@@ -263,67 +351,82 @@ export class PurchasesAnalyticsService {
     const organizationId = context.organization_id;
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
+    // tz-audit:ignore — `order_date` is an INSTANT (see getPurchasesSummary).
     const { startDate, endDate } = parseDateRange(query, tz);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
-    // Sin filtro de `state` a propósito: excluir archivados aquí borraría del
-    // reporte compras que sí ocurrieron y descuadraría los totales del período
-    // contra contabilidad.
-    const suppliers = await this.prisma.suppliers.findMany({
-      where: {
-        organization_id: organizationId,
-        store_id: storeId,
-      },
-      select: {
-        id: true,
-        name: true,
-        purchase_orders: {
-          where: {
-            organization_id: organizationId,
-            location: { store_id: storeId },
-            order_date: { // tz-audit:ignore — INSTANTE real (ver arriba)
-              gte: startDate,
-              lte: endDate,
-            },
-          },
-          select: {
-            status: true,
-            total_amount: true,
-            order_date: true,
-          },
-        },
-      },
-    });
+    const [current, previous] = await Promise.all([
+      this.aggregateSupplierWindow(organizationId, storeId, startDate, endDate),
+      this.aggregateSupplierWindow(
+        organizationId,
+        storeId,
+        previousStartDate,
+        previousEndDate,
+      ),
+    ]);
 
-    const supplierStats = suppliers
-      .map((supplier) => {
-        const orders = supplier.purchase_orders;
-        const totalSpent = orders.reduce(
-          (sum, order) => sum + Number(order.total_amount || 0),
-          0,
-        );
-        const pendingOrders = orders.filter((order) =>
-          this.PENDING_STATES.includes(order.status as any),
-        ).length;
-        let lastOrderDate: Date | null = null;
-        for (const order of orders) {
-          if (
-            order.order_date &&
-            (!lastOrderDate || order.order_date > lastOrderDate)
-          ) {
-            lastOrderDate = order.order_date;
-          }
-        }
+    const previousBySupplier = new Map(
+      previous.map((p) => [p.supplier_id, p.total_spent]),
+    );
 
-        return {
+    // Denominator for the participation share. Taken from the SAME rows that
+    // are about to be emitted, so `SUM(percentage_of_total)` is always 100 and
+    // the total reconciles with `purchases/summary.total_spent`.
+    const grandTotal = current.reduce((sum, s) => sum + s.total_spent, 0);
+
+    let supplierStats = current
+      .map((s) => ({
+        supplier_id: s.supplier_id,
+        supplier_name: s.supplier_name,
+        order_count: s.order_count,
+        total_spent: round2(s.total_spent),
+        tax_amount: round2(s.tax_amount),
+        pending_orders: s.pending_orders,
+        last_order_date: s.last_order_date,
+        percentage_of_total:
+          grandTotal > 0 ? round2((s.total_spent / grandTotal) * 100) : 0,
+        growth: computeGrowth(
+          s.total_spent,
+          previousBySupplier.get(s.supplier_id) ?? 0,
+        ),
+      }))
+      .sort((a, b) => b.total_spent - a.total_spent);
+
+    // Suppliers with no purchases in the window are excluded by default: they
+    // add rows to a volume ranking without adding volume. `include_zero=true`
+    // brings back the full roster for the callers that want it.
+    if (query.include_zero) {
+      const seen = new Set(supplierStats.map((s) => s.supplier_id));
+      const roster = await this.prisma.suppliers.findMany({
+        where: { organization_id: organizationId },
+        select: { id: true, name: true },
+      });
+      for (const supplier of roster) {
+        if (seen.has(supplier.id)) continue;
+        supplierStats.push({
           supplier_id: supplier.id,
           supplier_name: supplier.name,
-          order_count: orders.length,
-          total_spent: totalSpent,
-          pending_orders: pendingOrders,
-          last_order_date: lastOrderDate,
-        };
-      })
-      .sort((a, b) => b.total_spent - a.total_spent);
+          order_count: 0,
+          total_spent: 0,
+          tax_amount: 0,
+          pending_orders: 0,
+          last_order_date: null,
+          percentage_of_total: 0,
+          growth: computeGrowth(0, previousBySupplier.get(supplier.id) ?? 0),
+        });
+      }
+    }
+
+    const serialize = (s: (typeof supplierStats)[number]) => ({
+      ...s,
+      // Emitted raw (ISO instant); the frontend renders it in the store's TZ.
+      last_order_date: s.last_order_date
+        ? new Date(s.last_order_date).toISOString()
+        : null,
+    });
 
     const isPaginated = query.page !== undefined && query.limit !== undefined;
 
@@ -331,15 +434,13 @@ export class PurchasesAnalyticsService {
       const page = query.page!;
       const limit = query.limit!;
       const total = supplierStats.length;
-      const paginatedData = supplierStats.slice((page - 1) * limit, page * limit);
-
-      const mapped = paginatedData.map((s) => ({
-        ...s,
-        last_order_date: s.last_order_date?.toISOString() || null,
-      }));
+      const paginatedData = supplierStats.slice(
+        (page - 1) * limit,
+        page * limit,
+      );
 
       return {
-        data: mapped,
+        data: paginatedData.map(serialize),
         meta: {
           pagination: {
             total,
@@ -351,9 +452,8 @@ export class PurchasesAnalyticsService {
       };
     }
 
-    return supplierStats.slice(0, query.limit || supplierStats.length).map((s) => ({
-      ...s,
-      last_order_date: s.last_order_date?.toISOString() || null,
-    }));
+    return supplierStats
+      .slice(0, query.limit || supplierStats.length)
+      .map(serialize);
   }
 }
