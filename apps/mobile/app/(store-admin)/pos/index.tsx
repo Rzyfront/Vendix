@@ -11,8 +11,6 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
@@ -20,6 +18,7 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { CashRegisterService } from '@/features/pos/services/cash-register.service';
+import { PosTicketService, type PosTicketData } from '@/features/pos/services/pos-ticket.service';
 import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
@@ -946,76 +945,62 @@ function buildPosCustomerPayload(customer: {
 }
 
 /**
- * Escape user-controlled values before interpolating into receipt HTML.
- * expo-print renders the string in a WebView; without escaping, a customer
- * name like `</td><script>...</script>` would break the layout or inject markup.
+ * Datos que la venta deja listos para el tiquete. Es lo que `PaymentSheet`
+ * entrega a `SuccessModal`; el documento en sí lo arma `PosTicketService`.
  */
-function escapeReceiptHtml(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+type PosReceiptData = {
+  items: any[];
+  summary: any;
+  customer: PosCustomer | null;
+  paymentMethod: string;
+  cashReceived?: number;
+  change?: number;
+};
 
-function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary: any; customer?: PosCustomer | null; paymentMethod: string }): string {
-  const date = new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const itemsHtml = order.items.map((item: any) => `
-    <tr>
-      <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeReceiptHtml(item.product?.name || '')}${item.variant_display_name ? ` (${escapeReceiptHtml(item.variant_display_name)})` : ''}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${Number(item.quantity) || 0}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unitPrice).toLocaleString('es-CO')}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.totalPrice).toLocaleString('es-CO')}</td>
-    </tr>
-  `).join('');
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        body { font-family: -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; }
-        h1 { font-size: 18px; text-align: center; margin-bottom: 5px; }
-        .header { text-align: center; margin-bottom: 20px; }
-        .order-info { font-size: 12px; color: #666; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th { background: #f5f5f5; padding: 8px; text-align: left; }
-        .totals { margin-top: 20px; }
-        .row { display: flex; justify-content: space-between; padding: 5px 0; }
-        .total-row { font-weight: bold; font-size: 16px; border-top: 1px solid #333; padding-top: 10px; margin-top: 5px; }
-        .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #999; }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>Vendix</h1>
-        <div class="order-info">Orden #${escapeReceiptHtml(order.orderNumber)}<br>${date}</div>
-      </div>
-      ${order.customer ? `<p><strong>Cliente:</strong> ${escapeReceiptHtml(order.customer.first_name)} ${escapeReceiptHtml(order.customer.last_name)}</p>` : ''}
-      <table>
-        <thead>
-          <tr>
-            <th style="padding: 8px;">Producto</th>
-            <th style="padding: 8px; text-align: center;">Cant</th>
-            <th style="padding: 8px; text-align: right;">Precio</th>
-            <th style="padding: 8px; text-align: right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${itemsHtml}</tbody>
-      </table>
-      <div class="totals">
-        <div class="row"><span>Subtotal:</span><span>$${order.summary.subtotal.toLocaleString('es-CO')}</span></div>
-        <div class="row"><span>IVA:</span><span>$${order.summary.taxAmount.toLocaleString('es-CO')}</span></div>
-        ${order.summary.discountAmount > 0 ? `<div class="row" style="color: green;"><span>Descuento:</span><span>-$${order.summary.discountAmount.toLocaleString('es-CO')}</span></div>` : ''}
-        <div class="row total-row"><span>Total:</span><span>$${order.summary.total.toLocaleString('es-CO')}</span></div>
-        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${escapeReceiptHtml(order.paymentMethod)}</span></div>
-      </div>
-      <div class="footer">¡Gracias por su compra!</div>
-    </body>
-    </html>
-  `;
+/**
+ * QUI-665 — traduce el carrito recién cobrado al contrato de tiquete.
+ *
+ * Acá NO se arma HTML. Antes esta pantalla escribía a mano una página web
+ * (ancho en píxeles, `<table>` con cabecera gris, marca "Vendix" quemada, pie
+ * quemado, `$`/`es-CO` quemados) y la mandaba a `Print.printAsync`, así que del
+ * papel salía literalmente una página web y la configuración de impresión de la
+ * tienda no la leía nadie. El documento ahora lo renderiza
+ * `PosTicketService`, gemelo del renderizador de escritorio: mismo encabezado,
+ * mismo desglose de impuestos, mismo pie y el mismo papel resuelto desde
+ * `receipts.printing.pos_ticket`.
+ */
+function buildPosTicketData(order: { orderNumber: string } & PosReceiptData): PosTicketData {
+  return {
+    id: order.orderNumber,
+    date: new Date(),
+    items: (order.items ?? []).map((item: any) => ({
+      id: item.id,
+      name: `${item.product?.name ?? ''}${item.variant_display_name ? ` (${item.variant_display_name})` : ''}`,
+      sku: item.product?.sku || undefined,
+      quantity: Number(item.quantity) || 0,
+      unitPrice: Number(item.unitPrice) || 0,
+      totalPrice: Number(item.totalPrice) || 0,
+      // El impuesto REAL de la línea, el que el carrito calculó y se mandó al
+      // backend. El renderizador omite la línea cuando es 0 en vez de imprimir
+      // un `Imp: 0.00%` inventado.
+      tax: Number(item.taxAmount) || 0,
+    })),
+    subtotal: Number(order.summary?.subtotal) || 0,
+    tax: Number(order.summary?.taxAmount) || 0,
+    discount: Number(order.summary?.discountAmount) || 0,
+    total: Number(order.summary?.total) || 0,
+    paymentMethod: order.paymentMethod,
+    cashReceived: order.cashReceived,
+    change: order.change,
+    customer: order.customer
+      ? {
+          name: `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim(),
+          email: order.customer.email || undefined,
+          phone: order.customer.phone || undefined,
+          taxId: order.customer.document_number || undefined,
+        }
+      : undefined,
+  };
 }
 
 const ProductCard = ({
@@ -1875,7 +1860,7 @@ const PaymentSheet = ({
 }: {
   visible: boolean;
   onClose: () => void;
-  onSuccess: (orderNumber: string, receiptData: { items: any[]; summary: any; customer: any; paymentMethod: string }) => void;
+  onSuccess: (orderNumber: string, receiptData: PosReceiptData) => void;
 }) => {
   const [selectedMethodId, setSelectedMethodId] = useState<number | null>(null);
   const [cashReceived, setCashReceived] = useState('');
@@ -2014,11 +1999,17 @@ const PaymentSheet = ({
     },
     onSuccess: (result) => {
       const orderNumber = result.response.order?.order_number || result.response.order?.id?.toString() || '---';
-      const receiptData = {
+      const receiptData: PosReceiptData = {
         items,
         summary,
         customer,
         paymentMethod: result.paymentMethodLabel,
+        // Efectivo recibido y cambio solo cuando el método es efectivo: el
+        // tiquete de escritorio imprime ese par y hasta ahora el móvil lo
+        // perdía en el camino.
+        ...(isCash && received > 0
+          ? { cashReceived: received, change: Math.max(0, change) }
+          : {}),
       };
       clearCart();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -2166,21 +2157,18 @@ const SuccessModal = ({
   visible: boolean;
   orderNumber: string;
   onClose: () => void;
-  receiptData?: {
-    items: any[];
-    summary: any;
-    customer: any;
-    paymentMethod: string;
-  } | null;
+  receiptData?: PosReceiptData | null;
 }) => {
   const [printing, setPrinting] = useState(false);
 
+  // Imprimir y Compartir arman el MISMO documento: los dos pasan por
+  // `PosTicketService`, que resuelve papel, moneda, encabezado y pie desde la
+  // configuración de la tienda. Antes cada botón se armaba su propio HTML.
   const handlePrint = useCallback(async () => {
     if (!receiptData) return;
     setPrinting(true);
     try {
-      const html = generateReceiptHtml({ orderNumber, ...receiptData });
-      await Print.printAsync({ html });
+      await PosTicketService.print(buildPosTicketData({ orderNumber, ...receiptData }));
     } catch {
       toastError('Error al imprimir');
     }
@@ -2191,15 +2179,7 @@ const SuccessModal = ({
     if (!receiptData) return;
     setPrinting(true);
     try {
-      const html = generateReceiptHtml({ orderNumber, ...receiptData });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync('data:text/html,' + encodeURIComponent(html), {
-          mimeType: 'text/html',
-          dialogTitle: 'Compartir recibo',
-        });
-      } else {
-        await Print.printAsync({ html });
-      }
+      await PosTicketService.share(buildPosTicketData({ orderNumber, ...receiptData }));
     } catch {
       toastError('Error al compartir');
     }
@@ -2388,12 +2368,7 @@ const PosScreen = () => {
     return n;
   }, [activeFilters]);
   const [orderNumber, setOrderNumber] = useState('');
-  const [receiptData, setReceiptData] = useState<{
-    items: any[];
-    summary: any;
-    customer: any;
-    paymentMethod: string;
-  } | null>(null);
+  const [receiptData, setReceiptData] = useState<PosReceiptData | null>(null);
 
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
@@ -2549,7 +2524,7 @@ const PosScreen = () => {
     [selectedProduct, addItem],
   );
 
-  const handleChargeSuccess = useCallback((num: string, data: any) => {
+  const handleChargeSuccess = useCallback((num: string, data: PosReceiptData) => {
     setOrderNumber(num);
     setReceiptData(data);
     setShowPayment(false);
