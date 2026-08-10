@@ -21,6 +21,11 @@ const KITCHEN_TICKET_INCLUDE = {
   items: {
     orderBy: { id: 'asc' },
     include: {
+      // QUI-655 — las exclusiones viajan CON el ticket para que el KDS pueda
+      // mostrar tachado lo que el mesero quito al pedir, sin una segunda llamada.
+      exclusions: {
+        select: { component_product_id: true, path_recipe_ids: true },
+      },
       product: {
         select: {
           id: true,

@@ -49,6 +49,15 @@ export class KitchenConfirmModalComponent {
   readonly preview = input<FirePreview | null>(null);
   readonly isLoading = input<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
+  /**
+   * QUI-655 — exclusiones YA capturadas por quien tomo el pedido, por
+   * `order_item_id`. El modal las arranca desmarcadas (y por lo tanto tachadas),
+   * asi el cocinero VE "sin papas" en vez de tener que deducirlo de una nota.
+   *
+   * El cocinero puede quitar mas o volver a incluirlas: la intencion del mesero es
+   * el punto de partida, no una orden.
+   */
+  readonly initialExclusions = input<Map<number, number[]> | null>(null);
 
   readonly confirmed = output<FireItemExclusion[]>();
   readonly cancelled = output<void>();
@@ -77,7 +86,17 @@ export class KitchenConfirmModalComponent {
     // siguiente y se excluye un insumo que nadie desmarcó en ESTE envío.
     effect(() => {
       if (this.isOpen()) {
-        this.excluded.set(new Map());
+        // Se siembra con lo capturado al pedir. Sin esto el cocinero abriria el
+        // modal con TODO marcado y volveria a descontar las papas que el cliente
+        // pidio sin papas.
+        const seed = this.initialExclusions();
+        const next = new Map<number, Set<number>>();
+        if (seed) {
+          for (const [itemId, ids] of seed) {
+            if (ids.length > 0) next.set(itemId, new Set(ids));
+          }
+        }
+        this.excluded.set(next);
         this.collapsed.set(new Set());
         this.unitsByItem.set(new Map());
       }

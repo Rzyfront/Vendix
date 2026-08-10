@@ -40,6 +40,15 @@ export interface KitchenTicketProductRef {
 }
 
 export interface KitchenTicketItem {
+  /**
+   * QUI-655 — insumos que NO se van a usar en este plato, tal como los quito
+   * quien tomo el pedido. El KDS los muestra TACHADOS en el modal de confirmacion
+   * para que el cocinero vea "sin papas" sin tener que leer una nota.
+   */
+  exclusions?: Array<{
+    component_product_id: number;
+    path_recipe_ids: number[];
+  }>;
   id: number;
   kitchen_ticket_id: number;
   order_item_id: number;

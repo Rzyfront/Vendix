@@ -26,6 +26,8 @@ import {
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
+import type { FirePreview, FireItemExclusion } from '../../interfaces';
+import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import {
   KdsConnectionState,
   KdsSseService,
@@ -72,6 +74,7 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
     KdsTicketDetailModalComponent,
     ModalComponent,
     ButtonComponent,
+    KitchenConfirmModalComponent,
   ],
   templateUrl: './kds-board-page.component.html',
   styleUrl: './kds-board-page.component.scss',
@@ -582,8 +585,78 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   // ─── ticket mutations ──────────────────────────────────────────────
 
+  /**
+   * QUI-655 — cocinar exige CONFIRMAR el ticket primero.
+   *
+   * El cocinero ve cada platillo con su receta y sus insumos, con lo que quien tomo
+   * el pedido quito ya TACHADO, y puede quitar mas antes de empezar. El gate de
+   * turno sigue aplicando: se evalua en `runMutation`, al confirmar.
+   */
   startTicket(ticket: KitchenTicket): void {
-    this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+    const orderItemIds = (ticket.items ?? [])
+      .map((i) => i.order_item_id)
+      .filter((id): id is number => typeof id === 'number');
+
+    if (orderItemIds.length === 0) {
+      // Sin items no hay receta que confirmar: se avanza directo en vez de abrir un
+      // modal vacio.
+      this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+      return;
+    }
+
+    // Lo que ya venia excluido, indexado por order_item para sembrar el modal.
+    const seed = new Map<number, number[]>();
+    for (const item of ticket.items ?? []) {
+      const ids = (item.exclusions ?? []).map((e) => e.component_product_id);
+      if (ids.length > 0) seed.set(item.order_item_id, ids);
+    }
+
+    this.cookTicketId.set(ticket.id);
+    this.cookSeed.set(seed);
+    this.cookPreview.set(null);
+    this.cookPreviewLoading.set(true);
+    this.cookConfirmOpen.set(true);
+
+    this.ticketsService
+      .previewFire({ order_id: ticket.order_id, order_item_ids: orderItemIds })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.cookPreview.set(preview);
+          this.cookPreviewLoading.set(false);
+        },
+        error: () => {
+          // Si no se pueden leer las recetas NO se avanza a ciegas: el punto del
+          // modal es que nadie cocine sin ver que insumos se van a gastar.
+          this.cookPreviewLoading.set(false);
+          this.cookConfirmOpen.set(false);
+          this.toastService.error('No se pudieron leer las recetas del ticket');
+        },
+      });
+  }
+
+  /** Estado del modal de confirmacion de cocina en el tablero. */
+  readonly cookConfirmOpen = signal(false);
+  readonly cookPreview = signal<FirePreview | null>(null);
+  readonly cookPreviewLoading = signal(false);
+  readonly cookSeed = signal<Map<number, number[]> | null>(null);
+  private readonly cookTicketId = signal<number | null>(null);
+
+  onCookConfirmed(exclusions: FireItemExclusion[]): void {
+    const ticketId = this.cookTicketId();
+    this.cookConfirmOpen.set(false);
+    if (ticketId == null) return;
+    // NOTA: hoy el inventario ya se consumio en el fire, asi que estas exclusiones
+    // aun no cambian el descuento — se registran y se muestran. Mover el consumo a
+    // este punto es la fase siguiente, y este confirm es su disparador.
+    this.runMutation(ticketId, () => this.ticketsService.start(ticketId));
+    this.cookTicketId.set(null);
+  }
+
+  onCookCancelled(): void {
+    this.cookConfirmOpen.set(false);
+    this.cookPreview.set(null);
+    this.cookTicketId.set(null);
   }
 
   markTicketReady(ticket: KitchenTicket): void {

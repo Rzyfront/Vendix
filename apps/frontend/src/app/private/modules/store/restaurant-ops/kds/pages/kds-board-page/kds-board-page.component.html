@@ -168,6 +168,19 @@
     Nada se muto al llegar aca: la accion quedo pendiente y se reintenta sola tras
     abrir el turno, para que el operador no tenga que volver a buscar el ticket.
   -->
+  <!--
+    QUI-655 — confirmacion de ticket antes de cocinar. Muestra cada platillo con su
+    receta y lo que ya venia quitado, TACHADO.
+  -->
+  <app-kitchen-confirm-modal
+    [isOpen]="cookConfirmOpen()"
+    [preview]="cookPreview()"
+    [isLoading]="cookPreviewLoading()"
+    [initialExclusions]="cookSeed()"
+    (confirmed)="onCookConfirmed($event)"
+    (cancelled)="onCookCancelled()"
+  />
+
   <app-modal
     [isOpen]="sessionGateOpen()"
     size="sm"
