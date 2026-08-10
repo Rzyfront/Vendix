@@ -112,6 +112,12 @@ import type { KdsSession, KdsStation } from '../../interfaces';
   styles: [
     `
       .kds-bar {
+        /* Alto comun de los botones de la barra. Vive aqui, en el contenedor, para
+           que los botones NO deriven su alto del contenido: uno con texto lo saca
+           del line-height (19.2px) y uno de solo icono lo saca del icono (12px), y
+           quedaban desalineados 7px en la misma fila. */
+        --kds-bar-btn-h: 1.625rem;
+
         display: flex;
         align-items: center;
         gap: 0.4rem;
@@ -158,8 +164,13 @@ import type { KdsSession, KdsStation } from '../../interfaces';
       .kds-bar__btn {
         display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 0.25rem;
-        padding: 0.15rem 0.5rem;
+        /* Alto explicito y padding solo horizontal: asi el alto es el mismo lleve
+           texto o no, y el padding vertical no puede volver a introducir la
+           diferencia. */
+        height: var(--kds-bar-btn-h);
+        padding: 0 0.5rem;
         border: 1px solid currentColor;
         border-radius: 0.35rem;
         background: transparent;
@@ -174,9 +185,12 @@ import type { KdsSession, KdsStation } from '../../interfaces';
       }
 
       /* Solo icono: es un control de VISTA, no una acción del turno, y en una
-         pantalla de cocina compite por el mismo espacio que los tickets. */
+         pantalla de cocina compite por el mismo espacio que los tickets. Cuadrado
+         con el mismo lado que el alto de la fila, para que no quede ni mas bajo ni
+         mas angosto de lo que su area de clic necesita. */
       .kds-bar__btn--icon {
-        padding: 0.15rem 0.3rem;
+        width: var(--kds-bar-btn-h);
+        padding: 0;
       }
     `,
   ],
