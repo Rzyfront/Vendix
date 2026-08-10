@@ -510,6 +510,41 @@ export class AccountsPayableService {
             notes: null,
           },
         });
+        // QUI-647 — materializar el calendario acordado al crear la ORDEN.
+        //
+        // Las cuotas se pactaron con el proveedor antes de que existiera esta
+        // CxP: la CxP nace acá, con la recepción. Hasta este momento vivían en
+        // `purchase_order_payment_schedules`, que es su puente. Ahora pasan al
+        // motor real (`ap_payment_schedules`) y se marcan, para que una segunda
+        // recepción de la misma orden no las duplique.
+        //
+        // Va DENTRO de la misma transacción que crea la CxP a propósito: una
+        // CxP con calendario a medias es peor que una sin calendario, porque
+        // parece configurada.
+        if (data.source_id) {
+          const planned = await tx.purchase_order_payment_schedules.findMany({
+            where: {
+              purchase_order_id: data.source_id,
+              status: 'planned',
+            },
+            orderBy: { scheduled_date: 'asc' },
+          });
+          if (planned.length > 0) {
+            await tx.ap_payment_schedules.createMany({
+              data: planned.map((p: { scheduled_date: Date; amount: unknown }) => ({
+                accounts_payable_id: result_ap.id,
+                scheduled_date: p.scheduled_date,
+                amount: p.amount as never,
+                status: 'scheduled',
+              })),
+            });
+            await tx.purchase_order_payment_schedules.updateMany({
+              where: { id: { in: planned.map((p: { id: number }) => p.id) } },
+              data: { status: 'materialized', materialized_at: new Date() },
+            });
+          }
+        }
+
         // FASE 3 — Backfill anticipos: si la OC ya tenía pagos del modal PO
         // ANTES de esta primera recepción (pagos anticipados reales a 133005),
         // espejarlos a ap_payments (source='advance_backfill') para que el

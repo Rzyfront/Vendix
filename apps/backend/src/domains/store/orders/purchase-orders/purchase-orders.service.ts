@@ -1089,6 +1089,57 @@ export class PurchaseOrdersService {
         subtotal + round2(lineTax) + (createPurchaseOrderDto.shipping_cost || 0),
       );
 
+      // ===== QUI-647: validación del plan de pago =====
+      //
+      // Se valida ANTES de escribir nada: un calendario cuyas cuotas no suman
+      // el saldo no puede cerrar la deuda nunca, y descubrirlo después de crear
+      // la orden deja al usuario con una OC a medio configurar que tiene que
+      // ir a arreglar a mano en Cuentas por Pagar — exactamente el trabajo que
+      // este ticket viene a eliminar.
+      const paymentPlan = createPurchaseOrderDto.payment_plan;
+      const downPayment = Number(
+        createPurchaseOrderDto.down_payment_amount ?? 0,
+      );
+      const installments = createPurchaseOrderDto.payment_installments ?? [];
+
+      if (paymentPlan === 'partial') {
+        if (!(downPayment > 0)) {
+          throw new BadRequestException(
+            'Un abono parcial requiere un monto abonado mayor que cero.',
+          );
+        }
+        if (downPayment > totalAmount) {
+          throw new BadRequestException(
+            `El abono ($${downPayment}) no puede superar el total de la orden ($${totalAmount}).`,
+          );
+        }
+      }
+
+      if (paymentPlan === 'installments') {
+        if (installments.length === 0) {
+          throw new BadRequestException(
+            'Un pago en cuotas requiere al menos una cuota programada.',
+          );
+        }
+        const scheduled = round2(
+          installments.reduce((sum, i) => sum + Number(i.amount || 0), 0),
+        );
+        // Se compara contra el SALDO, no contra el total: en un plan de cuotas
+        // con abono, lo que se programa es lo que queda debiendo.
+        const balance = round2(totalAmount - downPayment);
+        if (Math.abs(scheduled - balance) > 0.01) {
+          throw new BadRequestException(
+            `Las cuotas suman $${scheduled} y el saldo de la orden es $${balance}. Deben coincidir.`,
+          );
+        }
+      }
+
+      if (paymentPlan === 'deferred' && !createPurchaseOrderDto.payment_due_date) {
+        throw new BadRequestException(
+          'Un pago diferido requiere una fecha de pago.',
+        );
+      }
+
       // Generate order number
       const date = new Date();
       const order_number = `PO-${date.getFullYear()}${(date.getMonth() + 1)
@@ -1140,7 +1191,14 @@ export class PurchaseOrdersService {
       // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
       // would otherwise blow up here.
       const toDate = PurchaseOrdersService.toDateOrUndefined;
-      const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
+      // QUI-647: `payment_installments` es un campo del DTO, no una columna.
+      // Se saca del spread o Prisma lo rechaza como argumento desconocido; las
+      // cuotas se escriben más abajo por la relación `payment_schedules`.
+      const {
+        expected_date: rawExpectedDate,
+        payment_installments: _installmentsInput,
+        ...orderDataRest
+      } = orderData;
 
       // Fase 2: `orderType` was resolved at the top of the transaction so the
       // new-product creation block could inherit ingredient flags.
@@ -1166,6 +1224,25 @@ export class PurchaseOrdersService {
           tax_amount: round2(lineTax),
           total_amount: totalAmount,
           order_date: new Date(),
+          // QUI-647: el plan acordado queda en la orden. `payment_terms` ya
+          // existía como texto libre; `payment_plan` es el modo tipado que el
+          // motor lee, para no tener que interpretar una cadena.
+          ...(paymentPlan ? { payment_plan: paymentPlan } : {}),
+          ...(downPayment > 0 ? { down_payment_amount: downPayment } : {}),
+          // Las cuotas se guardan contra la ORDEN porque la CxP todavía no
+          // existe: nace con la recepción. Se materializan en
+          // `ap_payment_schedules` cuando esa CxP aparece.
+          ...(installments.length > 0
+            ? {
+                payment_schedules: {
+                  create: installments.map((i) => ({
+                    scheduled_date: new Date(i.scheduled_date),
+                    amount: i.amount,
+                    status: 'planned',
+                  })),
+                },
+              }
+            : {}),
           purchase_order_items: {
             create: processedItems.map((item, index) => {
               // F1 IVA lifecycle: derive net/tax from the entered unit_price

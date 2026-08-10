@@ -125,6 +125,7 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   discount_percentage?: number;
 
+
   @ApiProperty({
     description:
       'QUI-661: line discount as a money amount. Wins over discount_percentage.',
@@ -287,6 +288,24 @@ export class PurchaseOrderItemDto {
   category_names?: string;
 }
 
+
+/**
+ * QUI-647 — una cuota del calendario de pago acordado con el proveedor.
+ *
+ * Vive contra la ORDEN, no contra la CxP: la CxP nace con la recepción, así que
+ * al crear la orden todavía no hay a qué colgarla. Se materializa en
+ * `ap_payment_schedules` cuando la CxP existe.
+ */
+export class PurchaseOrderInstallmentDto {
+  @ApiProperty({ description: 'Fecha programada de la cuota (YYYY-MM-DD)' })
+  @IsDateString()
+  scheduled_date: string;
+
+  @ApiProperty({ description: 'Monto de la cuota' })
+  @IsNumber()
+  amount: number;
+}
+
 export class CreatePurchaseOrderDto {
   @ApiProperty({ description: 'Organization ID' })
   @IsNumber()
@@ -384,6 +403,53 @@ export class CreatePurchaseOrderDto {
   @IsNumber()
   @IsOptional()
   discount_amount?: number;
+
+  // ===== QUI-647: configuración de pago al crear la orden =====
+
+  /**
+   * Modo de pago acordado con el proveedor.
+   *
+   * - `immediate`: se paga completa en el acto (el `ackPay` binario de antes).
+   * - `partial`: se abona `down_payment_amount` y el resto queda como saldo.
+   * - `deferred`: no se paga ahora; una sola fecha en `payment_due_date`.
+   * - `installments`: no se paga ahora; calendario en `payment_installments`.
+   */
+  @ApiProperty({
+    description: 'QUI-647: immediate | partial | deferred | installments',
+    required: false,
+  })
+  @IsIn(['immediate', 'partial', 'deferred', 'installments'])
+  @IsOptional()
+  payment_plan?: 'immediate' | 'partial' | 'deferred' | 'installments';
+
+  @ApiProperty({
+    description: 'QUI-647: monto abonado en el acto (payment_plan=partial)',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  down_payment_amount?: number;
+
+  @ApiProperty({ description: 'QUI-647: fecha única de pago (deferred)', required: false })
+  @IsDateString()
+  @IsOptional()
+  payment_due_date?: string;
+
+  /**
+   * Calendario de cuotas. La suma DEBE igualar el saldo de la orden; el
+   * servicio lo valida y rechaza el desbalance en vez de programar un
+   * calendario que nunca podría cerrar la deuda.
+   */
+  @ApiProperty({
+    description: 'QUI-647: cuotas planeadas (payment_plan=installments)',
+    required: false,
+    type: [PurchaseOrderInstallmentDto],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderInstallmentDto)
+  @IsOptional()
+  payment_installments?: PurchaseOrderInstallmentDto[];
 
   @ApiProperty({ description: 'Notes' })
   @IsString()
