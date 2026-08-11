@@ -11,6 +11,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { PwaCacheService } from '@common/services/pwa-cache.service';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import {
   AuditService,
@@ -103,7 +104,36 @@ export class SettingsService {
     private migrator: SettingsMigratorService,
     private fiscalScope: FiscalScopeService,
     private sessionsService: SessionsService,
+    private pwaCache: PwaCacheService,
   ) {}
+
+  /**
+   * Whether the fields the Web App Manifest and the installable icon are built
+   * from actually changed.
+   *
+   * Compared field by field instead of invalidating on every settings write:
+   * this endpoint also carries inventory, fiscal, payroll and panel_ui
+   * sections, and each needless invalidation costs a re-derivation of four PNGs
+   * for the tenant's next visitor.
+   *
+   * `ecommerce.inicio` is read too because a STORE_ECOMMERCE domain takes its
+   * `theme_color` from there, not from `branding` (see `resolveDomain`).
+   */
+  private brandingAffectsPwa(before: any, after: any): boolean {
+    const read = (settings: any) => {
+      const branding = settings?.branding ?? {};
+      const inicio = settings?.ecommerce?.inicio ?? {};
+      return [
+        branding.logo_url,
+        branding.favicon_url,
+        branding.primary_color,
+        inicio.logo_url,
+        inicio.colores?.primary_color,
+      ].join('|');
+    };
+
+    return read(before) !== read(after);
+  }
 
   /**
    * Dependencias que los guards de transición pueden consultar (QUI-560).
@@ -662,6 +692,20 @@ export class SettingsService {
       },
     });
 
+    // El manifest y el ícono instalable se derivan de dos tablas: el nombre y
+    // el logo viven en `stores`, los colores y el favicon en este branding.
+    // Ambos se cachean en S3 + Redis y no se re-derivan solos, así que sin este
+    // drop la PWA de la tienda conserva el logo anterior (ver PwaCacheService).
+    const storeFieldsFeedPwa =
+      dto.general?.name !== undefined || dto.general?.logo_url !== undefined;
+
+    if (
+      storeFieldsFeedPwa ||
+      this.brandingAffectsPwa(currentSettings, updatedSettings)
+    ) {
+      await this.pwaCache.invalidateStore(store_id);
+    }
+
     // Registrar auditoría de actualización de settings
     try {
       // Solo guardar las secciones que cambiaron (no todo el objeto de settings)
@@ -903,6 +947,12 @@ export class SettingsService {
       });
 
       this.logger.log(`Favicon updated in store_settings for store ${storeId}`);
+
+      // Corre fuera de la petición que subió el logo (se dispara con
+      // `.catch()`), así que la invalidación de `updateSettings` ya pasó y no
+      // vio este `favicon_url`. Sin este segundo drop, una tienda SIN logo que
+      // acaba de estrenar favicon seguiría instalando con la marca Vendix.
+      await this.pwaCache.invalidateStore(storeId);
     } catch (error) {
       this.logger.error(
         `Error in generateFaviconForStore for store ${storeId}: ${error.message}`,
