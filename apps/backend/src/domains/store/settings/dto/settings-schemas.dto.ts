@@ -237,6 +237,17 @@ export class NotificationsSettingsDto {
   @IsOptional()
   @IsBoolean()
   sound_muted?: boolean;
+
+  /**
+   * Anticipación del aviso de vencimiento de cuotas de CxP, en días.
+   * 0 desactiva el aviso anticipado; la vencida se sigue emitiendo.
+   */
+  @ApiProperty({ example: 1, required: false, minimum: 0, maximum: 30 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  ap_due_soon_days?: number;
 }
 
 export class ScaleDeviceConfigDto {

@@ -101,6 +101,10 @@ export function getDefaultStoreSettings(): StoreSettings {
       sound_id: null,
       sound_volume: 70,
       sound_muted: false,
+      // Anticipación del aviso de vencimiento de cuotas de CxP, en días. El
+      // cron `ApDueNotificationsJob` la lee por tienda; 0 desactiva el aviso
+      // anticipado (la vencida se sigue emitiendo).
+      ap_due_soon_days: 1,
     },
     pos: {
       allow_anonymous_sales: true,

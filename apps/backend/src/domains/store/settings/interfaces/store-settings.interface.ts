@@ -457,6 +457,13 @@ export interface NotificationsSettings {
   sound_id: string | null;
   sound_volume: number;
   sound_muted: boolean;
+  /**
+   * Anticipación del aviso de vencimiento de cuotas de CxP, en días (0-30).
+   * La consume `ApDueNotificationsJob`: por cada tienda, una cuota planificada
+   * genera `ap_installment.due_soon` cuando cae dentro de esta ventana antes de
+   * la fecha; `0` desactiva el aviso anticipado (la vencida se re-emite siempre).
+   */
+  ap_due_soon_days: number;
 }
 
 export interface CustomerQueueSettings {
