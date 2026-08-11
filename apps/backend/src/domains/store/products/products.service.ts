@@ -538,6 +538,28 @@ export class ProductsService {
         { barcode: normalized, conflict_type: 'variant' },
       );
     }
+
+    // Tercera tabla del mismo espacio de nombres (QUI-648): la presentación
+    // "Caja x12" pistolea su propio código y no puede chocar con el del
+    // producto ni con el de una variante. El scoping por tienda lo aporta el
+    // cliente scopeado; el índice único parcial lo respalda en la base.
+    const presentationConflict =
+      await prisma.product_price_tier_assignments.findFirst({
+        where: {
+          barcode: { equals: normalized },
+          ...(options.excludeProductId && {
+            NOT: { product_id: options.excludeProductId },
+          }),
+        },
+        select: { product_id: true, price_tier_id: true },
+      });
+    if (presentationConflict) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_BARCODE_DUP_001,
+        'El código de barras ya está en uso por una presentación de venta en esta tienda',
+        { barcode: normalized, conflict_type: 'presentation' },
+      );
+    }
   }
 
   async create(createProductDto: CreateProductDto) {
@@ -1121,6 +1143,14 @@ export class ProductsService {
         OR: [
           { barcode: { equals: barcode } },
           { product_variants: { some: { barcode: { equals: barcode } } } },
+          // Tercer espacio del mismo namespace (QUI-648): pistolear el código
+          // de la "Caja x12" devuelve su producto, y el POS resuelve la
+          // presentación desde el assignment que lo lleva.
+          {
+            product_price_tier_assignments: {
+              some: { barcode: { equals: barcode } },
+            },
+          },
         ],
       }),
       ...(search &&
@@ -1260,7 +1290,7 @@ export class ProductsService {
             },
           },
           product_price_tier_assignments: {
-            select: { price_tier_id: true },
+            select: { price_tier_id: true, barcode: true },
           },
           product_images: {
             where: { is_main: true },
@@ -1661,6 +1691,16 @@ export class ProductsService {
             (product as any).product_price_tier_assignments?.map(
               (assignment: any) => assignment.price_tier_id,
             ) ?? [],
+          // QUI-648: pistolear el código de una presentación devuelve el
+          // producto Y cuál de sus presentaciones se escaneó. Sin esto el POS
+          // recibiría el producto y tendría que adivinar la unidad de venta,
+          // que es justo lo que el código de barras vino a resolver.
+          ...(barcode && {
+            scanned_price_tier_id:
+              (product as any).product_price_tier_assignments?.find(
+                (assignment: any) => assignment.barcode === barcode,
+              )?.price_tier_id ?? null,
+          }),
         };
       }),
     );

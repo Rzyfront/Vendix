@@ -1,4 +1,12 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 /**
@@ -53,4 +61,15 @@ export class UpsertProductPriceTierOverrideDto {
   @IsBoolean()
   @Transform(({ value }) => (typeof value === 'string' ? value === 'true' : value))
   is_default?: boolean;
+
+  /**
+   * Código de barras de esta presentación. Identifica el par (producto,
+   * presentación): la caja y la unidad suelta nunca comparten código, y es
+   * único dentro de la tienda en el mismo espacio de nombres que el del
+   * producto y el de la variante. Cadena vacía = borrar el código.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 }

@@ -889,6 +889,9 @@ model stores {
 
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers price_tiers[]
+  /// Assignments de presentación de sus productos. La relación existe solo
+  /// para sostener el índice único de `barcode` por tienda (ver el modelo).
+  product_price_tier_assignments product_price_tier_assignments[]
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   recipes                   recipes[]
@@ -1869,13 +1872,28 @@ model product_price_tier_assignments {
   /// además por `kind` porque vive en otra tabla — que solo un `sale_unit`
   /// pueda marcarse lo garantiza el servicio.
   is_default    Boolean   @default(false)
+  /// Código de barras del par (producto, presentación). La "Caja x12" de dos
+  /// productos distintos nunca comparte código, y la caja no comparte código
+  /// con la unidad suelta: por eso vive acá y no en `price_tiers`, que es de
+  /// tienda. Pistolearlo agrega la línea con la presentación ya aplicada.
+  ///
+  /// La unicidad es POR TIENDA y la garantiza un índice único PARCIAL que
+  /// Prisma no puede expresar y vive solo en la migración:
+  ///   CREATE UNIQUE INDEX ... ON product_price_tier_assignments (store_id, barcode)
+  ///   WHERE barcode IS NOT NULL;
+  barcode       String?   @db.VarChar(64)
+  /// Denormalizado del producto dueño. Existe SOLO para poder exigir la
+  /// unicidad del barcode por tienda: un índice único no atraviesa un JOIN.
+  store_id      Int?
   created_at    DateTime? @default(now()) @db.Timestamp(6)
 
   product    products    @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   price_tier price_tiers @relation(fields: [price_tier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stores     stores?     @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@id([product_id, price_tier_id])
   @@index([price_tier_id])
+  @@index([store_id])
 }
 
 model refund_items {

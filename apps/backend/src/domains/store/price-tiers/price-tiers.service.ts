@@ -301,7 +301,12 @@ export class PriceTiersService {
 
     const product = await this.prisma.products.findFirst({
       where: { id: productId },
-      select: { id: true, cost_price: true, price_unit_quantity: true },
+      select: {
+        id: true,
+        store_id: true,
+        cost_price: true,
+        price_unit_quantity: true,
+      },
     });
     if (!product) {
       throw new VendixHttpException(
@@ -401,6 +406,16 @@ export class PriceTiersService {
         );
       }
 
+      // El código va después del default: si el default acaba de crear el
+      // assignment, el upsert del barcode escribe sobre esa misma fila.
+      await this.applyPresentationBarcode(
+        tx,
+        productId,
+        tierId,
+        (product as any).store_id ?? null,
+        dto.barcode,
+      );
+
       return row;
     });
   }
@@ -485,6 +500,60 @@ export class PriceTiersService {
         product_id: productId,
         price_tier_id: tierId,
         is_default: true,
+      },
+    });
+  }
+
+  /**
+   * Persiste el código de barras de una presentación.
+   *
+   * Vive en el assignment porque el código identifica el par (producto,
+   * presentación): la "Caja x12" de dos productos distintos no comparte
+   * código. `store_id` se copia del producto porque la unicidad es por tienda
+   * y un índice único no atraviesa un JOIN. Cadena vacía borra el código:
+   * `null` y `''` no son lo mismo bajo un índice único parcial.
+   */
+  private async applyPresentationBarcode(
+    tx: Prisma.TransactionClient,
+    productId: number,
+    tierId: number,
+    storeId: number | null,
+    barcode: string | undefined,
+  ): Promise<void> {
+    if (barcode === undefined) return;
+    const normalized = barcode.trim() || null;
+
+    if (normalized) {
+      const conflict = await tx.product_price_tier_assignments.findFirst({
+        where: {
+          barcode: normalized,
+          store_id: storeId,
+          NOT: { product_id: productId, price_tier_id: tierId },
+        },
+        select: { product_id: true },
+      });
+      if (conflict) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_BARCODE_DUP_001,
+          'El código de barras ya está en uso por otra presentación en esta tienda',
+          { barcode: normalized, conflict_type: 'presentation' },
+        );
+      }
+    }
+
+    await tx.product_price_tier_assignments.upsert({
+      where: {
+        product_id_price_tier_id: {
+          product_id: productId,
+          price_tier_id: tierId,
+        },
+      },
+      update: { barcode: normalized, store_id: storeId },
+      create: {
+        product_id: productId,
+        price_tier_id: tierId,
+        barcode: normalized,
+        store_id: storeId,
       },
     });
   }
