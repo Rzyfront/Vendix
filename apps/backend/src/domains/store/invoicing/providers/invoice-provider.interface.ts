@@ -158,6 +158,14 @@ export interface ProviderInvoiceItem {
    * de adopción del contribuyente», porque Vendix no publica catálogo UNSPSC.
    */
   item_code?: string;
+
+  /**
+   * Código UN/ECE de la unidad realmente vendida (`MTR`, `KGM`, `LTR`, `EA`).
+   * La DIAN valida la coherencia entre cantidad y unidad: 3 metros declarados
+   * como `EA` dicen "3 unidades". Opcional: el builder cae a `EA`, que es el
+   * comportamiento histórico de todo el catálogo por pieza.
+   */
+  unit_code?: string;
 }
 
 export interface ProviderInvoiceTax {

@@ -23,6 +23,7 @@ import {
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
+import { resolveUneceUnitCode } from '../../products/services/uom-uncefact.util';
 
 type InvoiceStatus =
   | 'draft'
@@ -555,6 +556,68 @@ export class InvoiceFlowService {
     return updated;
   }
 
+  /**
+   * Código UN/ECE por línea, resuelto desde la unidad de stock del producto.
+   *
+   * Dos consultas para toda la factura —productos y catálogo— en vez de una
+   * por línea. Una línea sin producto (concepto libre) o sin unidad declarada
+   * queda en `EA`, que es lo que se emitía hasta ahora.
+   */
+  private async resolveLineUnitCodes(
+    items: Array<{ id: number; product_id?: number | null }>,
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((i) => i.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    if (productIds.length === 0) return out;
+
+    try {
+      const products = await this.prisma.products.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, stock_uom_id: true },
+      });
+      const uomIds: number[] = Array.from(
+        new Set(
+          products
+            .map((p: any) => p.stock_uom_id)
+            .filter((id: any): id is number => typeof id === 'number'),
+        ),
+      );
+      if (uomIds.length === 0) return out;
+
+      const units = await this.prisma.units_of_measure.findMany({
+        where: { id: { in: uomIds } },
+        select: { id: true, code: true },
+      });
+      const codeByUom = new Map<number, string>(
+        units.map((u: any) => [Number(u.id), String(u.code)]),
+      );
+      const codeByProduct = new Map<number, string>(
+        products.map((p: any) => [
+          p.id,
+          resolveUneceUnitCode(
+            p.stock_uom_id != null ? codeByUom.get(p.stock_uom_id) : null,
+          ),
+        ]),
+      );
+      for (const item of items) {
+        if (item.product_id == null) continue;
+        const code = codeByProduct.get(item.product_id);
+        if (code) out.set(item.id, code);
+      }
+    } catch {
+      // La unidad es un detalle de presentación fiscal: si su lectura falla,
+      // la factura se emite con `EA` en vez de no emitirse.
+      return out;
+    }
+    return out;
+  }
+
   async send(id: number) {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
@@ -569,6 +632,13 @@ export class InvoiceFlowService {
     }
 
     const timezone = await this.resolveTimezone(invoice);
+
+    // Unidad real de cada línea: la DIAN valida que la cantidad y su unidad
+    // digan lo mismo, y desde que una ferretería factura metros el `EA` fijo
+    // declararía "3 unidades" donde se vendieron 3 metros.
+    const unitCodeByItem = await this.resolveLineUnitCodes(
+      invoice.invoice_items || [],
+    );
 
     // Build provider data from invoice
     const provider_data: ProviderInvoiceData = {
@@ -608,6 +678,7 @@ export class InvoiceFlowService {
         discount_amount: dianAmount(item.discount_amount),
         tax_amount: dianAmount(item.tax_amount),
         total_amount: dianAmount(item.total_amount),
+        unit_code: unitCodeByItem.get(item.id) ?? 'EA',
       })),
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,

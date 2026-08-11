@@ -323,9 +323,67 @@ export class PromotionEngineService {
    *    honoured (same predicates the legacy methods already enforce).
    *  - Stacking follows promotion `priority` (desc) like `getEligiblePromotions`.
    */
+  /**
+   * `price_unit_quantity` por producto del carrito. Solo devuelve los que
+   * publican su precio por N unidades: la ausencia significa escala 1, que es
+   * todo el catálogo por pieza y no necesita consulta ni conversión.
+   */
+  private async resolveSaleUnitScales(
+    items: PromotionQuoteItemInput[],
+  ): Promise<Map<number, number>> {
+    const out = new Map<number, number>();
+    const ids = Array.from(
+      new Set(
+        items
+          .map((i) => Number(i.product_id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    );
+    if (ids.length === 0) return out;
+    try {
+      const rows = await this.prisma.products.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, price_unit_quantity: true },
+      });
+      for (const row of rows as any[]) {
+        const n = Number(row.price_unit_quantity ?? 1);
+        if (Number.isFinite(n) && n > 1) out.set(Number(row.id), n);
+      }
+    } catch {
+      // Sin la escala, la promoción cuenta como siempre: preferible a no
+      // cotizar descuentos por una lectura fallida.
+      return out;
+    }
+    return out;
+  }
+
+  /**
+   * Cantidad de una línea expresada en unidades de VENTA.
+   *
+   * Una línea con presentación aplicada ya cuenta paquetes —2 bultos son 2— y
+   * queda intacta. Una línea de un producto con escala se divide: 3.000 mm de
+   * un cable vendido por metro son 3. El piso es 1 cuando la cantidad vendida
+   * es menor que la escala (medio metro sigue siendo una compra, no cero).
+   */
+  private toSaleUnits(
+    item: PromotionQuoteItemInput,
+    scaleByProduct: Map<number, number>,
+  ): number {
+    const quantity = Number(item.quantity) || 0;
+    if ((item as any).stock_units_consumed != null) return quantity;
+    const scale = scaleByProduct.get(Number(item.product_id));
+    if (!scale || scale <= 1) return quantity;
+    const converted = quantity / scale;
+    return converted >= 1 ? Math.floor(converted) : converted;
+  }
+
   async quoteDiscounts(input: PromotionQuoteInput): Promise<PromotionQuoteResult> {
     const now = input.now ?? new Date();
     const items = input.items ?? [];
+    // "Lleva 3" cuenta unidades de VENTA, no de stock. Un producto medido en
+    // milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la
+    // promoción se dispararía con 3 milímetros de cable.
+    const saleUnitScale = await this.resolveSaleUnitScales(items);
     const customerId = input.customer_id ?? null;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
@@ -501,7 +559,11 @@ export class PromotionEngineService {
           const byProduct = new Map<number, number>();
           for (const idx of applicableIndexes) {
             const pid = Number(items[idx].product_id);
-            byProduct.set(pid, (byProduct.get(pid) ?? 0) + Number(items[idx].quantity));
+            byProduct.set(
+              pid,
+              (byProduct.get(pid) ?? 0) +
+                this.toSaleUnits(items[idx], saleUnitScale),
+            );
           }
           const tierByProduct = new Map<number, (typeof tiers)[number]>();
           for (const [pid, qty] of byProduct.entries()) {
@@ -545,7 +607,7 @@ export class PromotionEngineService {
         } else {
           // cart_total: legacy behavior — sum across every applicable line.
           scopedQty = applicableIndexes.reduce(
-            (sum, idx) => sum + Number(items[idx].quantity),
+            (sum, idx) => sum + this.toSaleUnits(items[idx], saleUnitScale),
             0,
           );
           matchedTier = tiers.find(

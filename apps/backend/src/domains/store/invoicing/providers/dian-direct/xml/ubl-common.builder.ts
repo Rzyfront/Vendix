@@ -965,7 +965,9 @@ export class UblCommonBuilder {
 
       line
         .ele(UBL_NAMESPACES.CBC, options.quantity_element)
-        .att('unitCode', 'EA') // Each (unit)
+        // Unidad realmente vendida; `EA` (each) cuando el producto no declara
+        // unidad, que es todo el catálogo por pieza.
+        .att('unitCode', item.unit_code || 'EA')
         .txt(item.quantity);
 
       // Same function the header uses, so header and lines cannot disagree.
@@ -1065,7 +1067,7 @@ export class UblCommonBuilder {
         .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
+        .att('unitCode', item.unit_code || 'EA')
         .txt('1.00');
     });
   }
