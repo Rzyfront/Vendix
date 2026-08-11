@@ -850,6 +850,42 @@ export const ErrorCodes = {
     devMessage: 'Orden de compra no encontrada',
   },
 
+  // QUI-647 — plan de pago al crear la OC. Red final del wizard: el frontend
+  // valida inline, pero estos códigos son la cara HTTP cuando un request
+  // inválido llega por API directa. Reemplazan los BadRequestException de
+  // texto suelto que existían antes del ticket.
+  PO_PAYMENT_001: {
+    code: 'PO_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'Un abono parcial requiere un monto abonado mayor que cero',
+  },
+  PO_PAYMENT_002: {
+    code: 'PO_PAYMENT_002',
+    httpStatus: 400,
+    devMessage: 'El abono no puede superar el total de la orden',
+  },
+  PO_PAYMENT_003: {
+    code: 'PO_PAYMENT_003',
+    httpStatus: 400,
+    devMessage: 'Un pago diferido requiere una fecha de pago',
+  },
+  PO_PAYMENT_004: {
+    code: 'PO_PAYMENT_004',
+    httpStatus: 400,
+    devMessage: 'La fecha de pago no puede ser anterior a hoy',
+  },
+  PO_PAYMENT_005: {
+    code: 'PO_PAYMENT_005',
+    httpStatus: 400,
+    devMessage: 'Las cuotas programadas deben sumar el saldo de la orden',
+  },
+  PO_PAYMENT_006: {
+    code: 'PO_PAYMENT_006',
+    httpStatus: 400,
+    devMessage:
+      'El calendario de cuotas requiere al menos una cuota con monto mayor que cero',
+  },
+
   // Inventory
   INV_FIND_001: {
     code: 'INV_FIND_001',

@@ -11,6 +11,11 @@ import {
   IsBoolean,
   MaxLength,
   ValidateNested,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+  registerDecorator,
+  ValidationOptions,
 } from 'class-validator';
 import { IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -357,6 +362,10 @@ export class PurchaseOrderItemDto {
  * Vive contra la ORDEN, no contra la CxP: la CxP nace con la recepción, así que
  * al crear la orden todavía no hay a qué colgarla. Se materializa en
  * `ap_payment_schedules` cuando la CxP existe.
+ *
+ * El monto tiene piso monetario 0.01 y máx. 2 decimales (consistente con
+ * `ScheduleApPaymentDto` y layaway): una cuota de $0 no programa nada y una de
+ * 3 decimales no puede persistirse en una columna Decimal(12,2).
  */
 export class PurchaseOrderInstallmentDto {
   @ApiProperty({ description: 'Fecha programada de la cuota (YYYY-MM-DD)' })
@@ -364,8 +373,78 @@ export class PurchaseOrderInstallmentDto {
   scheduled_date: string;
 
   @ApiProperty({ description: 'Monto de la cuota' })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
   amount: number;
+}
+
+/**
+ * QUI-647 — validador CROSS-FIELD del plan de pago (patrón quantity-tier).
+ *
+ * `payment_plan` es el campo que gobierna al resto: cada modo exige (o prohíbe)
+ * campos hermanos. El total de la orden se deriva server-side, así que la
+ * comparación de montos contra el total NO vive aquí sino en el service.
+ *
+ *   - immediate: no admite abono ni cuotas (el pago completo viaja por el flujo
+ *     post-creación, no como anticipo).
+ *   - partial:  requiere `down_payment_amount` > 0.
+ *   - deferred: requiere `payment_due_date`.
+ *   - installments: requiere al menos una cuota en `payment_installments`.
+ */
+@ValidatorConstraint({ name: 'IsValidPaymentPlan', async: false })
+export class IsValidPaymentPlanConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const object = args.object as CreatePurchaseOrderDto;
+    const plan = object.payment_plan;
+    const down = object.down_payment_amount;
+    const dueDate = object.payment_due_date;
+    const installments = object.payment_installments;
+
+    switch (plan) {
+      case 'immediate':
+        return down == null && (!installments || installments.length === 0);
+      case 'partial':
+        return down != null && down > 0;
+      case 'deferred':
+        return dueDate != null && dueDate !== '';
+      case 'installments':
+        return Array.isArray(installments) && installments.length >= 1;
+      default:
+        // Plan ausente o valor inválido: el formato lo gobierna @IsIn, y un
+        // plan ausente es una orden legacy sin configuración de pago.
+        return true;
+    }
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const plan = (args.object as CreatePurchaseOrderDto).payment_plan;
+    switch (plan) {
+      case 'immediate':
+        return 'El pago inmediato no admite abono ni cuotas programadas';
+      case 'partial':
+        return 'Un abono parcial requiere un monto abonado mayor que cero';
+      case 'deferred':
+        return 'Un pago diferido requiere una fecha de pago';
+      case 'installments':
+        return 'Un pago en cuotas requiere al menos una cuota programada';
+      default:
+        return 'El plan de pago es inválido';
+    }
+  }
+}
+
+export function IsValidPaymentPlan(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsValidPaymentPlan',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: IsValidPaymentPlanConstraint,
+    });
+  };
 }
 
 export class CreatePurchaseOrderDto {
@@ -481,14 +560,21 @@ export class CreatePurchaseOrderDto {
     required: false,
   })
   @IsIn(['immediate', 'partial', 'deferred', 'installments'])
+  @IsValidPaymentPlan()
   @IsOptional()
   payment_plan?: 'immediate' | 'partial' | 'deferred' | 'installments';
 
+  /**
+   * QUI-647: monto abonado en el acto (payment_plan=partial, o abono dentro de
+   * un plan de cuotas). Piso $0 y máx. 2 decimales; el tope contra el total lo
+   * valida el service porque el total se deriva server-side.
+   */
   @ApiProperty({
     description: 'QUI-647: monto abonado en el acto (payment_plan=partial)',
     required: false,
   })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   @IsOptional()
   down_payment_amount?: number;
 

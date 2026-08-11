@@ -15,12 +15,18 @@ import {
   purchase_order_status_enum,
   tax_type_enum,
   invoice_type_enum,
+  Prisma,
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  localDateString,
+  resolveStoreTimezone,
+  DEFAULT_STORE_TIMEZONE,
+} from '@common/utils/store-timezone.util';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
@@ -51,6 +57,16 @@ import { assertTiersAllowed } from '../../products/services/tiers-variants-exclu
  * (exclude vs capitalize IVA) uses the same canonical fiscal source.
  */
 const VAT_RESPONSIBLE_CODE = 'O-48';
+
+/**
+ * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
+ * `source: 'po_advance'` distingue la fila del abono de las de `po_modal`
+ * (pagos post-creación) y `po_bridge` (espejo AP). `payment_method` es solo
+ * etiqueta: la contabilidad deriva la cuenta de contrapartida por mapping key,
+ * no por este texto.
+ */
+const PO_ADVANCE_SOURCE = 'po_advance';
+const PO_ADVANCE_PAYMENT_METHOD = 'advance';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -530,7 +546,27 @@ export class PurchaseOrdersService {
   }
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
-    const result = await this.prisma.$transaction(async (tx) => {
+    // QUI-647 — timezone de la tienda para comparar las fechas del plan de
+    // pago contra "hoy" en el CALENDARIO local (fecha-sólo, sin convertir a
+    // instante: pasar a UTC correría la fecha un día en tiendas con offset
+    // negativo). Se resuelve ANTES del $transaction para no abrir una segunda
+    // lectura dentro de la transacción.
+    const ctxStoreId = RequestContextService.getStoreId();
+    const storeTz = ctxStoreId
+      ? await resolveStoreTimezone(this.prisma, ctxStoreId)
+      : DEFAULT_STORE_TIMEZONE;
+
+    // La transacción devuelve la orden + (si hubo abono) el pago de anticipo
+    // registrado: el evento contable se emite por FUERA, después del commit.
+    const txResult = await this.prisma.$transaction(
+      async (tx): Promise<{
+        order: any;
+        advance: { paymentId: number; amount: number } | null;
+      }> => {
+        let advanceToRegister: {
+          paymentId: number;
+          amount: number;
+        } | null = null;
       // 1. Process items to handle new product creation
       const processedItems: any[] = [];
       const organization_id = RequestContextService.getOrganizationId();
@@ -1138,48 +1174,106 @@ export class PurchaseOrdersService {
       // la orden deja al usuario con una OC a medio configurar que tiene que
       // ir a arreglar a mano en Cuentas por Pagar — exactamente el trabajo que
       // este ticket viene a eliminar.
-      const paymentPlan = createPurchaseOrderDto.payment_plan;
-      const downPayment = Number(
+      //
+      // `paymentPlan`/`downPayment` son `let` porque la matriz anti-doble-
+      // registro reconduce un caso límite: partial con abono == total significa
+      // "pago todo ahora", que se trata como immediate SIN abono (el pago
+      // completo viaja por el flujo post-creación, jamás como anticipo 133005).
+      let paymentPlan = createPurchaseOrderDto.payment_plan;
+      let downPayment = Number(
         createPurchaseOrderDto.down_payment_amount ?? 0,
       );
       const installments = createPurchaseOrderDto.payment_installments ?? [];
+      const dueDate = createPurchaseOrderDto.payment_due_date;
+
+      // "Hoy" en el calendario de la tienda. Las fechas del plan son strings
+      // date-only (YYYY-MM-DD) y se comparan LEXICOGRÁFICAMENTE contra esta
+      // referencia: convertir a instante UTC correría la fecha un día en
+      // tiendas con offset negativo (contrato vendix-date-timezone).
+      const todayLocal = localDateString(new Date(), storeTz);
+      const dateOnly = (s: string) => s.slice(0, 10);
+      const isPast = (s: string) => dateOnly(s) < todayLocal;
 
       if (paymentPlan === 'partial') {
         if (!(downPayment > 0)) {
-          throw new BadRequestException(
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_001,
             'Un abono parcial requiere un monto abonado mayor que cero.',
           );
         }
         if (downPayment > totalAmount) {
-          throw new BadRequestException(
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_002,
             `El abono ($${downPayment}) no puede superar el total de la orden ($${totalAmount}).`,
+          );
+        }
+        // Matriz anti-doble-registro: abono == total se reconduce a immediate
+        // SIN abono registrado (ver comentario de los `let` de arriba).
+        if (downPayment === totalAmount) {
+          paymentPlan = 'immediate';
+          downPayment = 0;
+        }
+      }
+
+      if (paymentPlan === 'deferred') {
+        if (!dueDate) {
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_003,
+            'Un pago diferido requiere una fecha de pago.',
+          );
+        }
+        if (isPast(dueDate)) {
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_004,
+            `La fecha de pago ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
           );
         }
       }
 
       if (paymentPlan === 'installments') {
         if (installments.length === 0) {
-          throw new BadRequestException(
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_006,
             'Un pago en cuotas requiere al menos una cuota programada.',
           );
         }
-        const scheduled = round2(
-          installments.reduce((sum, i) => sum + Number(i.amount || 0), 0),
-        );
-        // Se compara contra el SALDO, no contra el total: en un plan de cuotas
-        // con abono, lo que se programa es lo que queda debiendo.
-        const balance = round2(totalAmount - downPayment);
-        if (Math.abs(scheduled - balance) > 0.01) {
-          throw new BadRequestException(
-            `Las cuotas suman $${scheduled} y el saldo de la orden es $${balance}. Deben coincidir.`,
+        // El abono de un plan de cuotas es opcional y DEBE dejar saldo para
+        // las cuotas: 0 <= down < total (down >= total haría imposible que
+        // las cuotas, con piso 0.01 cada una, sumen el saldo).
+        if (downPayment < 0 || downPayment >= totalAmount) {
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_002,
+            `El abono ($${downPayment}) debe ser menor que el total de la orden ($${totalAmount}) para un pago en cuotas.`,
           );
         }
-      }
-
-      if (paymentPlan === 'deferred' && !createPurchaseOrderDto.payment_due_date) {
-        throw new BadRequestException(
-          'Un pago diferido requiere una fecha de pago.',
+        for (const inst of installments) {
+          if (!(Number(inst.amount) >= 0.01)) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_006,
+              'Cada cuota debe tener un monto mayor que cero.',
+            );
+          }
+          if (isPast(inst.scheduled_date)) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_004,
+              `La cuota del ${dateOnly(inst.scheduled_date)} no puede programarse en una fecha anterior a hoy (${todayLocal}).`,
+            );
+          }
+        }
+        // Suma EXACTA con Prisma.Decimal contra totalAmount − downPayment
+        // (tolerancia 0.01). Reemplaza el round2 anterior: la aritmética de
+        // punto flotante puede desviar la suma de cuotas en centavos.
+        const scheduledSum = installments.reduce(
+          (sum, i) => sum.plus(new Prisma.Decimal(i.amount ?? 0)),
+          new Prisma.Decimal(0),
         );
+        const balance = new Prisma.Decimal(totalAmount).minus(downPayment);
+        if (!scheduledSum.minus(balance).abs().lte(new Prisma.Decimal('0.01'))) {
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_005,
+            `Las cuotas suman $${scheduledSum.toFixed(2)} y el saldo de la orden es $${balance.toFixed(2)}. Deben coincidir.`,
+          );
+        }
       }
 
       // Generate order number
@@ -1346,8 +1440,43 @@ export class PurchaseOrdersService {
         },
       });
 
-      return purchaseOrder;
+      // QUI-647 Paso 2 — un abono declarado al crear es un PAGO REAL de
+      // anticipo. Se registra DENTRO de esta transacción (Prisma no permite
+      // anidar $transaction, así que el core de registerPayment se ejecuta
+      // contra el `tx` abierto via registerAdvancePaymentInTx); el evento
+      // contable se emite solo después del commit (ver
+      // emitPurchaseOrderPaymentEvent). `downPayment` ya vino reconducido
+      // por la matriz anti-doble-registro: partial con abono==total es
+      // immediate SIN abono, así que aquí solo entran abonos reales < total.
+      if (downPayment > 0) {
+        const advance = await this.registerAdvancePaymentInTx(
+          tx,
+          purchaseOrder.id,
+          downPayment,
+          user_id,
+        );
+        (purchaseOrder as any).payment_status = advance.paymentStatus;
+        advanceToRegister = { paymentId: advance.id, amount: downPayment };
+      }
+
+      return { order: purchaseOrder, advance: advanceToRegister };
     });
+
+    const result = txResult.order;
+    const advanceRegistered = txResult.advance;
+
+    // QUI-647 Paso 2 — el evento contable del anticipo se emite DESPUÉS del
+    // commit: el handler de `purchase_order.payment` corre async y debe ver la
+    // fila de pago ya persistida (misma convención que registerPayment).
+    if (advanceRegistered) {
+      await this.emitPurchaseOrderPaymentEvent({
+        purchaseOrder: result,
+        paymentId: advanceRegistered.paymentId,
+        amount: advanceRegistered.amount,
+        paymentMethod: PO_ADVANCE_PAYMENT_METHOD,
+        userId: RequestContextService.getUserId(),
+      });
+    }
 
     // Audit log after transaction
     try {
@@ -1483,6 +1612,12 @@ export class PurchaseOrdersService {
             products: true,
             product_variants: true,
           },
+        },
+        // QUI-647 — el detalle de la OC expone el calendario de pagos completo
+        // (fechas, montos, estados) ordenado cronológicamente; es la superficie
+        // donde el operador audita la deuda con el proveedor.
+        payment_schedules: {
+          orderBy: { scheduled_date: 'asc' },
         },
       },
     });
@@ -3529,6 +3664,124 @@ export class PurchaseOrdersService {
 
   // ===== Payments =====
 
+  /**
+   * QUI-647 — registra el PAGO REAL de un abono declarado al crear la OC.
+   *
+   * `create()` corre dentro de `this.prisma.$transaction` y Prisma NO permite
+   * anidar transacciones, así que este helper recibe el `tx` abierto y ejecuta
+   * el core de `registerPayment` (fila de pago + recálculo de payment_status)
+   * SIN abrir otra transacción.
+   *
+   * El abono es un ANTICIPO (is_advance=true): la OC no tiene recepciones al
+   * momento de crearse, y el asiento DR 133005 / CR 1110 lo postea el handler
+   * de `purchase_order.payment` que se emite DESPUÉS del commit — ver
+   * emitPurchaseOrderPaymentEvent. Aquí no se hace el puente PO→AP (el espejo
+   * de registerPayment) a propósito: la CxP no puede existir todavía porque
+   * nace con la recepción.
+   */
+  private async registerAdvancePaymentInTx(
+    tx: any,
+    purchaseOrderId: number,
+    amount: number,
+    userId: number | undefined,
+  ): Promise<{ id: number; paymentStatus: 'unpaid' | 'partial' | 'paid' }> {
+    const payment = await tx.purchase_order_payments.create({
+      data: {
+        purchase_order_id: purchaseOrderId,
+        amount,
+        payment_date: new Date(),
+        payment_method: PO_ADVANCE_PAYMENT_METHOD,
+        source: PO_ADVANCE_SOURCE,
+        created_by_user_id: userId,
+      },
+    });
+
+    const status = await this.recalculatePaymentStatus(purchaseOrderId, tx);
+    await tx.purchase_orders.update({
+      where: { id: purchaseOrderId },
+      data: { payment_status: status as any },
+    });
+
+    return { id: payment.id, paymentStatus: status };
+  }
+
+  /**
+   * QUI-647 — emite `purchase_order.payment` para contabilidad.
+   *
+   * El EMISOR resuelve `is_advance` (la OC no tenía recepciones al momento del
+   * pago → anticipo) y el snapshot del proveedor/entidad fiscal; el handler
+   * contable NUNCA lo detecta. Se llama SIEMPRE después del commit de la
+   * transacción que creó la fila de pago (los handlers corren async y deben
+   * leer la fila ya persistida). Compartido por registerPayment y create().
+   */
+  private async emitPurchaseOrderPaymentEvent(params: {
+    purchaseOrder: {
+      id: number;
+      organization_id: number;
+      location?: { store_id?: number | null } | null;
+      suppliers?: {
+        id: number;
+        name: string;
+        tax_id?: string | null;
+      } | null;
+    };
+    paymentId: number;
+    amount: number;
+    paymentMethod: string;
+    userId?: number;
+  }) {
+    try {
+      const { purchaseOrder: po, paymentId, amount, paymentMethod, userId } =
+        params;
+      const receptionsCount = await this.prisma.purchase_order_receptions.count(
+        {
+          where: { purchase_order_id: po.id },
+        },
+      );
+      const is_advance = receptionsCount === 0;
+
+      const store_id = po.location?.store_id ?? undefined;
+      const supplier = po.suppliers
+        ? {
+            id: po.suppliers.id,
+            name: po.suppliers.name,
+            tax_id: po.suppliers.tax_id ?? undefined,
+          }
+        : undefined;
+
+      let accounting_entity_id: number | undefined;
+      try {
+        const entity =
+          await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+            organization_id: po.organization_id,
+            store_id,
+          });
+        accounting_entity_id = entity?.id;
+      } catch (error: any) {
+        this.logger.warn(
+          `Could not resolve fiscal accounting entity for PO payment #${po.id}: ${error?.message}`,
+        );
+      }
+
+      this.eventEmitter.emit('purchase_order.payment', {
+        purchase_order_id: po.id,
+        payment_id: paymentId,
+        organization_id: po.organization_id,
+        store_id,
+        accounting_entity_id,
+        amount: Number(amount),
+        payment_method: paymentMethod,
+        is_advance,
+        user_id: userId,
+        supplier,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit purchase_order.payment for PO #${params.purchaseOrder.id}: ${error.message}`,
+      );
+    }
+  }
+
   async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
     const po = await this.prisma.purchase_orders.findUnique({
       where: { id: purchaseOrderId },
@@ -3664,57 +3917,16 @@ export class PurchaseOrdersService {
       );
     }
 
-    // Emit event for accounting
-    try {
-      // ANTICIPO A PROVEEDORES: si la OC NO tiene recepciones al momento del
-      // pago, es un pago anticipado (no extingue una CxP inexistente sino que
-      // crea un activo 133005). El EMISOR resuelve la bandera `is_advance` y el
-      // snapshot del proveedor/entidad; el handler contable NUNCA lo detecta.
-      const receptionsCount = await this.prisma.purchase_order_receptions.count({
-        where: { purchase_order_id: purchaseOrderId },
-      });
-      const is_advance = receptionsCount === 0;
-
-      const store_id = po.location?.store_id ?? undefined;
-      const supplier = po.suppliers
-        ? {
-            id: po.suppliers.id,
-            name: po.suppliers.name,
-            tax_id: po.suppliers.tax_id ?? undefined,
-          }
-        : undefined;
-
-      let accounting_entity_id: number | undefined;
-      try {
-        const entity =
-          await this.fiscalScopeService.resolveAccountingEntityForFiscal({
-            organization_id: po.organization_id,
-            store_id,
-          });
-        accounting_entity_id = entity?.id;
-      } catch (error: any) {
-        this.logger.warn(
-          `Could not resolve fiscal accounting entity for PO payment #${purchaseOrderId}: ${error?.message}`,
-        );
-      }
-
-      this.eventEmitter.emit('purchase_order.payment', {
-        purchase_order_id: purchaseOrderId,
-        payment_id: payment.id,
-        organization_id: po.organization_id,
-        store_id,
-        accounting_entity_id,
-        amount: Number(dto.amount),
-        payment_method: dto.payment_method,
-        is_advance,
-        user_id: userId,
-        supplier,
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to emit purchase_order.payment for PO #${purchaseOrderId}: ${error.message}`,
-      );
-    }
+    // Emit event for accounting (helper compartido con create(): el EMISOR
+    // resuelve `is_advance` y el snapshot proveedor/entidad; el handler
+    // contable NUNCA lo detecta).
+    await this.emitPurchaseOrderPaymentEvent({
+      purchaseOrder: po,
+      paymentId: payment.id,
+      amount: Number(dto.amount),
+      paymentMethod: dto.payment_method,
+      userId,
+    });
 
     return payment;
   }
