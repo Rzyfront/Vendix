@@ -529,10 +529,15 @@ export const storeAdminRoutes: Routes = [
             redirectTo: 'general',
           },
           {
+            // Configuración General es un shell con pestañas y rutas hijas
+            // (`negocio`, `venta`, `logistica`, `reservas`, `mesas`,
+            // `notificaciones`). `settings/general` a secas redirige a `negocio`,
+            // así que los enlaces entrantes que apuntan al módulo sin pestaña
+            // siguen resolviendo.
             path: 'general',
-            loadComponent: () =>
-              import('../../private/modules/store/settings/general/general-settings.component').then(
-                (c) => c.GeneralSettingsComponent,
+            loadChildren: () =>
+              import('../../private/modules/store/settings/general/general-settings.routes').then(
+                (m) => m.GENERAL_SETTINGS_ROUTES,
               ),
           },
           {

@@ -17,7 +17,7 @@ import { InvoicingService } from '../../../invoicing/services/invoicing.service'
 import type { DianEmissionStatus } from '../../../invoicing/interfaces/invoice.interface';
 import type { EmissionStage } from '../components/receipts-settings-form/receipts-settings-form.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import {
+import type {
   StickyHeaderActionButton,
   StickyHeaderBadgeColor,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
@@ -37,6 +37,11 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
  * estaban apiladas en una sola vista. Al partirlas en rutas hijas, dejar el
  * estado en el componente habría significado perder los cambios pendientes en
  * cada clic de pestaña.
+ *
+ * OJO con el ciclo de vida: el router cachea el inyector de la ruta en
+ * `route._injector` y no lo destruye al salir, así que esta instancia sobrevive
+ * a la navegación y su `DestroyRef` nunca dispara. De eso se ocupa `init()`,
+ * que resetea el estado transitorio en cada montaje del shell.
  */
 @Injectable()
 export class GeneralSettingsStore {
@@ -46,8 +51,6 @@ export class GeneralSettingsStore {
   private readonly configFacade = inject(ConfigFacade);
   private readonly authFacade = inject(AuthFacade);
   private readonly invoicingService = inject(InvoicingService);
-
-  private hasInitialized = false;
 
   // ─── Estado base ────────────────────────────────────────
 
@@ -240,13 +243,30 @@ export class GeneralSettingsStore {
   // ─── Comandos ───────────────────────────────────────────
 
   /**
-   * Carga inicial de la pantalla. Idempotente: el shell la llama en su
-   * constructor y el store vive tanto como la rama de rutas, así que un
-   * re-render del shell no debe disparar tres peticiones más.
+   * Carga inicial de la pantalla. La llama el shell en su constructor, o sea
+   * una vez por montaje del módulo.
+   *
+   * **Resetea el estado transitorio a propósito.** El router CACHEA el inyector
+   * de una ruta con `providers` en el propio objeto de configuración
+   * (`route._injector`, creado una sola vez) y NO lo destruye al desactivarla:
+   * la MISMA instancia de este store atiende la próxima visita. Sin el reset se
+   * volvería con el badge "Pendiente de Guardar" de la visita anterior, sin
+   * spinner de carga, y —lo grave— con un `focusBusinessTabRequest` viejo que el
+   * effect del shell interpretaría como una petición nueva y secuestraría un
+   * deep-link a otra pestaña.
    */
   init(): void {
-    if (this.hasInitialized) return;
-    this.hasInitialized = true;
+    this.isLoading.set(true);
+    this.settingsLoaded.set(false);
+    this.hasUnsavedChanges.set(false);
+    this.lastSaved.set(null);
+    this.pendingAppLogo.set(null);
+    this.pendingAppFavicon.set(null);
+    this.markTouchedRequest.set(0);
+    this.focusBusinessTabRequest.set(0);
+    // Validez desconocida hasta que el formulario de Identidad se monte y la
+    // publique — igual que un componente recién creado.
+    this.generalFormValid.set(null);
 
     // forceRefresh: true también en el montaje — la cache de 60s devolvería la
     // respuesta rancia previa al guardado tras navegar, y el formulario se
