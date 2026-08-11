@@ -330,7 +330,7 @@ interface ResolutionFormControls {
           <app-button
             type="button"
             size="sm"
-            variant="ghost"
+            variant="outline"
             (clicked)="cancel.emit()"
           >
             Cancelar
@@ -587,6 +587,19 @@ export class DianResolutionFormComponent {
     const value = this.formValue();
     const from = Number(value.range_from);
     const to = Number(value.range_to);
+
+    // Mismo predicado que el backend (`invoice-resolutions.service.ts`): el
+    // consecutivo nace en `range_from - 1`, así que una fila intacta está por
+    // debajo de su propio piso POR CONSTRUCCIÓN. Sin este corte, toda
+    // resolución recién creada abre su formulario acusada de emitir fuera del
+    // rango autorizado —y un aviso que grita en falso es un aviso que el
+    // comerciante deja de leer justo cuando pasa a ser cierto.
+    if (existing.current_number < existing.range_from) {
+      return Number.isFinite(from)
+        ? `Esta resolución todavía no ha emitido: el próximo documento saldrá con el ${from}.`
+        : 'Esta resolución todavía no ha emitido.';
+    }
+
     const base = `Esta resolución va por el consecutivo ${existing.current_number}.`;
     if (
       Number.isFinite(from) &&

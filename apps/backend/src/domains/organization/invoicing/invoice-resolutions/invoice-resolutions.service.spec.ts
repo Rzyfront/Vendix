@@ -425,6 +425,69 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
 
   // ---------------------------------------------------------------------------
 
+  describe('mover el rango de una resolución que todavía no ha emitido', () => {
+    /**
+     * Fila intacta: `current_number` vale `range_from - 1`, que es como nace en
+     * `create`. Nada se ha numerado todavía, así que el rango entero es
+     * corregible.
+     */
+    const sinConsumir = {
+      id: 55,
+      organization_id: ORGANIZATION_ID,
+      store_id: null,
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      document_type: 'support_document',
+      resolution_number: '18764000001234',
+      resolution_date: new Date('2026-01-15'),
+      prefix: 'DSJL',
+      range_from: 1000,
+      range_to: 5000,
+      current_number: 999,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active: true,
+      technical_key: null,
+      _count: { invoices: 0 },
+    };
+
+    it('re-siembra el consecutivo en el piso nuevo', async () => {
+      const { service, prisma } = createOrgService({ resolution: sinConsumir });
+
+      await service.update(55, { range_from: 8000, range_to: 9000 } as any);
+
+      const { data } =
+        prisma.__unscoped.invoice_resolutions.update.mock.calls[0][0];
+      // Sin esto, el siguiente documento saldría con el 1000 —el piso viejo—,
+      // que el rango nuevo ya no cubre: numeración no autorizada emitida por
+      // una corrección que el comerciante creyó inofensiva.
+      expect(data.current_number).toBe(7999);
+    });
+
+    it('no lo toca cuando el piso no se mueve', async () => {
+      const { service, prisma } = createOrgService({ resolution: sinConsumir });
+
+      await service.update(55, { range_to: 9000 } as any);
+
+      const { data } =
+        prisma.__unscoped.invoice_resolutions.update.mock.calls[0][0];
+      expect(data).not.toHaveProperty('current_number');
+    });
+
+    it('no re-siembra una resolución que ya numeró: ahí el piso es inmutable', async () => {
+      const { service } = createOrgService({
+        resolution: { ...sinConsumir, current_number: 1200 },
+      });
+
+      const error = await capturarError(() =>
+        service.update(55, { range_from: 8000 } as any),
+      );
+
+      expect(error.errorCode).toBe('INVOICING_RESOLUTION_005');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+
   describe('edición de una resolución ya consumida', () => {
     /**
      * Fila deliberadamente sucia: documento soporte CON clave técnica —del tipo

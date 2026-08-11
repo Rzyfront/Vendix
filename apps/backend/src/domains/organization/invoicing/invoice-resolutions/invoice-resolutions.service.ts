@@ -330,6 +330,18 @@ export class OrgInvoiceResolutionsService {
     }
     if (dto.range_from !== undefined) update_data.range_from = dto.range_from;
     if (dto.range_to !== undefined) update_data.range_to = dto.range_to;
+    // Una fila sin consumo lleva `current_number = range_from - 1` por
+    // construcción (ver `create`). Si el piso se mueve hay que re-sembrarlo: si
+    // se queda apuntando al piso viejo, el siguiente documento sale con un
+    // número que el rango nuevo ya no cubre —y esa es justo la numeración no
+    // autorizada que el resto de este servicio se dedica a impedir.
+    if (
+      !consumed &&
+      dto.range_from !== undefined &&
+      dto.range_from !== current.range_from
+    ) {
+      update_data.current_number = dto.range_from - 1;
+    }
     if (dto.valid_from !== undefined) update_data.valid_from = next_valid_from;
     if (dto.valid_to !== undefined) update_data.valid_to = next_valid_to;
     // `!== undefined` y nada más: un defecto materializado en el DTO reactivaría
