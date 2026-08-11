@@ -486,7 +486,7 @@ export class FinancialAnalyticsService {
         AND o.state IN (${states})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
-    `;
+    `);
     const row = rows[0];
     return {
       cogs: Number(row?.cogs ?? 0),
