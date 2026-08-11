@@ -83,14 +83,23 @@ export interface PromotionQuoteItemBreakdown {
   line_id?: string | number;
   product_id: number;
   variant_id?: number | null;
+  /** Cantidad en unidades de STOCK, tal como llegó en la línea. */
   quantity: number;
-  /** Unit price BEFORE any promotional discount. */
+  /**
+   * Unit price BEFORE any promotional discount, expressed per PRICE unit —
+   * per metre for a cable stocked in millimetres, not per millimetre.
+   */
   original_unit_price: number;
   /** Total promotional discount for this item across all applied promotions. */
   promotion_discount: number;
-  /** Effective unit price after applying promotions (>= 0). */
+  /** Effective unit price after applying promotions (>= 0), same scale as `original_unit_price`. */
   final_unit_price: number;
-  /** Final line total after promotions (= final_unit_price * quantity). */
+  /**
+   * Final line total after promotions. Es `final_unit_price × unidades de
+   * PRECIO`, no `× quantity`: cuando el producto publica su precio por N
+   * unidades de stock (`products.price_unit_quantity`), las dos difieren por
+   * ese factor. Con N = 1 —todo el catálogo histórico— coinciden.
+   */
   final_line_total: number;
   /** All promotion ids that contributed to this item's discount. */
   promotion_ids: number[];

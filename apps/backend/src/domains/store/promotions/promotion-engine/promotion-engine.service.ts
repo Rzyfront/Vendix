@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { resolvePriceUnits } from '../../products/services/price-unit.util';
 import {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -16,6 +17,27 @@ import {
 
 /** Promotions resolve rule types from the Prisma enum. */
 type PromotionRuleType = 'flat' | 'quantity_tiered';
+
+/**
+ * Línea mínima que la aritmética de escala necesita leer. Cubre a la vez el
+ * `PromotionQuoteItemInput` tipado que entra por `quoteDiscounts` y los
+ * `any[]` sin tipo que llegan por `POST /store/promotions/check-eligibility`,
+ * para que las dos superficies compartan exactamente el mismo cálculo.
+ */
+type ScalableLine = {
+  product_id?: unknown;
+  unit_price?: unknown;
+  quantity?: unknown;
+  stock_units_consumed?: unknown;
+  applied_price_tier_id?: unknown;
+};
+
+/**
+ * "Ningún producto declara escala". Se usa como valor por defecto en los
+ * caminos legacy sincrónicos, donde colapsa la aritmética a la histórica
+ * `unit_price × quantity`.
+ */
+const NO_SALE_UNIT_SCALES: ReadonlyMap<number, number> = new Map();
 
 /** Tier row resolved from DB; `type` and `value` mirror a flattened promotion. */
 interface PromotionQuantityTierRecord {
@@ -66,6 +88,11 @@ export class PromotionEngineService {
   async getEligiblePromotions(cartItems: any[], customerId?: number) {
     const now = new Date();
 
+    // Misma escala de venta que `quoteDiscounts`: /check-eligibility y el
+    // snapshot del POS tienen que ver el mismo dinero, o el cliente vería un
+    // descuento al validar y otro al cobrar.
+    const saleUnitScale = await this.resolveSaleUnitScales(cartItems ?? []);
+
     // Fetch active promotions (query-time filtering)
     const promotions = await this.prisma.promotions.findMany({
       where: {
@@ -100,12 +127,16 @@ export class PromotionEngineService {
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
-      const applicableTotal = this.calculateApplicableTotal(promo, cartItems);
+      const applicableTotal = this.calculateApplicableTotal(
+        promo,
+        cartItems,
+        saleUnitScale,
+      );
       if (applicableTotal <= 0) continue;
 
       // Check minimum purchase
       const cartTotal = cartItems.reduce(
-        (sum, item) => sum + item.unit_price * item.quantity,
+        (sum, item) => sum + this.lineTotal(item, saleUnitScale),
         0,
       );
       if (
@@ -115,7 +146,7 @@ export class PromotionEngineService {
         continue;
 
       // Calculate discount
-      const discount = this.calculateDiscount(promo, cartItems);
+      const discount = this.calculateDiscount(promo, cartItems, saleUnitScale);
 
       eligible.push({
         ...promo,
@@ -144,10 +175,24 @@ export class PromotionEngineService {
   }
 
   /**
-   * Calculate discount amount for a promotion
+   * Calculate discount amount for a promotion.
+   *
+   * `scaleByProduct` trae el `price_unit_quantity` de los productos que
+   * publican su precio por N unidades de stock. Se recibe por parámetro porque
+   * este método es sincrónico y la escala se lee una sola vez por carrito; sin
+   * él la aritmética colapsa a la histórica `unit_price × quantity`, que es lo
+   * correcto para todo el catálogo por pieza.
    */
-  calculateDiscount(promotion: any, cartItems: any[]): number {
-    const applicableTotal = this.calculateApplicableTotal(promotion, cartItems);
+  calculateDiscount(
+    promotion: any,
+    cartItems: any[],
+    scaleByProduct: ReadonlyMap<number, number> = NO_SALE_UNIT_SCALES,
+  ): number {
+    const applicableTotal = this.calculateApplicableTotal(
+      promotion,
+      cartItems,
+      scaleByProduct,
+    );
 
     let discount = 0;
     if (promotion.type === 'percentage') {
@@ -165,7 +210,11 @@ export class PromotionEngineService {
     return Math.round(discount * 100) / 100;
   }
 
-  private calculateApplicableTotal(promotion: any, cartItems: any[]): number {
+  private calculateApplicableTotal(
+    promotion: any,
+    cartItems: any[],
+    scaleByProduct: ReadonlyMap<number, number> = NO_SALE_UNIT_SCALES,
+  ): number {
     if (promotion.scope === 'product') {
       const promoProductIds =
         promotion.promotion_products?.map((pp: any) => Number(pp.product_id)) ||
@@ -173,7 +222,7 @@ export class PromotionEngineService {
 
       return cartItems
         .filter((item) => promoProductIds.includes(Number(item.product_id)))
-        .reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+        .reduce((sum, item) => sum + this.lineTotal(item, scaleByProduct), 0);
     }
 
     if (promotion.scope === 'category') {
@@ -187,11 +236,11 @@ export class PromotionEngineService {
             promoCategoryIds.includes(categoryId),
           ),
         )
-        .reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+        .reduce((sum, item) => sum + this.lineTotal(item, scaleByProduct), 0);
     }
 
     return cartItems.reduce(
-      (sum, item) => sum + Number(item.unit_price) * Number(item.quantity),
+      (sum, item) => sum + this.lineTotal(item, scaleByProduct),
       0,
     );
   }
@@ -283,8 +332,11 @@ export class PromotionEngineService {
       }
     }
 
+    // Misma escala de venta que `quoteDiscounts` y `getEligiblePromotions`.
+    const saleUnitScale = await this.resolveSaleUnitScales(cartItems ?? []);
+
     const cartTotal = cartItems.reduce(
-      (sum, item) => sum + item.unit_price * item.quantity,
+      (sum, item) => sum + this.lineTotal(item, saleUnitScale),
       0,
     );
     if (
@@ -296,12 +348,16 @@ export class PromotionEngineService {
       );
     }
 
-    const applicableTotal = this.calculateApplicableTotal(promotion, cartItems);
+    const applicableTotal = this.calculateApplicableTotal(
+      promotion,
+      cartItems,
+      saleUnitScale,
+    );
     if (applicableTotal <= 0) {
       throw new BadRequestException('Promocion no aplica a los items del carrito');
     }
 
-    const discount = this.calculateDiscount(promotion, cartItems);
+    const discount = this.calculateDiscount(promotion, cartItems, saleUnitScale);
     return { promotion, discount };
   }
 
@@ -329,7 +385,7 @@ export class PromotionEngineService {
    * todo el catálogo por pieza y no necesita consulta ni conversión.
    */
   private async resolveSaleUnitScales(
-    items: PromotionQuoteItemInput[],
+    items: ScalableLine[],
   ): Promise<Map<number, number>> {
     const out = new Map<number, number>();
     const ids = Array.from(
@@ -358,7 +414,27 @@ export class PromotionEngineService {
   }
 
   /**
-   * Cantidad de una línea expresada en unidades de VENTA.
+   * Una línea vendida por PRESENTACIÓN ya viene en su propia escala:
+   * `unit_price` es el precio del paquete completo y `quantity` cuenta
+   * paquetes, no unidades de stock. Volver a dividir por `price_unit_quantity`
+   * contaría de menos y —peor— cobraría de menos.
+   *
+   * Predicado ÚNICO a propósito: lo comparten la CANTIDAD (`toSaleUnits`) y el
+   * DINERO (`toPriceUnits`), para que las dos lecturas de una misma línea no
+   * puedan divergir nunca. `applied_price_tier_id` viaja junto a
+   * `stock_units_consumed` en todos los caminos que hoy persisten una
+   * presentación; se lee también por si alguna superficie llega con el
+   * snapshot a medias.
+   */
+  private isSoldByPresentation(item: ScalableLine): boolean {
+    return (
+      item.stock_units_consumed != null || item.applied_price_tier_id != null
+    );
+  }
+
+  /**
+   * Cantidad de una línea expresada en unidades de VENTA — el contador de
+   * TRAMOS ("lleva 3").
    *
    * Una línea con presentación aplicada ya cuenta paquetes —2 bultos son 2— y
    * queda intacta. Una línea de un producto con escala se divide: 3.000 mm de
@@ -366,15 +442,57 @@ export class PromotionEngineService {
    * es menor que la escala (medio metro sigue siendo una compra, no cero).
    */
   private toSaleUnits(
-    item: PromotionQuoteItemInput,
-    scaleByProduct: Map<number, number>,
+    item: ScalableLine,
+    scaleByProduct: ReadonlyMap<number, number>,
   ): number {
     const quantity = Number(item.quantity) || 0;
-    if ((item as any).stock_units_consumed != null) return quantity;
+    if (this.isSoldByPresentation(item)) return quantity;
     const scale = scaleByProduct.get(Number(item.product_id));
     if (!scale || scale <= 1) return quantity;
-    const converted = quantity / scale;
+    const converted = resolvePriceUnits(quantity, scale);
     return converted >= 1 ? Math.floor(converted) : converted;
+  }
+
+  /**
+   * Unidades de PRECIO de una línea — el multiplicador del DINERO.
+   *
+   * Comparte la escala con `toSaleUnits` pero NO su piso, y esa distinción es
+   * el corazón de QUI-648:
+   *
+   *   - `toSaleUnits` cuenta unidades ENTERAS porque resuelve un TRAMO: "lleva
+   *     3" no se cumple con 2,5 metros, así que aplica `Math.floor`.
+   *   - el DINERO es continuo: 2.500 mm de un cable publicado a $5.000 el
+   *     metro son 2,5 metros y valen $12.500. Aplicar el piso acá cobraría
+   *     $10.000, es decir, regalaría medio metro en cada línea.
+   *
+   * Con escala 1 —todo el catálogo vendido por pieza— devuelve `quantity`
+   * intacto y la aritmética queda idéntica a la histórica.
+   */
+  private toPriceUnits(
+    item: ScalableLine,
+    scaleByProduct: ReadonlyMap<number, number>,
+  ): number {
+    const quantity = Number(item.quantity) || 0;
+    if (this.isSoldByPresentation(item)) return quantity;
+    return resolvePriceUnits(
+      quantity,
+      scaleByProduct.get(Number(item.product_id)),
+    );
+  }
+
+  /**
+   * Total NETO de una línea en la escala de venta de su producto. Es el mismo
+   * contrato que `resolveLineTotal` de `price-unit.util`
+   * (`unit_price × quantity / price_unit_quantity`) pero SIN redondear a
+   * centavos: el motor redondea una sola vez por agregado (subtotal,
+   * applicableTotal, share por línea) y redondear también acá acumularía el
+   * error línea a línea.
+   */
+  private lineTotal(
+    item: ScalableLine,
+    scaleByProduct: ReadonlyMap<number, number>,
+  ): number {
+    return Number(item.unit_price) * this.toPriceUnits(item, scaleByProduct);
   }
 
   async quoteDiscounts(input: PromotionQuoteInput): Promise<PromotionQuoteResult> {
@@ -383,15 +501,17 @@ export class PromotionEngineService {
     // "Lleva 3" cuenta unidades de VENTA, no de stock. Un producto medido en
     // milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la
     // promoción se dispararía con 3 milímetros de cable.
+    //
+    // La MISMA escala gobierna el DINERO: `unit_price` es el precio de una
+    // unidad de PRECIO (el metro), así que multiplicarlo por la cantidad cruda
+    // en unidades de stock inflaría el subtotal por N. Ver `toPriceUnits` para
+    // por qué el dinero no puede usar el piso que sí usa la cantidad.
     const saleUnitScale = await this.resolveSaleUnitScales(items);
     const customerId = input.customer_id ?? null;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
     const subtotal = this.roundMoney(
-      items.reduce(
-        (sum, item) => sum + Number(item.unit_price) * Number(item.quantity),
-        0,
-      ),
+      items.reduce((sum, item) => sum + this.lineTotal(item, saleUnitScale), 0),
     );
 
     // Initialize item breakdown — even if no promotions apply we return a
@@ -400,6 +520,11 @@ export class PromotionEngineService {
     items.forEach((item, index) => {
       const originalUnitPrice = Number(item.unit_price);
       const quantity = Number(item.quantity);
+      // `quantity` se reporta CRUDO (en unidades de stock) porque es la
+      // cantidad que la orden persiste; el multiplicador del dinero va en
+      // unidades de precio. Los dos números coinciden salvo en productos con
+      // escala.
+      const priceUnits = this.toPriceUnits(item, saleUnitScale);
       itemBreakdownMap.set(index, {
         line_id: item.line_id,
         product_id: Number(item.product_id),
@@ -408,7 +533,7 @@ export class PromotionEngineService {
         original_unit_price: this.roundMoney(originalUnitPrice),
         promotion_discount: 0,
         final_unit_price: this.roundMoney(originalUnitPrice),
-        final_line_total: this.roundMoney(originalUnitPrice * quantity),
+        final_line_total: this.roundMoney(originalUnitPrice * priceUnits),
         promotion_ids: [],
       });
     });
@@ -488,10 +613,10 @@ export class PromotionEngineService {
       if (applicableIndexes.length === 0) continue;
 
       const applicableTotal = this.roundMoney(
-        applicableIndexes.reduce((sum, idx) => {
-          const item = items[idx];
-          return sum + Number(item.unit_price) * Number(item.quantity);
-        }, 0),
+        applicableIndexes.reduce(
+          (sum, idx) => sum + this.lineTotal(items[idx], saleUnitScale),
+          0,
+        ),
       );
       if (applicableTotal <= 0) continue;
 
@@ -597,9 +722,7 @@ export class PromotionEngineService {
             );
             tierTotal = this.roundMoney(
               tierIndexes.reduce(
-                (sum, idx) =>
-                  sum +
-                  Number(items[idx].unit_price) * Number(items[idx].quantity),
+                (sum, idx) => sum + this.lineTotal(items[idx], saleUnitScale),
                 0,
               ),
             );
@@ -631,7 +754,9 @@ export class PromotionEngineService {
           const item = items[idx];
           const lineDiscount = this.computeTierDiscountForResolvedTier(
             Number(item.unit_price),
-            Number(item.quantity),
+            // Unidades de PRECIO: el tramo ya se resolvió arriba con
+            // `toSaleUnits`; acá solo se cobra dinero.
+            this.toPriceUnits(item, saleUnitScale),
             matchedTier,
             tierTotal,
           );
@@ -691,7 +816,7 @@ export class PromotionEngineService {
         for (let i = 0; i < applicableIndexes.length; i++) {
           const idx = applicableIndexes[i];
           const item = items[idx];
-          const lineTotal = Number(item.unit_price) * Number(item.quantity);
+          const lineTotal = this.lineTotal(item, saleUnitScale);
           const isLast = i === applicableIndexes.length - 1;
           const share = isLast
             ? this.roundMoney(discountAmount - assigned)
@@ -732,12 +857,18 @@ export class PromotionEngineService {
         const current = itemBreakdownMap.get(idx);
         if (!current) continue;
         const item = items[idx];
-        const lineTotal = Number(item.unit_price) * Number(item.quantity);
+        const priceUnits = this.toPriceUnits(item, saleUnitScale);
+        const lineTotal = Number(item.unit_price) * priceUnits;
         const cappedDiscount = Math.min(share, lineTotal);
         const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
+        // `final_unit_price` sigue siendo el precio de UNA unidad de PRECIO
+        // (el metro), no de una unidad de stock: lo que la escala cambia es el
+        // multiplicador, nunca la magnitud del precio unitario. Un 10% sobre
+        // $5.000/m da $4.500/m — dividir por la cantidad cruda daría $4,5 y el
+        // POS cobraría una milésima parte.
         const nextUnitPrice =
-          item.quantity > 0
-            ? this.roundMoney(remainingLineTotal / Number(item.quantity))
+          priceUnits > 0
+            ? this.roundMoney(remainingLineTotal / priceUnits)
             : current.original_unit_price;
 
         itemBreakdownMap.set(idx, {
@@ -805,6 +936,7 @@ export class PromotionEngineService {
     const tierProgress = this.buildTierProgress(
       candidates,
       items,
+      saleUnitScale,
       winner?.promo ?? null,
     );
 
@@ -835,6 +967,7 @@ export class PromotionEngineService {
   private buildTierProgress(
     candidatePromos: PromotionRecord[],
     items: PromotionQuoteItemInput[],
+    scaleByProduct: ReadonlyMap<number, number>,
     appliedPromo: PromotionRecord | null = null,
   ): PromotionTierProgress[] {
     const progress: PromotionTierProgress[] = [];
@@ -898,9 +1031,12 @@ export class PromotionEngineService {
         for (const idx of applicableIndexes) {
           const pid = Number(items[idx].product_id);
           // Sum qty for this product across all its lines in cart.
+          // Misma vara que el tramo que dispara el descuento: unidades de
+          // VENTA. Contar en unidades de stock haría que el empujón dijera
+          // "agrega 997 más" para un cable al que le falta un metro.
           const perProductQty = applicableIndexes
             .filter((i) => Number(items[i].product_id) === pid)
-            .reduce((s, i) => s + Number(items[i].quantity), 0);
+            .reduce((s, i) => s + this.toSaleUnits(items[i], scaleByProduct), 0);
           if (perProductQty <= 0) continue;
           const candidate = tiers.find((t) => t.min_quantity > perProductQty);
           if (!candidate) continue;
@@ -915,7 +1051,7 @@ export class PromotionEngineService {
       } else {
         // cart_total (legacy): sum across every applicable line.
         const scopedQty = applicableIndexes.reduce(
-          (sum, idx) => sum + Number(items[idx].quantity),
+          (sum, idx) => sum + this.toSaleUnits(items[idx], scaleByProduct),
           0,
         );
         if (scopedQty <= 0) continue;
@@ -1314,16 +1450,21 @@ export class PromotionEngineService {
    *    confirmed: a fixed_amount tier discounts a single flat amount, exactly
    *    like a non-tiered fixed discount.
    * The returned share is capped at the line total (never a negative line) and
-   * rounded to 2 decimals. Returns 0 when guards fail (quantity <= 0,
+   * rounded to 2 decimals. Returns 0 when guards fail (priceUnits <= 0,
    * unitPrice <= 0, tier.value <= 0, or, for fixed_amount, applicableTotal <= 0).
+   *
+   * `priceUnits` son unidades de PRECIO, no de stock: el caller ya convirtió la
+   * cantidad con `toPriceUnits`, así que `unitPrice × priceUnits` es el total
+   * neto real de la línea. Para todo el catálogo sin escala `priceUnits` es la
+   * cantidad tal cual y la aritmética no cambia.
    */
   private computeTierDiscountForResolvedTier(
     unitPrice: number,
-    quantity: number,
+    priceUnits: number,
     tier: PromotionQuantityTierRecord,
     applicableTotal: number,
   ): number {
-    const qty = Number(quantity);
+    const qty = Number(priceUnits);
     const price = Number(unitPrice);
     if (!Number.isFinite(qty) || qty <= 0) return 0;
     if (!Number.isFinite(price) || price <= 0) return 0;
