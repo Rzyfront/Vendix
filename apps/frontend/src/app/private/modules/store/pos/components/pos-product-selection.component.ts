@@ -39,6 +39,10 @@ import {
   SearchResult,
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
+import {
+  PosSaleUnitService,
+  PosSaleUnitConfig,
+} from '../services/pos-sale-unit.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
@@ -726,6 +730,7 @@ export class PosProductSelectionComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
+  private saleUnitService = inject(PosSaleUnitService);
   private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private serialNumbersService = inject(SerialNumbersService);
   private cashRegisterService = inject(PosCashRegisterService);
@@ -1523,9 +1528,70 @@ export class PosProductSelectionComponent {
       }
     }
 
+    // QUI-648 — el código pistoleado era el de una PRESENTACIÓN. La línea entra
+    // con esa presentación ya aplicada y no se le pregunta nada al cajero: si
+    // tuviera que elegir la unidad después de pistolear, el código de barras no
+    // habría resuelto nada. `PosCartService` resuelve la tarifa y la aplica.
+    const scannedTierId = Number(product.scanned_price_tier_id ?? 0);
+    if (Number.isFinite(scannedTierId) && scannedTierId > 0) {
+      this.addingToCart.add(product.id);
+      this.cartService
+        .addToCart({
+          product,
+          quantity: 1,
+          scannedPriceTierId: scannedTierId,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.addingToCart.delete(product.id);
+            this.toastService.success(
+              `${product.name} agregado al carrito en la presentación pistoleada`,
+            );
+            this.productAddedToCart.emit({ product, quantity: 1 });
+          },
+          error: (error) => {
+            this.addingToCart.delete(product.id);
+            this.handleAddToCartError(error, product, undefined, 1);
+          },
+        });
+      return;
+    }
+
     // Check if product is sold by weight and scale is enabled
     const isWeightProduct =
       product.pricing_type === 'weight' && this.scaleEnabled();
+
+    // QUI-648 — cómo se MIDE el producto decide cómo se CAPTURA la línea.
+    //
+    // Dos poblaciones pagan la consulta de detalle que completa el contrato de
+    // venta: el producto de balanza (que ya iba a abrir un modal) y el que
+    // declara presentaciones (que es donde vive el catálogo medido). El resto
+    // —la inmensa mayoría, vendida por pieza— resuelve en memoria y no dispara
+    // una sola petición extra, que es lo que un POS de escaneo necesita.
+    const declaresPresentations =
+      product.has_multiple_price_tiers === true ||
+      (product.enabled_price_tier_ids?.length ?? 0) > 0;
+    const saleUnit =
+      isWeightProduct || declaresPresentations
+        ? await this.saleUnitService.resolveFor(product)
+        : this.saleUnitService.configFor(product);
+
+    // Solo se captura en unidad de venta cuando ESA unidad existe y es distinta
+    // de la mínima (metros sobre milímetros, kilos sobre gramos). Un producto
+    // cuya unidad de stock ya es la de venta —"unidad", precio por unidad— se
+    // agrega de un toque como siempre: preguntarle la cantidad al cajero ahí
+    // sería una regresión, no una mejora.
+    if (saleUnit.stockUnit && saleUnit.unitsPerCapture > 1) {
+      const captured = await this.captureSaleQuantity(
+        product,
+        saleUnit,
+        isWeightProduct,
+      );
+      if (!captured) return;
+      this.addMeasuredProductToCart(product, captured);
+      return;
+    }
 
     // For weight products, require weight input
     if (isWeightProduct) {
@@ -1587,6 +1653,130 @@ export class PosProductSelectionComponent {
         error: (error) => {
           this.addingToCart.delete(product.id);
           this.handleAddToCartError(error, product, undefined, 1);
+        },
+      });
+  }
+
+  /**
+   * QUI-648 — captura de una línea medida, en la UNIDAD DE VENTA.
+   *
+   * El cajero pide "3 metros" o pesa 2,35 kg; la conversión a la unidad mínima
+   * (milímetros, gramos) es interna y es lo único que viaja al backend. La
+   * balanza dejó de ser un modo del producto: es uno de los dos métodos de
+   * captura de esta misma pantalla, y por eso la línea que produce es una línea
+   * de cantidad normal y no una línea de peso con `quantity = 1`.
+   *
+   * Devuelve `null` cuando el cajero cancela o la captura no es válida.
+   */
+  private async captureSaleQuantity(
+    product: any,
+    saleUnit: PosSaleUnitConfig,
+    preferScale: boolean,
+  ): Promise<{
+    quantity: number;
+    amount: number;
+    unitCode: string;
+    byScale: boolean;
+  } | null> {
+    const unitCode = saleUnit.captureUnit?.code ?? saleUnit.stockUnit!.code;
+    const weighable =
+      saleUnit.stockUnit?.dimension === 'mass' && this.scaleEnabled();
+    const useScale = preferScale || weighable;
+
+    let amount: number | undefined;
+    if (useScale) {
+      amount = await this.getWeightFromScaleOrManual(
+        product.name,
+        product.final_price,
+        unitCode,
+      );
+      if (amount !== undefined && amount > 999) {
+        this.toastService.warning(
+          `El peso máximo permitido es 999 ${unitCode}`,
+        );
+        return null;
+      }
+    } else {
+      const raw = await this.dialogService.prompt(
+        {
+          title: `Cantidad en ${unitCode}`,
+          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unitCode}`,
+          placeholder: `Cantidad en ${unitCode}`,
+          defaultValue: '1',
+          confirmText: 'Agregar',
+          cancelText: 'Cancelar',
+          inputType: 'number',
+        },
+        { size: 'sm' },
+      );
+      if (!raw) return null;
+      const parsed = parseFloat(String(raw).replace(',', '.'));
+      amount = Number.isNaN(parsed) ? undefined : parsed;
+    }
+
+    if (amount === undefined) return null;
+    if (!(amount > 0)) {
+      this.toastService.warning('La cantidad debe ser mayor a 0');
+      return null;
+    }
+
+    const quantity = Math.round(amount * saleUnit.unitsPerCapture);
+    if (quantity <= 0) {
+      // Redondear a cero sería vender aire: se le dice al cajero cuál es el
+      // mínimo real en vez de aceptar una línea sin mercancía detrás.
+      const minimum = 1 / saleUnit.unitsPerCapture;
+      this.toastService.warning(
+        `La cantidad mínima es ${minimum} ${unitCode} (${saleUnit.stockUnit!.code}).`,
+      );
+      return null;
+    }
+
+    return {
+      quantity,
+      amount,
+      unitCode,
+      byScale: useScale && this.scaleService.isConnected(),
+    };
+  }
+
+  /** Agrega una línea medida ya convertida a la unidad mínima del producto. */
+  private addMeasuredProductToCart(
+    product: any,
+    captured: {
+      quantity: number;
+      amount: number;
+      unitCode: string;
+      byScale: boolean;
+    },
+  ): void {
+    this.addingToCart.add(product.id);
+
+    this.cartService
+      .addToCart({
+        product,
+        quantity: captured.quantity,
+        capturedByScale: captured.byScale,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.addingToCart.delete(product.id);
+          this.toastService.success(
+            `${product.name} (${captured.amount} ${captured.unitCode}) agregado al carrito`,
+          );
+          this.productAddedToCart.emit({
+            product,
+            quantity: captured.quantity,
+          });
+        },
+        error: (error) => {
+          this.addingToCart.delete(product.id);
+          this.handleAddToCartError(
+            error,
+            product,
+            undefined,
+            captured.quantity,
+          );
         },
       });
   }

@@ -60,6 +60,7 @@ import {
   CartItem,
 } from './services/pos-cart.service';
 import { CartSummary } from './models/cart.model';
+import { resolveSaleQuantity } from './utils/line-units.util';
 import {
   PosCustomerService,
   PosCustomer,
@@ -1413,6 +1414,12 @@ export class PosComponent {
         }
 
         // No variants: reuse the standard add-to-cart path (quantity 1).
+        //
+        // QUI-648: cuando el código pistoleado es el de una PRESENTACIÓN, el
+        // backend devuelve `scanned_price_tier_id` sobre el mismo producto y
+        // `onAddToCart` lo agrega con esa presentación ya aplicada. No se
+        // ramifica acá a propósito: todo add sigue pasando por el hijo, que es
+        // el que valida stock y emite los toasts.
         void child.onAddToCart(product);
       });
   }
@@ -1913,6 +1920,11 @@ export class PosComponent {
             variant_display_name: item.variant_display_name,
             weight: item.weight || undefined,
             weight_unit: item.weight_unit || undefined,
+            // QUI-648 — la escala en la que el cajero capturó la línea, para
+            // que el tiquete diga "3 m" y no "3000". `quantity` sigue siendo
+            // la unidad mínima, que es lo que el backend persistió.
+            sale_unit_code: item.sale_unit_code || undefined,
+            sale_quantity: resolveSaleQuantity(item),
           })),
         subtotal: paymentData.order?.subtotal || csm.subtotal,
         tax_amount: paymentData.order?.tax_amount || csm.taxAmount,
@@ -2782,6 +2794,11 @@ export class PosComponent {
             variant_display_name: item.variant_display_name,
             weight: item.weight || undefined,
             weight_unit: item.weight_unit || undefined,
+            // QUI-648 — la escala en la que el cajero capturó la línea, para
+            // que el tiquete diga "3 m" y no "3000". `quantity` sigue siendo
+            // la unidad mínima, que es lo que el backend persistió.
+            sale_unit_code: item.sale_unit_code || undefined,
+            sale_quantity: resolveSaleQuantity(item),
           })),
         subtotal: shippingData.order?.subtotal || csm.subtotal,
         tax_amount: shippingData.order?.tax_amount || csm.taxAmount,

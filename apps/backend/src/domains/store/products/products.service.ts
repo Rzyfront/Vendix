@@ -1511,6 +1511,20 @@ export class ProductsService {
               (product as any).product_price_tier_assignments?.map(
                 (assignment: any) => assignment.price_tier_id,
               ) ?? [],
+            // QUI-648: cómo se mide y cómo se cobra el producto. Van en el
+            // LISTADO —no solo en el detalle— porque el POS decide la captura
+            // al tocar la tarjeta: sin esto tendría que pedir el detalle de
+            // cada producto medido antes de poder agregarlo al carrito.
+            // `sale_config_summary` no viaja acá a propósito: cuesta dos
+            // consultas por producto y sería un N+1 sobre la grilla.
+            stock_uom_id: (product as any).stock_uom_id ?? null,
+            price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+            ...(barcode && {
+              scanned_price_tier_id:
+                (product as any).product_price_tier_assignments?.find(
+                  (assignment: any) => assignment.barcode === barcode,
+                )?.price_tier_id ?? null,
+            }),
           };
         }),
       );
@@ -1691,10 +1705,14 @@ export class ProductsService {
             (product as any).product_price_tier_assignments?.map(
               (assignment: any) => assignment.price_tier_id,
             ) ?? [],
-          // QUI-648: pistolear el código de una presentación devuelve el
-          // producto Y cuál de sus presentaciones se escaneó. Sin esto el POS
-          // recibiría el producto y tendría que adivinar la unidad de venta,
-          // que es justo lo que el código de barras vino a resolver.
+          // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
+          // `pos_optimized` para el porqué de exponerlo en el listado).
+          stock_uom_id: (product as any).stock_uom_id ?? null,
+          price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+          // Pistolear el código de una presentación devuelve el producto Y
+          // cuál de sus presentaciones se escaneó. Sin esto el POS recibiría
+          // el producto y tendría que adivinar la unidad de venta, que es
+          // justo lo que el código de barras vino a resolver.
           ...(barcode && {
             scanned_price_tier_id:
               (product as any).product_price_tier_assignments?.find(

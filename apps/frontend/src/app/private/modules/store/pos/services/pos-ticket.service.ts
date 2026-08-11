@@ -429,9 +429,21 @@ export class PosTicketService {
 
     ticketData.items.forEach((item: any) => {
       const isWeightItem = item.weight && item.weight > 0;
+      // QUI-648: la línea medida se imprime en su unidad de venta.
+      const saleUnitCode = item.saleUnitCode || null;
+      const saleQuantity =
+        item.saleQuantity != null ? Number(item.saleQuantity) : null;
+      const isSaleUnitItem = !isWeightItem && !!saleUnitCode && saleQuantity != null;
+      const unitSuffix = isWeightItem
+        ? '/' + (item.weight_unit || 'kg')
+        : isSaleUnitItem
+          ? '/' + saleUnitCode
+          : '';
       const qtyDisplay = isWeightItem
         ? `${item.weight} ${item.weight_unit || 'kg'}`
-        : `${item.quantity}`;
+        : isSaleUnitItem
+          ? `${saleQuantity!.toLocaleString('es-CO', { maximumFractionDigits: 3 })} ${saleUnitCode}`
+          : `${item.quantity}`;
       const tierLine = item.appliedPriceTierName
         ? `<br><span style="font-size: 10px; color: #92400e;">Tarifa: ${item.appliedPriceTierName}</span>`
         : '';
@@ -456,7 +468,7 @@ export class PosTicketService {
         <tr>
           <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
-          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
+          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${unitSuffix}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>
         </tr>
       `;

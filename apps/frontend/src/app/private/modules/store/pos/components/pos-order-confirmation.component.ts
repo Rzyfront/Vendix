@@ -107,6 +107,9 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
 	                    <span class="text-xs text-text-secondary">
 	                      @if (item.is_weight_product) {
 	                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
+	                      } @else if (item.saleUnitCode && item.saleQuantity != null) {
+	                        <!-- QUI-648: la misma escala que capturó el cajero. -->
+	                        {{ item.saleQuantity }} {{ item.saleUnitCode }} x {{ formatCurrency(item.unitPrice) }}/{{ item.saleUnitCode }}
 	                      } @else {
 	                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
 	                      }
@@ -488,6 +491,16 @@ effect(() => {
 	          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
 	            ? stockUnitsConsumed / quantity
 	            : null;
+	      // QUI-648 — la escala en la que se capturó la línea. Viaja en el
+	      // snapshot que arma el POS al cerrar la venta; una orden releída del
+	      // backend no la trae y la línea se imprime en su cantidad cruda, que
+	      // es el comportamiento histórico.
+	      const saleUnitCode = item.sale_unit_code || item.saleUnitCode || null;
+	      const rawSaleQuantity = item.sale_quantity ?? item.saleQuantity ?? null;
+	      const saleQuantity =
+	        rawSaleQuantity != null && Number.isFinite(Number(rawSaleQuantity))
+	          ? Number(rawSaleQuantity)
+	          : null;
 	      return {
 	        name: item.product_name || item.name || 'Producto',
 	        quantity,
@@ -497,6 +510,8 @@ effect(() => {
 	        weight,
 	        weight_unit,
 	        is_weight_product,
+	        saleUnitCode,
+	        saleQuantity,
 	        appliedPriceTierName:
 	          item.applied_price_tier_name_snapshot ||
 	          item.applied_price_tier_name ||
@@ -590,6 +605,9 @@ effect(() => {
 	        appliedPriceTierName: item.appliedPriceTierName,
 	        isPackageUnit: item.isPackageUnit,
 	        unitsPerPackage: item.unitsPerPackage,
+	        // QUI-648 — el tiquete imprime "3 m", no "3000".
+	        saleUnitCode: item.saleUnitCode,
+	        saleQuantity: item.saleQuantity,
 	        // QUI-653 — se propaga en este camino también: si solo lo llevara el
 	        // mapeo desde la orden persistida, el tiquete que se imprime justo tras
 	        // cobrar saldría sin la marca y el de una reimpresión sí, con la misma
