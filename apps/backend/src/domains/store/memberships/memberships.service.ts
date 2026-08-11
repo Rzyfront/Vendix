@@ -1,1 +1,802 @@
-**no-op** re-trigger
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  Prisma,
+  membership_status_enum,
+  membership_kind_enum,
+} from '@prisma/client';
+import { RequestContextService } from '@common/context/request-context.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { PaymentsService } from '../payments/payments.service';
+import { MembershipPlansService } from '../membership-plans/membership-plans.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
+import {
+  CreateMembershipDto,
+  CreateMembershipFromImportDto,
+  UpdateMembershipDto,
+  MembershipQueryDto,
+  ExpiringQueryDto,
+  RenewMembershipDto,
+} from './dto';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * MembershipsService
+ *
+ * Store-scoped CRUD + lifecycle for memberships (`memberships`). A membership
+ * binds a `customer_id` to a `plan_id` for a billing period, carries an
+ * explicit status (`membership_status_enum`) and a `kind`
+ * (`membership_kind_enum`: generic | gym | service) so any industry can reuse
+ * the same core.
+ *
+ * Renewal delegates the charge to `PaymentsService.processPaymentWithOrder`
+ * (which creates an order and processes payment); the accounting entry is
+ * inherited from the `payment.received` event — NOT re-implemented here. On a
+ * confirmed charge the period is extended one cycle and status set to `active`.
+ *
+ * Payment invariant (fix H3): a membership is BORN `pending_payment` with a
+ * null `period_end` — it only gets a live period once a charge confirms via
+ * `renew`. `reactivate` never resurrects an unpaid membership to `active`.
+ *
+ * Tenant scope: membership models are registered in `store_scoped_models`. This
+ * service uses `withoutScope()` with an EXPLICIT `store_id` predicate on every
+ * read/write (tenant-safe).
+ */
+@Injectable()
+export class MembershipsService {
+  private readonly logger = new Logger(MembershipsService.name);
+
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly membershipPlansService: MembershipPlansService,
+    private readonly paymentsService: PaymentsService,
+    private readonly orderFlow: OrderFlowService,
+  ) {}
+
+  // ------------------------------------------------------------------ Helpers
+
+  private requireStoreId(): number {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return storeId;
+  }
+
+  private get memberships() {
+    return this.prisma.withoutScope().memberships;
+  }
+
+  private get membershipPlans() {
+    return this.prisma.withoutScope().membership_plans;
+  }
+
+  private addDays(base: Date, days: number): Date {
+    return new Date(base.getTime() + days * DAY_MS);
+  }
+
+  /**
+   * Default `kind` for a new membership: `gym` when the store's industries
+   * include `gym`, otherwise `generic`. An explicit DTO value always wins.
+   */
+  private async resolveDefaultKind(
+    storeId: number,
+  ): Promise<membership_kind_enum> {
+    try {
+      const store = await this.prisma.withoutScope().stores.findFirst({
+        where: { id: storeId },
+        select: { industries: true },
+      });
+      const industries = (store?.industries ?? []) as string[];
+      return industries.includes('gym')
+        ? membership_kind_enum.gym
+        : membership_kind_enum.generic;
+    } catch {
+      return membership_kind_enum.generic;
+    }
+  }
+
+  // ------------------------------------------------------------------ CRUD
+
+  async create(dto: CreateMembershipDto) {
+    const storeId = this.requireStoreId();
+
+    // 1. Customer must exist.
+    const customer = await this.prisma.users.findFirst({
+      where: { id: dto.customer_id },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'El cliente (socio) no existe',
+      );
+    }
+
+    // 2. Plan must exist in this store (findOne enforces store scope + throws).
+    await this.membershipPlansService.findOne(dto.plan_id);
+
+    // Fix H3: a membership is ALWAYS born `pending_payment`; the client cannot
+    // pick the initial status. `period_end` stays null until the first charge
+    // confirms in `renew` — there is no free/live membership without a payment.
+    const kind = dto.kind ?? (await this.resolveDefaultKind(storeId));
+    const periodStart = dto.period_start ? new Date(dto.period_start) : null;
+
+    return this.memberships.create({
+      data: {
+        store_id: storeId,
+        customer_id: dto.customer_id,
+        plan_id: dto.plan_id,
+        kind,
+        status: membership_status_enum.pending_payment,
+        period_start: periodStart,
+        period_end: null,
+        auto_renew: dto.auto_renew ?? false,
+        notes: dto.notes ?? null,
+      },
+    });
+  }
+
+  /**
+   * Bulk-import sibling of `create`. Used by the member roster scanner
+   * (`MemberBulkScannerService.commitRoster`) to seed historical data —
+   * memberships with explicit `status` / `period_start` / `period_end` that
+   * originated from a paper/spreadsheet roster rather than a real charge.
+   *
+   * Why this method exists: `create()` enforces the H3 payment invariant
+   * (`pending_payment` + null `period_end`) so it cannot represent imported
+   * `active` / `expired` rows. This method preserves the same validation
+   * (customer exists, plan exists in this store) but accepts the caller-
+   * supplied status and dates verbatim.
+   *
+   * Imported `active` rows intentionally skip `source_order_id` — there is
+   * no real charge to back them. Accounting events are NOT emitted here;
+   * historical data does not move money.
+   */
+  async createFromImport(dto: CreateMembershipFromImportDto) {
+    const storeId = this.requireStoreId();
+
+    // 1. Customer must exist.
+    const customer = await this.prisma.users.findFirst({
+      where: { id: dto.customer_id },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'El cliente (socio) no existe',
+      );
+    }
+
+    // 2. Plan must exist in this store (findOne enforces store scope + throws).
+    await this.membershipPlansService.findOne(dto.plan_id);
+
+    const kind = dto.kind ?? (await this.resolveDefaultKind(storeId));
+    const periodStart = dto.period_start ? new Date(dto.period_start) : null;
+    const periodEnd = dto.period_end ? new Date(dto.period_end) : null;
+
+    return this.memberships.create({
+      data: {
+        store_id: storeId,
+        customer_id: dto.customer_id,
+        plan_id: dto.plan_id,
+        kind,
+        status: dto.status,
+        period_start: periodStart,
+        period_end: periodEnd,
+        auto_renew: dto.auto_renew ?? false,
+        notes: dto.notes ?? null,
+      },
+    });
+  }
+
+  async findAll(query: MembershipQueryDto) {
+    const storeId = this.requireStoreId();
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      customer_id,
+      plan_id,
+      search,
+      include_archived,
+    } = query ?? {};
+    const skip = (page - 1) * limit;
+    const showArchived = include_archived === 'true';
+
+    // QUI-646: archived members (users.archived_at IS NOT NULL) are hidden by
+    // default. Resolve the set of allowed customer_ids here and intersect
+    // with the search/customer_id filter below. An empty set collapses to
+    // `[-1]` so the membership query returns 0 rows instead of every row.
+    const archivedUsers = await this.prisma.withoutScope().users.findMany({
+      where: { main_store_id: storeId, archived_at: { not: null } } as any,
+      select: { id: true },
+    });
+    const archivedIds = new Set(archivedUsers.map((u) => u.id));
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict memberships to that set.
+    const term = (search ?? '').trim();
+    let customerFilter: Prisma.membershipsWhereInput['customer_id'] | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store membership list.
+      let customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      // Apply the archive filter unless explicitly overridden.
+      if (!showArchived) {
+        customerIdsFilter = customerIdsFilter.filter(
+          (id) => !archivedIds.has(id),
+        );
+      }
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      // Single explicit customer — hide if archived unless include_archived.
+      if (!showArchived && archivedIds.has(customer_id)) {
+        customerFilter = -1;
+      } else {
+        customerFilter = customer_id;
+      }
+    } else if (archivedIds.size > 0 && !showArchived) {
+      // No explicit customer_id, no search: restrict to non-archived customers.
+      customerFilter = { notIn: Array.from(archivedIds) };
+    }
+
+    const where: Prisma.membershipsWhereInput = {
+      store_id: storeId,
+      ...(status !== undefined && { status }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
+      ...(plan_id !== undefined && { plan_id }),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.memberships.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { id: 'desc' },
+      }),
+      this.memberships.count({ where }),
+    ]);
+
+    const data = await this.attachRelations(rows, storeId);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * List memberships whose `period_end` is within the next `days` days OR
+   * already past, restricted to `active` + `expired`. The window combines
+   * "vencidas" (overdue) and "por vencer" (about to expire) so the dashboard
+   * widget can prompt renewals in a single read.
+   *
+   * Ordered by `period_end ASC` so the most urgent rows (already overdue or
+   * closest to expiring) surface first. Bounded list — no pagination: the
+   * caller is expected to render a focused widget, not a full report.
+   */
+  async findExpiring(query: ExpiringQueryDto) {
+    const storeId = this.requireStoreId();
+    const { days = 7, limit = 15 } = query ?? {};
+
+    const now = new Date();
+    const deadline = new Date(now.getTime() + days * DAY_MS);
+
+    const rows = await this.memberships.findMany({
+      where: {
+        store_id: storeId,
+        period_end: { not: null, lte: deadline },
+        status: {
+          in: [membership_status_enum.active, membership_status_enum.expired],
+        },
+      },
+      orderBy: { period_end: 'asc' },
+      take: limit,
+    });
+
+    return this.attachRelations(rows, storeId);
+  }
+
+  async findOne(id: number) {
+    const storeId = this.requireStoreId();
+    const membership = await this.memberships.findFirst({
+      where: { id, store_id: storeId },
+    });
+    if (!membership) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Membresía no encontrada',
+      );
+    }
+    const [withRel] = await this.attachRelations([membership], storeId);
+    return withRel;
+  }
+
+  async update(id: number, dto: UpdateMembershipDto) {
+    const storeId = this.requireStoreId();
+    const current = await this.findOne(id);
+
+    // If `plan_id` is being swapped, validate it exists in this store. The
+    // plans service throws `SYS_NOT_FOUND_001` when the plan is outside the
+    // caller's store scope, which is exactly the cross-tenant guard we want.
+    if (dto.plan_id !== undefined) {
+      await this.membershipPlansService.findOne(dto.plan_id);
+    }
+
+    // Build the merged period range to enforce `period_start <= period_end`.
+    // Existing values may be null (memberships born `pending_payment` have no
+    // period yet — see fix H3), in which case we skip the cross-bound check
+    // because there is nothing on the other side to compare against.
+    const mergedStart: Date | null = dto.period_start
+      ? new Date(dto.period_start)
+      : (current.period_start ?? null);
+    const mergedEnd: Date | null = dto.period_end
+      ? new Date(dto.period_end)
+      : (current.period_end ?? null);
+
+    if (mergedStart && mergedEnd && mergedStart > mergedEnd) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'period_start debe ser anterior o igual a period_end',
+      );
+    }
+
+    const data: Prisma.membershipsUpdateInput = {
+      ...(dto.plan_id !== undefined && { plan_id: dto.plan_id }),
+      ...(dto.period_start !== undefined && {
+        period_start: new Date(dto.period_start),
+      }),
+      ...(dto.period_end !== undefined && {
+        period_end: new Date(dto.period_end),
+      }),
+      ...(dto.status !== undefined && { status: dto.status }),
+      ...(dto.auto_renew !== undefined && { auto_renew: dto.auto_renew }),
+      ...(dto.notes !== undefined && { notes: dto.notes }),
+    };
+
+    // Do NOT recalculate price, do NOT emit accounting entries. Admin edits to
+    // plan / period / status are pure metadata overrides; the financial truth
+    // lives in `renew` (which generates the order + journal entry on a real
+    // charge) and in the dedicated transition endpoints.
+    await this.memberships.updateMany({
+      where: { id, store_id: storeId },
+      data,
+    });
+    return this.findOne(id);
+  }
+
+  // --------------------------------------------------------- State transitions
+
+  async suspend(id: number) {
+    return this.transition(id, 'suspend', membership_status_enum.suspended);
+  }
+
+  async freeze(id: number) {
+    return this.transition(id, 'freeze', membership_status_enum.frozen);
+  }
+
+  async cancel(id: number) {
+    return this.transition(id, 'cancel', membership_status_enum.cancelled);
+  }
+
+  /**
+   * Fix H3: reactivate is valid ONLY from `suspended`/`frozen`. It restores the
+   * membership to `active` only when it still has a live paid period
+   * (`period_end` in the future). If the period is missing or already expired
+   * (i.e. it was never paid, or has lapsed), it drops back to `pending_payment`
+   * instead of granting free `active` access.
+   */
+  async reactivate(id: number) {
+    const storeId = this.requireStoreId();
+    const membership = await this.memberships.findFirst({
+      where: { id, store_id: storeId },
+      select: { id: true, status: true, period_end: true },
+    });
+    if (!membership) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Membresía no encontrada',
+      );
+    }
+
+    const allowedFrom: membership_status_enum[] = [
+      membership_status_enum.suspended,
+      membership_status_enum.frozen,
+    ];
+    if (!allowedFrom.includes(membership.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        `Transición inválida: no se puede reactivar una membresía en estado "${membership.status}"`,
+      );
+    }
+
+    const now = new Date();
+    const hasLivePeriod =
+      membership.period_end != null && membership.period_end >= now;
+    const target = hasLivePeriod
+      ? membership_status_enum.active
+      : membership_status_enum.pending_payment;
+
+    await this.memberships.updateMany({
+      where: { id, store_id: storeId },
+      data: { status: target },
+    });
+    return this.findOne(id);
+  }
+
+  private async transition(
+    id: number,
+    action: 'suspend' | 'freeze' | 'cancel',
+    target: membership_status_enum,
+  ) {
+    const storeId = this.requireStoreId();
+    const membership = await this.memberships.findFirst({
+      where: { id, store_id: storeId },
+      select: { id: true, status: true },
+    });
+    if (!membership) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Membresía no encontrada',
+      );
+    }
+
+    const allowedFrom: Record<typeof action, membership_status_enum[]> = {
+      suspend: [
+        membership_status_enum.active,
+        membership_status_enum.frozen,
+        membership_status_enum.pending_payment,
+      ],
+      freeze: [membership_status_enum.active],
+      cancel: [
+        membership_status_enum.active,
+        membership_status_enum.frozen,
+        membership_status_enum.suspended,
+        membership_status_enum.pending_payment,
+        membership_status_enum.expired,
+      ],
+    };
+
+    if (!allowedFrom[action].includes(membership.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        `Transición inválida: no se puede ${action} una membresía en estado "${membership.status}"`,
+      );
+    }
+
+    await this.memberships.updateMany({
+      where: { id, store_id: storeId },
+      data: { status: target },
+    });
+    return this.findOne(id);
+  }
+
+  // ----------------------------------------------------------------- Renewal
+
+  /**
+   * Renew a membership: create an order for the plan and charge it via
+   * `PaymentsService.processPaymentWithOrder` (cash/card/transfer at reception).
+   * On a confirmed charge, extend `period_end` one cycle, set `status='active'`
+   * and persist `source_order_id`. The journal entry is emitted by the
+   * downstream `payment.received` event.
+   *
+   * For asynchronous methods that settle later (e.g. online gateway pending),
+   * the period is NOT extended synchronously — the membership stays as-is until
+   * the payment confirms.
+   */
+  async renew(id: number, dto: RenewMembershipDto, user: any) {
+    const storeId = this.requireStoreId();
+
+    const membership = await this.memberships.findFirst({
+      where: { id, store_id: storeId },
+    });
+    if (!membership) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Membresía no encontrada',
+      );
+    }
+
+    const plan = await this.membershipPlansService.findOne(membership.plan_id);
+
+    const amount = dto.amount ?? Number(plan.price);
+    const currency = dto.currency ?? plan.currency ?? 'COP';
+
+    const customer = await this.prisma.users.findFirst({
+      where: { id: membership.customer_id },
+      select: { first_name: true, last_name: true, email: true, phone: true },
+    });
+
+    const customerName =
+      dto.customer_name ??
+      `${customer?.first_name ?? ''} ${customer?.last_name ?? ''}`.trim();
+
+    // Order line: backed by the plan's product when set, otherwise ad-hoc.
+    const items: any[] =
+      plan.product_id != null
+        ? [
+            {
+              productId: plan.product_id,
+              productName: plan.name,
+              quantity: 1,
+              unitPrice: amount,
+              totalPrice: amount,
+            },
+          ]
+        : [
+            {
+              productName: `Membresía: ${plan.name}`,
+              quantity: 1,
+              unitPrice: amount,
+              totalPrice: amount,
+            },
+          ];
+
+    const payload = {
+      // orderId is ignored by processPaymentWithNewOrder (it creates a fresh
+      // order and overwrites this field with the new order id).
+      orderId: 0,
+      storeId,
+      customerId: membership.customer_id,
+      amount,
+      currency,
+      storePaymentMethodId: dto.store_payment_method_id,
+      customerEmail: dto.customer_email ?? customer?.email ?? '',
+      customerName: customerName || 'Socio',
+      customerPhone: dto.customer_phone ?? customer?.phone ?? undefined,
+      items,
+      metadata: {
+        source: 'membership_renewal',
+        membership_id: membership.id,
+        plan_id: plan.id,
+      },
+    };
+
+    const paymentResult: any = await this.paymentsService.processPaymentWithOrder(
+      payload as any,
+      user,
+    );
+
+    const status: string | undefined = paymentResult?.data?.status;
+    const confirmed = status === 'succeeded' || status === 'captured';
+
+    if (!confirmed) {
+      // Async / pending payment: leave the membership untouched. The period
+      // extension happens only when the charge is confirmed.
+      return {
+        membership: await this.findOne(id),
+        payment: paymentResult,
+        renewed: false,
+      };
+    }
+
+    // Resolve the freshly-created order id from the payment record.
+    let sourceOrderId: number | null = membership.source_order_id ?? null;
+    const txnId: string | undefined =
+      paymentResult?.data?.transactionId ??
+      paymentResult?.data?.gatewayReference;
+    if (txnId) {
+      const pay = await this.prisma.withoutScope().payments.findFirst({
+        where: {
+          OR: [{ transaction_id: txnId }, { gateway_reference: txnId }],
+        },
+        select: { order_id: true },
+        orderBy: { id: 'desc' },
+      });
+      if (pay?.order_id != null) sourceOrderId = pay.order_id;
+    }
+
+    // Extend from the later of "now" and the current period end.
+    const now = new Date();
+    const base =
+      membership.period_end && membership.period_end > now
+        ? membership.period_end
+        : now;
+    const newEnd = this.addDays(base, plan.duration_days ?? 30);
+
+    await this.memberships.updateMany({
+      where: { id, store_id: storeId },
+      data: {
+        status: membership_status_enum.active,
+        period_start: membership.period_start ?? now,
+        period_end: newEnd,
+        ...(sourceOrderId != null && { source_order_id: sourceOrderId }),
+      },
+    });
+
+    // A membership is delivered the instant it is paid → finalize the renewal
+    // order immediately instead of leaving it stuck in `processing`. The plan's
+    // backing product is a service (enforced in MembershipPlansService), so the
+    // canonical stock commit skips it — no inventory is deducted.
+    if (sourceOrderId != null) {
+      try {
+        await this.orderFlow.finishOrder(sourceOrderId, {
+          source: 'membership_renewal',
+        });
+      } catch (err) {
+        // The charge already succeeded and the membership is renewed; never fail
+        // the response if finishing trips. The order simply stays in `processing`.
+        this.logger.error(
+          `renew: finishOrder failed for order ${sourceOrderId} (membership ${id}); left in processing`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
+    return {
+      membership: await this.findOne(id),
+      payment: paymentResult,
+      renewed: true,
+    };
+  }
+
+  // ------------------------------------------------------------------ Internals
+
+  /**
+   * Attach `plan` and `customer` snapshots to membership rows. Because
+   * membership models have SCALAR fks (no Prisma relations), we batch-fetch the
+   * referenced plans/users manually.
+   */
+  private async attachRelations(rows: any[], storeId: number) {
+    if (rows.length === 0) return rows;
+
+    const planIds = [...new Set(rows.map((r) => r.plan_id))];
+    const customerIds = [...new Set(rows.map((r) => r.customer_id))];
+
+    const [plans, customers] = await Promise.all([
+      this.membershipPlans.findMany({
+        where: { id: { in: planIds }, store_id: storeId },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          price: true,
+          currency: true,
+          duration_days: true,
+        },
+      }),
+      this.prisma.users.findMany({
+        where: { id: { in: customerIds } },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+          // QUI-646: surface the soft-delete marker so the membership list can
+          // show 'Archivar' / 'Reactivar' based on the customer's state.
+          archived_at: true,
+        } as any,
+      }),
+    ]);
+
+    const planMap = new Map(plans.map((p) => [p.id, p]));
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+    return rows.map((r) => ({
+      ...r,
+      plan: planMap.get(r.plan_id) ?? null,
+      customer: customerMap.get(r.customer_id) ?? null,
+    }));
+  }
+
+  // ============================================================
+  // QUI-646: archive / unarchive of a member (soft delete).
+  // ============================================================
+
+  /**
+   * Soft-deletes a member: stamps `users.archived_at = now()` and returns the
+   * updated user. Rejected when the member still has any membership with
+   * `status = 'active'` — the operator must pause or cancel those first.
+   *
+   * The row is preserved (no DELETE): FK integrity, history, and audit logs
+   * remain intact; only the finder (`findAll` and the membership list) hides
+   * archived rows from default views.
+   */
+  async archiveMember(customerId: number): Promise<{ archived_at: Date }> {
+    const storeId = this.requireStoreId();
+
+    // 1. Verify the customer exists in this store's scope and is a member.
+    //    `users` is tenant-scoped — withoutScope() requires an explicit
+    //    store_id predicate.
+    const customer = await this.prisma.withoutScope().users.findFirst({
+      where: { id: customerId, main_store_id: storeId },
+      select: { id: true, archived_at: true } as any,
+    });
+    if (!customer) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    // 2. Idempotency: a second archive is a 409 so the frontend can show
+    //    a useful message instead of silently "succeeding" again.
+    if ((customer as any).archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_ALREADY_ARCHIVED_001,
+      );
+    }
+
+    // 3. Guard: active memberships block the archive. Frozen / suspended /
+    //    expired / cancelled / pending_payment are all OK — they don't
+    //    represent a live obligation to the gym. We surface the count so the
+    //    frontend can prompt the operator to pause or cancel each one.
+    const activeCount = await this.memberships.count({
+      where: {
+        store_id: storeId,
+        customer_id: customerId,
+        status: membership_status_enum.active,
+      },
+    });
+    if (activeCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_ARCHIVE_BLOCKED_ACTIVE_PLAN_001,
+      );
+    }
+
+    // 4. Stamp. Single UPDATE — the soft-delete marker IS the source of
+    //    truth; the membership rows are untouched.
+    //
+    //    Cast to `any` because `@prisma/client` types haven't been
+    //    regenerated yet for the new column; runtime works because the
+    //    migration ships `archived_at`. Once `prisma generate` runs in
+    //    deploy, these casts can go away.
+    const updated = await this.prisma.withoutScope().users.update({
+      where: { id: customerId },
+      data: { archived_at: new Date() } as any,
+      select: { archived_at: true } as any,
+    });
+    return { archived_at: (updated as any).archived_at };
+  }
+
+  /**
+   * Reverses an archive: clears `users.archived_at`. Idempotency guard:
+   *   409 if the member is NOT currently archived (no silent no-ops).
+   */
+  async unarchiveMember(customerId: number): Promise<{ archived_at: null }> {
+    const storeId = this.requireStoreId();
+
+    const customer = await this.prisma.withoutScope().users.findFirst({
+      where: { id: customerId, main_store_id: storeId },
+      select: { id: true, archived_at: true } as any,
+    });
+    if (!customer) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+    if (!(customer as any).archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.MEMBERSHIP_NOT_ARCHIVED_001,
+      );
+    }
+
+    await this.prisma.withoutScope().users.update({
+      where: { id: customerId },
+      data: { archived_at: null } as any,
+      select: { archived_at: true } as any,
+    });
+    return { archived_at: null };
+  }
+}
