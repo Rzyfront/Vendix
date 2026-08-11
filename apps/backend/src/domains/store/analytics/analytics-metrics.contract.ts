@@ -36,6 +36,25 @@ export const COMPLETED_SALE_STATES = ['delivered', 'finished'] as const;
  */
 export const RECOGNIZED_EXPENSE_STATES = ['approved', 'paid'] as const;
 
+/**
+ * Purchase-order states that count as a COMMITTED purchase of the period.
+ *
+ * A purchase becomes an economic commitment when it is approved: from that
+ * point the store owes the supplier regardless of whether the goods arrived.
+ * `draft` is excluded because a draft is a shopping list, not an obligation —
+ * counting it lets a test order hit the month's spend. `cancelled` is excluded
+ * because the commitment was undone.
+ *
+ * `partial` and `received` are included: a partially received order is already
+ * committed for its full ordered amount, which is why the gap between ordered
+ * and received units is reported separately instead of shrinking the spend.
+ */
+export const PURCHASE_COMMITTED_STATES = [
+  'approved',
+  'partial',
+  'received',
+] as const;
+
 /** Charset guard for a state literal inlined into raw SQL. */
 const SAFE_STATE_REGEX = /^[a-z_]+$/;
 

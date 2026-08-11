@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { DianConfigApiService } from '../../../../../shared/services/dian';
 import {
   Invoice,
   InvoiceResolution,
@@ -24,6 +25,13 @@ import {
 })
 export class InvoicingService {
   private http = inject(HttpClient);
+
+  /**
+   * Los métodos DIAN viven en un servicio con base inyectable para que el panel
+   * de super admin reutilice el wizard apuntando a otro tenant. Aquí quedan solo
+   * como delegación: POS, Ajustes y los effects siguen inyectando este servicio.
+   */
+  private readonly dianApi = inject(DianConfigApiService);
 
   private getApiUrl(endpoint: string): string {
     return `${environment.apiUrl}/store/invoicing${endpoint ? '/' + endpoint : ''}`;
@@ -143,9 +151,7 @@ export class InvoicingService {
   // ── Resolutions ───────────────────────────────────────────
 
   getResolutions(): Observable<ApiResponse<InvoiceResolution[]>> {
-    return this.http.get<ApiResponse<InvoiceResolution[]>>(
-      this.getApiUrl('resolutions'),
-    );
+    return this.dianApi.getResolutions();
   }
 
   createResolution(dto: CreateResolutionDto): Observable<ApiResponse<InvoiceResolution>> {
@@ -177,118 +183,7 @@ export class InvoicingService {
     return this.http.get<ApiResponse<InvoiceStats>>(this.getApiUrl('stats'));
   }
 
-  // ── DIAN Config ─────────────────────────────────────────
-
-  getDianDashboard(): Observable<any> {
-    return this.http.get(this.getApiUrl('dian-config/dashboard'));
-  }
-
-  getDianConfigs(): Observable<any> {
-    return this.http.get(this.getApiUrl('dian-config'));
-  }
-
-  getDianConfigById(id: number): Observable<any> {
-    return this.http.get(this.getApiUrl(`dian-config/${id}`));
-  }
-
-  createDianConfig(data: any): Observable<any> {
-    return this.http.post(this.getApiUrl('dian-config'), data);
-  }
-
-  updateDianConfig(id: number, data: any): Observable<any> {
-    return this.http.patch(this.getApiUrl(`dian-config/${id}`), data);
-  }
-
-  deleteDianConfig(id: number): Observable<any> {
-    return this.http.delete(this.getApiUrl(`dian-config/${id}`));
-  }
-
-  setDefaultDianConfig(id: number): Observable<any> {
-    return this.http.patch(this.getApiUrl(`dian-config/${id}/set-default`), {});
-  }
-
-  uploadDianCertificate(config_id: number, file: File, password: string): Observable<any> {
-    const form_data = new FormData();
-    form_data.append('certificate', file);
-    form_data.append('password', password);
-    form_data.append('config_id', String(config_id));
-    return this.http.post(this.getApiUrl('dian-config/upload-certificate'), form_data);
-  }
-
-  testDianConnection(config_id: number): Observable<any> {
-    return this.http.post(this.getApiUrl(`dian-config/${config_id}/test-connection`), {});
-  }
-
-  /**
-   * Encola el set de pruebas. Responde 202 con `job_id`, no con el resultado:
-   * construir, firmar y subir los 50 documentos toma ~74 s, y nginx corta el
-   * request a los 60 s. El resultado se obtiene sondeando `getDianTestSetJob`.
-   */
-  runDianTestSet(config_id: number, resolution_id: number): Observable<any> {
-    return this.http.post(this.getApiUrl(`dian-config/${config_id}/run-test-set`), { resolution_id });
-  }
-
-  getDianTestSetJob(config_id: number, job_id: string): Observable<any> {
-    return this.http.get(
-      this.getApiUrl(`dian-config/${config_id}/run-test-set/${job_id}`),
-    );
-  }
-
-  getDianTestResults(config_id: number): Observable<any> {
-    return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-results`));
-  }
-
-  /**
-   * Re-polls DIAN for the verdict of the ALREADY SUBMITTED test set, using the
-   * stored ZipKey. Safe to call repeatedly — it never re-sends the documents,
-   * so it does not burn resolution numbers.
-   */
-  checkDianTestSetStatus(config_id: number): Observable<any> {
-    return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-set-status`));
-  }
-
-  /**
-   * Asks DIAN document by document whether the submitted batch reached its
-   * records. Answers what the ZipKey cannot: whether the batch is queued or was
-   * never classified at all. Read-only, never re-sends.
-   */
-  getDianTestSetDocuments(config_id: number): Observable<any> {
-    return this.http.get(
-      this.getApiUrl(`dian-config/${config_id}/test-set-documents`),
-    );
-  }
-
-  /**
-   * Discards a batch DIAN never judged, releasing the re-send guard so a new
-   * test set can be submitted.
-   */
-  abandonDianTestSet(config_id: number): Observable<any> {
-    return this.http.post(
-      this.getApiUrl(`dian-config/${config_id}/abandon-test-set`),
-      {},
-    );
-  }
-
-  /** Read-only checklist of what is still missing before emitting real invoices. */
-  getDianProductionReadiness(config_id: number): Observable<any> {
-    return this.http.get(
-      this.getApiUrl(`dian-config/${config_id}/production-readiness`),
-    );
-  }
-
-  /**
-   * Whether this store is really issuing electronic invoices right now.
-   *
-   * The settings UI must not decide this from `fiscal_status.invoicing.state`:
-   * that flag only says the fiscal wizard was completed, so a store still in the
-   * DIAN test set would be told it is live and would stop offering sale
-   * receipts — which is exactly what it must keep emitting until production.
-   */
-  getDianEmissionStatus(): Observable<ApiResponse<DianEmissionStatus>> {
-    return this.http.get<ApiResponse<DianEmissionStatus>>(
-      this.getApiUrl('dian-config/emission-status'),
-    );
-  }
+  // ── PDF preview ───────────────────────────────────────────
 
   /**
    * Sample invoice PDF in the given paper format. Built from fabricated document
@@ -301,17 +196,81 @@ export class InvoicingService {
     });
   }
 
-  /** Switches the config to environment=production + enablement_status=enabled. */
+  // ── DIAN Config (delegado en DianConfigApiService) ────────
+
+  getDianDashboard(): Observable<any> {
+    return this.dianApi.getDianDashboard();
+  }
+
+  getDianConfigs(): Observable<any> {
+    return this.dianApi.getDianConfigs();
+  }
+
+  getDianConfigById(id: number): Observable<any> {
+    return this.dianApi.getDianConfigById(id);
+  }
+
+  createDianConfig(data: any): Observable<any> {
+    return this.dianApi.createDianConfig(data);
+  }
+
+  updateDianConfig(id: number, data: any): Observable<any> {
+    return this.dianApi.updateDianConfig(id, data);
+  }
+
+  deleteDianConfig(id: number): Observable<any> {
+    return this.dianApi.deleteDianConfig(id);
+  }
+
+  setDefaultDianConfig(id: number): Observable<any> {
+    return this.dianApi.setDefaultDianConfig(id);
+  }
+
+  uploadDianCertificate(config_id: number, file: File, password: string): Observable<any> {
+    return this.dianApi.uploadDianCertificate(config_id, file, password);
+  }
+
+  testDianConnection(config_id: number): Observable<any> {
+    return this.dianApi.testDianConnection(config_id);
+  }
+
+  runDianTestSet(config_id: number, resolution_id: number): Observable<any> {
+    return this.dianApi.runDianTestSet(config_id, resolution_id);
+  }
+
+  getDianTestSetJob(config_id: number, job_id: string): Observable<any> {
+    return this.dianApi.getDianTestSetJob(config_id, job_id);
+  }
+
+  getDianTestResults(config_id: number): Observable<any> {
+    return this.dianApi.getDianTestResults(config_id);
+  }
+
+  checkDianTestSetStatus(config_id: number): Observable<any> {
+    return this.dianApi.checkDianTestSetStatus(config_id);
+  }
+
+  getDianTestSetDocuments(config_id: number): Observable<any> {
+    return this.dianApi.getDianTestSetDocuments(config_id);
+  }
+
+  abandonDianTestSet(config_id: number): Observable<any> {
+    return this.dianApi.abandonDianTestSet(config_id);
+  }
+
+  getDianProductionReadiness(config_id: number): Observable<any> {
+    return this.dianApi.getDianProductionReadiness(config_id);
+  }
+
+  getDianEmissionStatus(): Observable<ApiResponse<DianEmissionStatus>> {
+    return this.dianApi.getDianEmissionStatus();
+  }
+
   promoteDianToProduction(config_id: number): Observable<any> {
-    return this.http.post(
-      this.getApiUrl(`dian-config/${config_id}/promote-to-production`),
-      {},
-    );
+    return this.dianApi.promoteDianToProduction(config_id);
   }
 
   getDianAuditLogs(page = 1, limit = 20, config_id?: number): Observable<any> {
-    const params: Record<string, string> = { page: String(page), limit: String(limit) };
-    if (config_id) params['config_id'] = String(config_id);
-    return this.http.get(this.getApiUrl('dian-config/audit-logs'), { params });
+    return this.dianApi.getDianAuditLogs(page, limit, config_id);
   }
 }

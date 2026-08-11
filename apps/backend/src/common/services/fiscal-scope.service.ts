@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import type { OrganizationOperatingScope } from './operating-scope.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 export type OrganizationFiscalScope = 'STORE' | 'ORGANIZATION';
 
@@ -38,6 +39,24 @@ export class FiscalScopeService {
     organization_id: number,
     tx?: any,
   ): Promise<OrganizationFiscalScope> {
+    // QUI-673 — guardia de argumento, mismo predicado que `requireFiscalScope`.
+    // Sin ella un llamador que pasa `undefined` (el caso real: leer
+    // `order.organization_id`, una columna que `orders` no tiene) llegaba hasta
+    // `organizations.findUnique({ where: { id: undefined } })` y reventaba
+    // DENTRO de Prisma con un mensaje que no nombraba ni el argumento ni al
+    // culpable. Como `FiscalGateService.isAreaEnabled` captura cualquier error
+    // y falla cerrado, ese defecto quedaba reducido a un WARN ilegible.
+    //
+    // Esto NO cambia el contrato de fallo del gate: sigue fallando cerrado. Lo
+    // único que cambia es que ahora el WARN nombra la causa.
+    if (!organization_id || !Number.isFinite(organization_id)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_CONTEXT_001,
+        'organization_id is required to resolve the fiscal scope',
+        { organization_id: organization_id ?? null },
+      );
+    }
+
     if (!tx) {
       const cached = this.scopeCache.get(organization_id);
       if (cached && cached.expires_at > Date.now()) {

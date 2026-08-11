@@ -282,6 +282,14 @@ export class InvoiceScannerService {
       }
       poItem.quantity = item.quantity;
       poItem.unit_price = item.unit_cost;
+      // QUI-661 Fase 4: el descuento comercial de la línea llega desde el modal
+      // de confirmación (el usuario lo revisó) y entra al motor de descuentos,
+      // que lo resta de la base ANTES de derivar el IVA y lo capitaliza al
+      // costo. Se manda solo cuando es > 0 para no escribir ceros en órdenes
+      // que no tienen descuento.
+      if (item.discount_amount && item.discount_amount > 0) {
+        poItem.discount_amount = item.discount_amount;
+      }
       poItem.notes = item.description;
       return poItem;
     });
@@ -755,6 +763,30 @@ export class InvoiceScannerService {
     );
     if (totalsWarning) scanWarnings.push(totalsWarning);
 
+    // QUI-661 Fase 4 — descuentos de cabecera.
+    const rawHeaderDiscount = Number(parsed.discount_amount);
+    const headerDiscountPrinted =
+      Number.isFinite(rawHeaderDiscount) && rawHeaderDiscount > 0
+        ? repairScannedAmount(rawHeaderDiscount, currency).value
+        : 0;
+    // Se aplana igual que las líneas: en una factura con IVA incluido el
+    // descuento impreso también es bruto.
+    const headerDiscountNet =
+      pricesIncludeTax && headerDiscountPrinted > 0
+        ? headerDiscountPrinted / (1 + this.dominantTaxRate(lineItems))
+        : headerDiscountPrinted;
+
+    const rawEarly = Number(parsed.early_payment_discount);
+    const earlyPaymentDiscount =
+      Number.isFinite(rawEarly) && rawEarly > 0
+        ? repairScannedAmount(rawEarly, currency).value
+        : 0;
+    if (earlyPaymentDiscount > 0) {
+      scanWarnings.push(
+        'La factura menciona un descuento por pronto pago. No se aplica al costo: es un descuento financiero y se decide al registrar el pago.',
+      );
+    }
+
     return {
       supplier: {
         name: parsed.supplier?.name || 'Desconocido',
@@ -769,10 +801,42 @@ export class InvoiceScannerService {
       line_items: lineItems,
       subtotal,
       tax_amount: taxAmount,
+      // QUI-661 Fase 4 — descuento comercial de pie de factura, aplanado a neto
+      // con la misma regla que las líneas.
+      discount_amount: headerDiscountNet > 0 ? headerDiscountNet : undefined,
+      // El de PRONTO PAGO se extrae para mostrarlo, NUNCA para aplicarlo: es
+      // financiero, se decide al pagar (QUI-647) y no rebaja el costo del
+      // inventario. Va crudo, sin aplanar, porque no entra a ningún cálculo.
+      early_payment_discount: earlyPaymentDiscount || undefined,
       total,
       confidence: Number(parsed.confidence) || 0,
       scan_warnings: scanWarnings.length > 0 ? scanWarnings : undefined,
     };
+  }
+
+  /**
+   * QUI-661 Fase 4 — tasa de IVA dominante de la factura, para aplanar el
+   * descuento de PIE de factura.
+   *
+   * El descuento de cabecera no pertenece a ninguna línea, así que no tiene una
+   * tasa propia: se usa la tasa de la línea de mayor valor, que es la que
+   * domina la factura. Es una aproximación consciente y sólo afecta al caso
+   * inclusivo con tasas mixtas, que es raro; el descuento POR LÍNEA, que es el
+   * camino preciso, usa la tasa de su propia línea.
+   */
+  private dominantTaxRate(
+    lineItems: InvoiceScanResult['line_items'],
+  ): number {
+    let best = 0;
+    let bestValue = -1;
+    for (const item of lineItems) {
+      const value = Number(item.total) || 0;
+      if (value > bestValue) {
+        bestValue = value;
+        best = Number(item.tax_rate) || 0;
+      }
+    }
+    return best;
   }
 
   /**
@@ -819,6 +883,19 @@ export class InvoiceScannerService {
     const unitNet =
       pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
 
+    // QUI-661 Fase 4 — el descuento se aplana a NETO con la MISMA regla que el
+    // precio. Si la factura imprime precios con IVA incluido, el descuento
+    // impreso también es bruto; restarlo tal cual de un `unit_price` ya neto
+    // sobre-descontaría exactamente el IVA del descuento (19% de más sobre esa
+    // rebaja) y arrastraría ese error hasta la capa de costo.
+    const rawDiscount = Number(item.discount_amount);
+    const printedDiscount =
+      Number.isFinite(rawDiscount) && rawDiscount > 0
+        ? repairScannedAmount(rawDiscount, currency).value
+        : 0;
+    const discountNet =
+      pricesIncludeTax && r > 0 ? printedDiscount / (1 + r) : printedDiscount;
+
     const rawPackSize = Number(item.pack_size);
 
     return {
@@ -838,6 +915,9 @@ export class InvoiceScannerService {
           ? rawPackSize
           : undefined,
       uom_hint: item.uom_hint ?? undefined,
+      // Neto, coherente con `unit_price`. Cero se emite como undefined para no
+      // ensuciar las líneas sin descuento.
+      discount_amount: discountNet > 0 ? discountNet : undefined,
     };
   }
 

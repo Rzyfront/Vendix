@@ -267,6 +267,13 @@ export class AIEngineAppsService {
     const testVars: Record<string, string> = {
       name: 'Test',
       context: 'Testing',
+      // Speech apps carry `{{text}}` as their whole template — that placeholder
+      // IS the text to dictate. Without a value `interpolate()` leaves the
+      // braces in place and the model reads "{{text}}" out loud, so the test
+      // button would burn a call and prove nothing. A real phrase also makes
+      // the button useful for its actual purpose: hearing the configured voice
+      // before committing to it.
+      text: 'Hola, soy Vexi. Esta es una prueba de voz.',
     };
 
     const modelType = await this.aiEngine.getApplicationModelType(app.key);

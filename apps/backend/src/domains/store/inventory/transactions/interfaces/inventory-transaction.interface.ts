@@ -22,6 +22,27 @@ export interface CreateTransactionDto {
    * the product's store organization. Required at the DB level (NOT NULL).
    */
   organizationId?: number;
+  /**
+   * QUI-651 — sesión de la estación de KDS que consumió el insumo.
+   *
+   * Es un responsable DISTINTO de `userId`: `userId` es quién PIDIÓ que se
+   * cocine (el mesero o cajero del POS), `kdsSessionId` es quién COCINÓ. Ambos
+   * son reales y ambos se persisten.
+   *
+   * `undefined`/null es un caso VÁLIDO: el fire consume al disparar, que puede
+   * ocurrir antes de que la estación abra sesión.
+   */
+  kdsSessionId?: number | null;
+  /**
+   * QUI-651 — costo del movimiento, persistido POR FILA.
+   *
+   * Antes el costo solo existía en memoria: `StockLevelManager.updateStock` lo
+   * devolvía en `cost_snapshot` y nunca lo guardaba. Sin estas dos columnas el
+   * historial y el resumen de consumo por turno no se pueden construir, y
+   * recomputar en lectura no sirve porque las capas FIFO ya se movieron.
+   */
+  unitCost?: number | null;
+  totalCost?: number | null;
 }
 
 export interface TransactionQueryDto {

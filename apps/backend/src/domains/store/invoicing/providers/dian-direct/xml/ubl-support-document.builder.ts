@@ -319,7 +319,7 @@ export class UblSupportDocumentBuilder {
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
       line
         .ele(UBL_NAMESPACES.CBC, 'CreditedQuantity')
-        .att('unitCode', 'EA')
+        .att('unitCode', item.unit_code || 'EA')
         .txt(item.quantity);
       line
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
@@ -334,7 +334,7 @@ export class UblSupportDocumentBuilder {
         .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
+        .att('unitCode', item.unit_code || 'EA')
         .txt('1.00');
     });
   }

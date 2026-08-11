@@ -1,0 +1,74 @@
+// Caja informativa del dominio Vendix — sólo la usa esta página, así que no
+// vive en `_settings-page.scss` (que se duplica en las seis).
+
+.vendix-info-box {
+  margin-top: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--color-info-200);
+  background: linear-gradient(
+    135deg,
+    var(--color-info-50),
+    var(--color-info-100)
+  );
+  padding: 16px;
+}
+
+.vendix-info-content {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.vendix-info-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-info-100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-info-600);
+}
+
+.vendix-info-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.vendix-info-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-info-700);
+  margin: 0 0 4px;
+}
+
+.vendix-info-description {
+  font-size: 13px;
+  color: var(--color-info-700);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.vendix-info-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-info-600);
+  border-radius: 8px;
+  padding: 8px 14px;
+  min-height: 44px; // Área táctil
+  text-decoration: none;
+  transition: background 200ms ease;
+
+  &:hover {
+    background: var(--color-info-700);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}

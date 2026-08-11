@@ -23,7 +23,10 @@ import { Type } from 'class-transformer';
 import { StoreIndustry } from '../../stores/dto/index';
 import {
   PRINT_FORMATS,
+  PrintDocument,
+  PrintDocumentConfig,
   PrintFormat,
+  PrintingSettings,
 } from '../interfaces/store-settings.interface';
 import {} from './shipping-carriers.dto';
 
@@ -461,6 +464,139 @@ export class PosSettingsDto {
   customer_queue?: CustomerQueueSettingsDto;
 }
 
+/** Formato, margen y copias de UN documento imprimible. */
+export class PrintDocumentConfigDto implements PrintDocumentConfig {
+  @ApiProperty({ enum: PRINT_FORMATS, example: 'thermal_80' })
+  @IsEnum(PRINT_FORMATS)
+  format!: PrintFormat;
+
+  @ApiProperty({
+    example: 20,
+    required: false,
+    description:
+      'Margen de página en milímetros. Se ignora en formatos de rollo, cuya página es `<ancho>mm auto` y no tiene margen del que hablar.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(50)
+  margin_mm?: number;
+
+  @ApiProperty({
+    example: 1,
+    required: false,
+    description:
+      'Copias impresas. 0 desactiva las impresiones automáticas; una impresión explícita siempre saca al menos una copia.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  copies?: number;
+}
+
+/**
+ * Configuración de impresión por tienda y por documento.
+ *
+ * Los doce documentos se declaran uno por uno en vez de aceptar un mapa libre
+ * porque el `ValidationPipe` global corre con `whitelist: true` y
+ * `forbidNonWhitelisted: true`: un mapa sin declarar se recorta o se rechaza, y
+ * declararlo campo por campo es lo que hace que cada documento se valide de
+ * verdad (formato dentro del enum, margen y copias en rango) en lugar de entrar
+ * como JSON opaco.
+ */
+export class PrintingSettingsDto implements PrintingSettings {
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  pos_ticket?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  invoice?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  dispatch_ticket?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  dispatch_note?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  dispatch_route?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  sales_order?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  purchase_order?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  quotation?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  reservation?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  layaway?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  guest_order?: PrintDocumentConfigDto;
+
+  @ApiProperty({ type: () => PrintDocumentConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintDocumentConfigDto)
+  withholding_certificate?: PrintDocumentConfigDto;
+}
+
+/**
+ * Red de seguridad en tiempo de compilación: `PrintingSettings` es un
+ * `Partial<Record<...>>`, así que `implements` NO obliga a declarar todos los
+ * documentos. Si alguien agrega uno a `PRINT_DOCUMENTS` y olvida declararlo
+ * arriba, esta asignación falla nombrando al que falta — en vez de que el
+ * documento nuevo se recorte en silencio en cada guardado, que es exactamente el
+ * defecto que este DTO vino a cerrar.
+ */
+type PrintingDtoCoversEveryDocument =
+  Exclude<PrintDocument, keyof PrintingSettingsDto> extends never
+    ? true
+    : [
+        'Falta declarar este documento en PrintingSettingsDto:',
+        Exclude<PrintDocument, keyof PrintingSettingsDto>,
+      ];
+const _printingDtoCoversEveryDocument: PrintingDtoCoversEveryDocument = true;
+void _printingDtoCoversEveryDocument;
+
 export class ReceiptsSettingsDto {
   @ApiProperty({ example: true, required: false })
   @IsOptional()
@@ -539,6 +675,24 @@ export class ReceiptsSettingsDto {
   @Max(5)
   pos_ticket_copies?: number;
 
+  /**
+   * Configuración por documento — la fuente de la verdad de los formatos.
+   *
+   * Vive bajo `receipts` y no como sección propia porque `KNOWN_SECTIONS`
+   * descarta secciones desconocidas respondiendo 200.
+   *
+   * **Sin este DTO el bloque no persistía.** El `ValidationPipe` global corre con
+   * `whitelist: true` (`main.ts`), así que una propiedad no declarada se recorta
+   * antes de llegar al servicio: la pantalla guardaba, respondía 200 y sólo
+   * surtían efecto los dos documentos que tienen espejo plano legacy
+   * (`pos_ticket_format` / `invoice_format`). Los otros diez se descartaban en
+   * silencio.
+   */
+  @ApiProperty({ type: () => PrintingSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PrintingSettingsDto)
+  printing?: PrintingSettingsDto;
 }
 
 export class AppSettingsDto {
@@ -1297,4 +1451,15 @@ export class VexiSettingsDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({
+    example: 'realtime',
+    enum: ['realtime', 'pipeline'],
+    required: false,
+    description:
+      'Motor del modo voz. `realtime` negocia WebRTC speech-to-speech contra el proveedor; `pipeline` transcribe, responde con el agente de texto del chat y dicta la respuesta. Solo el pipeline puede ejecutar escrituras con confirmación, porque es el único que pasa por la tarjeta de aprobación del panel.',
+  })
+  @IsOptional()
+  @IsIn(['realtime', 'pipeline'])
+  voice_engine?: 'realtime' | 'pipeline';
 }

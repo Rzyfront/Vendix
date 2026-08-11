@@ -8,7 +8,24 @@ import {
   IsObject,
   MaxLength,
 } from 'class-validator';
-import { AIModelType } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import {
+  AIModelType,
+  SdkType,
+} from '../../../../ai-engine/interfaces/ai-provider.interface';
+
+/**
+ * Must stay in step with the `switch` in `AIEngineService.initializeProvider`.
+ *
+ * An accepted value the switch does not know logs a warning at load time and
+ * silently registers no provider, so the row saves cleanly and every call
+ * against it fails later with "no provider configured" — far from the field that
+ * caused it.
+ */
+export const AI_SDK_TYPES: readonly SdkType[] = [
+  'openai_compatible',
+  'anthropic_compatible',
+  'minimax_t2a',
+] as const;
 
 export const AI_MODEL_TYPES: readonly AIModelType[] = [
   'text',
@@ -29,8 +46,8 @@ export class CreateAIConfigDto {
 
   @IsString()
   @IsNotEmpty()
-  @IsIn(['openai_compatible', 'anthropic_compatible'])
-  sdk_type: string;
+  @IsIn(AI_SDK_TYPES)
+  sdk_type: SdkType;
 
   @IsString()
   @IsNotEmpty()

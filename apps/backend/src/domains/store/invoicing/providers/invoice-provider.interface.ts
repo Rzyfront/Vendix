@@ -1,3 +1,5 @@
+import { DianInvoiceControl } from './dian-direct/interfaces/dian-config.interface';
+
 /**
  * Contract for electronic invoice providers (e.g., DIAN, mock, third-party).
  */
@@ -91,6 +93,25 @@ export interface ProviderInvoiceData {
   taxes: ProviderInvoiceTax[];
   resolution_number?: string;
   technical_key?: string;
+  /**
+   * Bloque `sts:DianExtensions/InvoiceControl`: autorización de numeración,
+   * período de vigencia y rango autorizado.
+   *
+   * Lo construye `resolveInvoiceControl` (common/helpers/invoice-control.helper.ts)
+   * desde la fila `invoice_resolutions`, y lo pueblan los DOS emisores — el de
+   * tenant en `invoice-flow.service.ts` y el de la plataforma en
+   * `subscription-fiscal.service.ts`—.
+   *
+   * Antes no existía este campo, y esa era la causa de que la emisión real saliera
+   * con el bloque vacío: `resolution_number` y `technical_key` por sí solos no
+   * llevan el prefijo ni el rango, así que ningún llamador tenía dónde ponerlos.
+   * Sin `sts:Prefix` desaparece el lado derecho de FAB10a y la DIAN rechaza en
+   * cascada por FAD05e, FAB24a y FAB27b.
+   *
+   * Opcional en el tipo porque el documento soporte no cuelga de una resolución
+   * de numeración (ver `dian-direct.provider.ts`, nota del documento soporte).
+   */
+  control?: DianInvoiceControl;
   notes?: string;
 
   // DIAN-enriched fields (optional — used by DianDirectProvider)
@@ -126,6 +147,25 @@ export interface ProviderInvoiceItem {
   discount_amount: string;
   tax_amount: string;
   total_amount: string;
+  /**
+   * Código del ítem para `cac:StandardItemIdentification/cbc:ID`, que la DIAN
+   * exige en toda línea (regla FAZ09 «StandardItemIdentification no informado»).
+   *
+   * OPCIONAL a propósito: el builder cae al número de línea cuando falta, así que
+   * ningún llamador queda obligado a inventar un código de catálogo. De dónde
+   * sale el código real del producto en emisión —SKU, código de barras, UNSPSC—
+   * es una decisión de negocio aparte. Se emite con `schemeID="999"`, «estándar
+   * de adopción del contribuyente», porque Vendix no publica catálogo UNSPSC.
+   */
+  item_code?: string;
+
+  /**
+   * Código UN/ECE de la unidad realmente vendida (`MTR`, `KGM`, `LTR`, `EA`).
+   * La DIAN valida la coherencia entre cantidad y unidad: 3 metros declarados
+   * como `EA` dicen "3 unidades". Opcional: el builder cae a `EA`, que es el
+   * comportamiento histórico de todo el catálogo por pieza.
+   */
+  unit_code?: string;
 }
 
 export interface ProviderInvoiceTax {

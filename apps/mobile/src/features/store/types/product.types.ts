@@ -41,6 +41,75 @@ export interface Product {
    */
   product_tax_assignments?: ProductTaxAssignment[];
   total_stock_available?: number;
+  /**
+   * Código de barras del producto suelto. El de una PRESENTACIÓN vive en
+   * `product_price_tier_assignments.barcode`, no acá: la "Caja x12" de dos
+   * productos distintos nunca comparte código con la unidad suelta.
+   */
+  barcode?: string | null;
+  /* ============================================================
+   * QUI-648 — Unidad de stock, escala de precio y presentaciones
+   * ============================================================ */
+  /**
+   * FK a `units_of_measure`. El stock y `order_items.quantity` viven SIEMPRE
+   * en la unidad MÍNIMA de la dimensión (mm, g, ml, unidad).
+   */
+  stock_uom_id?: number | null;
+  purchase_uom_id?: number | null;
+  stock_uom?: UnitOfMeasureRef | null;
+  purchase_uom?: UnitOfMeasureRef | null;
+  purchase_to_stock_factor?: number | null;
+  /**
+   * "Precio por N unidades de stock", estilo SAP. Un cable medido en
+   * milímetros guarda `base_price = 5000` y `price_unit_quantity = 1000` —
+   * "$5.000 por metro". El total de una línea es
+   * `unit_price × quantity / price_unit_quantity`, redondeado al FINAL.
+   *
+   * `1` (el default y el valor de todo el catálogo histórico) colapsa la
+   * fórmula a la aritmética de siempre: cero regresión.
+   *
+   * ⚠️ El backend lo expone hoy en `GET /store/products/:id`; el listado puede
+   * omitirlo. Toda la aritmética del móvil trata la ausencia como `1`
+   * (`resolvePriceUnitQuantity`), así que un listado sin el campo cobra igual
+   * que hoy en vez de romperse.
+   */
+  price_unit_quantity?: number | null;
+  /** Frase única que explica cómo se vende. La arma el backend. */
+  sale_config_summary?: SaleConfigSummary | null;
+  /** El producto participa del sistema de tarifas/presentaciones. */
+  has_multiple_price_tiers?: boolean;
+  /**
+   * Allowlist duro del par (producto, tarifa). El backend rechaza con
+   * `PRICE_TIER_NOT_ALLOWED` cualquier tarifa fuera de esta lista, así que el
+   * POS no puede ofrecer nada que no esté acá.
+   */
+  enabled_price_tier_ids?: number[];
+  /**
+   * Solo en `GET /store/products?barcode=XXXX`: cuál de las presentaciones del
+   * producto corresponde al código pistoleado. `null` = se escaneó la unidad
+   * suelta.
+   */
+  scanned_price_tier_id?: number | null;
+}
+
+/** Fila de `units_of_measure` tal como la expone el backend. */
+export interface UnitOfMeasureRef {
+  id: number;
+  code: string;
+  name: string;
+  dimension?: string | null;
+  factor_to_base?: number | null;
+  is_stock_eligible?: boolean;
+}
+
+/**
+ * Explicación de cómo se vende un producto, generada por el backend
+ * (`sale-config-explainer.util.ts`). Es texto listo para mostrar: el móvil no
+ * la reconstruye, solo la pinta.
+ */
+export interface SaleConfigSummary {
+  headline: string;
+  lines: string[];
 }
 
 export interface ProductVariant {
@@ -277,6 +346,16 @@ export interface CreateProductDto {
   variants?: CreateProductVariantDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+  /* ===== QUI-648: unidad de stock, escala de precio, presentaciones ===== */
+  stock_uom_id?: number | null;
+  purchase_uom_id?: number | null;
+  /**
+   * A cuántas unidades de stock corresponde `base_price`. Entero >= 1; `1` es
+   * el default y deja la aritmética histórica intacta.
+   */
+  price_unit_quantity?: number;
+  has_multiple_price_tiers?: boolean;
+  enabled_price_tier_ids?: number[];
 }
 
 export type UpdateProductDto = Partial<CreateProductDto>;
@@ -298,6 +377,29 @@ export interface PriceTier {
   sort_order?: number;
   created_at?: string;
   updated_at?: string;
+  /**
+   * Discriminador de los dos ejes que conviven en la tabla: `customer_tier`
+   * ("a quién le vendo") vs `sale_unit` ("en qué presentación vendo"). Los
+   * selectores filtran por acá para no mezclarlos.
+   */
+  kind?: PriceTierKind;
+  /** Descuento global de la tarifa cuando el par no tiene override explícito. */
+  discount_percentage?: number | string | null;
+}
+
+export type PriceTierKind = 'customer_tier' | 'sale_unit';
+
+/**
+ * Fila de `product_price_tier_overrides` para un producto.
+ * `GET /store/price-tiers/products/:productId/overrides`.
+ */
+export interface ProductPriceTierOverride {
+  price_tier_id: number;
+  variant_id?: number | null;
+  override_price?: number | string | null;
+  override_profit_margin?: number | string | null;
+  /** Factor de la presentación para ESTE producto. Gana sobre el de la tarifa. */
+  override_units_per_package?: number | null;
 }
 
 /* ============================================================

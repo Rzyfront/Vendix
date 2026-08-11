@@ -104,6 +104,154 @@ describe('AIEngineConfigService', () => {
     });
   });
 
+  describe('audio configs cannot be the global default', () => {
+    const baseDto = {
+      provider: 'OpenAI',
+      sdk_type: 'openai_compatible',
+      label: 'Realtime voice',
+      model_id: 'gpt-realtime-2.1',
+      model_type: 'audio',
+    };
+
+    it('create: rejects is_default on an audio config', async () => {
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.create({ ...baseDto, is_default: true } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_CONFIG_003' });
+
+      expect(prisma.ai_engine_configs.create).not.toHaveBeenCalled();
+      // The unset-previous-default sweep must not have run either: a rejected
+      // create that already cleared the text default would leave the platform
+      // with no default at all.
+      expect(prisma.ai_engine_configs.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('create: allows an audio config that is not the default', async () => {
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+      prisma.ai_engine_configs.create!.mockResolvedValueOnce({
+        id: 12,
+        ...baseDto,
+        api_key_ref: null,
+      });
+
+      await expect(
+        service.create({ ...baseDto, is_default: false } as any),
+      ).resolves.toEqual(expect.objectContaining({ id: 12 }));
+    });
+
+    it('update: rejects is_default using the persisted model_type when the DTO omits it', async () => {
+      // The likeliest way to hit this: PATCH {"is_default": true} on a config
+      // that is already audio, so the payload carries no model_type at all.
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce({
+        id: 9,
+        provider: 'OpenAI',
+        model_id: 'gpt-realtime-2.1',
+        model_type: 'audio',
+        is_default: false,
+        is_active: true,
+        settings: {},
+      });
+
+      await expect(
+        service.update(9, { is_default: true } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_CONFIG_003' });
+
+      expect(prisma.ai_engine_configs.update).not.toHaveBeenCalled();
+      expect(prisma.ai_engine_configs.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('update: rejects switching an existing default config over to audio', async () => {
+      // The mirror case: the config is already the default and the edit only
+      // changes model_type, so is_default is absent from the payload.
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce({
+        id: 4,
+        provider: 'OpenAI',
+        model_id: 'gpt-4o',
+        model_type: 'text',
+        is_default: true,
+        is_active: true,
+        settings: {},
+      });
+
+      await expect(
+        service.update(4, { model_type: 'audio' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_CONFIG_003' });
+    });
+
+    it('create: rejects is_default for every non-text model type', async () => {
+      // The footgun is not specific to audio: `defaultConfigId` is one global
+      // value shared by every application whose config_id is NULL, and those
+      // applications need a text model. The voice pipeline adds `speech` and
+      // `transcription` to the list, so the guard has to be a blacklist rather
+      // than a special case.
+      for (const modelType of [
+        'audio',
+        'speech',
+        'transcription',
+        'video',
+        'rerank',
+        'embedding',
+      ]) {
+        prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+
+        await expect(
+          service.create({
+            ...baseDto,
+            model_id: `model-${modelType}`,
+            model_type: modelType,
+            is_default: true,
+          } as any),
+        ).rejects.toMatchObject({ errorCode: 'AI_CONFIG_003' });
+      }
+
+      expect(prisma.ai_engine_configs.create).not.toHaveBeenCalled();
+      expect(prisma.ai_engine_configs.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('create: still allows a text config to be the default', async () => {
+      // The blacklist must not turn into "nothing can be default" — the
+      // platform needs exactly one text default to serve the unlinked apps.
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+      prisma.ai_engine_configs.create!.mockResolvedValueOnce({
+        id: 20,
+        ...baseDto,
+        model_type: 'text',
+        api_key_ref: null,
+      });
+
+      await expect(
+        service.create({
+          ...baseDto,
+          model_type: 'text',
+          is_default: true,
+        } as any),
+      ).resolves.toEqual(expect.objectContaining({ id: 20 }));
+      expect(prisma.ai_engine_configs.updateMany).toHaveBeenCalled();
+    });
+
+    it('create: allows a speech config that is not the default', async () => {
+      // What the voice pipeline migration actually creates.
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+      prisma.ai_engine_configs.create!.mockResolvedValueOnce({
+        id: 21,
+        provider: 'OpenAI',
+        model_id: 'gpt-4o-mini-tts',
+        model_type: 'speech',
+        api_key_ref: null,
+      });
+
+      await expect(
+        service.create({
+          ...baseDto,
+          model_id: 'gpt-4o-mini-tts',
+          model_type: 'speech',
+          is_default: false,
+        } as any),
+      ).resolves.toEqual(expect.objectContaining({ id: 21 }));
+    });
+  });
+
   describe('model_type', () => {
     it('create: persists model_type from the DTO when provided', async () => {
       prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);

@@ -23,11 +23,12 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.DashboardComponent),
       },
       {
+        // Directorio + ficha de tenant (`organizations/:organizationId/...`).
         path: 'organizations',
-        loadComponent: () =>
+        loadChildren: () =>
           import(
-            '../../private/modules/super-admin/organizations/organizations.component'
-          ).then((c) => c.OrganizationsComponent),
+            '../../private/modules/super-admin/organizations/organizations.routes'
+          ).then((m) => m.ORGANIZATIONS_ROUTES),
       },
       {
         path: 'users',
@@ -51,11 +52,12 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.PaymentMethodsComponent),
       },
       {
+        // Directorio + ficha de tenant (`stores/:storeId/...`).
         path: 'stores',
-        loadComponent: () =>
+        loadChildren: () =>
           import(
-            '../../private/modules/super-admin/stores/stores.component'
-          ).then((c) => c.StoresComponent),
+            '../../private/modules/super-admin/stores/stores.routes'
+          ).then((m) => m.STORES_ROUTES),
       },
       {
         path: 'audit',

@@ -142,7 +142,7 @@ export class UblEquivalentDocumentBuilder {
       .ele(UBL_NAMESPACES.CBC, 'LineCountNumeric')
       .txt(String(invoice_data.items.length));
 
-    UblCommonBuilder.buildSupplierParty(doc, issuer);
+    UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
     // A POS ticket is paid on the spot, so `PaymentDueDate` is the issue date

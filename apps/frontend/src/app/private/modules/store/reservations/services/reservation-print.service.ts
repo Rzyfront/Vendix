@@ -1,19 +1,49 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
+import { DocumentPrintService } from '../../../../../shared/services/print';
 import { Booking } from '../interfaces/reservation.interface';
+
+/**
+ * Document CSS handed to `DocumentPrintService`. The `@page` rule is NOT here:
+ * paper, margin and copies belong to `receipts.printing.reservation` and are
+ * resolved by the engine.
+ */
+const RESERVATION_PRINT_STYLES = `
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }
+    .container {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    table { border-collapse: collapse; }
+`;
 
 @Injectable({
   providedIn: 'root',
 })
 export class ReservationPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
+  private readonly documentPrint = inject(DocumentPrintService);
 
-  printReservation(booking: Booking): void {
-    const html = this.generateReservationHtml(booking);
-    this.printHtml(html);
+  async printReservation(booking: Booking): Promise<void> {
+    await this.documentPrint.print({
+      document: 'reservation',
+      body: this.generateReservationBody(booking),
+      title: `Comprobante de Reserva ${booking.booking_number}`,
+      styles: RESERVATION_PRINT_STYLES,
+    });
   }
 
-  private generateReservationHtml(booking: Booking): string {
+  private generateReservationBody(booking: Booking): string {
     let storeName = 'Vendix';
     let storeAddress = '';
     let storePhone = '';
@@ -80,32 +110,6 @@ export class ReservationPrintService {
       : null;
 
     return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Comprobante de Reserva ${booking.booking_number}</title>
-  <style>
-    @page { size: A4; margin: 20mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    table { border-collapse: collapse; }
-  </style>
-</head>
-<body>
   <div class="container">
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
@@ -188,27 +192,6 @@ export class ReservationPrintService {
         Generado por ${storeName} · Powered by Vendix
       </p>
     </div>
-  </div>
-</body>
-</html>`;
-  }
-
-  private printHtml(html: string): void {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.style.opacity = '0';
-    document.body.appendChild(iframe);
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    }
-    setTimeout(() => iframe.remove(), 1000);
+  </div>`;
   }
 }

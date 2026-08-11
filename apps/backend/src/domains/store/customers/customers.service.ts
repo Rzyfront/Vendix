@@ -532,7 +532,14 @@ export class CustomersService {
       });
 
       if (existingUser) {
-        throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
+        // Pasamos `details.kind` para que el bulk service pueda generar
+        // un mensaje específico ("este correo ya está tomado") y NO un
+        // genérico "Resource conflict" en inglés.
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'El correo electrónico ya está registrado en la organización',
+          { kind: 'email', value: effectiveEmail },
+        );
       }
     }
 
@@ -551,9 +558,17 @@ export class CustomersService {
       );
 
       if (existingByDocument) {
+        // Igual que el caso del email: el `details.kind` permite al bulk
+        // service generar la acción sugerida ("usa otro documento") sin
+        // hardcodear el copy aquí.
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Ya existe un cliente con este documento en la organización',
+          {
+            kind: 'document',
+            value: normalizedDoc.number,
+            type: normalizedDoc.type,
+          },
         );
       }
     }

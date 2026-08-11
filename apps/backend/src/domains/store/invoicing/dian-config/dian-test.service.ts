@@ -32,13 +32,38 @@ import {
   localTimeString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import {
   buildDianXmlFileName,
   buildDianZipFileName,
   softwareCodeForOperationMode,
   DianDocumentKind,
 } from '../utils/dian-file-naming.util';
-import { analyzeTestSetWait } from './test-set-wait.util';
+import {
+  analyzeTestSetWait,
+  resolveTestSetWait,
+} from './test-set-wait.util';
+import {
+  aggregateZipVerdicts,
+  describeRejectedDocuments,
+  indexDocumentsByZipKey,
+  rejectionMessages,
+  MAX_RAW_RESPONSE_CHARS,
+  TestSetDocumentRef,
+  TestSetZipAggregate,
+  TestSetZipCounts,
+  TestSetZipVerdict,
+} from './test-set-zip-aggregate.util';
+import {
+  buildNotePhaseView,
+  canWriteEnablementStatus,
+  decideNotePhase,
+  isTestSetClosedByDian,
+  resolveRegisteredInvoiceReferences,
+  NOTE_PHASE_MAX_POLLS,
+  NOTE_PHASE_POLL_DELAY_MS,
+} from './note-phase-gate.util';
+import { resolveIssuerFiscalIdentity } from '../utils/fiscal-issuer.util';
 import {
   DianTestSetJob,
   DianTestSetJobState,
@@ -66,7 +91,30 @@ export interface TestSetPollAttempt {
   status_code: string;
   status_message: string;
   success: boolean;
+  /**
+   * ZipKey consultado. Opcional porque un lote de un solo ZipKey no necesita
+   * desambiguar, y porque los registros escritos antes de que el sondeo fuera
+   * multi-lote no lo traen.
+   */
+  zip_key?: string;
+  /**
+   * Reglas que la DIAN reportó EN ESTE intento.
+   *
+   * EL DEFECTO QUE CIERRA: los dos push de este arreglo copiaban
+   * `status_code`/`status_message`/`success` y descartaban `status.error_messages`,
+   * teniéndolos delante. `poll_history` es lo que un operador lee cuando quiere
+   * saber qué contestó la DIAN en cada consulta, y contestaba sin el motivo.
+   *
+   * Opcional: los intentos escritos antes de este campo no lo traen, y un sondeo
+   * sin reglas (el caso normal, «en proceso») no debe inventar un arreglo vacío
+   * en cada fila del historial.
+   */
+  error_messages?: string[];
 }
+
+// `TestSetZipVerdict` y `TestSetZipCounts` viven en `test-set-zip-aggregate.util`
+// junto a la regla que los combina, por la misma razón que `analyzeTestSetWait`:
+// el endpoint HTTP y el cron de re-sondeo deben coincidir en el veredicto.
 
 @Injectable()
 export class DianTestService {
@@ -86,6 +134,34 @@ export class DianTestService {
     // servicio, no una copia por dominio.
     @InjectQueue('dian-test-set') private readonly testSetQueue: Queue,
   ) {}
+
+  /**
+   * Devuelve el event loop al resto del proceso durante UN turno de macrotarea.
+   *
+   * ## Por qué hace falta un `setImmediate` y no basta con `await` (QUI-674)
+   *
+   * Los bucles que arman el set son CPU pura: construir el UBL, calcular el
+   * CUFE/CUDE (SHA-384) y firmar (canonicalización C14N + `crypto.createSign()`,
+   * que es la API SÍNCRONA y no baja al threadpool). Entre el `update` de
+   * `enablement_status` y el primer `SendTestSetAsync` NO hay una sola operación
+   * de E/S real: los `await` de `sign()` resuelven promesas YA cumplidas, así que
+   * son MICROTAREAS. La cola de microtareas se drena entera antes de volver al
+   * event loop, de modo que los 50 documentos corrían en un ÚNICO macrotask
+   * ininterrumpido.
+   *
+   * Consecuencias medidas en producción: nginx devolvía 504 en rutas triviales
+   * (`/api/store/notifications?limit=15`) porque el proceso —el MISMO que sirve
+   * la API— no llegaba a atender el socket, y BullMQ registraba
+   * `could not renew lock for job` porque su temporizador de renovación (a la
+   * mitad de `lockDuration`) tampoco podía correr.
+   *
+   * `setImmediate` encola en la fase *check*, que corre DESPUÉS de la fase de
+   * timers: ceder aquí es exactamente lo que le da su turno al renovador del lock
+   * y a los sockets HTTP pendientes. Es la cesión mínima: un turno por documento.
+   */
+  private yieldEventLoop(): Promise<void> {
+    return new Promise<void>((resolve) => setImmediate(resolve));
+  }
 
   private async getConfigById(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
@@ -232,10 +308,14 @@ export class DianTestService {
   async enqueueTestSet(
     config_id: number,
     resolution_id: number,
+    options: { smoke?: boolean; validate_only?: boolean } = {},
   ): Promise<{ job_id: string }> {
     const config = await this.getConfigById(config_id);
 
-    if (!config.test_set_id) {
+    // La vía de validación no envía al set, así que no necesita su identificador:
+    // un tenant que aún no tiene set asignado igual puede comprobar que su
+    // certificado, su firma y su XML son conformes antes de pedirlo.
+    if (!config.test_set_id && !options.validate_only) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
@@ -250,8 +330,49 @@ export class DianTestService {
       );
     }
 
+    // `abandoned !== true` es deliberado y no es redundante con `pending`.
+    // Una fila descartada por el defecto anterior puede seguir teniendo
+    // `pending: true` y `zip_key`, y sin esta condición el tenant queda encerrado:
+    // la UI le ofrece ejecutar el set y aquí se le niega. El descarte gana.
+    //
+    // La vía de validación queda EXENTA: la guarda existe para no gastar otro
+    // bloque de consecutivos en un set que la DIAN todavía debe juzgar, y una
+    // validación sincrónica no se envía al set. Sin esta exención el diagnóstico
+    // sería inalcanzable justo cuando más se necesita — con un lote atascado.
+    // LA DIAN NO ACEPTA DOCUMENTOS CONTRA UN SET QUE YA APROBÓ.
+    //
+    // Responde status 2 a cada uno: «Set de prueba con identificador … se
+    // encuentra Aceptado.» Medido el 2026-08-09: un reenvío gastó 30 consecutivos
+    // autorizados para cosechar 30 veces esa frase. Los documentos estaban bien —
+    // el humo sincrónico del mismo código dio `is_valid: true`.
+    //
+    // Las vías de diagnóstico quedan EXENTAS: `validate_only` y `smoke` van por
+    // `SendBillSync` sin `testSetId`, no tocan el set, y son justamente cómo se
+    // comprueba un arreglo después de la habilitación.
+    if (
+      !options.validate_only &&
+      !options.smoke &&
+      isTestSetClosedByDian(config.enablement_status)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya aprobó el set de pruebas de esta configuración y no acepta más documentos contra él: ' +
+          'responde «Set de prueba … se encuentra Aceptado» y cada consecutivo enviado se pierde. ' +
+          'Para comprobar un arreglo usa la vía de validación sincrónica, que cuesta 1 consecutivo y no toca el set.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
+      );
+    }
+
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
-    if (previous.pending === true && previous.zip_key) {
+    if (
+      !options.validate_only &&
+      previous.pending === true &&
+      previous.zip_key &&
+      previous.abandoned !== true
+    ) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_002,
         `El set de pruebas ${previous.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
@@ -263,6 +384,8 @@ export class DianTestService {
     const payload: DianTestSetJob = {
       config_id,
       resolution_id,
+      smoke: options.smoke === true,
+      validate_only: options.validate_only === true,
       context: {
         // `store_id` puede quedar `undefined` legítimamente: la plataforma emite
         // con la organización como identidad fiscal, sin tienda.
@@ -338,15 +461,107 @@ export class DianTestService {
    * un ZipKey y tarda minutos en clasificar, así que sondear aquí no podía
    * alcanzar un veredicto — solo alargaba el trabajo 33 s. El veredicto lo
    * obtienen el cron de repoll y el endpoint de consulta de estado.
+   *
+   * `options.validate_only` cambia la operación SOAP a `SendBillSync`, que SÍ es
+   * sincrónica: la DIAN contesta en la misma llamada con `IsValid` y la lista
+   * completa de reglas violadas. Ver el comentario del bucle de envío.
    */
-  async executeTestSet(config_id: number, resolution_id: number) {
+  async executeTestSet(
+    config_id: number,
+    resolution_id: number,
+    options: {
+      smoke?: boolean;
+      validate_only?: boolean;
+      numbering_range?: boolean;
+      check_status?: boolean;
+      /**
+       * Qué documento emite la vía de diagnóstico. Por defecto una factura.
+       *
+       * Existe porque los rechazos que quedaban vivos eran de NOTA, y un humo que
+       * solo puede emitir facturas no puede medirlos: había que gastar los 50
+       * consecutivos del set completo para ver si una nota había quedado bien.
+       * Con esto la pregunta cuesta 1.
+       */
+      validate_kind?: DianDocumentKind;
+    } = {},
+  ) {
+    // CONSULTA DE VEREDICTO — corta aquí, sin emitir ni reservar numeración.
+    // Resuelve el estado de un lote ya enviado por `GetStatusZip`.
+    if (options.check_status === true) {
+      return this.checkTestSetStatus(config_id);
+    }
+
+    // CONSULTA DE RANGOS AUTORIZADOS — corta aquí, antes de tocar numeración.
+    //
+    // No emite ningún documento y no reserva ningún consecutivo: le pregunta a la
+    // DIAN qué resolución, prefijo, rango, VIGENCIA y clave técnica tiene
+    // registrados para este OFE. Es la fuente autoritativa de esos datos.
+    //
+    // Existe porque transcribirlos del portal a mano ya produjo dos defectos: un
+    // municipio de otro pueblo (44847 Uribia por 44001 Riohacha) y unas fechas de
+    // vigencia que la DIAN rechaza con FAB07b/FAB08b. La respuesta se devuelve
+    // CRUDA a propósito — los nombres de campo se leen de lo que la DIAN contesta.
+    if (options.numbering_range === true) {
+      const cfg = await this.getConfigById(config_id);
+      const credentials = await this.loadWsCredentials(cfg);
+      const nit = String(cfg.nit ?? '').replace(/\D/g, '');
+      // `accountCodeT` es el NIT del proveedor tecnológico. En software propio el
+      // obligado ES su propio proveedor, así que va el mismo NIT.
+      const response = await this.soap_client.getNumberingRange(
+        nit,
+        nit,
+        String(cfg.software_id ?? ''),
+        cfg.environment === 'production' ? 'production' : 'test',
+        credentials,
+      );
+      return {
+        numbering_range_query: true,
+        dian_configuration_id: config_id,
+        nit,
+        software_id: cfg.software_id,
+        environment: cfg.environment,
+        raw: response,
+      };
+    }
+
+    // Una validación es por definición de UN documento: someter 50 a `SendBillSync`
+    // no diría nada que el primero no diga y gastaría 50 consecutivos. Se deriva
+    // aquí, una vez, para que el resto del método no tenga que recordar la regla.
+    const diagnostic = options.smoke === true || options.validate_only === true;
     const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
-    if (!config.test_set_id) {
+    // La vía de validación no envía al set, así que no necesita su identificador.
+    // Misma exención que en `enqueueTestSet`.
+    if (!config.test_set_id && !options.validate_only) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
+      );
+    }
+
+    // SET YA APROBADO POR LA DIAN — copia de la guarda de `enqueueTestSet`, y por
+    // la misma razón que el comentario de abajo da para la guarda de lote pendiente:
+    // las dos copias tienen que existir o ninguna sirve. La cola se puede alimentar
+    // directamente sin pasar por `enqueueTestSet` —así se ejecutaron todos los
+    // envíos de operador de esta habilitación—, y ese camino se salta la primera.
+    //
+    // Va ANTES de reservar numeración: el objeto es no gastar consecutivos que la
+    // DIAN va a devolver con «Set de prueba … se encuentra Aceptado».
+    if (
+      !options.validate_only &&
+      !options.smoke &&
+      isTestSetClosedByDian(config.enablement_status)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya aprobó el set de pruebas de esta configuración y no acepta más documentos contra él: ' +
+          'responde «Set de prueba … se encuentra Aceptado» y cada consecutivo enviado se pierde. ' +
+          'Para comprobar un arreglo usa la vía de validación sincrónica, que cuesta 1 consecutivo y no toca el set.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
       );
     }
 
@@ -357,7 +572,20 @@ export class DianTestService {
       string,
       any
     >;
-    if (previous_result.pending === true && previous_result.zip_key) {
+    // `abandoned !== true`: ver la misma guarda en `enqueueTestSet`. Un lote
+    // descartado no bloquea el reenvío, ni aunque `pending` haya quedado en true.
+    //
+    // `!options.validate_only`: esta guarda está DUPLICADA en `enqueueTestSet` y en
+    // este método, y exentar solo la primera no sirve para nada — el encolado pasa,
+    // el worker revienta, y el fallo llega como un job `failed` en vez de un 409
+    // inmediato, que es peor de leer. Las dos copias tienen que compartir la
+    // exención o ninguna la tiene.
+    if (
+      !options.validate_only &&
+      previous_result.pending === true &&
+      previous_result.zip_key &&
+      previous_result.abandoned !== true
+    ) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_002,
         `El set de pruebas ${previous_result.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
@@ -388,6 +616,90 @@ export class DianTestService {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'Resolution not found',
+      );
+    }
+
+    // GUARDA — la misma resolución DIAN activa dos veces en la misma organización.
+    //
+    // Se comprueba ANTES de reservar el bloque de numeración: reservar primero y
+    // descubrirlo después ya habría movido `current_number`.
+    //
+    // LA DIAN NUMERA POR (NIT EMISOR, RESOLUCIÓN). El NIT emisor es `config.nit`
+    // — es el valor que los seis builders de `dian-direct.provider.ts` escriben
+    // en `cac:AccountingSupplierParty/…/cbc:CompanyID` vía
+    // `issuer_nit: onlyDigits(config.nit)`. Dos matices que definen esta guarda:
+    //
+    // 1. NO se agrupa por `accounting_entities.tax_id`. Ese campo es el eje
+    //    CONTABLE (a qué libro se imputa el asiento) y NUNCA viaja en el XML. En
+    //    producción las tres entidades de la organización 1 comparten el
+    //    `tax_id` de la semilla (`900123456-7`) mientras el NIT real de la
+    //    plataforma vive en `config.nit` (`902056589`). Agrupar por ese campo
+    //    lanzaría este 409 sobre emisiones legítimas y a la vez dejaría pasar el
+    //    caso inverso: dos entidades con `tax_id` distinto emitiendo bajo un
+    //    mismo `config.nit`.
+    //
+    // 2. NO se agrupa por `config.nit` directamente: `invoice_resolutions` no
+    //    tiene FK a `dian_configurations`, y la organización 1 tiene TRES
+    //    configuraciones a nivel plataforma con tres NIT distintos (13, 14, 15).
+    //    Resolver «qué configuración emitiría esta fila» sería adivinar.
+    //
+    // Queda `organization_id`: la frontera de tenant real, y el alcance bajo el
+    // cual una sola configuración DIAN gobierna la emisión. El caso de producción
+    // que motiva la guarda:
+    //
+    //   resolución 9  → entidad 18 «Tienda Principal Vendix»     consecutivo 989999999 (nunca emitió)
+    //   resolución 10 → entidad 95 «Vendix S.A.S. (Consolidado)» consecutivo 990000160
+    //
+    // Misma organización, misma resolución 18760000001, mismo rango, contadores
+    // separados. Emitir por la 9 saca 990000000 bajo un NIT que ya entregó hasta
+    // 990000160, y la DIAN rechaza numeración duplicada de forma DEFINITIVA: ese
+    // consecutivo no se recupera. La resolución 8 (HIDRO, organización 75) queda
+    // fuera y así debe ser: otro NIT, contador legítimamente independiente.
+    //
+    // No se auto-resuelve eligiendo la de `current_number` mayor: sin saber cuál
+    // fila es la correcta, adivinar puede quemar el resto del rango en silencio.
+    // Un humano decide cuál desactivar.
+    //
+    // LÍMITE CONOCIDO: la consulta va por el cliente Prisma SCOPEADO, así que si
+    // el alcance del llamador no alcanza la fila gemela, la guarda no la ve.
+    // Cruzar el aislamiento de tenant para verla sería peor. Es defensa en
+    // profundidad, no el control principal: el control principal es no tener dos
+    // filas activas.
+    const active_twin = await this.prisma.invoice_resolutions.findFirst({
+      where: {
+        id: { not: resolution.id },
+        is_active: true,
+        organization_id: resolution.organization_id,
+        document_type: resolution.document_type,
+        resolution_number: resolution.resolution_number,
+        prefix: resolution.prefix,
+        range_from: resolution.range_from,
+        range_to: resolution.range_to,
+      },
+      select: {
+        id: true,
+        current_number: true,
+        accounting_entity_id: true,
+      },
+    });
+    if (active_twin) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_008,
+        `La resolución ${resolution.resolution_number} (prefijo ${resolution.prefix}, ` +
+          `rango ${resolution.range_from}-${resolution.range_to}) está activa dos veces ` +
+          `en esta organización: id=${resolution.id} en la entidad contable ` +
+          `${resolution.accounting_entity_id} (consecutivo ${resolution.current_number}) y ` +
+          `id=${active_twin.id} en la entidad ${active_twin.accounting_entity_id} ` +
+          `(consecutivo ${active_twin.current_number}). Ambas emitirían bajo el NIT ` +
+          `${config.nit}, así que desactiva la que no corresponda antes de emitir: la que ` +
+          `quede atrasada reemitiría numeración que la DIAN ya recibió bajo ese NIT, y ese ` +
+          `rechazo es definitivo.`,
+        {
+          dian_configuration_id: config_id,
+          resolution_id: resolution.id,
+          duplicate_resolution_id: active_twin.id,
+          nit: config.nit,
+        },
       );
     }
 
@@ -432,7 +744,34 @@ export class DianTestService {
     // la provisiona la DIAN por set y la publica en su portal («Total de
     // documentos requeridos»): no se deriva de la norma. Para software propio el
     // portal exige 50 (30 FV + 10 ND + 10 NC), verificado el 2026-08-05.
-    const composition = resolveTestSetComposition(config.operation_mode);
+    //
+    // VÍA DE HUMO — `options.smoke`: emite UNA factura y gasta UN consecutivo.
+    //
+    // Existe porque un consecutivo autorizado es finito e irrecuperable. HIDRO
+    // gastó 150 en tres lotes de 50 sin que la DIAN recibiera un solo documento,
+    // y en los tres casos la única forma de saberlo fue el contador del portal.
+    // Antes de gastar 50 hay que poder gastar 1: si `Recibidos` pasa de 0 a 1, el
+    // camino de envío funciona; si no, no se gastaron 49 números para averiguarlo.
+    //
+    // No es un set válido para habilitar: la DIAN exige la composición completa.
+    // Es un diagnóstico del transporte y la ingesta.
+    //
+    // VÍA DE VALIDACIÓN — `options.validate_only`: la misma factura, sometida a
+    // `SendBillSync` en vez de `SendTestSetAsync`. Comparte la composición de 1
+    // documento por la razón de arriba.
+    //
+    // `validate_kind` elige QUÉ documento emite el diagnóstico. Sigue siendo UN
+    // consecutivo; lo que cambia es cuál de los tres tipos se pone a prueba. Una
+    // nota emitida así referencia una factura de un lote ANTERIOR que la DIAN ya
+    // aceptó (ver más abajo), no una de este lote: si no, el humo arrastraría
+    // CBG04a/DBG04a y no distinguiría «la nota está mal» de «su factura no existe».
+    const composition = diagnostic
+      ? options.validate_kind === 'debit_note'
+        ? { invoices: 0, debit_notes: 1, credit_notes: 0 }
+        : options.validate_kind === 'credit_note'
+          ? { invoices: 0, debit_notes: 0, credit_notes: 1 }
+          : { invoices: 1, debit_notes: 0, credit_notes: 0 }
+      : resolveTestSetComposition(config.operation_mode);
     const TEST_SET_SIZE = testSetSize(composition);
 
     // El código `ppp` del nombre de archivo se resuelve ANTES de reservar el
@@ -491,38 +830,108 @@ export class DianTestService {
       ? await resolveStoreTimezone(this.prisma, store_id)
       : DEFAULT_STORE_TIMEZONE;
 
-    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
-    // numbering-resolution row so the AuthorizedInvoices range and authorization
-    // period rendered in the XML are the real habilitación values, not empty.
-    // The validity range is a civil date range: `toISOString()` would shift it a
-    // day whenever the stored instant falls before the zone's UTC offset.
-    const control = {
-      invoice_authorization: resolution.resolution_number,
-      authorization_start_date: localDateString(resolution.valid_from, timezone),
-      authorization_end_date: localDateString(resolution.valid_to, timezone),
-      prefix: resolution.prefix,
-      range_from: String(resolution.range_from),
-      range_to: String(resolution.range_to),
-    };
-
-    const organization = await this.prisma.organizations.findFirst({
-      where: { id: context.organization_id },
+    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — lo construye el
+    // RESOLVEDOR ÚNICO, no este archivo.
+    //
+    // Aquí vivía la única implementación del bloque, y por eso la emisión real
+    // salía sin él: no había nada compartido que consumir. Ahora ambos caminos
+    // llaman a `resolveInvoiceControl`, así que el set de pruebas y la producción
+    // declaran la misma autorización por construcción y no por coincidencia.
+    const control = resolveInvoiceControl(resolution, timezone, new Date(), {
+      resolution_id: resolution.id,
+      document_type: resolution.document_type,
     });
 
-    const issuer: DianIssuerData = {
+    // ALCANCE FISCAL: `fiscal_data` vive en `store_settings` para entidades con
+    // alcance de TIENDA y en `organization_settings` para las de ORGANIZACIÓN. Es
+    // el mismo criterio que aplica la emisión real en `dian-direct.provider.ts`, y
+    // leer solo el de organización deja sin identidad a los tenants por tienda:
+    // en producción HIDRO (cfg 12, store 97) tiene su `fiscal_data` en
+    // `store_settings` y `organization_settings.fiscal_data` en null.
+    const issuer_entity = config.accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: { id: config.accounting_entity_id },
+          select: {
+            name: true,
+            legal_name: true,
+            fiscal_scope: true,
+            // La dirección FISCAL, no una de despacho: vive en `addresses` con
+            // `type='billing'` por la decisión documentada en `schema.prisma`.
+            organization: {
+              include: {
+                organization_settings: true,
+                addresses: {
+                  where: { type: 'billing' },
+                  orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                  take: 1,
+                },
+              },
+            },
+            store: {
+              include: {
+                store_settings: true,
+                addresses: {
+                  where: { type: 'billing' },
+                  orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                  take: 1,
+                },
+              },
+            },
+          },
+        })
+      : null;
+
+    const is_store_scope = issuer_entity?.fiscal_scope === 'STORE';
+    const organization =
+      issuer_entity?.organization ??
+      (await this.prisma.organizations.findFirst({
+        where: { id: context.organization_id },
+      }));
+
+    const scoped_settings = (
+      is_store_scope
+        ? issuer_entity?.store?.store_settings?.settings
+        : issuer_entity?.organization?.organization_settings?.settings
+    ) as Record<string, unknown> | undefined;
+    // Respaldo cruzado: un tenant por tienda que solo guardó su identidad a nivel
+    // de organización (o al revés) no debe quedarse sin emisor por eso.
+    const org_settings =
+      scoped_settings ??
+      ((issuer_entity?.organization?.organization_settings?.settings ??
+        issuer_entity?.store?.store_settings?.settings) as
+        | Record<string, unknown>
+        | undefined);
+
+    const scoped_address = is_store_scope
+      ? issuer_entity?.store?.addresses?.[0]
+      : issuer_entity?.organization?.addresses?.[0];
+
+    // EL EMISOR SALE DE LA FUENTE ÚNICA DE LA VERDAD, NO DE LITERALES.
+    //
+    // Aquí vivían hardcodeados `address_line: 'Calle 1 # 1-1'`, `city_code:
+    // '11001'` (Bogotá), `tax_regime: '49'` y `tax_scheme: 'O-15'`. Con el NIT de
+    // Quickss (902056589), cuyo RUT registra Riohacha 44847 y las
+    // responsabilidades O-13 y O-47, cada documento del set declaraba tres cosas
+    // incoherentes con el RUT a la vez. La peor era `'49'`: NO responsable de IVA
+    // en documentos que cobran 19% de IVA, una contradicción dentro del mismo
+    // documento.
+    //
+    // `resolveIssuerFiscalIdentity` es el MISMO resolvedor que consume la emisión
+    // real, así que habilitación y producción no pueden volver a declarar cosas
+    // distintas sobre el mismo NIT — que es exactamente cómo se produjo un 'O-15'
+    // aquí y un 'O-13' allá.
+    const issuer: DianIssuerData = resolveIssuerFiscalIdentity({
       nit: config.nit,
-      nit_dv: config.nit_dv || '0',
-      legal_name: organization?.name || config.name,
-      address_line: 'Calle 1 # 1-1',
-      city_code: '11001',
-      city_name: 'Bogotá',
-      department_code: '11',
-      department_name: 'Bogotá D.C.',
-      country_code: 'CO',
-      email: 'test@vendix.com',
-      tax_regime: '49',
-      tax_scheme: 'ZZ',
-    };
+      config_name: config.name,
+      fiscal_data: (org_settings?.fiscal_data ?? null) as Record<
+        string,
+        unknown
+      > | null,
+      entity: issuer_entity,
+      organization,
+      address: scoped_address ?? null,
+      email: organization?.email,
+    });
 
     const customer: DianCustomerData = {
       document_type: '13',
@@ -568,14 +977,42 @@ export class DianTestService {
       }
     }
 
-    // 5. Update status to testing
-    await this.prisma.dian_configurations.update({
-      where: { id: config_id },
-      data: { enablement_status: 'testing' },
-    });
+    // 5. Update status to testing.
+    //
+    // Las vías de diagnóstico NO lo tocan: un documento suelto no es un intento de
+    // habilitación, y marcar `testing` por él dejaría la guía de habilitación
+    // afirmando que hay un set en curso cuando no lo hay.
+    //
+    // Y una config ya `enabled` TAMPOCO: ninguna rama de este método vuelve nunca
+    // a `enabled`, así que reenviar el set para probar las notas degradaría una
+    // habilitación que la DIAN ya concedió y que su portal solo devuelve a mano.
+    // Ver `canWriteEnablementStatus`.
+    const may_write_enablement = canWriteEnablementStatus(
+      config.enablement_status,
+    );
+    if (!diagnostic && may_write_enablement) {
+      await this.prisma.dian_configurations.update({
+        where: { id: config_id },
+        data: { enablement_status: 'testing' },
+      });
+    }
 
     // 6. Generate the documents
-    const files: { name: string; content: string }[] = [];
+    //
+    // `consecutive` viaja con cada archivo porque cada documento se envía en SU
+    // PROPIO ZIP y el ZIP se nombra con el consecutivo del documento que
+    // contiene. Antes se armaba un solo ZIP con los 50 y se nombraba con el
+    // consecutivo del PRIMERO — ver el comentario del bucle de envío.
+    // `kind` viaja con el archivo porque la transmisión va en DOS FASES y tiene
+    // que separar facturas de notas. Derivarlo del índice paralelo de
+    // `documents[]` funcionaría hoy y se rompería en silencio el día que alguien
+    // añada un push a uno de los dos arreglos y no al otro.
+    const files: {
+      name: string;
+      content: string;
+      consecutive: number;
+      kind: DianDocumentKind;
+    }[] = [];
     const invoice_cufes: { number: string; cufe: string; date: string }[] = [];
     // Evidence persisted alongside the batch. Without the document key there is
     // no way to ask DIAN about an individual document later, which is exactly
@@ -689,7 +1126,12 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: invoice_file, content: xml });
+      files.push({
+        name: invoice_file,
+        content: xml,
+        consecutive: next_number + i,
+        kind: 'invoice',
+      });
       invoice_cufes.push({ number: invoice_number, cufe, date: today });
       documents.push({
         number: invoice_number,
@@ -699,6 +1141,38 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
+    }
+
+    // 6a-bis. Cuando el lote NO emite facturas propias —el humo de una nota— la
+    // referencia sale de un lote ANTERIOR, de entre las facturas que la DIAN
+    // ACEPTÓ y por tanto tiene registradas.
+    //
+    // Es lo que hace que el humo de una nota sea una medición limpia: si la DIAN
+    // vuelve a objetar, la objeción es del documento y no de una factura que aún
+    // no existe de su lado. Sin esto el diagnóstico arrastraría CBG04a/DBG04a y
+    // volvería a mezclar las dos causas — el ruido que costó un mes separar.
+    if (
+      invoice_cufes.length === 0 &&
+      composition.debit_notes + composition.credit_notes > 0
+    ) {
+      const registered = resolveRegisteredInvoiceReferences(previous_result);
+      if (registered.length === 0) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_TEST_SET_003,
+          'No hay ninguna factura aceptada por la DIAN a la que la nota pueda referenciar. ' +
+            'Emite primero un set (o un humo de factura) y espera su veredicto: una nota ' +
+            'contra una factura no registrada se rechaza con CBG04a/DBG04a y gasta el consecutivo.',
+          { dian_configuration_id: config_id, resolution_id },
+        );
+      }
+      invoice_cufes.push(...registered);
+      this.logger.log(
+        `[DIAN test-set] la nota referenciará una factura ya aceptada: ` +
+          `${registered[0].number} (${registered.length} disponibles).`,
+      );
     }
 
     // 6b. Generate the debit notes, each referencing an invoice of this same set
@@ -719,6 +1193,24 @@ export class DianTestService {
           note_number,
         );
 
+      // El CUDE de una nota NO usa la clave técnica: el anexo §11.4 lo define
+      // como
+      //
+      //   SHA-384(NumFac + FecFac + HorFac + ValFac + CodImp1 + ValImp1
+      //     + CodImp2 + ValImp2 + CodImp3 + ValImp3 + ValTot + NitOFE + NumAdq
+      //     + Software-PIN + TipoAmbiente)
+      //
+      // donde `Software-PIN` es «Pin del software registrado en el catálogo del
+      // participante». La clave técnica solo entra en el CUFE de la factura, y
+      // ni una ni otro viajan en el XML — de ahí que el error sea invisible en
+      // el documento y solo aparezca cuando la DIAN recalcula el hash.
+      //
+      // La vía de emisión real (`dian-direct.provider.ts`) ya pasaba el PIN; el
+      // generador del set pasaba `resolution.technical_key`, así que los 20
+      // documentos de nota del set —10 NC + 10 ND de 50— llevaban un CUDE que
+      // no reproduce el que la DIAN calcula. `CufeCalculator.generate` nombra el
+      // parámetro `technical_key` porque es la misma posición en la cadena; lo
+      // que cambia es el valor.
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
         issue_date: today,
@@ -728,7 +1220,7 @@ export class DianTestService {
         total_amount: total,
         issuer_nit: config.nit,
         customer_nit: '222222222222',
-        technical_key: resolution.technical_key || '',
+        technical_key: software_pin,
         environment: environment === 'test' ? '2' : '1',
       });
 
@@ -792,7 +1284,12 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: debit_file, content: xml });
+      files.push({
+        name: debit_file,
+        content: xml,
+        consecutive: next_number + debit_note_offset + i,
+        kind: 'debit_note',
+      });
       documents.push({
         number: note_number,
         cufe: cude,
@@ -801,6 +1298,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 6c. Generate the credit notes, each referencing an invoice of this same set
@@ -823,6 +1323,24 @@ export class DianTestService {
           note_number,
         );
 
+      // El CUDE de una nota NO usa la clave técnica: el anexo §11.4 lo define
+      // como
+      //
+      //   SHA-384(NumFac + FecFac + HorFac + ValFac + CodImp1 + ValImp1
+      //     + CodImp2 + ValImp2 + CodImp3 + ValImp3 + ValTot + NitOFE + NumAdq
+      //     + Software-PIN + TipoAmbiente)
+      //
+      // donde `Software-PIN` es «Pin del software registrado en el catálogo del
+      // participante». La clave técnica solo entra en el CUFE de la factura, y
+      // ni una ni otro viajan en el XML — de ahí que el error sea invisible en
+      // el documento y solo aparezca cuando la DIAN recalcula el hash.
+      //
+      // La vía de emisión real (`dian-direct.provider.ts`) ya pasaba el PIN; el
+      // generador del set pasaba `resolution.technical_key`, así que los 20
+      // documentos de nota del set —10 NC + 10 ND de 50— llevaban un CUDE que
+      // no reproduce el que la DIAN calcula. `CufeCalculator.generate` nombra el
+      // parámetro `technical_key` porque es la misma posición en la cadena; lo
+      // que cambia es el valor.
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
         issue_date: today,
@@ -832,7 +1350,7 @@ export class DianTestService {
         total_amount: total,
         issuer_nit: config.nit,
         customer_nit: '222222222222',
-        technical_key: resolution.technical_key || '',
+        technical_key: software_pin,
         environment: environment === 'test' ? '2' : '1',
       });
 
@@ -896,7 +1414,12 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: credit_file, content: xml });
+      files.push({
+        name: credit_file,
+        content: xml,
+        consecutive: next_number + credit_note_offset + i,
+        kind: 'credit_note',
+      });
       documents.push({
         number: note_number,
         cufe: cude,
@@ -905,40 +1428,374 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
-    // 7. Build multi-file ZIP
-    const zip_base64 = this.buildMultiFileZip(files);
-    const zip_file_name = buildDianZipFileName({
-      nit: config.nit,
-      consecutive: next_number,
-      software_code,
-      year: today,
-    });
+    // 7-8. Enviar UN DOCUMENTO POR ZIP, un `SendTestSetAsync` por documento.
+    //
+    // POR QUÉ — el defecto que cierra:
+    //
+    // Antes se armaba UN ZIP con los 50 documentos y se nombraba con el
+    // consecutivo del PRIMERO. `SendTestSetAsync` acepta un solo documento por
+    // ZIP a pesar del nombre, así que la DIAN devolvía un ZipKey y descartaba el
+    // paquete sin ingerirlo. El portal de habilitación lo dejó probado:
+    //
+    //   Requeridos 50 · Recibidos 0 · Aceptados 0 · **Rechazados 0**
+    //
+    // Cero rechazos es la firma: los documentos nunca llegaron a la validación
+    // por documento, así que no había nada que rechazar. HIDRO quemó 150
+    // consecutivos autorizados en 3 lotes sin un solo documento recibido.
+    //
+    // Un ZipKey prueba transporte, WS-Security y firma. NO prueba ingesta. Y
+    // `GetStatusZip` responde «Batch en proceso de validación» también para un
+    // ZipKey que la DIAN nunca encoló, así que tampoco es prueba de vida.
+    //
+    // Secuencial a propósito: son llamadas SOAP a la DIAN y el orden es la
+    // evidencia de qué consecutivo se gastó primero.
+    //
+    // VÍA DE VALIDACIÓN — `options.validate_only` cambia la operación a
+    // `SendBillSync`, que es SINCRÓNICA: la DIAN contesta en la misma llamada con
+    // `IsValid` y la lista completa de reglas violadas (`ErrorMessage`), en vez de
+    // un ZipKey que hay que sondear y que puede no llevar nunca a un veredicto.
+    //
+    // Por qué existe: un ZipKey no distingue «tu documento está bien y está en
+    // cola» de «tu documento nunca se clasificó». Durante un mes eso dejó el
+    // diagnóstico en manos del contador del portal, que solo dice sí o no y vive
+    // fuera del sistema. `SendBillSync` dice POR QUÉ, con código de regla.
+    //
+    // Y no lleva `testSetId`: no puede rechazar el set ni consumir un intento de
+    // habilitación, que es lo único verdaderamente irrecuperable aquí. El
+    // documento es byte a byte el mismo que envía el set de pruebas — misma
+    // generación, mismo CUFE, misma firma, mismo nombre de archivo —, porque un
+    // diagnóstico sobre un documento distinto no diagnostica nada.
+    // Declarado aquí y no después del envío porque la espera entre fase 1 y fase
+    // 2 sondea `GetStatusZip` y sus intentos son parte del historial del lote: si
+    // el operador ve «diferida tras 20 consultas», tiene que poder leer las 20.
+    const poll_history: TestSetPollAttempt[] = [];
 
-    // 8. Submit to DIAN. SendTestSetAsync is ASYNCHRONOUS: DIAN only returns a
-    //    ZipKey acknowledgement here; the real validation verdict is obtained
-    //    afterwards by polling GetStatusZip(ZipKey).
-    const submit = await this.soap_client.sendTestSetAsync(
-      zip_base64,
-      zip_file_name,
-      config.test_set_id,
-      environment,
-      ws_credentials,
-    );
+    const submissions: {
+      file_name: string;
+      zip_file_name: string;
+      zip_key: string | null;
+      success: boolean;
+      status_code?: string;
+      status_message?: string;
+      raw_response?: string;
+      error?: string;
+      /** Reglas de validación que la DIAN reportó para ESTE documento. */
+      error_messages?: string[];
+      /**
+       * Las mismas reglas DECODIFICADAS del `ApplicationResponse` que viaja en
+       * base64 dentro de `<b:XmlBase64Bytes>`. No es redundante con
+       * `error_messages`: la DIAN puede devolver `<b:ErrorMessage i:nil="true"/>`
+       * y poner el motivo únicamente ahí dentro, que es el caso que dejaba un
+       * rechazo sin explicación.
+       */
+      rejection_rules?: TestSetZipVerdict['rejection_rules'];
+      /**
+       * Fase del envío: 1 = facturas, 2 = notas. Persistir la fase es lo que
+       * permite leer después «las facturas salieron y las notas no» sin
+       * deducirlo del nombre del archivo.
+       */
+      phase: 1 | 2;
+    }[] = [];
 
-    const zip_key = submit.zip_key ?? null;
+    const transmit = async (
+      batch: typeof files,
+      phase: 1 | 2,
+    ): Promise<void> => {
+      for (const file of batch) {
+        const file_zip_name = buildDianZipFileName({
+          nit: config.nit,
+          consecutive: file.consecutive,
+          software_code,
+          year: today,
+        });
 
-    // 9. NO se sondea aquí. `SendTestSetAsync` es asíncrono: la DIAN devuelve un
-    //    ZipKey y tarda MINUTOS en classificar el lote, así que las 6 consultas
-    //    en línea que había antes no podían alcanzar un veredicto — solo sumaban
-    //    33 s a un request que ya se pasaba del `proxy_read_timeout` de nginx y
-    //    volvía 504, dejando la UI con el estado previo al envío.
+        try {
+          const response = options.validate_only
+            ? await this.soap_client.sendBillSync(
+                this.buildMultiFileZip([file]),
+                file_zip_name,
+                environment,
+                ws_credentials,
+              )
+            : await this.soap_client.sendTestSetAsync(
+                this.buildMultiFileZip([file]),
+                file_zip_name,
+                config.test_set_id,
+                environment,
+                ws_credentials,
+              );
+          // UN RECHAZO DE ENVÍO, no un acuse. `SendTestSetAsync` devuelve
+          // `success: false` SIEMPRE —su respuesta es un ZipKey, no un
+          // veredicto—, así que condicionar por `!success` a secas escribiría 50
+          // filas de «rechazo» en cada envío sano. La ausencia de ZipKey es lo
+          // que separa las dos cosas: la vía sincrónica (`SendBillSync`), el
+          // SOAP Fault y el error HTTP no traen ninguno.
+          const is_submit_rejection = !response.success && !response.zip_key;
+          const decoded = this.decodeRejection(
+            is_submit_rejection ? response.raw_response : undefined,
+          );
+
+          submissions.push({
+            file_name: file.name,
+            zip_file_name: file_zip_name,
+            zip_key: response.zip_key ?? null,
+            success: response.success,
+            status_code: response.status_code,
+            status_message: response.status_message,
+            raw_response: response.raw_response?.slice(0, 4000),
+            // Las reglas violadas son el producto de la vía de validación: sin
+            // persistirlas el envío sincrónico no valdría más que el asíncrono.
+            ...(response.error_messages?.length
+              ? { error_messages: response.error_messages }
+              : {}),
+            // Las reglas DECODIFICADAS del `ApplicationResponse`. La DIAN puede
+            // devolver `ErrorMessage` vacío y poner el motivo solo ahí dentro.
+            ...(decoded.rejection_rules?.length
+              ? { rejection_rules: decoded.rejection_rules }
+              : {}),
+            phase,
+          });
+
+          if (is_submit_rejection) {
+            const doc = documents.find((d) => d.file_name === file.name);
+            const rules = [
+              ...(decoded.rejection_rules ?? []).map((r) =>
+                r.code && r.code !== 'DIAN_VALIDATION'
+                  ? `${r.code}: ${r.message}`
+                  : r.message,
+              ),
+              ...(response.error_messages ?? []),
+            ];
+            await this.createAuditLog(config.id, {
+              action: options.validate_only
+                ? 'validate_document_rejected'
+                : 'test_set_document_rejected',
+              status: 'error',
+              document_type: doc?.kind ?? file.kind,
+              document_number: doc?.number ?? null,
+              cufe: doc?.cufe ?? decoded.document_key ?? null,
+              // El XML FIRMADO que se transmitió. Es la única copia fuera del
+              // JSON del lote, y el JSON se reescribe con el envío siguiente.
+              request_xml: file.content,
+              response_xml: decoded.raw_response ?? response.raw_response ?? null,
+              error_message: `${response.status_code}: ${
+                rules.length ? rules.join(' | ') : response.status_message
+              }`,
+            });
+          }
+        } catch (error) {
+          // No se aborta: los documentos ya enviados gastaron consecutivos y su
+          // ZipKey es la única forma de preguntar por ellos después. Perder ese
+          // rastro por un fallo en el documento 37 es peor que registrarlo.
+          submissions.push({
+            file_name: file.name,
+            zip_file_name: file_zip_name,
+            zip_key: null,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            phase,
+          });
+        }
+      }
+    };
+
+    // ENVÍO EN DOS FASES — las notas salen DESPUÉS de que la DIAN acepte las
+    // facturas que referencian.
+    //
+    // POR QUÉ — el defecto que cierra:
+    //
+    // El set enviaba los 50 documentos de corrido, así que una nota llegaba a
+    // validación en el mismo minuto que la factura a la que apunta. La DIAN la
+    // rechazaba porque, cuando validó la nota, esa factura todavía no estaba en
+    // sus registros:
+    //
+    //   CBG04a  «documento referenciado no existe»  (10 notas crédito)
+    //   DBG04a  «documento referenciado no existe»  (10 notas débito)
+    //
+    // No es un defecto del builder de la nota: el `BillingReference` lleva el
+    // número, el CUFE y la fecha correctos. Es un defecto de ORDEN, y solo del
+    // generador del set — la emisión real ya exige que la factura referenciada
+    // esté `accepted` antes de permitir su nota (`invoice-flow.service.ts`).
+    // Este generador era la única excepción a su propia regla.
+    //
+    // La numeración se reserva UNA SOLA VEZ, arriba, para las dos fases juntas.
+    // Partirla abriría una ventana entre fase 1 y fase 2 donde otro proceso
+    // podría tomar los consecutivos que las notas ya tienen asignados en su XML
+    // firmado — y un XML firmado no se puede renumerar.
+    const invoice_files = files.filter((f) => f.kind === 'invoice');
+    const note_files = files.filter((f) => f.kind !== 'invoice');
+
+    // La vía sincrónica (`validate_only`) NO se parte: `SendBillSync` contesta en
+    // la misma llamada y no devuelve ZipKey, así que no hay nada que sondear
+    // entre fases. La vía de humo tampoco, porque su composición no lleva notas.
+    const two_phase = note_files.length > 0 && !options.validate_only;
+
+    /**
+     * Resultado de la fase de notas. `null` cuando no hubo dos fases.
+     * Se persiste para que un operador pueda leer qué pasó sin reconstruirlo.
+     */
+    let note_phase: {
+      sent: boolean;
+      reason: string;
+      invoice_zip_keys: string[];
+      polls: number;
+      /**
+       * Notas generadas y firmadas que NO se transmitieron. Se guardan enteras
+       * —no solo sus números— porque su consecutivo ya está reservado y dentro
+       * de un XML firmado: regenerarlas mañana daría otro CUDE (la fecha y hora
+       * de emisión entran en el hash) y el consecutivo quedaría inservible.
+       * Guardarlas es lo que hace que un tope de espera agotado no pierda 20
+       * números autorizados irrecuperables.
+       */
+      deferred?: { name: string; consecutive: number; content: string }[];
+    } | null = null;
+
+    /**
+     * Veredictos que la DIAN dio sobre las facturas durante la espera entre fases.
+     *
+     * Se guardan aquí para persistirlos con el lote. La primera corrida real los
+     * perdió —vivían solo dentro del bucle de espera—, así que el registro quedó
+     * sin `zip_verdicts` y la razón del rechazo hubo que recuperarla con un
+     * re-sondeo. La razón era que la DIAN CIERRA el set al aprobarlo: «Set de
+     * prueba … se encuentra Aceptado». Ese dato decide si reintentar tiene
+     * sentido, y no debería costar una consulta extra averiguarlo.
+     */
+    let phase_one_verdicts: Record<string, TestSetZipVerdict> = {};
+
+    if (!two_phase) {
+      await transmit(files, 1);
+    } else {
+      await transmit(invoice_files, 1);
+
+      const invoice_zip_keys = submissions
+        .map((s) => s.zip_key)
+        .filter((k): k is string => !!k);
+
+      // CHECKPOINT ANTES DE ESPERAR. El worker corre con `attempts: 1`, así que
+      // si muere durante la espera no hay reintento: sin este guardado se
+      // perderían los ZipKeys de las facturas ya enviadas, que son la única
+      // forma de volver a preguntar por ellas. Cuesta un UPDATE.
+      await this.persistNotePhaseCheckpoint(config_id, {
+        invoice_submissions: submissions,
+        invoice_zip_keys,
+        deferred_notes: note_files.map((f) => ({
+          name: f.name,
+          consecutive: f.consecutive,
+        })),
+        resolution_id,
+        number_from: next_number,
+        number_to: next_number + TEST_SET_SIZE - 1,
+        // Los 50 documentos, no solo los transmitidos: `documents` lleva la clave
+        // de cada uno, y es lo que permite preguntarle a la DIAN por un documento
+        // concreto después. Para las notas diferidas es la única copia de su CUDE.
+        documents,
+        timezone,
+        issue_date: today,
+        issue_time: time_now,
+        composition,
+      });
+
+      // ZipKey → documento de ESTE lote, con lo que ya está en memoria y con la
+      // misma regla de cruce que aplica sobre lo persistido: `submissions` trae
+      // `file_name` + `zip_key`, `documents` trae `file_name` + número + CUFE.
+      const documents_by_zip_key = indexDocumentsByZipKey({
+        submissions,
+        documents,
+      });
+
+      const wait = await this.waitForInvoicesRegistered(
+        invoice_zip_keys,
+        environment,
+        ws_credentials,
+        poll_history,
+        {
+          dian_configuration_id: config.id,
+          documents_by_zip_key,
+        },
+      );
+
+      phase_one_verdicts = wait.verdicts;
+
+      if (wait.ready) {
+        await transmit(note_files, 2);
+        note_phase = {
+          sent: true,
+          reason: wait.reason,
+          invoice_zip_keys,
+          polls: wait.polls,
+        };
+      } else {
+        // NO se transmiten las notas. Enviarlas contra facturas que la DIAN aún
+        // no registró es gastar 20 consecutivos autorizados para cosechar los
+        // mismos CBG04a/DBG04a que este cambio existe para eliminar.
+        note_phase = {
+          sent: false,
+          reason: wait.reason,
+          invoice_zip_keys,
+          polls: wait.polls,
+          deferred: note_files.map((f) => ({
+            name: f.name,
+            consecutive: f.consecutive,
+            content: f.content,
+          })),
+        };
+        this.logger.warn(
+          `[DIAN test-set] fase 2 diferida: ${wait.reason}. ` +
+            `${note_files.length} notas quedan generadas y sin transmitir ` +
+            `(consecutivos ${note_files[0]?.consecutive}-${note_files[note_files.length - 1]?.consecutive}).`,
+        );
+      }
+    }
+
+    // El primer envío hace de representante para la forma persistida que ya leen
+    // la UI, `analyzeTestSetWait` y el cron de repoll — todos asumen UN
+    // `zip_key`. Con la vía de humo (1 documento) el representante ES el único
+    // envío, así que la fidelidad es exacta. Para el set completo esto es
+    // PARCIAL y queda pendiente: sondear los 50 ZipKeys es trabajo aparte.
+    const first = submissions[0];
+    const submit: DianSendBillResponse = {
+      success: submissions.some((s) => s.success),
+      zip_key: first?.zip_key ?? undefined,
+      status_code: first?.status_code,
+      status_message: first?.status_message,
+      raw_response: first?.raw_response,
+      // Dos clases de error se agregan aquí y ninguna puede tapar a la otra: el
+      // fallo de transporte (`error`) y las reglas de validación que la DIAN
+      // reportó por documento (`error_messages`). Sin la segunda, la vía de
+      // validación devolvería `IsValid: false` sin decir qué falló.
+      error_messages: [
+        ...submissions
+          .filter((s) => s.error)
+          .map((s) => `${s.file_name}: ${s.error}`),
+        ...submissions.flatMap((s) =>
+          (s.error_messages ?? []).map((m) => `${s.file_name}: ${m}`),
+        ),
+      ],
+    } as DianSendBillResponse;
+
+    const zip_file_name = first?.zip_file_name ?? '';
+    const zip_key = first?.zip_key ?? null;
+
+    // 9. NO se sondea el veredicto FINAL aquí. `SendTestSetAsync` es asíncrono: la
+    //    DIAN devuelve un ZipKey y tarda MINUTOS en clasificar el lote, así que las
+    //    6 consultas en línea que había antes no podían alcanzar un veredicto —
+    //    solo sumaban 33 s a un request que ya se pasaba del `proxy_read_timeout`
+    //    de nginx y volvía 504, dejando la UI con el estado previo al envío.
     //
     //    El veredicto lo obtienen el cron de repoll (cada 10 min, con backoff) y
     //    el endpoint de consulta de estado, ambos partiendo del `zip_key`
-    //    persistido abajo. `poll_history` nace vacío y se llena en esas rutas.
-    const poll_history: TestSetPollAttempt[] = [];
+    //    persistido abajo.
+    //
+    //    Ese razonamiento sigue en pie y NO lo contradice la espera de la fase 1:
+    //    esa espera no busca el veredicto del set, busca una precondición del
+    //    documento siguiente, y ocurre dentro del worker de BullMQ —donde no hay
+    //    timeout de nginx que agotar— no dentro de la petición HTTP. `poll_history`
+    //    llega aquí con los intentos de esa espera si hubo dos fases, y vacío si no.
     const verdict: DianSendBillResponse = submit;
 
     const success = verdict.success;
@@ -946,13 +1803,59 @@ export class DianTestService {
     // state (no numeric StatusCode / fault / error list). A terminal non-success
     // (e.g. DIAN StatusCode 2 "set Rechazado") is a REJECTION, not pending.
     const terminal = zip_key ? this.isTerminalZipStatus(verdict) : true;
-    const still_processing = !!zip_key && !success && !terminal;
-    const rejected = !success && !still_processing;
+    // LA ESPERA DE LA FASE 1 YA SABE LA RESPUESTA — y sin esto se descartaba.
+    //
+    // `verdict` viene de las respuestas de ENVÍO (`submit`), que solo dicen «la
+    // DIAN acusó recibo». Cuando hubo dos fases, la espera además CONSULTÓ
+    // `GetStatusZip` y tiene veredictos terminales. La primera corrida real
+    // escribió `pending: true` sobre un lote cuyas 30 facturas la DIAN ya había
+    // rechazado, y hubo que re-sondear para corregirlo: el dato estaba en la mano
+    // y se tiraba.
+    const phase_one = Object.keys(phase_one_verdicts).length
+      ? aggregateZipVerdicts(
+          Object.keys(phase_one_verdicts),
+          phase_one_verdicts,
+        )
+      : null;
+    const still_processing = phase_one
+      ? phase_one.pending
+      : !!zip_key && !success && !terminal;
+    // `rejected` significa «la DIAN rechazó el SET de habilitación», y eso es lo
+    // que leen la guía y el gate de emisión. Una validación sincrónica que sale
+    // inválida NO es eso: no se envió al set, no consumió un intento y no cambia
+    // el estado de la habilitación. Marcarla `rejected` haría que un diagnóstico
+    // exitoso —encontrar los defectos— se leyera como un fracaso de habilitación.
+    const rejected =
+      options.validate_only === true
+        ? false
+        : phase_one
+          ? phase_one.rejected
+          : !success && !still_processing;
 
     // 10. Persist result + raw evidence (DIAN's exact status XML for diagnosis).
     const result_data = {
       executed_at: new Date().toISOString(),
+      // Marca el lote como diagnóstico, no como intento de habilitación. Sin esto
+      // un envío de 1 documento se lee igual que un set completo fallido.
+      smoke: options.smoke === true,
+      // Vía de validación sincrónica: `SendBillSync`, sin `testSetId`. `is_valid`
+      // es el veredicto que la DIAN dio en la misma llamada, y es lo único de este
+      // registro que responde «¿el documento está bien?» sin ambigüedad.
+      validate_only: options.validate_only === true,
+      ...(options.validate_only ? { is_valid: success } : {}),
       total_documents: files.length,
+      // GENERADOS ≠ TRANSMITIDOS desde que el envío va en dos fases: si la fase 2
+      // se difiere, se generan 50 y salen 30. `total_documents` se conserva con su
+      // significado de siempre —lo generado— para no romper a quien ya lo lee, y
+      // los dos números van explícitos al lado. Es el mismo cuidado que este
+      // archivo ya se aplicó cuando `total_documents` devolvía 50 en una vía de
+      // humo de 1 documento: un número que el cliente no puede derivar es un
+      // número que el cliente va a malinterpretar.
+      // Nombres en plural-primero a propósito: la respuesta de este método ya
+      // expone un `documents_generated` BOOLEANO («llegamos a generar»), y dos
+      // campos con el mismo nombre y distinto tipo es una trampa garantizada.
+      generated_documents: files.length,
+      transmitted_documents: submissions.length,
       // Derivados de `composition`, no literales. Estaban escritos a mano como
       // 30/10/10, así que en cualquier modo con otra composición el registro
       // mentía sobre lo que se había enviado — justo el dato con el que se
@@ -962,6 +1865,11 @@ export class DianTestService {
       credit_notes: composition.credit_notes,
       zip_key,
       zip_file_name,
+      // Un ZipKey por documento: es lo que hay que sondear para el set completo.
+      // `zip_key` de arriba es solo el primero, para la forma que ya leen la UI,
+      // la espera y el cron.
+      submissions,
+      zip_keys: submissions.map((s) => s.zip_key).filter(Boolean),
       resolution_id,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
@@ -984,6 +1892,19 @@ export class DianTestService {
         raw_response: verdict.raw_response?.slice(0, 12000),
       },
       poll_history,
+      // Rastro del envío en dos fases. Cuando `sent` es falso las notas están
+      // generadas, firmadas y sin transmitir, con su consecutivo ya reservado:
+      // `deferred` las lleva enteras para que reenviarlas no exija regenerarlas
+      // (regenerar cambia la fecha de emisión y con ella el CUDE).
+      ...(note_phase ? { note_phase } : {}),
+      // Veredictos que la DIAN dio sobre las facturas DURANTE la espera. Se
+      // persisten en la misma clave que usan el cron de repoll y
+      // `checkTestSetStatus`, así que un lote diferido llega con su razón ya
+      // escrita en vez de exigir una consulta más para averiguarla.
+      ...(Object.keys(phase_one_verdicts).length
+        ? { zip_verdicts: phase_one_verdicts }
+        : {}),
+      ...(phase_one ? { zip_counts: phase_one.counts } : {}),
       pending: still_processing,
       rejected,
       tracking_id: zip_key ?? verdict.status_code,
@@ -1000,14 +1921,43 @@ export class DianTestService {
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
       data: {
-        last_test_result: result_data,
-        enablement_status: success ? 'test_set_passed' : 'testing',
-        enablement_evidence: success ? result_data : undefined,
+        // Una validación NO sobrescribe el registro del lote: `last_test_result`
+        // es la única copia del ZipKey y de las claves de documento del envío en
+        // vuelo, y perderlos deja ese lote imposible de consultar — exactamente el
+        // agujero que ya nos dejó un lote solo en `dian_audit_logs`. Se anida bajo
+        // `validation`, así que el diagnóstico convive con el lote en vez de
+        // reemplazarlo.
+        last_test_result: options.validate_only
+          ? { ...previous_result, validation: result_data }
+          : result_data,
+        // Un diagnóstico NO mueve el estado de habilitación. El paso 5 ya evitaba
+        // marcar `testing` ANTES de enviar, pero esta escritura de DESPUÉS seguía
+        // haciéndolo: una vía de humo sobre una config `not_started` la dejaba en
+        // `testing`, y un éxito suelto habría escrito `test_set_passed` —
+        // habilitando con un documento donde la DIAN exige 50.
+        //
+        // Una config ya `enabled` conserva su estado y solo SUMA evidencia: la
+        // habilitación la concedió la DIAN y este método no tiene rama que la
+        // devuelva. Ver `canWriteEnablementStatus`.
+        ...(diagnostic
+          ? {}
+          : may_write_enablement
+            ? {
+                enablement_status: success
+                  ? ('test_set_passed' as const)
+                  : ('testing' as const),
+                enablement_evidence: success ? result_data : undefined,
+              }
+            : {
+                enablement_evidence: success ? result_data : undefined,
+              }),
       },
     });
 
     await this.createAuditLog(config.id, {
-      action: 'run_test_set',
+      // Acción propia: en la historia de auditoría una validación sincrónica no
+      // debe leerse como un intento de habilitación.
+      action: options.validate_only ? 'validate_document' : 'run_test_set',
       // Tri-state: a batch DIAN has not judged yet is `pending`, not `error`.
       // Labelling it `error` made a perfectly healthy submission look broken.
       status: success ? 'success' : still_processing ? 'pending' : 'error',
@@ -1029,31 +1979,74 @@ export class DianTestService {
     return {
       success,
       documents_generated: true,
-      message: success
-        ? 'Set de pruebas procesado y validado por la DIAN.'
-        : is_ws_security_error
-          ? '50 documentos generados y firmados. La DIAN rechazó la firma WS-Security del envelope SOAP.'
+      message: options.validate_only
+        ? success
+          ? 'La DIAN validó el documento: IsValid = true, sin reglas violadas. El camino de generación y firma es conforme.'
+          : `La DIAN rechazó el documento con ${verdict.error_messages?.length ?? 0} regla(s): ${verdict.error_messages?.join(' | ') || verdict.status_message}`
+        : success
+          ? 'Set de pruebas procesado y validado por la DIAN.'
+          : is_ws_security_error
+          ? `${files.length} documento(s) generado(s) y firmado(s). La DIAN rechazó la firma WS-Security del envelope SOAP.`
           : verdict.error_messages?.length
             ? `La DIAN reportó errores de validación: ${verdict.error_messages.join(' | ')}`
             : still_processing
               ? `Set recibido por la DIAN (ZipKey ${zip_key}); aún en proceso tras ${poll_history.length} consultas. Consulta GET :id/test-set-status en unos minutos.`
               : `Set de pruebas RECHAZADO por la DIAN: ${verdict.status_message}`,
       tracking_id: result_data.tracking_id,
-      total_documents: 50,
-      invoices_count: 30,
-      debit_notes_count: 10,
-      credit_notes_count: 10,
+      // Derivados de lo que REALMENTE se envió. Estaban escritos a mano como
+      // 50/30/10/10, así que la vía de humo —1 factura, 1 consecutivo— devolvía
+      // «50 documentos» y el número contradecía a `number_from`/`number_to`, que
+      // sí eran correctos. Lo persistido (`result_data.total_documents`) siempre
+      // usó `files.length`: la mentira vivía solo en la respuesta.
+      total_documents: files.length,
+      // Con dos fases, generado y transmitido pueden diferir: si la fase 2 se
+      // difiere se generan 50 y salen 30. Se dicen los dos en vez de dejar que se
+      // deduzcan. OJO: `documents_generated` de arriba es un BOOLEANO con otro
+      // significado («llegamos a generar»), y no es lo mismo que estos recuentos.
+      generated_documents: files.length,
+      transmitted_documents: submissions.length,
+      // El rastro de la fase de notas, en su VISTA: los números y la razón, no los
+      // XML firmados que lleva el registro persistido. Va en esta respuesta porque
+      // es la que el asistente lee al terminar el job, y quien acaba de enviar el
+      // set es exactamente quien necesita saber que 20 notas quedaron retenidas.
+      note_phase: buildNotePhaseView(note_phase),
+      invoices_count: composition.invoices,
+      debit_notes_count: composition.debit_notes,
+      credit_notes_count: composition.credit_notes,
       environment,
       dian_status: verdict.status_code,
       error_messages: verdict.error_messages ?? [],
       zip_key,
       pending: still_processing,
       rejected,
+      // ESTE SITIO NO USA `resolveTestSetWait`, Y ES A PROPÓSITO.
+      //
+      // Es la respuesta de «acabo de enviar esto»: el `wait` describe el lote que
+      // se acaba de transmitir, no la habilitación. Anteponer la prueba durable
+      // acá haría que un humo o una validación sincrónica sobre una configuración
+      // ya `enabled` contestara con el veredicto del set aprobado meses atrás, en
+      // lugar del documento que el operador acaba de mandar.
+      //
+      // En una corrida real de habilitación da lo mismo —la configuración no está
+      // cerrada, así que `resolveTestSetProof` caería igual a este registro—, pero
+      // en las vías de diagnóstico no, y son justo las que se usan para depurar.
       wait: analyzeTestSetWait(result_data),
       executed_at: result_data.executed_at,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
-      enablement_status: success ? 'test_set_passed' : 'testing',
+      // Las vías de diagnóstico NO escriben `enablement_status`, así que tampoco
+      // pueden afirmarlo: devuelven el que la config tiene de verdad. Igual una
+      // config ya `enabled`, que este método no degrada.
+      enablement_status:
+        diagnostic || !may_write_enablement
+          ? config.enablement_status
+          : success
+            ? 'test_set_passed'
+            : 'testing',
+      // Se devuelven para que la UI pueda distinguir un veredicto de validación de
+      // un veredicto de habilitación sin inferirlo de la ausencia de `zip_key`.
+      validate_only: options.validate_only === true,
+      ...(options.validate_only ? { is_valid: success } : {}),
       response_time_ms: Date.now() - started_at,
     };
   }
@@ -1070,6 +2063,38 @@ export class DianTestService {
     const environment = config.environment as 'test' | 'production';
 
     const previous = (config.last_test_result ?? {}) as Record<string, any>;
+
+    // Un lote descartado NO se vuelve a consultar.
+    //
+    // Este era el bug: al descartar, `abandonTestSet` dejaba `pending: false`, y
+    // el siguiente sondeo — el del wizard, cada 15 s — llamaba aquí, la DIAN
+    // respondía «Batch en proceso de validación» y la línea de abajo reescribía
+    // `pending: true`. El descarte se deshacía solo, y como las guardas de
+    // reenvío miran `pending`, el tenant quedaba encerrado: la UI le ofrecía
+    // ejecutar un set nuevo y el backend le contestaba DIAN_TEST_SET_002.
+    //
+    // Además de negarse a sondear, normaliza la fila: así una configuración ya
+    // corrompida por el defecto anterior se cura en el primer sondeo, sin
+    // necesidad de tocar datos de producción a mano.
+    if (previous.abandoned === true) {
+      const healed: Record<string, any> = { ...previous, pending: false };
+      delete healed.zip_key;
+      delete healed.tracking_id;
+
+      if (previous.pending === true || previous.zip_key) {
+        await this.prisma.dian_configurations.update({
+          where: { id: config_id },
+          data: { last_test_result: healed },
+        });
+      }
+
+      return this.testSetStatusFromStoredResult(
+        config,
+        healed,
+        'El lote anterior está descartado. Puedes ejecutar un set de pruebas nuevo.',
+      );
+    }
+
     const zip_key: string | null = previous.zip_key ?? null;
 
     if (!zip_key) {
@@ -1079,19 +2104,75 @@ export class DianTestService {
       );
     }
 
+    // Un envío de 50 documentos sale como 50 ZIP independientes, cada uno con su
+    // propio ZipKey; `zip_key` es solo el PRIMERO. Consultar únicamente ese
+    // dejaba los otros 49 veredictos inalcanzables por construcción: la DIAN
+    // podía haber rechazado el documento 37 y la UI seguía informando «en
+    // proceso» porque el documento 1 seguía en cola. `zip_keys` los guarda todos
+    // desde el envío (ver el armado de `last_test_result`), así que la
+    // información estaba ahí: nadie la leía.
+    const zip_keys: string[] = (
+      Array.isArray(previous.zip_keys) ? previous.zip_keys : []
+    ).filter((k: unknown): k is string => typeof k === 'string' && k.length > 0);
+    const batch_keys = zip_keys.length ? zip_keys : [zip_key];
+
     const ws_credentials = await this.loadWsCredentials(config);
 
     const poll_history: TestSetPollAttempt[] = [];
-    const verdict = await this.pollTestSetStatus(
-      zip_key,
-      environment,
-      ws_credentials,
-      poll_history,
-    );
+    let verdict: DianSendBillResponse;
+    let zip_verdicts: Record<string, TestSetZipVerdict> | undefined;
+    let zip_counts: TestSetZipCounts | undefined;
+    let zip_aggregate: TestSetZipAggregate | undefined;
 
-    const success = verdict.success;
+    if (batch_keys.length === 1) {
+      // Un lote único conserva el reintento acotado de siempre: el asistente
+      // espera que UNA consulta lo resuelva, y con un solo ZipKey esos ~36 s de
+      // espera sí caben en la petición.
+      verdict = await this.pollTestSetStatus(
+        batch_keys[0],
+        environment,
+        ws_credentials,
+        poll_history,
+      );
+    } else {
+      // El cruce ZipKey→documento sale del propio registro del lote, así que el
+      // log y la evidencia por documento pueden nombrar lo que se rechazó.
+      const documents_by_zip_key = indexDocumentsByZipKey(previous);
+      const batch = await this.pollBatchZipKeys(
+        batch_keys,
+        environment,
+        ws_credentials,
+        poll_history,
+        (previous.zip_verdicts ?? {}) as Record<string, TestSetZipVerdict>,
+        documents_by_zip_key,
+      );
+      verdict = batch.primary;
+      zip_verdicts = batch.verdicts;
+      zip_aggregate = batch.aggregate;
+      zip_counts = batch.aggregate.counts;
+
+      // Una fila por documento rechazado, ANTES de tocar `last_test_result`.
+      //
+      // El orden importa: el JSON se reescribe entero y puede perder la carrera
+      // contra otro envío (ver la concurrencia optimista de abajo, que DESCARTA
+      // el resultado). La fila de auditoría no participa de esa carrera, así que
+      // el motivo del rechazo sobrevive incluso cuando el veredicto se descarta.
+      await this.persistRejectionEvidence(
+        config.id,
+        batch.verdicts,
+        batch.resolved_now,
+        documents_by_zip_key,
+      );
+    }
+
+    // Con N lotes el estado sale del agregado (`aggregateZipVerdicts`), no de un
+    // veredicto suelto: basta un rechazo para que el set esté rechazado, y hacen
+    // falta TODOS resueltos con éxito para declararlo aprobado.
+    const success = zip_aggregate ? zip_aggregate.success : verdict.success;
     // Terminal non-success (real StatusCode / fault / errors) == rejected, not pending.
-    const still_processing = !success && !this.isTerminalZipStatus(verdict);
+    const still_processing = zip_aggregate
+      ? zip_aggregate.pending
+      : !success && !this.isTerminalZipStatus(verdict);
     const rejected = !success && !still_processing;
 
     const result_data = {
@@ -1108,7 +2189,51 @@ export class DianTestService {
       poll_history,
       pending: still_processing,
       rejected,
+      ...(zip_verdicts && { zip_verdicts }),
+      ...(zip_counts && { zip_counts }),
     };
+
+    // Concurrencia optimista sobre el lote consultado.
+    //
+    // Sondear a la DIAN tarda ~31 s, y este método hace leer-modificar-escribir
+    // sobre TODO `last_test_result`. Sin este chequeo, una consulta que empezó
+    // antes de un envío escribe su snapshot rancio encima y borra el ZipKey del
+    // lote nuevo.
+    //
+    // Pasó en producción, config 12, con estos tiempos exactos:
+    //   00:13:04.228  la consulta lee `last_test_result` (ZipKey 932bceac)
+    //   00:13:16.447  el envío escribe el suyo         (ZipKey fa6f3f51)
+    //   00:13:35.444  la consulta escribe su snapshot  → fa6f3f51 desaparece
+    // Ese lote se envió a la DIAN, quemó 50 consecutivos autorizados
+    // (990000050–990000099) y su ZipKey solo sobrevive en `dian_audit_logs`.
+    // Un veredicto que no se puede consultar es un bloque de numeración perdido.
+    //
+    // La ventana no desaparece con el envío asíncrono: el cron reconsulta cada
+    // 10 minutos y tarda 31 s, así que puede solaparse igual con un envío de 81 s.
+    const current = await this.getConfigById(config_id);
+    const current_result = (current.last_test_result ?? {}) as Record<
+      string,
+      any
+    >;
+    if (current_result.zip_key !== zip_key) {
+      // Otro envío reemplazó el lote mientras consultábamos. El veredicto que
+      // traemos es de un lote que ya no es el vigente: escribirlo perdería el
+      // nuevo. Se descarta el resultado, no el lote.
+      await this.createAuditLog(config.id, {
+        action: 'check_test_set_status',
+        status: 'pending',
+        error_message:
+          `La consulta del lote ${zip_key} se descartó: otro envío dejó ` +
+          `${current_result.zip_key ?? '(ninguno)'} como lote vigente mientras se consultaba.`,
+        duration_ms: Date.now() - started_at,
+      });
+
+      return this.testSetStatusFromStoredResult(
+        current,
+        current_result,
+        'Se envió un lote nuevo mientras se consultaba el anterior. Consulta el estado del lote vigente.',
+      );
+    }
 
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
@@ -1123,7 +2248,20 @@ export class DianTestService {
       },
     });
 
-    const wait = analyzeTestSetWait(result_data);
+    // Sobre la prueba DURABLE, con los valores que ACABAN de escribirse.
+    //
+    // `config` se leyó antes del update, así que usarlo tal cual describiría el
+    // estado anterior. Y sin `resolveTestSetProof` esta ruta —la que el asistente
+    // sondea cada 15 s— seguía leyendo el último lote: una configuración
+    // `enabled` cuyo lote posterior fue rechazado o descartado recibía
+    // `wait.state: 'abandoned'` junto a su insignia «Habilitado», y la tarjeta de
+    // espera le ofrecía ejecutar un set nuevo sobre una habilitación concedida.
+    // Es el defecto del 2026-08-09, que quedó vivo en esta ruta.
+    const wait = resolveTestSetWait({
+      enablement_status: success ? 'test_set_passed' : config.enablement_status,
+      enablement_evidence: success ? result_data : config.enablement_evidence,
+      last_test_result: result_data,
+    });
 
     await this.createAuditLog(config.id, {
       action: 'check_test_set_status',
@@ -1141,6 +2279,9 @@ export class DianTestService {
       pending: still_processing,
       rejected,
       zip_key,
+      // Nulo cuando el lote es de un solo ZipKey: ahí el recuento no aporta nada
+      // que `pending`/`rejected` no digan ya.
+      zip_counts: (zip_counts ?? null) as TestSetZipCounts | null,
       dian_status: verdict.status_code,
       status_message: verdict.status_message,
       error_messages: verdict.error_messages ?? [],
@@ -1150,6 +2291,16 @@ export class DianTestService {
       executed_at: previous.executed_at ?? null,
       rechecked_at: result_data.rechecked_at,
       total_documents: previous.total_documents ?? null,
+      // GENERADOS Y TRANSMITIDOS, porque desde el envío en dos fases no son el
+      // mismo número y `total_documents` conserva el significado de generados.
+      //
+      // Sin estos tres campos el asistente decía «50 documentos» sobre un lote
+      // del que salieron 30, y las 20 notas retenidas eran invisibles: el backend
+      // las guardaba en `note_phase` y esta proyección las descartaba. Un dato que
+      // el cliente no recibe es indistinguible de un dato que no existe.
+      generated_documents: previous.generated_documents ?? null,
+      transmitted_documents: previous.transmitted_documents ?? null,
+      note_phase: buildNotePhaseView(previous.note_phase),
       invoices_count: previous.invoices ?? null,
       debit_notes_count: previous.debit_notes ?? null,
       credit_notes_count: previous.credit_notes ?? null,
@@ -1298,7 +2449,7 @@ export class DianTestService {
       ? previous.abandoned_batches
       : [];
 
-    const result_data = {
+    const result_data: Record<string, any> = {
       ...previous,
       pending: false,
       abandoned: true,
@@ -1314,9 +2465,37 @@ export class DianTestService {
       ],
     };
 
+    // El puntero al lote vivo se BORRA, no se deja con `pending: false`.
+    //
+    // `pending` solo era un booleano que cualquier sondeo podía reescribir, y uno
+    // lo hacía: `checkTestSetStatus` devolvía `pending: true` en cuanto la DIAN
+    // repetía «en proceso de validación», deshaciendo el descarte. Sin `zip_key`
+    // no hay nada que consultar, así que el descarte deja de ser una bandera
+    // opinable y pasa a ser un hecho estructural.
+    //
+    // La clave no se pierde: queda en `abandoned_batches` (arriba) y en
+    // `dian_audit_logs`, que es donde vive la auditoría del abandono.
+    delete result_data.zip_key;
+    delete result_data.tracking_id;
+
+    // `enablement_status: 'testing'` SOLO si no hay una habilitación que perder.
+    //
+    // Descartar un lote deja la configuración libre para reenviar, y por eso baja el
+    // estado a `testing`. Sobre una config ya `enabled` eso sería tirar lo que la
+    // DIAN concedió —y que su portal solo devuelve a mano— por una operación de
+    // limpieza de un puntero. Es el mismo defecto que `executeTestSet` tenía y que
+    // `canWriteEnablementStatus` cierra; esta era la tercera copia.
+    //
+    // El descarte SÍ sigue ocurriendo: se borra `zip_key` y se registra el lote en
+    // `abandoned_batches`. Lo único que no pasa es la degradación.
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
-      data: { last_test_result: result_data, enablement_status: 'testing' },
+      data: {
+        last_test_result: result_data,
+        ...(canWriteEnablementStatus(config.enablement_status)
+          ? { enablement_status: 'testing' as const }
+          : {}),
+      },
     });
 
     await this.createAuditLog(config.id, {
@@ -1330,6 +2509,591 @@ export class DianTestService {
       zip_key,
       message:
         'El lote anterior quedó descartado. Puedes ejecutar un nuevo set de pruebas.',
+    };
+  }
+
+  /**
+   * Nombre del ZIP contenedor de una nota diferida.
+   *
+   * Se DERIVA del nombre del XML, no se recalcula: el anexo define
+   * `<tag><nnnnnnnnnn><ppp><aa><dddddddd>.xml` para el XML y el MISMO cuerpo con
+   * prefijo `z` para el ZIP, así que copiar el cuerpo garantiza que el
+   * contenedor y su contenido declaren el mismo NIT, el mismo `ppp`, el mismo
+   * año y el mismo consecutivo. Recalcularlo con el reloj de hoy le cambiaría el
+   * `aa` a una nota firmada en diciembre y transmitida en enero, y el worker de
+   * la DIAN parsea ese nombre por posiciones fijas.
+   *
+   * `slice(-23)` toma el cuerpo sin depender del largo del tag (2 para `nc`/`nd`,
+   * 3 para `nas`/`ncs`). Si el nombre persistido no tiene la forma esperada se
+   * recompone con el helper compartido, que es lo que lo generó.
+   */
+  private zipNameForDeferredNote(
+    xml_file_name: string,
+    fallback: {
+      nit: string;
+      consecutive: number;
+      software_code: string;
+      year?: string;
+    },
+  ): string {
+    const body = String(xml_file_name ?? '')
+      .replace(/\.xml$/i, '')
+      .slice(-23);
+    if (/^\d{15}[0-9a-f]{8}$/i.test(body)) return `z${body}.zip`;
+    return buildDianZipFileName(fallback);
+  }
+
+  /**
+   * Transmite las notas que quedaron GENERADAS, FIRMADAS Y SIN ENVIAR.
+   *
+   * POR QUÉ EXISTE — el defecto que cierra:
+   *
+   * `decideNotePhase` difiere la fase 2 cuando la DIAN no registró las facturas
+   * que las notas referencian, y `note_phase.deferred[]` las guarda ENTERAS, con
+   * su XML firmado, precisamente para que reenviarlas no exija regenerarlas.
+   * Ningún endpoint las consumía: HIDRO quedó con 20 notas firmadas y los
+   * consecutivos 990000230-990000249 reservados, sin vía de recuperación. El
+   * dato estaba persistido y era inalcanzable.
+   *
+   * NO REGENERA Y NO RENUMERA. El consecutivo entra en el `SoftwareSecurityCode`
+   * y en el CUDE, así que renumerar exigiría volver a firmar y produciría OTRO
+   * CUDE — es decir, otro documento, y el consecutivo original quedaría gastado
+   * igual. El XML sale del JSON byte a byte y se transmite tal cual por la misma
+   * `SendTestSetAsync` que usa la fase 2 del envío normal.
+   *
+   * REANUDABLE a propósito: cada nota transmitida SALE de `deferred` y ENTRA en
+   * `transmitted` (con su XML, que nunca se borra). Una llamada interrumpida
+   * —por un 504 de nginx, por ejemplo— se retoma invocando de nuevo, y solo
+   * viajan las que faltan. `limit` permite partirlo a mano si hiciera falta.
+   */
+  async transmitDeferredNotes(config_id: number, limit?: number) {
+    const started_at = Date.now();
+    const config = await this.getConfigById(config_id);
+    const environment = config.environment as 'test' | 'production';
+
+    if (!config.test_set_id) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'No test set ID configured',
+      );
+    }
+
+    // Misma guarda que `enqueueTestSet` y `executeTestSet`, por la misma razón:
+    // la DIAN no acepta documentos contra un set que ya aprobó y contesta «Set de
+    // prueba … se encuentra Aceptado» a cada uno. Aquí los consecutivos ya están
+    // gastados, así que lo que se evita no es quemarlos: es que el operador crea
+    // que recuperó 20 notas cuando lo que cosechó fueron 20 veces esa frase.
+    if (isTestSetClosedByDian(config.enablement_status)) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya cerró el set de pruebas de esta configuración, así que no admitirá las notas retenidas: ' +
+          'responde «Set de prueba … se encuentra Aceptado» a cada documento. ' +
+          'Las notas siguen guardadas con su XML firmado y su consecutivo.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
+      );
+    }
+
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    const note_phase = (previous.note_phase ?? {}) as Record<string, any>;
+    const deferred: { name: string; consecutive: number; content: string }[] =
+      Array.isArray(note_phase.deferred) ? note_phase.deferred : [];
+
+    // Solo las que traen su XML. Un checkpoint de fase 1 guarda `{name,
+    // consecutive}` SIN `content` (ver `persistNotePhaseCheckpoint`), y sin el
+    // XML firmado no hay nada que transmitir: regenerarlo daría otro CUDE.
+    const transmittable = deferred.filter(
+      (note) => typeof note?.content === 'string' && note.content.length > 0,
+    );
+    if (!transmittable.length) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_004,
+        deferred.length
+          ? `Las ${deferred.length} notas retenidas de esta configuración se registraron sin su XML firmado ` +
+              '(checkpoint de fase 1), así que no pueden transmitirse: regenerarlas cambiaría el CUDE.'
+          : 'Esta configuración no tiene notas retenidas por transmitir.',
+        { dian_configuration_id: config_id, deferred_count: deferred.length },
+      );
+    }
+
+    const batch =
+      typeof limit === 'number' && limit > 0
+        ? transmittable.slice(0, limit)
+        : transmittable;
+
+    const ws_credentials = await this.loadWsCredentials(config);
+    const software_code = softwareCodeForOperationMode(config.operation_mode);
+    const documents: any[] = Array.isArray(previous.documents)
+      ? previous.documents
+      : [];
+
+    const sent: {
+      file_name: string;
+      zip_file_name: string;
+      zip_key: string | null;
+      success: boolean;
+      status_code?: string;
+      status_message?: string;
+      raw_response?: string;
+      error?: string;
+      error_messages?: string[];
+      phase: 2;
+    }[] = [];
+    const transmitted: typeof batch = [];
+
+    for (const note of batch) {
+      const doc = documents.find((d) => d?.file_name === note.name);
+      const zip_file_name = this.zipNameForDeferredNote(note.name, {
+        nit: config.nit,
+        consecutive: note.consecutive,
+        software_code,
+        // La fecha de EMISIÓN de la nota, no la de hoy: el `aa` del nombre tiene
+        // que ser el mismo con el que se firmó.
+        year: previous.issue_date ?? undefined,
+      });
+
+      try {
+        const response = await this.soap_client.sendTestSetAsync(
+          // El XML sale del JSON tal cual. Ni se reconstruye ni se re-firma.
+          this.buildMultiFileZip([{ name: note.name, content: note.content }]),
+          zip_file_name,
+          config.test_set_id,
+          environment,
+          ws_credentials,
+        );
+
+        sent.push({
+          file_name: note.name,
+          zip_file_name,
+          zip_key: response.zip_key ?? null,
+          success: response.success,
+          status_code: response.status_code,
+          status_message: response.status_message,
+          raw_response: response.raw_response?.slice(0, 4000),
+          ...(response.error_messages?.length
+            ? { error_messages: response.error_messages }
+            : {}),
+          phase: 2,
+        });
+
+        // Sale de `deferred` solo si la DIAN acusó recibo con un ZipKey. Sin él
+        // no hay nada que sondear después, y moverla igual perdería la única
+        // vía de reintento que tiene un consecutivo ya reservado.
+        if (response.zip_key) transmitted.push(note);
+
+        // La fila de auditoría se escribe DENTRO del bucle, no al final: el
+        // ZipKey es la única forma de volver a preguntar por un consecutivo ya
+        // gastado, y si este proceso muere en la nota 12 los 11 anteriores no
+        // pueden irse con él.
+        await this.createAuditLog(config.id, {
+          action: 'transmit_deferred_note',
+          status: response.zip_key ? 'pending' : 'error',
+          document_type: doc?.kind ?? null,
+          document_number: doc?.number ?? String(note.consecutive),
+          cufe: doc?.cufe ?? null,
+          request_xml: note.content,
+          response_xml: response.raw_response ?? null,
+          error_message: response.zip_key
+            ? `ZipKey ${response.zip_key} — pendiente de veredicto.`
+            : response.error_messages?.join(' | ') || response.status_message,
+          duration_ms: response.duration_ms,
+        });
+      } catch (error) {
+        // No aborta el lote: cada nota es independiente y las que ya salieron
+        // tienen su ZipKey registrado. Ver el mismo criterio en `transmit`.
+        const message = error instanceof Error ? error.message : String(error);
+        sent.push({
+          file_name: note.name,
+          zip_file_name,
+          zip_key: null,
+          success: false,
+          error: message,
+          phase: 2,
+        });
+        await this.createAuditLog(config.id, {
+          action: 'transmit_deferred_note',
+          status: 'error',
+          document_type: doc?.kind ?? null,
+          document_number: doc?.number ?? String(note.consecutive),
+          cufe: doc?.cufe ?? null,
+          request_xml: note.content,
+          error_message: message,
+        });
+      }
+    }
+
+    const new_zip_keys = sent
+      .map((s) => s.zip_key)
+      .filter((k): k is string => !!k);
+    const remaining = deferred.filter(
+      (note) => !transmitted.some((t) => t.name === note.name),
+    );
+
+    // RELECTURA ANTES DE ESCRIBIR. Transmitir 20 notas tarda decenas de
+    // segundos y `last_test_result` se reescribe entero, así que un envío que
+    // haya empezado mientras tanto perdería su ZipKey con este UPDATE. Es
+    // exactamente la carrera que ya costó un bloque de 50 consecutivos en la
+    // config 12 (ver `checkTestSetStatus`).
+    const current = await this.getConfigById(config_id);
+    const current_result = (current.last_test_result ?? {}) as Record<
+      string,
+      any
+    >;
+    const batch_replaced = current_result.zip_key !== previous.zip_key;
+
+    if (!batch_replaced) {
+      await this.prisma.dian_configurations.update({
+        where: { id: config_id },
+        data: {
+          last_test_result: {
+            ...current_result,
+            submissions: [
+              ...(Array.isArray(current_result.submissions)
+                ? current_result.submissions
+                : []),
+              ...sent,
+            ],
+            zip_keys: [
+              ...(Array.isArray(current_result.zip_keys)
+                ? current_result.zip_keys
+                : []),
+              ...new_zip_keys,
+            ],
+            transmitted_documents:
+              (Number(current_result.transmitted_documents) || 0) +
+              transmitted.length,
+            note_phase: {
+              ...note_phase,
+              // `sent` solo cuando ya no queda ninguna retenida: mientras
+              // `deferred` tenga contenido, la fase NO está enviada, y la vista
+              // que lee la UI deriva `deferred_count` de ese mismo arreglo.
+              sent: remaining.length === 0,
+              reason: remaining.length
+                ? `${transmitted.length} de ${deferred.length} notas retenidas se transmitieron desde su XML firmado; quedan ${remaining.length}.`
+                : `Las ${transmitted.length} notas retenidas se transmitieron desde su XML firmado, sin regenerar consecutivos.`,
+              // Las transmitidas NO se borran: se mueven, con su XML. Es la
+              // única copia de un documento cuyo consecutivo ya está gastado.
+              deferred: remaining,
+              transmitted: [
+                ...(Array.isArray(note_phase.transmitted)
+                  ? note_phase.transmitted
+                  : []),
+                ...transmitted.map((note) => ({
+                  ...note,
+                  zip_key:
+                    sent.find((s) => s.file_name === note.name)?.zip_key ?? null,
+                  transmitted_at: new Date().toISOString(),
+                })),
+              ],
+              transmitted_at: new Date().toISOString(),
+            },
+            // Hay ZipKeys nuevos sin veredicto: el cron de re-sondeo tiene que
+            // adoptarlos, y `pending` es la bandera con la que decide.
+            ...(new_zip_keys.length ? { pending: true } : {}),
+          } as any,
+        },
+      });
+    } else {
+      this.logger.warn(
+        `[DIAN test-set] otro envío reemplazó el lote mientras se transmitían las notas retenidas. ` +
+          `No se reescribe last_test_result; los ZipKey ${new_zip_keys.join(', ') || '(ninguno)'} ` +
+          `quedan en dian_audit_logs.`,
+      );
+    }
+
+    await this.createAuditLog(config.id, {
+      action: 'transmit_deferred_notes',
+      status: new_zip_keys.length ? 'pending' : 'error',
+      error_message: new_zip_keys.length
+        ? `${transmitted.length} de ${batch.length} notas retenidas transmitidas desde su XML firmado. ` +
+          `ZipKeys: ${new_zip_keys.join(', ')}.` +
+          (batch_replaced
+            ? ' Otro envío reemplazó el lote: el registro JSON no se actualizó.'
+            : '')
+        : `Ninguna de las ${batch.length} notas retenidas obtuvo ZipKey.`,
+      duration_ms: Date.now() - started_at,
+    });
+
+    return {
+      transmitted: transmitted.length,
+      attempted: batch.length,
+      // Lo que sigue retenido tras esta pasada, para que el llamador sepa si
+      // tiene que volver a invocar.
+      still_deferred: remaining.length,
+      zip_keys: new_zip_keys,
+      consecutives: transmitted.map((n) => n.consecutive),
+      batch_replaced,
+      submissions: sent.map((s) => ({
+        file_name: s.file_name,
+        zip_key: s.zip_key,
+        status_code: s.status_code ?? null,
+        status_message: s.status_message ?? s.error ?? null,
+        error_messages: s.error_messages ?? [],
+      })),
+      message: new_zip_keys.length
+        ? `${transmitted.length} nota(s) retenida(s) transmitida(s) desde su XML ya firmado, sin regenerar consecutivos. ` +
+          'Consulta el estado del lote en unos minutos para conocer el veredicto.'
+        : 'Ninguna nota retenida obtuvo ZipKey de la DIAN. Siguen guardadas con su XML firmado y su consecutivo.',
+      response_time_ms: Date.now() - started_at,
+    };
+  }
+
+  /**
+   * Respuesta de una consulta de estado que NO sondeó a la DIAN (lote descartado)
+   * o que decidió no escribir su resultado (otro envío ganó la carrera).
+   *
+   * Existe para que esas salidas tengan EXACTAMENTE la misma forma que el retorno
+   * normal: la UI y el cron leen campos concretos de esta respuesta
+   * (`wait.state`, `success`, `zip_key`…), y una unión con propiedades ausentes
+   * los rompe en compilación o, peor, en runtime con `undefined`.
+   */
+  private testSetStatusFromStoredResult(
+    config: {
+      environment: string;
+      enablement_status: string;
+      // Obligatoria: esta salida es la del lote DESCARTADO, y es precisamente
+      // donde un descarte tapaba una habilitación concedida. Sin la evidencia el
+      // `wait` volvería a describir el lote descartado.
+      enablement_evidence: unknown;
+    },
+    result: Record<string, any>,
+    message: string,
+  ) {
+    // Sobre la prueba durable. Con el lote a secas, una configuración `enabled`
+    // que descartó un lote posterior leía `state: 'abandoned'` y la UI le decía
+    // «ejecuta un set de pruebas nuevo». Ver `resolveTestSetProof`.
+    const wait = resolveTestSetWait({
+      enablement_status: config.enablement_status,
+      enablement_evidence: config.enablement_evidence,
+      last_test_result: result,
+    });
+    return {
+      success: false,
+      pending: result.pending === true,
+      rejected: result.rejected === true,
+      zip_key: (result.zip_key ?? null) as string | null,
+      zip_counts: (result.zip_counts ?? null) as TestSetZipCounts | null,
+      dian_status: null as string | null,
+      status_message: wait.reason,
+      error_messages: [] as string[],
+      poll_history: [] as TestSetPollAttempt[],
+      executed_at: result.executed_at ?? null,
+      rechecked_at: result.rechecked_at ?? null,
+      total_documents: result.total_documents ?? null,
+      // Misma forma EXACTA que el retorno normal. Es la razón de ser de este
+      // método: la UI lee campos concretos y una unión con propiedades ausentes
+      // la rompe en compilación o, peor, en runtime con `undefined`.
+      generated_documents: result.generated_documents ?? null,
+      transmitted_documents: result.transmitted_documents ?? null,
+      note_phase: buildNotePhaseView(result.note_phase),
+      invoices_count: result.invoices ?? null,
+      debit_notes_count: result.debit_notes ?? null,
+      credit_notes_count: result.credit_notes ?? null,
+      environment: config.environment as 'test' | 'production',
+      enablement_status: config.enablement_status,
+      wait,
+      message,
+    };
+  }
+
+  /**
+   * Guarda el lote a mitad de camino: fase 1 transmitida, fase 2 todavía no.
+   *
+   * POR QUÉ NO SE PUEDE OMITIR
+   *
+   * El worker del set corre con `attempts: 1` a propósito (ver
+   * `DianTestSetProcessor`): un reintento reservaría un bloque nuevo de
+   * consecutivos. Eso significa que si el proceso muere durante la espera entre
+   * fases, NADIE va a reintentar — y sin este guardado se irían con él los
+   * ZipKeys de las facturas ya enviadas, que son la única forma de volver a
+   * preguntarle a la DIAN por documentos cuyos consecutivos ya están gastados.
+   *
+   * La forma que escribe es deliberadamente la que el cron de repoll y
+   * `checkTestSetStatus` YA saben leer (`zip_key`, `zip_keys`, `pending: true`),
+   * para que un lote interrumpido siga siendo consultable por las rutas normales
+   * en vez de necesitar una de rescate.
+   *
+   * Se sobrescribe al final con el resultado completo. Su vida útil es la ventana
+   * de la espera, y cuesta un UPDATE.
+   */
+  private async persistNotePhaseCheckpoint(
+    config_id: number,
+    snapshot: {
+      invoice_submissions: unknown[];
+      invoice_zip_keys: string[];
+      deferred_notes: { name: string; consecutive: number }[];
+      resolution_id: number;
+      number_from: number;
+      number_to: number;
+      documents: unknown[];
+      timezone: string;
+      issue_date: string;
+      issue_time: string;
+      composition: unknown;
+    },
+  ): Promise<void> {
+    try {
+      await this.prisma.dian_configurations.update({
+        where: { id: config_id },
+        data: {
+          last_test_result: {
+            executed_at: new Date().toISOString(),
+            checkpoint: 'invoices_sent_notes_pending',
+            // Representante para la forma de un solo `zip_key` que ya leen la UI,
+            // la espera y el cron.
+            zip_key: snapshot.invoice_zip_keys[0] ?? null,
+            zip_keys: snapshot.invoice_zip_keys,
+            submissions: snapshot.invoice_submissions,
+            documents: snapshot.documents,
+            resolution_id: snapshot.resolution_id,
+            number_from: snapshot.number_from,
+            number_to: snapshot.number_to,
+            composition: snapshot.composition,
+            timezone: snapshot.timezone,
+            issue_date: snapshot.issue_date,
+            issue_time: snapshot.issue_time,
+            note_phase: {
+              sent: false,
+              reason:
+                'Facturas transmitidas; esperando que la DIAN las registre antes de enviar las notas.',
+              invoice_zip_keys: snapshot.invoice_zip_keys,
+              polls: 0,
+              deferred: snapshot.deferred_notes,
+            },
+            // `pending: true` es lo que hace que el cron de repoll adopte el lote
+            // si este proceso no vuelve.
+            pending: true,
+            rejected: false,
+          } as any,
+        },
+      });
+    } catch (error) {
+      // Un fallo del checkpoint NO aborta el envío: las facturas ya están en la
+      // DIAN y sus consecutivos ya se gastaron. Abortar aquí perdería el lote de
+      // la única forma que este método existe para evitar.
+      this.logger.error(
+        `[DIAN test-set] no se pudo guardar el checkpoint de fase 1: ` +
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          `ZipKeys en riesgo: ${snapshot.invoice_zip_keys.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * Espera a que la DIAN REGISTRE las facturas del lote, que es la precondición
+   * de las notas que las referencian.
+   *
+   * La REGLA no vive aquí: vive en `decideNotePhase` (`note-phase-gate.util.ts`),
+   * pura y con su propio spec, por la misma razón que `analyzeTestSetWait` — una
+   * decisión que gasta consecutivos autorizados irrecuperables no debe requerir
+   * hablar con la DIAN para verificarse. Este método solo aporta el sondeo y el
+   * reloj.
+   */
+  private async waitForInvoicesRegistered(
+    invoice_zip_keys: string[],
+    environment: 'test' | 'production',
+    ws_credentials: WsSecurityCredentials | undefined,
+    poll_history: TestSetPollAttempt[],
+    /**
+     * Con qué configuración y qué documentos se persiste la evidencia del
+     * rechazo, sondeo a sondeo.
+     *
+     * Se escribe DENTRO del bucle, no al final: la primera corrida real de esta
+     * espera vio «30 de 30 rechazadas» y el motivo se perdió porque solo vivía
+     * en el mapa local. El worker corre con `attempts: 1`, así que si muere
+     * durante la espera nadie reintenta — el mismo razonamiento que obligó al
+     * checkpoint de la fase 1.
+     */
+    evidence: {
+      dian_configuration_id: number;
+      documents_by_zip_key: Record<string, TestSetDocumentRef>;
+    },
+  ): Promise<{
+    ready: boolean;
+    reason: string;
+    polls: number;
+    /**
+     * Veredictos TERMINALES que la DIAN dio sobre las facturas durante la espera.
+     *
+     * SE DEVUELVEN PORQUE PERDERLOS COSTÓ EL DIAGNÓSTICO UNA VEZ. La primera
+     * corrida real de esta espera vio «30 de 30 rechazadas», difirió las notas
+     * correctamente… y tiró los mensajes: vivían solo en el mapa local de este
+     * bucle, así que `last_test_result` quedó sin `zip_verdicts` y la razón de la
+     * DIAN hubo que recuperarla con un re-sondeo aparte.
+     *
+     * La razón era «Set de prueba … se encuentra Aceptado», es decir que la DIAN
+     * cierra el set al aprobarlo y no admite más documentos — un dato que decide
+     * si tiene sentido volver a intentarlo, y que no debería costar otra consulta.
+     */
+    verdicts: Record<string, TestSetZipVerdict>;
+  }> {
+    // Sin ZipKey no hay nada que sondear: la decisión se resuelve sin red y sin
+    // gastar los 10 minutos del tope.
+    if (invoice_zip_keys.length === 0) {
+      const decision = decideNotePhase({
+        invoice_zip_key_count: 0,
+        accepted: 0,
+        rejected: 0,
+        poll: 0,
+      });
+      return { ready: false, reason: decision.reason, polls: 0, verdicts: {} };
+    }
+
+    let verdicts: Record<string, TestSetZipVerdict> = {};
+
+    for (let poll = 1; poll <= NOTE_PHASE_MAX_POLLS; poll++) {
+      await this.sleep(NOTE_PHASE_POLL_DELAY_MS);
+
+      const batch = await this.pollBatchZipKeys(
+        invoice_zip_keys,
+        environment,
+        ws_credentials,
+        poll_history,
+        verdicts,
+        evidence.documents_by_zip_key,
+      );
+      verdicts = batch.verdicts;
+      await this.persistRejectionEvidence(
+        evidence.dian_configuration_id,
+        batch.verdicts,
+        batch.resolved_now,
+        evidence.documents_by_zip_key,
+      );
+      const { accepted, rejected } = batch.aggregate.counts;
+
+      const decision = decideNotePhase({
+        invoice_zip_key_count: invoice_zip_keys.length,
+        accepted,
+        rejected,
+        poll,
+      });
+
+      this.logger.log(
+        `[DIAN test-set] fase 1, sondeo ${poll}/${NOTE_PHASE_MAX_POLLS}: ` +
+          `${decision.action} — ${decision.reason}`,
+      );
+
+      if (decision.action !== 'keep_waiting') {
+        return {
+          ready: decision.action === 'send_notes',
+          reason: decision.reason,
+          polls: poll,
+          verdicts,
+        };
+      }
+    }
+
+    // Inalcanzable en la práctica: `decideNotePhase` devuelve `defer_notes` en el
+    // último sondeo. Se conserva porque el bucle no se lo puede demostrar al
+    // compilador, y devolver un `ready: false` explícito es más seguro que un
+    // `throw` que perdería los ZipKeys de la fase 1.
+    return {
+      ready: false,
+      reason: `Tope de espera agotado tras ${NOTE_PHASE_MAX_POLLS} consultas.`,
+      polls: NOTE_PHASE_MAX_POLLS,
+      verdicts,
     };
   }
 
@@ -1363,11 +3127,19 @@ export class DianTestService {
         status_code: status.status_code,
         status_message: status.status_message,
         success: status.success,
+        // Las reglas del intento, que este push descartaba teniéndolas en
+        // `status`. Ver `TestSetPollAttempt.error_messages`.
+        ...(status.error_messages?.length
+          ? { error_messages: status.error_messages }
+          : {}),
       });
 
       this.logger.log(
         `[DIAN test-set] GetStatusZip ${attempt}/${max_attempts} ` +
-          `zipKey=${zip_key} status=${status.status_code} success=${status.success}`,
+          `zipKey=${zip_key} status=${status.status_code} success=${status.success}` +
+          (status.error_messages?.length
+            ? ` reglas=${status.error_messages.join(' | ')}`
+            : ''),
       );
 
       if (this.isTerminalZipStatus(status)) {
@@ -1376,6 +3148,188 @@ export class DianTestService {
     }
 
     return last as DianSendBillResponse;
+  }
+
+  /**
+   * Sondea los N ZipKeys de un lote y agrega su veredicto.
+   *
+   * POR QUÉ NO REUSA `pollTestSetStatus` PARA N LOTES
+   *
+   * Ese método reintenta hasta 6 veces con 5 s de espera ANTES de cada intento:
+   * ~36 s por ZipKey. Con un envío de 50 documentos —que sale como 50 ZIP
+   * independientes, cada uno con su propio ZipKey— eso son 30 minutos de tiempo
+   * de pared. No cabe en una petición HTTP y desborda el cron que lo invoca.
+   *
+   * El reintento interno existe para que UNA consulta resuelva UN lote que puede
+   * voltear a terminal en esos 30 s. Con N lotes la repetición la aporta quien
+   * llama (el cron cada 15 min), así que aquí se hace UN intento por ZipKey no
+   * resuelto y se persiste el que sí resolvió. Cada invocación avanza y ninguna
+   * repregunta lo ya sabido.
+   *
+   * AGREGACIÓN — un lote de habilitación es atómico frente al operador:
+   *   · cualquier ZipKey terminal sin éxito  ⇒ el set está RECHAZADO
+   *   · todos resueltos y todos con éxito    ⇒ el set está APROBADO
+   *   · en cualquier otro caso               ⇒ sigue PENDIENTE
+   *
+   * `primary` es el veredicto que representa al lote en `dian_response`: el
+   * primer rechazo si hay alguno —que es lo que el operador necesita leer—, si
+   * no el primer éxito, y si no el último «en proceso».
+   */
+  private async pollBatchZipKeys(
+    zip_keys: string[],
+    environment: 'test' | 'production',
+    ws_credentials: WsSecurityCredentials | undefined,
+    poll_history: TestSetPollAttempt[],
+    known: Record<string, TestSetZipVerdict>,
+    /**
+     * ZipKey → documento, para que el log agregado pueda NOMBRAR lo que se
+     * rechazó. Opcional porque un llamador sin `last_test_result` a mano sigue
+     * pudiendo sondear; lo único que pierde es el nombre del documento.
+     */
+    documents_by_zip_key: Record<string, TestSetDocumentRef> = {},
+  ): Promise<{
+    primary: DianSendBillResponse;
+    verdicts: Record<string, TestSetZipVerdict>;
+    aggregate: TestSetZipAggregate;
+    /**
+     * ZipKeys que resolvieron EN ESTA llamada.
+     *
+     * Se devuelven para que el llamador escriba la evidencia por documento una
+     * sola vez. Sin esto, el cron de re-sondeo —que corre cada 10-15 min y
+     * recibe `verdicts` acumulados— reescribiría en `dian_audit_logs` los mismos
+     * 30 rechazos en cada pasada, y una tabla de auditoría que se repite deja de
+     * poder leerse como historia.
+     */
+    resolved_now: string[];
+  }> {
+    const verdicts: Record<string, TestSetZipVerdict> = { ...known };
+    const pending_keys = zip_keys.filter((k) => !verdicts[k]);
+    const resolved_now: string[] = [];
+
+    // Concurrencia acotada: 50 peticiones simultáneas a la DIAN es un pico que
+    // el servicio de habilitación responde con timeouts, y un timeout aquí se
+    // lee igual que «en proceso» — perderíamos el veredicto sin saberlo.
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    let pending_sample: DianSendBillResponse | null = null;
+
+    const worker = async () => {
+      while (cursor < pending_keys.length) {
+        const key = pending_keys[cursor++];
+        const status = await this.soap_client.getStatusZip(
+          key,
+          environment,
+          ws_credentials,
+        );
+
+        poll_history.push({
+          attempt: poll_history.length + 1,
+          status_code: status.status_code,
+          status_message: status.status_message,
+          success: status.success,
+          zip_key: key,
+          ...(status.error_messages?.length
+            ? { error_messages: status.error_messages }
+            : {}),
+        });
+
+        if (this.isTerminalZipStatus(status)) {
+          verdicts[key] = {
+            zip_key: key,
+            success: status.success,
+            status_code: status.status_code,
+            status_message: status.status_message,
+            error_messages: status.error_messages ?? [],
+            resolved_at: new Date().toISOString(),
+            // EL CRUDO SE CONSERVA, y solo sobre el rechazo.
+            //
+            // Un veredicto de aceptación no necesita evidencia: lo que hay que
+            // poder releer es POR QUÉ la DIAN dijo que no. Guardarlo también en
+            // los aceptados multiplicaría por 50 un JSON que ya se lee entero en
+            // cada sondeo, sin añadir un dato accionable.
+            ...(status.success
+              ? {}
+              : this.decodeRejection(status.raw_response)),
+          };
+          resolved_now.push(key);
+        } else {
+          // Solo se guarda una muestra NO terminal, y solo para conservar la
+          // redacción literal de la DIAN («Batch en proceso de validación») en el
+          // agregado. Un veredicto terminal nunca se lee de aquí: para eso está
+          // `aggregate.primary_key`.
+          pending_sample = pending_sample ?? status;
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, pending_keys.length) }, worker),
+    );
+
+    const aggregate = aggregateZipVerdicts(zip_keys, verdicts);
+
+    // `duration_ms: 0` porque este objeto no representa una llamada: reconstituye
+    // un veredicto YA persistido para que el agregado tenga la misma forma que un
+    // sondeo en vivo. Medir cero milisegundos de red es exacto, no un relleno.
+    const asResponse = (v: TestSetZipVerdict): DianSendBillResponse => ({
+      success: v.success,
+      status_code: v.status_code,
+      // Las reglas decodificadas primero, y el `ErrorMessage` de la DIAN
+      // después. Este objeto es el que alimenta `dian_response.error_messages`
+      // del registro y el mensaje que lee el operador: devolverlo con
+      // `error_messages` a secas volvía a dejar fuera lo que el
+      // `ApplicationResponse` sí decía.
+      status_message: v.status_message,
+      error_messages: rejectionMessages(v),
+      // El crudo del veredicto, no un vacío. `raw_response: ''` era el segundo
+      // punto donde el motivo del rechazo se tiraba: `primary` es lo que se
+      // persiste en `dian_response.raw_response`, así que el lote quedaba con
+      // una evidencia en blanco aunque el veredicto la tuviera.
+      raw_response: v.raw_response ?? '',
+      has_dian_verdict: true,
+      duration_ms: 0,
+    });
+
+    const primary = aggregate.primary_key
+      ? asResponse(verdicts[aggregate.primary_key])
+      : (pending_sample ?? {
+          success: false,
+          status_code: 'NO_VERDICT',
+          status_message: 'Batch en proceso de validación.',
+          error_messages: [],
+          raw_response: '',
+          duration_ms: 0,
+        });
+
+    this.logger.log(
+      `[DIAN test-set] agregado sobre ${aggregate.counts.total} ZipKeys: ` +
+        `resueltos=${aggregate.counts.resolved} aceptados=${aggregate.counts.accepted} ` +
+        `rechazados=${aggregate.counts.rejected} pendientes=${aggregate.counts.pending}`,
+    );
+
+    // EL MOTIVO, NO SOLO EL RECUENTO.
+    //
+    // EL DEFECTO QUE CIERRA: este log imprimía «rechazados=30» con los 30
+    // veredictos —y sus `error_messages`— en el mismo scope. Un operador leía
+    // que la DIAN había rechazado 30 de 30 y no tenía en el log una sola pista
+    // de por qué; para averiguarlo había que volver a sondear a la DIAN por un
+    // lote que ya había contestado.
+    //
+    // `indexDocumentsByZipKey` es lo que permite decir SETP990000200 en vez de
+    // un ZipKey: el cruce ZipKey→documento existía (`resolveRegisteredInvoiceReferences`
+    // lo hace para el lado aceptado) y ningún log lo aprovechaba.
+    const rejected_lines = describeRejectedDocuments(
+      verdicts,
+      documents_by_zip_key,
+    );
+    if (rejected_lines.length) {
+      this.logger.warn(
+        `[DIAN test-set] motivos de rechazo (${rejected_lines.length} de ` +
+          `${aggregate.counts.rejected}):\n  ${rejected_lines.join('\n  ')}`,
+      );
+    }
+
+    return { primary, verdicts, aggregate, resolved_now };
   }
 
   /**
@@ -1413,6 +3367,18 @@ export class DianTestService {
         environment: true,
         test_set_id: true,
         last_test_result: true,
+        // Las dos columnas de abajo se LEÍAN sin pedirse, y por eso este método
+        // estuvo devolviendo dos datos equivocados en silencio:
+        //
+        //   · `enablement_evidence` → `resolveTestSetProof` recibía `undefined` y
+        //     caía al último lote, justo lo que esa función existe para evitar.
+        //     Su firma ya es obligatoria, así que quitarla de acá no compila.
+        //   · `operation_mode` → `buildTestSetCompositionView(undefined)`, así que
+        //     la composición que la UI imprime no correspondía al modo real.
+        //
+        // Un `select` es un contrato con el resto del método, no una optimización.
+        enablement_evidence: true,
+        operation_mode: true,
       },
     });
 
@@ -1427,7 +3393,12 @@ export class DianTestService {
       last_result: config.last_test_result,
       // Derived on read, never stored: `pending` + `executed_at` are the facts,
       // and a persisted "stalled" flag would go stale the moment DIAN answers.
-      wait: analyzeTestSetWait(config.last_test_result),
+      //
+      // Y sobre la prueba DURABLE, no sobre el último lote: `last_test_result` es
+      // a la vez el puntero al lote en vuelo y la prueba de la habilitación, así
+      // que un intento posterior borraba un hecho ya ocurrido. Ver
+      // `resolveTestSetProof`.
+      wait: resolveTestSetWait(config),
       // Cuántos documentos y consecutivos implica un envío en ESTE modo de
       // operación. Sin esto la UI imprimía 50, la composición de 2019.
       composition: buildTestSetCompositionView(config.operation_mode),
@@ -1448,6 +3419,128 @@ export class DianTestService {
     return zip.toBuffer().toString('base64');
   }
 
+  /**
+   * Decodifica el `ApplicationResponse` de un rechazo y devuelve el trozo de
+   * veredicto que lo conserva.
+   *
+   * EL ACTIVO QUE ESTABA SIN USAR: `<b:XmlBase64Bytes>` es el
+   * `ApplicationResponse` de la DIAN, donde viven las reglas de rechazo por
+   * documento (`cbc:Description`, `Regla: XXXX, Rechazo: …`, `cbc:UUID`).
+   * `DianSoapClient.parseSoapResponse` —un scrape por regex— nunca lo mira, y
+   * `DianResponseParserService.parseApplicationResponse` sí sabe leerlo desde
+   * siempre. Estaba INYECTADO en este servicio (ver el constructor) y no se
+   * invocaba ni una sola vez: solo lo usaba la emisión real
+   * (`dian-direct.provider.ts`). Esta es la invocación que faltaba.
+   *
+   * Devuelve un objeto para hacer spread sobre el veredicto, de modo que un
+   * crudo vacío no añada claves con `undefined` al JSON persistido.
+   *
+   * NUNCA LANZA: el parser ya atrapa lo suyo y devuelve `PARSE_ERROR`, pero un
+   * fallo aquí no puede tumbar un sondeo cuyo propósito es no perder el
+   * veredicto. Perder el detalle es malo; perder el veredicto entero es el
+   * defecto que este trabajo cierra.
+   */
+  private decodeRejection(raw_response: string | undefined): {
+    raw_response?: string;
+    rejection_rules?: TestSetZipVerdict['rejection_rules'];
+    document_key?: string;
+  } {
+    if (!raw_response) return {};
+
+    const evidence = { raw_response: raw_response.slice(0, MAX_RAW_RESPONSE_CHARS) };
+    try {
+      const parsed = this.response_parser.parseApplicationResponse(raw_response);
+      return {
+        ...evidence,
+        ...(parsed.errors?.length ? { rejection_rules: parsed.errors } : {}),
+        ...(parsed.document_key ? { document_key: parsed.document_key } : {}),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `[DIAN test-set] no se pudo decodificar el ApplicationResponse del rechazo: ` +
+          `${error instanceof Error ? error.message : String(error)}. Se conserva el crudo.`,
+      );
+      return evidence;
+    }
+  }
+
+  /**
+   * Escribe UNA FILA POR DOCUMENTO RECHAZADO en `dian_audit_logs`.
+   *
+   * POR QUÉ AHÍ Y NO EN UNA TABLA NUEVA: `dian_audit_logs` ya tiene
+   * `document_type`, `document_number`, `cufe`, `response_xml` y `error_message`,
+   * ya está migrada e indexada por `dian_configuration_id`, `action` y
+   * `created_at`. Lo único que faltaba era que `createAuditLog` aceptara esas
+   * columnas — las descartaba por firma, no por esquema. Cero migraciones.
+   *
+   * Por qué por documento y no un resumen: `last_test_result` es un JSON que se
+   * reescribe entero en cada envío, así que el motivo del rechazo del lote
+   * anterior desaparece con el siguiente. Una fila por documento es historia
+   * que ningún reenvío pisa, y es consultable por número y por CUFE.
+   *
+   * Solo los resueltos EN ESTA pasada (`resolved_now`): el cron re-sondea cada
+   * 10-15 min con los veredictos acumulados, y reescribir los mismos 30 rechazos
+   * en cada vuelta convertiría la auditoría en ruido.
+   */
+  private async persistRejectionEvidence(
+    dian_configuration_id: number,
+    verdicts: Record<string, TestSetZipVerdict>,
+    resolved_now: string[],
+    documents_by_zip_key: Record<string, TestSetDocumentRef>,
+  ): Promise<number> {
+    let written = 0;
+    for (const key of resolved_now) {
+      const verdict = verdicts[key];
+      if (!verdict || verdict.success) continue;
+
+      const doc = documents_by_zip_key[key];
+      const rules = rejectionMessages(verdict);
+      await this.createAuditLog(dian_configuration_id, {
+        action: 'test_set_document_rejected',
+        status: 'error',
+        document_type: doc?.kind ?? null,
+        document_number: doc?.number ?? null,
+        // El CUFE del documento que enviamos manda sobre el que nombre el
+        // ApplicationResponse: el primero es el que este sistema puede volver a
+        // consultar con `GetStatus`, el segundo puede venir vacío.
+        cufe: doc?.cufe ?? verdict.document_key ?? null,
+        response_xml: verdict.raw_response ?? null,
+        error_message:
+          `ZipKey ${key} — ${verdict.status_code}: ` +
+          (rules.length ? rules.join(' | ') : verdict.status_message),
+      });
+      written++;
+    }
+    return written;
+  }
+
+  /**
+   * `document_type` y `document_number` son `VarChar(50)` y `cufe` `VarChar(255)`.
+   *
+   * Se recortan aquí y no en cada llamador porque un valor largo no produce un
+   * campo feo: produce un `22001` de Postgres que aborta el INSERT, y este
+   * helper existe justamente para que un fallo de auditoría no tumbe la
+   * operación que audita.
+   */
+  private static clamp(
+    value: string | null | undefined,
+    max: number,
+  ): string | null {
+    if (value === null || value === undefined) return null;
+    const text = String(value);
+    return text.length > max ? text.slice(0, max) : text;
+  }
+
+  /**
+   * Fila de auditoría de una operación DIAN.
+   *
+   * Las columnas de DOCUMENTO son opcionales y se añadieron para QUI-675: la
+   * firma anterior solo aceptaba `{action, status, error_message, duration_ms}`,
+   * así que el detalle del rechazo por documento no tenía dónde ir aunque la
+   * tabla llevara `document_type`, `document_number`, `cufe`, `request_xml` y
+   * `response_xml` desde su migración. Todas son opcionales, así que los
+   * llamadores anteriores no cambian.
+   */
   private async createAuditLog(
     dian_configuration_id: number,
     data: {
@@ -1455,13 +3548,26 @@ export class DianTestService {
       status: string;
       error_message?: string | null;
       duration_ms?: number;
+      /** `invoice` | `debit_note` | `credit_note`. */
+      document_type?: string | null;
+      /** Número con prefijo de resolución, p. ej. `SETP990000230`. */
+      document_number?: string | null;
+      cufe?: string | null;
+      /** El XML FIRMADO que se transmitió. Es la única copia fuera del JSON. */
+      request_xml?: string | null;
+      /** El XML con el que la DIAN contestó, crudo. */
+      response_xml?: string | null;
     },
   ): Promise<void> {
     try {
+      const { document_type, document_number, cufe, ...rest } = data;
       await this.prisma.dian_audit_logs.create({
         data: {
           dian_configuration_id,
-          ...data,
+          ...rest,
+          document_type: DianTestService.clamp(document_type, 50),
+          document_number: DianTestService.clamp(document_number, 50),
+          cufe: DianTestService.clamp(cufe, 255),
         },
       });
     } catch (error) {

@@ -35,6 +35,16 @@ export const DIAN_SOAP_ACTIONS = {
    */
   SendEventUpdateStatus:
     'http://wcf.dian.colombia/IWcfDianCustomerServices/SendEventUpdateStatus',
+  /**
+   * Rangos de numeración AUTORIZADOS que la DIAN tiene registrados para un OFE.
+   *
+   * Es la fuente autoritativa de resolución, prefijo, rango, VIGENCIA y clave
+   * técnica: lo mismo que el portal muestra, pero consultable. Existe porque
+   * transcribir esos datos del portal a mano ya produjo dos defectos —un municipio
+   * de otro pueblo y unas fechas de vigencia que la DIAN rechaza con FAB07b/FAB08b—.
+   */
+  GetNumberingRange:
+    'http://wcf.dian.colombia/IWcfDianCustomerServices/GetNumberingRange',
 } as const;
 
 /**

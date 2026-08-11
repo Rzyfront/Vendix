@@ -42,6 +42,10 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_backend
     restart: unless-stopped
+    # Sin límite, el backend crecía libre (~2.3 GB observados) y empujaba a la
+    # VM al OOM global, cuya víctima siempre acababa siendo `ng serve` por RSS.
+    mem_limit: 2560m
+    memswap_limit: 3g
     env_file:
       - ./apps/backend/.env
     environment:
@@ -72,18 +76,87 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Proceso worker: MISMA imagen, MISMO comando, distinto VENDIX_PROCESS_ROLE.
+  #
+  # QUI-674: los 11 workers de BullMQ y todos los @Cron compartían el event loop
+  # de la API, así que un job CPU-bound (firmar el set de pruebas DIAN) congelaba
+  # el backend entero. Con el rol separado, un worker bloqueado ya no puede
+  # tumbar la API porque no comparte su event loop.
+  #
+  # NO arranca por defecto: pertenece al perfil `split`, así que
+  # `docker compose up -d` sigue levantando el stack de siempre —un solo backend
+  # con todo dentro— y el desarrollo cotidiano no cambia. Para reproducir la
+  # topología de producción:
+  #
+  #   docker compose --profile split up -d backend-worker
+  #   # y en el contenedor `backend`, VENDIX_PROCESS_ROLE=api
+  #
+  # La cola vive en el contenedor `redis`, que ya es compartido, así que el
+  # productor (API) y el consumidor (worker) se encuentran sin más cableado.
+  backend-worker:
+    profiles: ["split"]
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile.dev
+    container_name: vendix_backend_worker
+    restart: unless-stopped
+    # Presupuesto menor que el de la API: no sirve HTTP ni sostiene SSE, pero
+    # carga el MISMO grafo de módulos (cliente Prisma incluido), que es el grueso
+    # del heap en reposo.
+    mem_limit: 1536m
+    memswap_limit: 2g
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
+      NODE_ENV: development
+      NODE_OPTIONS: "--max-old-space-size=1024"
+      CHOKIDAR_USEPOLLING: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VENDIX_PROCESS_ROLE: worker
+    depends_on:
+      - db
+      - redis
+    # Sin `ports`: no hay servidor HTTP que exponer. Es la comprobación más
+    # barata de que el modo worker no abrió un puerto por accidente.
+    volumes:
+      - ./apps/backend:/app
+      - /app/node_modules
+    networks:
+      - vendix_net
+    command: sh -c "npx prisma generate && npm run start:dev"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   frontend:
     build:
       context: ./apps/frontend
       dockerfile: Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
-    mem_limit: 6g
-    memswap_limit: 7g
+    # Presupuesto del contenedor en build en frío, medido en dmesg:
+    #   ng serve (heap V8)  ~2.5 GB
+    #   esbuild (binario Go) ~1.5 GB   <-- NO lo gobierna NODE_OPTIONS
+    #   overhead de Node     ~0.3 GB
+    # Total ~4.3 GB, por eso 4g moría con CONSTRAINT_MEMCG. Requiere VM de
+    # colima con 10 GB (5.5g frontend + 2.5g backend + resto).
+    mem_limit: 5632m
+    memswap_limit: 6656m
     environment:
       - NODE_ENV=development
       - BACKEND_URL=http://api.vendix.com
-      - NODE_OPTIONS=--max-old-space-size=4096
+      # Ojo: este límite lo hereda también el *worker* de compilación de
+      # Angular, no sólo el proceso de ng serve. Con 2048 el worker moría con
+      # "Worker terminated due to reaching memory limit: JS heap out of memory"
+      # y el compiler-plugin quedaba con compilation=null, lo que se manifiesta
+      # como un críptico assert(compilation) en el ciclo siguiente.
+      # 3072 le alcanza y sigue por debajo del 4096 original que dejaba al GC
+      # crecer hasta reventar la VM.
+      - NODE_OPTIONS=--max-old-space-size=3072
       - CHOKIDAR_USEPOLLING="true"
     depends_on:
       - backend

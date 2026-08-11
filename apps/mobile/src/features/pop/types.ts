@@ -76,6 +76,29 @@ export interface PreBulkData {
   /** FK a `units_of_measure` (modo ingrediente). */
   stock_uom_id?: number | null;
   is_sellable?: boolean;
+  /* ============================================================
+   * QUI-648 — Unidad de venta configurada desde la compra
+   * ============================================================
+   * Compro bultos de 50 kg y acá defino que se venden por bulto y por kilo,
+   * sin salir del flujo de compra. El backend
+   * (`purchase-orders.service.ts::persistSaleUnitConfigToProduct`) persiste las
+   * TRES filas de forma coordinada o ninguna: `price_tiers` (kind='sale_unit'),
+   * `product_price_tier_assignments` (el allowlist que consulta la venta) y
+   * `product_price_tier_overrides` (factor + precio).
+   *
+   * Todo el bloque es opcional: sin `sale_unit_name` el backend ni siquiera
+   * entra a la rama, y la orden de compra se comporta exactamente como hoy.
+   */
+  /** Nombre libre de la presentación (Bulto 50 kg, Kilo, Rollo, Metro). */
+  sale_unit_name?: string;
+  /** Unidades de stock que consume UNA unidad de esa presentación. Entero >= 2. */
+  sale_unit_units_per_package?: number;
+  /** Precio de la presentación completa. Gana sobre el margen (cost-anchor). */
+  sale_unit_price?: number;
+  /** Margen (markup sobre el costo del paquete). Se ignora si llega precio. */
+  sale_unit_profit_margin?: number;
+  /** La presentación rige por defecto en TODA superficie de venta. */
+  sale_unit_is_default?: boolean;
 }
 
 export interface PopCartItem {
@@ -201,6 +224,22 @@ export interface PurchaseOrderItemRequest {
   product_name?: string;
   sku?: string;
   product_description?: string;
+  /* ===== Insumo (UoM) — solo para productos NUEVOS creados desde la línea ===== */
+  is_ingredient?: boolean;
+  is_sellable?: boolean;
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+  /**
+   * "Contenido por envase": factor manual compra→stock cuando las dimensiones
+   * no son convertibles por catálogo (una bolsita → 250 g).
+   */
+  purchase_to_stock_factor?: number;
+  /* ===== Unidad de venta (QUI-648) ===== */
+  sale_unit_name?: string;
+  sale_unit_units_per_package?: number;
+  sale_unit_price?: number;
+  sale_unit_profit_margin?: number;
+  sale_unit_is_default?: boolean;
 }
 
 export interface CreatePurchaseOrderRequest {

@@ -12,6 +12,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { IconComponent } from '../../../shared/components/icon/icon.component';
+import { ActiveTenantContextService } from '../../../core/services/active-tenant-context.service';
 // S1.2 — SubscriptionBannerComponent removed from SUPER_ADMIN. The banner is
 // store-scoped only and never makes sense in the platform-level layout.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
@@ -31,6 +33,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
     HeaderComponent,
     PaywallOutletComponent,
     FiscalGateOutletComponent,
+    IconComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -66,6 +69,61 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
         <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
 
+        <!--
+          Banner de tenant activo.
+
+          Va FUERA del <main> con scroll a propósito: mientras el super admin
+          esté operando sobre la ficha de un cliente, la señal no puede
+          desaparecer al bajar la página. Esta pantalla es visualmente idéntica
+          al panel de una tienda y al de la plataforma, y quien se confunda
+          sube el certificado digital de un cliente a la ficha de otro.
+        -->
+        @if (activeTenant(); as tenant) {
+          <div
+            class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-300 bg-amber-100 px-3 py-1.5 text-amber-950 md:px-6"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="flex flex-shrink-0 items-center gap-1.5">
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="text-amber-700"
+              ></app-icon>
+              <span class="text-[11px] font-bold uppercase tracking-wide">
+                Operando sobre un tenant
+              </span>
+            </span>
+
+            <span class="min-w-0 flex-1 truncate text-sm">
+              <strong class="font-semibold">{{ tenant.label }}</strong>
+              @if (tenant.organizationName) {
+                <span class="text-amber-800">
+                  · {{ tenant.organizationName }}
+                </span>
+              }
+              <span class="text-xs text-amber-800">
+                ·
+                {{
+                  tenant.scope === 'stores' ? 'Tienda' : 'Organización'
+                }}
+                #{{ tenant.tenantId }}
+              </span>
+              @if (tenant.resolving) {
+                <span class="text-xs italic text-amber-700">· cargando…</span>
+              }
+            </span>
+
+            <a
+              [routerLink]="tenant.exitRoute"
+              class="flex flex-shrink-0 items-center gap-1 rounded-md border border-amber-400 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-200"
+            >
+              <app-icon name="log-out" [size]="14"></app-icon>
+              Salir del tenant
+            </a>
+          </div>
+        }
+
         <!-- Page Content (Scrollable) -->
         <main
           class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -93,6 +151,15 @@ export class SuperAdminLayoutComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly supportService = inject(SupportService);
   private readonly router = inject(Router);
+  private readonly activeTenantContext = inject(ActiveTenantContextService);
+
+  /**
+   * Tenant sobre el que se está operando ahora mismo, o `null`.
+   *
+   * Lo publica el guard del perfil y lo apaga el shell al destruirse, así que
+   * el layout no necesita saber nada de rutas para decidir si pinta el banner.
+   */
+  readonly activeTenant = this.activeTenantContext.context;
 
   readonly currentVlink = 'super-admin';
   readonly platformTitle = 'Vendix Platform';

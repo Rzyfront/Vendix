@@ -57,7 +57,13 @@ export interface PriceResolutionResult {
  */
 export interface PriceResolverWithTierParams {
   product: PriceResolverParams['product'];
-  variant?: PriceResolverParams['variant'];
+  /**
+   * El `id` es necesario para elegir la fila de override de ESTA variante.
+   * Es opcional por compatibilidad con el tipo de la cascada legacy; cuando no
+   * llega, el lookup cae a la fila base del producto (modo conservador) en vez
+   * de tomar la fila de otra variante.
+   */
+  variant?: PriceResolverParams['variant'] & { id?: number };
   priceTier?: {
     id: number;
     name: string;
@@ -333,15 +339,23 @@ export class PriceResolverService {
           override_units_per_package?: number | null;
         }
       | undefined;
-    if (variant) {
+    // La fila de la variante se elige comparando su `variant_id` real. Antes se
+    // tomaba la PRIMERA fila con `variant_id` no nulo, así que un producto con
+    // overrides para varias variantes resolvía el precio de la variante
+    // equivocada; los callers lo tapaban pre-filtrando el array, y el tipo no
+    // obligaba a hacerlo. Sin `id` disponible se cae a la fila base, que es el
+    // modo de fallo conservador.
+    const variantIdNum =
+      variant?.id != null && Number.isFinite(Number(variant.id))
+        ? Number(variant.id)
+        : null;
+    if (variantIdNum != null) {
       overrideRow = overrides.find(
-        (o) => o.variant_id !== null && o.variant_id !== undefined,
+        (o) => o.variant_id != null && Number(o.variant_id) === variantIdNum,
       );
     }
     if (!overrideRow) {
-      overrideRow = overrides.find(
-        (o) => o.variant_id === null || o.variant_id === undefined,
-      );
+      overrideRow = overrides.find((o) => o.variant_id == null);
     }
 
     // packSize cascade: override ?? tier ?? 1. When packSize === 1 every

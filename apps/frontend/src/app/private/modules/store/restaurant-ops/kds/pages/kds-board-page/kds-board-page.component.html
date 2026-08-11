@@ -1,11 +1,29 @@
-<div class="kds-board">
+<!--
+  `#boardRoot` es el elemento que se promueve al top layer con la Fullscreen API.
+  `is-fullscreen` solo se aplica en el respaldo `fixed`, cuando el navegador
+  rechazo la API — ver `toggleFullscreen`.
+-->
+<div
+  class="kds-board"
+  #boardRoot
+  [class.is-fullscreen]="fixedFallback()"
+>
   <!-- Header -->
   <app-sticky-header
     title="KDS — Pantalla de Cocina"
     subtitle="Tickets activos en tiempo real"
     icon="flame"
     variant="glass"
+    [tabs]="headerTabs"
+    [activeTab]="'board'"
+    tabsAriaLabel="Secciones del KDS"
     [actions]="[
+      {
+        id: 'fullscreen',
+        label: isFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa',
+        icon: isFullscreen() ? 'minimize' : 'maximize',
+        variant: 'ghost',
+      },
       {
         id: 'refresh',
         label: 'Refrescar',
@@ -22,6 +40,20 @@
     ]"
     (actionClicked)="onHeaderAction($event)"
   >
+    <!--
+      QUI-651 — quien tiene el turno abierto en ESTA estacion. Antes el unico rastro
+      de sesion era el modal de apertura: el cocinero abria turno y despues no tenia
+      forma de saber si seguia abierto ni de cerrarlo desde el tablero.
+    -->
+    @if (stationsService.openSession(); as session) {
+      <app-badge slot="badge" variant="success" size="sm" badgeStyle="outline">
+        <app-icon name="chef-hat" [size]="12" />
+        Turno de
+        {{ session.opened_by_user?.first_name ?? 'operador' }}
+        · {{ session.opened_at | date: 'shortTime' }}
+      </app-badge>
+    }
+
     <app-badge
       slot="badge"
       [variant]="isManualMode() ? 'warning' : connectionVariant()"
@@ -36,6 +68,70 @@
       {{ modeLabel() }}
     </app-badge>
   </app-sticky-header>
+
+  <!--
+    QUI-651 — SELECCION DE ESTACION. Solo aparece cuando la tienda tiene mas de una
+    estacion activa Y todavia no se eligio: con una sola se entra directo al
+    tablero, que es el caso de la mayoria de los restaurantes y no debe costar un
+    clic extra.
+  -->
+  @if (stationsService.needsStationChoice() && stationsService.selectedStationId() === null) {
+    <div class="kds-station-picker">
+      <!--
+        Se puede entrar a pantalla completa ESTANDO en el picker: el botón vive en
+        el sticky header, que en el picker todavía se dibuja. Sin esta salida aquí,
+        ocultar el header dejaría al operador sin ningún control para volver,
+        porque la barra de turno solo existe en la otra rama.
+      -->
+      @if (isFullscreen()) {
+        <button
+          type="button"
+          class="kds-station-picker__exit"
+          title="Salir de pantalla completa"
+          aria-label="Salir de pantalla completa"
+          (click)="exitFullscreen()"
+        >
+          <app-icon name="minimize" [size]="14" />
+          Salir de pantalla completa
+        </button>
+      }
+      <h2 class="kds-station-picker__title">¿En qué estación vas a trabajar?</h2>
+      <p class="kds-station-picker__hint">
+        Cada tablero muestra solo los tickets de su estación.
+      </p>
+      <div class="kds-station-picker__grid">
+        @for (station of stationsService.activeStations(); track station.id) {
+          <button
+            type="button"
+            class="kds-station-card"
+            (click)="selectStation(station.id)"
+          >
+            <app-icon name="chef-hat" [size]="22" />
+            <span class="kds-station-card__name">{{ station.name }}</span>
+            <span class="kds-station-card__code">{{ station.code }}</span>
+            @if (station.is_default) {
+              <app-badge variant="primary">Por defecto</app-badge>
+            }
+          </button>
+        }
+      </div>
+    </div>
+  } @else {
+
+  <!--
+    QUI-651 — barra de turno, espejo de la de caja en el POS. Dice en que estacion
+    estas, quien tiene el turno y desde cuando, y ofrece cerrarlo sin salir del
+    tablero. Cuando no hay turno lo dice en vez de desaparecer: una barra ausente
+    no distingue "sin turno" de "no cargo".
+  -->
+  <app-kds-session-status-bar
+    [session]="stationsService.openSession()"
+    [station]="stationsService.selectedStation()"
+    [canExitFullscreen]="isFullscreen()"
+    (closeClicked)="onHeaderAction('close-session')"
+    (detailClicked)="openSessionSummary()"
+    (exitFullscreenClicked)="exitFullscreen()"
+  />
 
   @if (lastError()) {
     <div class="kds-board__error" role="alert">
@@ -122,4 +218,132 @@
     (createRecipeClicked)="onCreateRecipe($event)"
     (closed)="closeDetail()"
   />
+
+  <!--
+    QUI-651 — gate de turno. El tablero se LEE sin turno abierto; gestionar un
+    ticket consume inventario y genera COGS, y eso necesita un responsable. Misma
+    convencion que caja: la sesion se exige AL ACTUAR, no al entrar.
+
+    Nada se muto al llegar aca: la accion quedo pendiente y se reintenta sola tras
+    abrir el turno, para que el operador no tenga que volver a buscar el ticket.
+  -->
+  <!--
+    QUI-655 — confirmacion de ticket antes de cocinar. Muestra cada platillo con su
+    receta y lo que ya venia quitado, TACHADO.
+  -->
+  <app-kitchen-confirm-modal
+    [isOpen]="cookConfirmOpen()"
+    [preview]="cookPreview()"
+    [isLoading]="cookPreviewLoading()"
+    [initialExclusions]="cookSeed()"
+    mode="cook"
+    (confirmed)="onCookConfirmed($event)"
+    (cancelled)="onCookCancelled()"
+  />
+
+  <!--
+    QUI-651 — resumen del turno ACTUAL, en modal. Sacar al cocinero del tablero para
+    ver su propio turno es perder el contexto de la cocina mientras la opera.
+  -->
+  <app-modal
+    [isOpen]="sessionSummaryOpen()"
+    size="lg"
+    title="Mi turno"
+    [showCloseButton]="true"
+    (cancel)="closeSessionSummary()"
+  >
+    <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
+
+    @if (stationsService.openSession(); as s) {
+      <p class="kds-sum-head">
+        <strong>{{
+          s.kds?.name ?? stationsService.selectedStation()?.name ?? 'Estación'
+        }}</strong>
+        · {{ s.opened_by_user?.first_name }} {{ s.opened_by_user?.last_name }}
+        · desde {{ s.opened_at | date: 'shortTime' }}
+      </p>
+    }
+
+    @if (loadingSessionSummary()) {
+      <p class="kds-sum-empty">Cargando consumo…</p>
+    } @else if (sessionSummary(); as sum) {
+      @if (sum.ingredients.length === 0) {
+        <p class="kds-sum-empty">Este turno todavía no consumió insumos.</p>
+      } @else {
+        <h4 class="kds-sum-title">Resumen por insumo</h4>
+        <ul class="kds-sum-list">
+          @for (ing of sum.ingredients; track ing.product_id) {
+            <li>
+              <span>{{ ing.name }}</span>
+              <span>{{ ing.quantity }}</span>
+              <span>{{ ing.total_cost | currency }}</span>
+            </li>
+          }
+        </ul>
+        <p class="kds-sum-total">
+          Total del turno: <strong>{{ sum.total_cost | currency }}</strong>
+          · {{ sum.movement_count }} movimiento(s)
+        </p>
+
+        <!-- El detalle por pedido es lo que explica de dónde salió cada peso del
+             resumen; sin él el total es un número que hay que creer. -->
+        @if (sessionHistory().length > 0) {
+          <h4 class="kds-sum-title">Detalle por pedido</h4>
+          <ul class="kds-sum-list">
+            @for (r of sessionHistory(); track r.transaction_id) {
+              <li>
+                <span>{{ r.order_number ?? '—' }} · {{ r.dish_name ?? '—' }}</span>
+                <span>{{ r.quantity }}</span>
+                <span>{{ +(r.total_cost ?? 0) | currency }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+    }
+
+    <app-button slot="footer" variant="secondary" (clicked)="closeSessionSummary()">
+      Cerrar
+    </app-button>
+  </app-modal>
+
+  <app-modal
+    [isOpen]="sessionGateOpen()"
+    size="sm"
+    title="Abrir turno de estación"
+    [showCloseButton]="true"
+    (cancel)="cancelOpenSession()"
+  >
+    <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
+
+    <div class="session-gate">
+      <p>
+        Para gestionar tickets de
+        <strong>{{ stationsService.selectedStation()?.name ?? 'esta estación' }}</strong>
+        necesitas un turno abierto.
+      </p>
+      <p class="session-gate-why">
+        El turno registra quién consumió los insumos de la estación, no solo quién
+        pidió que se cocine.
+      </p>
+    </div>
+
+    <app-button
+      slot="footer"
+      variant="secondary"
+      (clicked)="cancelOpenSession()"
+      [disabled]="openingSession()"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      slot="footer"
+      variant="primary"
+      [loading]="openingSession()"
+      (clicked)="confirmOpenSession()"
+    >
+      Abrir turno
+    </app-button>
+  </app-modal>
+  }
 </div>

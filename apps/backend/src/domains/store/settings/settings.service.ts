@@ -29,6 +29,11 @@ import {
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import {
+  buildTenantFiscalColumns,
+  mergeFiscalData,
+} from '@common/helpers/organization-fiscal-columns.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import {
   SETTINGS_TRANSITION_GUARDS,
@@ -40,7 +45,7 @@ import {
  * Top-level keys retained when sanitizing an incoming settings payload.
  * Anything else is dropped and logged. Order does not matter.
  */
-const KNOWN_SECTIONS = [
+export const KNOWN_SECTIONS = [
   'general',
   'inventory',
   'checkout',
@@ -63,6 +68,17 @@ const KNOWN_SECTIONS = [
   // Appointment redesign phase 2: reschedule policy (directo vs aprobación)
   // and per-product home service eligibility live here.
   'reservations',
+  // Slot generation fallback (`AvailabilitySettings.working_days`). Declared in
+  // `StoreSettings` and validated by `UpdateSettingsDto`, but it was missing
+  // here, so a PATCH over it was dropped by the sanitizer and answered 200 with
+  // the previous value: the caller had no way to know the write never landed.
+  'availability',
+  // @deprecated — el camino nuevo es `module_flows.accounting`; esta clave sólo
+  // se conserva como alias legacy (`updateSettings` la sincroniza hacia
+  // `module_flows`). Se lista igualmente porque dejar de mentir con un 200 no
+  // puede depender de si la clave está deprecada: sin esto el alias se descarta
+  // en silencio en vez de aplicarse o rechazarse.
+  'accounting_flows',
   // Vexi's store-wide master switch. Must be listed here or the sanitizer
   // drops `{ vexi: { enabled: false } }` before validation and the endpoint
   // answers 200 with the old value — a switch that silently refuses to move.
@@ -370,12 +386,18 @@ export class SettingsService {
       store_id,
     );
 
-    // El interruptor de Vexi es exclusivo de propietario y administrador, y eso
+    // La configuración de Vexi es exclusiva de propietario y administrador, y eso
     // tiene que decidirse acá. `store:settings:update` — el permiso que protege
     // este endpoint — también lo tienen `manager` y `Preventista`, así que el
     // guard de permisos no alcanza: sin esta comprobación, un manager apaga la
     // asistente de toda la tienda con un curl aunque el panel le oculte la
     // opción. Ocultar una UI no es restringir una capacidad.
+    //
+    // La compuerta cubre la sección ENTERA, no sólo `enabled`. `voice_engine`
+    // también entra por acá, y con razón: el pipeline es el único motor que puede
+    // ejecutar escrituras con confirmación, así que elegirlo amplía lo que la
+    // asistente puede hacer sobre los datos de la tienda. Es la misma decisión
+    // que encenderla.
     if (dto.vexi !== undefined) {
       const roles = RequestContextService.getRoles();
       const puedeConfigurarVexi = roles.some((role) =>
@@ -386,7 +408,7 @@ export class SettingsService {
       if (!puedeConfigurarVexi) {
         throw new VendixHttpException(
           ErrorCodes.SYS_FORBIDDEN_001,
-          'Solo el propietario o un administrador de la tienda pueden activar o desactivar a Vexi.',
+          'Solo el propietario o un administrador de la tienda pueden configurar a Vexi.',
         );
       }
     }
@@ -499,6 +521,24 @@ export class SettingsService {
       if (dto[key as keyof UpdateSettingsDto] !== undefined) {
         (updatedSettings as any)[key] = dto[key as keyof UpdateSettingsDto];
       }
+    }
+
+    // `vexi` se mezcla por clave, no por sección.
+    //
+    // El bucle de arriba REEMPLAZA la sección completa, que es lo correcto para
+    // secciones que se editan enteras desde una sola pantalla. `vexi` no es una
+    // de esas: el interruptor maestro manda `{ vexi: { enabled } }` y el selector
+    // de motor manda `{ vexi: { voice_engine } }`, cada uno desde su propio
+    // control. Con reemplazo de sección, tocar el interruptor borraba el
+    // `voice_engine` que el dueño había elegido y la tienda volvía al default sin
+    // avisar — la clase de fallo que ya se pagó en `ai_feature_flags`, donde un
+    // normalizador que reconstruía el objeto entero borraba la clave que no
+    // conocía. Un PATCH parcial no debe destruir lo que no menciona.
+    if (dto.vexi !== undefined) {
+      (updatedSettings as any).vexi = {
+        ...((currentSettings as any).vexi ?? {}),
+        ...dto.vexi,
+      };
     }
 
     // @deprecated: Sync bidireccional eliminada. module_flows es source of truth.
@@ -1096,7 +1136,7 @@ export class SettingsService {
           }),
         this.prisma.withoutScope().organizations.findUnique({
           where: { id: organization_id },
-          select: { legal_name: true, tax_id: true },
+          select: { legal_name: true, tax_id: true, name: true },
         }),
       ]);
       const orgFiscal = ((orgSettings?.settings as any)?.fiscal_data ??
@@ -1106,19 +1146,50 @@ export class SettingsService {
       const orgTaxIdDv = orgFiscal.tax_id_dv ?? orgFiscal.nit_dv;
       const orgNitType = orgFiscal.nit_type;
 
+      // Antes del paso 5 del plan, este return vivía con su propia cascada de
+      // respaldos store→org. Esa cascada podía divergir de la del resolvedor
+      // único (ej: `nit_dv` se concatenaba al NIT sin re-derivar). El
+      // resolvedor decide precedencias — `fiscal_data` gana a la columna — y
+      // expone un contrato ancho con campos crudos; lo proyectamos a la forma
+      // que el formulario de tienda espera.
+      // Esta es una superficie de LECTURA: el GET que llena el formulario fiscal
+      // del wizard. Se usa el resolvedor PERMISIVO, no el estricto envuelto en
+      // try/catch: el tenant abre este formulario justamente porque le faltan
+      // datos, así que un campo ausente es el estado NORMAL aquí, no una
+      // excepción. Con el estricto había que atrapar el throw para no romper el
+      // GET — control de flujo por excepción para un caso esperado.
+      // Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
+      const { identity } = tryResolveTenantFiscalIdentity({
+        nit: (orgTaxId as string) ?? '',
+        fiscal_data: orgFiscal,
+        organization: organization
+          ? { legal_name: organization.legal_name, name: organization.name }
+          : null,
+      });
+      // Los campos que el resolvedor no pudo resolver llegan vacíos, así que la
+      // cascada previa sigue actuando como respaldo con un `||` explícito.
+      const resolvedLegalName: unknown =
+        identity.legal_name || storeLevel.legal_name;
+      const resolvedNit: unknown =
+        identity.nit || storeLevel.tax_id || storeLevel.nit;
+      const resolvedNitDv: unknown =
+        identity.nit_dv || storeLevel.tax_id_dv || storeLevel.nit_dv;
+      const resolvedNitType: unknown =
+        identity.nit_type || storeLevel.nit_type;
+
       return {
         ...storeLevel,
         legal_name: blank(storeLevel.legal_name)
-          ? orgLegalName
+          ? resolvedLegalName
           : storeLevel.legal_name,
-        nit: blank(storeLevel.nit) ? orgTaxId : storeLevel.nit,
-        nit_dv: blank(storeLevel.nit_dv) ? orgTaxIdDv : storeLevel.nit_dv,
-        tax_id: blank(storeLevel.tax_id) ? orgTaxId : storeLevel.tax_id,
+        nit: blank(storeLevel.nit) ? resolvedNit : storeLevel.nit,
+        nit_dv: blank(storeLevel.nit_dv) ? resolvedNitDv : storeLevel.nit_dv,
+        tax_id: blank(storeLevel.tax_id) ? resolvedNit : storeLevel.tax_id,
         tax_id_dv: blank(storeLevel.tax_id_dv)
-          ? orgTaxIdDv
+          ? resolvedNitDv
           : storeLevel.tax_id_dv,
         nit_type: blank(storeLevel.nit_type)
-          ? orgNitType
+          ? resolvedNitType
           : storeLevel.nit_type,
       } as StoreSettings['fiscal_data'];
     }
@@ -1166,32 +1237,23 @@ export class SettingsService {
     const currentSettings = mergeStoreSettingsWithDefaults(existing?.settings);
     const previousFiscalData = currentSettings.fiscal_data ?? {};
 
-    const nextFiscalData = {
-      ...previousFiscalData,
-      ...dto,
-    };
-    const legal_name =
-      typeof dto.legal_name === 'string' ? dto.legal_name.trim() : undefined;
-    const tax_id =
-      typeof dto.tax_id === 'string'
-        ? dto.tax_id.trim()
-        : typeof dto.nit === 'string'
-          ? dto.nit.trim()
-          : undefined;
-    const tax_id_dv =
-      typeof dto.tax_id_dv === 'string'
-        ? dto.tax_id_dv.trim()
-        : typeof dto.nit_dv === 'string'
-          ? dto.nit_dv.trim()
-          : undefined;
-    const nit_type =
-      typeof dto.nit_type === 'string' ? dto.nit_type.trim() : undefined;
-    const municipality_code =
-      typeof dto.municipality_code === 'string'
-        ? dto.municipality_code.trim()
-        : undefined;
-    const ciiu_code =
-      typeof dto.ciiu_code === 'string' ? dto.ciiu_code.trim() : undefined;
+    // Fusión superficial centralizada en `mergeFiscalData` (ver §"Approach
+    // Chosen" del plan de identidad fiscal SSOT). Antes este spread se hacía
+    // inline — mismo resultado, pero el nombre no declaraba la intención.
+    const nextFiscalData = mergeFiscalData(
+      previousFiscalData as Record<string, unknown>,
+      dto,
+    );
+
+    // Proyección única de columnas del alcance tienda vía
+    // `buildTenantFiscalColumns`. Antes este bloque inlineaba la lectura de cada
+    // campo del DTO y la escritura de cada columna, así que el mismo payload
+    // podía producir columnas distintas si el orden o el saneado cambiaban.
+    const storeColumns = buildTenantFiscalColumns(
+      'store',
+      dto,
+      nextFiscalData,
+    );
 
     const updatedSettings: StoreSettings = {
       ...currentSettings,
@@ -1211,20 +1273,12 @@ export class SettingsService {
         },
       });
 
-      await tx.stores.update({
-        where: { id: store_id },
-        data: {
-          ...(legal_name !== undefined && { legal_name: legal_name || null }),
-          ...(tax_id !== undefined && { tax_id: tax_id || null }),
-          ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
-          ...(nit_type !== undefined && { nit_type: nit_type || null }),
-          ...(municipality_code !== undefined && {
-            municipality_code: municipality_code || null,
-          }),
-          ...(ciiu_code !== undefined && { ciiu_code: ciiu_code || null }),
-          updated_at: new Date(),
-        },
-      });
+      if (Object.keys(storeColumns).length > 0) {
+        await tx.stores.update({
+          where: { id: store_id },
+          data: { ...storeColumns, updated_at: new Date() },
+        });
+      }
     });
 
     try {

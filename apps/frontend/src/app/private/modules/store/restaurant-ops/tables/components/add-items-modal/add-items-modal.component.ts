@@ -30,6 +30,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import { ProductsService } from '../../../../products/services/products.service';
+import { TablesService } from '../../services/tables.service';
 import {
   TableSessionAddItem,
   SellableProductOption,
@@ -66,6 +67,7 @@ import {
 export class AddItemsModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly productsService = inject(ProductsService);
+  private readonly tablesService = inject(TablesService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -165,6 +167,98 @@ export class AddItemsModalComponent {
     return this.selectedQty().get(productId) ?? 0;
   }
 
+  /**
+   * QUI-653 — productos marcados "para llevar" en esta tanda.
+   *
+   * Se lleva en un Set aparte y NO dentro de `selectedQty`, porque son dos
+   * dimensiones independientes: la cantidad decide si la línea existe, el flag
+   * decide cómo se entrega. Mezclarlos obligaría a un Map de objetos y a
+   * reconstruirlo en cada `bumpQty`.
+   *
+   * El flag aplica a TODA la línea. Marcar solo algunas unidades de una línea
+   * con cantidad > 1 exigiría partir la línea, que es el eje de QUI-655 y no de
+   * este ticket.
+   */
+  readonly takeawayIds = signal<Set<number>>(new Set());
+
+  /**
+   * QUI-655 — "sin papas" capturado AL PEDIR, por producto.
+   *
+   * Es la INTENCION del cliente, no el consumo: el KDS la muestra tachada y el
+   * cocinero decide al confirmar. Se guarda por `product_id` porque en este punto
+   * la linea de pedido todavia no existe.
+   */
+  readonly excludedByProduct = signal<Map<number, Set<number>>>(new Map());
+  /** Receta cargada del producto cuyo picker esta abierto. */
+  readonly recipeProductId = signal<number | null>(null);
+  readonly recipeItems = signal<
+    Array<{ component_product_id: number; name: string; quantity: string | number }>
+  >([]);
+  readonly loadingRecipe = signal(false);
+
+  /**
+   * Abre el picker de insumos de un plato. Se carga la receta on-demand y no al
+   * listar: pedir la receta de cada producto del catalogo seria N llamadas para una
+   * captura que la mayoria de las veces nadie usa.
+   */
+  openRecipePicker(product: SellableProductOption): void {
+    if (this.recipeProductId() === product.id) {
+      this.recipeProductId.set(null);
+      return;
+    }
+    this.recipeProductId.set(product.id);
+    this.recipeItems.set([]);
+    this.loadingRecipe.set(true);
+    this.tablesService
+      .getRecipeByProduct(product.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (items) => {
+          this.recipeItems.set(items);
+          this.loadingRecipe.set(false);
+        },
+        error: () => {
+          // Sin receta activa no hay nada que excluir: se cierra en silencio en vez
+          // de mostrar un error por algo que es un caso normal.
+          this.loadingRecipe.set(false);
+          this.recipeProductId.set(null);
+        },
+      });
+  }
+
+  isComponentExcluded(productId: number, componentId: number): boolean {
+    return this.excludedByProduct().get(productId)?.has(componentId) === true;
+  }
+
+  toggleComponent(productId: number, componentId: number): void {
+    this.excludedByProduct.update((prev) => {
+      const next = new Map(prev);
+      const set = new Set(next.get(productId) ?? []);
+      if (set.has(componentId)) set.delete(componentId);
+      else set.add(componentId);
+      if (set.size === 0) next.delete(productId);
+      else next.set(productId, set);
+      return next;
+    });
+  }
+
+  excludedCountFor(productId: number): number {
+    return this.excludedByProduct().get(productId)?.size ?? 0;
+  }
+
+  isTakeaway(productId: number): boolean {
+    return this.takeawayIds().has(productId);
+  }
+
+  toggleTakeaway(product: SellableProductOption): void {
+    this.takeawayIds.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(product.id)) next.delete(product.id);
+      else next.add(product.id);
+      return next;
+    });
+  }
+
   increment(product: SellableProductOption): void {
     this.bumpQty(product, 1);
   }
@@ -181,7 +275,20 @@ export class AddItemsModalComponent {
   onSubmit(): void {
     const items: TableSessionAddItem[] = [];
     for (const [productId, qty] of this.selectedQty()) {
-      if (qty > 0) items.push({ product_id: productId, quantity: qty });
+      if (qty > 0)
+        items.push({
+          product_id: productId,
+          quantity: qty,
+          // Solo se envía cuando está marcado: el backend ya tiene default
+          // false, y mandar `false` explícito en cada línea ensucia el payload
+          // sin cambiar nada.
+          ...(this.isTakeaway(productId) && { is_takeaway: true }),
+          // Solo se manda cuando hay algo excluido: el backend trata la ausencia
+          // como "receta completa".
+          ...(this.excludedCountFor(productId) > 0 && {
+            excluded_component_ids: [...this.excludedByProduct().get(productId)!],
+          }),
+        });
     }
     if (items.length === 0) {
       this.toastService.error('Agrega al menos un producto con cantidad > 0');
@@ -203,6 +310,13 @@ export class AddItemsModalComponent {
   // --- Private helpers ---------------------------------------------------
   private resetAndLoad(): void {
     this.selectedQty.set(new Map());
+    // QUI-653 — sin esto un "para llevar" de la tanda anterior sobrevive al
+    // cierre y se filtra a la siguiente, marcando un plato que nadie pidió así.
+    this.takeawayIds.set(new Set());
+    // Sin esto una exclusion de la tanda anterior se filtra y se captura un "sin
+    // papas" que nadie pidio en ESTE pedido.
+    this.excludedByProduct.set(new Map());
+    this.recipeProductId.set(null);
     this.productById.set(new Map());
     this.searchTerm.set('');
     this.form.controls.search.setValue('', { emitEvent: false });
@@ -217,6 +331,21 @@ export class AddItemsModalComponent {
     const map = new Map(this.selectedQty());
     if (next === 0) {
       map.delete(product.id);
+      // QUI-653 — al sacar el producto de la selección se limpia su flag. Si no,
+      // volver a agregarlo lo traeria marcado "para llevar" sin que nadie lo
+      // pidiera: la linea seria nueva pero el flag viejo.
+      this.takeawayIds.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Set(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
+      this.excludedByProduct.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Map(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
     } else {
       map.set(product.id, next);
     }

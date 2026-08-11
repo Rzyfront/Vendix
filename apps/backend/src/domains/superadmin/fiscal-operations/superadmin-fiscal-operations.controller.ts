@@ -117,7 +117,7 @@ export class SuperadminFiscalOperationsController {
       accounting_entity: { id: platform.accounting_entity_id },
     };
 
-    return RequestContextService.run(
+    return RequestContextService.runIsolated(
       {
         user_id: undefined,
         organization_id: platform.organization_id,

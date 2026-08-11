@@ -129,12 +129,10 @@
     ></app-store-edit-modal>
   }
 
-  @defer (when isSettingsModalOpen()) {
-    <app-store-settings-modal
-      [(isOpen)]="isSettingsModalOpen"
-      [isSubmitting]="isUpdatingSettings()"
-      [settings]="selectedStoreForSettings()?.settings"
-      (submit)="updateStoreSettings($event)"
-    ></app-store-settings-modal>
-  }
+  <!--
+    Aquí vivía `<app-store-settings-modal>`. Su guardado apuntaba a
+    `PATCH /superadmin/stores/:id/settings`, que el backend nunca publicó: el
+    modal siempre acababa en 404. La acción de fila "Configuración DIAN" lleva
+    ahora a la ficha de tenant, que sí tiene endpoints detrás.
+  -->
 </div>

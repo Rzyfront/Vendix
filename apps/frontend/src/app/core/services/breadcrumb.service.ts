@@ -240,15 +240,44 @@ export class BreadcrumbService {
       title: 'Crear Organización',
       parent: 'Organizaciones',
     },
+    // Ficha de tenant de una organización. `matchesRoute` exige el MISMO número
+    // de segmentos que el patrón, así que una entrada genérica
+    // `/super-admin/organizations/:id` nunca casaría con
+    // `/super-admin/organizations/12/general`: hay que declarar una entrada por
+    // pestaña. No existe entrada `:id/edit` porque el router nunca registró esa
+    // ruta — la edición se hace desde el modal del directorio.
     {
       path: '/super-admin/organizations/:id',
-      title: 'Detalles',
+      title: 'Ficha de la organización',
       parent: 'Organizaciones',
     },
     {
-      path: '/super-admin/organizations/:id/edit',
-      title: 'Editar',
-      parent: 'Organizaciones',
+      path: '/super-admin/organizations/:id/general',
+      title: 'General',
+      parent: 'Ficha de la organización',
+    },
+    {
+      path: '/super-admin/organizations/:id/activity',
+      title: 'Actividad',
+      parent: 'Ficha de la organización',
+    },
+    {
+      path: '/super-admin/organizations/:id/configuration',
+      title: 'Configuración del tenant',
+      parent: 'Ficha de la organización',
+    },
+    {
+      path: '/super-admin/organizations/:id/subscription',
+      title: 'Suscripción del tenant',
+      parent: 'Ficha de la organización',
+    },
+    {
+      // El título NO puede ser "Tiendas": `resolveParentChain` resuelve el padre
+      // por título y esta entrada precede a `/super-admin/stores`, así que se lo
+      // robaría como padre de la ficha de tienda.
+      path: '/super-admin/organizations/:id/stores',
+      title: 'Tiendas de la organización',
+      parent: 'Ficha de la organización',
     },
     {
       path: '/super-admin/users',
@@ -290,11 +319,33 @@ export class BreadcrumbService {
       title: 'Crear Tienda',
       parent: 'Tiendas',
     },
-    { path: '/super-admin/stores/:id', title: 'Detalles', parent: 'Tiendas' },
+    // Ficha de tenant de una tienda: una entrada por pestaña, por la misma
+    // razón de conteo de segmentos que en organizaciones. Tampoco hay
+    // `:id/edit`: esa ruta nunca existió en el router.
     {
-      path: '/super-admin/stores/:id/edit',
-      title: 'Editar',
+      path: '/super-admin/stores/:id',
+      title: 'Ficha de la tienda',
       parent: 'Tiendas',
+    },
+    {
+      path: '/super-admin/stores/:id/general',
+      title: 'General',
+      parent: 'Ficha de la tienda',
+    },
+    {
+      path: '/super-admin/stores/:id/activity',
+      title: 'Actividad',
+      parent: 'Ficha de la tienda',
+    },
+    {
+      path: '/super-admin/stores/:id/configuration',
+      title: 'Configuración del tenant',
+      parent: 'Ficha de la tienda',
+    },
+    {
+      path: '/super-admin/stores/:id/subscription',
+      title: 'Suscripción del tenant',
+      parent: 'Ficha de la tienda',
     },
     {
       path: '/super-admin/products',
@@ -1335,6 +1386,27 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/settings/general',
+      title: 'General',
+      parent: 'Configuración',
+      icon: 'sliders',
+    },
+    // Configuración General pasó de una pantalla única a seis pestañas con ruta
+    // propia, y `findRouteMatch` exige coincidencia exacta antes de probar
+    // patrones: una URL de 4 segmentos NO cae en la entrada de 3 de arriba, así
+    // que sin esto las seis pestañas mostraban el breadcrumb por defecto
+    // ("Panel Principal / Dashboard").
+    //
+    // Es UNA entrada con patrón y no seis literales a propósito. `parent` se
+    // resuelve por TÍTULO con un `find`, y hay seis entradas tituladas 'General'
+    // y cinco 'Configuración': un `parent: 'General'` en las pestañas encontraba
+    // primero la de `/organization/settings/general` y la miga terminaba
+    // enlazando al panel de organización. Repitiendo título y padre de la
+    // entrada de arriba, la miga queda "Configuración / General" igual que
+    // cuando era una sola pantalla, sin introducir ambigüedad nueva. La pestaña
+    // concreta ya se ve en las pestañas del sticky-header y en el `title` del
+    // documento, que cada ruta hija declara.
+    {
+      path: '/admin/settings/general/:tab',
       title: 'General',
       parent: 'Configuración',
       icon: 'sliders',

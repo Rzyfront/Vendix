@@ -8,13 +8,38 @@ export type PlanBillingCycle =
   | 'annual'
   | 'lifetime';
 
+/**
+ * Must stay in sync with `AIFeatureKey` in
+ * `apps/backend/src/domains/store/subscriptions/types/access.types.ts`, which is
+ * what the subscription gate actually evaluates. A key the backend gates on but
+ * this union omits is a feature no plan can ever grant: the editor cannot write
+ * it, and `normalizeAIFeatureFlags` used to drop it on load — so it read as
+ * "upgrade your plan" with no way to upgrade into it. That is what happened to
+ * `realtime_voice`.
+ */
 export type AIFeatureKey =
   | 'text_generation'
   | 'streaming_chat'
   | 'conversations'
   | 'tool_agents'
   | 'rag_embeddings'
-  | 'async_queue';
+  | 'async_queue'
+  | 'realtime_voice';
+
+/**
+ * The runtime mirror of the union. Anything that needs to walk every feature
+ * reads this instead of hand-listing keys, so adding the eighth feature is one
+ * edit rather than a hunt through `raw['x'] || raw['y']` chains.
+ */
+export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
+  'text_generation',
+  'streaming_chat',
+  'conversations',
+  'tool_agents',
+  'rag_embeddings',
+  'async_queue',
+  'realtime_voice',
+] as const;
 
 export type AIFeatureDegradation = 'warn' | 'block';
 
@@ -26,6 +51,12 @@ export interface AIFeatureConfig {
   tools_allowed?: string[];
   indexed_docs_cap?: number | null;
   monthly_jobs_cap?: number | null;
+  /**
+   * Voice budget in seconds of open session, not sessions. A push-to-talk turn
+   * runs 5-20s, so a per-session cap would burn the budget several times faster
+   * than the provider actually charges.
+   */
+  monthly_voice_seconds_cap?: number | null;
   degradation?: AIFeatureDegradation;
   period?: 'daily' | 'monthly';
 }

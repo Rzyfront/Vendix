@@ -64,22 +64,49 @@ import { PaginatedResponse } from '../interfaces/analytics.interface';
 // Purchases interfaces
 export interface PurchasesSummary {
   total_orders: number;
+  /** SUM(subtotal_amount) of committed orders — spend WITHOUT VAT. */
   total_spent: number;
   pending_orders: number;
   completed_orders: number;
+  /** Ordered units in the MINIMUM STOCK unit (purchase_to_stock_factor applied). */
   total_items_ordered: number;
+  /** Received units in the MINIMUM STOCK unit. */
   total_items_received: number;
+  /** Units still owed, computed per line so an over-received line contributes 0. */
+  pending_units: number;
+  /** VAT the suppliers charged, summed from the LINES (never the order header). */
   total_tax_amount: number;
+  /** Portion recoverable in the DIAN declaration (O-48 responsible stores). */
+  deductible_tax_amount: number;
+  /** Portion sealed into inventory cost (O-49 non-responsible stores). */
+  capitalized_tax_amount: number;
   average_order_value: number;
+  /** `null` = the previous window had no base; render "sin base", never 0 %. */
+  total_spent_growth: number | null;
+  total_orders_growth: number | null;
+  average_order_value_growth: number | null;
+  /** Order count per status, including states excluded from the spend. */
+  orders_by_status: Record<string, number>;
+  /** The states that counted as spend, straight from the metric contract. */
+  committed_states: string[];
+  /** Which universe the view aggregated over (`location` = destination store). */
+  store_scope: string;
 }
 
 export interface PurchasesBySupplier {
   supplier_id: number;
   supplier_name: string;
   order_count: number;
+  /** SUM(subtotal_amount) of committed orders — same base as the summary. */
   total_spent: number;
+  /** VAT the supplier charged, summed from the order LINES. */
+  tax_amount: number;
   pending_orders: number;
   last_order_date: string | null;
+  /** Share of the window's total spend; the column always sums to 100. */
+  percentage_of_total: number;
+  /** `null` = this supplier had no purchases in the previous window. */
+  growth: number | null;
 }
 
 // Reviews interfaces
@@ -163,6 +190,12 @@ export interface TaxSummary {
   total_tax_collected: number;
   total_tax_refunded: number;
   net_tax: number;
+  /**
+   * Base gravable EXENTA — suma de líneas en el período que NO tienen
+   * `order_item_taxes`. Reportada aparte (defect 3) para que la "tarifa
+   * efectiva" del bloque gravado no se diluya con productos exentos.
+   */
+  exempt_revenue: number;
   total_taxable_revenue: number;
   effective_tax_rate: number;
   breakdown: Array<{
@@ -214,11 +247,20 @@ export class AnalyticsService {
       if (value !== undefined && value !== null) {
         if (typeof value === 'object' && key === 'date_range') {
           const dateRange = value as DateRangeFilter;
-          if (dateRange.start_date && dateRange.end_date) {
-            params = params.set('date_from', dateRange.start_date);
-            params = params.set('date_to', dateRange.end_date);
-          } else if (dateRange.preset) {
+          // QUI-609: the backend is the source of truth for "today" — it resolves
+          // `date_preset` against `stores.timezone` via `localCalendarRange`.
+          // Always forward the preset when present. Forward explicit dates only
+          // for `custom` (or when no preset was picked): for any other preset the
+          // dates are leftovers from the device clock, and forwarding them would
+          // defeat the whole point of letting the backend resolve the range.
+          if (dateRange.preset) {
             params = params.set('date_preset', dateRange.preset);
+          }
+          if (!dateRange.preset || dateRange.preset === 'custom') {
+            if (dateRange.start_date && dateRange.end_date) {
+              params = params.set('date_from', dateRange.start_date);
+              params = params.set('date_to', dateRange.end_date);
+            }
           }
         } else {
           params = params.set(key, String(value));

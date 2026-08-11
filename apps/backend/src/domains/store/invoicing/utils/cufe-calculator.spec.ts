@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { CufeCalculator, CufeParams } from './cufe-calculator';
 import { dianAmount } from './dian-money.util';
@@ -296,6 +297,109 @@ describe('CufeCalculator', () => {
         software_pin: '11111',
       });
       expect(padded).toBe(normalized);
+    });
+  });
+
+  /**
+   * Vectores publicados por el Anexo Técnico 1.9 §11.2 y §11.4, con su cadena de
+   * concatenación Y su digest impresos. Son la única verificación NO circular de
+   * esta clase: cualquier otra prueba comprueba que nuestro código reproduce
+   * nuestro código.
+   *
+   * El de nota crédito es el que importa aquí: confirma que el Software-PIN ocupa
+   * la posición de la clave técnica, que es exactamente lo que el generador del
+   * set de pruebas tenía mal. (El vector de evento §11.6 ya se cubre arriba.)
+   */
+  describe('vectores del Anexo Técnico 1.9', () => {
+    it('reproduce el CUFE de factura de §11.2 (ClTec en la 14ª posición)', () => {
+      expect(
+        CufeCalculator.generate({
+          invoice_number: '8110007871',
+          issue_date: '2019-02-20',
+          issue_time: '16:46:55-05:00',
+          total_before_tax: '235.28',
+          tax_iva: '19.00',
+          tax_inc: '0.00',
+          // El vector imprime `038.28`: código ICA `03` + valor `8.28`. La
+          // aritmética lo confirma — 235.28 + 19.00 + 8.28 = 262.56.
+          tax_ica: '8.28',
+          total_amount: '262.56',
+          issuer_nit: '900373076',
+          customer_nit: '8355990123',
+          technical_key: '45',
+          environment: '2',
+        }),
+      ).toBe(
+        '955327eb55f8bdf16d069358a063d87e1577a292cb088ec186ed60bbc38e750b7b3980659b278ead789b95f9c51a9ef7',
+      );
+    });
+
+    it('reproduce el CUDE de nota crédito de §11.4 con el Software-PIN, no la clave técnica', () => {
+      // El anexo define el CUDE con `Software-PIN` —«Pin del software registrado
+      // en el catálogo del participante»— en la misma posición donde el CUFE
+      // lleva la clave técnica. Ninguno de los dos viaja en el XML, así que
+      // pasar el valor equivocado produce un documento de apariencia perfecta
+      // que la DIAN rechaza al recalcular el hash.
+      expect(
+        CufeCalculator.generate({
+          invoice_number: '8110007871',
+          issue_date: '2019-01-12',
+          issue_time: '07:00:00-05:00',
+          total_before_tax: '5000.00',
+          tax_iva: '950.00',
+          tax_inc: '0.00',
+          tax_ica: '0.00',
+          total_amount: '5950.00',
+          issuer_nit: '900373076',
+          customer_nit: '8355990123',
+          technical_key: '01', // Software-PIN
+          environment: '1',
+        }),
+      ).toBe(
+        '907e4444decc9e59c160a2fb3b6659b33dc5b632a5008922b9a62f83f757b1c448e47f5867f2b50dbdb96f48c7681168',
+      );
+    });
+
+    /**
+     * El cuarto vector del anexo —§11.4.5, nota débito `ND1001`— es
+     * INTERNAMENTE INCONSISTENTE: el digest que imprime no es el SHA-384 de la
+     * cadena que imprime a su lado.
+     *
+     *   cadena  ND10012019-01-1810:58:00-05:0030000.00010.00042400.00030.00
+     *           32400.0090019726410254102102012
+     *   digest  b9483dc2a17167feedf37b6bd67c4204e7b601933e0e389cffbd545e4d0ec370…
+     *   real    3fa73a86d57d9341c536afde1f85c4efd9d4591c2c22bce4dfb0e6b0d2e83b8f…
+     *
+     * Queda escrito para que nadie «arregle» el calculador para alcanzar ese
+     * digest: los otros tres vectores coinciden, así que la composición es
+     * correcta y el error está en el ejemplo del anexo. La referencia que el
+     * propio anexo cita para ese cálculo es `sha1-online.com`.
+     */
+    it('la composición reproduce la CADENA del vector §11.4.5, cuyo digest publicado está errado', () => {
+      const cude = CufeCalculator.generate({
+        invoice_number: 'ND1001',
+        issue_date: '2019-01-18',
+        issue_time: '10:58:00-05:00',
+        total_before_tax: '30000.00',
+        tax_iva: '0.00',
+        tax_inc: '2400.00',
+        tax_ica: '0.00',
+        total_amount: '32400.00',
+        issuer_nit: '900197264',
+        customer_nit: '10254102',
+        technical_key: '10201', // Software-PIN
+        environment: '2',
+      });
+      const string_of_the_annex =
+        'ND10012019-01-1810:58:00-05:0030000.00010.00042400.00030.0032400.00' +
+        '90019726410254102102012';
+      expect(cude).toBe(
+        createHash('sha384').update(string_of_the_annex).digest('hex'),
+      );
+      // Y NO al digest impreso, que no corresponde a esa cadena.
+      expect(cude).not.toBe(
+        'b9483dc2a17167feedf37b6bd67c4204e7b601933e0e389cffbd545e4d0ec370b403cbb41ff656776cb6cb5d8348ecd4',
+      );
     });
   });
 });

@@ -46,6 +46,22 @@ export class RequestContextService {
   }
 
   /**
+   * Igual que `run`, pero SIN escribir el estático `currentContext`.
+   *
+   * `run` deja el último contexto en un campo estático de clase que
+   * `getContext()` usa como fallback cuando el ALS está vacío. Para el flujo
+   * HTTP normal eso es inocuo, pero cualquier código que forje el contexto de
+   * un tenant ajeno (consola de super admin, workers, listeners) convertiría
+   * ese estático en "el último tenant que alguien miró", y el siguiente
+   * ejecutor que corra fuera del ALS lo adoptaría en silencio.
+   *
+   * Úsalo siempre que el contexto no venga del request del propio usuario.
+   */
+  static runIsolated<T>(context: RequestContext, callback: () => T): T {
+    return this.asyncLocalStorage.run(context, callback);
+  }
+
+  /**
    * Obtiene el contexto actual del request
    */
   static getContext(): RequestContext | undefined {

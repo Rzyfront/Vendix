@@ -1,0 +1,244 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Configuración de KDS"
+    subtitle="Estaciones de preparación y turnos"
+    icon="chef-hat"
+    variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin/restaurant-ops/kds"
+  />
+
+  <div class="kds-manage">
+    <!-- ── Estaciones ────────────────────────────────────────────────── -->
+    <app-card title="Estaciones" [responsive]="true">
+      <div class="section-head">
+        <div class="section-stats">
+          <span><strong>{{ activeCount() }}</strong> activas</span>
+          <span><strong>{{ openSessionsCount() }}</strong> con turno abierto</span>
+        </div>
+        <app-button variant="primary" size="sm" (clicked)="openCreate()">
+          <app-icon slot="icon" name="plus" [size]="14" />
+          Nueva estación
+        </app-button>
+      </div>
+
+      @if (isLoading() && stations().length === 0) {
+        <div class="loading"><app-spinner size="md" /></div>
+      } @else if (stations().length === 0) {
+        <p class="empty">
+          No hay estaciones. Toda tienda de restaurante debería tener al menos una:
+          es a donde el sistema rutea los tickets cuando el plato no declara otra.
+        </p>
+      } @else {
+        <ul class="station-list">
+          @for (s of stations(); track trackStation($index, s)) {
+            <li class="station-row" [class.is-off]="!s.is_active">
+              <div class="station-main">
+                <span class="station-name">
+                  {{ s.name }}
+                  @if (s.is_default) {
+                    <app-badge variant="primary">Por defecto</app-badge>
+                  }
+                  @if (!s.is_active) {
+                    <app-badge variant="neutral">Inactiva</app-badge>
+                  }
+                </span>
+                <span class="station-meta">
+                  {{ s.code }}
+                  @if (s._count) {
+                    · {{ s._count.sessions }} turno(s) · {{ s._count.products }} plato(s)
+                  }
+                </span>
+              </div>
+              <div class="station-actions">
+                <!-- Marcar por defecto solo cuando aplica: promover la que ya lo es
+                     no hace nada, y una inactiva sería un destino inalcanzable
+                     porque el fire filtra por is_active. -->
+                @if (!s.is_default && s.is_active) {
+                  <app-button variant="ghost" size="sm" (clicked)="makeDefault(s)">
+                    <app-icon slot="icon" name="star" [size]="14" />
+                    Por defecto
+                  </app-button>
+                }
+                <app-button variant="outline" size="sm" (clicked)="openEdit(s)">
+                  <app-icon slot="icon" name="pencil" [size]="14" />
+                  Editar
+                </app-button>
+                @if (s.is_active && !s.is_default) {
+                  <app-button variant="ghost" size="sm" (clicked)="deactivate(s)">
+                    <app-icon slot="icon" name="power" [size]="14" />
+                    Desactivar
+                  </app-button>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </app-card>
+
+    <!-- ── Turnos ────────────────────────────────────────────────────── -->
+    <app-card title="Historial de turnos" [responsive]="true">
+      @if (loadingSessions() && sessions().length === 0) {
+        <div class="loading"><app-spinner size="md" /></div>
+      } @else if (sessions().length === 0) {
+        <p class="empty">
+          Sin turnos todavía. Un turno se abre desde el tablero, al gestionar el
+          primer ticket de la estación.
+        </p>
+      } @else {
+        <ul class="session-list">
+          @for (s of sessions(); track trackSession($index, s)) {
+            <li class="session-row" (click)="openDetail(s)">
+              <div class="session-main">
+                <span class="session-station">
+                  {{ s.kds?.name ?? 'Estación #' + s.kds_id }}
+                  <app-badge [variant]="s.status === 'open' ? 'warning' : 'success'">
+                    {{ s.status === 'open' ? 'Abierto' : 'Cerrado' }}
+                  </app-badge>
+                </span>
+                <!-- QUIÉN gestiona el turno: es el propósito de la sesión —
+                     el responsable del consumo de insumos de esa estación. -->
+                <span class="session-meta">
+                  Abrió: {{ operatorName(s.opened_by_user) }}
+                  @if (s.closed_by_user) {
+                    · Cerró: {{ operatorName(s.closed_by_user) }}
+                  }
+                </span>
+                <span class="session-meta">
+                  {{ s.opened_at | date: 'short' }}
+                  @if (s.closed_at) {
+                    → {{ s.closed_at | date: 'short' }}
+                  }
+                </span>
+              </div>
+              <div class="session-cost">
+                @if (s.summary) {
+                  <strong>{{ s.summary.total_cost | currency }}</strong>
+                  <span>{{ s.summary.distinct_ingredients }} insumo(s)</span>
+                } @else {
+                  <span class="muted">Ver detalle</span>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </app-card>
+  </div>
+
+  <!-- ── Alta / edición ──────────────────────────────────────────────── -->
+  <app-modal
+    [isOpen]="isFormOpen()"
+    size="md"
+    [title]="formTitle()"
+    [showCloseButton]="true"
+    (cancel)="closeForm()"
+  >
+    <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
+    <form [formGroup]="form" class="station-form">
+      <app-input label="Nombre" formControlName="name" placeholder="Cocina caliente" />
+      <app-input label="Código" formControlName="code" placeholder="COCINA" />
+      <app-input label="Descripción" formControlName="description" placeholder="Opcional" />
+      <!-- Marcar por defecto acá promueve y degrada la anterior en la misma
+           transacción del backend: el índice único parcial no admite dos. -->
+      <label class="default-check">
+        <input type="checkbox" formControlName="is_default" />
+        <span>Estación por defecto de la tienda</span>
+      </label>
+      <p class="form-hint">
+        La estación por defecto recibe los platos que no declaran otra. Sin una, la
+        tienda no puede enviar nada a cocina.
+      </p>
+    </form>
+
+    <app-button slot="footer" variant="secondary" (clicked)="closeForm()" [disabled]="isSaving()">
+      Cancelar
+    </app-button>
+    <app-button slot="footer" variant="primary" [loading]="isSaving()" (clicked)="save()">
+      Guardar
+    </app-button>
+  </app-modal>
+
+  <!-- ── Detalle del turno ───────────────────────────────────────────── -->
+  <app-modal
+    [isOpen]="detailSession() !== null"
+    size="lg"
+    title="Detalle del turno"
+    [showCloseButton]="true"
+    (cancel)="closeDetail()"
+  >
+    <app-icon slot="header" name="receipt" [size]="20" class="text-primary" />
+
+    @if (detailSession(); as s) {
+      <div class="detail-head">
+        <span>
+          <strong>{{ s.kds?.name ?? 'Estación #' + s.kds_id }}</strong>
+          <app-badge [variant]="s.status === 'open' ? 'warning' : 'success'">
+            {{ s.status === 'open' ? 'Abierto' : 'Cerrado' }}
+          </app-badge>
+        </span>
+        <span class="muted">
+          {{ operatorName(s.opened_by_user) }} · {{ s.opened_at | date: 'short' }}
+        </span>
+      </div>
+
+      @if (loadingDetail()) {
+        <div class="loading"><app-spinner size="sm" /></div>
+      } @else {
+        <!-- RESUMEN: una fila por insumo, colapsando todos los pedidos. -->
+        <h4 class="detail-title">Resumen de consumo</h4>
+        @if (detailSummary(); as sum) {
+          @if (sum.ingredients.length === 0) {
+            <p class="empty">Este turno no consumió insumos.</p>
+          } @else {
+            <ul class="sum-list">
+              @for (ing of sum.ingredients; track ing.product_id) {
+                <li>
+                  <span class="sum-name">{{ ing.name }}</span>
+                  <span class="sum-qty">{{ ing.quantity }}</span>
+                  <span class="sum-cost">{{ ing.total_cost | currency }}</span>
+                </li>
+              }
+            </ul>
+            <p class="sum-total">
+              Total del turno: <strong>{{ sum.total_cost | currency }}</strong>
+              · {{ sum.movement_count }} movimiento(s)
+            </p>
+          }
+        }
+
+        <!-- HISTORIAL: una fila por insumo POR PEDIDO. Es lo que permite auditar
+             de dónde salió cada peso del resumen. -->
+        <h4 class="detail-title">Historial de movimientos</h4>
+        @if (detailHistory().length === 0) {
+          <p class="empty">Sin movimientos en este turno.</p>
+        } @else {
+          <ul class="hist-list">
+            @for (r of detailHistory(); track trackHistory($index, r)) {
+              <li>
+                <span class="hist-order">
+                  {{ r.order_number ?? ('Orden #' + (r.order_id ?? '—')) }}
+                </span>
+                <span class="hist-dish">{{ r.dish_name ?? '—' }}</span>
+                <span class="hist-ing">{{ r.ingredient?.name ?? '—' }}</span>
+                <span class="hist-qty">{{ r.quantity }}</span>
+                <span class="hist-cost">{{ +(r.total_cost ?? 0) | currency }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+
+      <app-button slot="footer" variant="secondary" (clicked)="closeDetail()">
+        Cerrar
+      </app-button>
+      @if (s.status === 'open') {
+        <app-button slot="footer" variant="primary" (clicked)="closeSession(s)">
+          <app-icon slot="icon" name="lock" [size]="14" />
+          Cerrar turno
+        </app-button>
+      }
+    }
+  </app-modal>
+</div>

@@ -85,6 +85,23 @@ export interface Product {
   // is resolved per cart line via PriceResolverService.resolveWithTier.
   has_multiple_price_tiers?: boolean;
   enabled_price_tier_ids?: number[];
+  // ===== QUI-648 · un producto se mide de UNA sola manera =====
+  // `undefined` significa "el endpoint no trajo el contrato" (el listado
+  // `pos_optimized` todavía no lo expone) y NO "por pieza": ese matiz es el que
+  // permite hidratar desde el detalle solo cuando hace falta. `null` sí
+  // significa por pieza.
+  /** FK a `units_of_measure`: unidad MÍNIMA en la que vive el stock. */
+  stock_uom_id?: number | null;
+  /** Unidades de stock que cubre `price`. `1` = precio por unidad. */
+  price_unit_quantity?: number | null;
+  /** Frase que explica cómo se vende, armada por el helper compartido. */
+  sale_config_summary?: { headline: string; lines: string[] } | null;
+  /**
+   * Presentación pistoleada: cuando el código de barras pertenece a una tarifa
+   * `sale_unit` del producto, el backend devuelve cuál. El POS agrega la línea
+   * con esa presentación ya aplicada, sin preguntarle nada al cajero.
+   */
+  scanned_price_tier_id?: number | null;
 }
 
 export interface ProductTaxAssignment {
@@ -553,6 +570,22 @@ export class PosProductService {
               .map((id: unknown) => Number(id))
               .filter((id: number) => Number.isFinite(id))
           : [],
+        // QUI-648. Se copian SOLO si el endpoint los trajo: dejar la clave
+        // ausente es lo que distingue "no vino en el payload" de "por pieza",
+        // y de eso depende que el POS no dispare una consulta de detalle por
+        // cada producto que el cajero toca.
+        ...(product.stock_uom_id !== undefined && {
+          stock_uom_id: product.stock_uom_id ?? null,
+        }),
+        ...(product.price_unit_quantity !== undefined && {
+          price_unit_quantity: Number(product.price_unit_quantity ?? 1) || 1,
+        }),
+        ...(product.sale_config_summary !== undefined && {
+          sale_config_summary: product.sale_config_summary ?? null,
+        }),
+        ...(product.scanned_price_tier_id !== undefined && {
+          scanned_price_tier_id: product.scanned_price_tier_id ?? null,
+        }),
         // Campos de servicio y reserva
         product_type: product.product_type || 'physical',
         requires_booking: product.requires_booking === true,

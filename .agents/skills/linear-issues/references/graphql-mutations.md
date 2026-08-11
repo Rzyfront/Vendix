@@ -72,7 +72,8 @@ exception) if any ID is invalid — check this before reading `issue`.
 Used when the deduplication check finds a real duplicate and the user chooses
 to update it instead of creating a new one. The `id` is the issue **UUID**
 (not the `QUI-12` identifier) — resolve it from the `searchIssues` result
-(`id` field) or via `issues(filter: { identifier: { eq: "QUI-12" } })`.
+(`id` field) or with the `issue(id:)` query described in
+**Resolve a UUID from an identifier** below.
 
 ```graphql
 mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
@@ -284,5 +285,41 @@ mutation CommentCreate($input: CommentCreateInput!) {
 }
 ```
 
-`input`: `{ issueId: "<uuid>", body: "markdown..." }`. Issue UUID is
-resolved from identifier with `issues(filter: { identifier: { eq: "QUI-12" } })`.
+`input`: `{ issueId: "<uuid>", body: "markdown..." }`. Issue UUID is resolved
+from the identifier with the `issue(id:)` query below.
+
+## Resolve a UUID from an identifier
+
+Every write in this skill (`issueUpdate`, `commentCreate`) takes the issue
+**UUID**, but the user and the pipeline skills always speak in identifiers
+(`QUI-651`). Resolve with the **direct argument**, which accepts either form:
+
+```graphql
+query { issue(id: "QUI-651") { id identifier title } }
+```
+
+```bash
+UUID=$(curl -sS https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"query { issue(id: \"QUI-651\") { id } }"}' \
+  | jq -r '.data.issue.id')
+```
+
+**Do NOT use `issues(filter: { identifier: { eq: "QUI-651" } })`.** `identifier`
+is **not a filterable field** on the `issues` connection. The query is accepted
+but matches nothing, so it returns `nodes: []`, the UUID resolves to `null`, and
+the mutation that follows fails with:
+
+```
+Entity not found: Issue
+```
+
+That message is actively misleading: it names the target issue, not the filter
+that silently resolved to nothing — so the obvious diagnosis ("the ticket does
+not exist", "the API key lost access") is wrong every time. Verified against the
+live API on 2026-08-09.
+
+This matters beyond this skill: `git-workflow` (moving an issue to Code Review /
+In Review), `pr-code-review` (writing verdict labels) and `verify-ticket-prod`
+(closing to Done, or returning to Todo) all address issues by identifier and all
+delegate their writes here.

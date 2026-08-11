@@ -68,6 +68,27 @@ export class LayawayItemDto {
   @IsInt()
   @Type(() => Number)
   location_id?: number;
+
+  /**
+   * Multi-tarifa / presentación de venta aplicada a esta línea (opcional).
+   *
+   * Mismo contrato que en orders, quotations y el cobro POS: si viaja, el
+   * backend valida server-side el permiso `store:products:apply_pricing_tier`
+   * y el allowlist producto↔tarifa, y `quantity` pasa a contar PAQUETES —el
+   * consumo real de stock sale de la cascada de empaque, no de `quantity`—.
+   *
+   * OJO: `layaway_items` todavía no tiene columnas para snapshotear la tarifa
+   * (`applied_price_tier_id`, `stock_units_consumed`, `price_unit_quantity`),
+   * así que hoy el dato gobierna el cálculo y la reserva pero no queda
+   * persistido en la línea. La reversa al cancelar no depende de ese snapshot:
+   * `releaseReservationsByReference` trabaja sobre las filas de reserva, que sí
+   * guardan las unidades reales.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  applied_price_tier_id?: number;
 }
 
 // ===== Installment sub-DTO =====

@@ -320,6 +320,14 @@ export default function PopScreen() {
           is_sellable: prebulk?.is_ingredient !== undefined ? prebulk?.is_sellable : undefined,
           purchase_uom_id: prebulk?.is_ingredient ? prebulk?.purchase_uom_id : undefined,
           stock_uom_id: prebulk?.is_ingredient ? prebulk?.stock_uom_id : undefined,
+          // QUI-648 — unidad de venta configurada desde la compra. El backend
+          // solo entra a la rama si llega `sale_unit_name`; sin ella la orden
+          // se comporta exactamente como hoy.
+          sale_unit_name: prebulk?.sale_unit_name || undefined,
+          sale_unit_units_per_package: prebulk?.sale_unit_units_per_package,
+          sale_unit_price: prebulk?.sale_unit_price,
+          sale_unit_profit_margin: prebulk?.sale_unit_profit_margin,
+          sale_unit_is_default: prebulk?.sale_unit_is_default,
           batch_number: i.lot_info?.batch_number,
           // lot_dates son fechas de calendario elegidas por el usuario (YYYY-MM-DD).
           // Las enviamos tal cual para no desfasar por zona horaria — el backend

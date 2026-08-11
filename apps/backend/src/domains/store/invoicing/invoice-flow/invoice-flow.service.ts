@@ -22,6 +22,8 @@ import {
   resolveOrganizationTimezone,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
+import { resolveUneceUnitCode } from '../../products/services/uom-uncefact.util';
 
 type InvoiceStatus =
   | 'draft'
@@ -554,6 +556,126 @@ export class InvoiceFlowService {
     return updated;
   }
 
+  /**
+   * Código UN/ECE por línea, resuelto contra la ESCALA de la cantidad que la
+   * línea declara — no contra la unidad de stock del producto.
+   *
+   * La distinción no es cosmética: la DIAN valida la coherencia entre cantidad
+   * y unidad. Un cable cuyo stock vive en milímetros vendido como "3 metros"
+   * lleva `quantity = 3`; declararlo con la unidad de stock diría "3
+   * milímetros" y describiría una venta 1.000 veces menor que la real.
+   *
+   * Tres casos, en este orden:
+   * 1. Línea vendida por presentación (`stock_units_consumed` presente): la
+   *    cantidad cuenta presentaciones. Si el factor de la presentación coincide
+   *    con una unidad del catálogo en la misma dimensión —"Metro" = 1.000 mm—
+   *    se declara esa unidad (`MTR`). Si no coincide con ninguna —"Caja x12" de
+   *    un producto contable, "Rollo 20 m"— se declara `EA`: son 3 paquetes, y
+   *    ningún código de longitud describe eso sin mentir.
+   * 2. Sin presentación: la cantidad ya está en la unidad mínima, así que la
+   *    unidad de stock es coherente (`3000` + `MMT`).
+   * 3. Sin producto o sin unidad declarada: `EA`, el comportamiento histórico.
+   *
+   * Dos consultas para toda la factura —productos y catálogo— en vez de una
+   * por línea.
+   */
+  private async resolveLineUnitCodes(
+    items: Array<{
+      id: number;
+      product_id?: number | null;
+      quantity?: any;
+      stock_units_consumed?: number | null;
+    }>,
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((i) => i.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    if (productIds.length === 0) return out;
+
+    try {
+      const products = await this.prisma.products.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, stock_uom_id: true },
+      });
+      const uomIds: number[] = Array.from(
+        new Set(
+          products
+            .map((p: any) => p.stock_uom_id)
+            .filter((id: any): id is number => typeof id === 'number'),
+        ),
+      );
+      if (uomIds.length === 0) return out;
+
+      const stockUnits = await this.prisma.units_of_measure.findMany({
+        where: { id: { in: uomIds } },
+        select: { id: true, code: true, dimension: true },
+      });
+      const stockUnitById = new Map<number, { code: string; dimension: string }>(
+        stockUnits.map((u: any) => [
+          Number(u.id),
+          { code: String(u.code), dimension: String(u.dimension) },
+        ]),
+      );
+
+      // El catálogo de una dimensión son unas pocas filas; traerlo entero
+      // evita una consulta por escala distinta dentro de la misma factura.
+      const dimensions = Array.from(
+        new Set(Array.from(stockUnitById.values()).map((u) => u.dimension)),
+      );
+      const siblings = await this.prisma.units_of_measure.findMany({
+        where: { dimension: { in: dimensions as any } },
+        select: { code: true, dimension: true, factor_to_base: true },
+      });
+      /** `dimension|factor` → código del catálogo con ese factor exacto. */
+      const codeByScale = new Map<string, string>(
+        siblings.map((u: any) => [
+          `${u.dimension}|${Number(u.factor_to_base)}`,
+          String(u.code),
+        ]),
+      );
+
+      const stockUnitByProduct = new Map<
+        number,
+        { code: string; dimension: string } | null
+      >(
+        products.map((p: any) => [
+          p.id,
+          p.stock_uom_id != null
+            ? (stockUnitById.get(p.stock_uom_id) ?? null)
+            : null,
+        ]),
+      );
+
+      for (const item of items) {
+        if (item.product_id == null) continue;
+        const stockUnit = stockUnitByProduct.get(item.product_id);
+        if (!stockUnit) continue;
+
+        const quantity = Number(item.quantity ?? 0);
+        const consumed = item.stock_units_consumed;
+        if (consumed != null && quantity > 0) {
+          const scale = Number(consumed) / quantity;
+          const scaleCode = codeByScale.get(
+            `${stockUnit.dimension}|${scale}`,
+          );
+          out.set(item.id, scaleCode ? resolveUneceUnitCode(scaleCode) : 'EA');
+          continue;
+        }
+        out.set(item.id, resolveUneceUnitCode(stockUnit.code));
+      }
+    } catch {
+      // La unidad es un detalle de presentación fiscal: si su lectura falla,
+      // la factura se emite con `EA` en vez de no emitirse.
+      return out;
+    }
+    return out;
+  }
+
   async send(id: number) {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
@@ -568,6 +690,13 @@ export class InvoiceFlowService {
     }
 
     const timezone = await this.resolveTimezone(invoice);
+
+    // Unidad real de cada línea: la DIAN valida que la cantidad y su unidad
+    // digan lo mismo, y desde que una ferretería factura metros el `EA` fijo
+    // declararía "3 unidades" donde se vendieron 3 metros.
+    const unitCodeByItem = await this.resolveLineUnitCodes(
+      invoice.invoice_items || [],
+    );
 
     // Build provider data from invoice
     const provider_data: ProviderInvoiceData = {
@@ -607,6 +736,7 @@ export class InvoiceFlowService {
         discount_amount: dianAmount(item.discount_amount),
         tax_amount: dianAmount(item.tax_amount),
         total_amount: dianAmount(item.total_amount),
+        unit_code: unitCodeByItem.get(item.id) ?? 'EA',
       })),
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,
@@ -653,6 +783,33 @@ export class InvoiceFlowService {
       configuration_type: this.configurationType(invoice.invoice_type),
     });
     this.assertProviderSupports(provider, invoice.invoice_type);
+
+    // sts:InvoiceControl — la autorización de numeración que respalda el
+    // consecutivo. Sale del RESOLVEDOR ÚNICO, el mismo que consume la ruta de
+    // habilitación, para que ambos caminos declaren lo mismo por construcción.
+    //
+    // SE RESUELVE AQUÍ Y NO AL ARMAR EL PAYLOAD, y el orden importa: las dos cosas
+    // lanzan, así que quien va primero decide el error que ve quien opera. Si el
+    // proveedor no puede emitir este tipo de documento, la causa es eso — no que su
+    // resolución esté inactiva, que mandaría a revisar la resolución equivocada. Y
+    // `assertProviderSupports` es la comprobación más barata de las dos, además de
+    // la que su propio comentario declara como el rechazo temprano.
+    //
+    // El documento soporte se excluye porque NO cuelga de una resolución de la
+    // DIAN: su consecutivo es interno del tenant, y el proveedor omite el bloque
+    // para él a propósito. Pedirlo aquí haría lanzar al resolvedor justo donde la
+    // ausencia del bloque es la respuesta correcta.
+    if (!this.isSupportDocumentType(invoice.invoice_type)) {
+      provider_data.control = resolveInvoiceControl(
+        invoice.resolution,
+        timezone,
+        new Date(),
+        {
+          resolution_id: invoice.resolution?.id,
+          document_type: invoice.invoice_type,
+        },
+      );
+    }
     const transmission = await this.fiscal_ledger.ensureInvoiceTransmission({
       invoice,
       provider_data,

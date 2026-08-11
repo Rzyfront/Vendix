@@ -1,7 +1,7 @@
 import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -186,6 +186,7 @@ import './organizations.component.css';
 })
 export class OrganizationsComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
   readonly organizations = signal<OrganizationListItem[]>([]);
   readonly isLoading = signal(false);
   searchTerm = '';
@@ -308,6 +309,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   ];
 
   tableActions: TableAction[] = [
+    {
+      // Destino natural desde el directorio: la ficha de tenant, con alcance
+      // fiscal, titular del NIT y configuraciones DIAN de la organización.
+      label: 'Ver ficha',
+      icon: 'eye',
+      action: (org) => this.viewOrganization(org),
+      variant: 'primary',
+      tooltip: 'Abrir la ficha de configuración del tenant',
+    },
     {
       label: 'Editar',
       icon: 'edit',
@@ -683,9 +693,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       });
   }
 
+  /**
+   * Abre la ficha de tenant de la organización.
+   *
+   * Ruta absoluta por la misma razón que en el directorio de tiendas: una
+   * relativa duplicaría el id si el listado se montase bajo otro árbol.
+   */
   viewOrganization(org: OrganizationListItem): void {
-    // Navigate to organization details
-    // TODO: Implement navigation when details page is created
+    void this.router.navigate(['/super-admin/organizations', org.id]);
   }
 
   editOrganization(org: OrganizationListItem): void {

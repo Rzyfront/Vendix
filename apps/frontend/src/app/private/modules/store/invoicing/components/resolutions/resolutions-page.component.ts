@@ -13,8 +13,6 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
 import {
   CardComponent,
   ConfirmationModalComponent,
-  DianResolutionScanResult,
-  DianResolutionScannerModalComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
@@ -24,6 +22,11 @@ import {
   ItemListCardConfig,
   DropdownAction,
 } from '../../../../../../shared/components/index';
+import {
+  isFiscalDocumentType,
+  requirementsFor,
+  type FiscalDocumentType,
+} from '../../../../../../shared/components/dian';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 interface ResolutionStats {
@@ -35,13 +38,25 @@ interface ResolutionStats {
 
 type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inactive';
 
+/**
+ * Numeración autorizada, de TODOS los documentos.
+ *
+ * La tabla muestra el tipo de documento porque una resolución sin él es
+ * indistinguible de otra: el generador de consecutivos busca la fila POR
+ * `document_type`, así que dos rangos con el mismo prefijo y distinto documento
+ * son cosas completamente distintas y antes se veían iguales.
+ *
+ * La acción de activar/desactivar existe porque **desactivar es la única vía
+ * para retirar del uso una resolución que ya consumió numeración** —la de
+ * habilitación con prefijo SETP, señaladamente—. El backend rechaza su borrado:
+ * es evidencia fiscal de documentos ya reportados a la DIAN.
+ */
 @Component({
   selector: 'vendix-resolutions-page',
   standalone: true,
   imports: [
     CardComponent,
     ConfirmationModalComponent,
-    DianResolutionScannerModalComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -113,7 +128,7 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                placeholder="Buscar por prefijo o número..."
+                placeholder="Buscar por prefijo, número o documento..."
                 [debounceTime]="300"
                 (searchChange)="onSearch($event)"
               ></app-inputsearch>
@@ -140,20 +155,15 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
         </div>
       </app-card>
 
-      <!-- Create/Edit Resolution Modal -->
+      <!-- Create/Edit Resolution Modal.
+           El escáner de resoluciones por IA vive DENTRO del formulario
+           compartido: es el único sitio donde sabe qué tipo de documento está
+           rellenando. Antes se lanzaba desde aquí y precargaba un formulario que
+           siempre guardaba como factura de venta. -->
       <vendix-resolution-create
         [(isOpen)]="is_create_modal_open"
         [resolution]="selected_resolution()"
-        [prefill]="scan_prefill()"
       ></vendix-resolution-create>
-
-      <!-- Escáner IA: puerta de entrada a la creación, no un modal anidado -->
-      <app-dian-resolution-scanner-modal
-        [isOpen]="scanner_open()"
-        [scope]="'store'"
-        (isOpenChange)="scanner_open.set($event)"
-        (confirmed)="applyScan($event)"
-      ></app-dian-resolution-scanner-modal>
 
       <!-- Delete confirmation -->
       @if (pending_delete(); as row) {
@@ -166,6 +176,20 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
           confirmVariant="danger"
           (confirm)="confirmDelete(row)"
           (cancel)="cancelDelete()"
+        ></app-confirmation-modal>
+      }
+
+      <!-- Activar / desactivar -->
+      @if (pending_toggle(); as row) {
+        <app-confirmation-modal
+          [isOpen]="true"
+          [title]="row.is_active ? 'Desactivar resolución' : 'Activar resolución'"
+          [message]="toggleMessage(row)"
+          [confirmText]="row.is_active ? 'Desactivar' : 'Activar'"
+          cancelText="Cancelar"
+          [confirmVariant]="row.is_active ? 'danger' : 'primary'"
+          (confirm)="confirmToggle(row)"
+          (cancel)="cancelToggle()"
         ></app-confirmation-modal>
       }
     </div>
@@ -187,8 +211,7 @@ export class ResolutionsPageComponent {
   readonly is_create_modal_open = signal(false);
   readonly selected_resolution = signal<InvoiceResolution | null>(null);
   readonly pending_delete = signal<InvoiceResolution | null>(null);
-  readonly scanner_open = signal(false);
-  readonly scan_prefill = signal<DianResolutionScanResult | null>(null);
+  readonly pending_toggle = signal<InvoiceResolution | null>(null);
 
   // Derivados
   readonly filteredResolutions = computed(() => {
@@ -198,7 +221,8 @@ export class ResolutionsPageComponent {
     return list.filter(
       (r) =>
         (r.prefix || '').toLowerCase().includes(term) ||
-        (r.resolution_number || '').toLowerCase().includes(term),
+        (r.resolution_number || '').toLowerCase().includes(term) ||
+        this.documentLabel(r).toLowerCase().includes(term),
     );
   });
 
@@ -249,11 +273,6 @@ export class ResolutionsPageComponent {
       action: 'create',
       variant: 'primary',
     },
-    {
-      label: 'Escanear con IA',
-      icon: 'sparkles',
-      action: 'scan',
-    },
   ];
 
   columns: TableColumn[] = [
@@ -264,6 +283,15 @@ export class ResolutionsPageComponent {
       priority: 1,
       transform: (_val: any, item?: InvoiceResolution) =>
         item ? `${item.prefix} · ${item.resolution_number}` : '',
+    },
+    {
+      // Qué documento numera. Sin esta columna, la resolución del documento
+      // soporte y la de la factura de venta se ven idénticas.
+      key: 'document_type',
+      label: 'Documento',
+      priority: 1,
+      transform: (_val: any, item?: InvoiceResolution) =>
+        item ? this.documentLabel(item) : '',
     },
     {
       key: 'range_from',
@@ -323,6 +351,16 @@ export class ResolutionsPageComponent {
       action: (row: InvoiceResolution) => this.editResolution(row),
     },
     {
+      // Retirar del uso sin borrar. Es lo ÚNICO que se puede hacer con la
+      // resolución de habilitación (SETP) una vez gastó numeración.
+      label: (row: InvoiceResolution) =>
+        row.is_active ? 'Desactivar' : 'Activar',
+      icon: (row: InvoiceResolution) =>
+        row.is_active ? 'toggle-left' : 'toggle-right',
+      variant: (row: InvoiceResolution) => (row.is_active ? 'warning' : 'success'),
+      action: (row: InvoiceResolution) => this.askToggle(row),
+    },
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
@@ -334,9 +372,9 @@ export class ResolutionsPageComponent {
     titleKey: 'prefix',
     titleTransform: (item: InvoiceResolution) =>
       `${item.prefix} · ${item.resolution_number}`,
-    subtitleKey: 'range_from',
+    subtitleKey: 'document_type',
     subtitleTransform: (item: InvoiceResolution) =>
-      `Rango ${item.range_from} - ${item.range_to}`,
+      `${this.documentLabel(item)} · rango ${item.range_from} - ${item.range_to}`,
     badgeKey: 'is_active',
     badgeConfig: {
       type: 'status',
@@ -379,31 +417,12 @@ export class ResolutionsPageComponent {
   onActionClick(action: string): void {
     if (action === 'create') {
       this.selected_resolution.set(null);
-      // Se limpia para que "Nueva resolución" no reciba lo del escaneo anterior.
-      this.scan_prefill.set(null);
       this.is_create_modal_open.set(true);
-      return;
     }
-    if (action === 'scan') {
-      this.is_create_modal_open.set(false);
-      this.scanner_open.set(true);
-    }
-  }
-
-  /**
-   * El escáner solo precarga: entrega el resultado al modal de creación y el
-   * usuario sigue teniendo que pulsar Crear. Ningún dato llega a la tabla de
-   * numeración sin ese clic.
-   */
-  applyScan(scan: DianResolutionScanResult): void {
-    this.selected_resolution.set(null);
-    this.scan_prefill.set(scan);
-    this.is_create_modal_open.set(true);
   }
 
   editResolution(resolution: InvoiceResolution): void {
     this.selected_resolution.set(resolution);
-    this.scan_prefill.set(null);
     this.is_create_modal_open.set(true);
   }
 
@@ -425,6 +444,41 @@ export class ResolutionsPageComponent {
     this.store.dispatch(InvoicingActions.deleteResolution({ id: row.id }));
   }
 
+  askToggle(row: InvoiceResolution): void {
+    this.pending_toggle.set(row);
+  }
+
+  cancelToggle(): void {
+    this.pending_toggle.set(null);
+  }
+
+  /**
+   * Sólo viaja `is_active`. Mandar el resto de la fila haría que el backend
+   * comparase campos inmutables (prefijo, tipo de documento, rango, número) de
+   * una resolución que ya consumió numeración y rechazara el PATCH entero.
+   */
+  confirmToggle(row: InvoiceResolution): void {
+    this.pending_toggle.set(null);
+    this.store.dispatch(
+      InvoicingActions.updateResolution({
+        id: row.id,
+        resolution: { is_active: !row.is_active },
+      }),
+    );
+  }
+
+  toggleMessage(row: InvoiceResolution): string {
+    const identity = `${row.prefix} · ${row.resolution_number} (${this.documentLabel(row)})`;
+    if (!row.is_active) {
+      return `${identity} volverá a numerar documentos desde el consecutivo ${row.current_number + 1}. Solo debe haber una resolución activa por tipo de documento: si hay otra, desactívala antes.`;
+    }
+    const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
+    const base = `${identity} dejará de numerar documentos nuevos. Los ya emitidos con ella no cambian.`;
+    return consumed
+      ? `${base} Es la única forma de retirarla: ya consumió numeración ante la DIAN, así que no se puede borrar.`
+      : base;
+  }
+
   /**
    * Anticipa el rechazo del backend: una resolución que ya consumió numeración
    * ante la DIAN es evidencia fiscal y no se puede borrar. Decirlo aquí evita
@@ -434,8 +488,18 @@ export class ResolutionsPageComponent {
     const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
     const identity = `${row.prefix} · ${row.resolution_number}`;
     return consumed
-      ? `${identity} ya consumió numeración ante la DIAN (va en ${row.current_number}). No se puede borrar: desactívala desde Editar para retirarla del uso.`
+      ? `${identity} ya consumió numeración ante la DIAN (va en ${row.current_number}). No se puede borrar: desactívala para retirarla del uso.`
       : `Se eliminará la resolución ${identity} (rango ${row.range_from} – ${row.range_to}). No ha numerado ningún documento, así que no hay evidencia fiscal que preservar.`;
+  }
+
+  /** Rótulo del documento que numera la fila, tomado del contrato compartido. */
+  private documentLabel(item: InvoiceResolution): string {
+    return requirementsFor(this.documentTypeOf(item)).label;
+  }
+
+  private documentTypeOf(item: InvoiceResolution): FiscalDocumentType {
+    const raw = item.document_type;
+    return isFiscalDocumentType(raw) ? raw : 'sales_invoice';
   }
 
   private getResolutionStatus(
@@ -448,6 +512,7 @@ export class ResolutionsPageComponent {
     const max = item.range_to ?? 0;
     const used = item.current_number ?? item.range_from ?? 0;
 
+    if (!item.is_active) return 'inactive';
     if (!isNaN(validTo) && validTo < now) return 'expired';
     if (max > 0 && used >= max) return 'exhausted';
     if (
@@ -457,7 +522,7 @@ export class ResolutionsPageComponent {
     ) {
       return 'expiring';
     }
-    return item.is_active ? 'active' : 'inactive';
+    return 'active';
   }
 
   private getStatusLabel(status: ResolutionStatus): string {

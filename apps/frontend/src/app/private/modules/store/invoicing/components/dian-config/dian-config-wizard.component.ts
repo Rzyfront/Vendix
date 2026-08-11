@@ -8,7 +8,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
 import {
   FormBuilder,
@@ -18,7 +18,17 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { map, switchMap } from 'rxjs';
+import { map, startWith, switchMap, timer, type Subscription } from 'rxjs';
+// Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
+// Son el espejo del DTO del backend: lo que el DTO rechaza, se rechaza acá antes
+// de gastar un viaje a la DIAN.
+import {
+  DIAN_VALIDATION_MESSAGES,
+  dianSoftwarePinValidator,
+  dianUuidValidator,
+  nitFormatValidator,
+} from '../../../../../../shared/utils/dian-validators';
+import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
@@ -27,8 +37,9 @@ import {
   DianProductionReadiness,
   DianTestResult,
   InvoiceResolution,
+  toDianConfigurationType,
 } from '../../interfaces/invoice.interface';
-import { InvoicingService } from '../../services/invoicing.service';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -41,12 +52,31 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import {
+  DianTechnicalResponseComponent,
+  DianTechnicalResponseData,
+} from '../../../../../../shared/components/dian-technical-response/dian-technical-response.component';
+import {
+  DIAN_CONFIGURATION_TYPES,
+  DIAN_CONFIGURATION_TYPE_LABELS,
+  defaultDocumentTypeFor,
+  requirementsFor,
+  type DianConfigurationType,
+} from '../../../../../../shared/components/dian';
 
 /**
  * Typed credentials form interface.
  * Kept strict per `vendix-angular-forms` skill.
  */
 interface CredentialsForm {
+  /**
+   * Habilitación DIAN que se está creando.
+   *
+   * Sólo se manda en el alta: el backend acepta cambiarla en un PATCH, pero
+   * mover una configuración de eje la separaría del set de pruebas y de la
+   * numeración que la DIAN le aprobó bajo ese eje.
+   */
+  configuration_type: FormControl<DianConfigurationType>;
   name: FormControl<string>;
   nit_type: FormControl<string>;
   nit: FormControl<string>;
@@ -148,11 +178,25 @@ interface PersistedTestResult {
   tracking_id?: string;
   number_from?: number;
   number_to?: number;
+  /** Resolución usada en ese envío; preselecciona el selector al volver. */
+  resolution_id?: number | null;
+  /** Nombre del ZIP entregado a la DIAN. Su longitud es parte del contrato del anexo. */
+  zip_file_name?: string | null;
+  operation_mode?: string | null;
+  /** Evidencia por documento, incluido el nombre de archivo dentro del ZIP. */
+  documents?: Array<{
+    number?: string;
+    kind?: string;
+    cufe?: string;
+    file_name?: string;
+  }>;
   dian_response?: {
     success?: boolean;
     status_code?: string;
     status_message?: string;
     error_messages?: string[];
+    /** Sobre SOAP crudo, recortado a 12 KB por el backend. */
+    raw_response?: string;
   };
   poll_history?: Array<{
     attempt: number;
@@ -160,6 +204,21 @@ interface PersistedTestResult {
     status_message: string;
     success: boolean;
   }>;
+  /**
+   * Vía de validación sincrónica (`SendBillSync`), anidada porque no reemplaza al
+   * lote. Es el veredicto que no admite interpretación: la DIAN respondió en la
+   * misma llamada con `IsValid` y las reglas violadas.
+   */
+  validation?: {
+    executed_at?: string | null;
+    is_valid?: boolean;
+    dian_response?: {
+      status_code?: string;
+      status_message?: string;
+      error_messages?: string[];
+      raw_response?: string;
+    } | null;
+  } | null;
 }
 
 /**
@@ -193,6 +252,7 @@ interface PersistedTestResult {
     IconComponent,
     SelectorComponent,
     StepsLineComponent,
+    DianTechnicalResponseComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -216,6 +276,42 @@ interface PersistedTestResult {
             Ingrese los datos de su empresa y credenciales del software de facturacion electronica.
           </p>
           <form [formGroup]="credentialsForm" class="space-y-4">
+            <!--
+              QUÉ SE ESTÁ HABILITANDO. Va primero porque manda sobre todo lo
+              demás: cada habilitación es independiente ante la DIAN, con su
+              propio set de pruebas y su propio estado. Sin este campo el
+              asistente sólo sabía crear facturacion electronica de venta, y el
+              documento soporte, el documento equivalente POS y la nomina
+              electronica solo se podian activar por curl.
+            -->
+            @if (isEditingConfig()) {
+              <div
+                class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-start gap-2"
+              >
+                <app-icon name="shield" [size]="14" class="text-primary shrink-0 mt-0.5"></app-icon>
+                <div class="min-w-0">
+                  <p class="text-xs font-medium text-text-primary">
+                    {{ configurationTypeLabel() }}
+                  </p>
+                  <p class="text-[11px] text-text-secondary">
+                    La habilitacion no se cambia: mover una configuracion de eje
+                    la sacaria de la habilitacion que la DIAN aprobo, junto con
+                    su set de pruebas y su numeracion.
+                  </p>
+                </div>
+              </div>
+            } @else {
+              <app-selector
+                label="Que vas a habilitar"
+                formControlName="configuration_type"
+                [options]="configurationTypeOptions()"
+                placeholder="Elige la habilitacion DIAN"
+              ></app-selector>
+              <p class="text-[11px] text-text-secondary -mt-2">
+                {{ configurationTypeHint() }}
+              </p>
+            }
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Nombre de la configuracion"
@@ -246,6 +342,21 @@ interface PersistedTestResult {
                 placeholder="Ej: 7"
               ></app-input>
             </div>
+            <!--
+              El error del DV es de GRUPO: compara nit con nit_dv, y ningun
+              validador de control puede ver a su hermano. Por eso app-input no lo
+              pinta y se muestra aca. Se exige touched en los dos para no gritarle
+              al usuario mientras todavia esta escribiendo el NIT.
+              (Sin acentos ni backticks: este comentario vive dentro del template
+              literal del componente, y un backtick lo corta.)
+            -->
+            @if (
+              credentialsForm.hasError('nitDv') &&
+              nitControl.touched &&
+              nitDvControl.touched
+            ) {
+              <p class="text-xs text-error font-medium">{{ nitDvMessage }}</p>
+            }
             <app-input
               label="Software ID"
               formControlName="software_id"
@@ -464,7 +575,7 @@ interface PersistedTestResult {
                         <div class="w-2 h-2 rounded-full bg-primary"></div>
                       }
                     </div>
-                    <span class="text-sm font-medium text-text-primary">Produccion</span>
+                    <span class="text-sm font-medium text-text-primary">Producción</span>
                   </div>
                   <p class="text-xs text-text-secondary pl-6">
                     Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
@@ -488,7 +599,7 @@ interface PersistedTestResult {
                 </div>
                 <div class="flex items-center justify-between mt-2">
                   <span class="text-text-secondary">Ambiente actual:</span>
-                  <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
+                  <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</span>
                 </div>
               </div>
               <!-- ── Paso a producción ── -->
@@ -729,7 +840,7 @@ interface PersistedTestResult {
                   </div>
                   <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-success' : 'text-error'">
                     <div>{{ testResult()!.message }}</div>
-                    <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
+                    <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</div>
                     <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
                     @if (testResult()!.dian_status) {
                       <div>Estado DIAN: {{ testResult()!.dian_status }}</div>
@@ -737,6 +848,25 @@ interface PersistedTestResult {
                   </div>
                 </div>
               }
+              <!-- ══ Lote descartado ══
+                   Sin esto, tras recargar no quedaba rastro del descarte y la
+                   pantalla volvía a verse como si nunca se hubiera enviado nada.
+                   El texto viene del backend (wait.reason) a propósito: la UI ya
+                   inventó una explicación una vez —«se envió antes de que se
+                   guardaran las claves de documento»— sobre un lote que sí tenía
+                   sus 50 CUFE guardados.
+                   OJO: sin comillas invertidas acá. La plantilla ES un template
+                   literal de TypeScript, así que un backtick en un comentario
+                   cierra el string y el resto se compila como código. -->
+              @if (testSetWait()?.state === 'abandoned') {
+                <div class="p-3 rounded-lg border border-border bg-[var(--color-surface)] flex items-start gap-2">
+                  <app-icon name="trash-2" [size]="14" class="mt-0.5 shrink-0 text-text-secondary"></app-icon>
+                  <p class="text-xs text-text-secondary">
+                    {{ testSetWait()?.reason }}
+                  </p>
+                </div>
+              }
+
               <!-- ══ Waiting state: DIAN acknowledged the batch, no verdict yet ══
                    El contenedor cambia de "informativo" a "advertencia" cuando el
                    backend declara el lote estancado: un spinner azul eterno es
@@ -789,6 +919,41 @@ interface PersistedTestResult {
                       }
                     </div>
                   </div>
+
+                  <!--
+                    Notas retenidas por el envio en dos fases.
+
+                    Una nota solo puede referenciar una factura que la DIAN ya
+                    tenga registrada, asi que el set manda primero las facturas y
+                    espera. Si no las registra dentro del tope, las notas quedan
+                    generadas y firmadas sin transmitir, con su consecutivo ya
+                    reservado dentro del XML.
+
+                    Esto era invisible: el backend lo guardaba, la proyeccion de
+                    estado lo descartaba, y el operador veia un lote de 30 con una
+                    etiqueta de 50 y ninguna explicacion.
+                  -->
+                  @if (hasDeferredNotes()) {
+                    <div class="p-3 rounded-lg bg-warning-light border border-warning">
+                      <div class="flex items-start gap-2">
+                        <app-icon name="clock" [size]="16" class="text-warning mt-0.5 shrink-0"></app-icon>
+                        <div class="min-w-0 space-y-1">
+                          <p class="text-xs font-semibold text-warning">
+                            {{ notePhase()!.deferred_count }} nota(s) quedaron sin transmitir
+                          </p>
+                          <!-- El texto viene del backend: es quien sabe cuantas
+                               facturas registro la DIAN y en cuantas consultas. -->
+                          <p class="text-xs text-text-secondary">{{ notePhase()!.reason }}</p>
+                          @if (deferredConsecutivesLabel()) {
+                            <p class="text-xs text-text-secondary">
+                              Numeracion reservada y sin usar: {{ deferredConsecutivesLabel() }}.
+                              Se conservan firmadas, asi que reenviarlas no exige regenerarlas.
+                            </p>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  }
 
                   <!-- Fiscal tips: turn dead wait time into something useful.
                        Se ocultan cuando el lote está estancado: ahí el usuario no
@@ -1007,6 +1172,15 @@ interface PersistedTestResult {
                   }
                 </div>
               }
+
+              <!-- Respuesta técnica: fuera de los bloques por estado a propósito.
+                   Cuando la DIAN no emite veredicto, el estado es justamente el
+                   que menos información da, y es cuando más se necesita el
+                   StatusDescription crudo y los nombres de archivo enviados. -->
+              @if (technicalResult()) {
+                <app-dian-technical-response [result]="technicalResult()"></app-dian-technical-response>
+              }
+
               <div class="flex items-center justify-between pt-4 border-t border-border">
                 <app-button variant="outline" size="sm" (clicked)="activeStep.set(2)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
@@ -1134,7 +1308,7 @@ interface PersistedTestResult {
   `,
 })
 export class DianConfigWizardComponent {
-  private readonly invoicingService = inject(InvoicingService);
+  private readonly invoicingService = inject(DianConfigApiService);
   private readonly fb = inject(FormBuilder);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -1142,6 +1316,20 @@ export class DianConfigWizardComponent {
   // ── Inputs / Outputs ──────────────────────────────────────
   readonly initialConfig = input<DianConfig | null>(null);
   readonly initialStep = input<number>(0);
+
+  /**
+   * Habilitación con la que arranca el alta. La pone el host que abrió el
+   * asistente desde la tarjeta de un eje concreto.
+   */
+  readonly configurationType = input<DianConfigurationType | null>(null);
+
+  /**
+   * Ejes que YA tienen configuración. Se ofrecen deshabilitados en vez de
+   * ocultarse: que el documento soporte aparezca «ya configurado» es
+   * información; que desaparezca de la lista es lo que hizo que nadie supiera
+   * que existía.
+   */
+  readonly takenConfigurationTypes = input<DianConfigurationType[]>([]);
 
   readonly saved = output<DianConfig>();
   readonly cancelled = output<void>();
@@ -1168,6 +1356,13 @@ export class DianConfigWizardComponent {
   readonly resolutions = signal<InvoiceResolution[]>([]);
   readonly selectedResolutionId = signal<number | null>(null);
   readonly testSetResult = signal<DianTestResult | null>(null);
+  /**
+   * `last_test_result` sin mapear. `mapPersistedResult` produce el veredicto
+   * LEGIBLE y deja fuera lo que solo sirve para diagnosticar: nombres de archivo,
+   * modo de operación y el sobre SOAP crudo. Guardar el original evita ensanchar
+   * `DianTestResult` con campos que ninguna pantalla lee.
+   */
+  private readonly persistedTestResult = signal<PersistedTestResult | null>(null);
   readonly loadingTestSet = signal(false);
   readonly checkingStatus = signal(false);
   readonly polling = signal(false);
@@ -1191,20 +1386,58 @@ export class DianConfigWizardComponent {
 
   // ── Typed Forms ───────────────────────────────────────────
   readonly credentialsForm: FormGroup<CredentialsForm> = this.fb.nonNullable.group({
+    // VALIDADORES DE FORMATO, NO SOLO `required`.
+    //
+    // Este formulario tenía siete `required` pelados y ningún validador de forma,
+    // mientras el riel de plataforma —un operador interno, una configuración—
+    // tenía seis. La validación estaba invertida respecto al riesgo: acá un
+    // `software_id` mal copiado no lo rechaza nadie, y si llega a la DIAN el
+    // documento nunca clasifica, indistinguible de una cola atascada, con el
+    // consecutivo del set ya gastado.
+    //
+    // Son el espejo del DTO del backend (`@IsUUID`, forma del NIT). Viven en
+    // `shared/utils/dian-validators` para que las cuatro puertas de entrada
+    // rechacen lo mismo.
+    configuration_type: ['invoicing' as DianConfigurationType],
     name: ['', [Validators.required]],
     nit_type: ['NIT'],
-    nit: ['', [Validators.required]],
+    nit: ['', [Validators.required, nitFormatValidator]],
     nit_dv: [''],
-    software_id: ['', [Validators.required]],
-    software_pin: ['', [Validators.required]],
-    test_set_id: [''],
+    software_id: ['', [Validators.required, dianUuidValidator]],
+    software_pin: ['', [Validators.required, dianSoftwarePinValidator]],
+    test_set_id: ['', [dianUuidValidator]],
+  }, {
+    // `nitDvValidator` es de GRUPO, no de control: compara `nit` con `nit_dv`, y
+    // un validador de control no puede ver a su hermano. Ya existía en
+    // `shared/utils/nit.util.ts` y ninguna de las tres superficies lo usaba.
+    //
+    // Importa porque el DV no es decorativo: entra en el CUFE, así que un dígito
+    // equivocado hace que la DIAN recompute un hash distinto y rechace cada
+    // documento emitido, con su consecutivo ya gastado.
+    validators: [nitDvValidator],
   });
 
   readonly certificateForm: FormGroup<CertificateForm> = this.fb.nonNullable.group({
     certificate_password: ['', [Validators.required]],
   });
 
+  /**
+   * Texto del desajuste NIT↔DV.
+   *
+   * Constante y no `computed`: el mensaje no depende del estado, solo su
+   * visibilidad, y esa la decide el `@if` del template leyendo el formulario —el
+   * mismo patrón que ya usa `[disabled]="credentialsForm.invalid"`, que funciona
+   * porque la validez cambia por eventos del DOM y esos disparan detección.
+   *
+   * Se toma del mapa compartido para que este formulario no redacte su propia
+   * versión del mismo rechazo.
+   */
+  readonly nitDvMessage = DIAN_VALIDATION_MESSAGES['nitDv'];
+
   // ── Typed getters (per vendix-angular-forms skill) ───────
+  get configurationTypeControl(): FormControl<DianConfigurationType> {
+    return this.credentialsForm.controls.configuration_type;
+  }
   get nameControl(): FormControl<string> { return this.credentialsForm.controls.name; }
   get nitControl(): FormControl<string> { return this.credentialsForm.controls.nit; }
   get nitDvControl(): FormControl<string> { return this.credentialsForm.controls.nit_dv; }
@@ -1238,14 +1471,101 @@ export class DianConfigWizardComponent {
   );
 
   /**
+   * Puente del control a señal.
+   *
+   * `form.value` es una PROPIEDAD, no una señal: leerla dentro de un `computed`
+   * lo evalúa una vez con el estado inicial y no vuelve a recalcular, así que el
+   * texto de ayuda se quedaría hablando de facturación de venta después de
+   * elegir documento soporte.
+   */
+  private readonly configurationTypeValue = toSignal(
+    this.configurationTypeControl.valueChanges.pipe(
+      startWith(this.configurationTypeControl.value),
+    ),
+    { initialValue: this.configurationTypeControl.value },
+  );
+
+  readonly isEditingConfig = computed(() => this.selectedConfig() !== null);
+
+  /** El eje real: el de la configuración editada, o el elegido en el alta. */
+  readonly effectiveConfigurationType = computed<DianConfigurationType>(
+    () =>
+      toDianConfigurationType(this.selectedConfig()?.configuration_type) ??
+      this.configurationTypeValue() ??
+      'invoicing',
+  );
+
+  readonly configurationTypeLabel = computed(
+    () =>
+      DIAN_CONFIGURATION_TYPE_LABELS[this.effectiveConfigurationType()] ??
+      'Facturación electrónica',
+  );
+
+  /**
+   * Qué implica el eje elegido, dicho ANTES de pedir credenciales: cada
+   * habilitación tiene su propio set de pruebas ante la DIAN y su propia clave
+   * de documento (CUFE con ClTec sólo la factura de venta; el resto, CUDE/CUDS/
+   * CUNE con el Software-PIN).
+   */
+  readonly configurationTypeHint = computed(() => {
+    const requirements = requirementsFor(
+      defaultDocumentTypeFor(this.effectiveConfigurationType()),
+    );
+    const numbering = requirements.requires_authorized_range
+      ? 'Numera contra una Autorización de Numeración propia de la DIAN.'
+      : 'No cuelga de una Autorización de Numeración: lleva consecutivo propio.';
+    return `${requirements.label}. ${numbering} Su clave es un ${requirements.key_algorithm}. Es una habilitación independiente: tiene su propio set de pruebas y su propio estado ante la DIAN.`;
+  });
+
+  readonly configurationTypeOptions = computed<SelectorOption[]>(() => {
+    const taken = this.takenConfigurationTypes();
+    return DIAN_CONFIGURATION_TYPES.map((type) => {
+      const alreadyConfigured = taken.includes(type);
+      return {
+        value: type,
+        label: DIAN_CONFIGURATION_TYPE_LABELS[type],
+        description: alreadyConfigured
+          ? 'Ya configurada — ábrela desde su tarjeta para ajustarla'
+          : requirementsFor(defaultDocumentTypeFor(type)).label,
+        disabled: alreadyConfigured,
+      };
+    });
+  });
+
+  /**
    * Tri-state verdict of the test set. `pending` is the state the old UI could
    * not express: DIAN has the batch but has not judged it, which is neither
    * success nor failure and must NOT invite a re-send.
    */
+  /**
+   * Datos del panel técnico, atados al lote VIGENTE por su ZipKey.
+   *
+   * El snapshot trae nombres de archivo y sobre SOAP del lote que lo generó. Si el
+   * veredicto en pantalla ya es de otro lote, mostrar ese snapshot al lado sería la
+   * misma clase de mentira que se arregló esta semana —una pantalla afirmando cosas
+   * de un lote que no es el vigente—. Ante desacuerdo, no se muestra nada.
+   */
+  readonly technicalResult = computed<DianTechnicalResponseData | null>(() => {
+    const snapshot = this.persistedTestResult();
+    if (!snapshot) return null;
+    const live = this.testSetResult()?.zip_key ?? null;
+    if (live && snapshot.zip_key && live !== snapshot.zip_key) return null;
+    return snapshot as DianTechnicalResponseData;
+  });
+
   readonly testSetState = computed<TestSetState>(() => {
     if (this.runningTestSet()) return 'running';
     const result = this.testSetResult();
     if (!result) return 'idle';
+
+    // El backend es la autoridad sobre el estado del lote, igual que con
+    // `stalled`. Antes esto se derivaba solo de los booleanos y el
+    // `return 'pending'` de abajo convertía cualquier estado que no fuera
+    // success/pending/rejected en «la DIAN está validando tu set de pruebas».
+    // Un lote DESCARTADO cae justo ahí: la pantalla afirmaba que la DIAN estaba
+    // validando un lote que el usuario acababa de descartar.
+    if (this.testSetWait()?.state === 'abandoned') return 'idle';
+
     if (result.success) return 'passed';
     if (result.pending) return 'pending';
     if (result.rejected) return 'rejected';
@@ -1275,9 +1595,46 @@ export class DianConfigWizardComponent {
    * leía: un número escrito a mano en la UI envejece sin que nada lo delate.
    */
   readonly testSetDocumentsLabel = computed(() => {
-    const total = this.testSetResult()?.total_documents ?? null;
+    const result = this.testSetResult();
+    // GENERADOS ≠ TRANSMITIDOS con el envío en dos fases: las notas solo salen
+    // después de que la DIAN registre las facturas que referencian, y si no las
+    // registra dentro del tope quedan retenidas. `total_documents` conserva el
+    // significado de generados, así que decir «50 documentos» sobre un lote del
+    // que salieron 30 era exacto y engañoso a la vez.
+    const transmitted = result?.transmitted_documents ?? null;
+    const generated = result?.generated_documents ?? result?.total_documents ?? null;
+
+    if (transmitted !== null && generated !== null && transmitted !== generated) {
+      return `${transmitted} de ${generated} documentos`;
+    }
+    const total = generated;
     if (!total) return 'los documentos de habilitación';
     return `${total} documento${total === 1 ? '' : 's'}`;
+  });
+
+  /** El rastro de la fase de notas, o `null` si no hubo dos fases. */
+  readonly notePhase = computed(() => this.testSetResult()?.note_phase ?? null);
+
+  /**
+   * ¿Quedaron notas generadas y sin transmitir?
+   *
+   * Es el estado que la UI no sabía nombrar. Sin esto el operador veía un lote de
+   * 30 con una etiqueta de 50 y ninguna explicación, y las 20 notas retenidas
+   * —con su numeración autorizada ya reservada dentro de un XML firmado— eran
+   * invisibles.
+   */
+  readonly hasDeferredNotes = computed(() => {
+    const phase = this.notePhase();
+    return !!phase && phase.sent === false && phase.deferred_count > 0;
+  });
+
+  /** Rango de consecutivos retenidos, para que se sepan CUÁLES, no solo cuántos. */
+  readonly deferredConsecutivesLabel = computed(() => {
+    const list = this.notePhase()?.deferred_consecutives ?? [];
+    if (!list.length) return null;
+    const from = Math.min(...list);
+    const to = Math.max(...list);
+    return from === to ? `${from}` : `${from} – ${to}`;
   });
 
   /**
@@ -1358,8 +1715,20 @@ export class DianConfigWizardComponent {
     () => this.readiness()?.checks.filter((c) => c.satisfied) ?? [],
   );
 
-  private pollHandle: ReturnType<typeof setInterval> | null = null;
-  private tipHandle: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Temporizadores del asistente, como suscripciones RxJS y no como
+   * `setInterval`.
+   *
+   * POR QUÉ IMPORTA: un `setInterval` sólo muere si alguien se acuerda de
+   * llamar a `clearInterval`. Aquí lo hacía `destroyRef.onDestroy`, pero el
+   * asistente pasó a montarse también desde la consola de super admin, donde el
+   * injector de la ruta se CACHEA y no se destruye al cambiar de tenant: un
+   * temporizador superviviente seguiría interrogando a la DIAN por el
+   * contribuyente que el operador ya cerró. `takeUntilDestroyed(destroyRef)`
+   * ata el flujo al componente y no depende de que nadie recuerde nada.
+   */
+  private pollSubscription: Subscription | null = null;
+  private tipSubscription: Subscription | null = null;
 
   constructor() {
     // Sync initial inputs → internal signals (react to changes from parent)
@@ -1381,6 +1750,17 @@ export class DianConfigWizardComponent {
     effect(() => {
       const step = this.initialStep();
       if (typeof step === 'number') this.activeStep.set(step);
+    });
+
+    // El eje con el que abrió el host. Sólo aplica al alta: en edición manda el
+    // de la configuración, y pisarlo con el input movería la configuración de
+    // habilitación sin que nadie lo pidiera.
+    effect(() => {
+      const preset = this.configurationType();
+      if (!preset) return;
+      if (this.initialConfig()) return;
+      if (this.configurationTypeControl.value === preset) return;
+      this.configurationTypeControl.setValue(preset);
     });
 
     // The certificate password only matters when a NEW file is being uploaded;
@@ -1435,6 +1815,9 @@ export class DianConfigWizardComponent {
 
   private resetForms(): void {
     this.credentialsForm.reset({
+      // El eje preseleccionado por el host sobrevive al reset: se abrió el
+      // asistente desde la tarjeta de ESA habilitación.
+      configuration_type: this.configurationType() ?? 'invoicing',
       name: '',
       nit_type: 'NIT',
       nit: '',
@@ -1451,6 +1834,7 @@ export class DianConfigWizardComponent {
     this.selectedEnvironment.set('test');
     this.testResult.set(null);
     this.testSetResult.set(null);
+    this.persistedTestResult.set(null);
     this.selectedResolutionId.set(null);
     this.auditLogs.set([]);
     // A fresh config has no batch in flight; drop any timer from the previous one.
@@ -1462,6 +1846,7 @@ export class DianConfigWizardComponent {
 
   private patchCredentialsForm(cfg: DianConfig): void {
     this.credentialsForm.patchValue({
+      configuration_type: toDianConfigurationType(cfg.configuration_type) ?? 'invoicing',
       name: cfg.name,
       nit_type: cfg.nit_type,
       nit: cfg.nit,
@@ -1502,6 +1887,14 @@ export class DianConfigWizardComponent {
     }
 
     const cfg = this.selectedConfig();
+
+    // `configuration_type` viaja SÓLO en el alta. El backend acepta cambiarlo en
+    // un PATCH, pero mover una configuración de eje la separaría del set de
+    // pruebas y de la numeración que la DIAN le aprobó bajo el eje anterior.
+    if (!cfg) {
+      payload['configuration_type'] = v.configuration_type;
+    }
+
     const request$ = cfg
       ? this.invoicingService.updateDianConfig(cfg.id, payload)
       : this.invoicingService.createDianConfig(payload);
@@ -1686,14 +2079,44 @@ export class DianConfigWizardComponent {
         next: (response: any) => {
           const list: InvoiceResolution[] = response?.data || [];
           this.resolutions.set(list);
-          // With a single active resolution there is nothing to choose: leaving
-          // the selector empty only disabled the run button for no reason.
-          if (list.length === 1 && this.selectedResolutionId() === null) {
-            this.selectedResolutionId.set(list[0].id);
-          }
+          this.reconcileSelectedResolution();
         },
         error: () => this.resolutions.set([]),
       });
+  }
+
+  /**
+   * Preselecciona la resolución del set de pruebas.
+   *
+   * POR QUÉ EXISTE: el selector arrancaba vacío salvo que hubiera exactamente una
+   * resolución, así que con dos o más había que volver a elegirla en cada entrada
+   * al wizard — y elegir mal quema un bloque de consecutivos autorizados que no se
+   * recupera. La resolución del último envío ya está persistida en
+   * `last_test_result.resolution_id`, así que la elección del usuario sobrevive
+   * sin necesidad de columna nueva.
+   *
+   * Se llama desde las DOS cargas (resoluciones y resultados) porque son
+   * asíncronas e independientes: cuál termina primero no debe cambiar el
+   * resultado. Solo escribe si el selector está vacío, así que nunca pisa una
+   * elección hecha a mano.
+   */
+  private reconcileSelectedResolution(): void {
+    if (this.selectedResolutionId() !== null) return;
+
+    const list = this.resolutions();
+    if (list.length === 0) return;
+
+    const remembered = this.testSetResult()?.resolution_id ?? null;
+    if (remembered !== null && list.some((res) => res.id === remembered)) {
+      this.selectedResolutionId.set(remembered);
+      return;
+    }
+
+    // Con una sola candidata no hay nada que elegir: dejar el selector vacío solo
+    // deshabilitaba el botón de ejecutar sin motivo.
+    if (list.length === 1) {
+      this.selectedResolutionId.set(list[0].id);
+    }
   }
 
   /**
@@ -1714,10 +2137,15 @@ export class DianConfigWizardComponent {
           this.loadingTestSet.set(false);
           if (!persisted || !persisted.executed_at) {
             this.testSetResult.set(null);
+            this.persistedTestResult.set(null);
             return;
           }
           const mapped = this.mapPersistedResult(persisted, payload?.environment);
           this.testSetResult.set(mapped);
+          this.persistedTestResult.set(persisted);
+          // La resolución del último envío ya está en el resultado persistido:
+          // reconciliar aquí es lo que evita tener que volver a elegirla.
+          this.reconcileSelectedResolution();
           if (mapped.pending) {
             // Resolve the verdict right away; DIAN may have finished while the
             // merchant was away.
@@ -1762,6 +2190,7 @@ export class DianConfigWizardComponent {
       rechecked_at: persisted.rechecked_at ?? null,
       number_from: persisted.number_from ?? null,
       number_to: persisted.number_to ?? null,
+      resolution_id: persisted.resolution_id ?? null,
       poll_history: persisted.poll_history,
     };
   }
@@ -1827,6 +2256,10 @@ export class DianConfigWizardComponent {
    */
   private applyTestSetOutcome(result: DianTestResult, silent: boolean): void {
     this.testSetResult.set(result);
+    // Un envío nuevo cambia el ZipKey, y `technicalResult` oculta el snapshot en
+    // cuanto deja de coincidir. Se re-lee para que el panel técnico hable del lote
+    // que se acaba de mandar, que es justo cuando hace falta.
+    this.loadTechnicalSnapshot();
 
     if (result.success) {
       this.stopPolling();
@@ -1870,6 +2303,31 @@ export class DianConfigWizardComponent {
     this.startPolling();
   }
 
+  /**
+   * Re-lee `last_test_result` SIN efectos: no toca el veredicto, no arranca el
+   * sondeo, no lanza toasts.
+   *
+   * Separado de `loadTestResults` a propósito: ese método dispara
+   * `checkTestSetStatus` cuando el lote está pendiente, y llamarlo desde
+   * `applyTestSetOutcome` —que es a quien `checkTestSetStatus` le responde— cerraría
+   * un ciclo de consultas a la DIAN sin fin.
+   */
+  private loadTechnicalSnapshot(): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.invoicingService
+      .getDianTestResults(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const payload = response?.data ?? response;
+          this.persistedTestResult.set(
+            (payload?.last_result as PersistedTestResult) ?? null,
+          );
+        },
+      });
+  }
+
   private refreshConfig(): void {
     const cfg = this.selectedConfig();
     if (!cfg) return;
@@ -1888,26 +2346,26 @@ export class DianConfigWizardComponent {
   // ── Polling lifecycle ─────────────────────────────────────
   private startPolling(): void {
     this.startTips();
-    if (this.pollHandle || this.pollExhausted()) return;
+    if (this.pollSubscription || this.pollExhausted()) return;
     this.polling.set(true);
-    this.pollHandle = setInterval(() => {
-      if (this.pollAttempts() >= MAX_AUTO_POLLS) {
-        // Stop pestering DIAN: the ZipKey is persisted, so the merchant can come
-        // back whenever and resolve the verdict with one click.
-        this.pollExhausted.set(true);
-        this.stopPolling();
-        return;
-      }
-      this.pollAttempts.update((n) => n + 1);
-      this.checkTestSetStatus(true);
-    }, POLL_INTERVAL_MS);
+    this.pollSubscription = timer(POLL_INTERVAL_MS, POLL_INTERVAL_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.pollAttempts() >= MAX_AUTO_POLLS) {
+          // Stop pestering DIAN: the ZipKey is persisted, so the merchant can
+          // come back whenever and resolve the verdict with one click.
+          this.pollExhausted.set(true);
+          this.stopPolling();
+          return;
+        }
+        this.pollAttempts.update((n) => n + 1);
+        this.checkTestSetStatus(true);
+      });
   }
 
   private stopPolling(): void {
-    if (this.pollHandle) {
-      clearInterval(this.pollHandle);
-      this.pollHandle = null;
-    }
+    this.pollSubscription?.unsubscribe();
+    this.pollSubscription = null;
     this.polling.set(false);
     this.stopTips();
   }
@@ -1984,6 +2442,9 @@ export class DianConfigWizardComponent {
           this.pollAttempts.set(0);
           this.diagnosis.set(null);
           this.testSetResult.set(null);
+          // El lote descartado deja de existir para la pantalla; su sobre SOAP y
+          // sus nombres de archivo se van con él.
+          this.persistedTestResult.set(null);
           this.toast.success(
             'Lote descartado. Ya puedes ejecutar un nuevo set de pruebas.',
           );
@@ -1998,18 +2459,18 @@ export class DianConfigWizardComponent {
   }
 
   private startTips(): void {
-    if (this.tipHandle) return;
-    this.tipHandle = setInterval(() => {
-      this.tipIndex.update((i) => i + 1);
-      this.nowTick.update((n) => n + 1);
-    }, TIP_ROTATION_MS);
+    if (this.tipSubscription) return;
+    this.tipSubscription = timer(TIP_ROTATION_MS, TIP_ROTATION_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.tipIndex.update((i) => i + 1);
+        this.nowTick.update((n) => n + 1);
+      });
   }
 
   private stopTips(): void {
-    if (this.tipHandle) {
-      clearInterval(this.tipHandle);
-      this.tipHandle = null;
-    }
+    this.tipSubscription?.unsubscribe();
+    this.tipSubscription = null;
   }
 
   testConnection(): void {
@@ -2056,6 +2517,7 @@ export class DianConfigWizardComponent {
 
     this.runningTestSet.set(true);
     this.testSetResult.set(null);
+    this.persistedTestResult.set(null);
     this.pollExhausted.set(false);
     this.pollAttempts.set(0);
     this.startTips();

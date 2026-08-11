@@ -21,6 +21,10 @@ import {
   localDateString,
   localTimeString,
 } from '../../../../common/utils/store-timezone.util';
+import {
+  resolveInvoiceControl,
+  InvoiceControlSource,
+} from '../../../../common/helpers/invoice-control.helper';
 import { DianDirectProvider } from '../../../store/invoicing/providers/dian-direct/dian-direct.provider';
 import {
   DianSoapClient,
@@ -33,7 +37,12 @@ import {
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
-import { analyzeTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import {
+  buildNotePhaseView,
+  canWriteEnablementStatus,
+} from '../../../store/invoicing/dian-config/note-phase-gate.util';
 import { assertPlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
@@ -169,6 +178,19 @@ interface SubscriptionInvoiceForFiscal {
   };
 }
 
+/**
+ * Fila de `invoice_resolutions` que la emisión de la plataforma necesita.
+ *
+ * Se declara sobre `InvoiceControlSource` para que el resolvedor único la acepte
+ * tal cual, y se le añade lo que el XML pide aparte del bloque de control: la
+ * clave técnica (`ClTec`, que alimenta el CUFE) y el número de resolución.
+ */
+type PlatformInvoiceResolution = InvoiceControlSource & {
+  id: number;
+  technical_key: string | null;
+  document_type: string;
+};
+
 @Injectable()
 export class SubscriptionFiscalService {
   private readonly logger = new Logger(SubscriptionFiscalService.name);
@@ -186,6 +208,10 @@ export class SubscriptionFiscalService {
     // Reused so the platform checklist raises the SAME early alerts, with the
     // same thresholds and copy, as the tenant one.
     private readonly readiness: FiscalProductionReadinessService,
+    // Reutilizado tal cual bajo contexto de plataforma, igual que
+    // `DianTestService`: el reporte de readiness y la guarda de promoción tienen
+    // que ser LOS MISMOS que ve un tenant.
+    private readonly dianConfigService: DianConfigService,
   ) {}
 
   async getStatus() {
@@ -221,8 +247,26 @@ export class SubscriptionFiscalService {
             enablement_status: config.enablement_status,
             test_set_id: config.test_set_id,
             environment: config.environment,
-            last_test_result: config.last_test_result,
-            wait: analyzeTestSetWait(config.last_test_result),
+            // SIN el `note_phase` crudo: lleva cada nota retenida ENTERA, con su
+            // XML firmado. Este panel sondea el estado, así que un lote diferido
+            // mandaba 20 documentos firmados al navegador en cada consulta —datos
+            // que la UI no puede usar y que no deberían salir del servidor.
+            //
+            // El recuento y la razón van abajo, en la vista.
+            last_test_result: this.stripNotePhase(config.last_test_result),
+            // Generados ≠ transmitidos con el envío en dos fases: si las notas se
+            // difieren se generan 50 y salen 30. Sin estos tres campos la UI decía
+            // «50 documentos» sobre un lote del que salieron 30, y las notas
+            // retenidas eran invisibles.
+            note_phase: buildNotePhaseView(
+              (config.last_test_result as Record<string, any> | null)
+                ?.note_phase,
+            ),
+            // Sobre la prueba DURABLE, no sobre el último lote. Un reenvío
+            // posterior sobrescribe `last_test_result`, así que este panel decía
+            // «habilitación pendiente» sobre una config que la DIAN había
+            // habilitado catorce horas antes. Ver `resolveTestSetProof`.
+            wait: resolveTestSetWait(config),
             // Viaja al cliente porque la UI imprimía "50 documentos", la
             // composición de 2019, y con eso desinformaba sobre cuántos
             // consecutivos de la resolución consume cada envío.
@@ -692,17 +736,37 @@ export class SubscriptionFiscalService {
       nextSettings.last_test_result = null;
     }
 
-    if (dto.environment === 'production' && dto.is_enabled) {
-      if (!config.certificate_s3_key) {
-        throw new BadRequestException(
-          'Production activation requires a validated DIAN certificate',
-        );
-      }
-      this.assertFreshProductionTest(nextSettings, fingerprint, dto.confirm_production);
-      await this.prisma.withoutScope().dian_configurations.update({
-        where: { id: config.id },
-        data: { enablement_status: 'enabled', updated_at: new Date() },
-      });
+    // ESTE `PATCH` YA NO ACTIVA PRODUCCIÓN. LA VÍA ES `promote-to-production`.
+    //
+    // Aquí vivía la única guarda de la promoción de la plataforma: certificado
+    // presente + confirmación explícita + una prueba de CONEXIÓN de producción de
+    // la última hora. Ninguna de las tres mira `enablement_status`, así que este
+    // endpoint podía poner la plataforma a emitir en producción —y escribir
+    // `enablement_status: 'enabled'` de paso— sin que la DIAN hubiera aprobado su
+    // set de habilitación.
+    //
+    // El riel de tienda nunca permitió eso: su promoción exige `readiness.ready`,
+    // que incluye `test_set_evidence`. Cerrar esta vía es lo que hace que las dos
+    // tengan la misma guarda, en vez de que la de plataforma dependa de que la
+    // DIAN rechace por su cuenta una conexión de software no habilitado —un
+    // control real, pero externo y que no controlamos.
+    // Se bloquea el AMBIENTE, no la combinación ambiente+`is_enabled`.
+    //
+    // La guarda anterior solo miraba `environment === 'production' && is_enabled`,
+    // y eso dejaba abierta la puerta grande: `updateDianConfig` escribe
+    // `environment: dto.environment` sin condición, así que un PATCH con
+    // `is_enabled: false` volteaba `dian_configurations.environment` a producción
+    // —el ambiente con el que el proveedor firma y transmite— sin pasar por
+    // ninguna comprobación. La activación era un baile de dos pasos donde el
+    // primero ya había hecho el daño.
+    if (dto.environment === 'production') {
+      throw new BadRequestException(
+        'El paso a producción no se hace por este endpoint: usa POST ' +
+          'superadmin/subscriptions/fiscal/promote-to-production, que exige el ' +
+          'reporte de readiness completo (incluida la aprobación del set de ' +
+          'pruebas por la DIAN). Consúltalo en GET ' +
+          'superadmin/subscriptions/fiscal/production-readiness.',
+      );
     }
 
     await this.saveSettings(nextSettings);
@@ -865,11 +929,32 @@ export class SubscriptionFiscalService {
    * way to submit the 50-document test set that DIAN requires before enabling
    * production — the platform rail stopped one step short of usable.
    */
+  /**
+   * Quita `note_phase` del registro del lote antes de mandarlo al cliente.
+   *
+   * `note_phase.deferred[]` guarda cada nota retenida con su XML FIRMADO, porque su
+   * consecutivo ya está reservado dentro de ese XML y regenerarla daría otro CUDE.
+   * Imprescindible en base, y pésimo en una respuesta que el panel sondea: 20
+   * documentos firmados por consulta, que la UI no puede usar.
+   *
+   * El recuento y la razón viajan aparte, vía `buildNotePhaseView`.
+   */
+  private stripNotePhase(last_test_result: unknown): unknown {
+    if (!last_test_result || typeof last_test_result !== 'object') {
+      return last_test_result;
+    }
+    const { note_phase: _omitted, ...rest } = last_test_result as Record<
+      string,
+      any
+    >;
+    return rest;
+  }
+
   private async runInPlatformContext<T>(
     settings: SubscriptionFiscalSettings,
     fn: () => Promise<T>,
   ): Promise<T> {
-    return RequestContextService.run(
+    return RequestContextService.runIsolated(
       {
         organization_id: settings.platform_organization_id!,
         store_id: undefined,
@@ -915,11 +1000,13 @@ export class SubscriptionFiscalService {
    * worker lo restaure. Encolar fuera guardaría el contexto del superadmin y el
    * worker resolvería otra entidad fiscal — o ninguna.
    */
-  async runTestSet(): Promise<{ job_id: string }> {
+  async runTestSet(
+    options: { smoke?: boolean; validate_only?: boolean } = {},
+  ): Promise<{ job_id: string }> {
     const { settings, configId, resolutionId } =
       await this.requireTestSetTargets();
     return this.runInPlatformContext(settings, () =>
-      this.dianTestService.enqueueTestSet(configId, resolutionId),
+      this.dianTestService.enqueueTestSet(configId, resolutionId, options),
     );
   }
 
@@ -954,6 +1041,79 @@ export class SubscriptionFiscalService {
     return this.runInPlatformContext(settings, () =>
       this.dianTestService.abandonTestSet(configId),
     );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Paso a producción — el mismo reporte y la misma guarda que un tenant
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Qué falta para que la PLATAFORMA pueda emitir en producción.
+   *
+   * POR QUÉ ESTE ENDPOINT NO EXISTÍA Y POR QUÉ IMPORTA
+   *
+   * Este riel tenía `habilitation_readiness` —«¿puedo siquiera empezar?»— y no el
+   * reporte de producción —«¿puedo salir a producción?»—, que es el que contiene
+   * el chequeo `test_set_evidence`. Sin él, la única guarda de la promoción era
+   * una prueba de conexión reciente, que no dice nada sobre si la DIAN aprobó el
+   * set de habilitación.
+   *
+   * Delega en la implementación de tienda bajo contexto de plataforma, igual que
+   * `runTestSet` delega en `DianTestService`. Un segundo reporte se habría
+   * desviado del primero, que es exactamente el defecto que este método cierra.
+   *
+   * NO exige la resolución de numeración por adelantado: este reporte existe para
+   * DECIR qué falta, y su chequeo `production_resolution` ya lo cubre con un texto
+   * que explica el trámite en Muisca. Pedirla antes lo haría inalcanzable justo
+   * cuando más sirve.
+   */
+  async getProductionReadiness() {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+    return this.runInPlatformContext(settings, () =>
+      this.dianConfigService.getProductionReadiness(config.id),
+    );
+  }
+
+  /**
+   * Pasa la plataforma a producción, con la guarda completa de readiness.
+   *
+   * EL AMBIENTE DE LA PLATAFORMA VIVE EN DOS SITIOS, Y LOS DOS SE ESCRIBEN
+   *
+   * `dian_configurations.environment` es el que lee el proveedor DIAN al firmar y
+   * transmitir; `platform_settings.value.environment` es el que lee este riel para
+   * decidir si emite factura de suscripción. Escribir solo uno deja la plataforma
+   * firmando contra producción mientras su propio panel se cree en sandbox, o al
+   * revés. `promoteToProduction` de tienda cubre el primero; el segundo es propio
+   * de este riel y se escribe acá.
+   */
+  async promoteToProduction() {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+
+    // La guarda vive en la implementación de tienda: lanza con la lista completa
+    // de faltantes si el readiness no está listo, así que acá no se repite ninguna
+    // condición. Si esto devuelve, la promoción de la configuración ya ocurrió.
+    const promoted = await this.runInPlatformContext(settings, () =>
+      this.dianConfigService.promoteToProduction(config.id),
+    );
+
+    await this.saveSettings({
+      ...settings,
+      environment: 'production',
+      // La promoción es la afirmación de que la plataforma emite: dejar
+      // `is_enabled` en falso produciría una configuración en producción que este
+      // riel no usa, y el operador no tendría dónde ver la contradicción.
+      is_enabled: true,
+      updated_by_user_id: RequestContextService.getUserId() ?? null,
+      updated_at: new Date().toISOString(),
+    });
+
+    this.logger.log(
+      `Platform DIAN config ${config.id} promoted to production via promote-to-production`,
+    );
+
+    return { promoted, status: await this.getStatus() };
   }
 
   async listTransmissions(query: SubscriptionFiscalQueryDto) {
@@ -1080,9 +1240,14 @@ export class SubscriptionFiscalService {
       return { skipped: false, transmission, already_accepted: true };
     }
 
+    // La resolución que respalda el consecutivo de esta transmisión. Se carga aquí
+    // y no dentro de `buildProviderData` porque esa función es sincrónica y debe
+    // seguir siéndolo: armar el payload no debe poder tocar la base.
+    const resolution = await this.loadInvoiceResolution(settings);
+
     try {
       await this.markSubmitted(transmission.id);
-      const response = await RequestContextService.run(
+      const response = await RequestContextService.runIsolated(
         {
           organization_id: settings.platform_organization_id!,
           store_id: undefined,
@@ -1093,7 +1258,14 @@ export class SubscriptionFiscalService {
           permissions: [],
           app_type: 'VENDIX_ADMIN',
         },
-        () => this.dianProvider.sendInvoice(this.buildProviderData(invoice, transmission.document_number)),
+        () =>
+          this.dianProvider.sendInvoice(
+            this.buildProviderData(
+              invoice,
+              transmission.document_number,
+              resolution,
+            ),
+          ),
       );
 
       if (response.success) {
@@ -1749,16 +1921,43 @@ export class SubscriptionFiscalService {
     dto: UpsertSubscriptionFiscalConfigDto,
     options?: { realign_accounting_entity_id?: number | null },
   ) {
+    // El estado actual se lee ACÁ, no se recibe por parámetro.
+    //
+    // Un parámetro opcional que el llamador puede omitir es exactamente cómo este
+    // defecto se volvió invisible las otras tres veces. Con la lectura dentro del
+    // método no hay forma de olvidarla.
+    const current = await this.prisma
+      .withoutScope()
+      .dian_configurations.findUnique({
+        where: { id },
+        select: { enablement_status: true },
+      });
+
     const data: Prisma.dian_configurationsUpdateInput = {
       name: dto.name,
       nit: dto.nit,
       nit_dv: dto.nit_dv,
       software_id: dto.software_id,
       environment: dto.environment,
-      enablement_status: this.nextEnablementStatus(dto),
       test_set_id: dto.test_set_id,
       updated_at: new Date(),
     };
+
+    // CUARTA COPIA DEL MISMO DEFECTO: una escritura de `enablement_status` sin
+    // guarda podía degradar una habilitación concedida.
+    //
+    // `nextEnablementStatus` devuelve `not_started` para todo lo que no sea
+    // «habilitado y en test», así que editar el NOMBRE de una configuración ya
+    // `enabled` borraba el registro de que la DIAN la había habilitado. Es el
+    // mismo fallo que `abandonTestSet` producía el 2026-08-09, y las otras dos
+    // copias ya las cierra `canWriteEnablementStatus` en `dian-test.service`.
+    //
+    // `enabled` REGISTRA UN HECHO DE LA DIAN. Ningún guardado de formulario puede
+    // retirarlo: eso solo lo hace la DIAN, y se refleja por otras vías
+    // (`suspended`, `expired`).
+    if (canWriteEnablementStatus(current?.enablement_status ?? null)) {
+      data.enablement_status = this.nextEnablementStatus(dto);
+    }
     if (dto.software_pin && dto.software_pin !== '****') {
       data.software_pin_encrypted = this.encryption.encrypt(dto.software_pin);
     }
@@ -1845,6 +2044,22 @@ export class SubscriptionFiscalService {
     }
   }
 
+  /**
+   * SIN REFERENCIAS DESDE QUE `PATCH config` RECHAZA PRODUCCIÓN. NO SE BORRA AÚN.
+   *
+   * Era la única guarda de la vieja activación: exigía `last_test_result.ok` con
+   * `environment === 'production'` en la última hora. El problema es que
+   * `testConnection` graba el ambiente leyéndolo de `config.environment`, así que
+   * un resultado con `environment: 'production'` solo existe DESPUÉS de que la
+   * configuración ya está en producción. Como pre-requisito para promover era
+   * insatisfacible: el flujo real era voltear el ambiente primero con un PATCH
+   * —sin guarda ninguna— y recién entonces poder cumplirla.
+   *
+   * Cerrada esa vía, la guarda no puede cumplirse nunca antes de promover. Queda
+   * acá, sin llamar y documentada, en vez de borrada en silencio: una verificación
+   * de conexión POSTERIOR a la promoción sigue teniendo sentido y esta función es
+   * la pieza para ello, pero eso es una decisión de flujo que nadie ha pedido.
+   */
   private assertFreshProductionTest(
     settings: SubscriptionFiscalSettings,
     fingerprint: string,
@@ -2002,7 +2217,11 @@ export class SubscriptionFiscalService {
 
     return client.$transaction(async (tx: any) => {
       const number = await this.allocateFiscalNumber(tx, settings);
-      const providerData = this.buildProviderData(invoice, number.invoice_number);
+      const providerData = this.buildProviderData(
+        invoice,
+        number.invoice_number,
+        number.resolution,
+      );
       return tx.fiscal_transmissions.create({
         data: {
           organization_id: config.organization_id,
@@ -2024,10 +2243,46 @@ export class SubscriptionFiscalService {
     });
   }
 
+  /**
+   * Carga la resolución de numeración de la plataforma.
+   *
+   * NO filtra por `is_active` ni por vigencia a propósito: si la resolución está
+   * desactivada o vencida, `resolveInvoiceControl` lanza diciendo exactamente cuál
+   * de las dos cosas pasa y con qué fechas. Filtrarlo aquí lo convertiría en un
+   * «no encontrada» genérico, que es el mensaje que obliga a ir a la base a
+   * averiguar qué falló.
+   */
+  private async loadInvoiceResolution(
+    settings: SubscriptionFiscalSettings,
+  ): Promise<PlatformInvoiceResolution> {
+    if (!settings.invoice_resolution_id) {
+      throw new BadRequestException('A DIAN invoice resolution is required');
+    }
+    const resolution = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          id: settings.invoice_resolution_id,
+          accounting_entity_id: settings.accounting_entity_id ?? undefined,
+          document_type: 'sales_invoice',
+        },
+      });
+    if (!resolution) {
+      throw new BadRequestException(
+        `No existe la resolución ${settings.invoice_resolution_id} de factura de venta para la entidad contable de la plataforma`,
+      );
+    }
+    return resolution as PlatformInvoiceResolution;
+  }
+
   private async allocateFiscalNumber(
     tx: any,
     settings: SubscriptionFiscalSettings,
-  ): Promise<{ invoice_number: string; resolution_id: number }> {
+  ): Promise<{
+    invoice_number: string;
+    resolution_id: number;
+    resolution: PlatformInvoiceResolution;
+  }> {
     if (!settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
@@ -2068,6 +2323,9 @@ export class SubscriptionFiscalService {
     return {
       invoice_number: `${updated.prefix}${updated.current_number}`,
       resolution_id: updated.id,
+      // La fila RECARGADA, la misma cuyo `current_number` se acaba de consumir, para
+      // que la autorización declarada sea la de la resolución que dio el número.
+      resolution: updated as PlatformInvoiceResolution,
     };
   }
 
@@ -2140,6 +2398,7 @@ export class SubscriptionFiscalService {
   private buildProviderData(
     invoice: SubscriptionInvoiceForFiscal,
     fiscalNumber: string,
+    resolution: PlatformInvoiceResolution,
   ): ProviderInvoiceData {
     const issuedAt = invoice.issued_at ?? invoice.payments[0]?.paid_at ?? new Date();
     const org = invoice.store_subscription.store.organizations;
@@ -2205,6 +2464,20 @@ export class SubscriptionFiscalService {
         ? this.splitCustomerNit(org).dv
         : undefined,
       customer_person_type: org?.person_type ?? undefined,
+      // `customer_regime` NO declara el régimen de IVA del adquiriente, pese al
+      // nombre. Alimenta `normalizePartyAccountType`, que produce '1' o '2' para
+      // `cbc:AdditionalAccountID` (Persona Jurídica / Natural) y decide por
+      // `document_type` cuando el valor no es reconocible — así que con un NIT
+      // (document_type '31') devuelve '1' tanto para '49' como para 'COMUN'.
+      //
+      // El régimen de IVA del adquiriente viaja por otro camino:
+      // `cbc:TaxLevelCode`, que el builder construye desde
+      // `customer_tax_responsibilities?.[0] || 'R-99-PN'` (ubl-common.builder.ts).
+      // Ver también su nota: «The tax regime ('48'/'49') belongs in TaxLevelCode,
+      // not here.»
+      //
+      // Por eso el default '49' no declara nada falso, y derivarlo con
+      // `isVatResponsible` no cambiaría el XML: parecería un arreglo sin serlo.
       customer_regime: org?.tax_regime ?? '49',
       customer_tax_responsibilities: org?.fiscal_responsibilities?.length
         ? org.fiscal_responsibilities
@@ -2212,6 +2485,23 @@ export class SubscriptionFiscalService {
       payment_form: '1',
       payment_method: invoice.payments[0]?.payment_method ?? 'subscription',
       order_reference: invoice.invoice_number,
+      // LOS TRES CAMPOS DE NUMERACIÓN, que antes no viajaban.
+      //
+      // `technical_key` es obligatorio para la factura electrónica de venta: el
+      // proveedor lanza sin ella (guarda de ClTec en `dian-direct.provider.ts`), así
+      // que la emisión SaaS moría antes de llegar a la DIAN. `control` es el bloque
+      // de autorización: sin su prefijo desaparece el lado derecho de FAB10a y la
+      // DIAN rechaza en cascada por FAD05e, FAB24a y FAB27b.
+      //
+      // Los tres salen de la MISMA fila de resolución que consumió el consecutivo,
+      // no de tres lecturas distintas, para que el número emitido y la autorización
+      // declarada no puedan pertenecer a resoluciones diferentes.
+      resolution_number: resolution.resolution_number ?? undefined,
+      technical_key: resolution.technical_key ?? undefined,
+      control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+        resolution_id: resolution.id,
+        document_type: resolution.document_type,
+      }),
     };
   }
 

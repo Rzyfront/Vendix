@@ -217,28 +217,41 @@ export class CustomersAnalyticsService {
       AND u.created_at < ${startDate}
     `;
 
-    let cumulative = Number(cumulativeBefore[0]?.count || 0);
+    // Cumulative running total at the END of the window (used below as the
+    // seed for fillTimeSeries). The fill is responsible for the per-bucket
+    // running total — see the post-fill pass below.
+    const cumulativeAfterWindow = Number(cumulativeBefore[0]?.count || 0);
 
-    const mapped = results.map((r) => {
-      const newCustomers = Number(r.new_customers);
-      cumulative += newCustomers;
-      return {
-        // period is already the authoritative local label from SQL.
-        period: r.period,
-        new_customers: newCustomers,
-        cumulative_customers: cumulative,
-      };
-    });
+    const mapped = results.map((r) => ({
+      // period is already the authoritative local label from SQL.
+      period: r.period,
+      new_customers: Number(r.new_customers),
+    }));
 
-    return fillTimeSeries(
+    // fillTimeSeries generates missing periods (gaps) with `cumulative_customers`
+    // unset. We re-derive the running total in time order so the cumulative
+    // stays FLAT across gaps and grows by `new_customers` only on real buckets.
+    // Pre-fix this used `cumulative_customers: cumulative` (the END value) as the
+    // fill template, which made every gap look like the window closed early.
+    const filled = fillTimeSeries(
       mapped,
       startDate,
       endDate,
       granularity,
-      { new_customers: 0, cumulative_customers: cumulative },
+      { new_customers: 0 },
       formatPeriodFromDate,
       tz,
     );
+
+    let running = cumulativeAfterWindow;
+    const withCumulative = filled.map((b) => {
+      running += (b as any).new_customers;
+      return {
+        ...(b as any),
+        cumulative_customers: running,
+      };
+    });
+    return withCumulative as any;
   }
 
   async getTopCustomers(query: AnalyticsQueryDto) {

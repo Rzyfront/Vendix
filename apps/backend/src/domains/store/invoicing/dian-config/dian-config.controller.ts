@@ -23,6 +23,7 @@ import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
+import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.util';
 
 @Controller('store/invoicing/dian-config')
 export class DianConfigController {
@@ -78,6 +79,28 @@ export class DianConfigController {
   @Permissions('invoicing:read')
   async getEmissionStatus() {
     const result = await this.dian_config_service.getEmissionStatus();
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Estado de LAS CUATRO habilitaciones DIAN de la entidad fiscal, en una sola
+   * respuesta y con los cuatro ejes SIEMPRE presentes.
+   *
+   * `:id/production-readiness` solo sabe contestar por una configuración que ya
+   * existe, así que los ejes sin configurar —documento soporte, nómina,
+   * documento equivalente— no tenían forma de aparecer, y lo que no aparece se
+   * lee como «no aplica». Aquí el eje sin configuración se reporta como
+   * `not_started`, que es un estado, no una ausencia.
+   *
+   * Declarada ANTES de `@Get(':id')` a propósito, por el mismo motivo que
+   * `emission-status`: Nest resuelve en orden de declaración y la ruta
+   * paramétrica se tragaría este path, dejando que `ParseIntPipe` respondiera
+   * 400 sobre un texto que nunca fue un id.
+   */
+  @Get('fiscal-readiness')
+  @Permissions('invoicing:read')
+  async getFiscalReadiness() {
+    const result = await this.dian_config_service.getFiscalReadiness();
     return this.response_service.success(result);
   }
 
@@ -167,7 +190,13 @@ export class DianConfigController {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
     }
 
-    const s3_key = `dian/certificates/${config_id_int}/certificate.p12`;
+    // Clave con el dueño en el prefijo: sin ella el bucket no dice de quién es
+    // cada certificado ni permite purgar los de un tenant dado de baja.
+    const s3_key = buildDianCertificateS3Key({
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      dian_configuration_id: config_id_int,
+    });
     await this.s3_service.uploadFile(
       file.buffer,
       s3_key,
@@ -217,10 +246,21 @@ export class DianConfigController {
   async runTestSet(
     @Param('id', ParseIntPipe) id: number,
     @Body('resolution_id', ParseIntPipe) resolution_id: number,
+    // Vía de humo: 1 documento, 1 consecutivo. Diagnostica si la DIAN ingiere el
+    // envío sin quemar los 50 que exige el set. No habilita.
+    @Query('smoke') smoke?: string,
+    // Vía de validación: el MISMO documento por `SendBillSync`, que responde en la
+    // misma llamada con `IsValid` y las reglas violadas. No lleva `testSetId`, así
+    // que no puede rechazar el set ni consumir un intento de habilitación.
+    @Query('validate') validate?: string,
   ) {
     const result = await this.dian_test_service.enqueueTestSet(
       id,
       resolution_id,
+      {
+        smoke: smoke === 'true' || smoke === '1',
+        validate_only: validate === 'true' || validate === '1',
+      },
     );
     return this.response_service.success(result);
   }
@@ -270,6 +310,38 @@ export class DianConfigController {
   async getTestSetDocuments(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dian_test_service.getTestSetDocumentStatus(id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Transmite las notas que la fase 2 dejó GENERADAS, FIRMADAS Y SIN ENVIAR.
+   *
+   * Las lee de `last_test_result.note_phase.deferred[]` y las manda TAL CUAL:
+   * el consecutivo entra en el `SoftwareSecurityCode` y en el CUDE, así que
+   * renumerar exigiría volver a firmar y produciría otro documento. No reserva
+   * numeración nueva ni regenera nada.
+   *
+   * Es REANUDABLE: cada nota con ZipKey sale de `deferred`, así que una llamada
+   * cortada por el `proxy_read_timeout` de nginx se retoma invocando de nuevo y
+   * solo viajan las que faltan. `limit` permite partirla a mano si el bloque
+   * retenido es grande.
+   *
+   * `invoicing:write` y no `:read` porque envía documentos a la DIAN contra
+   * consecutivos autorizados: es la operación de escritura más costosa de este
+   * controlador, aunque no consuma numeración nueva.
+   */
+  @Post(':id/transmit-deferred-notes')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async transmitDeferredNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed = limit ? parseInt(limit, 10) : undefined;
+    const result = await this.dian_test_service.transmitDeferredNotes(
+      id,
+      Number.isFinite(parsed) && (parsed as number) > 0 ? parsed : undefined,
+    );
+    return this.response_service.success(result, result.message);
   }
 
   /**

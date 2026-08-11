@@ -21,8 +21,50 @@ import { DianTestSetJob } from './dian-test-set-job.interface';
  * política de reintentos vive en la persona que mira el resultado, no en BullMQ.
  * El productor (`DianTestService.enqueueTestSet`) fija esa política; este
  * comentario existe para que nadie la "mejore" a 3 intentos por costumbre.
+ *
+ * `attempts: 1` NO ERA SUFICIENTE, y `maxStalledCount: 0` cierra el hueco.
+ *
+ * En BullMQ la recuperación de un job ESTANCADO es un mecanismo APARTE del contador
+ * de intentos. Lo dicen sus propios tipos sobre `WorkerOptions.maxStalledCount`,
+ * cuyo default es 1: «Amount of times a job can be recovered from a stalled state
+ * to the `wait` state». Un job cuyo lock caduca vuelve a `wait` y se procesa otra
+ * vez — sin consultar `attempts`.
+ *
+ * Y caducar el lock no es hipotético: pasa cuando el contenedor se reinicia a mitad
+ * del job, que es exactamente lo que hace un deploy. Con el default, un deploy en
+ * medio de un envío habría hecho que `executeTestSet` corriera de nuevo, reservara
+ * OTRO bloque de 50 consecutivos y mandara un segundo lote a la DIAN. En silencio.
+ *
+ * El envío en dos fases agrava la exposición: el job pasó de ~2 minutos a hasta ~12,
+ * porque ahora espera a que la DIAN registre las facturas antes de mandar las notas.
+ *
+ * Con `maxStalledCount: 0` un job estancado va a `failed` y el operador lo ve. Falla
+ * ruidosa en vez de duplicar 50 números autorizados irrecuperables — el mismo
+ * criterio que el resto de este flujo: preferir fallar antes de gastar.
+ *
+ * ## `lockDuration: 120_000` — por qué se sube el default (QUI-674)
+ *
+ * BullMQ renueva el lock con un temporizador que dispara a la MITAD de
+ * `lockDuration` (15 s con el default de 30 s). Ese temporizador vive en el event
+ * loop de ESTE proceso, así que si el job lo bloquea, la renovación no corre y el
+ * lock caduca — con `maxStalledCount: 0` eso es un `failed` en medio de un envío
+ * a la DIAN. Es exactamente lo que pasaba: `could not renew lock for job 27`,
+ * `Missing lock for job 28. moveToFinished`.
+ *
+ * La causa se ataca en origen (caché del PKCS#12 en `DianXmlSignerService` +
+ * cesión del event loop por documento en `DianTestService.yieldEventLoop`), y con
+ * eso el macrotask más largo del job pasa a ser UN documento: sub-segundo.
+ *
+ * `lockDuration` se dimensiona sobre esa cota nueva, no sobre la vieja: 120 s son
+ * dos órdenes de magnitud de margen sobre un documento, y cubren de sobra un
+ * primer parseo en frío, una pausa de GC o un pico del host. El coste de pasarse
+ * es acotado y benigno: un proceso que MUERA a mitad de job deja el lock retenido
+ * hasta 120 s antes de que se detecte el estancamiento, y como `maxStalledCount`
+ * es 0 el desenlace es el mismo `failed` — solo que 90 s más tarde. Errar por
+ * generoso es el lado seguro: lo que no se puede permitir es lo contrario, un
+ * lock que caduca con el worker vivo y sano.
  */
-@Processor('dian-test-set')
+@Processor('dian-test-set', { maxStalledCount: 0, lockDuration: 120_000 })
 export class DianTestSetProcessor extends WorkerHost {
   private readonly logger = new Logger(DianTestSetProcessor.name);
 
@@ -31,11 +73,25 @@ export class DianTestSetProcessor extends WorkerHost {
   }
 
   async process(job: Job<DianTestSetJob>): Promise<unknown> {
-    const { config_id, resolution_id, context } = job.data;
+    const {
+      config_id,
+      resolution_id,
+      smoke,
+      validate_only,
+      numbering_range,
+      check_status,
+      validate_kind,
+      context,
+    } = job.data;
 
     this.logger.log(
       `Procesando set de pruebas DIAN job=${job.id} config=${config_id} ` +
-        `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}`,
+        `resolucion=${resolution_id} store_id=${context?.store_id ?? 'null'}` +
+        (validate_only
+          ? ` [VALIDACIÓN: SendBillSync, 1 ${validate_kind ?? 'invoice'}, sin testSetId]`
+          : smoke
+            ? ` [HUMO: 1 ${validate_kind ?? 'invoice'}]`
+            : ''),
     );
 
     const requestId =
@@ -44,7 +100,7 @@ export class DianTestSetProcessor extends WorkerHost {
         : `queue-${randomUUID()}`;
 
     try {
-      return await RequestContextService.run(
+      return await RequestContextService.runIsolated(
         {
           // Se arrastran tal cual: la plataforma corre con `store_id: undefined`
           // y `is_super_admin: true`, y aplanar eso a `false` haría que el
@@ -56,7 +112,16 @@ export class DianTestSetProcessor extends WorkerHost {
           user_id: context?.user_id,
           request_id: requestId,
         },
-        () => this.dianTestService.executeTestSet(config_id, resolution_id),
+        () =>
+          this.dianTestService.executeTestSet(config_id, resolution_id, {
+            smoke: smoke === true,
+            validate_only: validate_only === true,
+            numbering_range: numbering_range === true,
+            check_status: check_status === true,
+            // Se pasa tal cual, sin default: `executeTestSet` resuelve el suyo
+            // (`invoice`). Poner uno aquí duplicaría la decisión en dos sitios.
+            ...(validate_kind ? { validate_kind } : {}),
+          }),
       );
     } catch (error: any) {
       this.logger.error(

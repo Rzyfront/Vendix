@@ -7,6 +7,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
+import { resolveLineUnits } from '../utils/line-units.util';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -92,9 +93,9 @@ export class PosPaymentService {
   private mapCartItemForPos(item: CartItem): any {
     const isCustomItem =
       item.itemType === 'custom' || item.product.id.startsWith('custom-');
-    const lineUnits = item.is_weight_product && item.weight
-      ? item.weight
-      : item.quantity;
+    // QUI-648 — un solo multiplicador para peso legado, presentación y precio
+    // por N unidades. Con escala 1 devuelve la cantidad, como siempre.
+    const lineUnits = resolveLineUnits(item);
     const taxRate = item.taxRate ?? this.calculateItemTaxRate(item);
     const categoryIds = this.getProductCategoryIds(item);
 

@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -25,6 +26,15 @@ export class CreatePriceTierDto {
   @IsString()
   @MaxLength(255)
   name!: string;
+
+  /**
+   * Eje al que pertenece la tarifa: `customer_tier` (a quién le vendo) o
+   * `sale_unit` (en qué presentación vendo). Por defecto `customer_tier`, que
+   * es lo que la tabla significaba antes de existir este campo.
+   */
+  @IsOptional()
+  @IsIn(['customer_tier', 'sale_unit'])
+  kind?: 'customer_tier' | 'sale_unit';
 
   @IsOptional()
   @IsString()

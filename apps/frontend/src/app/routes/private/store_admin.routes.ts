@@ -169,6 +169,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.SuppliersComponent,
               ),
           },
+          // QUI-656 — perfil del proveedor. Ruta lazy con URL compartible, igual
+          // que el perfil de cliente. Va DESPUÉS de 'suppliers' para que la ruta
+          // literal gane sobre el parámetro.
+          {
+            path: 'suppliers/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/suppliers/supplier-details.component').then(
+                (c) => c.SupplierDetailsComponent,
+              ),
+          },
           /* Orders removed (moved to Orders module) */
           {
             path: 'locations',
@@ -519,10 +529,15 @@ export const storeAdminRoutes: Routes = [
             redirectTo: 'general',
           },
           {
+            // Configuración General es un shell con pestañas y rutas hijas
+            // (`negocio`, `venta`, `logistica`, `reservas`, `mesas`,
+            // `notificaciones`). `settings/general` a secas redirige a `negocio`,
+            // así que los enlaces entrantes que apuntan al módulo sin pestaña
+            // siguen resolviendo.
             path: 'general',
-            loadComponent: () =>
-              import('../../private/modules/store/settings/general/general-settings.component').then(
-                (c) => c.GeneralSettingsComponent,
+            loadChildren: () =>
+              import('../../private/modules/store/settings/general/general-settings.routes').then(
+                (m) => m.GENERAL_SETTINGS_ROUTES,
               ),
           },
           {

@@ -26,6 +26,17 @@ export const INVENTORY_ROUTES: Routes = [
                         (m) => m.SuppliersComponent
                     ),
             },
+            // QUI-656 — perfil del proveedor. Ruta lazy y no modal, igual que
+            // el perfil de cliente: da URL compartible y deep-link, que es lo
+            // que un modal no puede ofrecer. Va DESPUÉS de 'suppliers' para
+            // que la ruta literal gane sobre el parámetro.
+            {
+                path: 'suppliers/:id',
+                loadComponent: () =>
+                    import('./suppliers/supplier-details.component').then(
+                        (m) => m.SupplierDetailsComponent
+                    ),
+            },
             /* PopComponent kept, orders removed */
             {
                 path: 'locations',

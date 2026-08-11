@@ -2685,6 +2685,53 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/cash-registers/:id/unique-delete',
       method: 'DELETE',
     },
+    // Estaciones de preparación (KDS) — QUI-651.
+    // Espejo de los permisos de caja, con una separación deliberada: la estación
+    // y su turno son recursos distintos. Un jefe de cocina puede configurar
+    // estaciones sin operar turnos, y un cocinero opera turnos sin poder crear
+    // ni borrar estaciones.
+    {
+      name: 'store:kds:read',
+      description: 'Leer estaciones de cocina',
+      path: '/api/store/kds/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:kds:create',
+      description: 'Crear estación de cocina',
+      path: '/api/store/kds/unique-create',
+      method: 'POST',
+    },
+    {
+      name: 'store:kds:update',
+      description: 'Actualizar estación de cocina',
+      path: '/api/store/kds/:id/unique-update',
+      method: 'PUT',
+    },
+    {
+      name: 'store:kds:delete',
+      description: 'Desactivar estación de cocina',
+      path: '/api/store/kds/:id/unique-delete',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:kds_sessions:read',
+      description: 'Leer turnos de estación y su consumo de insumos',
+      path: '/api/store/kds-sessions/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:kds_sessions:create',
+      description: 'Abrir turno de estación',
+      path: '/api/store/kds-sessions/open',
+      method: 'POST',
+    },
+    {
+      name: 'store:kds_sessions:update',
+      description: 'Cerrar turno de estación',
+      path: '/api/store/kds-sessions/:id/close',
+      method: 'POST',
+    },
     {
       name: 'store:cash_registers:open_session',
       description: 'Abrir sesión de caja',
@@ -3469,6 +3516,82 @@ export async function seedPermissionsAndRoles(
         'Gestionar documentos soporte de proveedor (facturas recibidas): CRUD, aprobar, marcar pagado, anular, subir PDF',
       path: '/api/super-admin/fiscal/invoicing/*',
       method: 'GET',
+    },
+    // ── Consola de tenants del super admin ────────────────────────────────
+    //
+    // Los `path` son CENTINELAS NO ENRUTABLES (`.../unique-*`), no las rutas
+    // reales. `PermissionsGuard` matchea con `currentPath.startsWith(
+    // permission.path)`, así que sembrar aquí `/api/superadmin/tenants`
+    // regalaría de un golpe TODO lo que cuelgue del namespace —incluida la
+    // subida del `.p12` de un cliente— a cualquier rol que tuviera el permiso
+    // de solo lectura. Con un centinela, el único match posible es por nombre
+    // (`hasNamedPermission`), que es granular. Mismo patrón que
+    // `superadmin:stores:create` / `:read` y la contención de QUI-600.
+    //
+    // No hace falta asignarlos: super_admin recibe `allPermissions`, y owner,
+    // admin y manager los excluyen por el filtro `!startsWith('superadmin:')`.
+    {
+      name: 'superadmin:tenants:read',
+      description:
+        'Ver el directorio de tenants y el perfil de configuración de una tienda u organización (sin datos transaccionales)',
+      path: '/api/superadmin/tenants/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:tenants:dian:read',
+      description:
+        'Ver la configuración de facturación electrónica DIAN de un tenant y el estado de su set de pruebas',
+      path: '/api/superadmin/tenants/unique-dian-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:tenants:dian:write',
+      description:
+        'Crear, editar y eliminar configuraciones DIAN de un tenant, y ejecutar o descartar su set de pruebas de habilitación',
+      path: '/api/superadmin/tenants/unique-dian-write',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:tenants:dian:certificate:write',
+      description:
+        'Subir el certificado .p12 de un tenant. Permiso separado: implica que Vendix custodia material criptográfico ajeno y firma con el NIT del cliente',
+      path: '/api/superadmin/tenants/unique-dian-certificate-write',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:tenants:dian:promote',
+      description:
+        'Promover la facturación electrónica de un tenant a producción. Separado de la escritura general: quema consecutivos autorizados y es irreversible',
+      path: '/api/superadmin/tenants/unique-dian-promote',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:tenants:resolutions:read',
+      description:
+        'Ver las resoluciones DIAN y los rangos de numeración de un tenant (nunca la clave técnica)',
+      path: '/api/superadmin/tenants/unique-resolutions-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:tenants:resolutions:write',
+      description:
+        'Crear, editar y eliminar resoluciones DIAN y rangos de numeración de un tenant',
+      path: '/api/superadmin/tenants/unique-resolutions-write',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:tenants:settings:read',
+      description:
+        'Ver la configuración (store_settings / organization_settings) e identidad fiscal de un tenant',
+      path: '/api/superadmin/tenants/unique-settings-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:tenants:settings:write',
+      description:
+        'Editar la configuración e identidad fiscal de un tenant a través de SettingsService (respetando sanitización, guards de transición y defaults)',
+      path: '/api/superadmin/tenants/unique-settings-write',
+      method: 'PATCH',
     },
     {
       name: 'superadmin:social_sales:config:read',

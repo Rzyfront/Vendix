@@ -20,7 +20,10 @@ import {
 } from '@angular/forms';
 
 import {
+  AlertBannerComponent,
   ButtonComponent,
+  DianTechnicalResponseComponent,
+  DianTechnicalResponseData,
   FileUploadDropzoneComponent,
   IconComponent,
   InputComponent,
@@ -36,10 +39,13 @@ import {
   UpsertSubscriptionFiscalConfigDto,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+// El reporte de readiness es EL MISMO que el del riel de tiendas: el backend
+// delega en su implementación bajo contexto de plataforma.
+import type { DianProductionReadiness } from '../../../../../store/invoicing/interfaces/invoice.interface';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { PlatformDianGuideComponent } from '../../components/platform-dian-guide.component';
 import {
-  ENVIRONMENT_OPTIONS,
+  DIAN_CONFIG_ENVIRONMENT_OPTIONS,
   confirmProductionValidator,
   environmentLabel,
   nitFormatValidator,
@@ -101,6 +107,7 @@ const REQUIRED_LABELS: Record<string, string> = {
     JsonPipe,
     NgClass,
     RouterLink,
+    AlertBannerComponent,
     ButtonComponent,
     FileUploadDropzoneComponent,
     IconComponent,
@@ -109,6 +116,7 @@ const REQUIRED_LABELS: Record<string, string> = {
     StatsComponent,
     ToggleComponent,
     PlatformDianGuideComponent,
+    DianTechnicalResponseComponent,
   ],
   templateUrl: './platform-dian-config.component.html',
 })
@@ -132,8 +140,56 @@ export class PlatformDianConfigComponent {
   readonly formInvalid = signal(true);
   readonly identityPrefillApplied = signal(false);
 
-  readonly environmentOptions = ENVIRONMENT_OPTIONS;
+  /**
+   * Solo sandbox. El paso a producción va por `promote-to-production`, que exige
+   * el reporte de readiness completo; `PATCH config` responde 400 a cualquier
+   * `environment: 'production'`, así que ofrecerlo acá solo produciría un 400
+   * después de llenar el formulario.
+   */
+  readonly environmentOptions = DIAN_CONFIG_ENVIRONMENT_OPTIONS;
   readonly environmentLabel = environmentLabel;
+
+  // ── Paso a producción ──────────────────────────────────────
+  readonly readiness = signal<DianProductionReadiness | null>(null);
+  readonly loadingReadiness = signal(false);
+  readonly promoting = signal(false);
+
+  /** Bloqueantes del readiness. Vacío no significa listo: puede no haberse leído. */
+  readonly readinessBlockers = computed(
+    () => this.readiness()?.missing ?? [],
+  );
+
+  readonly canPromote = computed(() => this.readiness()?.ready === true);
+
+  /**
+   * Notas que quedaron generadas y sin transmitir por el envío en dos fases.
+   *
+   * Mismo dato y mismo criterio que el asistente de tiendas: el backend proyecta
+   * con `buildNotePhaseView` en los tres rieles, así que las tres superficies
+   * describen el diferimiento con las mismas palabras.
+   */
+  readonly hasDeferredNotes = computed(() => {
+    const phase = this.store.testSet()?.note_phase ?? null;
+    return !!phase && phase.sent === false && phase.deferred_count > 0;
+  });
+
+  /** Rango de consecutivos retenidos: cuáles, no solo cuántos. */
+  readonly deferredConsecutivesLabel = computed(() => {
+    const list = this.store.testSet()?.note_phase?.deferred_consecutives ?? [];
+    if (!list.length) return null;
+    const from = Math.min(...list);
+    const to = Math.max(...list);
+    return from === to ? `${from}` : `${from} – ${to}`;
+  });
+
+  /** ¿La plataforma ya emite en producción? Entonces no hay nada que promover. */
+  readonly alreadyInProduction = computed(() => {
+    const config = this.store.dianConfig();
+    return (
+      config?.environment === 'production' &&
+      config?.enablement_status === 'enabled'
+    );
+  });
 
   readonly form: FormGroup<FiscalConfigFormControls> =
     this.fb.group<FiscalConfigFormControls>(
@@ -200,6 +256,19 @@ export class PlatformDianConfigComponent {
 
   /** Lectura acotada de la espera del lote, calculada por el backend. */
   readonly testSetWait = computed(() => this.store.testSet()?.wait ?? null);
+
+  /**
+   * Snapshot persistido del lote, para el panel técnico.
+   *
+   * NO es `testSetResult()`: ese guarda la respuesta de la ÚLTIMA operación (envío,
+   * consulta o diagnóstico) y no incluye los nombres de archivo entregados ni el
+   * sobre SOAP. Lo que la DIAN devolvió sobre el lote vive en `last_test_result`.
+   */
+  readonly technicalResult = computed<DianTechnicalResponseData | null>(
+    () =>
+      (this.store.testSet()?.last_test_result as DianTechnicalResponseData) ??
+      null,
+  );
 
   /**
    * Composición del set según el modo de operación, resuelta por el backend. Se
@@ -637,6 +706,89 @@ export class PlatformDianConfigComponent {
           this.saving.set(false);
           this.toast.error(
             err?.error?.message ?? 'No se pudo guardar la configuración',
+            'Error',
+          );
+        },
+      });
+  }
+
+  /**
+   * Lee qué falta para producción. Solo lectura y repetible.
+   *
+   * NO se llama al montar: responde 400 mientras la plataforma no tenga
+   * configuración, y un error al abrir la pestaña se lee como si algo estuviera
+   * roto. Se pide cuando el operador pregunta.
+   */
+  onCheckReadiness(): void {
+    if (this.loadingReadiness()) return;
+    this.loadingReadiness.set(true);
+    this.fiscal
+      .getProductionReadiness()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (report) => {
+          this.readiness.set(report);
+          this.loadingReadiness.set(false);
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.loadingReadiness.set(false);
+          this.readiness.set(null);
+          this.toast.error(
+            err?.error?.message ??
+              'No se pudo leer el estado de preparación para producción',
+            'Error',
+          );
+        },
+      });
+  }
+
+  /**
+   * Pasa la plataforma a producción.
+   *
+   * La guarda es del backend: responde 412 con la lista completa de faltantes. Esta
+   * UI no la duplica —repetir la condición acá crearía dos reglas que se
+   * desincronizan— y se limita a mostrar lo que el servidor contestó.
+   *
+   * Tras promover RELEE el estado en vez de deducirlo del payload enviado: la
+   * respuesta trae `promoted` y `status`, pero el resto de la pestaña —resoluciones
+   * por ambiente, insignias, readiness— cuelga del status del store, y actualizar
+   * señales locales dejaría media pantalla describiendo el estado anterior.
+   */
+  onPromoteToProduction(): void {
+    if (this.promoting()) return;
+    this.promoting.set(true);
+    this.fiscal
+      .promoteToProduction()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.promoting.set(false);
+          this.toast.success(
+            'La plataforma quedó en producción ante la DIAN.',
+            'Listo',
+          );
+          this.reloadStatus();
+          // El readiness anterior describe un estado que ya no existe: se vuelve a
+          // pedir en vez de dejar en pantalla una lista de faltantes obsoleta.
+          this.onCheckReadiness();
+        },
+        error: (err: {
+          error?: { message?: string; details?: { missing?: unknown } };
+        }) => {
+          this.promoting.set(false);
+          // El 412 trae `details.missing`. Se guarda para pintar la misma lista que
+          // muestra el reporte, en vez de un toast que solo dice «faltan
+          // requisitos» sin decir cuáles.
+          const missing = err?.error?.details?.missing;
+          if (Array.isArray(missing)) {
+            this.readiness.update((current) =>
+              current
+                ? { ...current, ready: false, missing: missing as string[] }
+                : current,
+            );
+          }
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo pasar a producción',
             'Error',
           );
         },

@@ -2,6 +2,159 @@
   display: block;
 }
 
+// ─── Encabezados y ayuda ────────────────────────────────
+// Los kickers usaban `text-gray-400`, que no sigue al tema: en modo oscuro
+// quedaban al mismo gris que el fondo. Ahora cuelgan de los tokens.
+
+.section-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.section-kicker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+
+  app-icon {
+    color: var(--color-primary);
+  }
+}
+
+.section-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+
+  strong {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+
+  strong {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+  }
+}
+
+.volume-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  cursor: help;
+  transition: color 160ms ease;
+
+  &:hover {
+    color: var(--color-info);
+  }
+}
+
+// ─── Bloque del canal de dispositivo ────────────────────
+// Se enmarca porque su estado NO depende de esta pantalla sino del navegador:
+// el marco y la insignia lo separan de los interruptores que sí gobierna.
+
+.channel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-neutral-100);
+}
+
+.channel-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.channel-block__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+
+  app-icon {
+    color: var(--color-text-muted);
+  }
+}
+
+// ─── Ayuda colapsable ───────────────────────────────────
+
+.help-card-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--color-text-primary);
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--color-info);
+  }
+}
+
+.help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-secondary);
+  }
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--color-text-muted);
+  }
+
+  strong {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+}
+
 // Progressive disclosure animation for sub-fields
 .animate-slideDown {
   animation: slideDown 200ms ease-out;

@@ -5,8 +5,8 @@
       Reservas
     </h3>
     <p class="settings-section__hint">
-      Define cómo se gestionan las reprogramaciones de reservas desde
-      el ecommerce y el portal del cliente.
+      Define quién tiene la última palabra cuando un cliente quiere mover su
+      cita: él mismo, o tu equipo.
     </p>
   </div>
 
@@ -14,11 +14,116 @@
     <!-- Toggle: permite reagendamiento directo (1 click).
          Cuando está OFF, la reprogramación del cliente queda como
          solicitud pendiente hasta que un admin la apruebe o rechace. -->
-    <app-setting-toggle
-      [formControl]="allowDirectRescheduleControl"
-      label="¿Permitir reagendamiento directo?"
-      description="Si está activo, el cliente puede reprogramar su reserva con un solo click desde el ecommerce. Si lo desactivas, cada reagendamiento quedará como solicitud pendiente y un admin deberá aprobarla."
-      (changed)="onFieldChange()"
-    />
+    <div class="policy-toggle">
+      <div class="policy-toggle__label">
+        <span>Reagendamiento directo del cliente</span>
+        <app-tooltip
+          content="Ejemplo: un cliente con cita el martes 10:00 entra desde la tienda y elige el jueves 15:00. Con el reagendamiento directo ACTIVO su cita queda el jueves 15:00 de inmediato y el martes 10:00 se libera. Con el reagendamiento INACTIVO la cita sigue el martes 10:00 y queda una solicitud pendiente: si nadie la aprueba, el cliente se presenta el martes o no se presenta nunca."
+          position="top"
+        >
+          <span class="help-icon">
+            <app-icon name="help-circle" [size]="13"></app-icon>
+          </span>
+        </app-tooltip>
+        <app-badge variant="info" size="xs" badgeStyle="outline">
+          Activo por defecto
+        </app-badge>
+      </div>
+      <app-setting-toggle
+        [formControl]="allowDirectRescheduleControl"
+        label="¿Permitir reagendamiento directo?"
+        description="Activo: el cliente mueve su cita con un clic desde la tienda y el portal del cliente. Inactivo: cada cambio queda como solicitud pendiente y un administrador debe aprobarla o rechazarla."
+        (changed)="onFieldChange()"
+      />
+    </div>
+
+    <!-- Comparativa de las dos caras. La vigente queda resaltada para que el
+         operador vea de inmediato bajo qué política está operando hoy. -->
+    <div class="policy-grid">
+      @for (face of policyFaces; track face.active) {
+        <div
+          class="policy-card"
+          [class.policy-card--current]="face.active === allowDirectReschedule()"
+        >
+          <div class="policy-card__head">
+            <span class="policy-card__icon">
+              <app-icon [name]="face.icon" [size]="16"></app-icon>
+            </span>
+            <h4 class="policy-card__title">{{ face.title }}</h4>
+            @if (face.active === allowDirectReschedule()) {
+              <app-badge variant="success" size="xs" badgeStyle="outline">
+                Vigente
+              </app-badge>
+            }
+          </div>
+          <p class="policy-card__effect">{{ face.effect }}</p>
+          <ul class="policy-card__tradeoff">
+            <li class="policy-card__gain">
+              <app-icon name="check-circle" [size]="13"></app-icon>
+              <span>{{ face.gain }}</span>
+            </li>
+            <li class="policy-card__cost">
+              <app-icon name="alert-triangle" [size]="13"></app-icon>
+              <span>{{ face.cost }}</span>
+            </li>
+          </ul>
+        </div>
+      }
+    </div>
+
+    @if (!allowDirectReschedule()) {
+      <app-alert-banner variant="warning" icon="clock">
+        Con esta política, las solicitudes se acumulan en
+        <strong>Reservas › Solicitudes de reagenda</strong>. Revísala a diario:
+        mientras una solicitud siga pendiente, la cita original sigue en pie.
+      </app-alert-banner>
+    }
+
+    <app-expandable-card [(expanded)]="flowHelpOpen">
+      <div slot="header" class="help-card-header">
+        <app-icon name="list-checks" [size]="16"></app-icon>
+        <span>¿Qué pasa exactamente cuando el cliente pide otro horario?</span>
+      </div>
+      <div class="flow-help">
+        <div class="flow-help__block">
+          <h5 class="flow-help__title">
+            <app-icon name="zap" [size]="14"></app-icon>
+            Con reagendamiento directo activo
+          </h5>
+          <ol class="flow-help__steps">
+            <li>El cliente elige un horario disponible y confirma.</li>
+            <li>La reserva se mueve de inmediato al nuevo horario.</li>
+            <li>El horario anterior queda libre para otro cliente.</li>
+            <li>Tu equipo recibe el aviso del cambio ya consumado.</li>
+          </ol>
+        </div>
+        <div class="flow-help__block">
+          <h5 class="flow-help__title">
+            <app-icon name="shield-check" [size]="14"></app-icon>
+            Con reagendamiento directo inactivo
+          </h5>
+          <ol class="flow-help__steps">
+            <li>El cliente elige un horario y envía la solicitud.</li>
+            <li>
+              La reserva <strong>no se mueve</strong>: el horario original se
+              conserva.
+            </li>
+            <li>
+              La solicitud aparece como pendiente en el detalle de la reserva y
+              en la cola de <strong>Solicitudes de reagenda</strong>.
+            </li>
+            <li>
+              Al aprobar, la reserva pasa al nuevo horario. Al rechazar, se
+              queda donde estaba.
+            </li>
+          </ol>
+        </div>
+        <p class="flow-help__note">
+          Sólo se pueden reprogramar reservas en estado
+          <strong>pendiente</strong> o <strong>confirmada</strong>. Una reserva
+          cancelada o ya cumplida no se mueve con ninguna de las dos políticas.
+        </p>
+      </div>
+    </app-expandable-card>
   </div>
 </div>

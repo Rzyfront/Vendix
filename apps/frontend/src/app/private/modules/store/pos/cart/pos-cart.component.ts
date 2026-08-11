@@ -38,6 +38,11 @@ import {
   PriceTierCacheService,
   PriceTierSelectorComponent,
 } from '../../price-tiers';
+import { PosSaleUnitService } from '../services/pos-sale-unit.service';
+import {
+  formatSaleQuantity,
+  isSaleUnitLine as isLineCapturedInSaleUnit,
+} from '../utils/line-units.util';
 
 @Component({
   selector: 'app-pos-cart',
@@ -529,13 +534,7 @@ import {
                   <div class="flex items-center gap-2 mt-0.5">
                     <span class="text-[10px] text-text-muted">
                       Base: {{ formatCurrency(item.unitPrice)
-                      }}{{
-                        item.is_weight_product
-                          ? '/' + (item.weight_unit || 'kg')
-                          : isPackageLine(item)
-                            ? '/paquete'
-                            : ''
-                      }}
+                      }}{{ unitPriceSuffix(item) }}
                     </span>
                     @if (item.is_weight_product && item.weight) {
                       <span
@@ -584,6 +583,17 @@ import {
                         (selectedTierIdChange)="onTierChange(item, $event)"
                       ></app-price-tier-selector>
                     </div>
+                  } @else {
+                    <!-- QUI-648: sin selector de presentación, la línea dice
+                         POR QUÉ (la misma frase del editor de producto). -->
+                    @if (saleConfigHints()[item.id]; as hint) {
+                      <p
+                        class="mt-1 text-[10px] text-text-muted leading-tight truncate"
+                        [title]="hint.detail"
+                      >
+                        {{ hint.headline }}
+                      </p>
+                    }
                   }
                 </div>
                 <!-- Item actions -->
@@ -632,6 +642,27 @@ import {
                           [size]="10"
                           class="text-blue-400"
                         ></app-icon>
+                      </button>
+                    } @else if (isSaleUnitLine(item)) {
+                      <!-- QUI-648: la línea se muestra en la unidad que el
+                           cajero capturó ("3 m"), nunca en milímetros. -->
+                      <button
+                        (click)="editSaleQuantity(item)"
+                        class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                        [title]="
+                          item.captured_by_scale
+                            ? 'Volver a pesar'
+                            : 'Editar cantidad'
+                        "
+                      >
+                        <app-icon
+                          [name]="item.captured_by_scale ? 'scale' : 'edit'"
+                          [size]="14"
+                          class="text-blue-600"
+                        ></app-icon>
+                        <span class="text-xs font-bold text-blue-700">{{
+                          saleQuantityLabel(item)
+                        }}</span>
                       </button>
                     } @else {
                       <div class="flex flex-col gap-0.5">
@@ -986,6 +1017,7 @@ private cartService = inject(PosCartService);
   private authFacade = inject(AuthFacade);
   private taxesService = inject(TaxesService);
   private priceTierCache = inject(PriceTierCacheService);
+  private saleUnitService = inject(PosSaleUnitService);
 
   readonly cartState = this.cartService.cartState;
   readonly availableTiers = signal<PriceTier[]>([]);
@@ -1049,6 +1081,33 @@ private cartService = inject(PosCartService);
   readonly canApplyPricingTier = computed(() =>
     this.hasPermission('store:products:apply_pricing_tier'),
   );
+
+  /**
+   * QUI-648 — por qué una línea no ofrece presentaciones, en lenguaje del
+   * comerciante y con la MISMA frase que ve en el editor de producto
+   * (`buildSaleConfigExplanation`, vía `PosSaleUnitService.explain`). Se calcula
+   * en un computed y no en el template para no rearmar la frase en cada ciclo
+   * de detección de cambios. Vacío para el catálogo por pieza: ahí no hay nada
+   * que explicar.
+   */
+  readonly saleConfigHints = computed<
+    Record<string, { headline: string; detail: string }>
+  >(() => {
+    const hints: Record<string, { headline: string; detail: string }> = {};
+    for (const item of this.cartState().items) {
+      if (item.itemType === 'custom') continue;
+      const explanation = this.saleUnitService.explain(
+        item.product,
+        this.visibleTiersForItem(item),
+      );
+      if (!explanation) continue;
+      hints[item.id] = {
+        headline: explanation.headline,
+        detail: [explanation.headline, ...explanation.lines].join(' '),
+      };
+    }
+    return hints;
+  });
 
   /**
    * Active promotions fetched once from the backend. Signal-backed so the
@@ -1341,10 +1400,87 @@ private cartService = inject(PosCartService);
   canShowTierSelector(item: CartItem): boolean {
     return (
       item.itemType !== 'custom' &&
+      // QUI-648: una línea pesada NO ofrece presentación. Lo que la balanza
+      // capturó ya define la cantidad vendida; encima ofrecerle un "rollo" o un
+      // "bulto" al cajero es pedirle que contradiga lo que acaba de pesar.
+      item.captured_by_scale !== true &&
+      !item.is_weight_product &&
       item.product.has_multiple_price_tiers === true &&
       this.canApplyPricingTier() &&
       this.visibleTiersForItem(item).length > 0
     );
+  }
+
+  /**
+   * QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". Sin él,
+   * un cable a $5.000 el metro se leería como $5.000 el milímetro.
+   */
+  unitPriceSuffix(item: CartItem): string {
+    if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
+    if (this.isPackageLine(item)) return '/paquete';
+    return item.sale_unit_code ? '/' + item.sale_unit_code : '';
+  }
+
+  /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */
+  isSaleUnitLine(item: CartItem): boolean {
+    return isLineCapturedInSaleUnit(item);
+  }
+
+  /** "3 m" / "2,35 kg": la cantidad tal como la capturó el cajero. */
+  saleQuantityLabel(item: CartItem): string {
+    return formatSaleQuantity(item);
+  }
+
+  /**
+   * Reedita una línea medida EN SU UNIDAD DE VENTA. Si se capturó con la
+   * balanza se vuelve a pesar; si se digitó, se vuelve a digitar. La conversión
+   * a la unidad mínima es interna, igual que en la captura original.
+   */
+  async editSaleQuantity(item: CartItem): Promise<void> {
+    const factor = Number(item.stock_units_per_sale_unit ?? 1) || 1;
+    const unit = item.sale_unit_code || '';
+    const current = Number(item.quantity) / factor;
+    let amount: number | undefined;
+
+    if (item.captured_by_scale && this.scaleService.isConnected()) {
+      amount = await this.scaleService.showWeightModal({
+        title: 'Volver a pesar',
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+        weightUnit: unit,
+        allowManualFallback: true,
+      });
+    } else {
+      const raw = await this.dialogService.prompt(
+        {
+          title: `Cantidad en ${unit}`,
+          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+          placeholder: `Cantidad en ${unit}`,
+          defaultValue: String(current),
+          confirmText: 'Actualizar',
+          cancelText: 'Cancelar',
+          inputType: 'number',
+        },
+        { size: 'sm' },
+      );
+      if (!raw) return;
+      const parsed = parseFloat(String(raw).replace(',', '.'));
+      amount = Number.isNaN(parsed) ? undefined : parsed;
+    }
+
+    if (amount === undefined) return;
+    if (!(amount > 0)) {
+      this.toastService.warning('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    const quantity = Math.round(amount * factor);
+    if (quantity <= 0) {
+      this.toastService.warning(
+        `La cantidad mínima es ${1 / factor} ${unit}.`,
+      );
+      return;
+    }
+    this.updateQuantity(item.id, quantity);
   }
 
   onTierChange(item: CartItem, tierId: number | null): void {

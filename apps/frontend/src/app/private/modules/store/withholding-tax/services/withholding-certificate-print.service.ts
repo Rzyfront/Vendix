@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
+import { DocumentPrintService } from '../../../../../shared/services/print';
 import {
   WithholdingCertificateData,
   SufferedWithholdingCertificateData,
@@ -22,32 +23,81 @@ const MONTH_LABELS = [
 ];
 
 /**
+ * Document CSS shared by the three certificates in this file. The `@page` rule
+ * is NOT here: paper, margin and copies belong to
+ * `receipts.printing.withholding_certificate` and are resolved by the engine.
+ */
+const WITHHOLDING_CERTIFICATE_PRINT_STYLES = `
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }
+    .container {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    table { border-collapse: collapse; }
+`;
+
+/**
  * Printable "Certificado de Retención en la Fuente" (art. 381 Estatuto
- * Tributario). Same pattern as QuotationPrintService: build a self-contained
- * HTML document with the store data read from localStorage and print it
- * through a hidden iframe.
+ * Tributario). Builds the document body with the store data read from
+ * localStorage and hands it to `DocumentPrintService`, which owns the paper.
+ *
+ * Three distinct documents live here — practiced, suffered and the employee
+ * Formulario 220 — and all three print under the same `withholding_certificate`
+ * configuration key.
  */
 @Injectable({
   providedIn: 'root',
 })
 export class WithholdingCertificatePrintService {
   private readonly currencyService = inject(CurrencyFormatService);
+  private readonly documentPrint = inject(DocumentPrintService);
 
-  printCertificate(certificate: WithholdingCertificateData): void {
-    const html = this.generateCertificateHtml(certificate);
-    this.printHtml(html);
+  async printCertificate(
+    certificate: WithholdingCertificateData,
+  ): Promise<void> {
+    await this.print(
+      this.generateCertificateBody(certificate),
+      `Certificado de Retención en la Fuente ${certificate.year} - ${certificate.supplier_name}`,
+    );
   }
 
   /** Certificado de retención "sufrida" (customer/supplier retuvo al tenant). */
-  printSufferedCertificate(certificate: SufferedWithholdingCertificateData): void {
-    const html = this.generateSufferedCertificateHtml(certificate);
-    this.printHtml(html);
+  async printSufferedCertificate(
+    certificate: SufferedWithholdingCertificateData,
+  ): Promise<void> {
+    await this.print(
+      this.generateSufferedCertificateBody(certificate),
+      `Certificado de Retención Sufrida ${certificate.year} - ${certificate.counterparty_name}`,
+    );
   }
 
   /** Certificado de Ingresos y Retenciones (Formulario 220 DIAN) por empleado. */
-  printEmployeeCertificate(certificate: EmployeeIncomeCertificateData): void {
-    const html = this.generateEmployeeCertificateHtml(certificate);
-    this.printHtml(html);
+  async printEmployeeCertificate(
+    certificate: EmployeeIncomeCertificateData,
+  ): Promise<void> {
+    await this.print(
+      this.generateEmployeeCertificateBody(certificate),
+      `Certificado de Ingresos y Retenciones ${certificate.year} - ${certificate.employee_name}`,
+    );
+  }
+
+  private async print(body: string, title: string): Promise<void> {
+    await this.documentPrint.print({
+      document: 'withholding_certificate',
+      body,
+      title,
+      styles: WITHHOLDING_CERTIFICATE_PRINT_STYLES,
+    });
   }
 
   /** Reads store branding info from localStorage (same pattern as QuotationPrintService). */
@@ -95,7 +145,7 @@ export class WithholdingCertificatePrintService {
     return { storeName, storeAddress, storeCity, storeTaxId, storeLogo };
   }
 
-  private generateCertificateHtml(cert: WithholdingCertificateData): string {
+  private generateCertificateBody(cert: WithholdingCertificateData): string {
     const { storeName, storeAddress, storeCity, storeTaxId, storeLogo } =
       this.readStoreInfo();
 
@@ -115,32 +165,6 @@ export class WithholdingCertificatePrintService {
       .join('');
 
     return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Certificado de Retención en la Fuente ${cert.year} - ${cert.supplier_name}</title>
-  <style>
-    @page { size: A4; margin: 20mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    table { border-collapse: collapse; }
-  </style>
-</head>
-<body>
   <div class="container">
     <!-- Header -->
     <div style="text-align: center; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
@@ -218,12 +242,10 @@ export class WithholdingCertificatePrintService {
         Generado por ${storeName} · Powered by Vendix
       </p>
     </div>
-  </div>
-</body>
-</html>`;
+  </div>`;
   }
 
-  private generateSufferedCertificateHtml(
+  private generateSufferedCertificateBody(
     cert: SufferedWithholdingCertificateData,
   ): string {
     const { storeName, storeAddress, storeCity, storeTaxId, storeLogo } =
@@ -248,32 +270,6 @@ export class WithholdingCertificatePrintService {
       cert.counterparty_type === 'customer' ? 'Cliente' : 'Proveedor';
 
     return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Certificado de Retención Sufrida ${cert.year} - ${cert.counterparty_name}</title>
-  <style>
-    @page { size: A4; margin: 20mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    table { border-collapse: collapse; }
-  </style>
-</head>
-<body>
   <div class="container">
     <!-- Header -->
     <div style="text-align: center; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
@@ -352,12 +348,10 @@ export class WithholdingCertificatePrintService {
         Generado por ${storeName} · Powered by Vendix
       </p>
     </div>
-  </div>
-</body>
-</html>`;
+  </div>`;
   }
 
-  private generateEmployeeCertificateHtml(
+  private generateEmployeeCertificateBody(
     cert: EmployeeIncomeCertificateData,
   ): string {
     const { storeLogo } = this.readStoreInfo();
@@ -377,32 +371,6 @@ export class WithholdingCertificatePrintService {
       .join('');
 
     return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Certificado de Ingresos y Retenciones ${cert.year} - ${cert.employee_name}</title>
-  <style>
-    @page { size: A4; margin: 20mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    table { border-collapse: collapse; }
-  </style>
-</head>
-<body>
   <div class="container">
     <!-- Header -->
     <div style="text-align: center; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
@@ -487,29 +455,6 @@ export class WithholdingCertificatePrintService {
         Generado por ${cert.employer_name} · Powered by Vendix
       </p>
     </div>
-  </div>
-</body>
-</html>`;
-  }
-
-  private printHtml(html: string): void {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.style.opacity = '0';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    }
-
-    setTimeout(() => iframe.remove(), 1000);
+  </div>`;
   }
 }
