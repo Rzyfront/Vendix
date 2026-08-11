@@ -82,6 +82,28 @@ export class DianConfigController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Estado de LAS CUATRO habilitaciones DIAN de la entidad fiscal, en una sola
+   * respuesta y con los cuatro ejes SIEMPRE presentes.
+   *
+   * `:id/production-readiness` solo sabe contestar por una configuración que ya
+   * existe, así que los ejes sin configurar —documento soporte, nómina,
+   * documento equivalente— no tenían forma de aparecer, y lo que no aparece se
+   * lee como «no aplica». Aquí el eje sin configuración se reporta como
+   * `not_started`, que es un estado, no una ausencia.
+   *
+   * Declarada ANTES de `@Get(':id')` a propósito, por el mismo motivo que
+   * `emission-status`: Nest resuelve en orden de declaración y la ruta
+   * paramétrica se tragaría este path, dejando que `ParseIntPipe` respondiera
+   * 400 sobre un texto que nunca fue un id.
+   */
+  @Get('fiscal-readiness')
+  @Permissions('invoicing:read')
+  async getFiscalReadiness() {
+    const result = await this.dian_config_service.getFiscalReadiness();
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('invoicing:read')
   async getConfigById(@Param('id', ParseIntPipe) id: number) {

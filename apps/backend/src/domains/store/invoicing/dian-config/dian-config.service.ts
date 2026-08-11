@@ -15,6 +15,50 @@ import {
   isActionableCheck,
 } from '../providers/fiscal-production-readiness.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
+import {
+  DIAN_CONFIGURATION_TYPES,
+  defaultDocumentTypeFor,
+  documentTypesFor,
+  requirementsFor,
+  type DianConfigurationType,
+} from '../fiscal-document-requirements';
+import type {
+  FiscalReadinessAxis,
+  FiscalReadinessResponse,
+} from './dto/fiscal-readiness.dto';
+
+/**
+ * Lo que `getFiscalReadiness` selecciona de `dian_configurations`.
+ *
+ * Se declara explícito —y no se infiere del `select`— para que quitar un campo
+ * de la consulta rompa la COMPILACIÓN y no la evaluación en producción.
+ * `enablement_evidence` y `last_test_result` son los dos que más caro cuesta
+ * olvidar: sin la evidencia, `resolveTestSetProof` cae al último lote y lee «no
+ * pasó» sobre una habilitación que la DIAN ya concedió.
+ */
+type FiscalReadinessConfigRow = {
+  id: number;
+  organization_id: number;
+  store_id: number | null;
+  accounting_entity_id: number;
+  configuration_type: DianConfigurationType;
+  operation_mode: string;
+  environment: string;
+  enablement_status: string;
+  software_id: string | null;
+  software_pin_encrypted: string | null;
+  certificate_s3_key: string | null;
+  certificate_password_encrypted: string | null;
+  certificate_kms_key_id: string | null;
+  certificate_expiry: Date | null;
+  certificate_fingerprint: string | null;
+  certificate_nit: string | null;
+  enablement_evidence: unknown;
+  test_set_id: string | null;
+  last_test_result: unknown;
+  nit: string | null;
+  nit_dv: string | null;
+};
 
 @Injectable()
 export class DianConfigService {
@@ -763,6 +807,200 @@ export class DianConfigService {
         is_habilitacion_range: isHabilitacionResolution(r.prefix),
         is_expired: r.valid_to < now,
         is_exhausted: r.current_number >= r.range_to,
+      })),
+    };
+  }
+
+  /**
+   * Estado agregado de LAS CUATRO habilitaciones DIAN de la entidad fiscal.
+   *
+   * ## Qué contesta que `:id/production-readiness` no puede
+   *
+   * El checklist por `configId` exige saber de antemano que la configuración
+   * existe. Los ejes que todavía NO se han configurado no tienen id por el que
+   * preguntar, así que la pregunta que el comerciante realmente se hace al
+   * abrir el panel —«¿qué me falta en cada eje?»— no tenía endpoint.
+   *
+   * La consecuencia no era teórica: el documento soporte, la nómina y el
+   * documento equivalente quedaban invisibles hasta que alguien los creaba, y
+   * nadie los creaba porque no se veían. Por eso LOS CUATRO EJES SE DEVUELVEN
+   * SIEMPRE y el que no tiene configuración se reporta con
+   * `enablement_status: 'not_started'` y `config_id: null` — un eje ausente de
+   * la lista se lee como «no aplica», que es exactamente la lectura errónea
+   * que hay que evitar.
+   *
+   * La lista de ejes sale de `DIAN_CONFIGURATION_TYPES`, no de un literal
+   * local: añadir una habilitación al enum de Prisma la hace aparecer aquí
+   * sola, sin que nadie tenga que acordarse de esta pantalla.
+   */
+  async getFiscalReadiness(): Promise<FiscalReadinessResponse> {
+    const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    // MISMO predicado que `getConfigs`. Es el que decide de quién es la
+    // configuración: con `fiscal_scope=ORGANIZATION` vive en la organización
+    // (`store_id: null`) y con `STORE` cuelga de la tienda del contexto.
+    // Saltárselo mostraría la habilitación de una tienda dentro de otra.
+    const configs = await this.prisma
+      .withoutScope()
+      .dian_configurations.findMany({
+        where:
+          fiscalScope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id },
+        orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
+        // Selección explícita y no la fila entera: deja auditable que
+        // `enablement_evidence` y `last_test_result` viajan (los exige
+        // `resolveTestSetProof`; sin la evidencia caería al último lote y
+        // leería «no pasó» sobre una habilitación ya concedida) y que los dos
+        // secretos cifrados se leen SOLO para comprobar su presencia — nunca
+        // se copian a la respuesta, que solo lleva el informe de booleanos.
+        select: {
+          id: true,
+          organization_id: true,
+          store_id: true,
+          accounting_entity_id: true,
+          configuration_type: true,
+          operation_mode: true,
+          environment: true,
+          enablement_status: true,
+          software_id: true,
+          software_pin_encrypted: true,
+          certificate_s3_key: true,
+          certificate_password_encrypted: true,
+          certificate_kms_key_id: true,
+          certificate_expiry: true,
+          certificate_fingerprint: true,
+          certificate_nit: true,
+          enablement_evidence: true,
+          test_set_id: true,
+          last_test_result: true,
+          nit: true,
+          nit_dv: true,
+        },
+      });
+
+    const axes = await Promise.all(
+      DIAN_CONFIGURATION_TYPES.map((configuration_type) =>
+        this.buildFiscalReadinessAxis(
+          configuration_type,
+          // `find` sobre la lista YA ordenada: la predeterminada primero y, a
+          // igualdad, la más antigua. Mismo criterio de desempate que
+          // `getConfigs`, para que el panel y el listado no señalen a
+          // configuraciones distintas cuando un eje tiene varias.
+          configs.find((c) => c.configuration_type === configuration_type) ??
+            null,
+        ),
+      ),
+    );
+
+    return { fiscal_scope: fiscalScope, axes };
+  }
+
+  /** Un eje del estado fiscal agregado. Ver {@link getFiscalReadiness}. */
+  private async buildFiscalReadinessAxis(
+    configuration_type: DianConfigurationType,
+    config: FiscalReadinessConfigRow | null,
+  ): Promise<FiscalReadinessAxis> {
+    // El rótulo se deriva del contrato en vez de escribirse aquí: un rótulo
+    // duplicado es un rótulo que termina desincronizado. El documento por
+    // defecto del eje es el que lo representa (`equivalent_document` →
+    // «Documento equivalente POS», nunca la factura de venta).
+    const label = requirementsFor(
+      defaultDocumentTypeFor(configuration_type),
+    ).label;
+
+    if (!config) {
+      return {
+        configuration_type,
+        label,
+        config_id: null,
+        environment: null,
+        // EXISTE y está sin empezar. No es lo mismo que no aparecer.
+        enablement_status: 'not_started',
+        readiness: null,
+        resolutions: [],
+      };
+    }
+
+    // La ClTec del rango la asigna la DIAN por NIT y alimenta el CUFE: si está
+    // compartida con otro NIT, el CUFE que calculamos no coincide con el que la
+    // DIAN recomputa y el documento se rechaza con el consecutivo ya gastado.
+    //
+    // Se resuelve AQUÍ y se pasa como dato porque `evaluateProductionReadiness`
+    // es sincrónico a propósito. Omitirlo lo dejaría en `undefined`, que la
+    // comprobación distingue de `null`: `null` es «comprobado y limpio»,
+    // `undefined` es «no comprobado» y falla en abierto.
+    const shared_technical_key =
+      await this.readiness.findResolutionsSharingTechnicalKey(
+        {
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type,
+        },
+        // Se evalúa COMO SI fuera producción, así que el detector también: en
+        // habilitación la DIAN reparte la MISMA ClTec de prueba a todos y
+        // compartirla ahí no es un hallazgo.
+        'production',
+      );
+
+    const readiness = this.readiness.evaluateProductionReadiness({
+      ...config,
+      // Igual que `getProductionReadiness`: se evalúa como si el eje ya
+      // estuviera promovido, para que el comerciante vea lo que le falta
+      // ADEMÁS de la promoción misma y no una lista que se resuelve sola.
+      environment: 'production',
+      enablement_status: 'enabled',
+      shared_technical_key,
+    });
+
+    // TODOS los documentos que cubre el eje, vía contrato: la habilitación de
+    // facturación numera factura, nota crédito y nota débito, y mostrar solo la
+    // factura escondería justo el rango que falta.
+    const resolutions = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findMany({
+        // Filtro de tenant EXPLÍCITO: `withoutScope()` no aplica ninguno, y la
+        // entidad contable sale de una configuración que el predicado fiscal de
+        // arriba ya acotó a este comerciante.
+        where: {
+          organization_id: config.organization_id,
+          accounting_entity_id: config.accounting_entity_id,
+          document_type: { in: documentTypesFor(configuration_type) },
+        },
+        select: {
+          id: true,
+          document_type: true,
+          prefix: true,
+          range_from: true,
+          range_to: true,
+          current_number: true,
+          valid_from: true,
+          valid_to: true,
+          is_active: true,
+          technical_key: true,
+        },
+        orderBy: [{ document_type: 'asc' }, { id: 'desc' }],
+      });
+
+    return {
+      configuration_type,
+      label,
+      config_id: config.id,
+      // El estado REAL, no el hipotético con el que se evaluó el checklist.
+      environment: config.environment,
+      enablement_status: config.enablement_status,
+      readiness,
+      resolutions: resolutions.map(({ technical_key, ...rest }) => ({
+        ...rest,
+        // La ClTec se ELIMINA, no se enmascara: quien la tiene puede
+        // reconstruir la huella fiscal del comerciante. Solo viaja su
+        // presencia. Mismo criterio que `tenant-resolutions.controller.ts`.
+        technical_key_set: Boolean(technical_key),
       })),
     };
   }
