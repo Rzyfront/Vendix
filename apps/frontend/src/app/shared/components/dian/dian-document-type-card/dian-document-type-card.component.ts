@@ -240,12 +240,19 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
           </div>
         }
 
-        <!-- Acciones -->
-        <div class="mt-auto pt-2 flex flex-wrap items-center gap-2">
+        <!-- Acciones. En móvil se apilan a ancho completo —el pulgar no acierta
+             un botón de 90px al borde de la tarjeta—; desde sm vuelven a fila.
+             La jerarquía la marca el estado: sin configurar, la acción es
+             «Configurar»; ya configurado, lo que se quiere es entrar al detalle,
+             y «Ajustar» pasa a segundo plano. -->
+        <div
+          class="mt-auto pt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+        >
           @if (canWrite()) {
             <app-button
               size="sm"
               [variant]="summary().notEvaluated ? 'primary' : 'outline'"
+              customClasses="w-full sm:w-auto"
               [disabled]="busy()"
               (clicked)="configure.emit(axis())"
             >
@@ -268,7 +275,8 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
           @if (!summary().notEvaluated) {
             <app-button
               size="sm"
-              variant="ghost"
+              variant="primary"
+              customClasses="w-full sm:w-auto"
               [disabled]="busy()"
               (clicked)="viewDetail.emit(axis())"
             >

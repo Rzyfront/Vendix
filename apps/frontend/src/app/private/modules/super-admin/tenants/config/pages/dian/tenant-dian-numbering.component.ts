@@ -116,7 +116,7 @@ interface NumberingRow extends FiscalReadinessResolution {
 
           <div class="flex items-center gap-2">
             <app-button
-              variant="ghost"
+              variant="outline"
               size="sm"
               [loading]="store.loading()"
               (clicked)="store.reload()"

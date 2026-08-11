@@ -199,7 +199,7 @@ interface TestSetDocumentRow {
               </app-button>
               <app-button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 [disabled]="busy()"
                 [loading]="listingDocuments()"
                 (clicked)="loadDocuments()"

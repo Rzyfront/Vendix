@@ -100,37 +100,20 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
     ResolutionCreateComponent,
   ],
   template: `
-    <div class="w-full flex flex-col gap-4">
-      <!-- Cabecera -->
-      <div class="flex items-start justify-between gap-3 flex-wrap">
-        <div class="flex items-start gap-3 min-w-0">
-          <app-button variant="ghost" size="sm" (clicked)="goBack()">
-            <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-            Habilitaciones
-          </app-button>
-          <div class="min-w-0">
-            <h1
-              class="text-base md:text-lg font-semibold text-[var(--color-text-primary)] truncate"
-            >
-              {{ axisLabel() }}
-            </h1>
-            <div class="flex flex-wrap items-center gap-1.5 mt-1">
-              <app-badge [variant]="statusVariant()" size="xs">
-                {{ statusLabel() }}
-              </app-badge>
-              @if (environmentLabel(); as env) {
-                <app-badge
-                  [variant]="isProduction() ? 'success' : 'warning'"
-                  badgeStyle="outline"
-                  size="xs"
-                >
-                  {{ env }}
-                </app-badge>
-              }
-            </div>
-          </div>
-        </div>
-      </div>
+    <div class="w-full flex flex-col gap-3 sm:gap-4">
+      <!-- Migaja de vuelta. NO es una cabecera: el título y el botón de volver
+           del sticky header ya existen, pero ese botón sale del módulo entero
+           (/admin/fiscal). Sin este enlace, subir un nivel —del eje a la lista
+           de habilitaciones— no tendría camino. Es una línea de texto, no un
+           bloque con cuerpo propio. -->
+      <button
+        type="button"
+        class="self-start inline-flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors"
+        (click)="goBack()"
+      >
+        <app-icon name="chevron-left" [size]="14"></app-icon>
+        Habilitaciones
+      </button>
 
       @if (!configurationType()) {
         <app-card>
@@ -147,19 +130,31 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
           <p class="text-sm text-[var(--color-error)]">{{ message }}</p>
         </app-card>
       } @else {
-        <!-- Checklist -->
+        <!-- Identidad del eje + requisitos. Van juntos porque el título sin el
+             estado no dice nada: lo que el comerciante viene a mirar es si este
+             documento ya emite o qué le falta. -->
         <app-card>
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center justify-between gap-2 flex-wrap">
-              <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                Requisitos para emitir
-              </h2>
-              @if (!summary().notEvaluated) {
-                <span class="text-xs text-[var(--color-text-secondary)]">
-                  {{ summary().satisfiedCount }} de {{ summary().totalCount }}
-                  cumplidos
-                </span>
-              }
+          <div class="flex flex-col gap-4">
+            <div class="flex flex-col gap-2">
+              <h1
+                class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)] leading-tight"
+              >
+                {{ axisLabel() }}
+              </h1>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <app-badge [variant]="statusVariant()" size="xs">
+                  {{ statusLabel() }}
+                </app-badge>
+                @if (environmentLabel(); as env) {
+                  <app-badge
+                    [variant]="isProduction() ? 'success' : 'warning'"
+                    badgeStyle="outline"
+                    size="xs"
+                  >
+                    {{ env }}
+                  </app-badge>
+                }
+              </div>
             </div>
 
             @if (summary().notEvaluated) {
@@ -169,15 +164,50 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                 electrónico de la tienda.
               </p>
             } @else {
+              <!-- Barra de avance: el conteo solo obliga a comparar dos números
+                   mentalmente en cada visita. -->
+              <div class="flex flex-col gap-1.5">
+                <div class="flex items-baseline justify-between gap-2">
+                  <span
+                    class="text-xs font-medium text-[var(--color-text-primary)]"
+                  >
+                    Requisitos para emitir
+                  </span>
+                  <span class="text-xs tabular-nums text-[var(--color-text-secondary)]">
+                    {{ summary().satisfiedCount }}/{{ summary().totalCount }}
+                  </span>
+                </div>
+                <div
+                  class="h-1.5 w-full rounded-full bg-[var(--color-border)] overflow-hidden"
+                  role="progressbar"
+                  [attr.aria-valuenow]="summary().satisfiedCount"
+                  [attr.aria-valuemin]="0"
+                  [attr.aria-valuemax]="summary().totalCount"
+                  [attr.aria-label]="'Requisitos cumplidos de ' + axisLabel()"
+                >
+                  <div
+                    class="h-full rounded-full transition-[width] duration-300"
+                    [class]="
+                      summary().ready
+                        ? 'bg-[var(--color-success)]'
+                        : 'bg-[var(--color-warning)]'
+                    "
+                    [style.width.%]="progressPercent()"
+                  ></div>
+                </div>
+              </div>
+
               @if (summary().todo.length) {
-                <div class="flex flex-col gap-1.5">
+                <div
+                  class="rounded-lg border border-[var(--color-warning)]/30 bg-warning-light p-3 flex flex-col gap-2"
+                >
                   <p
                     class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
                   >
                     Lo que falta hacer
                   </p>
                   @for (check of summary().todo; track check.key) {
-                    <div class="flex items-start gap-2 text-xs">
+                    <div class="flex items-start gap-2 text-xs leading-relaxed">
                       <app-icon
                         name="alert-triangle"
                         [size]="13"
@@ -203,9 +233,12 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                 </div>
               }
 
-              <!-- ESPERA: no es tarea. Sin verbo imperativo y sin botón. -->
+              <!-- ESPERA: no es tarea. Sin verbo imperativo y sin botón. Por eso
+                   tampoco lleva el tinte de aviso: no hay nada que hacer. -->
               @if (summary().waiting.length) {
-                <div class="flex flex-col gap-1.5">
+                <div
+                  class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 flex flex-col gap-2"
+                >
                   <p
                     class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
                   >
@@ -213,7 +246,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                   </p>
                   @for (check of summary().waiting; track check.key) {
                     <div
-                      class="flex items-start gap-2 text-xs text-[var(--color-text-secondary)]"
+                      class="flex items-start gap-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
                     >
                       <app-icon
                         name="hourglass"
@@ -223,7 +256,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                       <span class="min-w-0">{{ check.label }}</span>
                     </div>
                   }
-                  <p class="text-[11px] text-[var(--color-text-secondary)] pl-5">
+                  <p class="text-[11px] text-[var(--color-text-secondary)] pl-[21px]">
                     Nuestra parte está hecha. No hay nada que reenviar: repetir el
                     envío consume un bloque nuevo de consecutivos autorizados que
                     no se recupera.
@@ -233,14 +266,14 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
 
               <!-- AVISOS: nunca bloquean nada -->
               @if (summary().warnings.length) {
-                <div class="flex flex-col gap-1.5">
+                <div class="flex flex-col gap-2">
                   <p
                     class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
                   >
                     Avisos — no bloquean la emisión
                   </p>
                   @for (check of summary().warnings; track check.key) {
-                    <div class="flex items-start gap-2 text-xs">
+                    <div class="flex items-start gap-2 text-xs leading-relaxed">
                       <app-icon
                         name="clock"
                         [size]="13"
@@ -260,17 +293,20 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
               <!-- Paso a producción: sólo cuando el backend dice que está listo.
                    Un aviso pendiente NO lo bloquea; un bloqueante sí. -->
               @if (canPromote()) {
-                <div class="pt-1">
+                <div
+                  class="flex flex-col gap-1.5 pt-3 border-t border-[var(--color-border)]"
+                >
                   <app-button
                     size="sm"
                     variant="primary"
+                    customClasses="w-full sm:w-auto"
                     [loading]="promoting()"
                     (clicked)="promoteConfirmVisible.set(true)"
                   >
                     <app-icon slot="icon" name="power" [size]="14"></app-icon>
                     Activar producción
                   </app-button>
-                  <p class="text-[11px] text-[var(--color-text-secondary)] mt-1.5">
+                  <p class="text-[11px] text-[var(--color-text-secondary)]">
                     A partir de ese momento los documentos de esta habilitación
                     salen a la DIAN como documentos reales.
                   </p>
@@ -302,12 +338,19 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
         <!-- Numeración del eje -->
         <app-card>
           <div class="flex flex-col gap-3">
-            <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div
+              class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+            >
               <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">
                 Numeración
               </h2>
               @if (acceptsResolutions() && configId()) {
-                <app-button size="sm" variant="outline" (clicked)="openCreate()">
+                <app-button
+                  size="sm"
+                  variant="outline"
+                  customClasses="w-full sm:w-auto"
+                  (clicked)="openCreate()"
+                >
                   <app-icon slot="icon" name="plus" [size]="14"></app-icon>
                   Nueva resolución
                 </app-button>
@@ -330,12 +373,12 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
               <div class="flex flex-col gap-2">
                 @for (resolution of resolutions(); track resolution.id) {
                   <div
-                    class="rounded-lg border border-[var(--color-border)] p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                    class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                   >
-                    <div class="min-w-0 flex flex-col gap-1">
+                    <div class="min-w-0 flex flex-col gap-1.5">
                       <div class="flex flex-wrap items-center gap-1.5">
                         <span
-                          class="text-sm font-medium text-[var(--color-text-primary)]"
+                          class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)]"
                         >
                           {{ resolution.prefix }}{{ resolution.range_from }}–{{
                             resolution.range_to
@@ -351,7 +394,9 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                           {{ documentLabel(resolution) }}
                         </app-badge>
                       </div>
-                      <p class="text-[11px] text-[var(--color-text-secondary)]">
+                      <p
+                        class="text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                      >
                         Va por {{ resolution.current_number }} · vigente hasta
                         {{ validTo(resolution) }}
                         @if (resolution.resolution_number) {
@@ -359,10 +404,16 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                         }
                       </p>
                     </div>
-                    <div class="flex items-center gap-1.5 shrink-0">
+                    <!-- En móvil los dos botones reparten el ancho; en desktop
+                         vuelven a su tamaño natural. Con la variante ghost se
+                         leían como texto suelto y no como las acciones que son.
+                         (Sin backticks: este comentario vive dentro del template
+                         literal del componente y un backtick lo corta.) -->
+                    <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
                       <app-button
                         size="sm"
-                        variant="ghost"
+                        variant="outline"
+                        customClasses="w-full sm:w-auto"
                         (clicked)="openEdit(resolution)"
                       >
                         <app-icon slot="icon" name="edit" [size]="14"></app-icon>
@@ -370,7 +421,8 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                       </app-button>
                       <app-button
                         size="sm"
-                        variant="ghost"
+                        [variant]="resolution.is_active ? 'outline-danger' : 'outline'"
+                        customClasses="w-full sm:w-auto"
                         (clicked)="pendingToggle.set(resolution)"
                       >
                         <app-icon
@@ -473,6 +525,17 @@ export class DianAxisDetailComponent {
   readonly configId = computed(() => this.axis()?.config_id ?? null);
 
   readonly summary = computed(() => summarizeReadiness(this.axis()?.readiness));
+
+  /**
+   * Avance del checklist en porcentaje. Se calcula aquí y no en el template
+   * porque una división por cero en Angular imprime `NaN` como ancho y la barra
+   * desaparece sin decir por qué.
+   */
+  readonly progressPercent = computed(() => {
+    const { satisfiedCount, totalCount } = this.summary();
+    if (!totalCount) return 0;
+    return Math.round((satisfiedCount / totalCount) * 100);
+  });
 
   readonly resolutions = computed<FiscalReadinessResolution[]>(
     () => this.axis()?.resolutions ?? [],

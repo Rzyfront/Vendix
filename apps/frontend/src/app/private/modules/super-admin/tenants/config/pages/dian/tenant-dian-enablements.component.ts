@@ -118,7 +118,7 @@ const OPERATION_MODE_OPTIONS: SelectorOption[] = [
               Emisión: {{ emissionLabel() }}
             </app-badge>
             <app-button
-              variant="ghost"
+              variant="outline"
               size="sm"
               [loading]="store.loading()"
               (clicked)="store.reload()"
@@ -288,7 +288,7 @@ const OPERATION_MODE_OPTIONS: SelectorOption[] = [
       </form>
 
       <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" size="sm" (clicked)="closeCreate()">
+        <app-button variant="outline" size="sm" (clicked)="closeCreate()">
           Cancelar
         </app-button>
         <app-button
@@ -342,7 +342,7 @@ const OPERATION_MODE_OPTIONS: SelectorOption[] = [
       </div>
 
       <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" size="sm" (clicked)="closePromoteGate()">
+        <app-button variant="outline" size="sm" (clicked)="closePromoteGate()">
           Cancelar
         </app-button>
         <app-button

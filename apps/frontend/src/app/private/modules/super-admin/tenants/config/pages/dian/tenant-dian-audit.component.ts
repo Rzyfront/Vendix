@@ -116,7 +116,7 @@ interface AuditRow extends AuditLogRow {
               [formControl]="configFilter"
             ></app-selector>
             <app-button
-              variant="ghost"
+              variant="outline"
               size="sm"
               [loading]="loading()"
               (clicked)="reload()"

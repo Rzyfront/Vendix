@@ -380,7 +380,7 @@ interface PersistedTestResult {
             ></app-input>
           </form>
           <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-            <app-button variant="ghost" size="sm" (clicked)="cancelled.emit()">
+            <app-button variant="outline" size="sm" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
             <div class="flex items-center gap-2">
@@ -613,7 +613,7 @@ interface PersistedTestResult {
                       </span>
                     </div>
                     <app-button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       (clicked)="loadReadiness()"
                       [loading]="loadingReadiness()"
