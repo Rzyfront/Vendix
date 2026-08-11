@@ -26,6 +26,14 @@ import {
 } from '../../selector/selector.component';
 import { IconComponent } from '../../icon/icon.component';
 import { formatDateOnlyUTC } from '../../../utils/date.util';
+// Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
+import {
+  dianSoftwarePinValidator,
+  dianUuidValidator,
+  nitFormatValidator,
+  rangeOrderValidator,
+} from '../../../utils/dian-validators';
+import { nitDvValidator } from '../../../utils/nit.util';
 
 export type DianEnvironment = 'test' | 'production';
 
@@ -376,9 +384,16 @@ export class DianConfigFormComponent {
         validators: [Validators.required],
       }),
       nit_type: new FormControl('NIT', { nonNullable: true }),
+      // VALIDADORES DE FORMATO, espejo del DTO del backend.
+      //
+      // Esta es la cuarta puerta de entrada a una configuración DIAN —la usa el
+      // asistente de activación fiscal— y tenía cuatro `required` pelados. Sin
+      // validar la forma, un `software_id` mal copiado llega al backend, que lo
+      // rechaza con `@IsUUID`, o peor: llega a la DIAN y el documento nunca
+      // clasifica, indistinguible de una cola atascada.
       nit: new FormControl('', {
         nonNullable: true,
-        validators: [Validators.required],
+        validators: [Validators.required, nitFormatValidator],
       }),
       nit_dv: new FormControl('', { nonNullable: true }),
       environment: new FormControl<DianEnvironment>('test', {
@@ -387,10 +402,16 @@ export class DianConfigFormComponent {
       }),
       software_id: new FormControl('', {
         nonNullable: true,
-        validators: [Validators.required],
+        validators: [Validators.required, dianUuidValidator],
       }),
-      software_pin: new FormControl('', { nonNullable: true }),
-      test_set_id: new FormControl('', { nonNullable: true }),
+      software_pin: new FormControl('', {
+        nonNullable: true,
+        validators: [dianSoftwarePinValidator],
+      }),
+      test_set_id: new FormControl('', {
+        nonNullable: true,
+        validators: [dianUuidValidator],
+      }),
       resolution_number: new FormControl('', { nonNullable: true }),
       resolution_prefix: new FormControl('', { nonNullable: true }),
       resolution_range_from: new FormControl<number | null>(null),
@@ -401,7 +422,17 @@ export class DianConfigFormComponent {
       resolution_technical_key: new FormControl('', { nonNullable: true }),
       certificate_password: new FormControl('', { nonNullable: true }),
     },
-    { validators: [resolutionCompletenessValidator] },
+    {
+      validators: [
+        resolutionCompletenessValidator,
+        // El DV entra en el CUFE: un dígito equivocado hace que la DIAN recompute
+        // otro hash y rechace cada documento, con el consecutivo gastado. Es de
+        // grupo porque compara `nit` con `nit_dv`.
+        nitDvValidator,
+        // Un rango invertido produce una resolución que no puede emitir nada.
+        rangeOrderValidator('resolution_range_from', 'resolution_range_to'),
+      ],
+    },
   );
 
   /**

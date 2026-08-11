@@ -330,6 +330,22 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
   }
 
+  /**
+   * `/audio/transcriptions` has **two incompatible request contracts**, and
+   * which one applies depends on the host, not on the endpoint name.
+   *
+   * - **OpenAI** takes `multipart/form-data` with the audio as a `file` part.
+   *   Sending JSON is refused with a 400 that names the missing `file` field.
+   * - **OpenRouter** takes **JSON**: `{ model, input_audio: { data, format } }`,
+   *   with no file part at all. That is why
+   *   `AITranscriptionRequestOptions.inputAudio` is shaped `{ data, format }` —
+   *   the interface was written against OpenRouter.
+   *
+   * An earlier version of this method sent multipart unconditionally, on the
+   * belief that this endpoint never accepts JSON. That holds for OpenAI and
+   * fails for OpenRouter, so every OpenRouter transcription was rejected while
+   * the configuration itself was correct.
+   */
   async transcribeAudio(
     options: AITranscriptionRequestOptions,
   ): Promise<AITranscriptionResponse> {
@@ -339,35 +355,57 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.config.modelId;
 
     try {
-      const response = await this.postJson<any>('/audio/transcriptions', {
-        model,
-        input_audio: options.inputAudio,
-        ...(options.language || this.config.settings?.language
-          ? { language: options.language || this.config.settings?.language }
-          : {}),
-        ...((options.temperature ?? this.config.settings?.temperature)
-          ? {
-              temperature:
-                options.temperature ?? this.config.settings?.temperature,
-            }
-          : {}),
-        ...(options.provider || this.config.settings?.provider_preferences
-          ? {
-              provider:
-                options.provider || this.config.settings?.provider_preferences,
-            }
-          : {}),
-      });
+      const format = (options.inputAudio.format || 'webm').toLowerCase();
+      const language = options.language || this.config.settings?.language;
+      const temperature =
+        options.temperature ?? this.config.settings?.temperature;
+
+      const request = this.isOpenRouterConfig()
+        ? this.buildJsonTranscriptionRequest(
+            model,
+            options,
+            format,
+            language,
+            temperature,
+          )
+        : this.buildMultipartTranscriptionRequest(
+            model,
+            options,
+            format,
+            language,
+            temperature,
+          );
+
+      const response = await fetch(
+        this.buildProviderUrl('/audio/transcriptions'),
+        { method: 'POST', ...request },
+      );
+
+      if (!response.ok) {
+        throw new Error(await this.readProviderError(response));
+      }
+
+      // Read through `?.`: a provider answering the literal JSON `null` is a
+      // 200 with an empty body, and dereferencing it would surface a TypeError
+      // where the operator needs to read "returned no text".
+      const parsed = (await response.json()) as {
+        text?: string;
+        usage?: any;
+      } | null;
 
       return {
-        success: typeof response.text === 'string',
-        text: response.text,
+        success: typeof parsed?.text === 'string',
+        text: parsed?.text,
         model,
-        usage: this.mapTokenUsage(response.usage),
+        usage: this.mapTokenUsage(parsed?.usage),
         error:
-          typeof response.text === 'string'
+          typeof parsed?.text === 'string'
             ? undefined
-            : 'Transcription model returned no text',
+            : // The keys, never the values: a transcript is the merchant's own
+              // speech and does not belong in an error string. Naming the keys
+              // is what distinguishes "the model said nothing" from "the
+              // response carries the text under a field we do not read".
+              `Transcription model returned no text (response fields: ${Object.keys(parsed || {}).join(', ') || 'none'})`,
       };
     } catch (error: any) {
       return {
@@ -377,6 +415,90 @@ export class OpenAICompatibleProvider implements AIProvider {
           error.message || 'OpenAI-compatible transcription request failed',
       };
     }
+  }
+
+  /** OpenRouter: JSON body carrying base64 audio inline. */
+  private buildJsonTranscriptionRequest(
+    model: string,
+    options: AITranscriptionRequestOptions,
+    format: string,
+    language?: string,
+    temperature?: number | null,
+  ): { headers: Record<string, string>; body: string } {
+    return {
+      headers: this.buildProviderHeaders(),
+      body: JSON.stringify({
+        model,
+        input_audio: {
+          data: options.inputAudio.data,
+          format,
+        },
+        ...(language ? { language } : {}),
+        ...(temperature !== undefined && temperature !== null
+          ? { temperature }
+          : {}),
+      }),
+    };
+  }
+
+  /**
+   * OpenAI: multipart with a `file` part.
+   *
+   * `buildProviderHeaders(false)` omits `Content-Type` on purpose — `fetch`
+   * derives it from the `FormData` body along with the multipart boundary, and
+   * setting it by hand produces a body the server cannot split.
+   */
+  private buildMultipartTranscriptionRequest(
+    model: string,
+    options: AITranscriptionRequestOptions,
+    format: string,
+    language?: string,
+    temperature?: number | null,
+  ): { headers: Record<string, string>; body: FormData } {
+    // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
+    // parameter drifts between @types/node majors; a plain view never does.
+    const bytes = new Uint8Array(Buffer.from(options.inputAudio.data, 'base64'));
+
+    const form = new FormData();
+    form.append('model', model);
+    // The extension matters as much as the MIME type: the API sniffs the
+    // filename to pick a decoder, and a container it cannot name is refused
+    // even when the bytes are valid.
+    form.append(
+      'file',
+      new Blob([bytes], { type: this.audioMimeType(format) }),
+      `audio.${format}`,
+    );
+
+    if (language) form.append('language', language);
+    if (temperature !== undefined && temperature !== null) {
+      form.append('temperature', String(temperature));
+    }
+
+    return { headers: this.buildProviderHeaders(false), body: form };
+  }
+
+  /**
+   * Container name → MIME type for the formats the transcription endpoint
+   * accepts. Anything unrecognized is sent as a generic audio stream rather
+   * than guessed at: a wrong specific type is worse than an honest vague one,
+   * because it makes the server pick the wrong decoder instead of sniffing.
+   */
+  private audioMimeType(format: string): string {
+    const byFormat: Record<string, string> = {
+      webm: 'audio/webm',
+      ogg: 'audio/ogg',
+      oga: 'audio/ogg',
+      mp3: 'audio/mpeg',
+      mpga: 'audio/mpeg',
+      mpeg: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      mp4: 'audio/mp4',
+      wav: 'audio/wav',
+      flac: 'audio/flac',
+    };
+
+    return byFormat[format] || 'application/octet-stream';
   }
 
   async rerank(options: AIRerankRequestOptions): Promise<AIRerankResponse> {
@@ -589,7 +711,13 @@ export class OpenAICompatibleProvider implements AIProvider {
       };
     }
 
-    return { success: false, message: response.error || 'Unknown error' };
+    return {
+      success: false,
+      message: this.describeAudioFailure(
+        '/audio/speech',
+        response.error || 'Unknown error',
+      ),
+    };
   }
 
   private async testTranscriptionConnection(): Promise<{
@@ -610,7 +738,94 @@ export class OpenAICompatibleProvider implements AIProvider {
       };
     }
 
-    return { success: false, message: response.error || 'Unknown error' };
+    return {
+      success: false,
+      message: this.describeAudioFailure(
+        '/audio/transcriptions',
+        response.error || 'Unknown error',
+      ),
+    };
+  }
+
+  /**
+   * Reframes a provider error when the real fault is neither the model id nor
+   * the network, but a field the message never names.
+   *
+   * Two cases, both observed in production:
+   *
+   * 1. **The host has no such endpoint.** It answers identically for every
+   *    model id, so forwarding its message unchanged sends the operator to
+   *    edit the one field that cannot fix it.
+   * 2. **The model is real but wired to the wrong capability.** A transcription
+   *    model tested against `/audio/speech` is reported by the provider as
+   *    *nonexistent* — true of that endpoint's catalog, and deeply misleading:
+   *    the model exists, the endpoint is wrong, and the field to change is
+   *    `model_type`. `openai/gpt-transcribe` saved as `speech` produced exactly
+   *    "Model openai/gpt-transcribe does not exist" against OpenRouter.
+   */
+  private describeAudioFailure(path: string, error: string): string {
+    const mismatch = this.describeCapabilityMismatch(path, error);
+    if (mismatch) return mismatch;
+
+    const looksLikeMissingEndpoint =
+      /\b404\b|not found|no such (?:endpoint|route|path)|unknown (?:url|path|endpoint)|invalid url/i.test(
+        error,
+      );
+
+    if (!looksLikeMissingEndpoint) return error;
+
+    let host = this.config.baseUrl || 'the configured host';
+    try {
+      host = new URL(this.getApiRootBaseUrl()).host;
+    } catch {
+      // Keep the raw base_url: an unparseable one is itself worth showing.
+    }
+
+    return `${host} did not serve ${path} — "${error}". Check this configuration's endpoint, not its model: a host without audio support answers the same way for every model id.`;
+  }
+
+  /**
+   * Names `model_type` when the model id itself contradicts the endpoint it was
+   * sent to. Deliberately narrow: it only fires on an unmistakable id, so a
+   * genuinely absent model still surfaces the provider's own words.
+   */
+  private describeCapabilityMismatch(
+    path: string,
+    error: string,
+  ): string | null {
+    const looksLikeUnknownModel =
+      /does not exist|no such model|unknown model|model not found|invalid model/i.test(
+        error,
+      );
+    if (!looksLikeUnknownModel) return null;
+
+    const modelId = this.config.modelId || '';
+    const expectations: Array<{
+      path: string;
+      pattern: RegExp;
+      actual: string;
+      configured: string;
+    }> = [
+      {
+        path: '/audio/speech',
+        pattern: /transcrib|whisper|\bstt\b|speech[-_]to[-_]text/i,
+        actual: 'transcription',
+        configured: 'speech',
+      },
+      {
+        path: '/audio/transcriptions',
+        pattern: /\btts\b|text[-_]to[-_]speech/i,
+        actual: 'speech',
+        configured: 'transcription',
+      },
+    ];
+
+    const hit = expectations.find(
+      (candidate) => candidate.path === path && candidate.pattern.test(modelId),
+    );
+    if (!hit) return null;
+
+    return `"${error}" — but ${modelId} looks like a ${hit.actual} model and this configuration is saved as ${hit.configured}, so it was tested against ${path}. Change this configuration's model type to ${hit.actual}; the model id and the endpoint are fine.`;
   }
 
   private async testRerankConnection(): Promise<{
@@ -1360,15 +1575,40 @@ export class OpenAICompatibleProvider implements AIProvider {
     );
   }
 
+  /**
+   * Resolves which capability this configuration represents.
+   *
+   * Reading `settings.model_type` used to be the *only* source, and nothing in
+   * the write path populates it — the superadmin DTO persists `model_type` as
+   * its own column. So every speech and transcription configuration resolved to
+   * `text`, its connection test fell through to `chat()`, and an audio model id
+   * sent to `/chat/completions` came back as `Model <id> does not exist`. The
+   * message named the model while the fault was the endpoint, which is why
+   * changing the model never helped.
+   *
+   * Precedence is deliberately conservative so nothing that resolves to a
+   * non-text type today changes answer:
+   *
+   * 1. `settings.model_type` — an explicit override some rows already carry.
+   * 2. The column, when it says something other than `text`.
+   * 3. The image heuristic, for configurations created before the column
+   *    existed and still holding its `text` default.
+   */
   private getModelType(): string {
-    const modelType =
+    const override =
       this.config.settings?.model_type || this.config.settings?.modelType;
 
-    if (typeof modelType === 'string' && modelType.trim()) {
-      return modelType.trim();
+    if (typeof override === 'string' && override.trim()) {
+      return override.trim();
     }
 
-    return this.hasImageGenerationSettings() ? 'image' : 'text';
+    if (this.config.modelType && this.config.modelType !== 'text') {
+      return this.config.modelType;
+    }
+
+    return this.hasImageGenerationSettings()
+      ? 'image'
+      : (this.config.modelType ?? 'text');
   }
 
   private hasImageGenerationSettings(): boolean {

@@ -105,6 +105,33 @@ export function PosLayawayConfigModal({
     [items],
   );
 
+  /**
+   * QUI-648 — guarda de escala / presentación.
+   *
+   * `POST /store/layaway` reconstruye cada línea como
+   * `unit_price × quantity − discount + tax`
+   * (`apps/backend/src/domains/store/layaway/layaway.service.ts`), SIN dividir
+   * por `price_unit_quantity` y sin resolver `stock_units_consumed`: el plan
+   * separé todavía no conoce ninguna de las dos reglas.
+   *
+   * Para un producto con escala eso cobraría el precio del metro por cada
+   * milímetro; para una presentación descontaría 1 unidad en vez del bulto
+   * entero. Cualquiera de las dos cosas es peor que no dejar crear el plan, así
+   * que se bloquea con un mensaje explícito en vez de cobrar mal en silencio.
+   *
+   * Con `price_unit_quantity` ausente o `1` y sin presentación —todo el
+   * catálogo histórico— la guarda nunca se dispara: cero regresión.
+   */
+  const hasUnsupportedSaleUnits = useMemo(
+    () =>
+      items.some(
+        (it) =>
+          it.appliedPriceTierId != null ||
+          Number(it.priceUnitQuantity ?? 1) > 1,
+      ),
+    [items],
+  );
+
   // Discount sanity guard: layaway rejects when a cart-level discount exceeds
   // the items' gross subtotal. The discount allocator (`allocateCartDiscounts`)
   // would otherwise cap allocations per line and leave `Σ allocations <
@@ -167,6 +194,7 @@ export function PosLayawayConfigModal({
     configValid &&
     installmentsWithinCap &&
     !hasCustomItems &&
+    !hasUnsupportedSaleUnits &&
     !discountExceedsSubtotal &&
     !!customer &&
     items.length > 0 &&
@@ -201,6 +229,12 @@ export function PosLayawayConfigModal({
     if (hasCustomItems) {
       toastWarning(
         'Los ítems personalizados no se pueden incluir en un plan separé. Elimínalos del carrito.',
+      );
+      return;
+    }
+    if (hasUnsupportedSaleUnits) {
+      toastWarning(
+        'El plan separé todavía no soporta productos con precio por escala ni presentaciones de venta. Cóbralos como venta normal.',
       );
       return;
     }
@@ -306,6 +340,7 @@ export function PosLayawayConfigModal({
     customer,
     items,
     hasCustomItems,
+    hasUnsupportedSaleUnits,
     configValid,
     installmentsWithinCap,
     preview,
@@ -394,6 +429,22 @@ export function PosLayawayConfigModal({
                   <Text style={styles.warningText}>
                     Los ítems personalizados no se pueden incluir en un plan
                     separé. Elimínalos del carrito antes de continuar.
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* === Escala de precio / presentación de venta (QUI-648) ===
+                  El backend del plan separé reconstruye la línea como
+                  `unit_price × quantity` y no conoce `price_unit_quantity` ni
+                  `stock_units_consumed`. Cobrarlo así multiplicaría el precio
+                  por la escala; bloqueamos con un mensaje explícito. */}
+              {hasUnsupportedSaleUnits ? (
+                <View style={styles.warningCard}>
+                  <Icon name="alert-triangle" size={18} color={colors.error} />
+                  <Text style={styles.warningText}>
+                    El plan separé todavía no soporta productos con precio por
+                    escala (ej. por metro) ni presentaciones de venta (caja,
+                    bulto). Cóbralos como venta normal.
                   </Text>
                 </View>
               ) : null}

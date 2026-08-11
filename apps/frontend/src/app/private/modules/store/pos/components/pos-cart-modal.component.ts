@@ -27,6 +27,11 @@ import {
   PriceTierCacheService,
   PriceTierSelectorComponent,
 } from '../../price-tiers';
+import { PosSaleUnitService } from '../services/pos-sale-unit.service';
+import {
+  formatSaleQuantity,
+  isSaleUnitLine as isLineCapturedInSaleUnit,
+} from '../utils/line-units.util';
 
 @Component({
   selector: 'app-pos-cart-modal',
@@ -138,7 +143,7 @@ import {
                         </span>
                       }
                       <span class="item-unit-price">
-                        {{ formatCurrency(item.finalPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : ' c/u' }}
+                        {{ formatCurrency(item.finalPrice) }}{{ unitPriceSuffix(item) }}
                       </span>
                       @if ((item.taxAmount || 0) > 0) {
                         <span class="item-tax-badge">
@@ -167,6 +172,13 @@ import {
                           (selectedTierIdChange)="onTierChange(item, $event)"
                         ></app-price-tier-selector>
                       </div>
+                    } @else {
+                      <!-- QUI-648: sin selector, la línea dice POR QUÉ. -->
+                      @if (saleConfigHints()[item.id]; as hint) {
+                        <p class="item-sale-config" [title]="hint.detail">
+                          {{ hint.headline }}
+                        </p>
+                      }
                     }
                   </div>
                   <!-- Remove Button -->
@@ -182,6 +194,11 @@ import {
                     @if (item.is_weight_product) {
                       <div class="weight-badge-mobile">
                         <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                      </div>
+                    } @else if (isSaleUnitLine(item)) {
+                      <!-- QUI-648: la escala que el cajero capturó, no la mínima. -->
+                      <div class="weight-badge-mobile">
+                        <span class="weight-value">{{ saleQuantityLabel(item) }}</span>
                       </div>
                     } @else {
                       <div class="qty-with-packages">
@@ -544,6 +561,17 @@ import {
         font-family: monospace;
       }
 
+      /* QUI-648: por qué la línea no ofrece presentaciones. */
+      .item-sale-config {
+        margin: 4px 0 0;
+        font-size: 10px;
+        line-height: 1.25;
+        color: var(--color-text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
       .item-unit-price {
         font-size: 12px;
         color: var(--color-text-secondary);
@@ -848,6 +876,7 @@ export class PosCartModalComponent {
   private readonly cartService = inject(PosCartService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly saleUnitService = inject(PosSaleUnitService);
 
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
@@ -930,11 +959,55 @@ export class PosCartModalComponent {
   canShowTierSelector(item: CartItem): boolean {
     return (
       item.itemType !== 'custom' &&
+      // QUI-648: una línea pesada no ofrece presentación — ver la nota gemela
+      // en `pos-cart.component.ts`.
+      item.captured_by_scale !== true &&
+      !item.is_weight_product &&
       item.product.has_multiple_price_tiers === true &&
       this.canApplyPricingTier() &&
       this.visibleTiersForItem(item).length > 0
     );
   }
+
+  /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", " c/u". */
+  unitPriceSuffix(item: CartItem): string {
+    if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
+    if (item.sale_unit_code) return '/' + item.sale_unit_code;
+    return ' c/u';
+  }
+
+  /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */
+  isSaleUnitLine(item: CartItem): boolean {
+    return isLineCapturedInSaleUnit(item);
+  }
+
+  /** "3 m" / "2,35 kg": la cantidad tal como la capturó el cajero. */
+  saleQuantityLabel(item: CartItem): string {
+    return formatSaleQuantity(item);
+  }
+
+  /**
+   * QUI-648 — por qué esta línea no ofrece presentaciones, con la misma frase
+   * del editor de producto. Computed para no rearmarla en cada ciclo de CD.
+   */
+  readonly saleConfigHints = computed<
+    Record<string, { headline: string; detail: string }>
+  >(() => {
+    const hints: Record<string, { headline: string; detail: string }> = {};
+    for (const item of this.cartState()?.items ?? []) {
+      if (item.itemType === 'custom') continue;
+      const explanation = this.saleUnitService.explain(
+        item.product,
+        this.visibleTiersForItem(item),
+      );
+      if (!explanation) continue;
+      hints[item.id] = {
+        headline: explanation.headline,
+        detail: [explanation.headline, ...explanation.lines].join(' '),
+      };
+    }
+    return hints;
+  });
 
   visibleTiersForItem(item: CartItem): PriceTier[] {
     if (item.itemType === 'custom') return [];

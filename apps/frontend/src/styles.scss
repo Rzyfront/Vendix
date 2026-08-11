@@ -1900,3 +1900,26 @@ html[data-theme="light"][data-theme-preset="monocromo"] {
   color: var(--color-primary);
   font-weight: 600;
 }
+
+/* ── KDS a pantalla completa (QUI-651) ─────────────────────────────────────
+   La pantalla completa del KDS la resuelve la Fullscreen API sobre el elemento
+   del tablero (ver `kds-board-page.component.ts`): el navegador lo promueve al
+   TOP LAYER, con lo cual el sidebar y el header quedan debajo de la capa y no
+   hay nada que colapsar. Esa es la razon por la que este bloque ya no esconde
+   partes del layout: hacerlo con selectores estructurales
+   (`> div > div > div:first-child`) acoplaba el KDS a la forma interna del
+   layout admin, y cualquiera que insertara un `div` lo rompia en silencio.
+
+   Lo que queda aqui sirve UNICAMENTE al respaldo `position: fixed`, que se
+   activa cuando `requestFullscreen()` es rechazado (webview embebida, permiso
+   denegado). En ese modo el tablero si comparte el documento con el layout, y
+   sin esto el fondo sigue haciendo scroll detras y el dock de Vexi tapa una
+   columna de tickets. */
+body.kds-fullscreen {
+  overflow: hidden;
+
+  app-vexi-dock,
+  button[aria-label^='Abrir Vexi'] {
+    display: none !important;
+  }
+}

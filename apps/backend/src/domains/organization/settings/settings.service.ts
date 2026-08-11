@@ -22,9 +22,8 @@ import { getDefaultStoreSettings } from '../../store/settings/defaults/default-s
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
-import { buildOrganizationFiscalColumns } from '@common/helpers/organization-fiscal-columns.helper';
+import { buildTenantFiscalColumns, mergeFiscalData } from '@common/helpers/organization-fiscal-columns.helper';
 import { Prisma } from '@prisma/client';
-import type { dian_nit_type_enum } from '@prisma/client';
 
 @Injectable()
 export class SettingsService {
@@ -375,9 +374,11 @@ export class SettingsService {
   }
 
   /**
-   * Patch-style update for `settings.fiscal_data`. Deep-merges over the
-   * existing section and preserves every other key (branding, fonts,
-   * inventory, payroll, panel_ui, fiscal_status).
+   * Patch-style update for `settings.fiscal_data`. Shallow-merges over the
+   * existing section via `mergeFiscalData` (helper en `common/helpers/`) and
+   * preserves every other key (branding, fonts, inventory, payroll, panel_ui,
+   * fiscal_status). Superficial a propósito: `tax_responsibilities` es un array
+   * y una fusión profunda lo concatenaría en vez de reemplazarlo.
    *
    * Canonical endpoint: `PATCH /organization/settings/fiscal-data`.
    *
@@ -409,10 +410,13 @@ export class SettingsService {
         (existing?.settings as Record<string, any> | null) ?? {};
       const previousFiscalData =
         (currentSettings.fiscal_data ?? {}) as OrganizationFiscalData;
-      const nextFiscalData = {
-        ...previousFiscalData,
-        ...cleanDto,
-      } as OrganizationFiscalData;
+      // Fusión superficial centralizada en `mergeFiscalData` para que este
+      // escritor produzca el mismo estado que `store/settings` por el mismo
+      // payload (ver §"Approach Chosen" del plan de identidad fiscal SSOT).
+      const nextFiscalData = mergeFiscalData(
+        previousFiscalData as Record<string, unknown>,
+        cleanDto,
+      ) as OrganizationFiscalData;
       const nextSettings = {
         ...getDefaultStoreSettings(),
         ...currentSettings,
@@ -431,56 +435,20 @@ export class SettingsService {
         },
       });
 
-      const legal_name =
-        typeof cleanDto.legal_name === 'string'
-          ? cleanDto.legal_name.trim()
-          : undefined;
-      const tax_id =
-        typeof cleanDto.tax_id === 'string'
-          ? cleanDto.tax_id.trim()
-          : typeof cleanDto.nit === 'string'
-            ? cleanDto.nit.trim()
-            : undefined;
-      const tax_id_dv =
-        typeof cleanDto.tax_id_dv === 'string'
-          ? cleanDto.tax_id_dv.trim()
-          : typeof cleanDto.nit_dv === 'string'
-            ? cleanDto.nit_dv.trim()
-            : undefined;
-      const nit_type: dian_nit_type_enum | undefined =
-        typeof cleanDto.nit_type === 'string'
-          ? (cleanDto.nit_type.trim() as dian_nit_type_enum)
-          : undefined;
-      const municipality_code =
-        typeof cleanDto.municipality_code === 'string'
-          ? cleanDto.municipality_code.trim()
-          : undefined;
-      const ciiu_code =
-        typeof cleanDto.ciiu_code === 'string'
-          ? cleanDto.ciiu_code.trim()
-          : undefined;
-
-      if (
-        legal_name !== undefined ||
-        tax_id !== undefined ||
-        tax_id_dv !== undefined ||
-        nit_type !== undefined ||
-        municipality_code !== undefined ||
-        ciiu_code !== undefined
-      ) {
+      // Proyección única de columnas del alcance tienda vía
+      // `buildTenantFiscalColumns`. Antes este bloque inlineaba la lectura de
+      // cada campo del DTO y la escritura de cada columna, así que el mismo
+      // payload podía producir columnas distintas si el orden de campos o el
+      // saneado cambiaban en un escritor y no en el otro.
+      const storeColumns = buildTenantFiscalColumns(
+        'store',
+        cleanDto,
+        nextFiscalData as Record<string, unknown>,
+      );
+      if (Object.keys(storeColumns).length > 0) {
         await this.prisma.withoutScope().stores.update({
           where: { id: target.store_id },
-          data: {
-            ...(legal_name !== undefined && { legal_name: legal_name || null }),
-            ...(tax_id !== undefined && { tax_id: tax_id || null }),
-            ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
-            ...(nit_type !== undefined && { nit_type: nit_type || null }),
-            ...(municipality_code !== undefined && {
-              municipality_code: municipality_code || null,
-            }),
-            ...(ciiu_code !== undefined && { ciiu_code: ciiu_code || null }),
-            updated_at: new Date(),
-          },
+          data: { ...storeColumns, updated_at: new Date() },
         });
       }
 
@@ -514,10 +482,13 @@ export class SettingsService {
     const previousFiscalData: OrganizationFiscalData =
       currentSettings?.fiscal_data ?? {};
 
-    const nextFiscalData: OrganizationFiscalData = {
-      ...previousFiscalData,
-      ...cleanDto,
-    } as OrganizationFiscalData;
+    // Fusión superficial centralizada en `mergeFiscalData` (ver §"Approach
+    // Chosen" del plan). Antes este spread se hacía inline — mismo resultado,
+    // pero el nombre no declaraba la intención.
+    const nextFiscalData: OrganizationFiscalData = mergeFiscalData(
+      previousFiscalData as Record<string, unknown>,
+      cleanDto,
+    ) as OrganizationFiscalData;
 
     const nextSettings: OrganizationSettings = {
       ...((currentSettings as OrganizationSettings | null) ??
@@ -548,9 +519,10 @@ export class SettingsService {
     //
     // No hay columna `municipality_code` a nivel organización: el ICA siempre se
     // declara por tienda, así que ese campo solo aplica al target 'store'.
-    const fiscalColumns = buildOrganizationFiscalColumns(
+    const fiscalColumns = buildTenantFiscalColumns(
+      'organization',
       cleanDto,
-      nextFiscalData,
+      nextFiscalData as Record<string, unknown>,
     );
     if (Object.keys(fiscalColumns).length > 0) {
       try {

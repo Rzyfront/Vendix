@@ -46,6 +46,11 @@ import {
   KdsSseService,
   KitchenMutationError,
 } from '../../../kds/services';
+import type {
+  FireItemExclusion,
+  FirePreview,
+} from '../../../kds/interfaces';
+import { KitchenConfirmModalComponent } from '../../../kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
@@ -95,6 +100,7 @@ import { AssignCustomerModalComponent } from '../../components/assign-customer-m
     SplitOrderModalComponent,
     TablePaymentModalComponent,
     AssignCustomerModalComponent,
+    KitchenConfirmModalComponent,
   ],
   templateUrl: './table-session-page.component.html',
   styleUrl: './table-session-page.component.scss',
@@ -121,6 +127,23 @@ export class TableSessionPageComponent implements OnInit {
   readonly isFiring = signal(false);
   readonly firingItemId = signal<number | null>(null);
   readonly deliveringTicketId = signal<number | null>(null);
+  /**
+   * QUI-652 — spinner del item que se está entregando SIN pasar por cocina.
+   * Separado de `deliveringTicketId` porque estos items no tienen ticket:
+   * reutilizar esa señal dejaría el botón sin spinner o marcaría otra fila.
+   */
+  readonly deliveringItemId = signal<number | null>(null);
+  /**
+   * QUI-655 — estado del modal de confirmacion de cocina. `pendingFireIds`
+   * sobrevive al modal porque el confirm necesita los MISMOS ids que se
+   * previsualizaron: recalcularlos desde la seleccion podria dar otro conjunto si
+   * el operador toco algo mientras el modal estaba abierto.
+   */
+  readonly kitchenConfirmOpen = signal(false);
+  readonly kitchenPreview = signal<FirePreview | null>(null);
+  readonly kitchenPreviewLoading = signal(false);
+  private readonly pendingFireIds = signal<number[]>([]);
+  private readonly pendingFireSingleId = signal<number | null>(null);
   readonly isSplitting = signal(false);
   readonly isClosing = signal(false);
   readonly isPaying = signal(false);
@@ -499,10 +522,58 @@ export class TableSessionPageComponent implements OnInit {
    *   - `null`             → false (never fired)
    */
   canDeliver(item: TableSessionOrderItem): boolean {
+    // QUI-652 — la entrega es un hecho de SERVICIO y ya está registrada.
+    if (this.isDelivered(item)) return false;
+
+    // Lo que no se cocina se entrega directo desde la fila: no pasa por cocina,
+    // así que no hay estado de cocina que esperar. Antes esto devolvía false
+    // porque `kitchenStatusFor` es null para siempre en un no-preparado, y la
+    // cerveza en botella se quedaba sin ningún estado de entrega alcanzable.
+    if (!this.needsKitchen(item)) return true;
+
     const status = this.kitchenStatusFor(item);
     if (status == null) return false;
-    if (status === 'delivered' || status === 'cancelled') return false;
+    if (status === 'cancelled') return false;
     return status === 'ready' || status === 'in_preparation';
+  }
+
+  /**
+   * ¿Este item pasa por cocina? Solo los platos preparados: el fire excluye
+   * explícitamente todo lo demás (`kitchen-fire.service.ts`), así que para el
+   * resto no existe ni existirá un `kitchen_ticket_item`.
+   */
+  needsKitchen(item: TableSessionOrderItem): boolean {
+    return item.item_type === 'prepared';
+  }
+
+  /**
+   * QUI-653 — ¿la cuenta mezcla consumo en la mesa con items para llevar?
+   *
+   * `computed` sobre la señal de sesión: el backend ya envía `is_mixed_order`
+   * derivado, pero se recalcula localmente como respaldo para que el badge
+   * responda al instante cuando la sesión se reemplaza tras agregar items, sin
+   * depender de que ese campo viaje en cada respuesta.
+   */
+  readonly isMixedOrder = computed(() => {
+    const items = this.session()?.order?.order_items ?? [];
+    if (this.session()?.order?.is_mixed_order != null) {
+      return this.session()!.order!.is_mixed_order === true;
+    }
+    return (
+      items.some((it) => it.is_takeaway) && items.some((it) => !it.is_takeaway)
+    );
+  });
+
+  /**
+   * ¿Ya se le entregó al cliente? Lee el hecho de servicio en la línea de
+   * pedido. Se acepta además el `delivered` del ticket como respaldo, porque el
+   * reconciliador SSE puede adelantar el estado de cocina en vivo antes de que
+   * la sesión se recargue y traiga `delivered_at`.
+   */
+  isDelivered(item: TableSessionOrderItem): boolean {
+    return (
+      item.delivered_at != null || this.kitchenStatusFor(item) === 'delivered'
+    );
   }
 
   /** Operator-friendly hint explaining why `canDeliver` is/isn't true. */
@@ -779,13 +850,72 @@ export class TableSessionPageComponent implements OnInit {
     this.fire(ids, null);
   }
 
+  /**
+   * QUI-655 — enviar a cocina pasa SIEMPRE por el modal de confirmacion.
+   *
+   * Este es el embudo unico de los dos disparadores (fireItem por fila y
+   * fireSelected por seleccion multiple), asi que interceptar aca cubre ambos. No
+   * se escribe NADA antes de confirmar: primero se previsualiza el arbol de receta,
+   * y el consumo de inventario ocurre solo tras el confirm.
+   */
   private fire(orderItemIds: number[], singleItemId: number | null): void {
+    const order = this.session()?.order;
+    if (!order) return;
+
+    this.pendingFireIds.set(orderItemIds);
+    this.pendingFireSingleId.set(singleItemId);
+    this.kitchenPreviewLoading.set(true);
+    this.kitchenConfirmOpen.set(true);
+
+    this.kitchenService
+      .previewFire({ order_id: order.id, order_item_ids: orderItemIds })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.kitchenPreview.set(preview);
+          this.kitchenPreviewLoading.set(false);
+        },
+        error: (err: unknown) => {
+          this.kitchenPreviewLoading.set(false);
+          this.kitchenConfirmOpen.set(false);
+          this.onKitchenMutationError(err);
+        },
+      });
+  }
+
+  /** Confirma el envio con las exclusiones que dejo el modal. */
+  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+    const ids = this.pendingFireIds();
+    if (ids.length === 0) return;
+    this.kitchenConfirmOpen.set(false);
+    this.executeFire(ids, this.pendingFireSingleId(), exclusions);
+  }
+
+  /** Cancelar no consume inventario ni crea tickets: el modal abre ANTES de escribir. */
+  onKitchenCancelled(): void {
+    this.kitchenConfirmOpen.set(false);
+    this.kitchenPreview.set(null);
+    this.pendingFireIds.set([]);
+    this.pendingFireSingleId.set(null);
+  }
+
+  private executeFire(
+    orderItemIds: number[],
+    singleItemId: number | null,
+    exclusions: FireItemExclusion[],
+  ): void {
     const order = this.session()?.order;
     if (!order) return;
     this.isFiring.set(true);
     this.firingItemId.set(singleItemId);
     this.kitchenService
-      .fireOrderItems({ order_id: order.id, order_item_ids: orderItemIds })
+      .fireOrderItems({
+        order_id: order.id,
+        order_item_ids: orderItemIds,
+        // Solo se manda cuando hay algo excluido: el backend trata la ausencia
+        // como "todos los componentes marcados", que es el camino rapido.
+        ...(exclusions.length > 0 && { exclusions }),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -832,6 +962,15 @@ export class TableSessionPageComponent implements OnInit {
    *    messages instead of the generic "Transición de estado no permitida".
    */
   markDelivered(item: TableSessionOrderItem): void {
+    // QUI-652 — dos caminos, una sola verdad. Un item que no pasa por cocina no
+    // tiene ticket que avanzar: se entrega contra su línea de pedido. El backend
+    // del ticket de cocina propaga a la misma columna, así que ambos caminos
+    // escriben `order_items.delivered_at`.
+    if (!this.needsKitchen(item)) {
+      this.deliverNonKitchenItem(item);
+      return;
+    }
+
     const ticketId = this.ticketIdFor(item);
     if (ticketId == null) {
       this.toastService.error('Este plato no tiene un ticket de cocina');
@@ -866,6 +1005,39 @@ export class TableSessionPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.deliveringTicketId.set(null);
+          this.onKitchenMutationError(err);
+        },
+      });
+  }
+
+  /**
+   * QUI-652 — entrega de un item que NO pasa por cocina (una cerveza, un agua,
+   * algo de nevera). No hay ticket que avanzar: se escribe el hecho de servicio
+   * contra la línea de pedido.
+   *
+   * Usa `deliveringItemId` en vez de `deliveringTicketId` justamente porque
+   * estos items no tienen ticket, y reutilizar la señal del ticket dejaría el
+   * botón sin spinner o marcaría el equivocado.
+   */
+  private deliverNonKitchenItem(item: TableSessionOrderItem): void {
+    const sessionId = this.session()?.id;
+    if (sessionId == null) return;
+
+    this.deliveringItemId.set(item.id);
+    this.tablesService
+      .markItemDelivered(sessionId, item.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (session) => {
+          this.deliveringItemId.set(null);
+          // El backend devuelve la sesión completa ya recalculada, así que se
+          // reemplaza en vez de recargar: una llamada menos y sin ventana en la
+          // que la fila muestre el estado viejo.
+          this.session.set(session);
+          this.toastService.success('Item marcado como entregado');
+        },
+        error: (err: unknown) => {
+          this.deliveringItemId.set(null);
           this.onKitchenMutationError(err);
         },
       });

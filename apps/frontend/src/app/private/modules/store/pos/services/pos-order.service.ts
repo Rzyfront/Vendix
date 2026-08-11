@@ -22,6 +22,7 @@ import {
 // Re-export types for component usage
 export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
 import { CartItem, CartState, CartDiscount } from '../models/cart.model';
+import { resolveLineUnits } from '../utils/line-units.util';
 import { PosCustomer } from '../models/customer.model';
 import { PosCashRegisterService } from './pos-cash-register.service';
 
@@ -1000,9 +1001,9 @@ export class PosOrderService {
   private mapCartItemForPos(item: CartItem): any {
     const isCustomItem =
       item.itemType === 'custom' || item.product.id.startsWith('custom-');
-    const lineUnits = item.is_weight_product && item.weight
-      ? item.weight
-      : item.quantity;
+    // QUI-648 — un solo multiplicador para peso legado, presentación y precio
+    // por N unidades. Con escala 1 devuelve la cantidad, como siempre.
+    const lineUnits = resolveLineUnits(item);
     const categoryIds = this.getProductCategoryIds(item);
     return {
       item_type: isCustomItem ? 'custom' : 'product',

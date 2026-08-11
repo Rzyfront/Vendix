@@ -39,6 +39,10 @@ import {
   SearchResult,
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
+import {
+  PosSaleUnitService,
+  PosSaleUnitConfig,
+} from '../services/pos-sale-unit.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
@@ -246,7 +250,7 @@ interface ActiveOrderPromotion {
             ) {
               <div
                 (click)="onAddToCart(product)"
-                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
+                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
                 [class]="
                   isProductCardUnavailable(product)
                     ? 'opacity-60 cursor-not-allowed'
@@ -255,7 +259,7 @@ interface ActiveOrderPromotion {
               >
                 <!-- Product Image or Icon -->
                 <div
-                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
+                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden rounded-t-card"
                 >
                   <!-- Product Image -->
                   @if (product.image_url || product.image) {
@@ -304,6 +308,15 @@ interface ActiveOrderPromotion {
                       >
                         Últimas {{ product.stock }}
                       </app-badge>
+                    } @else {
+                      <app-badge
+                        variant="success"
+                        size="xs"
+                        badgeStyle="outline"
+                        class="absolute top-2 right-2 z-[1]"
+                      >
+                        {{ product.stock }} Disponibles
+                      </app-badge>
                     }
                   } @else if (product.track_inventory === false) {
                     <app-badge
@@ -321,7 +334,7 @@ interface ActiveOrderPromotion {
                       variant="success"
                       size="xs"
                       badgeStyle="outline"
-                      class="absolute bottom-2 right-2 z-[1]"
+                      class="absolute bottom-2 right-2 z-[1] promo-badge"
                     >
                       {{ product.active_promotion.badge_label }}
                     </app-badge>
@@ -354,25 +367,48 @@ interface ActiveOrderPromotion {
                       <span class="text-white">Peso</span>
                     </div>
                   }
+                  <!-- Add FAB — esquina inferior derecha de la imagen.
+                       Se revela al hacer hover sobre la card (desktop);
+                       en táctil queda siempre visible (ver .add-fab en styles). -->
+                  @if (!isProductCardUnavailable(product)) {
+                    <button
+                      [class]="getAddButtonClass(product)"
+                      (click)="$event.stopPropagation(); onAddToCart(product)"
+                      aria-label="Agregar al carrito"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                  }
                 </div>
                 <!-- Product Info -->
-                <div class="p-2 sm:p-3">
-                  <!-- Product Name -->
-                  <h3
-                    class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
-                    [title]="product.name"
-                  >
-                    {{ product.name }}
-                  </h3>
-                  <!-- Product Description (hidden on mobile, shortened on desktop) -->
-                  @if (product.description) {
-                    <p
-                      class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
-                      [title]="product.description"
+                <div class="p-2">
+                  <!-- Product Name — una sola línea en reposo.
+                       El nombre completo se revela en hover mediante .name-pop,
+                       un overlay absoluto que no altera el flujo ni el alto. -->
+                  <div class="relative mb-0.5">
+                    <h3
+                      class="text-text-primary font-medium text-xs sm:text-sm leading-tight truncate group-hover:text-primary transition-colors"
+                      [title]="product.name"
                     >
-                      {{ product.description }}
-                    </p>
-                  }
+                      {{ product.name }}
+                    </h3>
+                    <span class="name-pop" aria-hidden="true">{{
+                      product.name
+                    }}</span>
+                  </div>
                   <!-- Bottom Section: Price and Stock -->
                   <div class="flex items-center justify-between">
                     <!-- Price -->
@@ -409,78 +445,9 @@ interface ActiveOrderPromotion {
                           }
                         </span>
                       }
-                      <!-- Stock indicator for non-variant products -->
-                      @if (product.track_inventory !== false) {
-                        @if (!product.has_variants) {
-                          <span
-                            class="text-[10px] sm:text-xs leading-tight"
-                            [class]="
-                              product.is_available === false
-                                ? 'text-error font-semibold'
-                                : isProductLowStock(product)
-                                  ? 'text-warning font-medium'
-                                  : 'text-text-muted'
-                            "
-                          >
-                            {{
-                              product.is_available === false
-                                ? 'Sin stock'
-                                : product.stock + ' en stock'
-                            }}
-                          </span>
-                        }
-                      } @else {
-                        @if (!product.has_variants) {
-                          <span
-                            class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium"
-                          >
-                            Disponible
-                          </span>
-                        }
-                      }
+                      <!-- Disponibilidad: vive en el badge superior de la card
+                           (AGOTADO / Últimas N / N disponibles / Disponible). -->
                     </div>
-                  </div>
-                  <!-- Additional Product Details + Add Button -->
-                  <div
-                    class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
-                  >
-                    <div
-                      class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted"
-                    >
-                      @if (product.sku) {
-                        <span
-                          class="font-mono truncate max-w-[80px]"
-                          [title]="product.sku"
-                          >{{ product.sku }}</span
-                        >
-                      }
-                      @if (product.category_name) {
-                        <span class="truncate">{{
-                          product.category_name
-                        }}</span>
-                      }
-                    </div>
-                    <button
-                      [class]="getAddButtonClass(product)"
-                      [disabled]="isProductCardUnavailable(product)"
-                      (click)="$event.stopPropagation(); onAddToCart(product)"
-                      aria-label="Agregar al carrito"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                      </svg>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -590,6 +557,100 @@ interface ActiveOrderPromotion {
         }
       }
 
+      /* FAB de agregar sobre la imagen.
+         Base táctil: siempre visible, porque sin :hover no habría forma de verlo. */
+      .add-fab {
+        opacity: 1;
+        transform: scale(1);
+        transition:
+          opacity 0.15s ease,
+          transform 0.15s ease;
+      }
+
+      .promo-badge {
+        transition: opacity 0.15s ease;
+      }
+
+      /* Overlay del nombre completo. Vive fuera del flujo (absolute) sobre el
+         h3 truncado, así revelar el texto no empuja el precio ni crece la card.
+         Anclado por bottom: las líneas extra crecen hacia ARRIBA, invadiendo
+         la imagen en vez de tapar el precio.
+         Oculto por defecto — en táctil el nombre completo queda en [title]. */
+      .name-pop {
+        position: absolute;
+        bottom: 0;
+        left: -0.25rem;
+        right: -0.25rem;
+        z-index: 4;
+        visibility: hidden;
+        opacity: 0;
+        /* translateY en vez de scaleY: escalar deforma la tipografía durante la
+           animación y eso delata el overlay como algo pegado encima. */
+        transform: translateY(3px);
+        transition:
+          opacity 0.2s ease-out,
+          transform 0.2s ease-out,
+          visibility 0s linear 0.2s;
+        /* El padding-top extra no aloja texto: es la banda donde el fondo se
+           desvanece, para que el borde superior no corte en seco sobre la
+           imagen. El texto arranca ya en zona opaca, así que sigue legible. */
+        /* Sin sombra ni radio: cualquiera de los dos dibuja el contorno de la
+           caja y rompe la fusión. El bloque nace opaco abajo — donde ya está el
+           fondo de la card — y se disuelve del todo antes de invadir la foto. */
+        padding: 1.1rem 0.25rem 0.125rem;
+        background: linear-gradient(
+          to bottom,
+          rgba(var(--color-surface-rgb, 255, 255, 255), 0) 0,
+          rgba(var(--color-surface-rgb, 255, 255, 255), 0.12) 30%,
+          rgba(var(--color-surface-rgb, 255, 255, 255), 0.45) 55%,
+          rgba(var(--color-surface-rgb, 255, 255, 255), 0.82) 78%,
+          rgba(var(--color-surface-rgb, 255, 255, 255), 1) 92%
+        );
+        color: var(--color-primary);
+        font-weight: var(--fw-medium, 500);
+        font-size: 0.75rem;
+        line-height: 1.25;
+      }
+
+      @media (min-width: 640px) {
+        .name-pop {
+          font-size: 0.875rem;
+        }
+      }
+
+      @media (hover: hover) {
+        /* Solo en punteros con hover el FAB se esconde hasta que la card recibe hover. */
+        .add-fab {
+          opacity: 0;
+          transform: scale(0.85);
+          pointer-events: none;
+        }
+
+        .product-card:hover .add-fab,
+        .add-fab:focus-visible {
+          opacity: 1;
+          transform: scale(1);
+          pointer-events: auto;
+        }
+
+        /* El badge de promoción comparte esquina con el FAB: cede el lugar en hover. */
+        .product-card:hover .promo-badge {
+          opacity: 0;
+        }
+
+        /* Nombre completo al hover, sin consumir alto de la card. */
+        .product-card:hover .name-pop {
+          visibility: visible;
+          opacity: 1;
+          transform: translateY(0);
+          transition-delay: 0s;
+        }
+
+        .add-fab:active {
+          transform: scale(0.92);
+        }
+      }
+
       /* Price styling */
       .price-primary {
         color: var(--color-primary);
@@ -669,6 +730,7 @@ export class PosProductSelectionComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
+  private saleUnitService = inject(PosSaleUnitService);
   private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private serialNumbersService = inject(SerialNumbersService);
   private cashRegisterService = inject(PosCashRegisterService);
@@ -1061,12 +1123,15 @@ export class PosProductSelectionComponent {
     return product.stock === 0;
   }
 
+  /**
+   * FAB de "agregar" anclado a la esquina inferior derecha de la imagen.
+   * La visibilidad la gobierna `.add-fab` en los styles del componente:
+   * oculto hasta el hover en punteros con hover, siempre visible en táctil.
+   * No se emiten utilidades de opacity/scale aquí para no competir con esas reglas.
+   */
   getAddButtonClass(product: any): string {
-    const base =
-      'shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]';
-    return this.isProductCardUnavailable(product)
-      ? `${base} opacity-50 cursor-not-allowed bg-muted`
-      : `${base} bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95`;
+    void product;
+    return 'add-fab absolute bottom-2 right-2 z-[2] w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-text-on-primary)] hover:brightness-110';
   }
 
   async onAddToCart(product: any): Promise<void> {
@@ -1463,9 +1528,70 @@ export class PosProductSelectionComponent {
       }
     }
 
+    // QUI-648 — el código pistoleado era el de una PRESENTACIÓN. La línea entra
+    // con esa presentación ya aplicada y no se le pregunta nada al cajero: si
+    // tuviera que elegir la unidad después de pistolear, el código de barras no
+    // habría resuelto nada. `PosCartService` resuelve la tarifa y la aplica.
+    const scannedTierId = Number(product.scanned_price_tier_id ?? 0);
+    if (Number.isFinite(scannedTierId) && scannedTierId > 0) {
+      this.addingToCart.add(product.id);
+      this.cartService
+        .addToCart({
+          product,
+          quantity: 1,
+          scannedPriceTierId: scannedTierId,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.addingToCart.delete(product.id);
+            this.toastService.success(
+              `${product.name} agregado al carrito en la presentación pistoleada`,
+            );
+            this.productAddedToCart.emit({ product, quantity: 1 });
+          },
+          error: (error) => {
+            this.addingToCart.delete(product.id);
+            this.handleAddToCartError(error, product, undefined, 1);
+          },
+        });
+      return;
+    }
+
     // Check if product is sold by weight and scale is enabled
     const isWeightProduct =
       product.pricing_type === 'weight' && this.scaleEnabled();
+
+    // QUI-648 — cómo se MIDE el producto decide cómo se CAPTURA la línea.
+    //
+    // Dos poblaciones pagan la consulta de detalle que completa el contrato de
+    // venta: el producto de balanza (que ya iba a abrir un modal) y el que
+    // declara presentaciones (que es donde vive el catálogo medido). El resto
+    // —la inmensa mayoría, vendida por pieza— resuelve en memoria y no dispara
+    // una sola petición extra, que es lo que un POS de escaneo necesita.
+    const declaresPresentations =
+      product.has_multiple_price_tiers === true ||
+      (product.enabled_price_tier_ids?.length ?? 0) > 0;
+    const saleUnit =
+      isWeightProduct || declaresPresentations
+        ? await this.saleUnitService.resolveFor(product)
+        : this.saleUnitService.configFor(product);
+
+    // Solo se captura en unidad de venta cuando ESA unidad existe y es distinta
+    // de la mínima (metros sobre milímetros, kilos sobre gramos). Un producto
+    // cuya unidad de stock ya es la de venta —"unidad", precio por unidad— se
+    // agrega de un toque como siempre: preguntarle la cantidad al cajero ahí
+    // sería una regresión, no una mejora.
+    if (saleUnit.stockUnit && saleUnit.unitsPerCapture > 1) {
+      const captured = await this.captureSaleQuantity(
+        product,
+        saleUnit,
+        isWeightProduct,
+      );
+      if (!captured) return;
+      this.addMeasuredProductToCart(product, captured);
+      return;
+    }
 
     // For weight products, require weight input
     if (isWeightProduct) {
@@ -1527,6 +1653,130 @@ export class PosProductSelectionComponent {
         error: (error) => {
           this.addingToCart.delete(product.id);
           this.handleAddToCartError(error, product, undefined, 1);
+        },
+      });
+  }
+
+  /**
+   * QUI-648 — captura de una línea medida, en la UNIDAD DE VENTA.
+   *
+   * El cajero pide "3 metros" o pesa 2,35 kg; la conversión a la unidad mínima
+   * (milímetros, gramos) es interna y es lo único que viaja al backend. La
+   * balanza dejó de ser un modo del producto: es uno de los dos métodos de
+   * captura de esta misma pantalla, y por eso la línea que produce es una línea
+   * de cantidad normal y no una línea de peso con `quantity = 1`.
+   *
+   * Devuelve `null` cuando el cajero cancela o la captura no es válida.
+   */
+  private async captureSaleQuantity(
+    product: any,
+    saleUnit: PosSaleUnitConfig,
+    preferScale: boolean,
+  ): Promise<{
+    quantity: number;
+    amount: number;
+    unitCode: string;
+    byScale: boolean;
+  } | null> {
+    const unitCode = saleUnit.captureUnit?.code ?? saleUnit.stockUnit!.code;
+    const weighable =
+      saleUnit.stockUnit?.dimension === 'mass' && this.scaleEnabled();
+    const useScale = preferScale || weighable;
+
+    let amount: number | undefined;
+    if (useScale) {
+      amount = await this.getWeightFromScaleOrManual(
+        product.name,
+        product.final_price,
+        unitCode,
+      );
+      if (amount !== undefined && amount > 999) {
+        this.toastService.warning(
+          `El peso máximo permitido es 999 ${unitCode}`,
+        );
+        return null;
+      }
+    } else {
+      const raw = await this.dialogService.prompt(
+        {
+          title: `Cantidad en ${unitCode}`,
+          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unitCode}`,
+          placeholder: `Cantidad en ${unitCode}`,
+          defaultValue: '1',
+          confirmText: 'Agregar',
+          cancelText: 'Cancelar',
+          inputType: 'number',
+        },
+        { size: 'sm' },
+      );
+      if (!raw) return null;
+      const parsed = parseFloat(String(raw).replace(',', '.'));
+      amount = Number.isNaN(parsed) ? undefined : parsed;
+    }
+
+    if (amount === undefined) return null;
+    if (!(amount > 0)) {
+      this.toastService.warning('La cantidad debe ser mayor a 0');
+      return null;
+    }
+
+    const quantity = Math.round(amount * saleUnit.unitsPerCapture);
+    if (quantity <= 0) {
+      // Redondear a cero sería vender aire: se le dice al cajero cuál es el
+      // mínimo real en vez de aceptar una línea sin mercancía detrás.
+      const minimum = 1 / saleUnit.unitsPerCapture;
+      this.toastService.warning(
+        `La cantidad mínima es ${minimum} ${unitCode} (${saleUnit.stockUnit!.code}).`,
+      );
+      return null;
+    }
+
+    return {
+      quantity,
+      amount,
+      unitCode,
+      byScale: useScale && this.scaleService.isConnected(),
+    };
+  }
+
+  /** Agrega una línea medida ya convertida a la unidad mínima del producto. */
+  private addMeasuredProductToCart(
+    product: any,
+    captured: {
+      quantity: number;
+      amount: number;
+      unitCode: string;
+      byScale: boolean;
+    },
+  ): void {
+    this.addingToCart.add(product.id);
+
+    this.cartService
+      .addToCart({
+        product,
+        quantity: captured.quantity,
+        capturedByScale: captured.byScale,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.addingToCart.delete(product.id);
+          this.toastService.success(
+            `${product.name} (${captured.amount} ${captured.unitCode}) agregado al carrito`,
+          );
+          this.productAddedToCart.emit({
+            product,
+            quantity: captured.quantity,
+          });
+        },
+        error: (error) => {
+          this.addingToCart.delete(product.id);
+          this.handleAddToCartError(
+            error,
+            product,
+            undefined,
+            captured.quantity,
+          );
         },
       });
   }

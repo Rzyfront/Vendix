@@ -8,6 +8,12 @@ import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
+import { VexiSpeechService } from '../vexi/vexi-speech.service';
+import { SPEECH_REGISTER_BLOCK } from '../vexi/vexi-speech.constants';
+import type {
+  VexiSpeechTurn,
+  VexiVoiceFrame,
+} from '../vexi/vexi-speech.pipeline';
 import { RequestContextService } from '@common/context/request-context.service';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -33,6 +39,16 @@ import {
  */
 const PERSISTED_TOOL_RESULT_CHARS = 1000;
 
+/**
+ * What the chat SSE turn can emit.
+ *
+ * The voice frames are a union on top of `AIStreamChunk` rather than new members
+ * of it: no provider ever produces audio, and widening the provider interface
+ * would make every implementation carry a case it cannot reach. The SSE
+ * controller only serializes what it is handed, so the transport needs no change.
+ */
+export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
+
 @Injectable()
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
@@ -48,6 +64,7 @@ export class AIChatService {
     private readonly vexiContext: VexiContextService,
     private readonly streamIntents: VexiStreamIntentService,
     private readonly uiChannel: VexiUiChannelService,
+    private readonly speech: VexiSpeechService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -290,6 +307,8 @@ export class AIChatService {
       content: dto.content,
       ui_context: dto.ui_context,
       attachment_ids: dto.attachment_ids,
+      speak: dto.speak,
+      skip_user_message: dto.skip_user_message,
       user_id: RequestContextService.getContext()?.user_id,
     });
   }
@@ -299,11 +318,20 @@ export class AIChatService {
    * `RequestContextService.run()` before subscribing, because Nest's `@Sse()`
    * Observable body runs after the handler returned and the interceptor's
    * AsyncLocalStorage scope has already been torn down.
+   *
+   * `signal` is aborted when the client disconnects. It stops the synthesis queue
+   * from spending on a turn nobody is listening to; it deliberately does **not**
+   * interrupt the generator, because leaving the loop early would skip the writes
+   * that persist the assistant reply and its tool trace.
    */
   async *sendMessageStream(
     conversationId: number,
     streamId: string,
-  ): AsyncGenerator<AIStreamChunk> {
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamFrame> {
+    // Every timing mark is relative to this. Taken before the first await so it
+    // includes the intent lookup the browser is already waiting through.
+    const streamStartedAt = Date.now();
     const userId = RequestContextService.getContext()?.user_id;
     const intent = await this.streamIntents.consume(streamId, userId);
 
@@ -323,14 +351,57 @@ export class AIChatService {
       return;
     }
 
-    // Save user message
-    await this.prisma.ai_messages.create({
-      data: {
-        conversation_id: conversationId,
-        role: 'user',
-        content: intent.content,
-      },
-    });
+    // Opened — and the filler emitted — before the turn is persisted, because
+    // this is the frame the person is waiting on. The writes below cost a few
+    // milliseconds each, but they are milliseconds spent in the only window
+    // where the user is hearing nothing at all.
+    let voice: VexiSpeechTurn | null = null;
+    if (intent.speak) {
+      voice = await this.speech.openTurn(streamStartedAt);
+      const turn = voice;
+      if (signal?.aborted) {
+        turn.abort();
+      } else {
+        signal?.addEventListener('abort', () => turn.abort(), { once: true });
+      }
+
+      // `previous` es lo que hacía falta para que la rotación existiera de
+      // verdad: sin él `pickFiller` recibía undefined, resolvía el índice
+      // anterior en -1 y devolvía SIEMPRE la primera frase del banco. Las otras
+      // trece estaban escritas, sintetizadas y pinneadas en caché, y ninguna se
+      // oía nunca.
+      const previousFiller = this.speech.lastFiller(conversationId);
+      const filler = await voice.filler(previousFiller);
+      if (filler) {
+        // Se recuerda al emitirla, no al cerrar el turno. Un turno cuyo
+        // transporte se cae no llega al cierre, y ese es precisamente el caso en
+        // que el reintento no debe repetir la misma muletilla que la persona ya
+        // escuchó hace dos segundos.
+        this.speech.rememberFiller(conversationId, voice.usedFiller());
+        yield filler;
+      }
+    }
+
+    // Save user message.
+    //
+    // Skipped when the client is replaying a turn whose transport dropped: the
+    // row was written by the attempt that died, and this write happens BEFORE the
+    // model is called, so a dropped turn almost always left it behind. Writing it
+    // again would show the person's question twice in a conversation they only
+    // asked once — the one visible artefact a transparent retry must not leave.
+    //
+    // Trusting the client on this is safe because the flag can only ever cause a
+    // *missing* user row, never a forged one: the content it would have written is
+    // the client's own `content` either way.
+    if (!intent.skip_user_message) {
+      await this.prisma.ai_messages.create({
+        data: {
+          conversation_id: conversationId,
+          role: 'user',
+          content: intent.content,
+        },
+      });
+    }
 
     // Claims this stream id as the only channel allowed to answer this turn's UI
     // commands. Without it a leaked `stream_id` would let any authenticated user
@@ -347,6 +418,12 @@ export class AIChatService {
     let fullContent = '';
     let totalTokens = 0;
     let toolsUsed: Array<{ name: string; args: any; result: string }> = [];
+    // Held back until after the audio and timing frames. Both the SSE controller
+    // and the browser close the connection the moment `done` arrives, so anything
+    // emitted after it is never seen. See the agent branch below for the original
+    // reason this hold-back exists (the confirmation token) — speaking adds a
+    // second set of frames with the same constraint.
+    let doneChunk: AIStreamChunk | null = null;
 
     if (agentEnabled) {
       // The stream used to call `runStream()` with no tools regardless of
@@ -356,7 +433,11 @@ export class AIChatService {
       const agentStream = this.aiAgent.runAgentStream({
         goal: intent.content,
         app_key: appKey,
-        messages: this.buildContextWindow(conversation),
+        // El mismo flag que enciende la síntesis enciende el registro hablado.
+        // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
+        // dos en fase: si se dicta, se responde para ser oído — y si el mismo
+        // hilo sigue por escrito en el turno siguiente, vuelve a prosa sola.
+        messages: this.buildContextWindow(conversation, undefined, intent.speak),
         variables: await this.vexiContext.buildSnapshot({
           uiContext: intent.ui_context,
           attachmentIds: intent.attachment_ids,
@@ -374,11 +455,13 @@ export class AIChatService {
       // browser close the connection the moment `done` arrives. Emitted in
       // order, `done` would take the confirmation token out with it and the
       // approval card would never render.
-      let doneChunk: AIStreamChunk | null = null;
       while (!step.done) {
         const chunk = step.value;
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
+          // Segments are cut and queued here; nothing is awaited. The `await`
+          // on the next agent step below is what lets those jobs make progress.
+          voice?.push(chunk.content);
         }
         if (chunk.type === 'done') {
           if (chunk.usage) {
@@ -389,6 +472,9 @@ export class AIChatService {
           continue;
         }
         yield chunk;
+        // Whatever finished synthesizing while the model was producing this
+        // chunk. Non-blocking on purpose: a caption must never wait on audio.
+        if (voice) for (const frame of voice.drain()) yield frame;
         step = await agentStream.next();
       }
 
@@ -407,6 +493,10 @@ export class AIChatService {
           result.content?.trim() ||
           'No logré completar eso. Vuelve a pedírmelo con otras palabras, o dime el nombre exacto del registro sobre el que quieres que trabaje.';
         yield { type: 'text', content: fullContent };
+        // Spoken too, fallback included. A turn that only ran tools already got
+        // its human filler at the top; leaving the failure text unspoken as well
+        // would hand the listener a "dame un segundo" and then silence.
+        voice?.push(fullContent);
       }
       if (result.pending_confirmation) {
         yield {
@@ -424,14 +514,14 @@ export class AIChatService {
           },
         };
       }
-
-      if (doneChunk) {
-        yield doneChunk;
-      }
     } else {
+      // La rama sin agente también dicta, así que también necesita el registro:
+      // una tienda con `agent_enabled` en false igual habla, y sin esto sería la
+      // única superficie que contesta con listas y asteriscos en voz alta.
       const contextMessages = this.buildContextWindow(
         conversation,
         intent.content,
+        intent.speak,
       );
 
       for await (const chunk of this.aiEngine.runStream(
@@ -441,12 +531,36 @@ export class AIChatService {
       )) {
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
+          voice?.push(chunk.content);
         }
-        if (chunk.type === 'done' && chunk.usage) {
-          totalTokens = chunk.usage.totalTokens;
+        if (chunk.type === 'done') {
+          if (chunk.usage) {
+            totalTokens = chunk.usage.totalTokens;
+          }
+          // Held back for the same reason as the agent branch: the audio and
+          // timing frames have to precede the frame that closes the connection.
+          doneChunk = chunk;
+          continue;
         }
         yield chunk;
+        if (voice) for (const frame of voice.drain()) yield frame;
       }
+    }
+
+    if (voice) {
+      // The answer is complete, so the tail can be cut even without a closing
+      // period, and there is nothing left to overlap with — this is the one place
+      // where waiting on the remaining audio is correct.
+      voice.flush();
+      await voice.settle();
+      for (const frame of voice.drain()) yield frame;
+      // Emitted last so the client can attach them to a turn it has fully
+      // received. They are diagnostics, not content: nothing renders from them.
+      for (const frame of voice.timings()) yield frame;
+    }
+
+    if (doneChunk) {
+      yield doneChunk;
     }
 
     // Save assistant response after stream completes
@@ -540,8 +654,28 @@ export class AIChatService {
   private buildContextWindow(
     conversation: ConversationWithMessages,
     newMessage?: string,
+    /**
+     * Este turno se va a dictar, así que la respuesta se escribe para ser oída.
+     */
+    speak?: boolean,
   ): AIMessage[] {
     const messages: AIMessage[] = [];
+
+    // Como mensaje de sistema del turno y NO como un {{placeholder}} en el
+    // `system_prompt` almacenado, que era la otra opción.
+    //
+    // Ese prompt lo edita un operador desde Super Admin, así que un placeholder
+    // ahí es un mecanismo que cualquiera puede borrar sin saber que existía —
+    // y la migración que lo insertara pisaría ediciones que ya están en
+    // producción. Acá el bloque no depende de ninguna fila: viaja con el turno
+    // o no viaja.
+    //
+    // Primero en la ventana para que quede pegado al prompt de sistema
+    // interpolado y se lea como su continuación. Va delante del historial a
+    // propósito: el registro gobierna cómo se responde, no de qué se habla.
+    if (speak) {
+      messages.push({ role: 'system', content: SPEECH_REGISTER_BLOCK });
+    }
 
     // Add recent messages from history (last N)
     const recentMessages = conversation.messages.slice(

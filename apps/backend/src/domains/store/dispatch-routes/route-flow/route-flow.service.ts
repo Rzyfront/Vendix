@@ -27,6 +27,11 @@ import {
   aggregateRouteTotals,
   deriveStopIsPrepaid,
 } from '../utils/route-stop-calc';
+import {
+  PRINT_DEFAULTS,
+  type PrintDocumentConfig,
+  type PrintingSettings,
+} from '../../settings/interfaces/store-settings.interface';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -1400,6 +1405,44 @@ export class RouteFlowService {
     // Consolidated goods-out summary (sum of dispatched_quantity per product
     // across all non-released stops) rendered as the last PDF page.
     const articles = aggregateArticleExits(route.stops);
-    return this.pdfExport.generate(route, articles);
+    const print_config = await this.readPrintConfig(store_id);
+    return this.pdfExport.generate(route, articles, print_config);
+  }
+
+  /**
+   * Reads `receipts.printing.dispatch_route` for the store — the paper the
+   * planilla is printed on. Same tenant-safe shape as
+   * {@link readOrderStateUpdateMode} in OrderFlowService: `findFirst` (never
+   * `findUnique`, which breaks under the scope merge) and a total fallback, so
+   * a missing settings row or a read failure prints the default sheet instead
+   * of failing the download.
+   *
+   * Scope is the STORE: printing is not inherited from the organization.
+   */
+  private async readPrintConfig(
+    store_id: number,
+  ): Promise<PrintDocumentConfig> {
+    const fallback = PRINT_DEFAULTS.dispatch_route;
+    try {
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+      const settings = (row?.settings ?? {}) as {
+        receipts?: { printing?: PrintingSettings };
+      };
+      const config = settings.receipts?.printing?.dispatch_route;
+      if (!config) return fallback;
+      // The builder re-validates the format and clamps the margin; passing the
+      // stored values through keeps a single validation point.
+      return { ...fallback, ...config };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo leer la configuración de impresión de la tienda #${store_id}; se usa el formato por defecto: ${
+          (error as Error).message
+        }`,
+      );
+      return fallback;
+    }
   }
 }

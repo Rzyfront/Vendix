@@ -90,6 +90,11 @@ model users {
   // Cash Register
   cash_register_sessions_opened cash_register_sessions[]  @relation("cash_register_sessions_opened_by")
   cash_register_sessions_closed cash_register_sessions[]  @relation("cash_register_sessions_closed_by")
+  kds_sessions_opened           kds_sessions[]            @relation("kds_sessions_opened_by")
+  kds_sessions_closed           kds_sessions[]            @relation("kds_sessions_closed_by")
+  order_items_delivered         order_items[]             @relation("order_items_delivered_by")
+  order_item_exclusions_created order_item_exclusions[]   @relation("order_item_exclusions_created_by")
+  kti_exclusions_excluded       kitchen_ticket_item_exclusions[] @relation("kti_exclusions_excluded_by")
   cash_register_movements       cash_register_movements[]
 
   // Promotions
@@ -438,6 +443,11 @@ model audit_logs {
   organizations   organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
   stores          stores?        @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   users           users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([store_id, created_at])
+  @@index([organization_id, created_at])
+  @@index([user_id, created_at])
+  @@index([created_at])
 }
 
 model organizations {
@@ -800,6 +810,8 @@ model stores {
   // Cash Register
   cash_registers          cash_registers[]
   cash_register_sessions  cash_register_sessions[]  @relation("cash_register_sessions_store")
+  kds                     kds[]
+  kds_sessions            kds_sessions[]            @relation("kds_sessions_store")
   cash_register_movements cash_register_movements[]
 
   // Layaway
@@ -877,6 +889,9 @@ model stores {
 
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers price_tiers[]
+  /// Assignments de presentación de sus productos. La relación existe solo
+  /// para sostener el índice único de `barcode` por tienda (ver el modelo).
+  product_price_tier_assignments product_price_tier_assignments[]
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   recipes                   recipes[]
@@ -1104,6 +1119,12 @@ model units_of_measure {
   dimension      uom_dimension_enum
   is_base        Boolean            @default(false)
   factor_to_base Decimal            @db.Decimal(18, 6)
+  /// Si esta unidad puede ser la unidad de STOCK de un producto. El inventario
+  /// es `Int` en la unidad base, así que una unidad cuyo `factor_to_base` no es
+  /// entero (pulgada = 25.4 mm, galón = 3785.411784 ml) no puede representarse
+  /// sin perder mercancía por redondeo: sirve como unidad de COMPRA o de
+  /// presentación, nunca como unidad de stock.
+  is_stock_eligible Boolean         @default(true)
   is_active      Boolean            @default(true)
   created_at     DateTime?          @default(now()) @db.Timestamp(6)
   updated_at     DateTime?          @default(now()) @db.Timestamp(6)
@@ -1140,14 +1161,37 @@ model inventory_transactions {
   notes              String?
   transaction_date   DateTime?                       @default(now()) @db.Timestamp(6)
   quantity_change    Int
+  /// QUI-651 — QUIÉN COCINÓ y consumió el insumo, frente a `user_id`, que es
+  /// quién PIDIÓ que se cocine (el mesero o cajero del POS). Son dos
+  /// responsables distintos y ambos reales; antes de esto el consumo de la
+  /// estación quedaba firmado por quien disparó el fire.
+  ///
+  /// NULL es un caso VÁLIDO: el fire consume inventario al disparar, que puede
+  /// ocurrir antes de que la estación abra sesión. Exigir sesión abierta
+  /// convertiría a la cocina en bloqueante del POS — si el cocinero no fichó,
+  /// el mesero no podría enviar el pedido. Se reporta como "consumo sin sesión".
+  kds_session_id     Int?
+  /// Costo del movimiento, persistido POR FILA. Antes de QUI-651 el costo solo
+  /// existía en memoria: `StockLevelManager.updateStock` lo devuelve en
+  /// `cost_snapshot` y nunca lo guardaba en la fila del movimiento.
+  /// `inventory_valuation_snapshots` sí persiste costo, pero su `total_value` es
+  /// el valor del stock ON-HAND después del movimiento, no el costo de lo
+  /// consumido — usarlo para el historial de la sesión daría otro número.
+  /// Sin estas dos columnas el historial y el resumen de consumo por turno no
+  /// se pueden construir, y recomputar en lectura no sirve porque las capas
+  /// FIFO ya se movieron. NULL en los movimientos históricos.
+  unit_cost          Decimal?                        @db.Decimal(12, 4)
+  total_cost         Decimal?                        @db.Decimal(18, 4)
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   order_items        order_items?                    @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   products           products                        @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   product_variants   product_variants?               @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users              users?                          @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  kds_session        kds_sessions?                   @relation(fields: [kds_session_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([organization_id, created_at(sort: Desc)])
+  @@index([kds_session_id])
 }
 
 model order_item_taxes {
@@ -1199,6 +1243,11 @@ model order_items {
   applied_price_tier_id            Int?
   applied_price_tier_name_snapshot String?                  @db.VarChar(255)
   stock_units_consumed             Int?
+  /// Snapshot de `products.price_unit_quantity` al momento de la venta: a
+  /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
+  /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
+  /// unidad, el comportamiento histórico.
+  price_unit_quantity              Int?
   // Restaurant Suite Fase D — guard anti-doble-descuento.
   // Marcado por KitchenFireService al enviar el item a cocina (fire-to-kitchen).
   // PaymentsService.updateInventoryFromOrder lo salta si está true para que
@@ -1223,6 +1272,62 @@ model order_items {
   //   decide al final segun product_type='prepared' y existencia de receta activa.
   // Default false preserva el comportamiento actual para ordenes existentes.
   skip_kds                         Boolean                  @default(false)
+  // QUI-653 — el item se empaca y el cliente se lo lleva, aunque pertenezca al
+  // pedido de una mesa. Es una dimension POR ITEM, deliberadamente separada de
+  // `orders.delivery_type`, por dos razones:
+  //   1. `delivery_type` es order-level: un solo valor no puede expresar "estos
+  //      3 items en la mesa y este 1 para llevar".
+  //   2. Cambiarlo metaria la orden en los flujos de despacho. `stores.service`
+  //      y `orders.service` excluyen 'direct_delivery' y 'dine_in' del conjunto
+  //      que requiere remision; si una orden de mesa pasara a 'pickup' por
+  //      tener un item para llevar, empezaria a aparecer como pendiente de
+  //      remision, donde no tiene nada que hacer: el plato se entrega en mano.
+  // El indicador de "pedido mixto" es DERIVADO, no persistido: la orden es
+  // mixta cuando tiene items con y sin el flag.
+  is_takeaway                      Boolean                  @default(false)
+  // QUI-652 — LA ENTREGA ES UN HECHO DE SERVICIO, NO DE COCINA.
+  // Antes el estado de entrega vivia SOLO en `kitchen_ticket_items.status`
+  // ('delivered'), y el fire excluye explicitamente todo lo que no sea
+  // `product_type='prepared'`. Consecuencia: una cerveza en botella nunca
+  // obtenia fila en kitchen_ticket_items, `kitchenStatusFor()` devolvia null
+  // para siempre, y el item se quedaba en "Sin enviar" sin poder marcarse
+  // entregado — se perdia la trazabilidad de que recibio el cliente.
+  //
+  // Una cerveza necesita trazabilidad de entrega y nunca necesita cocinarse, y
+  // un plato para llevar tambien se entrega (empacado). Por eso el hecho vive
+  // aqui, independiente del ticket de cocina, y la UI muestra dos dimensiones
+  // separadas: cocina (solo cuando aplica) y entrega (siempre).
+  delivered_at                     DateTime?                @db.Timestamp(6)
+  delivered_by_user_id             Int?
+  // QUI-655 — nota de texto libre al TOMAR el pedido ("sin cebolla", "poca sal",
+  // "bien cocido"). No existía ningún campo así: `order_items` solo tenía
+  // `quantity`, así que no había dónde poner ni la nota ni la exclusión.
+  //
+  // Es uno de los tres caminos OPCIONALES que convergen en el modal de
+  // confirmación de cocina, y el que mejor refleja cómo funciona un restaurante
+  // real cuando hay prisa o cuando la petición no calza con un ingrediente
+  // exacto. El fire la propaga a `kitchen_ticket_items.notes`, columna que ya
+  // existía en el schema documentando este caso y que el código nunca escribía.
+  notes                            String?
+  // QUI-655 — línea partida por PREPARACIÓN. Cuando una línea de 3 unidades
+  // necesita una excepción en solo 1, se parte en 2 + 1 para que cada línea
+  // quede HOMOGÉNEA: "una línea = una especificación de preparación".
+  //
+  // Se preserva así la invariante que todo el pipeline ya asume — `explodeBom`
+  // multiplica por la cantidad de la línea, `updateStock` consume por línea, el
+  // COGS suma por línea, `kitchen_ticket_items` es una fila por línea. La
+  // alternativa (`unit_index`) rompe esa aritmética en cuatro lugares a la vez.
+  //
+  // `split_from_order_item_id` apunta a la línea original para que la UI pueda
+  // reagrupar las partes y el cliente siga viendo "3 pollos" en vez de dos filas
+  // sueltas. NULL = línea nunca partida.
+  split_from_order_item_id         Int?
+  /// SET NULL y no CASCADE: si la linea original se elimina, las partes NO deben
+  /// desaparecer — son consumo real que ya paso por cocina. Pierden el puntero de
+  /// agrupacion visual y nada mas.
+  split_from_order_item            order_items?             @relation("order_item_preparation_split", fields: [split_from_order_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  split_parts                      order_items[]            @relation("order_item_preparation_split")
+  order_item_exclusions            order_item_exclusions[]
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers sold on
   // this line. Persisted at emission time so legal documents (order voucher,
   // POS ticket) never read the live serial pool. The strong link lives in
@@ -1236,6 +1341,7 @@ model order_items {
   products                         products?                @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variants                 product_variants?        @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   applied_price_tier               price_tiers?             @relation("order_items_applied_price_tier", fields: [applied_price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delivered_by_user                users?                   @relation("order_items_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   refund_items                     refund_items[]
 
   // Restaurant Suite Foundation (Fase A) — back-relation
@@ -1521,6 +1627,13 @@ model products {
   slug                           String                           @db.VarChar(255)
   description                    String?
   base_price                     Decimal                          @db.Decimal(12, 2)
+  /// A cuántas unidades de stock corresponde `base_price` (la *price unit* de
+  /// SAP). Un cable con el stock en milímetros guarda `base_price = 5000` y
+  /// `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+  /// `unit_price * quantity / price_unit_quantity`. Con el default `1` la
+  /// aritmética es idéntica a la histórica, así que ningún producto existente
+  /// cambia de precio.
+  price_unit_quantity            Int                              @default(1)
   cost_price                     Decimal?                         @db.Decimal(12, 2)
   profit_margin                  Decimal?                         @db.Decimal(5, 2)
   sku                            String?                          @db.VarChar(100)
@@ -1647,6 +1760,19 @@ model products {
   menu_section_items        menu_section_items[]
   kitchen_ticket_items      kitchen_ticket_items[]
 
+  /// QUI-651 — estación de preparación del plato. Solo significativo para
+  /// `product_type = 'prepared'`. NULL significa "cae en el KDS por defecto de
+  /// la tienda", que es lo que hace funcionar el caso de una sola estación sin
+  /// configurar nada. Las variantes NO sobrescriben esta estación: el ruteo es
+  /// una propiedad de cómo se cocina el plato, no de qué opción se vendió.
+  kds_id                    Int?
+  kds                       kds?                   @relation(fields: [kds_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  /// QUI-655 — back-relations de exclusion: este producto figura como el
+  /// COMPONENTE excluido de la receta de otro plato.
+  excluded_in_order_items   order_item_exclusions[]          @relation("order_item_exclusion_component")
+  excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
+
   @@unique([store_id, slug])
   @@unique([store_id, sku])
   @@unique([store_id, barcode])
@@ -1654,6 +1780,7 @@ model products {
   @@index([store_id, barcode])
   @@index([store_id, product_type])
   @@index([store_id, is_ingredient])
+  @@index([kds_id])
   @@index([stock_uom_id])
   @@index([purchase_uom_id])
   @@index([store_id, is_featured])
@@ -1675,6 +1802,10 @@ model price_tiers {
   discount_percentage Decimal   @default(0) @db.Decimal(5, 2)
   is_active           Boolean   @default(true)
   is_default          Boolean   @default(false)
+  // Discriminador de los dos ejes que conviven en esta tabla: tarifa de
+  // cliente (a quién le vendo) vs unidad de venta (en qué presentación
+  // vendo). Los selectores filtran por este campo para no mezclarlos.
+  kind                price_tier_kind_enum @default(customer_tier)
   // When true, applying this tier is interpreted as selling by package
   // (caja/bulto). Derived from units_per_package: it is set true whenever
   // units_per_package >= 2.
@@ -1697,6 +1828,7 @@ model price_tiers {
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
+  @@index([store_id, kind, is_active])
 }
 
 model product_price_tier_overrides {
@@ -1711,6 +1843,11 @@ model product_price_tier_overrides {
   // Per-product override of the tier packaging quantity. Optional. Wins over
   // price_tiers.units_per_package in the packSize cascade.
   override_units_per_package Int?
+  // Margen de la presentación, en porcentaje. Se deriva contra
+  // `cost_price * packSize` (el costo del paquete completo), no contra el
+  // costo unitario. Criterio cost-anchor: si llegan precio y margen juntos,
+  // el precio explícito gana y el margen se recalcula a partir de él.
+  override_profit_margin     Decimal?  @db.Decimal(5, 2)
   created_at                 DateTime? @default(now()) @db.Timestamp(6)
   updated_at                 DateTime? @default(now()) @db.Timestamp(6)
 
@@ -1725,13 +1862,41 @@ model product_price_tier_overrides {
 model product_price_tier_assignments {
   product_id    Int
   price_tier_id Int
+  /// Presentación por defecto del producto: la que rige en TODA superficie de
+  /// venta (tienda online, POS, cotizaciones). Elegir entre varias es una
+  /// capacidad exclusiva del POS; el storefront usa esta y no expone selector.
+  ///
+  /// La unicidad la garantiza un índice único PARCIAL que Prisma no puede
+  /// expresar en el schema y vive solo en la migración:
+  ///   CREATE UNIQUE INDEX ... ON product_price_tier_assignments (product_id)
+  ///   WHERE is_default;
+  /// No lo borres al regenerar: un `@@unique([product_id, is_default])` NO
+  /// sirve (dejaría un solo `false` por producto). El índice no puede filtrar
+  /// además por `kind` porque vive en otra tabla — que solo un `sale_unit`
+  /// pueda marcarse lo garantiza el servicio.
+  is_default    Boolean   @default(false)
+  /// Código de barras del par (producto, presentación). La "Caja x12" de dos
+  /// productos distintos nunca comparte código, y la caja no comparte código
+  /// con la unidad suelta: por eso vive acá y no en `price_tiers`, que es de
+  /// tienda. Pistolearlo agrega la línea con la presentación ya aplicada.
+  ///
+  /// La unicidad es POR TIENDA y la garantiza un índice único PARCIAL que
+  /// Prisma no puede expresar y vive solo en la migración:
+  ///   CREATE UNIQUE INDEX ... ON product_price_tier_assignments (store_id, barcode)
+  ///   WHERE barcode IS NOT NULL;
+  barcode       String?   @db.VarChar(64)
+  /// Denormalizado del producto dueño. Existe SOLO para poder exigir la
+  /// unicidad del barcode por tienda: un índice único no atraviesa un JOIN.
+  store_id      Int?
   created_at    DateTime? @default(now()) @db.Timestamp(6)
 
   product    products    @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   price_tier price_tiers @relation(fields: [price_tier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stores     stores?     @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@id([product_id, price_tier_id])
   @@index([price_tier_id])
+  @@index([store_id])
 }
 
 model refund_items {
@@ -1743,6 +1908,11 @@ model refund_items {
   tax_amount              Decimal?             @db.Decimal(12, 2)
   discount_amount         Decimal?             @db.Decimal(12, 2)
   inventory_action        String?              @default("no_return") @db.VarChar(20)
+  /// Unidades mínimas de stock que esta devolución repone, proporcionales a
+  /// `order_items.stock_units_consumed` de la línea original. Devolver 1 bulto
+  /// de 50 repone 50, no 1. `null` = la línea no vendió en presentación y se
+  /// repone `quantity`.
+  stock_units_consumed    Int?
   location_id             Int?
   reason                  String?
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers returned
@@ -1928,6 +2098,7 @@ model inventory_locations {
   dispatch_notes_from_location  dispatch_notes[]                @relation("dispatch_notes_from_location")
   dispatch_notes_to_location    dispatch_notes[]                @relation("dispatch_notes_to_location")
   cash_registers                cash_registers[]
+  kds                           kds[]
   // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
   // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 
@@ -2291,6 +2462,13 @@ model purchase_orders {
   updated_at              DateTime?                          @default(now()) @db.Timestamp(6)
   payment_status          purchase_order_payment_status_enum @default(unpaid)
   payment_due_date        DateTime?                          @db.Timestamp(6)
+  /// QUI-647 — modo de pago acordado al crear la orden:
+  /// `immediate` | `partial` | `deferred` | `installments`.
+  /// NULL en órdenes anteriores al ticket, que se comportan como el checkbox
+  /// binario `ackPay` que existía antes.
+  payment_plan            String?                            @db.VarChar(20)
+  /// Monto abonado en el acto cuando `payment_plan = 'partial'`.
+  down_payment_amount     Decimal?                           @default(0.00) @db.Decimal(12, 2)
   /// F1 IVA lifecycle: dominant tax mode for the whole invoice. When true,
   /// line `unit_price` is understood as tax-INCLUSIVE (gross); when false the
   /// tax is ADDED on top. Individual lines may override via
@@ -2311,6 +2489,7 @@ model purchase_orders {
   inventory_cost_layers   inventory_cost_layers[]
   attachments             purchase_order_attachments[]
   payments                purchase_order_payments[]
+  payment_schedules       purchase_order_payment_schedules[]
   receptions              purchase_order_receptions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
 
@@ -2337,6 +2516,19 @@ model purchase_order_items {
   tax_rate               Decimal?                         @db.Decimal(5, 2)
   tax_type               tax_type_enum?                   @default(iva)
   prices_include_tax     Boolean?
+  /// QUI-661 commercial discount granted by the supplier ON THIS LINE.
+  /// `discount_percentage` is what the user typed when the deal is percentual;
+  /// `discount_amount` is the RESOLVED money figure and the single source of
+  /// truth for the calculation (the percentage is kept only to reproduce how
+  /// the number was reached). The discount is subtracted from the gross unit
+  /// price BEFORE the VAT is derived, so it lowers the taxable base, the
+  /// deductible VAT and the cost capitalized into the inventory layers.
+  /// A header-level discount (`purchase_orders.discount_amount`) is prorated
+  /// into these same columns at write time — it never stays in the header,
+  /// because FIFO cost layers are written per line and a header-only figure
+  /// has no way to reach the product's cost.
+  discount_percentage    Decimal?                         @default(0) @db.Decimal(5, 2)
+  discount_amount        Decimal?                         @default(0) @db.Decimal(12, 2)
   unit_price_net         Decimal?                         @db.Decimal(12, 4)
   tax_amount             Decimal?                         @db.Decimal(12, 2)
   deductible_tax_amount  Decimal?                         @db.Decimal(12, 2)
@@ -2479,6 +2671,11 @@ model sales_order_items {
   applied_price_tier_name_snapshot String?           @db.VarChar(255)
   variant_image_url                String?           @db.VarChar(500)
   stock_units_consumed             Int?
+  /// Snapshot de `products.price_unit_quantity` al momento de la venta: a
+  /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
+  /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
+  /// unidad, el comportamiento histórico.
+  price_unit_quantity             Int?
   created_at                       DateTime?         @default(now()) @db.Timestamp(6)
   products                         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants                 product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
@@ -3011,6 +3208,10 @@ enum notification_type_enum {
   payment_received
   layaway_payment_received
   layaway_payment_reminder
+  /// QUI-647 — cuotas de Cuentas por Pagar (lado proveedor). Espejo de
+  /// `installment_*`, que es el lado cliente.
+  ap_installment_due_soon
+  ap_installment_overdue
   layaway_overdue
   layaway_completed
   layaway_cancelled
@@ -3319,6 +3520,20 @@ enum product_state_enum {
   active
   inactive
   archived
+}
+
+/// Los dos sentidos que conviven sobre `price_tiers`.
+///
+/// `customer_tier` — a QUIEN le vendo: mayorista, minorista, distribuidor.
+/// `sale_unit`     — EN QUE PRESENTACION vendo: rollo, metro, bulto, kilo,
+///                   palada. El factor vive en `units_per_package` y se
+///                   ajusta por producto vía `override_units_per_package`.
+///
+/// El default es `customer_tier` porque es lo que la tabla significaba antes
+/// de existir este enum: toda fila previa es una tarifa de cliente.
+enum price_tier_kind_enum {
+  customer_tier
+  sale_unit
 }
 
 enum pricing_type_enum {
@@ -5034,6 +5249,11 @@ model invoice_items {
   // expands the sold quantity. Propagated from order_items at invoice build.
   applied_price_tier_name String?   @db.VarChar(255)
   stock_units_consumed    Int?
+  /// Snapshot de `products.price_unit_quantity` al momento de la venta: a
+  /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
+  /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
+  /// unidad, el comportamiento histórico.
+  price_unit_quantity    Int?
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers,
   // propagated from the source order_item at invoice build. Legal documents
   // render this snapshot instead of reading the live serial pool.
@@ -6164,6 +6384,11 @@ model quotation_items {
   applied_price_tier_id            Int?
   applied_price_tier_name_snapshot String?   @db.VarChar(255)
   stock_units_consumed             Int?
+  /// Snapshot de `products.price_unit_quantity` al momento de la venta: a
+  /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
+  /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
+  /// unidad, el comportamiento histórico.
+  price_unit_quantity             Int?
   created_at                       DateTime? @default(now()) @db.Timestamp(6)
   updated_at                       DateTime? @default(now()) @db.Timestamp(6)
 
@@ -6413,6 +6638,82 @@ model cash_register_movements {
   @@index([session_id, type])
   @@index([store_id])
   @@index([order_id])
+}
+
+// ===== KDS (ESTACIONES DE PREPARACIÓN) =====
+//
+// QUI-651. Antes de esto el KDS era IMPLÍCITO: existía un solo tablero por
+// tienda y `kitchen_tickets` no apuntaba a ninguna estación, así que en un
+// restaurante con barra + cocina caliente + postres un pedido de 20 productos
+// caía completo en el mismo tablero y el personal filtraba a mano.
+//
+// El modelado es espejo deliberado de `cash_registers` / `cash_register_sessions`:
+// misma forma de entidad, mismo `@@unique([store_id, code])`, mismo índice
+// `[x_id, status]` que respalda el guard de una-sola-sesión-abierta, y mismo
+// `summary Json?` para el snapshot inmutable al cerrar el turno.
+//
+// La diferencia sustantiva: la sesión de caja custodia DINERO, la de KDS
+// custodia RESPONSABILIDAD SOBRE EL CONSUMO DE INSUMOS. Por eso `kds_sessions`
+// no tiene montos, y por eso `inventory_transactions` gana `kds_session_id`.
+
+enum kds_session_status_enum {
+  open
+  closed
+}
+
+model kds {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  name        String    @db.VarChar(100)
+  code        String    @db.VarChar(50)
+  description String?   @db.VarChar(255)
+  is_active   Boolean   @default(true)
+  /// Exactamente un KDS por defecto por tienda. La unicidad se refuerza con un
+  /// índice único PARCIAL (`WHERE is_default`) creado en la migración: Prisma no
+  /// sabe expresar índices parciales, así que vive en SQL.
+  is_default  Boolean   @default(false)
+  location_id Int?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores               @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  location inventory_locations? @relation(fields: [location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  sessions kds_sessions[]
+  products products[]
+  tickets  kitchen_tickets[]
+
+  @@unique([store_id, code])
+  @@index([store_id, is_active])
+  @@index([location_id])
+}
+
+model kds_sessions {
+  id            Int                     @id @default(autoincrement())
+  kds_id        Int
+  store_id      Int
+  opened_by     Int
+  closed_by     Int?
+  status        kds_session_status_enum @default(open)
+  opened_at     DateTime                @default(now()) @db.Timestamp(6)
+  closed_at     DateTime?               @db.Timestamp(6)
+  closing_notes String?
+  /// Snapshot inmutable del turno, persistido AL CERRAR (igual que caja):
+  /// tickets servidos, tiempo promedio de preparación, items cancelados y el
+  /// resumen de consumo de insumos con su costo total. Mientras la sesión está
+  /// abierta el resumen se calcula en vivo y esta columna sigue NULL.
+  summary       Json?
+  created_at    DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?               @default(now()) @db.Timestamp(6)
+
+  kds                    kds                      @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
+  store                  stores                   @relation("kds_sessions_store", fields: [store_id], references: [id], onUpdate: NoAction)
+  opened_by_user         users                    @relation("kds_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
+  closed_by_user         users?                   @relation("kds_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
+  inventory_transactions inventory_transactions[]
+
+  @@index([store_id, status])
+  @@index([kds_id, status])
+  @@index([opened_by, status])
 }
 
 // ===== LAYAWAY (PLAN SEPARÉ) =====
@@ -8971,6 +9272,9 @@ enum kitchen_ticket_item_state_enum {
 enum uom_dimension_enum {
   mass
   volume
+  /// Longitud, con base en milímetros: cable, manguera, tubo, cinta. Entró con
+  /// QUI-648 para que una ferretería pueda vender por metro y por rollo.
+  length
   count
 }
 
@@ -9118,6 +9422,10 @@ model kitchen_tickets {
   store_id      Int
   order_id      Int
   table_id      Int?
+  /// QUI-651 — estación que prepara este ticket. NOT NULL: un ticket sin
+  /// estación no se puede mostrar en ningún tablero. Se resuelve en el fire por
+  /// la cascada skip_kds -> products.kds_id -> KDS por defecto de la tienda.
+  kds_id        Int
   status        kitchen_ticket_state_enum @default(pending)
   daily_number  Int?
   business_date DateTime?                 @db.Date
@@ -9128,13 +9436,20 @@ model kitchen_tickets {
 
   store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  kds   kds                    @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
   items kitchen_ticket_items[]
 
-  @@unique([store_id, business_date, daily_number])
+  /// El consecutivo diario es POR ESTACIÓN, no por tienda: cada tablero cuenta
+  /// desde 1, así cocina canta #1 y barra canta #1 el mismo día. El número
+  /// identifica al ticket DENTRO de la estación donde se canta en voz alta.
+  /// Con el unique global anterior, un fire de dos estaciones consumía dos
+  /// números y cada tablero veía la secuencia con huecos (8, 10, 13...).
+  @@unique([store_id, kds_id, business_date, daily_number])
   @@index([store_id, status])
   @@index([store_id, order_id])
   @@index([store_id, fired_at])
   @@index([store_id, business_date])
+  @@index([kds_id, status])
 }
 
 /// A single line on a kitchen ticket. Tracks per-item state and optional
@@ -9153,11 +9468,74 @@ model kitchen_ticket_items {
   kitchen_ticket kitchen_tickets @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   order_item     order_items     @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product        products        @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  exclusions     kitchen_ticket_item_exclusions[]
 
   @@index([kitchen_ticket_id])
   @@index([order_item_id])
   @@index([product_id])
   @@index([status])
+}
+
+// ===== EXCLUSIONES DE INSUMOS (QUI-655) =====
+//
+// Un plato pedido sin un ingrediente CONSUMIA ese ingrediente del inventario y
+// lo cargaba al costo igual: `fireOrderItems` explotaba la receta y consumia
+// TODAS las hojas del BOM sin punto donde alguien dijera "este plato va sin
+// papas". El inventario quedaba descuadrado contra la realidad fisica y el
+// margen del plato subestimado.
+//
+// Son DOS registros con roles distintos, y la diferencia entre ambos es dato de
+// auditoria:
+//
+//   - LA INTENCION (`order_item_exclusions`): lo que el cliente pidio al
+//     ordenar, cuando alguien lo capturo. Es OPCIONAL y puede estar vacia — la
+//     captura al pedir no es obligatoria y la nota de texto libre requiere que
+//     el cocinero la traduzca.
+//
+//   - LO CONSUMIDO (`kitchen_ticket_item_exclusions`): lo que efectivamente se
+//     excluyo al confirmar el modal de cocina. Es lo que se costeo y lo que
+//     explica el margen. SIEMPRE existe cuando hubo exclusion.
+//
+// Ninguna de las dos necesita `unit_index`: con la particion de linea la linea
+// ya es homogenea y la exclusion aplica a TODA la linea. Ese es buena parte del
+// atractivo de partir.
+
+model order_item_exclusions {
+  id                  Int       @id @default(autoincrement())
+  order_item_id       Int
+  component_product_id Int
+  /// Procedencia de la linea del BOM, root-first, tal como la expone
+  /// `BomExplosionLine.path_recipe_ids`. Permite excluir un NODO de sub-receta
+  /// completo ("sin salsa criolla") en vez de obligar a desmarcar sus tres hojas
+  /// y a saber de memoria cuales venian de la salsa.
+  path_recipe_ids     Int[]
+  created_by_user_id  Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  order_item        order_items @relation(fields: [order_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product products    @relation("order_item_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?      @relation("order_item_exclusions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([order_item_id, component_product_id])
+  @@index([order_item_id])
+  @@index([component_product_id])
+}
+
+model kitchen_ticket_item_exclusions {
+  id                    Int       @id @default(autoincrement())
+  kitchen_ticket_item_id Int
+  component_product_id  Int
+  path_recipe_ids       Int[]
+  excluded_by_user_id   Int?
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  kitchen_ticket_item kitchen_ticket_items @relation(fields: [kitchen_ticket_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product   products             @relation("kti_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  excluded_by_user    users?               @relation("kti_exclusions_excluded_by", fields: [excluded_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([kitchen_ticket_item_id, component_product_id])
+  @@index([kitchen_ticket_item_id])
+  @@index([component_product_id])
 }
 
 /// A named menu that bundles sections of products. Multiple menus per store
@@ -9458,4 +9836,26 @@ model dispatch_route_stop_history {
 
   @@index([stop_id, created_at])
   @@index([action])
+}
+
+/// QUI-647 — cuotas PLANEADAS del pago de una orden de compra.
+///
+/// El motor de cobro sigue siendo `ap_payment_schedules`, que cuelga de
+/// `accounts_payable`. Pero la CxP no existe cuando se crea la orden: nace
+/// atada a la RECEPCIÓN (`ap_reception_links`). Esta tabla es el puente donde
+/// vive el calendario acordado con el proveedor hasta que haya CxP a la cual
+/// colgarlo; al materializarse, las filas se copian y se marcan.
+model purchase_order_payment_schedules {
+  id                Int       @id @default(autoincrement())
+  purchase_order_id Int
+  scheduled_date    DateTime  @db.Date
+  amount            Decimal   @db.Decimal(12, 2)
+  /// `planned` mientras espera CxP; `materialized` una vez copiada.
+  status            String    @default("planned") @db.VarChar(20)
+  materialized_at   DateTime? @db.Timestamp(6)
+  created_at        DateTime  @default(now()) @db.Timestamp(6)
+
+  purchase_orders purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+
+  @@index([purchase_order_id])
 }

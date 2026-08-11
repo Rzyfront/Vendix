@@ -608,6 +608,32 @@
                 No se puede diagnosticar por CUFE: descarta el lote y reenvía.
               </p>
             }
+
+            <!--
+              Notas retenidas por el envio en dos fases. Mismo dato y misma vista
+              que el asistente de tiendas: el backend proyecta con
+              buildNotePhaseView en los tres rieles.
+            -->
+            @if (hasDeferredNotes()) {
+              <div
+                class="mt-2 p-2 rounded-md bg-warning-light border border-warning"
+              >
+                <p class="text-xs font-semibold text-warning">
+                  {{ testSet.note_phase!.deferred_count }} nota(s) generadas y sin
+                  transmitir
+                </p>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ testSet.note_phase!.reason }}
+                </p>
+                @if (deferredConsecutivesLabel()) {
+                  <p class="text-xs text-text-secondary mt-0.5">
+                    Numeracion reservada y sin usar:
+                    {{ deferredConsecutivesLabel() }}. Se conservan firmadas, asi
+                    que reenviarlas no exige regenerarlas.
+                  </p>
+                }
+              </div>
+            }
           </div>
         }
 
@@ -665,23 +691,142 @@
           </app-button>
         </div>
 
+        <!--
+          Respuesta técnica del lote, estructurada. Antes esto era un volcado del
+          resultado entero con el pipe `json`, así que el sobre SOAP se leía
+          escapado y en una sola línea, y los nombres de archivo entregados —cuya
+          longitud es parte del contrato del anexo— no aparecían en absoluto.
+        -->
+        @if (technicalResult()) {
+          <app-dian-technical-response
+            [result]="technicalResult()"
+          ></app-dian-technical-response>
+        }
+
         @if (testSetResult(); as result) {
           <!--
-            La respuesta cruda de la DIAN es diagnóstico, no información de
-            pantalla: por defecto va plegada. El veredicto legible ya lo muestran
-            las tarjetas de estado del set de pruebas.
+            Respuesta de la ÚLTIMA operación, sin estructurar. Se conserva porque
+            es el único lugar donde aparece la salida de «Diagnosticar documentos»
+            (registro por CUFE documento a documento), que el panel de arriba no
+            cubre: ese lee el lote persistido, no la respuesta de la operación.
           -->
           <details class="rounded-lg border border-border bg-background">
             <summary
               class="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary select-none"
             >
-              Ver respuesta técnica de la DIAN
+              Ver respuesta de la última operación
             </summary>
             <pre
               class="text-[11px] leading-relaxed px-3 pb-3 overflow-x-auto text-text-secondary"
               >{{ result | json }}</pre
             >
           </details>
+        }
+      </div>
+    </div>
+
+    <!--
+      Paso a producción. Esta sección NO existía en el riel de plataforma.
+
+      El paso a producción se hacía cambiando el ambiente en el formulario de
+      arriba, y su única guarda era una prueba de conexión reciente: nunca miraba
+      si la DIAN había aprobado el set de habilitación. Ahora el selector solo
+      ofrece sandbox y el paso va por aquí, contra el mismo reporte de 20+
+      chequeos que ve un tenant.
+    -->
+    <div class="rounded-xl border border-border bg-surface">
+      <div class="px-4 py-3 border-b border-border flex items-center gap-2">
+        <app-icon name="rocket" [size]="16" class="text-text-secondary" />
+        <h3 class="text-sm font-semibold text-text">6 · Paso a producción</h3>
+      </div>
+
+      <div class="p-4 space-y-4">
+        @if (alreadyInProduction()) {
+          <app-alert-banner
+            variant="success"
+            title="La plataforma emite en producción"
+            message="La configuración está en ambiente de producción y la DIAN la reporta habilitada. No hay nada que promover."
+          />
+        } @else {
+          <p class="text-xs text-text-secondary">
+            Emitir en producción exige más que aprobar el set de pruebas: la DIAN
+            separa la habilitación del software de la autorización de numeración,
+            que se solicita aparte en Muisca. Este reporte enumera las dos cosas.
+          </p>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <app-button
+              variant="secondary"
+              size="sm"
+              [loading]="loadingReadiness()"
+              [disabled]="loadingReadiness() || promoting()"
+              (clicked)="onCheckReadiness()"
+            >
+              Revisar requisitos
+            </app-button>
+
+            <!--
+              El boton de promover solo aparece con el reporte leido Y listo. Sin
+              reporte no se ofrece: el backend responderia 412 y el operador
+              recibiria un rechazo en vez de una explicacion.
+            -->
+            @if (readiness()) {
+              <app-button
+                variant="primary"
+                size="sm"
+                [loading]="promoting()"
+                [disabled]="!canPromote() || promoting()"
+                (clicked)="onPromoteToProduction()"
+              >
+                Pasar a producción
+              </app-button>
+            }
+          </div>
+
+          @if (readiness(); as report) {
+            @if (report.ready) {
+              <app-alert-banner
+                variant="success"
+                title="Todos los requisitos están cubiertos"
+                message="Puedes pasar la plataforma a producción."
+              />
+            } @else {
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-error">
+                  Faltan {{ readinessBlockers().length }} requisito(s):
+                </p>
+                <!--
+                  Se listan los chequeos completos, no solo las claves de
+                  `missing`: cada uno trae su `action`, que dice como resolverlo.
+                  Imprimir solo la clave -«test_set_evidence»- obliga al operador
+                  a adivinar que significa.
+                -->
+                <ul class="space-y-2">
+                  @for (check of report.checks; track check.key) {
+                    @if (!check.satisfied) {
+                      <li
+                        class="flex items-start gap-2 text-xs text-text-secondary"
+                      >
+                        <app-icon
+                          name="alert-circle"
+                          [size]="14"
+                          class="mt-0.5 text-error shrink-0"
+                        />
+                        <span>
+                          <span class="font-medium text-text">{{
+                            check.label
+                          }}</span>
+                          @if (check.action) {
+                            <span class="block">{{ check.action }}</span>
+                          }
+                        </span>
+                      </li>
+                    }
+                  }
+                </ul>
+              </div>
+            }
+          }
         }
       </div>
     </div>

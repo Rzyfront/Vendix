@@ -6,6 +6,10 @@ import {
   AIFeatureKey,
 } from '../interfaces/subscription-admin.interface';
 import {
+  defaultAIFeatureFlags,
+  normalizeAIFeatureFlags,
+} from '../utils/ai-feature-flags.util';
+import {
   ToggleComponent,
   InputComponent,
   MultiSelectorComponent,
@@ -115,7 +119,13 @@ export class AiFeatureMatrixComponent {
       description: 'Habilita llamadas del IA Engine que consumen tokens para redactar, resumir o transformar contenido.',
       capField: 'monthly_tokens_cap',
       capLabel: 'Tokens mensuales',
-      capHelp: 'Cupo mensual consumido por AIEngineService.run(). Cero significa sin cupo util.',
+      // Cero es ILIMITADO, no bloqueado. `checkQuota` en
+      // subscription-access.service.ts hace `if (cap <= 0) return { exceeded:
+      // false }` — un cap ausente o en cero se lee como "sin tope declarado".
+      // El texto anterior decia lo contrario, de modo que un operador que
+      // quisiera cortar el consumo ponia 0 y obtenia barra libre.
+      capHelp:
+        'Cupo mensual consumido por AIEngineService.run(). Cero significa ILIMITADO: para restringir hay que poner un numero mayor que cero.',
     },
     {
       key: 'streaming_chat',
@@ -153,6 +163,16 @@ export class AiFeatureMatrixComponent {
       capField: 'monthly_jobs_cap',
       capLabel: 'Jobs mensuales',
       capHelp: 'Cupo mensual de jobs asincronos IA.',
+    },
+    {
+      key: 'realtime_voice',
+      label: 'Modo voz de Vexi',
+      description:
+        'Habilita hablarle a Vexi y que responda en voz: dictado, chat por voz y sesiones de voz en vivo.',
+      capField: 'monthly_voice_seconds_cap',
+      capLabel: 'Segundos de voz al mes',
+      capHelp:
+        'Se mide en segundos de sesion, no en sesiones: un turno de push-to-talk dura 5-20 s. 3600 = 1 hora, 7200 = 2 horas. Cero significa ILIMITADO: lo que habilita o corta la funcion es el switch, no el cupo.',
     },
   ];
 
@@ -225,90 +245,10 @@ export class AiFeatureMatrixComponent {
   }
 
   private normalizeFlags(value: AIFeatureFlags | undefined): AIFeatureFlags {
-    const defaults = this.defaultFlags();
-    const raw = (value ?? {}) as Record<string, any>;
-
-    if (
-      raw['text_generation'] ||
-      raw['streaming_chat'] ||
-      raw['conversations'] ||
-      raw['tool_agents'] ||
-      raw['rag_embeddings'] ||
-      raw['async_queue']
-    ) {
-      return {
-        text_generation: { ...defaults.text_generation, ...raw['text_generation'] },
-        streaming_chat: { ...defaults.streaming_chat, ...raw['streaming_chat'] },
-        conversations: { ...defaults.conversations, ...raw['conversations'] },
-        tool_agents: { ...defaults.tool_agents, ...raw['tool_agents'] },
-        rag_embeddings: { ...defaults.rag_embeddings, ...raw['rag_embeddings'] },
-        async_queue: { ...defaults.async_queue, ...raw['async_queue'] },
-      };
-    }
-
-    return {
-      ...defaults,
-      text_generation: {
-        ...defaults.text_generation,
-        enabled: raw['chat_enabled'] ?? defaults.text_generation!.enabled,
-        monthly_tokens_cap: raw['max_tokens_per_month'] ?? defaults.text_generation!.monthly_tokens_cap,
-      },
-      streaming_chat: {
-        ...defaults.streaming_chat,
-        enabled: raw['streaming_enabled'] ?? defaults.streaming_chat!.enabled,
-        daily_messages_cap: raw['max_conversations'] ?? defaults.streaming_chat!.daily_messages_cap,
-      },
-      conversations: {
-        ...defaults.conversations,
-        enabled: raw['chat_enabled'] ?? defaults.conversations!.enabled,
-      },
-      tool_agents: {
-        ...defaults.tool_agents,
-        enabled: raw['agent_enabled'] ?? raw['custom_tools_enabled'] ?? defaults.tool_agents!.enabled,
-      },
-      rag_embeddings: {
-        ...defaults.rag_embeddings,
-        enabled: raw['rag_enabled'] ?? raw['embeddings_enabled'] ?? defaults.rag_embeddings!.enabled,
-      },
-    };
+    return normalizeAIFeatureFlags(value);
   }
 
   private defaultFlags(): Required<AIFeatureFlags> {
-    return {
-      text_generation: {
-        enabled: true,
-        monthly_tokens_cap: 100000,
-        degradation: 'block',
-        period: 'monthly',
-      },
-      streaming_chat: {
-        enabled: true,
-        daily_messages_cap: 100,
-        degradation: 'warn',
-        period: 'daily',
-      },
-      conversations: {
-        enabled: true,
-        retention_days: 90,
-        degradation: 'warn',
-      },
-      tool_agents: {
-        enabled: false,
-        tools_allowed: [],
-        degradation: 'block',
-      },
-      rag_embeddings: {
-        enabled: true,
-        indexed_docs_cap: 1000,
-        degradation: 'block',
-        period: 'monthly',
-      },
-      async_queue: {
-        enabled: false,
-        monthly_jobs_cap: 500,
-        degradation: 'block',
-        period: 'monthly',
-      },
-    };
+    return defaultAIFeatureFlags();
   }
 }

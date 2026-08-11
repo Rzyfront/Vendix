@@ -13,14 +13,70 @@ export interface CartItem {
   id: string;
   product: Product;
   variant?: ProductVariant | null;
+  /**
+   * Cantidad de la línea. **Sin presentación** cuenta unidades de STOCK (la
+   * unidad mínima: mm, g, ml, unidad). **Con presentación aplicada** cuenta
+   * PAQUETES, y el inventario descuenta `stockUnitsConsumed`.
+   */
   quantity: number;
+  /**
+   * Precio publicado. Sin presentación es el precio de `priceUnitQuantity`
+   * unidades de stock ("$5.000 por metro" ⇒ `unitPrice = 5000` con
+   * `priceUnitQuantity = 1000`). Con presentación es el precio del PAQUETE
+   * COMPLETO. Es el valor que viaja como `unit_price` en la línea de venta.
+   */
   unitPrice: number;
+  /** `unitPrice` con impuesto incluido, en la misma escala que `unitPrice`. */
   finalPrice: number;
+  /**
+   * Total de la línea CON impuesto. Se calcula con `resolveLineTotal`
+   * (`unitPrice × quantity / priceUnitQuantity`, redondeando al final) y NUNCA
+   * como `finalPrice × quantity`: esa multiplicación es la que cobraba de más.
+   */
   totalPrice: number;
   taxAmount: number;
   notes?: string;
   variant_display_name?: string;
   itemType?: 'product' | 'custom';
+  /* ============================================================
+   * QUI-648 — escala de precio y presentación de venta
+   * ============================================================ */
+  /**
+   * Snapshot de `products.price_unit_quantity` al momento de agregar la línea.
+   * Ausente o `1` ⇒ aritmética histórica. **Se ignora cuando la línea lleva
+   * presentación**: ahí `unitPrice` ya es el precio del paquete entero
+   * (misma exclusión que `hasTierAtIndex` en el backend).
+   */
+  priceUnitQuantity?: number | null;
+  /** Presentación aplicada. Viaja como `applied_price_tier_id` en el payload. */
+  appliedPriceTierId?: number | null;
+  appliedPriceTierName?: string | null;
+  /** `true` cuando la presentación resolvió un packSize > 1. */
+  isPackageUnit?: boolean;
+  /** packSize efectivo: `override_units_per_package ?? tier ?? 1`. */
+  unitsPerPackage?: number | null;
+  /**
+   * Unidades de stock que consume la línea (`quantity × packSize`). `null`
+   * cuando no hay empaque — el consumo es `quantity` y el backend no persiste
+   * snapshot. Informativo en el cliente: el backend re-resuelve el valor
+   * canónico desde `applied_price_tier_id`.
+   */
+  stockUnitsConsumed?: number | null;
+  /**
+   * Unidad en la que el CAJERO capturó la línea ("m", "kg"). `null` = se
+   * capturó en la unidad mínima, que es el caso de todo el catálogo por pieza.
+   *
+   * No cambia el significado de `quantity` —que sigue en unidades mínimas—:
+   * solo dice en qué escala volver a leerla para mostrarla. Equivale a
+   * `sale_unit_code` del modelo web.
+   */
+  saleUnitCode?: string | null;
+  /**
+   * Unidades mínimas que consume UNA unidad de captura (1000 mm por metro).
+   * `null` o 1 ⇒ la línea se muestra tal cual, sin conversión. Equivale a
+   * `stock_units_per_sale_unit` del modelo web.
+   */
+  stockUnitsPerSaleUnit?: number | null;
 }
 
 export interface CartDiscount {
@@ -86,6 +142,16 @@ export interface CreatePosPaymentItemDto {
   total_price: number;
   tax_amount_item?: number;
   cost?: number;
+  /**
+   * Presentación aplicada a la línea. El backend valida el permiso
+   * `store:products:apply_pricing_tier`, verifica el allowlist
+   * `product_price_tier_assignments` y persiste el snapshot
+   * (`applied_price_tier_id`, `applied_price_tier_name`,
+   * `stock_units_consumed`). El cliente NO manda `stock_units_consumed`: el
+   * consumo real lo re-resuelve el servidor con la cascada
+   * `override ?? tier ?? 1`.
+   */
+  applied_price_tier_id?: number;
 }
 
 export interface CreatePosPaymentDto {

@@ -12,6 +12,9 @@ describe('FiscalProductionReadinessService', () => {
           current_number: 10,
           range_to: 100,
         }),
+        // La detección de clave técnica compartida consulta `findMany`. Por
+        // defecto: nadie más comparte la clave.
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
     const prisma = { withoutScope: () => client };
@@ -45,6 +48,10 @@ describe('FiscalProductionReadinessService', () => {
     last_test_result: { success: true },
     nit: '900123456',
     accounting_entity_id: 77,
+    // Una configuración LISTA es una que ya se comprobó y salió limpia. `null` es
+    // ese estado; los tests que ejercitan el hallazgo o el caso sin comprobar lo
+    // sobreescriben de forma explícita.
+    shared_technical_key: null,
     ...overrides,
   });
 
@@ -142,7 +149,11 @@ describe('FiscalProductionReadinessService', () => {
     process.env.DIAN_ENCRYPTION_KEY = 'test-key';
     const { service } = createService(readyConfig());
     const client = (service as any).prisma.withoutScope();
-    client.invoice_resolutions.findFirst.mockResolvedValueOnce({
+    // `mockResolvedValue`, no `...Once`: la ruta hace DOS lecturas de
+    // `invoice_resolutions` — la del detector de clave técnica compartida y la del
+    // agotamiento del rango— y con `Once` la primera se quedaba el valor y la
+    // segunda recibía el mock por defecto, que no está agotado.
+    client.invoice_resolutions.findFirst.mockResolvedValue({
       id: 9,
       current_number: 100,
       range_to: 100,
@@ -156,6 +167,174 @@ describe('FiscalProductionReadinessService', () => {
         configuration_type: 'invoicing',
       }),
     ).rejects.toMatchObject({ errorCode: 'FISCAL_RESOLUTION_EXHAUSTED' });
+  });
+
+  describe('clave técnica compartida entre NIT (§4.5 del anexo)', () => {
+    // Forma REAL medida en producción: tres resoluciones de tres NIT distintos
+    // comparten número de autorización, rango y clave técnica. La DIAN asigna la
+    // ClTec por rango y por NIT, y alimenta el CUFE sin viajar en el XML, así que
+    // como mínimo dos de las tres calculan un CUFE que la DIAN recomputa distinto.
+    const CLTEC = 'f7cc345ca297aa11bb22cc33dd44ee55ff66aa77';
+
+    function withResolutions(own: any, others: any[]) {
+      const client = {
+        dian_configurations: { findFirst: jest.fn() },
+        invoice_resolutions: {
+          findFirst: jest.fn().mockResolvedValue(own),
+          findMany: jest.fn().mockResolvedValue(others),
+        },
+      };
+      return new FiscalProductionReadinessService(
+        { withoutScope: () => client } as any,
+        {
+          isUsingFallbackKey: () => false,
+          needsReencryption: () => false,
+        } as any,
+      );
+    }
+
+    const PARAMS = {
+      organization_id: 1,
+      store_id: null,
+      accounting_entity_id: 95,
+      configuration_type: 'invoicing' as const,
+    };
+
+    it('detecta la clave compartida con otro NIT y nombra las resoluciones', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [
+          { id: 8, accounting_entity: { tax_id: '902075738' } },
+          { id: 9, accounting_entity: { tax_id: '902056589' } },
+        ],
+      );
+
+      const finding = await service.findResolutionsSharingTechnicalKey(
+        PARAMS,
+        'production',
+      );
+
+      expect(finding).not.toBeNull();
+      expect(finding!.resolution_id).toBe(10);
+      // La 9 es del MISMO NIT (otra entidad contable del mismo obligado): no es
+      // un hallazgo. La 8 es de otro NIT: sí lo es.
+      expect(finding!.foreign).toEqual([
+        { resolution_id: 8, tax_id: '902075738' },
+      ]);
+    });
+
+    it('no reporta nada cuando la clave solo la usan entidades del mismo NIT', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 9, accounting_entity: { tax_id: '9020565899' } }],
+      );
+
+      // Mismo NIT con el DV pegado: `onlyDigits` no basta, así que se compara la
+      // base. Aquí se afirma el comportamiento actual — comparación por dígitos—
+      // para que un cambio futuro sea visible.
+      const finding = await service.findResolutionsSharingTechnicalKey(
+        PARAMS,
+        'production',
+      );
+      expect(finding?.foreign.map((f) => f.resolution_id)).toEqual([9]);
+    });
+
+    it('no reporta nada cuando la resolución no tiene clave técnica', async () => {
+      const service = withResolutions(
+        { id: 10, technical_key: null, accounting_entity: { tax_id: '902056589' } },
+        [],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
+    it('NO reporta nada en habilitación: la DIAN da a todos el mismo rango', async () => {
+      // Verificado contra el portal de habilitación de dos NIT distintos: prefijo
+      // SETP, resolución 18760000001, rango 990000000-995000000 y la MISMA clave
+      // técnica. Compartirla ahí no es contaminación entre tenants, es cómo
+      // funciona el ambiente de pruebas. La primera versión de este check no lo
+      // distinguía y habría bloqueado a todo tenant en habilitación.
+      const service = withResolutions(
+        {
+          id: 10,
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'test'),
+      ).resolves.toBeNull();
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, undefined),
+      ).resolves.toBeNull();
+    });
+
+    it('el checklist marca la comprobación como no satisfecha y explica qué copiar', () => {
+      const { service } = createService(readyConfig());
+
+      const report = service.evaluateProductionReadiness({
+        ...readyConfig(),
+        shared_technical_key: {
+          resolution_id: 10,
+          foreign: [{ resolution_id: 8, tax_id: '902075738' }],
+        },
+      });
+
+      const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
+      expect(check?.satisfied).toBe(false);
+      expect(check?.action).toMatch(/902075738/);
+      // El mensaje debe nombrar el siguiente paso real: la resolución de
+      // producción en MUISCA. Decir solo «clave compartida» deja al operador
+      // buscando una contaminación que en habilitación no existe.
+      expect(check?.action).toMatch(/MUISCA/);
+      expect(check?.action).toMatch(/SETP/);
+      // Bloqueante: emitir con una ClTec ajena gasta el consecutivo.
+      expect(report.missing).toContain('technical_key_per_nit');
+    });
+
+    it('FALLA CERRADO cuando el llamador no comprobó el hallazgo', () => {
+      const { service } = createService(readyConfig());
+
+      // `undefined`, no `null`: un llamador que difunde una fila de
+      // `StorePrismaService` compila sin el campo pese a ser obligatorio, porque
+      // sus modelos cuelgan de un `scoped_client: any`. La comprobación no puede
+      // afirmar que está limpia sin haberla hecho.
+      const report = service.evaluateProductionReadiness({
+        ...readyConfig(),
+        shared_technical_key: undefined as any,
+      });
+
+      const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
+      expect(check?.satisfied).toBe(false);
+      expect(check?.action).toMatch(/No se comprobó/);
+      expect(report.missing).toContain('technical_key_per_nit');
+    });
+
+    it('el checklist la marca satisfecha cuando el hallazgo es null', () => {
+      const { service } = createService(readyConfig());
+
+      const report = service.evaluateProductionReadiness({
+        ...readyConfig(),
+        shared_technical_key: null,
+      });
+
+      expect(
+        report.checks.find((c) => c.key === 'technical_key_per_nit')?.satisfied,
+      ).toBe(true);
+      expect(report.missing).not.toContain('technical_key_per_nit');
+    });
   });
 
   describe('alertas anticipadas', () => {

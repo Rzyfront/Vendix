@@ -41,6 +41,12 @@ export interface TableSessionView {
       first_name: string;
       last_name: string;
     } | null;
+    /**
+     * QUI-653 — la orden tiene items para consumo en la mesa Y items para
+     * llevar. Es DERIVADO de las lineas, no una columna: la cabecera de la mesa
+     * y el tiquete impreso lo usan para distinguir las dos partes del pedido.
+     */
+    is_mixed_order: boolean;
     order_items: Array<{
       id: number;
       product_id: number | null;
@@ -55,6 +61,14 @@ export interface TableSessionView {
       // UI to know whether an order_item is a `prepared` dish (kitchen
       // flow) or a non-dish like bottled water (no kitchen control).
       item_type: string | null;
+      // QUI-653 — para llevar, por item. La mesa muestra un badge en la fila y
+      // la cabecera marca "pedido mixto" cuando hay items de los dos tipos.
+      is_takeaway: boolean;
+      // QUI-652 — hecho de entrega, SIEMPRE aplicable. Se lee junto a
+      // kitchen_ticket_items, que ahora informa solo el estado de COCINA: la
+      // fila de la mesa muestra las dos dimensiones por separado.
+      delivered_at: Date | null;
+      delivered_by_user_id: number | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -581,7 +595,7 @@ export class TableSessionsService {
         const unitPrice = Number(product.base_price ?? 0);
         const totalPrice = unitPrice * item.quantity;
 
-        await tx.order_items.create({
+        const createdItem = await tx.order_items.create({
           data: {
             order_id: session.order_id,
             product_id: item.product_id,
@@ -594,9 +608,34 @@ export class TableSessionsService {
             cost_price: null,
             is_price_overridden: false,
             inventory_consumed_at_fire: false,
+            // QUI-653 — para llevar es una dimension por item. La orden sigue
+            // siendo de la mesa y `orders.delivery_type` no se toca, para no
+            // arrastrarla a los flujos de remision.
+            is_takeaway: item.is_takeaway ?? false,
             updated_at: new Date(),
           },
         });
+
+        // QUI-655 — LA INTENCION, no el consumo. Se registra lo que el cliente
+        // pidio sin, para que el KDS lo muestre tachado y el cocinero no tenga que
+        // deducirlo de una nota. El consumo real se decide al confirmar en cocina y
+        // puede diferir; esa diferencia es dato de auditoria.
+        //
+        // NO se valida contra el BOM aca a proposito: al tomar el pedido la receta
+        // puede cambiar antes de cocinar, y rechazar la captura por eso le quitaria
+        // al mesero la unica via rapida que tiene. La validacion dura vive en el
+        // fire, que es donde la exclusion se vuelve consumo.
+        const excluded = item.excluded_component_ids ?? [];
+        if (excluded.length > 0) {
+          await tx.order_item_exclusions.createMany({
+            data: excluded.map((componentId) => ({
+              order_item_id: createdItem.id,
+              component_product_id: componentId,
+              created_by_user_id: RequestContextService.getContext()?.user_id ?? null,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       // 3. Recompute order totals. The retail OrdersService stores
@@ -1103,6 +1142,15 @@ export class TableSessionsService {
                 // Read-only projection: lets the table-session UI hide
                 // the kitchen controls for non-dish items.
                 item_type: true,
+                // QUI-653 — el item se empaca y el cliente se lo lleva. El
+                // derivado "pedido mixto" se calcula sobre estas lineas, no se
+                // persiste, para que no pueda desincronizarse de ellas.
+                is_takeaway: true,
+                // QUI-652 — la entrega es un hecho de SERVICIO, independiente
+                // del ticket de cocina. Siempre aplica; el estado de cocina
+                // solo aplica a los platos preparados.
+                delivered_at: true,
+                delivered_by_user_id: true,
                 // KDS state per dish — same include shape as
                 // orders.service.findOne (Gap 2). Ordered desc by id so
                 // the most recent ticket-item leads the array.
@@ -1160,6 +1208,12 @@ export class TableSessionsService {
                   last_name: order.users.last_name,
                 }
               : null,
+            // QUI-653 — DERIVADO, nunca persistido: la orden es mixta cuando
+            // tiene items de los dos tipos. Persistirlo permitiria que quedara
+            // desincronizado de sus propias lineas.
+            is_mixed_order:
+              order.order_items.some((it) => it.is_takeaway) &&
+              order.order_items.some((it) => !it.is_takeaway),
             order_items: order.order_items.map((it) => ({
               id: it.id,
               product_id: it.product_id,
@@ -1169,6 +1223,9 @@ export class TableSessionsService {
               total_price: it.total_price,
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
+              is_takeaway: it.is_takeaway,
+              delivered_at: it.delivered_at,
+              delivered_by_user_id: it.delivered_by_user_id,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,
                 status: kti.status,
@@ -1184,6 +1241,72 @@ export class TableSessionsService {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Mark one item of an open table session as delivered to the customer.
+   * QUI-652.
+   *
+   * The entrega is a SERVICE fact, not a KITCHEN fact. Before this, the only
+   * place a delivery could be recorded was `kitchen_ticket_items.status`, and
+   * the fire never creates a row for anything that is not
+   * `product_type='prepared'` — so a bottled beer could never be marked
+   * delivered at all.
+   *
+   * Two dimensions, two rules:
+   *   - A PREPARED dish still has to reach kitchen state `ready` first. Letting
+   *     a waiter mark an uncooked dish as delivered would make the KDS lie.
+   *   - Anything else can be delivered straight from the row: it never passes
+   *     through the kitchen, so there is no kitchen state to wait for.
+   *
+   * Idempotent: re-marking an already-delivered item returns the session
+   * unchanged instead of moving `delivered_at` forward. The first delivery is
+   * the one that happened.
+   */
+  async markItemDelivered(
+    sessionId: number,
+    orderItemId: number,
+  ): Promise<TableSessionView> {
+    const { userId } = this.requireContext();
+
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    const item = session.order?.order_items.find((it) => it.id === orderItemId);
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El item #${orderItemId} no pertenece a esta cuenta`,
+      );
+    }
+
+    // Idempotencia: la primera entrega es la que ocurrio.
+    if (item.delivered_at) return session;
+
+    if (item.item_type === 'prepared') {
+      // `kitchen_ticket_items` viene ordenado desc por id, asi que el primero es
+      // el estado de cocina vigente.
+      const kitchenStatus = item.kitchen_ticket_items?.[0]?.status ?? null;
+      if (kitchenStatus !== 'ready') {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ITEM_NOT_DELIVERABLE,
+          `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
+        );
+      }
+    }
+
+    await this.prisma.order_items.updateMany({
+      where: { id: orderItemId, order_id: session.order_id },
+      data: {
+        delivered_at: new Date(),
+        delivered_by_user_id: userId ?? null,
+        updated_at: new Date(),
+      },
+    });
+
+    return this.findOne(sessionId);
   }
 
   // ------------------------------------------------------------ customer

@@ -41,6 +41,12 @@ export interface ExtractedLineItem {
    */
   unit_price_gross?: number | null;
   /**
+   * QUI-661 Fase 4 — descuento COMERCIAL de la línea, ya aplanado a NETO por el
+   * backend con la misma regla que `unit_price`. El de PRONTO PAGO no viene
+   * acá: es financiero y viaja aparte, sólo para mostrarlo.
+   */
+  discount_amount?: number | null;
+  /**
    * Fase 4: pistas de unidad de medida emitidas por el perfil
    * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
    * emite, por eso son opcionales. `uom_hint` es un código de unidad
@@ -66,6 +72,18 @@ export interface InvoiceScanResult {
   line_items: ExtractedLineItem[];
   subtotal: number;
   tax_amount: number;
+  /**
+   * QUI-661 Fase 4 — descuento COMERCIAL de pie de factura, ya aplanado a neto
+   * por el backend. `pop.component` lo pasa al carrito, que lo manda como
+   * descuento general; el backend lo prorratea por línea antes del IVA.
+   */
+  discount_amount?: number | null;
+  /**
+   * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura. Se
+   * muestra, NO se aplica: es financiero, va a cuenta de resultado y se decide
+   * al registrar el pago (QUI-647). Nunca entra al costo del inventario.
+   */
+  early_payment_discount?: number | null;
   total: number;
   confidence: number;
 }
@@ -129,6 +147,8 @@ export interface InvoiceMatchResult {
 
 export interface ConfirmScannedInvoiceItemDto {
   product_id?: number;
+  /** QUI-661 Fase 4 — descuento comercial de la línea, revisado por el usuario. */
+  discount_amount?: number;
   product_name?: string;
   sku?: string;
   quantity: number;

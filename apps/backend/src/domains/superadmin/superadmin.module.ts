@@ -27,6 +27,7 @@ import { NotificationSoundsModule } from './notification-sounds/notification-sou
 import { SuperadminAccountingModule } from './accounting/superadmin-accounting.module';
 import { SuperadminFiscalOperationsModule } from './fiscal-operations/superadmin-fiscal-operations.module';
 import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.module';
+import { SuperadminTenantConfigModule } from './tenant-config/superadmin-tenant-config.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.modu
     SuperadminAccountingModule,
     SuperadminFiscalOperationsModule,
     SuperadminInvoicingModule,
+    SuperadminTenantConfigModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

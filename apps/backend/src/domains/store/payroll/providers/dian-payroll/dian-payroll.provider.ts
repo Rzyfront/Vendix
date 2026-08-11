@@ -32,6 +32,7 @@ import {
   NominaDeduccionesData,
   NominaPagoData,
 } from './interfaces/nomina-data.interface';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   CONTRACT_TYPE_MAP,
   DOCUMENT_TYPE_MAP,
@@ -621,6 +622,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
               orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
               take: 1,
             },
+            organization_settings: true,
           },
         },
         store: {
@@ -629,6 +631,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
               orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
               take: 1,
             },
+            store_settings: true,
           },
         },
       },
@@ -647,27 +650,60 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         ? store?.addresses?.[0]
         : organization.addresses?.[0];
 
-    if (!address?.municipality_code) {
-      throw new Error(
-        `Fiscal entity ${entity.id} requires a primary address with DIAN municipality_code.`,
-      );
-    }
+    const settings =
+      entity.fiscal_scope === 'STORE'
+        ? store?.store_settings?.settings
+        : organization?.organization_settings?.settings;
+    const fiscalData = (settings as any)?.fiscal_data ?? {};
 
-    const legal_name =
-      entity.legal_name ||
-      (entity.fiscal_scope === 'STORE'
-        ? store?.legal_name
-        : organization.legal_name) ||
-      entity.name;
+    // Fuente única de la verdad fiscal: el resolvedor decide precedencias entre
+    // `fiscal_data`, columnas y `dian_configurations`. Esta misma cascada la
+    // usa `dian-direct` (emisión de facturas) y `dian-test` (set de pruebas),
+    // así que habilitación, facturación y nómina no pueden divergir sobre el
+    // mismo NIT. Antes esta función duplicaba la cascada con tres defectos
+    // conocidos que el plan cierra: `dv` leído crudo de la columna, `department`
+    // cayendo a `municipality_code.slice(0,2)` (código numérico en
+    // `cbc:CountrySubentity`) y `legal_name` ignorando `fiscal_data.legal_name`.
+    const identity = resolveTenantFiscalIdentity({
+      nit: config.nit,
+      fiscal_data: fiscalData,
+      entity: { legal_name: entity.legal_name, name: entity.name },
+      organization: organization
+        ? {
+            legal_name: organization.legal_name,
+            name: organization.name,
+            email: organization.email,
+            phone: organization.phone,
+            document_type: organization.document_type,
+            person_type: organization.person_type,
+          }
+        : null,
+      address: address
+        ? {
+            address_line1: address.address_line1,
+            city: address.city,
+            state_province: address.state_province,
+            municipality_code: address.municipality_code,
+            postal_code: address.postal_code,
+            phone_number: address.phone_number,
+          }
+        : null,
+      email: organization.email,
+    });
 
     return {
-      nit: config.nit,
-      dv: config.nit_dv || '0',
-      country: address.country_code || DEFAULT_COUNTRY_CODE,
-      department: address.municipality_code.slice(0, 2),
-      city: address.municipality_code,
-      address: address.address_line1,
-      legal_name,
+      nit: identity.nit,
+      // Derivado por módulo 11 — NUNCA leído de la columna `dian_configurations`.
+      dv: identity.nit_dv,
+      country: identity.country || DEFAULT_COUNTRY_CODE,
+      // El DSPNE pide el código numérico del departamento (no el nombre). Lo
+      // derivamos del municipio como antes, pero ya no se confunde con el
+      // `cbc:CountrySubentity` del XML de facturas porque aquí va al campo
+      // numérico correcto del documento electrónico de nómina.
+      department: identity.municipality_code.slice(0, 2),
+      city: identity.municipality_code,
+      address: identity.fiscal_address,
+      legal_name: identity.legal_name,
     };
   }
 

@@ -1353,4 +1353,280 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
     // now lives on the correct (persist) side, not as a preview-vs-persist gap.
     expect(o49 / o48).toBeCloseTo(1.19, 5);
   });
+
+  /**
+   * QUI-648 — el margen del preview se mide contra el costo llevado a la escala
+   * del precio. `new_cost_per_unit` es el costo de la unidad MÍNIMA de stock;
+   * `current_base_price` cubre `price_unit_quantity` de esas unidades.
+   */
+  describe('QUI-648: resulting_margin respeta price_unit_quantity', () => {
+    /**
+     * Igual que `buildPreviewService` pero con control sobre el snapshot de
+     * precio del producto (incluida su escala de publicación).
+     */
+    async function buildScaledPreviewService(pricing: {
+      base_price: number;
+      profit_margin: number;
+      price_unit_quantity: number | null;
+    }) {
+      const mockPrismaService = {
+        inventory_locations: {
+          findUnique: jest.fn().mockResolvedValue({ store_id: STORE_ID }),
+        },
+        stock_levels: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        products: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: PRODUCT_ID,
+            is_ingredient: false,
+            purchase_to_stock_factor: null,
+            stock_uom_id: null,
+            purchase_uom_id: null,
+          }),
+          findUnique: jest.fn().mockResolvedValue({
+            name: 'Cable de cobre',
+            ...pricing,
+          }),
+        },
+        product_variants: { findUnique: jest.fn() },
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PurchaseOrdersService,
+          { provide: StorePrismaService, useValue: mockPrismaService },
+          { provide: StockLevelManager, useValue: {} as any },
+          {
+            provide: CostingService,
+            useValue: {
+              // Stock en cero ⇒ reactivación ⇒ el CPP es el costo entrante
+              // directo, lo que aísla la aritmética del margen.
+              getScopedStockAggregate: jest
+                .fn()
+                .mockResolvedValue({ quantity: 0, cost_per_unit: 0 }),
+            },
+          },
+          {
+            provide: CostingMethodResolverService,
+            useValue: {
+              resolveCostingMethod: jest
+                .fn()
+                .mockResolvedValue('weighted_average'),
+            },
+          },
+          { provide: InventorySerialNumbersService, useValue: {} as any },
+          { provide: SerialNumberEnforcementService, useValue: {} as any },
+          { provide: AuditService, useValue: {} as any },
+          { provide: S3Service, useValue: {} as any },
+          {
+            provide: SettingsService,
+            useValue: {
+              // O-48 responsable ⇒ el costo queda NETO y no se capitaliza IVA.
+              getFiscalData: jest
+                .fn()
+                .mockResolvedValue({ tax_responsibilities: ['O-48'] }),
+            },
+          },
+          {
+            provide: FiscalScopeService,
+            useValue: {
+              resolveAccountingEntityForFiscal: jest
+                .fn()
+                .mockResolvedValue({ id: 1 }),
+            },
+          },
+          { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+          {
+            provide: AccountsPayableService,
+            useValue: {
+              findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+            },
+          },
+        ],
+      }).compile();
+
+      jest
+        .spyOn(RequestContextService, 'getOrganizationId')
+        .mockReturnValue(ORG_ID);
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+
+      return module.get<PurchaseOrdersService>(PurchaseOrdersService);
+    }
+
+    const previewFor = async (service: PurchaseOrdersService, cost: number) =>
+      (
+        await service.getCostPreview({
+          location_id: LOCATION_ID,
+          prices_include_tax: false,
+          items: [{ product_id: PRODUCT_ID, quantity: 100, unit_cost: cost }],
+        } as any)
+      ).items[0];
+
+    it('escala 1: el margen sale del cociente histórico (no-regresión)', async () => {
+      // base 3000, costo 2000 ⇒ (3000-2000)/2000 = 50%.
+      const service = await buildScaledPreviewService({
+        base_price: 3000,
+        profit_margin: 20,
+        price_unit_quantity: 1,
+      });
+
+      const item = await previewFor(service, 2000);
+
+      expect(item.new_cost_per_unit).toBe(2000);
+      expect(item.resulting_margin).toBe(50);
+      expect(item.price_unit_quantity).toBe(1);
+    });
+
+    it('price_unit_quantity nulo se comporta igual que escala 1 (no-regresión)', async () => {
+      const service = await buildScaledPreviewService({
+        base_price: 3000,
+        profit_margin: 20,
+        price_unit_quantity: null,
+      });
+
+      const item = await previewFor(service, 2000);
+
+      expect(item.resulting_margin).toBe(50);
+      expect(item.price_unit_quantity).toBe(1);
+    });
+
+    it('escala 1000: mide el precio del metro contra el costo del metro', async () => {
+      // Cable publicado a $5.000 el metro (1.000 mm), costo $3,50 el milímetro
+      // ⇒ costo del metro = $3.500 ⇒ margen = (5000-3500)/3500 = 42,86%.
+      // Sin la escala el cociente daba (5000-3,5)/3,5 = 142.757,14%.
+      const service = await buildScaledPreviewService({
+        base_price: 5000,
+        profit_margin: 40,
+        price_unit_quantity: 1000,
+      });
+
+      const item = await previewFor(service, 3.5);
+
+      // El costo mostrado sigue siendo el de la unidad mínima: es el que la
+      // recepción sella en stock_levels (paridad preview↔persist de F3).
+      expect(item.new_cost_per_unit).toBe(3.5);
+      expect(item.price_unit_quantity).toBe(1000);
+      expect(item.resulting_margin).toBeCloseTo(42.86, 2);
+      // Y sobre todo: NO el número de la mezcla de escalas.
+      expect(item.resulting_margin).not.toBeCloseTo(142757.14, 2);
+    });
+  });
+});
+
+/**
+ * QUI-648 — `resolvePricingAfterReceipt` es la función pura que decide qué
+ * `base_price` / `profit_margin` deja escrito una recepción de mercancía.
+ *
+ * El defecto que estas pruebas clavan: `costPrice` llega en unidad MÍNIMA de
+ * stock (lo escribe `CostingService` como valor / quantity_on_hand) y
+ * `base_price` vale por `price_unit_quantity` de esas unidades. Compararlos
+ * derecho no solo publicaba un margen falso — con un margen pinneado derivaba
+ * el precio DESDE el costo del milímetro y dejaba el cable a $4,90 el metro.
+ */
+describe('PurchaseOrdersService.resolvePricingAfterReceipt()', () => {
+  const resolve = PurchaseOrdersService.resolvePricingAfterReceipt;
+
+  describe('no-regresión: escala ausente / 1 / 0 / no numérica', () => {
+    it('sin priceUnitQuantity: cost-anchor da el cociente de siempre', () => {
+      // (3000 - 2000) / 2000 = 50%.
+      expect(resolve({ costPrice: 2000, existingBasePrice: 3000 })).toEqual({
+        basePrice: 3000,
+        profitMargin: 50,
+      });
+    });
+
+    it('priceUnitQuantity = 1: margen pinneado deriva el precio como siempre', () => {
+      expect(
+        resolve({
+          costPrice: 2000,
+          existingBasePrice: 3000,
+          newProfitMargin: 25,
+          priceUnitQuantity: 1,
+        }),
+      ).toEqual({ basePrice: 2500, profitMargin: 25 });
+    });
+
+    it('priceUnitQuantity = 0, null o NaN colapsan a la aritmética histórica', () => {
+      const historic = resolve({ costPrice: 2000, existingBasePrice: 3000 });
+      for (const scale of [0, null, undefined, NaN as unknown as number]) {
+        expect(
+          resolve({
+            costPrice: 2000,
+            existingBasePrice: 3000,
+            priceUnitQuantity: scale,
+          }),
+        ).toEqual(historic);
+      }
+    });
+
+    it('costo 0 sigue devolviendo margen 0 sin dividir por cero', () => {
+      expect(
+        resolve({
+          costPrice: 0,
+          existingBasePrice: 3000,
+          priceUnitQuantity: 1000,
+        }),
+      ).toEqual({ basePrice: 3000, profitMargin: 0 });
+    });
+  });
+
+  describe('escala 1000: el cable vendido por metro', () => {
+    // Costo $3,50 por milímetro ⇒ $3.500 por metro. Precio $5.000 el metro.
+    const COST_PER_MM = 3.5;
+    const SCALE = 1000;
+
+    it('cost-anchor: conserva el precio y publica el margen del metro', () => {
+      const result = resolve({
+        costPrice: COST_PER_MM,
+        existingBasePrice: 5000,
+        priceUnitQuantity: SCALE,
+      });
+
+      // (5000 - 3500) / 3500 = 42,857…% → 42.86.
+      expect(result.basePrice).toBe(5000);
+      expect(result.profitMargin).toBeCloseTo(42.86, 2);
+      // El número que publicaba el bug.
+      expect(result.profitMargin).not.toBeCloseTo(142757.14, 2);
+    });
+
+    it('margen pinneado: el precio derivado es el del METRO, no el del milímetro', () => {
+      const result = resolve({
+        costPrice: COST_PER_MM,
+        existingBasePrice: 5000,
+        newProfitMargin: 40,
+        priceUnitQuantity: SCALE,
+      });
+
+      // 3500 × 1,40 = 4900 — el precio del metro.
+      expect(result).toEqual({ basePrice: 4900, profitMargin: 40 });
+      // Antes del fix: 3,5 × 1,40 = 4,90. Recibir mercancía regalaba el cable.
+      expect(result.basePrice).not.toBe(4.9);
+    });
+
+    it('precio explícito gana y el margen se deriva de él (cost-anchor QUI-425)', () => {
+      const result = resolve({
+        costPrice: COST_PER_MM,
+        existingBasePrice: 5000,
+        newBasePrice: 7000,
+        // El margen enviado se ignora a propósito: el precio explícito manda.
+        newProfitMargin: 999,
+        priceUnitQuantity: SCALE,
+      });
+
+      // (7000 - 3500) / 3500 = 100%.
+      expect(result).toEqual({ basePrice: 7000, profitMargin: 100 });
+    });
+
+    it('precio explícito con escala 1 conserva el comportamiento histórico', () => {
+      expect(
+        resolve({
+          costPrice: 3500,
+          existingBasePrice: 5000,
+          newBasePrice: 7000,
+          priceUnitQuantity: 1,
+        }),
+      ).toEqual({ basePrice: 7000, profitMargin: 100 });
+    });
+  });
 });

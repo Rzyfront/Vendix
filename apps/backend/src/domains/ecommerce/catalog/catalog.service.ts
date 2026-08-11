@@ -7,6 +7,7 @@ import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { resolveDefaultSaleUnit } from '../../store/products/services/default-sale-unit.util';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import {
   MenuAvailabilityCheckerService,
@@ -28,6 +29,16 @@ export class CatalogService {
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
+
+  /**
+   * Catálogo global de unidades, cacheado por proceso. Es de solo lectura y
+   * cambia únicamente cuando el equipo agrega una unidad nueva, así que pagar
+   * una consulta por producto para leerlo sería gratuito solo en la demo.
+   */
+  private uomByIdCache: Map<
+    number,
+    { code: string; name: string; dimension: string; factor_to_base: number }
+  > | null = null;
 
   async getProducts(query: CatalogQueryDto) {
     const {
@@ -883,6 +894,7 @@ export class CatalogService {
   ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+    await this.hydrateDefaultSaleUnit(product);
 
     const variantCount = product._count?.product_variants || 0;
     const effectiveTracking = this.resolveEffectiveTracking(product);
@@ -911,6 +923,19 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      // Presentación en la que se publica y se vende. `null` = unidad principal.
+      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      sale_unit: product.__default_sale_unit
+        ? {
+            price_tier_id: product.__default_sale_unit.tier.id,
+            name: product.__default_sale_unit.tier.name,
+            units_per_package:
+              product.__default_sale_unit.tier.units_per_package,
+          }
+        : null,
+      // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
+      // sobre un producto que se mide en milímetros.
+      price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
@@ -942,6 +967,7 @@ export class CatalogService {
     activePromotion: ActiveProductPromotion | null = null,
     availability: ProductAvailability | null = null,
   ) {
+    await this.hydrateDefaultSaleUnit(product);
     const reviews = reviews_enabled ? product.reviews || [] : [];
     let avg_rating = 0;
     let review_count = 0;
@@ -997,6 +1023,19 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      // Presentación en la que se publica y se vende. `null` = unidad principal.
+      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      sale_unit: product.__default_sale_unit
+        ? {
+            price_tier_id: product.__default_sale_unit.tier.id,
+            name: product.__default_sale_unit.tier.name,
+            units_per_package:
+              product.__default_sale_unit.tier.units_per_package,
+          }
+        : null,
+      // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
+      // sobre un producto que se mide en milímetros.
+      price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: ahora reflejan stock_levels.
@@ -1039,6 +1078,16 @@ export class CatalogService {
   private async mapVariantsToResponse(product: any): Promise<any[]> {
     const variants = product.product_variants || [];
     if (variants.length === 0) return [];
+
+    // Multi-tarifa ⊕ variantes: si el producto se publica en una presentación
+    // por defecto, la vitrina NO expone variantes. No es cosmético — las dos
+    // proyecciones resuelven el precio por caminos distintos (el producto con
+    // `calculateFinalPrice`, tier-aware; la variante con `resolvePrice`, cascada
+    // legacy), y el detalle público muestra el mínimo de variante. Un producto
+    // legacy con ambos ejes publicaba el precio de la unidad mínima ($1.000) en
+    // vez del de la presentación ($2.000). La regla es excluyente en escritura;
+    // acá se cierra la lectura para los datos que ya nacieron mezclados.
+    if (product.__default_sale_unit) return [];
 
     return Promise.all(
       variants.map(async (variant: any) => {
@@ -1092,9 +1141,156 @@ export class CatalogService {
    */
   private calculateFinalPrice(product: any, variant?: any): number {
     const totalTaxRate = this.getTotalTaxRate(product);
+    // QUI-648 — cuando el producto tiene presentación por defecto, el precio
+    // publicado es el del PAQUETE. Tiene que coincidir con lo que cobra el
+    // checkout: si la vitrina mostrara el precio unitario, el total cambiaría al
+    // pagar. El default se hidrata en los mapeadores (`__default_sale_unit`).
+    const saleUnit = product?.__default_sale_unit;
+    if (saleUnit) {
+      const tierResult = this.priceResolverService.resolveWithTier({
+        product: {
+          base_price: Number(product.base_price),
+          is_on_sale: product.is_on_sale,
+          sale_price:
+            product.sale_price != null ? Number(product.sale_price) : null,
+          track_inventory: product.track_inventory,
+          has_multiple_price_tiers: true,
+        },
+        variant: variant
+          ? {
+              id: variant.id,
+              price_override:
+                variant.price_override != null
+                  ? Number(variant.price_override)
+                  : null,
+              is_on_sale: variant.is_on_sale,
+              sale_price:
+                variant.sale_price != null ? Number(variant.sale_price) : null,
+              track_inventory_override: variant.track_inventory_override ?? null,
+            }
+          : undefined,
+        priceTier: saleUnit.tier,
+        tierOverrides: saleUnit.overrides,
+        taxRate: totalTaxRate,
+      });
+      return Math.round(tierResult.unitPriceWithTax * 100) / 100;
+    }
     const priceResult = this.resolvePrice(product, variant, totalTaxRate);
     const finalPrice = priceResult.unitPriceWithTax;
     return Math.round(finalPrice * 100) / 100;
+  }
+
+  /**
+   * Hidrata `product.__default_sale_unit` para que la proyección sincrónica
+   * (`calculateFinalPrice`) pueda usar la presentación por defecto sin volverse
+   * asíncrona. Devuelve el mismo objeto recibido.
+   */
+  private async hydrateDefaultSaleUnit(product: any): Promise<any> {
+    if (!product?.id || product.__default_sale_unit !== undefined) {
+      return product;
+    }
+    await this.hydrateStockUnit(product);
+    try {
+      product.__default_sale_unit = await resolveDefaultSaleUnit(
+        this.prisma as any,
+        Number(product.id),
+      );
+    } catch {
+      // Una falla leyendo la presentación no debe tumbar la vitrina: sin default
+      // el producto se publica en su unidad principal (cascada legacy).
+      product.__default_sale_unit = null;
+    }
+    return product;
+  }
+
+  /**
+   * Código de la unidad de stock del producto, para publicar el precio en la
+   * escala del comerciante ("$5.000 por metro") en vez de un número sin unidad.
+   *
+   * El catálogo de unidades es global, diminuto e inmutable en runtime, así que
+   * se lee una vez por proceso: la vitrina no puede pagar una consulta por
+   * producto para mostrar dos palabras.
+   */
+  private async hydrateStockUnit(product: any): Promise<void> {
+    if (!product?.stock_uom_id) {
+      product.__stock_unit = null;
+      return;
+    }
+    try {
+      if (!this.uomByIdCache) {
+        const rows = await this.storePrisma.units_of_measure.findMany({
+          where: { is_active: true },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            dimension: true,
+            factor_to_base: true,
+          },
+        });
+        this.uomByIdCache = new Map(
+          rows.map((u) => [
+            u.id,
+            {
+              code: u.code,
+              name: u.name,
+              dimension: u.dimension as string,
+              factor_to_base: Number(u.factor_to_base),
+            },
+          ]),
+        );
+      }
+      product.__stock_unit =
+        this.uomByIdCache.get(Number(product.stock_uom_id)) ?? null;
+    } catch {
+      product.__stock_unit = null;
+    }
+  }
+
+  /**
+   * Escala en la que se publica el precio: "por metro" cuando el producto vive
+   * en milímetros y su precio cubre 1.000. `null` cuando el precio es por
+   * unidad, que es todo el catálogo histórico.
+   *
+   * No aplica cuando hay presentación por defecto: ahí el precio publicado ya
+   * es el del paquete completo y hablar de escala confundiría dos cosas.
+   */
+  private buildPriceUnit(product: any): {
+    quantity: number;
+    stock_unit_code: string | null;
+    reference_unit_code: string | null;
+    label: string;
+  } | null {
+    if (product?.__default_sale_unit) return null;
+    const quantity = Number(product?.price_unit_quantity ?? 1);
+    if (!Number.isFinite(quantity) || quantity <= 1) return null;
+
+    const stock = product.__stock_unit ?? null;
+    if (!stock) {
+      return {
+        quantity,
+        stock_unit_code: null,
+        reference_unit_code: null,
+        label: `por ${quantity.toLocaleString('es-CO')} unidades`,
+      };
+    }
+
+    const reference = this.uomByIdCache
+      ? Array.from(this.uomByIdCache.values()).find(
+          (u) =>
+            u.dimension === stock.dimension &&
+            Math.abs(u.factor_to_base / stock.factor_to_base - quantity) < 1e-9,
+        )
+      : undefined;
+
+    return {
+      quantity,
+      stock_unit_code: stock.code,
+      reference_unit_code: reference?.code ?? null,
+      label: reference
+        ? `por ${reference.code}`
+        : `por ${quantity.toLocaleString('es-CO')} ${stock.code}`,
+    };
   }
 
   private getTotalTaxRate(product: any): number {

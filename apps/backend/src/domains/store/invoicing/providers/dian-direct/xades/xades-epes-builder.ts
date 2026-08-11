@@ -175,7 +175,17 @@ export class XadesEpesBuilder {
       `</xades:SigPolicyHash>` +
       `</xades:SignaturePolicyId>` +
       `</xades:SignaturePolicyIdentifier>` +
-      `<xades:SignerRole>${this.escapeXml(signer_role)}</xades:SignerRole>` +
+      // `xades:SignerRole` es `element-only` en el XSD de XAdES 1.3.2: el rol
+      // vive en `ClaimedRoles/ClaimedRole`, nunca como texto directo. Emitirlo
+      // crudo rompía el esquema y la DIAN rechazaba con ZB01 — «Element
+      // 'xades:SignerRole' cannot have character [children], because the type's
+      // content type is element-only» — antes de mirar el contenido del
+      // documento. `ClaimedRole` es `AnyType`, así que ahí el texto sí es válido.
+      `<xades:SignerRole>` +
+      `<xades:ClaimedRoles>` +
+      `<xades:ClaimedRole>${this.escapeXml(signer_role)}</xades:ClaimedRole>` +
+      `</xades:ClaimedRoles>` +
+      `</xades:SignerRole>` +
       `</xades:SignedSignatureProperties>` +
       `</xades:SignedProperties>` +
       `</xades:QualifyingProperties>` +

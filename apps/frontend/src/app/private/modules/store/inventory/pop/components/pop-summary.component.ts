@@ -47,6 +47,34 @@ const PAYMENT_TERM_LABELS = {
             <span class="text-[var(--color-text-primary)] font-medium">{{ formatCurrency(summary().subtotal) }}</span>
           </div>
     
+          <!--
+            QUI-661 — Descuento comercial GENERAL de la factura del proveedor.
+            Va ANTES de impuestos a propósito: el descuento reduce la base
+            gravable, así que el IVA que se muestra debajo ya sale de la base
+            rebajada. El backend lo prorratea por línea para que llegue también
+            al costo capitalizado del inventario.
+          -->
+          <div class="flex justify-between text-sm">
+            <span class="text-[var(--color-text-secondary)]">Descuento</span>
+            <div class="flex items-center gap-2">
+              <input
+                type="number"
+                class="w-24 px-2 py-1 text-right border border-[var(--color-border)] rounded focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                [(ngModel)]="discountAmount"
+                (ngModelChange)="onDiscountAmountChange($event)"
+                [min]="0"
+                [step]="0.01"
+                />
+              <span class="text-amber-700 font-medium">
+                @if (summary().discount_amount > 0) {
+                  -{{ formatCurrency(summary().discount_amount) }}
+                } @else {
+                  {{ formatCurrency(0) }}
+                }
+              </span>
+            </div>
+          </div>
+
           <div class="flex justify-between text-sm">
             <span class="text-[var(--color-text-secondary)]">Costo Envío</span>
             <div class="flex items-center gap-2">
@@ -213,6 +241,8 @@ export class PopSummaryComponent {
   );
 
   shippingCost: number = 0;
+  /** QUI-661 — general commercial discount typed by the buyer, in money. */
+  discountAmount: number = 0;
   selectedPaymentPreset: string = '';
   customPaymentTerms: string = '';
   notes: string = '';
@@ -231,6 +261,16 @@ export class PopSummaryComponent {
   onShippingCostChange(value: number): void {
     this.shippingCost = value || 0;
     this.popCartService.setShippingCost(this.shippingCost);
+  }
+
+  /**
+   * QUI-661 — general commercial discount. Clamped at 0 here as well as in the
+   * service: the input is `type="number"` and a browser will happily hand over
+   * a negative, which as a "discount" would silently inflate the taxable base.
+   */
+  onDiscountAmountChange(value: number): void {
+    this.discountAmount = Math.max(0, Number(value) || 0);
+    this.popCartService.setDiscountAmount(this.discountAmount);
   }
 
   onPaymentPresetChange(event: Event): void {
@@ -264,6 +304,7 @@ export class PopSummaryComponent {
   private initializeFromCart(): void {
     const state = this.popCartService.currentState;
     this.shippingCost = state.shippingCost;
+    this.discountAmount = state.discountAmount ?? 0;
     this.notes = state.notes || '';
     this.internalNotes = state.internalNotes || '';
 

@@ -13,6 +13,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { resolveDefaultSaleUnits } from '../../store/products/services/default-sale-unit.util';
 import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
@@ -957,6 +958,20 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
+    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
+    // presentación marcada por defecto y no expone selector: elegir entre varias
+    // es capacidad exclusiva del POS. Un producto sin default conserva la
+    // cascada legacy sin cambio alguno.
+    const defaultSaleUnits = await resolveDefaultSaleUnits(
+      this.prisma,
+      cart_items.map((item) => item.product_id),
+    );
+    // Unidades reales de stock por línea, para que la RESERVA use el mismo
+    // número que el commit posterior (`stock_units_consumed ?? quantity`).
+    const stockUnitsByLine = new Map<string, number>();
+    const lineKey = (productId: number, variantId?: number | null): string =>
+      `${productId}:${variantId ?? 'null'}`;
+
     const itemsWithTaxes = await Promise.all(
       cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
@@ -1001,7 +1016,57 @@ export class CheckoutService {
             : undefined,
         });
 
-        const netPrice = priceResult.unitPrice;
+        // Con presentación por defecto el precio de la línea es el del PAQUETE
+        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
+        // default ya es una decisión explícita del comercio, así que se fuerza en
+        // true para no depender de un flag que puede quedar desincronizado.
+        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
+        const tierPriceResult = defaultSaleUnit
+          ? this.priceResolverService.resolveWithTier({
+              product: {
+                base_price: Number(productWithTaxes.base_price),
+                is_on_sale: productWithTaxes.is_on_sale,
+                sale_price:
+                  productWithTaxes.sale_price != null
+                    ? Number(productWithTaxes.sale_price)
+                    : null,
+                track_inventory: productWithTaxes.track_inventory,
+                has_multiple_price_tiers: true,
+              },
+              variant: item.product_variant
+                ? {
+                    id: item.product_variant.id,
+                    price_override:
+                      item.product_variant.price_override != null
+                        ? Number(item.product_variant.price_override)
+                        : null,
+                    is_on_sale: item.product_variant.is_on_sale,
+                    sale_price:
+                      item.product_variant.sale_price != null
+                        ? Number(item.product_variant.sale_price)
+                        : null,
+                    track_inventory_override:
+                      item.product_variant.track_inventory_override,
+                  }
+                : undefined,
+              priceTier: defaultSaleUnit.tier,
+              tierOverrides: defaultSaleUnit.overrides,
+            })
+          : null;
+
+        const netPrice = tierPriceResult
+          ? tierPriceResult.unitPrice
+          : priceResult.unitPrice;
+
+        const packSize = tierPriceResult?.unitsPerPackage ?? null;
+        const stockUnitsConsumed =
+          packSize && packSize > 1 ? item.quantity * packSize : null;
+        if (stockUnitsConsumed != null) {
+          stockUnitsByLine.set(
+            lineKey(item.product_id, item.product_variant_id),
+            stockUnitsConsumed,
+          );
+        }
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1024,6 +1089,9 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
+          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
+          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          stock_units_consumed: stockUnitsConsumed,
         };
       }),
     );
@@ -1104,6 +1172,13 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+            // en null cuando no hubo empaque, para distinguir "no aplica" de
+            // "empaque de 1" igual que en el resto de los flujos de venta.
+            applied_price_tier_id: item.applied_price_tier_id,
+            applied_price_tier_name_snapshot:
+              item.applied_price_tier_name_snapshot,
+            stock_units_consumed: item.stock_units_consumed,
             order_item_taxes: {
               create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
@@ -1193,7 +1268,13 @@ export class CheckoutService {
           item.product_id,
           item.product_variant_id || undefined,
           location_id,
-          item.quantity,
+          // Reservar en la unidad MÍNIMA. Vender 1 bulto de 50 kg reserva 50, no
+          // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
+          // así que reservar `quantity` dejaría la reserva y el descuento en
+          // números distintos y el inventario se desincronizaría.
+          stockUnitsByLine.get(
+            lineKey(item.product_id, item.product_variant_id),
+          ) ?? item.quantity,
           'order',
           order.id,
           undefined,
@@ -1499,6 +1580,20 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
+    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
+    // presentación marcada por defecto y no expone selector: elegir entre varias
+    // es capacidad exclusiva del POS. Un producto sin default conserva la
+    // cascada legacy sin cambio alguno.
+    const defaultSaleUnits = await resolveDefaultSaleUnits(
+      this.prisma,
+      cart_items.map((item) => item.product_id),
+    );
+    // Unidades reales de stock por línea, para que la RESERVA use el mismo
+    // número que el commit posterior (`stock_units_consumed ?? quantity`).
+    const stockUnitsByLine = new Map<string, number>();
+    const lineKey = (productId: number, variantId?: number | null): string =>
+      `${productId}:${variantId ?? 'null'}`;
+
     const itemsWithTaxes = await Promise.all(
       cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
@@ -1543,7 +1638,57 @@ export class CheckoutService {
             : undefined,
         });
 
-        const netPrice = priceResult.unitPrice;
+        // Con presentación por defecto el precio de la línea es el del PAQUETE
+        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
+        // default ya es una decisión explícita del comercio, así que se fuerza en
+        // true para no depender de un flag que puede quedar desincronizado.
+        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
+        const tierPriceResult = defaultSaleUnit
+          ? this.priceResolverService.resolveWithTier({
+              product: {
+                base_price: Number(productWithTaxes.base_price),
+                is_on_sale: productWithTaxes.is_on_sale,
+                sale_price:
+                  productWithTaxes.sale_price != null
+                    ? Number(productWithTaxes.sale_price)
+                    : null,
+                track_inventory: productWithTaxes.track_inventory,
+                has_multiple_price_tiers: true,
+              },
+              variant: item.product_variant
+                ? {
+                    id: item.product_variant.id,
+                    price_override:
+                      item.product_variant.price_override != null
+                        ? Number(item.product_variant.price_override)
+                        : null,
+                    is_on_sale: item.product_variant.is_on_sale,
+                    sale_price:
+                      item.product_variant.sale_price != null
+                        ? Number(item.product_variant.sale_price)
+                        : null,
+                    track_inventory_override:
+                      item.product_variant.track_inventory_override,
+                  }
+                : undefined,
+              priceTier: defaultSaleUnit.tier,
+              tierOverrides: defaultSaleUnit.overrides,
+            })
+          : null;
+
+        const netPrice = tierPriceResult
+          ? tierPriceResult.unitPrice
+          : priceResult.unitPrice;
+
+        const packSize = tierPriceResult?.unitsPerPackage ?? null;
+        const stockUnitsConsumed =
+          packSize && packSize > 1 ? item.quantity * packSize : null;
+        if (stockUnitsConsumed != null) {
+          stockUnitsByLine.set(
+            lineKey(item.product_id, item.product_variant_id),
+            stockUnitsConsumed,
+          );
+        }
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1566,6 +1711,9 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
+          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
+          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          stock_units_consumed: stockUnitsConsumed,
         };
       }),
     );
@@ -1686,6 +1834,13 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+            // en null cuando no hubo empaque, para distinguir "no aplica" de
+            // "empaque de 1" igual que en el resto de los flujos de venta.
+            applied_price_tier_id: item.applied_price_tier_id,
+            applied_price_tier_name_snapshot:
+              item.applied_price_tier_name_snapshot,
+            stock_units_consumed: item.stock_units_consumed,
             order_item_taxes: {
               create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
@@ -1739,7 +1894,13 @@ export class CheckoutService {
           item.product_id,
           item.product_variant_id || undefined,
           location_id,
-          item.quantity,
+          // Reservar en la unidad MÍNIMA. Vender 1 bulto de 50 kg reserva 50, no
+          // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
+          // así que reservar `quantity` dejaría la reserva y el descuento en
+          // números distintos y el inventario se desincronizaría.
+          stockUnitsByLine.get(
+            lineKey(item.product_id, item.product_variant_id),
+          ) ?? item.quantity,
           'order',
           order.id,
           undefined,

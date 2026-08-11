@@ -14,9 +14,15 @@ import type {
   Brand,
   TaxCategory,
   PriceTier,
+  PriceTierKind,
+  ProductPriceTierOverride,
   BulkProductAnalysisResult,
   BulkUploadResult,
 } from '../types';
+import {
+  resolveSaleUnitPresentations,
+  type SaleUnitPresentation,
+} from '../pricing';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
   const d = response.data as ApiResponse<T>;
@@ -141,15 +147,105 @@ export const ProductService = {
    * Lista las tarifas de precio del store (multi-tarifa). Se usa en
    * el form de producto para que el usuario seleccione cuáles aplican.
    * Devuelve `{ data: PriceTier[], meta: { total, ... } }`.
+   *
+   * `kind` discrimina los dos ejes que conviven en la tabla: `customer_tier`
+   * ("a quién le vendo") vs `sale_unit` ("en qué presentación vendo"). El
+   * selector de presentaciones del POS SIEMPRE debe filtrar por `sale_unit`.
    */
-  async getPriceTiers(params?: { is_active?: boolean; search?: string }): Promise<PriceTier[]> {
+  async getPriceTiers(params?: {
+    is_active?: boolean;
+    search?: string;
+    kind?: PriceTierKind;
+  }): Promise<PriceTier[]> {
     const query: string[] = [];
     if (params?.is_active !== undefined) query.push(`is_active=${params.is_active}`);
     if (params?.search) query.push(`search=${encodeURIComponent(params.search)}`);
+    if (params?.kind) query.push(`kind=${params.kind}`);
     const qs = query.length ? `?${query.join('&')}` : '';
     const res = await apiClient.get(`${Endpoints.STORE.PRICE_TIERS.LIST}${qs}`);
     const body = unwrap<{ data?: PriceTier[] } | PriceTier[]>(res);
     return Array.isArray(body) ? body : body.data ?? [];
+  },
+
+  /**
+   * Catálogo de presentaciones de venta de la tienda
+   * (`price_tiers.kind='sale_unit'`, solo activas). Es la lista que hay que
+   * cruzar con `product.enabled_price_tier_ids` para saber qué puede ofrecer
+   * el POS para un producto concreto.
+   *
+   * Se pide una sola vez por sesión de POS y se cachea en el caller: el
+   * catálogo es de tienda, no de producto.
+   */
+  async getSaleUnitTiers(): Promise<PriceTier[]> {
+    return ProductService.getPriceTiers({ kind: 'sale_unit', is_active: true });
+  },
+
+  /**
+   * Presentaciones que el POS puede ofrecer para UN producto, con el precio del
+   * paquete ya resuelto.
+   *
+   * Cruza las tres fuentes que el backend también cruza al persistir
+   * (`tier-snapshot.util.ts`): el allowlist del producto
+   * (`enabled_price_tier_ids`), el catálogo `sale_unit` de la tienda y los
+   * overrides del producto (`override_price`, `override_units_per_package`).
+   *
+   * Devuelve `[]` cuando el producto no tiene allowlist — ese producto se
+   * vende exactamente como hoy y ninguna UI cambia.
+   */
+  async getSaleUnitPresentations(
+    product: Pick<
+      Product,
+      'id' | 'base_price' | 'sale_price' | 'is_on_sale' | 'price_unit_quantity' | 'enabled_price_tier_ids' | 'has_multiple_price_tiers'
+    >,
+    options?: { tiers?: PriceTier[]; defaultTierId?: number | null },
+  ): Promise<SaleUnitPresentation[]> {
+    const enabled = product.enabled_price_tier_ids ?? [];
+    if (enabled.length === 0) return [];
+
+    const [tiers, overrides] = await Promise.all([
+      options?.tiers
+        ? Promise.resolve(options.tiers)
+        : ProductService.getSaleUnitTiers(),
+      ProductService.getProductPriceTierOverrides(product.id),
+    ]);
+
+    return resolveSaleUnitPresentations(
+      product,
+      tiers,
+      overrides,
+      options?.defaultTierId ?? null,
+    );
+  },
+
+  /**
+   * Resuelve un código de barras pistoleado.
+   *
+   * El backend responde con el producto Y —cuando el código pertenece a una
+   * presentación— con `scanned_price_tier_id`. Sin ese dato el POS recibiría el
+   * producto y tendría que adivinar la unidad de venta, que es justo lo que el
+   * código de barras vino a resolver.
+   *
+   * Devuelve `null` cuando ningún producto coincide.
+   */
+  async findByBarcode(
+    barcode: string,
+  ): Promise<{ product: Product; scannedPriceTierId: number | null } | null> {
+    const code = barcode.trim();
+    if (!code) return null;
+    const page = await ProductService.list({
+      barcode: code,
+      limit: 1,
+      include_variants: true,
+      pos_optimized: true,
+    });
+    const product = page.data?.[0];
+    if (!product) return null;
+    const scanned = product.scanned_price_tier_id;
+    return {
+      product,
+      scannedPriceTierId:
+        scanned != null && Number.isFinite(Number(scanned)) ? Number(scanned) : null,
+    };
   },
 
   /**
@@ -158,13 +254,9 @@ export const ProductService = {
    * Se usa para hidratar el form al re-editar un producto con
    * multi-tarifa.
    */
-  async getProductPriceTierOverrides(productId: number): Promise<
-    Array<{
-      price_tier_id: number;
-      override_price?: number | null;
-      override_units_per_package?: number | null;
-    }>
-  > {
+  async getProductPriceTierOverrides(
+    productId: number,
+  ): Promise<ProductPriceTierOverride[]> {
     const res = await apiClient.get(
       `/store/price-tiers/products/${productId}/overrides`,
     );

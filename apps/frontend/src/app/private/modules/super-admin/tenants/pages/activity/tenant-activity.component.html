@@ -1,0 +1,519 @@
+<div class="space-y-3 md:space-y-4">
+  <!-- ==================================================================
+       Ventana de observación
+       ================================================================== -->
+  <app-card [responsive]="true">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h2 class="text-base font-semibold text-text-primary">
+          Actividad de uso
+        </h2>
+        <p class="mt-0.5 text-xs text-text-secondary">
+          Telemetría de uso del tenant. Ninguna cifra de esta pestaña es un
+          importe, un pedido ni un cliente del comerciante.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5">
+        @for (option of windowOptions; track option) {
+          <app-button
+            [variant]="days() === option ? 'primary' : 'outline'"
+            size="xsm"
+            [disabled]="loading()"
+            (clicked)="setDays(option)"
+          >
+            {{ option }} días
+          </app-button>
+        }
+        <app-button
+          variant="ghost"
+          size="xsm"
+          [disabled]="loading()"
+          (clicked)="reload()"
+        >
+          <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+          Actualizar
+        </app-button>
+      </div>
+    </div>
+  </app-card>
+
+  @if (loading()) {
+    <app-card [responsive]="true">
+      <div
+        class="flex flex-col items-center justify-center gap-3 py-12 text-center"
+      >
+        <div
+          class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"
+        ></div>
+        <p class="text-sm text-text-secondary">Midiendo el uso del tenant…</p>
+      </div>
+    </app-card>
+  } @else if (error()) {
+    <app-card [responsive]="true">
+      <div
+        class="flex flex-col items-center justify-center gap-4 py-10 text-center"
+      >
+        <div
+          class="flex h-12 w-12 items-center justify-center rounded-full bg-red-100"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="24"
+            class="text-red-600"
+          ></app-icon>
+        </div>
+        <div class="space-y-1">
+          <h3 class="text-base font-semibold text-text-primary">
+            No se pudo leer la actividad
+          </h3>
+          <p class="mx-auto max-w-md text-sm text-text-secondary">
+            {{ error() }}
+          </p>
+        </div>
+        <app-button variant="outline" size="sm" (clicked)="reload()">
+          <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+          Reintentar
+        </app-button>
+      </div>
+    </app-card>
+  } @else if (activity(); as data) {
+    <!-- ================================================================
+         1. SEMÁFORO — la respuesta a "¿este cliente usa la app?"
+         ================================================================ -->
+    <div class="stats-container">
+      <app-stats
+        title="Último acceso"
+        [value]="lastAccessValue()"
+        [smallText]="lastAccessHint()"
+        iconName="log-in"
+        [iconBgColor]="toneIconBg(lastAccessTone())"
+        [iconColor]="toneIconColor(lastAccessTone())"
+      ></app-stats>
+
+      <app-stats
+        title="Activos · 7 días"
+        [value]="data.active_users_7d"
+        [smallText]="seatsLabel()"
+        iconName="user-check"
+        [iconBgColor]="data.active_users_7d > 0 ? 'bg-green-100' : 'bg-red-100'"
+        [iconColor]="
+          data.active_users_7d > 0 ? 'text-green-600' : 'text-red-600'
+        "
+      ></app-stats>
+
+      <app-stats
+        title="Activos · 30 días"
+        [value]="data.active_users_30d"
+        [smallText]="seatsLabel()"
+        iconName="users"
+        [iconBgColor]="
+          data.active_users_30d > 0 ? 'bg-blue-100' : 'bg-gray-100'
+        "
+        [iconColor]="
+          data.active_users_30d > 0 ? 'text-blue-600' : 'text-gray-500'
+        "
+      ></app-stats>
+
+      <app-stats
+        title="Pulso semanal"
+        [value]="weeklyTierLabel()"
+        [smallText]="weeklyTierHint()"
+        iconName="award"
+        [iconBgColor]="
+          weeklyTier() === 'ZERO' ? 'bg-gray-100' : 'bg-purple-100'
+        "
+        [iconColor]="
+          weeklyTier() === 'ZERO' ? 'text-gray-500' : 'text-purple-600'
+        "
+      ></app-stats>
+    </div>
+
+    <!-- Veredicto + nota de eventos sin atribuir -->
+    <app-card [responsive]="true">
+      <div class="space-y-3">
+        @if (verdict(); as reading) {
+          <div
+            class="flex items-start gap-2.5 rounded-lg border p-3"
+            [class]="toneBoxClass(reading.tone)"
+          >
+            <app-icon
+              [name]="reading.icon"
+              [size]="18"
+              class="mt-0.5 flex-shrink-0"
+              [class]="toneIconColor(reading.tone)"
+            ></app-icon>
+            <div class="min-w-0">
+              <p
+                class="text-sm font-semibold"
+                [class]="toneTextClass(reading.tone)"
+              >
+                {{ reading.title }}
+              </p>
+              <p class="mt-0.5 text-xs" [class]="toneTextClass(reading.tone)">
+                {{ reading.detail }}
+              </p>
+            </div>
+          </div>
+        }
+
+        <!--
+          Eventos sin atribuir. Nota explicativa, NUNCA una tarjeta más: no es
+          una métrica del tenant, es el margen de error de las que sí lo son.
+          Se muestra también cuando vale 0 — si sólo apareciera con orfandad,
+          su ausencia se leería como "todo está atribuido" sin haberlo dicho.
+        -->
+        @if (unattributed() !== null) {
+          <div
+            class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3"
+          >
+            <app-icon
+              name="help-circle"
+              [size]="16"
+              class="mt-0.5 flex-shrink-0 text-text-secondary"
+            ></app-icon>
+            <div class="min-w-0 text-xs text-text-secondary">
+              @if (unattributed()! > 0) {
+                <p>
+                  <strong class="text-text-primary">
+                    {{ unattributed() }} evento(s)
+                  </strong>
+                  de esta organización quedaron en el periodo
+                  <strong>sin tienda atribuida</strong>
+                  (~{{ unattributedShare() }}% del total del periodo). No se
+                  suman a los {{ totalEvents() }} evento(s) de arriba.
+                </p>
+                <p class="mt-1">
+                  Ocurre porque muchas escrituras registran auditoría sin pasar
+                  el <code>store_id</code>. Con orfandad, un conteo bajo en esta
+                  ficha significa
+                  <strong class="text-text-primary">«no lo sabemos»</strong>, no
+                  «no hubo uso».
+                </p>
+              } @else {
+                <p>
+                  Ningún evento del periodo quedó sin tienda atribuida: los
+                  {{ totalEvents() }} evento(s) contados de arriba son todo lo
+                  que la organización registró en la ventana.
+                </p>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </app-card>
+
+    @if (hasNoActivity()) {
+      <!-- ==============================================================
+           Estado vacío coherente: una tienda recién creada llega aquí.
+           No es un error ni una pantalla rota — es la respuesta.
+           ============================================================== -->
+      <app-card [responsive]="true">
+        <app-empty-state
+          icon="activity"
+          size="sm"
+          title="Sin actividad en la ventana"
+          [description]="
+            'No hay eventos, usuarios activos ni sesiones abiertas en los últimos ' +
+            data.window.days +
+            ' días. Prueba una ventana más amplia antes de concluir que el tenant está abandonado.'
+          "
+          [showActionButton]="false"
+        ></app-empty-state>
+      </app-card>
+    } @else {
+      <!-- ==============================================================
+           2. CURVA — acciones por día
+           ============================================================== -->
+      <app-card [responsive]="true">
+        <div class="space-y-3">
+          <header class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-text-primary">
+                Acciones por día
+              </h3>
+              <p class="mt-0.5 text-xs text-text-secondary">
+                Días naturales del tenant ({{ timezone() }}).
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <app-badge variant="neutral" size="xs">
+                {{ totalEvents() }} evento(s)
+              </app-badge>
+              @if (busiestDay(); as peak) {
+                <app-badge variant="primary" size="xs">
+                  Pico {{ peak.label }} · {{ peak.count }}
+                </app-badge>
+              }
+            </div>
+          </header>
+
+          @if (series().length) {
+            <div class="activity-chart" role="img" aria-label="Acciones por día">
+              @for (day of series(); track day.date) {
+                <div class="activity-chart__col" [title]="day.label">
+                  <div
+                    class="activity-chart__bar"
+                    [class.activity-chart__bar--seen]="day.count > 0"
+                    [style.height.%]="day.heightPct"
+                  ></div>
+                </div>
+              }
+            </div>
+
+            @if (seriesEdges(); as edges) {
+              <div
+                class="flex items-center justify-between text-[11px] text-text-secondary"
+              >
+                <span>{{ edges.first }}</span>
+                <span>máx. {{ seriesPeak() }} / día</span>
+                <span>{{ edges.last }}</span>
+              </div>
+            }
+          } @else {
+            <app-empty-state
+              icon="activity"
+              size="xsm"
+              title="Sin serie diaria"
+              description="El backend no devolvió días para esta ventana."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+        </div>
+      </app-card>
+
+      <!-- ==============================================================
+           3. DETALLE
+           ============================================================== -->
+
+      <!-- 3a. Sesiones vivas -->
+      <app-card [responsive]="true">
+        <div class="space-y-3">
+          <header class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-text-primary">
+                Sesiones vivas
+              </h3>
+              <p class="mt-0.5 text-xs text-text-secondary">
+                Tokens sin revocar y sin caducar: quién tiene la app abierta,
+                desde qué dispositivo y desde qué IP.
+              </p>
+            </div>
+            <app-badge variant="neutral" size="xs">
+              {{ sessionRows().length }}
+            </app-badge>
+          </header>
+
+          @if (sessionRows().length) {
+            <app-responsive-data-view
+              [data]="sessionRows()"
+              [columns]="sessionColumns"
+              [cardConfig]="sessionCardConfig"
+              tableSize="sm"
+              [hoverable]="true"
+              emptyIcon="monitor"
+            ></app-responsive-data-view>
+          } @else {
+            <app-empty-state
+              icon="monitor"
+              size="xsm"
+              title="Sin sesiones abiertas"
+              description="Nadie del tenant tiene una sesión activa en este momento."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+        </div>
+      </app-card>
+
+      <!-- 3b. Usuarios que mueven el tenant -->
+      <app-card [responsive]="true">
+        <div class="space-y-3">
+          <header class="min-w-0">
+            <h3 class="text-sm font-semibold text-text-primary">
+              Usuarios más activos
+            </h3>
+            <p class="mt-0.5 text-xs text-text-secondary">
+              Ranking del periodo. Incluye a quien ya no tiene asiento en el
+              tenant.
+            </p>
+          </header>
+
+          @if (topUserRows().length) {
+            @if (hasFormerStaff()) {
+              <div
+                class="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5"
+              >
+                <app-icon
+                  name="alert-circle"
+                  [size]="15"
+                  class="mt-0.5 flex-shrink-0 text-amber-600"
+                ></app-icon>
+                <p class="text-xs text-amber-900">
+                  Hay actividad de usuarios marcados
+                  <strong>«Sin asiento»</strong>: ya no están vinculados al
+                  tenant. Sus acciones aparecen en esta tabla pero
+                  <strong>no suman</strong> a los contadores de usuarios activos
+                  de arriba, que sólo cuentan la plantilla actual.
+                </p>
+              </div>
+            }
+
+            <app-responsive-data-view
+              [data]="topUserRows()"
+              [columns]="topUserColumns"
+              [cardConfig]="topUserCardConfig"
+              tableSize="sm"
+              [hoverable]="true"
+              [rowClass]="topUserRowClass"
+              emptyIcon="users"
+            ></app-responsive-data-view>
+          } @else {
+            <app-empty-state
+              icon="users"
+              size="xsm"
+              title="Sin actores en el periodo"
+              description="Ningún usuario registró eventos en esta ventana."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+        </div>
+      </app-card>
+
+      <!-- 3c. Módulos tocados + acciones más frecuentes -->
+      <app-card [responsive]="true">
+        <div class="space-y-4">
+          <header class="min-w-0">
+            <h3 class="text-sm font-semibold text-text-primary">
+              Qué partes del producto se usan
+            </h3>
+            <p class="mt-0.5 text-xs text-text-secondary">
+              Recursos tocados en el periodo y tipo de operación.
+            </p>
+          </header>
+
+          @if (topActions().length) {
+            <div class="flex flex-wrap gap-1.5">
+              @for (row of topActions(); track row.action) {
+                <app-badge variant="neutral" size="xs">
+                  {{ row.label }} · {{ row.count }}
+                </app-badge>
+              }
+            </div>
+          }
+
+          @if (modules().length) {
+            <div class="space-y-2">
+              @for (module of modules(); track module.resource) {
+                <div class="rounded-lg border border-border p-2.5">
+                  <div
+                    class="flex flex-wrap items-baseline justify-between gap-2"
+                  >
+                    <span class="text-xs font-semibold text-text-primary">
+                      {{ module.label }}
+                    </span>
+                    <span class="text-[11px] text-text-secondary">
+                      {{ module.count }} evento(s) · último
+                      {{ module.lastAt }}
+                    </span>
+                  </div>
+                  <div
+                    class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
+                  >
+                    <div
+                      class="h-full rounded-full bg-primary"
+                      [style.width.%]="module.widthPct"
+                    ></div>
+                  </div>
+                </div>
+              }
+            </div>
+          } @else {
+            <app-empty-state
+              icon="layers"
+              size="xsm"
+              title="Sin módulos tocados"
+              description="El periodo no registró operaciones sobre ningún recurso."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+        </div>
+      </app-card>
+
+      <!-- 3d. Timeline de eventos crudos -->
+      <app-card [responsive]="true">
+        <div class="space-y-3">
+          <header class="min-w-0">
+            <h3 class="text-sm font-semibold text-text-primary">
+              Últimos eventos
+            </h3>
+            <p class="mt-0.5 text-xs text-text-secondary">
+              Los registros de auditoría más recientes del tenant, tal como
+              quedaron guardados.
+            </p>
+          </header>
+
+          @if (!timelineScoped()) {
+            <div
+              class="flex items-start gap-2 rounded-lg border border-border bg-background p-3"
+            >
+              <app-icon
+                name="info"
+                [size]="16"
+                class="mt-0.5 flex-shrink-0 text-text-secondary"
+              ></app-icon>
+              <p class="text-xs text-text-secondary">
+                El registro crudo de auditoría sólo se puede acotar por tienda:
+                el endpoint no acepta un filtro de organización. Pedirlo desde
+                una ficha de organización devolvería eventos de otros tenants,
+                así que aquí no se muestra. Abre la ficha de una de sus tiendas
+                para ver su timeline.
+              </p>
+            </div>
+          } @else if (timelineUnavailable()) {
+            <div
+              class="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3"
+            >
+              <app-icon
+                name="alert-circle"
+                [size]="16"
+                class="mt-0.5 flex-shrink-0 text-amber-600"
+              ></app-icon>
+              <p class="text-xs text-amber-900">
+                No se pudo leer el registro de auditoría. El resto de la ficha
+                sigue siendo válido: estos eventos son un detalle adicional, no
+                la fuente de los contadores.
+              </p>
+            </div>
+          } @else if (timelineRows().length) {
+            <app-responsive-data-view
+              [data]="timelineRows()"
+              [columns]="timelineColumns"
+              [cardConfig]="timelineCardConfig"
+              tableSize="sm"
+              [hoverable]="true"
+              emptyIcon="history"
+            ></app-responsive-data-view>
+          } @else {
+            <app-empty-state
+              icon="history"
+              size="xsm"
+              title="Sin eventos recientes"
+              description="El registro de auditoría no tiene entradas atribuidas a esta tienda."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+        </div>
+      </app-card>
+    }
+  } @else {
+    <app-card [responsive]="true">
+      <app-empty-state
+        icon="activity"
+        size="sm"
+        title="Actividad no disponible"
+        description="La ficha del tenant todavía no está cargada."
+        [showActionButton]="false"
+      ></app-empty-state>
+    </app-card>
+  }
+</div>

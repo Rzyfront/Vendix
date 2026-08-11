@@ -1,4 +1,4 @@
-import { Component, output, inject, DestroyRef } from '@angular/core';
+import { Component, computed, output, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Observable } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -94,6 +94,31 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <span class="font-medium">{{
                 formatCurrency(summary()?.subtotal || 0)
               }}</span>
+            </div>
+            <!--
+              QUI-661 — Descuento comercial GENERAL de la factura. Se muestra
+              ANTES del IVA porque ese es el orden real del cálculo: el
+              descuento baja la base gravable, y el IVA de abajo ya sale de la
+              base rebajada. El backend lo prorratea por línea para que llegue
+              también al costo capitalizado del inventario.
+            -->
+            <div class="flex justify-between items-center text-xs text-text-secondary">
+              <span>Descuento general</span>
+              <div class="flex items-center gap-2">
+                <input
+                  type="number"
+                  class="w-20 px-2 py-0.5 text-right border border-border rounded bg-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  [ngModel]="discountAmount()"
+                  (ngModelChange)="updateGeneralDiscount($event)"
+                  min="0"
+                  step="0.01"
+                />
+                @if ((summary()?.discount_amount || 0) > 0) {
+                  <span class="font-medium text-amber-600">
+                    -{{ formatCurrency(summary()!.discount_amount) }}
+                  </span>
+                }
+              </div>
             </div>
             @if (hasVat()) {
               <div class="flex justify-between text-xs text-text-secondary">
@@ -307,6 +332,29 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                           min="0"
                         ></app-input>
                       </div>
+                      <!--
+                        QUI-661 — Descuento comercial de ESTA línea, en %.
+                        Baja el costo unitario ANTES de derivar el IVA, así que
+                        reduce la base gravable y el costo que se capitaliza al
+                        inventario. No es lo mismo que teclear un costo menor:
+                        el descuento queda registrado como tal.
+                      -->
+                      <div class="flex flex-col">
+                        <span
+                          class="text-[10px] text-text-secondary uppercase mb-1"
+                          >Desc. %</span
+                        >
+                        <app-input
+                          type="number"
+                          size="sm"
+                          [ngModel]="item.discount"
+                          (ngModelChange)="updateDiscount(item.id, $event)"
+                          customInputClass="text-right !h-7 !py-0"
+                          customWrapperClass="!mt-0"
+                          min="0"
+                          max="100"
+                        ></app-input>
+                      </div>
                       <div class="flex flex-col items-end">
                         <span
                           class="text-[10px] text-text-secondary uppercase mb-1"
@@ -489,6 +537,14 @@ export class PopCartComponent {
   readonly isEmpty = toSignal(this.isEmpty$, { initialValue: false });
   readonly summary = toSignal(this.summary$, { initialValue: null! });
   readonly loading = toSignal(this.loading$, { initialValue: false });
+  /**
+   * QUI-661 — general commercial discount, read off the cart state so the input
+   * survives a cart reload (editing an existing draft rehydrates it from
+   * `purchase_orders.discount_amount`).
+   */
+  readonly discountAmount = computed(
+    () => this.cartState()?.discountAmount ?? 0,
+  );
   hoveredRemoveTooltip: string | null = null;
   disabledActionsTooltipVisible = false;
 
@@ -596,6 +652,27 @@ export class PopCartComponent {
       item.id,
       value === header ? undefined : value,
     );
+  }
+
+  /**
+   * QUI-661 — per-line commercial discount, as a percentage.
+   *
+   * Goes straight through the cart service (not `updateCartItem`) because the
+   * discount is not an item attribute the backend resolves: it changes the
+   * line's net, its VAT and the order's taxable base, so the service recomputes
+   * the whole summary from it.
+   */
+  updateDiscount(itemId: string, percentage: number): void {
+    this.cartService.setItemDiscount(itemId, Number(percentage));
+  }
+
+  /**
+   * QUI-661 — general commercial discount on the whole invoice, in money.
+   * The backend prorates it across the lines; here it only needs to reach the
+   * cart state so the summary recomputes and the payload carries it.
+   */
+  updateGeneralDiscount(amount: number): void {
+    this.cartService.setDiscountAmount(Number(amount));
   }
 
   updateCost(itemId: string, cost: number): void {

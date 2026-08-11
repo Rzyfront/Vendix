@@ -276,4 +276,101 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       expect(persisted().branding.logo_url).toBeNull();
     });
   });
+
+  // ------------------------------------------- merge por clave de la sección vexi
+
+  /**
+   * El bucle de merge de `updateSettings` REEMPLAZA la sección enviada. Para
+   * `vexi` eso es destructivo, porque sus dos campos se editan desde controles
+   * distintos de la misma pantalla: el interruptor maestro manda
+   * `{ enabled }` y el selector de motor manda `{ voice_engine }`. Con reemplazo
+   * de sección, cada uno borraba al otro y la tienda volvía al default sin aviso.
+   *
+   * Quitar el bloque de merge de `vexi` debe romper exactamente los dos primeros
+   * casos de aquí.
+   */
+  describe('updateSettings — merge por clave de vexi', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+
+      // Cualquier PATCH sobre `vexi` pasa por una compuerta de rol propia
+      // (owner/admin), independiente del permiso `store:settings:update`. Sin
+      // este mock los cuatro casos fallan con SYS_FORBIDDEN_001 y no se llega a
+      // medir el merge.
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['owner'] as any);
+
+      stored = {
+        ...STORED_WITH_CASH_REGISTER_ON,
+        vexi: { enabled: true, voice_engine: 'realtime' },
+      };
+
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('mover el interruptor conserva el motor elegido', async () => {
+      await service.updateSettings({ vexi: { enabled: false } });
+
+      expect(stored.vexi.enabled).toBe(false);
+      // Éste es el aserto que importa: sin el merge por clave, `voice_engine`
+      // desaparecía del objeto persistido y la tienda caía al default.
+      expect(stored.vexi.voice_engine).toBe('realtime');
+    });
+
+    it('cambiar el motor conserva el interruptor', async () => {
+      await service.updateSettings({ vexi: { voice_engine: 'pipeline' } });
+
+      expect(stored.vexi.voice_engine).toBe('pipeline');
+      expect(stored.vexi.enabled).toBe(true);
+    });
+
+    it('un PATCH que no menciona vexi no toca la sección', async () => {
+      await service.updateSettings({ inventory: { low_stock_threshold: 5 } });
+
+      expect(stored.vexi).toEqual({
+        enabled: true,
+        voice_engine: 'realtime',
+      });
+    });
+
+    it('acepta la sección completa sin duplicar ni perder claves', async () => {
+      await service.updateSettings({
+        vexi: { enabled: false, voice_engine: 'pipeline' },
+      });
+
+      expect(stored.vexi).toEqual({
+        enabled: false,
+        voice_engine: 'pipeline',
+      });
+    });
+
+    it('un manager no puede cambiar el motor, no sólo el interruptor', async () => {
+      // El motor no es una preferencia cosmética: sólo el pipeline pasa por la
+      // tarjeta de confirmación, así que elegirlo amplía lo que la asistente
+      // puede escribir. `store:settings:update` lo tiene también un manager, de
+      // modo que la compuerta de rol es lo único que separa a un manager de
+      // ampliar la capacidad de Vexi con un curl.
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['manager'] as any);
+
+      await expect(
+        service.updateSettings({ vexi: { voice_engine: 'pipeline' } }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_FORBIDDEN_001' });
+
+      expect(stored.vexi.voice_engine).toBe('realtime');
+    });
+  });
 });

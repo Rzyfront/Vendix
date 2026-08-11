@@ -89,6 +89,33 @@
               <app-icon slot="icon" name="plus" [size]="14"></app-icon>
             </app-button>
           </div>
+
+          <!--
+            QUI-653 — "Para llevar" por línea. Solo aparece cuando el producto ya
+            está en la selección: ofrecerlo antes de elegir cantidad sugeriría que
+            marcarlo agrega el producto, que no es el caso.
+
+            El flag aplica a TODA la línea. Marcar solo algunas unidades de una
+            línea con cantidad > 1 exige partir la línea, que es el eje de
+            QUI-655 y no de este ticket.
+          -->
+          @if (quantityOf(row.id) > 0) {
+            <button
+              type="button"
+              class="takeaway-toggle"
+              [class.is-on]="isTakeaway(row.id)"
+              [attr.aria-pressed]="isTakeaway(row.id)"
+              [attr.title]="
+                isTakeaway(row.id)
+                  ? 'Se empaca para llevar. Toca para volverlo consumo en la mesa.'
+                  : 'Marcar para llevar (se empaca)'
+              "
+              (click)="toggleTakeaway(row)"
+            >
+              <app-icon name="shopping-bag" [size]="12"></app-icon>
+              Para llevar
+            </button>
+          }
         </div>
       }
     </div>

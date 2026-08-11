@@ -1,5 +1,9 @@
 // Components
 export { AiReviewAckComponent } from './ai-review-ack/ai-review-ack.component';
+export {
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
+} from './ai-discard-toggle/ai-discard-toggle.component';
 export { AlertBannerComponent } from './alert-banner/alert-banner.component';
 export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
 export { DianResolutionScannerModalComponent } from './dian-resolution-scanner/dian-resolution-scanner-modal.component';
@@ -70,6 +74,8 @@ export { SubscriptionBannerComponent } from './subscription-banner/subscription-
 export { AiPaywallModalComponent } from './ai-paywall-modal/ai-paywall-modal.component';
 export { DateRangePickerComponent } from './date-range-picker/date-range-picker.component';
 export { DiffViewerComponent } from './diff-viewer/diff-viewer.component';
+export { DianTechnicalResponseComponent } from './dian-technical-response/dian-technical-response.component';
+export type { DianTechnicalResponseData } from './dian-technical-response/dian-technical-response.component';
 export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/store-fiscal-identity-form.component';
 export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
@@ -190,3 +196,53 @@ export { CHART_THEMES } from './chart';
 
 // Directives
 export { CurrencyInputDirective } from '../directives/currency-input.directive';
+
+/**
+ * DIAN compartido — una sola implementación gobierna el panel del comerciante y
+ * la consola de super admin. Ver `./dian/index.ts`.
+ */
+export {
+  DianDocumentTypeCardComponent,
+  DianCertificatePanelComponent,
+  DianTestSetPanelComponent,
+  DianResolutionFormComponent,
+  FISCAL_DOCUMENT_TYPES,
+  DIAN_CONFIGURATION_TYPES,
+  DIAN_CONFIGURATION_TYPE_LABELS,
+  FISCAL_DOCUMENT_REQUIREMENTS,
+  RESOLUTION_DOCUMENT_TYPES,
+  DIAN_ENABLEMENT_STATUS_LABELS,
+  DIAN_ENVIRONMENT_LABELS,
+  CERTIFICATE_EXPIRY_ALERT_DAYS,
+  RESOLUTION_RANGE_WARNING_PERCENT,
+  isFiscalDocumentType,
+  requirementsFor,
+  configurationTypeFor,
+  defaultDocumentTypeFor,
+  documentTypesFor,
+  requiresAuthorizedRange,
+  acceptsTechnicalKey,
+  resolutionDocumentTypesFor,
+  validateResolutionDraft,
+  isBlockingCheck,
+  isActionableCheck,
+  summarizeReadiness,
+  warningDetail,
+} from './dian';
+export type {
+  DianResolutionFormValue,
+  FiscalDocumentType,
+  DianConfigurationType,
+  FiscalKeyAlgorithm,
+  FiscalDocumentRequirements,
+  FiscalRequirementViolation,
+  FiscalResolutionDraft,
+  ProductionReadinessCheck,
+  ProductionReadinessReport,
+  FiscalReadinessResolution,
+  FiscalReadinessAxis,
+  FiscalReadinessResponse,
+  DianEnablementStatus,
+  DianCertificateState,
+  ReadinessSummary,
+} from './dian';

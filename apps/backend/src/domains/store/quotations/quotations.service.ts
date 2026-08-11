@@ -16,7 +16,7 @@ import { OrdersService } from '../orders/orders.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
-import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 
 @Injectable()
 export class QuotationsService {
@@ -82,7 +82,8 @@ export class QuotationsService {
     const items = createQuotationDto.items || [];
 
     // Multi-tarifa: validar permission + resolver snapshots por línea.
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
       items,
       context,
     );
@@ -234,7 +235,8 @@ export class QuotationsService {
     // If items are provided, delete and recreate
     if (updateQuotationDto.items) {
       const ctx = RequestContextService.getContext();
-      const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      const tierSnapshots = await resolveTierSnapshotsForItems(
+        this.prisma,
         updateQuotationDto.items,
         ctx,
       );
@@ -599,135 +601,6 @@ export class QuotationsService {
         updated_at: new Date(),
       },
       include: this.QUOTATION_INCLUDE,
-    });
-  }
-
-  /**
-   * Multi-tarifa: idéntica a OrdersService.resolveTierSnapshotsForItems.
-   * Centralizar el helper aquí evita un import cruzado entre dominios y
-   * mantiene la quotation independiente del flujo de stock.
-   */
-  private async resolveTierSnapshotsForItems(
-    items: Array<{
-      product_id?: number | null;
-      product_variant_id?: number | null;
-      quantity: number;
-      applied_price_tier_id?: number | null;
-    }>,
-    context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<
-    Array<{
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null>
-  > {
-    const tierIds = new Set<number>();
-    for (const item of items) {
-      if (
-        item.applied_price_tier_id !== undefined &&
-        item.applied_price_tier_id !== null
-      ) {
-        tierIds.add(Number(item.applied_price_tier_id));
-      }
-    }
-    if (tierIds.size === 0) {
-      return items.map(() => null);
-    }
-
-    const permissions = context?.permissions ?? [];
-    const isSuperAdmin = !!context?.is_super_admin;
-    const isOwner = !!context?.is_owner;
-    if (
-      !isSuperAdmin &&
-      !isOwner &&
-      !permissions.includes('store:products:apply_pricing_tier')
-    ) {
-      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
-    }
-
-    const tiers = await this.prisma.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIds) }, is_active: true },
-      select: { id: true, name: true, is_package_unit: true, units_per_package: true },
-    });
-    type TierRow = (typeof tiers)[number];
-    const tierById = new Map<number, TierRow>(
-      tiers.map((t): [number, TierRow] => [t.id, t]),
-    );
-
-    const productIds = Array.from(
-      new Set(
-        items
-          .map((i) => i.product_id)
-          .filter((id): id is number => typeof id === 'number'),
-      ),
-    );
-    const assignments = productIds.length
-      ? await this.prisma.product_price_tier_assignments.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIds) },
-          },
-          select: { product_id: true, price_tier_id: true },
-        })
-      : [];
-    const allowedTierKeys = new Set(
-      assignments.map((assignment) =>
-        `${assignment.product_id}:${assignment.price_tier_id}`,
-      ),
-    );
-
-    // Per-product packaging overrides (override_units_per_package wins over
-    // tier.units_per_package in the packSize cascade). Keyed by
-    // product_id:variant_id:price_tier_id (variant null → "null").
-    const overrides = productIds.length
-      ? await this.prisma.product_price_tier_overrides.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIds) },
-          },
-          select: {
-            product_id: true,
-            variant_id: true,
-            price_tier_id: true,
-            override_units_per_package: true,
-          },
-        })
-      : [];
-    const overrideUnitsByKey = new Map<string, number | null>(
-      overrides.map(
-        (o): [string, number | null] => [
-          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
-          o.override_units_per_package,
-        ],
-      ),
-    );
-
-    return items.map((item) => {
-      const tid = item.applied_price_tier_id;
-      if (tid === undefined || tid === null) return null;
-      const tier = tierById.get(Number(tid));
-      if (!tier) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const productId = item.product_id;
-      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tid)}`)) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const variantId = item.product_variant_id ?? null;
-      const override_units_per_package = overrideUnitsByKey.get(
-        `${productId}:${variantId ?? 'null'}:${Number(tid)}`,
-      );
-      const stock_units_consumed = resolveStockUnitsConsumed(
-        Number(item.quantity),
-        tier?.units_per_package,
-        override_units_per_package,
-      );
-      return {
-        tier_id: tier.id,
-        tier_name: tier.name,
-        stock_units_consumed,
-      };
     });
   }
 

@@ -382,6 +382,23 @@ export interface StoreSettings {
  */
 export interface VexiSettings {
   enabled: boolean;
+
+  /**
+   * Which engine answers a voice turn.
+   *
+   * - `realtime` — WebRTC speech-to-speech straight to the provider. One hop, but
+   *   audio tokens, and it cannot execute writes: the tools that need
+   *   confirmation have no approval surface on that path.
+   * - `pipeline` — transcribe, answer with the chat's own text agent, dictate.
+   *   Slower on paper and cheaper in practice, and it *inherits* the whole tool
+   *   catalog, the confirmation card, the conversation and the write audit,
+   *   because a voice turn is literally a chat turn.
+   *
+   * Defaults to `realtime` so the behaviour of every existing store is unchanged
+   * until its numbers say otherwise. This is a separate axis from the interface:
+   * the panel toggles chat ⇄ voice at runtime regardless of which engine answers.
+   */
+  voice_engine?: 'realtime' | 'pipeline';
 }
 
 export interface GeneralSettings {
@@ -509,12 +526,109 @@ export interface ScaleDeviceConfig {
 export const PRINT_FORMATS = [
   'letter',
   'half_letter',
+  'a4',
   'thermal_80',
   'thermal_58',
 ] as const;
 
 /** Derived from the runtime list so `@IsEnum` and the type never drift apart. */
 export type PrintFormat = (typeof PRINT_FORMATS)[number];
+
+/**
+ * Every document the application can print, as its own configurable unit.
+ *
+ * The configurable unit is the store × the document type, not the store alone:
+ * a dispatch note, a route sheet, a quotation and a POS sale are different
+ * papers with different jobs, so one global format would be wrong for most of
+ * them. A single global setting was the shape the system grew into by accident
+ * — ten emitters each hardcoding their own `@page` — and it is what this list
+ * replaces.
+ */
+export const PRINT_DOCUMENTS = [
+  'pos_ticket',
+  'invoice',
+  /** Short hand-carried dispatch slip for `direct_delivery` (see QUI-659). */
+  'dispatch_ticket',
+  'dispatch_note',
+  'dispatch_route',
+  'sales_order',
+  'purchase_order',
+  'quotation',
+  'reservation',
+  'layaway',
+  'guest_order',
+  'withholding_certificate',
+] as const;
+
+export type PrintDocument = (typeof PRINT_DOCUMENTS)[number];
+
+/**
+ * Per-document print settings. `margin_mm` is ignored for `thermal_*`, whose
+ * page is a roll (`<width>mm auto`) with no page margin to speak of.
+ */
+export interface PrintDocumentConfig {
+  format: PrintFormat;
+  /** Page margin in millimetres. Ignored on roll formats. */
+  margin_mm?: number;
+  /** Printed copies. 0 = do not print. */
+  copies?: number;
+}
+
+/**
+ * Per-store, per-document print configuration — the single source of truth the
+ * shared print service reads. Scope is the STORE: two stores of the same
+ * organization may print differently, and nothing is inherited from the
+ * organization. Absent entries fall back to `PRINT_DEFAULTS`.
+ */
+export type PrintingSettings = Partial<
+  Record<PrintDocument, PrintDocumentConfig>
+>;
+
+/**
+ * System defaults, taken from what the desktop build already does today so a
+ * store that never opens this screen keeps printing exactly as before.
+ *
+ * `dispatch_route` keeps its deliberately thin margin — it needs printable
+ * width, and its builder already used a 24 pt margin for that reason.
+ *
+ * `invoice` is the one entry that CHANGES live behaviour rather than recording
+ * it. `invoice_format` is read by `invoice-pdf.service.ts` (`resolveInvoiceFormat`)
+ * and defaults to `letter` in `default-store-settings.ts`, so stores already
+ * issuing electronic invoices print letter today. Moving the default to an
+ * 80 mm roll is a deliberate product decision, not a formalisation — and the
+ * graphic representation carries mandatory DIAN content (issuer data, CUFE,
+ * QR), so the roll layout must still fit all of it.
+ */
+export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
+  pos_ticket: { format: 'thermal_80', copies: 1 },
+  invoice: { format: 'thermal_80', copies: 1 },
+  dispatch_ticket: { format: 'thermal_80', copies: 1 },
+  dispatch_note: { format: 'a4', margin_mm: 20, copies: 1 },
+  dispatch_route: { format: 'a4', margin_mm: 8, copies: 1 },
+  sales_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  purchase_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  quotation: { format: 'a4', margin_mm: 20, copies: 1 },
+  reservation: { format: 'a4', margin_mm: 20, copies: 1 },
+  layaway: { format: 'a4', margin_mm: 20, copies: 1 },
+  guest_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  withholding_certificate: { format: 'a4', margin_mm: 20, copies: 1 },
+};
+
+/**
+ * Page geometry per format. `page_size` is the CSS `@page size` rule; without
+ * it the browser falls back to its own default and silently ignores the
+ * configured paper. `width_mm` is null on roll formats, whose height is `auto`.
+ */
+export const PRINT_PAGE_GEOMETRY: Record<
+  PrintFormat,
+  { page_size: string; width_mm: number; is_roll: boolean }
+> = {
+  letter: { page_size: 'letter', width_mm: 216, is_roll: false },
+  half_letter: { page_size: '216mm 140mm', width_mm: 216, is_roll: false },
+  a4: { page_size: 'A4', width_mm: 210, is_roll: false },
+  thermal_80: { page_size: '80mm auto', width_mm: 80, is_roll: true },
+  thermal_58: { page_size: '58mm auto', width_mm: 58, is_roll: true },
+};
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -540,12 +654,26 @@ export interface ReceiptsSettings {
    * channel, and the UI requires at least one of the two to stay on.
    */
   deliver_printed?: boolean;
-  /** Paper format of the invoice's graphic representation. */
+  /**
+   * @deprecated Superseded by `printing.invoice`. Kept so settings rows written
+   * before the per-document block stay valid and can be migrated; it was never
+   * read by any printer, so nothing depended on it.
+   */
   invoice_format?: PrintFormat;
-  /** Paper format of the POS ticket, which may differ from the invoice's. */
+  /**
+   * @deprecated Superseded by `printing.pos_ticket`. Still honoured as a
+   * fallback while stores are migrated.
+   */
   pos_ticket_format?: PrintFormat;
-  /** Printed POS ticket copies. 0 = do not print. */
+  /** @deprecated Superseded by `printing.pos_ticket.copies`. */
   pos_ticket_copies?: number;
+  /**
+   * Per-document print configuration. Lives under `receipts` rather than as a
+   * new top-level section on purpose: `KNOWN_SECTIONS` silently drops unknown
+   * sections while still answering 200, so a new section would look saved and
+   * never persist. `receipts` is already registered.
+   */
+  printing?: PrintingSettings;
 }
 
 export interface BusinessHoursBlock {

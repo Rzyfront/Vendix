@@ -6,7 +6,6 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
-import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
@@ -61,6 +60,26 @@ type DatePreset =
           [min]="startDate() || undefined"
         ></app-input>
       </div>
+
+      <!--
+        QUI-609 chip — when a preset is active and the local dates are empty
+        (meaning the backend resolves the range against stores.timezone),
+        surface that fact so the user knows why the inputs look blank and what
+        the analytics screen will compute against. The fully resolved range
+        (e.g. "1–4 ago 2026 · hora de la tienda") would require every analytics
+        response to carry period: { start_date, end_date, label } — a follow-up
+        change. For now the chip shows the preset name as the visible anchor of
+        "what range is active".
+      -->
+      @if (selectedPreset() && !startDate() && !endDate()) {
+        <span
+          class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200"
+          data-testid="date-range-resolved-chip"
+          aria-live="polite"
+        >
+          {{ activePresetLabel() }} · hora de la tienda
+        </span>
+      }
     </div>
   `,
 })
@@ -103,13 +122,16 @@ export class DateRangeFilterComponent {
 
   onPresetChange(preset: string): void {
     this.selectedPreset.set(preset as DatePreset);
-    const range = this.getDateRange(preset as DatePreset);
-    if (range) {
-      this.startDate.set(range.start_date);
-      this.endDate.set(range.end_date);
-      this.dateRangeSync.setDateRange(range);
-      this.valueChange.emit(range);
-    }
+    // QUIs-609: the device clock does NOT define "today" — the store's timezone
+    // does. We let the backend resolve the preset against `stores.timezone`
+    // (via `localCalendarRange` in `store-timezone.util`), so we no longer
+    // derive `start_date` / `end_date` locally. Empty strings are sent so the
+    // service knows to drop them and forward `date_preset` instead. The
+    // resolved range comes back via `value()` from the parent and the effect
+    // above repopulates the inputs.
+    this.startDate.set('');
+    this.endDate.set('');
+    this.emitRange(preset as DatePreset);
   }
 
   onStartDateChange(date: string): void {
@@ -138,57 +160,9 @@ export class DateRangeFilterComponent {
     this.valueChange.emit(range);
   }
 
-  private getDateRange(preset: DatePreset): DateRangeFilter | null {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let start: Date;
-    let end: Date;
-
-    switch (preset) {
-      case 'today':
-        start = today;
-        end = today;
-        break;
-      case 'yesterday':
-        start = new Date(today);
-        start.setDate(start.getDate() - 1);
-        end = start;
-        break;
-      case 'thisWeek':
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        end = today;
-        break;
-      case 'lastWeek':
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay() - 7);
-        end = new Date(start);
-        end.setDate(end.getDate() + 6);
-        break;
-      case 'thisMonth':
-        start = new Date(today.getFullYear(), today.getMonth(), 1);
-        end = today;
-        break;
-      case 'lastMonth':
-        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        end = new Date(today.getFullYear(), today.getMonth(), 0);
-        break;
-      case 'thisYear':
-        start = new Date(today.getFullYear(), 0, 1);
-        end = today;
-        break;
-      case 'lastYear':
-        start = new Date(today.getFullYear() - 1, 0, 1);
-        end = new Date(today.getFullYear() - 1, 11, 31);
-        break;
-      default:
-        return null;
-    }
-
-    return {
-      start_date: toLocalDateString(start),
-      end_date: toLocalDateString(end),
-      preset,
-    };
+  /** Human label for the chip, derived from the active preset. */
+  activePresetLabel(): string {
+    const opt = this.presetOptions.find((o) => o.value === this.selectedPreset());
+    return opt?.label ?? String(this.selectedPreset());
   }
 }

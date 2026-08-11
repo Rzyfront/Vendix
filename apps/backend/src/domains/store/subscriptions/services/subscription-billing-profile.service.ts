@@ -3,6 +3,7 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { computeNitDv, normalizeNit } from '@common/utils/nit.util';
 import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.constants';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
 
 /**
@@ -175,9 +176,11 @@ export class SubscriptionBillingProfileService {
         email: true,
         document_type: true,
         verification_digit: true,
+        name: true,
         person_type: true,
         tax_regime: true,
         fiscal_responsibilities: true,
+        organization_settings: { select: { settings: true } },
         addresses: {
           where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
@@ -201,6 +204,25 @@ export class SubscriptionBillingProfileService {
       this.fiscalModuleActive(organizationId),
     ]);
 
+    const orgFiscalData = ((org?.organization_settings as any)?.settings
+      ?.fiscal_data ?? null) as Record<string, unknown> | null;
+
+    // NIT y razón social resueltos por el resolvedor único — la ÚNICA fuente —
+    // en su variante PERMISIVA. Esta es una superficie de LECTURA/EDICIÓN: el
+    // cliente abre la sección fiscal del checkout justamente para completar lo
+    // que le falta. Con el resolvedor estricto, `get()` lanzaba
+    // «No hay municipio DIAN para el NIT …» y la sección quedaba inaccesible
+    // para los tenants que más necesitan llenarla. La emisión sigue usando el
+    // resolvedor estricto; ver la nota de asimetría lectura/emisión en
+    // `fiscal-identity.helper.ts`.
+    const { identity } = tryResolveTenantFiscalIdentity({
+      nit: org?.tax_id ?? '',
+      fiscal_data: orgFiscalData,
+      organization: org
+        ? { legal_name: org.legal_name, name: org.name }
+        : null,
+    });
+
     return {
       // `enabled: false` means the checkout must not render the fiscal section
       // at all — not that the data is missing.
@@ -209,14 +231,22 @@ export class SubscriptionBillingProfileService {
       locked: complete && fiscalActive,
       profile: org
         ? {
-            legal_name: org.legal_name,
-            tax_id: org.tax_id,
+            legal_name: identity.legal_name,
+            tax_id: identity.nit || null,
             email: org.email,
             document_type: org.document_type,
-            verification_digit: org.verification_digit,
+            verification_digit: identity.nit_dv || null,
             person_type: org.person_type,
-            tax_regime: org.tax_regime,
-            fiscal_responsibilities: org.fiscal_responsibilities,
+            // `tax_regime` y `fiscal_responsibilities` se leen del JSON
+            // (fiscal_data) — el plan los declara proyección derivada y
+            // nunca lectura de columna.
+            tax_regime:
+              (orgFiscalData?.['tax_regime'] as string) ?? null,
+            fiscal_responsibilities: Array.isArray(
+              orgFiscalData?.['tax_responsibilities'],
+            )
+              ? (orgFiscalData?.['tax_responsibilities'] as string[])
+              : org.fiscal_responsibilities,
             address: org.addresses[0] ?? null,
           }
         : null,
@@ -285,10 +315,9 @@ export class SubscriptionBillingProfileService {
       where: { id: organizationId },
       select: {
         legal_name: true,
-        tax_id: true,
         email: true,
-        document_type: true,
-        verification_digit: true,
+        name: true,
+        organization_settings: { select: { settings: true } },
         addresses: {
           where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
@@ -299,15 +328,17 @@ export class SubscriptionBillingProfileService {
     });
     if (!org) return false;
 
-    // The NIT is often stored with the DV inline (`800987654-3`). The DV is
-    // derived from the number, so it is never "missing" for a valid NIT — the
-    // check is really that the number itself parses.
-    const { number, dv } = normalizeNit(org.tax_id);
-    const documentType = org.document_type ?? (org.tax_id ? '31' : null);
-    if (documentType === '31' && !dv) return false;
+    // Validación de NIT desde el JSON, no la columna. Si `fiscal_data.nit`
+    // falta o no parsea, el perfil está incompleto — sin caer a `org.tax_id`
+    // (que podría estar rancio o vacío por el defecto histórico que cerró
+    // el plan de SSOT).
+    const fiscalDataNit = (org?.organization_settings as any)?.settings
+      ?.fiscal_data?.nit as string | undefined;
+    const { number, dv } = normalizeNit(fiscalDataNit ?? '');
+    if (!number) return false;
+    if (!dv) return false; // el DV se deriva del NIT, no se lee de columna
 
     return !!(
-      number &&
       org.legal_name?.trim() &&
       org.email?.trim() &&
       org.addresses[0]?.municipality_code

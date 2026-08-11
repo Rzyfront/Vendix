@@ -2,10 +2,6 @@ import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
 import {
-  dianAmount,
-  dianLineExtension,
-} from '../../../utils/dian-money.util';
-import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
 } from '../constants/dian-document-types';
@@ -91,6 +87,10 @@ export class UblCreditNoteBuilder {
           ? DIAN_OPERATION_TYPES.CREDIT_NOTE_WITH_REF
           : DIAN_OPERATION_TYPES.CREDIT_NOTE_NO_REF,
       );
+    // DEUDA CONOCIDA: la DIAN observa esto con CAD03 y espera
+    // `UBL_CONSTANTS.PROFILE_ID_CREDIT_NOTE`. Es NOTIFICACIÓN, no rechazo, así que
+    // quedó fuera del alcance del arreglo de las notas —limitado a lo que bloquea—,
+    // pero el literal ya está capturado en `xml-namespaces.ts` con su procedencia.
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(credit_note_data.invoice_number);
@@ -155,41 +155,34 @@ export class UblCreditNoteBuilder {
     }
 
     // Parties
-    UblCommonBuilder.buildSupplierParty(doc, issuer);
+    UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
     UblCommonBuilder.buildCustomerParty(doc, customer);
+
+    // Payment means — mandatory group `1..N` (rule CAN01, «Rechazo si grupo no
+    // informado»). Goes here because UBL fixes the order
+    // `DeliveryTerms → PaymentMeans → PaymentTerms → TaxTotal → monetary total`.
+    UblCommonBuilder.buildPaymentMeans(doc, credit_note_data);
 
     // Tax totals
     UblCommonBuilder.buildTaxTotals(doc, credit_note_data.taxes, currency);
 
-    // Legal monetary total
+    // `cac:LegalMonetaryTotal` is correct HERE — rule CAU01 points at
+    // `/CreditNote/cac:LegalMonetaryTotal`. The debit note is the exception and
+    // uses `cac:RequestedMonetaryTotal`; do not unify the two.
     UblCommonBuilder.buildLegalMonetaryTotal(doc, credit_note_data, currency);
 
-    // Credit note lines (similar to invoice lines but with CreditNoteLine)
-    credit_note_data.items.forEach((item, index) => {
-      const line = doc.ele(UBL_NAMESPACES.CAC, 'CreditNoteLine');
-      line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
-      line
-        .ele(UBL_NAMESPACES.CBC, 'CreditedQuantity')
-        .att('unitCode', 'EA')
-        .txt(item.quantity);
-      line
-        .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
-        .att('currencyID', currency)
-        .txt(dianLineExtension(item));
-
-      const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
-      ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
-
-      const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
-      price
-        .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(item.unit_price));
-      price
-        .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
-        .txt('1.00');
-    });
+    // `cac:CreditNoteLine` comparte cuerpo con `cac:InvoiceLine`: en UBL los dos
+    // tipos difieren SOLO en el nombre del elemento de cantidad. Se delega al
+    // builder común en vez de escribir la línea aparte, porque esa duplicación
+    // dejó la nota crédito sin `cac:TaxTotal` de línea (regla CAS01b) y obligó a
+    // replicar a mano el arreglo de FAZ09 — 10 de los 50 documentos del set.
+    UblCommonBuilder.buildDocumentLines(
+      doc,
+      credit_note_data.items,
+      credit_note_data.taxes,
+      currency,
+      { line_element: 'CreditNoteLine', quantity_element: 'CreditedQuantity' },
+    );
 
     return doc.end({ prettyPrint: true });
   }

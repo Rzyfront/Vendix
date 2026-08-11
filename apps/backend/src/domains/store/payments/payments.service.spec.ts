@@ -27,6 +27,7 @@ import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -46,6 +47,7 @@ describe('PaymentsService', () => {
   let prisma: StorePrismaService;
   let promotionEngine: PromotionEngineService;
   let couponsService: CouponsService;
+  let fiscalThreshold: FiscalInvoiceThresholdService;
 
   const mockUser = {
     id: 1,
@@ -85,6 +87,10 @@ describe('PaymentsService', () => {
       stores: {
         findUnique: jest.fn(),
       },
+      // `processPosPayment` corre todo el cobro dentro de una transacción; el
+      // mock ejecuta el callback en línea para poder observar lo que ocurre
+      // adentro sin una base de datos.
+      $transaction: jest.fn(),
     };
 
     const mockPaymentGateway = {
@@ -201,6 +207,9 @@ describe('PaymentsService', () => {
     prisma = module.get<StorePrismaService>(StorePrismaService);
     promotionEngine = module.get<PromotionEngineService>(PromotionEngineService);
     couponsService = module.get<CouponsService>(CouponsService);
+    fiscalThreshold = module.get<FiscalInvoiceThresholdService>(
+      FiscalInvoiceThresholdService,
+    );
   });
 
   it('should be defined', () => {
@@ -293,6 +302,156 @@ describe('PaymentsService', () => {
       await expect(
         service.processPayment(createPaymentDto, mockUser),
       ).rejects.toBeDefined();
+    });
+  });
+
+  /**
+   * QUI-673 — el gate fiscal se apagaba en silencio en cada cobro POS.
+   *
+   * `orders` no tiene columna `organization_id` (schema.prisma: sólo `store_id`
+   * + la relación `stores`), así que leer `order.organization_id` para el
+   * umbral de 5 UVT entregaba SIEMPRE `undefined`. `order` está tipado `any` en
+   * las dos ramas que lo producen, de modo que TypeScript no lo veía; y como
+   * `FiscalGateService.isAreaEnabled` captura cualquier error y falla cerrado,
+   * el `findUnique({ where: { id: undefined } })` resultante se degradaba a un
+   * WARN y el cobro seguía respondiendo 201. El umbral no se evaluaba nunca.
+   *
+   * Por eso estos casos assertan el `organization_id` CONCRETO que recibe
+   * `assertInvoiceNotRequired`: un stub que sólo verifica "fue llamado" es
+   * exactamente lo que dejó pasar la regresión.
+   */
+  describe('processPosPayment (5 UVT fiscal threshold arguments)', () => {
+    // Corta la ejecución justo después del gate fiscal. Lo que sigue dentro de
+    // la transacción (pagos, inventario, COGS, asientos) no es lo que estos
+    // casos assertan, y stubearlo entero volvería el test frágil sin añadir
+    // cobertura sobre el argumento.
+    const STOP_AFTER_GATE = 'stop-after-fiscal-threshold';
+
+    let contextSpy: jest.SpyInstance;
+
+    const CONTEXT_ORGANIZATION_ID = 999;
+
+    const arrangePosSale = (order: any) => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: 1,
+          organization_id: CONTEXT_ORGANIZATION_ID,
+        } as any);
+
+      (prisma as any).$transaction = jest.fn(async (cb: any) => cb({}));
+
+      jest
+        .spyOn(service as any, 'createOrUpdateOrderFromPos')
+        .mockResolvedValue({
+          order,
+          hasSerialized: false,
+          promotionsSnapshot: [],
+          appliedPromotions: [],
+          couponInfo: {
+            coupon_id: null,
+            coupon_code: null,
+            discount_amount: 0,
+          },
+          kitchenFire: null,
+          closedSessionId: null,
+        });
+
+      (fiscalThreshold.assertInvoiceNotRequired as jest.Mock).mockRejectedValue(
+        new Error(STOP_AFTER_GATE),
+      );
+    };
+
+    const buildPosDto = (overrides: any = {}): any => ({
+      store_id: 1,
+      currency: 'COP',
+      items: [],
+      payments: [],
+      ...overrides,
+    });
+
+    // `super_admin` atraviesa `validateUserAccess` sin tocar la base.
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: CONTEXT_ORGANIZATION_ID,
+      roles: ['super_admin'],
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+    });
+
+    it('resolves the organization through order.stores, never through a non-existent orders.organization_id column', async () => {
+      // La orden se modela como la devuelve Prisma: SIN `organization_id`, con
+      // la organización colgando de la relación `stores`.
+      arrangePosSale({
+        id: 10,
+        store_id: 1,
+        grand_total: 400000,
+        stores: { id: 1, organization_id: 55 },
+      });
+
+      await expect(
+        service.processPosPayment(
+          buildPosDto({ customer_id: null }),
+          posUser,
+        ),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect(fiscalThreshold.assertInvoiceNotRequired).toHaveBeenCalledTimes(1);
+
+      const callArg = (fiscalThreshold.assertInvoiceNotRequired as jest.Mock)
+        .mock.calls[0][0];
+
+      // El assert que faltaba: la organización concreta, no "se llamó".
+      expect(callArg.organization_id).toBe(55);
+      expect(callArg.organization_id).not.toBeUndefined();
+      expect(callArg.store_id).toBe(1);
+      // El total viene del `grand_total` recalculado por el servidor, no del DTO.
+      expect(callArg.total_amount).toBe(400000);
+      expect(callArg.has_customer).toBe(false);
+      expect(callArg.channel).toBe('pos');
+    });
+
+    it('marks the sale as identified when the POS payload carries a customer', async () => {
+      arrangePosSale({
+        id: 11,
+        store_id: 1,
+        grand_total: 400000,
+        stores: { id: 1, organization_id: 55 },
+      });
+
+      await expect(
+        service.processPosPayment(buildPosDto({ customer_id: 77 }), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      const callArg = (fiscalThreshold.assertInvoiceNotRequired as jest.Mock)
+        .mock.calls[0][0];
+      expect(callArg.organization_id).toBe(55);
+      expect(callArg.has_customer).toBe(true);
+    });
+
+    it('falls back to the request context organization when the order relation is absent', async () => {
+      // Red de seguridad: hoy ambas ramas que producen `order` incluyen
+      // `stores`, pero si alguna dejara de hacerlo el gate debe seguir
+      // recibiendo una organización real en vez de `undefined`.
+      arrangePosSale({
+        id: 12,
+        store_id: 1,
+        grand_total: 400000,
+      });
+
+      await expect(
+        service.processPosPayment(
+          buildPosDto({ customer_id: null }),
+          posUser,
+        ),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      const callArg = (fiscalThreshold.assertInvoiceNotRequired as jest.Mock)
+        .mock.calls[0][0];
+      expect(callArg.organization_id).toBe(CONTEXT_ORGANIZATION_ID);
     });
   });
 

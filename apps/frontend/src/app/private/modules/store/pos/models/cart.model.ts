@@ -32,10 +32,31 @@ export interface CartItem {
    * have `image_id = null` in the DB).
    */
   variant_image_url?: string;
-  // Weight product fields
+  // Weight product fields (camino LEGADO: `quantity` queda en 1 y el peso es el
+  // multiplicador). Se conserva para que las líneas de peso ya existentes no
+  // cambien de lectura; los productos que declaran unidad de stock ya NO pasan
+  // por acá — ver `sale_unit_code` abajo.
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
   is_weight_product?: boolean;
+  // ===== QUI-648 · captura por unidad de venta =====
+  // `quantity` vive SIEMPRE en la unidad mínima del producto (mm, g, ml,
+  // unidad), igual que `order_items.quantity`. Estos tres campos son los que
+  // permiten mostrar la misma escala que el cajero capturó sin tocar la
+  // cantidad que viaja al backend.
+  /** Unidad en la que el cajero capturó la línea ("m", "kg"). */
+  sale_unit_code?: string | null;
+  /** Unidades mínimas que consume UNA unidad de venta (1000 mm por metro). */
+  stock_units_per_sale_unit?: number | null;
+  /** Escala del precio publicado (`products.price_unit_quantity`). */
+  price_unit_quantity?: number | null;
+  /**
+   * La línea se capturó pesando en la balanza. La balanza dejó de ser un modo
+   * del producto y es un método de captura de la línea: por eso el flag vive
+   * acá y no en el producto. Una línea así no ofrece selector de presentación
+   * —lo pesado ya define la cantidad— y se reedita volviendo a pesar.
+   */
+  captured_by_scale?: boolean;
   // Multi-tarifa (Phase 5) + Empaque por tarifa.
   applied_price_tier_id?: number | null;
   applied_price_tier_name?: string | null;
@@ -54,6 +75,19 @@ export interface CartItem {
   // no DB migration is required. Defaults to false (legacy
   // behaviour: send to kitchen).
   skipKds?: boolean;
+  // QUI-653 — la línea se empaca y el cliente se la lleva. A diferencia de
+  // `skipKds`, este flag SÍ se persiste: viaja a `order_items.is_takeaway` vía
+  // `TableSessionAddItem`, porque el ticket de cocina y el tiquete impreso lo
+  // necesitan después del cobro.
+  //
+  // Solo tiene sentido en el camino POS -> mesa. En una venta directa del POS
+  // (sin sesión de mesa) "para llevar" no significa nada.
+  //
+  // ATENCIÓN: participa en la identidad de la línea igual que `skipKds` (ver la
+  // clave de fusión en pos-cart.service.ts). Dos líneas del mismo plato, una
+  // para llevar y otra para la mesa, son líneas DISTINTAS; fusionarlas perdería
+  // una de las dos decisiones en silencio.
+  isTakeaway?: boolean;
   // QUI-431 — Serial numbers chosen by the cashier for a serialized
   // product (`requires_serial_numbers=true`). `serial_ids` are existing
   // pool rows picked from the selector; `serial_numbers` are free-text
@@ -146,9 +180,21 @@ export interface AddToCartRequest {
   quantity: number;
   notes?: string;
   variant?: PosProductVariant;
-  // Weight product fields
+  // Weight product fields (camino legado; ver `CartItem.weight`).
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
+  /**
+   * QUI-648 — la línea se capturó pesando. `quantity` ya viene convertido a la
+   * unidad mínima (2,35 kg de un producto en gramos ⇒ 2350), así que la línea
+   * NO necesita `weight`.
+   */
+  capturedByScale?: boolean;
+  /**
+   * QUI-648 — presentación pistoleada. El código de barras pertenece a una
+   * tarifa `sale_unit` del producto: la línea entra con esa presentación ya
+   * aplicada, sin que el cajero la elija.
+   */
+  scannedPriceTierId?: number | null;
   /**
    * Restaurant Suite — Fase K Gap 1: when true the item is added to
    * the cart with `skipKds=true`, meaning the POS will NOT fire it
@@ -158,6 +204,12 @@ export interface AddToCartRequest {
    * inventory and have stock > 0.
    */
   skipKds?: boolean;
+  /**
+   * QUI-653 — la línea se agrega marcada "para llevar". Participa en la
+   * identidad de la línea, así que un mismo plato pedido para llevar y para la
+   * mesa produce DOS líneas y no una fusionada.
+   */
+  isTakeaway?: boolean;
   // QUI-431 — Pre-selected serials for serialized products. The POS opens a
   // selector modal before calling addToCart and passes the cashier's choice
   // here. `serial_ids` are pool rows; `serial_numbers` are free-text entries.

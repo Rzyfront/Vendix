@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsNumber,
   IsObject,
   IsOptional,
@@ -102,4 +103,36 @@ export class StreamIntentDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   attachment_ids?: string[];
+
+  /**
+   * Asks for the answer to be spoken as well as written.
+   *
+   * Per turn rather than per conversation, because the person can switch between
+   * chat and voice mode inside the same thread — the previous turn being spoken
+   * says nothing about this one.
+   *
+   * Only adds audio frames; it never changes the text, the tools, or what gets
+   * persisted. That is the premise of the pipeline: a voice turn *is* a chat
+   * turn, so nothing about the answer depends on how it will be delivered.
+   */
+  @IsOptional()
+  @IsBoolean()
+  speak?: boolean;
+
+  /**
+   * Replay of a turn whose transport dropped before it produced anything.
+   *
+   * The `user` row is written before the model is called, so a turn that died
+   * mid-flight already left it in the conversation. Without this flag the
+   * automatic retry would write it again and the person would see their question
+   * twice — the one visible trace a transparent recovery must not leave.
+   *
+   * The client is trusted with it because the worst it can do is *omit* a row
+   * whose content it supplied anyway. It cannot forge history, skip a guard, or
+   * reach another conversation: everything else about the turn is resolved
+   * server-side from the conversation id and the session.
+   */
+  @IsOptional()
+  @IsBoolean()
+  skip_user_message?: boolean;
 }

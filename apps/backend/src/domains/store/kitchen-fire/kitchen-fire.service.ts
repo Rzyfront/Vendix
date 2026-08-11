@@ -21,6 +21,16 @@ const KITCHEN_TICKET_INCLUDE = {
   items: {
     orderBy: { id: 'asc' },
     include: {
+      // QUI-655 — las exclusiones viajan CON el ticket para que el KDS pueda
+      // mostrar tachado lo que el mesero quito al pedir, sin una segunda llamada.
+      exclusions: {
+        select: { component_product_id: true, path_recipe_ids: true },
+      },
+      // QUI-653 — "para llevar" viaja con el ticket porque QUIEN EMPACA es la
+      // cocina, no el mesero. El flag vivia en `order_items` y se mostraba en la
+      // fila de la mesa, pero el KDS nunca lo veia: el plato se servia en loza y
+      // el dato solo existia del lado que no lo ejecuta.
+      order_item: { select: { is_takeaway: true } },
       product: {
         select: {
           id: true,
@@ -52,7 +62,10 @@ const KITCHEN_TICKET_INCLUDE = {
  * accepted and which items were actually consumed.
  */
 export interface FireOrderItemsResult {
+  /** Ticket primario (estacion de menor id). Lo consumen 6 llamadores externos. */
   kitchen_ticket_id: number;
+  /** QUI-651 — un id por estacion involucrada en el envio. */
+  kitchen_ticket_ids: number[];
   order_id: number;
   fired_item_ids: number[];
   skipped_item_ids: number[];
@@ -77,14 +90,34 @@ export interface PreExplodedFireContext {
   firedItemIds: number[];
   skippedItemIds: number[];
   preparedItems: Array<{
-    orderItem: { id: number; product_id: number | null; product_name: string; quantity: any };
+    orderItem: {
+      id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: any;
+      // QUI-651 — el contexto ya arrastra el producto; se declara solo lo que
+      // el ruteo necesita. `kds_id` null significa "KDS por defecto".
+      products?: { kds_id: number | null } | null;
+    };
     recipeId: number;
     bomLines: BomExplosionLine[];
   }>;
-  recipeLessItems: Array<{ id: number; product_id: number | null; product_name: string; quantity: any }>;
+  recipeLessItems: Array<{
+    id: number;
+    product_id: number | null;
+    product_name: string;
+    quantity: any;
+    products?: { kds_id: number | null } | null;
+  }>;
   locationByProduct: Map<number, number>;
   businessDate: string;
   user_id?: number;
+  /**
+   * QUI-655 — componentes excluidos por `order_item_id`, tal como los confirmo
+   * el modal de cocina. Ausente o vacio equivale a "todos los componentes
+   * marcados", que es el comportamiento previo al ticket.
+   */
+  exclusionsByOrderItem?: Map<number, number[]>;
 }
 
 /**
@@ -181,6 +214,21 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    // ------------------------------------------------------------- QUI-655
+    // PARTICION DE LINEA POR PREPARACION, antes de cualquier explosion de BOM.
+    //
+    // Se hace ACA y no mas abajo a proposito: `prepareFireContext` explota la
+    // receta multiplicando por la cantidad de la linea, asi que si la particion
+    // ocurriera despues habria que rehacer la explosion. Partiendo primero, todo
+    // el pipeline aguas abajo (explosion, consumo, COGS, tickets, impresion)
+    // sigue viendo lineas HOMOGENEAS y no cambia una sola linea de codigo.
+    //
+    // Eso es exactamente el argumento por el que se eligio partir sobre
+    // `unit_index`: la invariante "una linea = una especificacion de preparacion"
+    // se preserva en vez de romperse en cuatro lugares.
+    const { orderItemIds: effectiveItemIds, exclusions: remappedExclusions } =
+      await this.splitLinesForExclusions(dto);
+
     // Plan KDS fire-flows (B8): gate the manual fire endpoint to
     // `restaurant` stores. Non-restaurant stores don't have a kitchen;
     // allowing fire would create kitchen_tickets rows for them and
@@ -202,7 +250,7 @@ export class KitchenFireService {
         store_id: true,
         order_number: true,
         order_items: {
-          where: { id: { in: dto.order_item_ids } },
+          where: { id: { in: effectiveItemIds } },
           include: {
             products: {
               select: {
@@ -211,6 +259,8 @@ export class KitchenFireService {
                 product_type: true,
                 track_inventory: true,
                 store_id: true,
+                // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
+                kds_id: true,
               },
             },
           },
@@ -335,6 +385,15 @@ export class KitchenFireService {
       locationByProduct,
       businessDate,
       user_id,
+      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item. Se
+      // arman aca (fuera de la transaccion) porque el filtrado del BOM ocurre
+      // dentro y no debe pagar el costo de recorrer el DTO por linea.
+      exclusionsByOrderItem: new Map(
+        remappedExclusions.map((e) => [
+          e.order_item_id,
+          e.component_product_ids ?? [],
+        ]),
+      ),
     };
     const result = await this.prisma.$transaction(async (tx) =>
       this.fireOrderItemsInTx(tx, store_id, preComputed),
@@ -345,6 +404,11 @@ export class KitchenFireService {
     try {
       this.eventEmitter.emit('kitchen.fired', {
         kitchen_ticket_id: result.ticketId,
+        // QUI-651 — el asiento DR 6135 / CR 1435 es UNO por fire y cubre el COGS
+        // de todas las estaciones (`total_cost` ya viene sumado), asi que el
+        // listener contable no cambia. Se expone la lista para que quien audite
+        // el asiento pueda rastrear a que tickets corresponde.
+        kitchen_ticket_ids: result.ticketIds,
         order_id: order.id,
         organization_id,
         store_id,
@@ -376,9 +440,30 @@ export class KitchenFireService {
           ts: Date.now(),
         });
       }
+
+      // QUI-651 — un fire de dos estaciones produce DOS tickets, y cada tablero
+      // solo escucha el suyo. Empujar unicamente el primario dejaba a la segunda
+      // estacion sin enterarse hasta el siguiente refresco: el pedido existia en
+      // su cola y su pantalla no lo mostraba.
+      const secondaryTicketIds = result.ticketIds.filter(
+        (id) => id !== result.ticketId,
+      );
+      if (secondaryTicketIds.length > 0) {
+        const others = await this.prisma.kitchen_tickets.findMany({
+          where: { id: { in: secondaryTicketIds }, store_id },
+          include: KITCHEN_TICKET_INCLUDE,
+        });
+        for (const other of others) {
+          this.pushKitchenEvent(store_id, {
+            type: 'ticket.created',
+            ticket: other,
+            ts: Date.now(),
+          });
+        }
+      }
     } catch (err) {
       this.logger.warn(
-        `Failed to build SSE payload for ticket #${result.ticketId}: ${
+        `Failed to build SSE payload for tickets ${result.ticketIds.join(', ')}: ${
           (err as Error).message
         }`,
       );
@@ -386,6 +471,10 @@ export class KitchenFireService {
 
     return {
       kitchen_ticket_id: result.ticketId,
+      // QUI-651 — todos los tickets del envio, uno por estacion involucrada. Se
+      // agrega en vez de reemplazar `kitchen_ticket_id` porque 6 consumidores
+      // externos leen ese campo; quien necesite las estaciones usa este.
+      kitchen_ticket_ids: result.ticketIds,
       order_id: order.id,
       fired_item_ids: result.firedItemSnapshots.map((s) => s.orderItemId),
       skipped_item_ids: skippedItemIds,
@@ -434,7 +523,10 @@ export class KitchenFireService {
     store_id: number,
     preComputed: PreExplodedFireContext,
   ): Promise<{
+    /** Ticket primario (estacion de menor id). Ver nota en el return. */
     ticketId: number;
+    /** Un id por estacion involucrada en el fire (QUI-651). */
+    ticketIds: number[];
     firedItemSnapshots: Array<{
       orderItemId: number;
       productId: number;
@@ -446,6 +538,8 @@ export class KitchenFireService {
   }> {
     const { order, preparedItems, recipeLessItems, locationByProduct, businessDate, user_id } =
       preComputed;
+    const exclusionsByOrderItem =
+      preComputed.exclusionsByOrderItem ?? new Map<number, number[]>();
 
     const firedItemSnapshots: Array<{
       orderItemId: number;
@@ -457,6 +551,56 @@ export class KitchenFireService {
     let cogsTotal = 0;
     let consumedLineCount = 0;
 
+    // ---------------------------------------------------------------- QUI-651
+    // La estación destino se resuelve ANTES de consumir, no al crear el ticket,
+    // porque el movimiento de inventario tiene que nacer firmado con la sesión
+    // de la estación que lo consumió. Resolverlo después obligaría a un UPDATE
+    // posterior sobre `inventory_transactions`.
+    //
+    // Cascada: `products.kds_id` presente -> esa estación; sin él -> el KDS por
+    // defecto de la tienda. Los `skip_kds = true` ya quedaron fuera aguas arriba.
+    const defaultKds = await tx.kds.findFirst({
+      where: { store_id, is_default: true, is_active: true },
+      select: { id: true },
+    });
+    if (!defaultKds) {
+      // Precondición real, no defensiva: la migración backfilleó un default por
+      // tienda restaurante y el bootstrap lo autocrea. Si falta, rutear a ciegas
+      // mandaría el ticket a un tablero que nadie mira.
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS,
+        `La tienda ${store_id} no tiene un KDS por defecto activo`,
+      );
+    }
+
+    const kdsByProduct = new Map<number, number>();
+    for (const ctxItem of preparedItems) {
+      kdsByProduct.set(
+        ctxItem.orderItem.product_id!,
+        ctxItem.orderItem.products?.kds_id ?? defaultKds.id,
+      );
+    }
+    for (const item of recipeLessItems) {
+      kdsByProduct.set(
+        item.product_id!,
+        item.products?.kds_id ?? defaultKds.id,
+      );
+    }
+
+    // Sesión abierta por estación involucrada. Se resuelve UNA vez por estación
+    // y no por línea de BOM: un plato con 15 ingredientes haría 15 consultas
+    // idénticas. NULL es un resultado válido y esperado — el fire no se bloquea
+    // porque la estación no haya abierto turno.
+    const openSessionByKds = new Map<number, number | null>();
+    for (const kdsId of new Set(kdsByProduct.values())) {
+      const session = await tx.kds_sessions.findFirst({
+        where: { kds_id: kdsId, status: 'open' },
+        select: { id: true },
+      });
+      openSessionByKds.set(kdsId, session?.id ?? null);
+    }
+
+
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
       const orderQty = Number(orderItem.quantity || 0);
@@ -465,8 +609,39 @@ export class KitchenFireService {
         continue;
       }
 
+      // ------------------------------------------------------------- QUI-655
+      // Filtrado de exclusiones ANTES de consumir. Antes se recorrian todas las
+      // hojas del BOM sin excepcion, asi que un plato "sin papas" descontaba las
+      // papas igual y las cargaba al costo.
+      //
+      // Se valida server-side que cada componente excluido pertenezca realmente
+      // al BOM de ESTE item: el cliente no puede excluir un producto arbitrario,
+      // o el consumo dejaria de reflejar la receta.
+      //
+      // La exclusion de un NODO de sub-receta se expresa excluyendo sus hojas,
+      // que es lo que el modal manda tras expandir `path_recipe_ids`; por eso el
+      // filtro es por `component_product_id` y no necesita conocer el arbol.
+      const excludedIds = new Set(
+        (exclusionsByOrderItem.get(orderItem.id) ?? []).filter((componentId) => {
+          const belongs = bomLines.some(
+            (l) => l.component_product_id === componentId,
+          );
+          if (!belongs) {
+            throw new VendixHttpException(
+              ErrorCodes.KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM,
+              `El componente #${componentId} no pertenece a la receta del item #${orderItem.id}`,
+            );
+          }
+          return true;
+        }),
+      );
+
+      const effectiveBomLines = excludedIds.size
+        ? bomLines.filter((l) => !excludedIds.has(l.component_product_id))
+        : bomLines;
+
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
-      for (const line of bomLines) {
+      for (const line of effectiveBomLines) {
         const consumedQty = Math.round(line.quantity * orderQty);
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
           // Defensive: this should never happen if the recipe items have
@@ -495,6 +670,14 @@ export class KitchenFireService {
             order_item_id: orderItem.id,
             create_movement: true,
             validate_availability: false,
+            // QUI-651 — dueño del consumo por estación. Se firma con la sesión
+            // abierta del KDS destino de ESTE plato, no con una sesión global:
+            // en un fire de dos estaciones cada movimiento pertenece al turno
+            // de la suya.
+            kds_session_id:
+              openSessionByKds.get(
+                kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
+              ) ?? null,
           },
           tx,
         );
@@ -539,43 +722,126 @@ export class KitchenFireService {
       });
     }
 
-    // Serialize the daily correlative per (store, business_date) with a
-    // transaction-scoped advisory lock so concurrent fires can't collide
-    // on the same daily_number. The lock auto-releases at commit/rollback.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
-    const sameDayCount = await tx.kitchen_tickets.count({
-      where: {
-        store_id,
-        business_date: new Date(`${businessDate}T00:00:00.000Z`),
-      },
-    });
-    const dailyNumber = sameDayCount + 1;
+    // ---------------------------------------------------------------- QUI-651
+    // RUTEO POR ESTACION. Antes esto creaba UN ticket por fire y todos los items
+    // caian en el mismo tablero. Ahora se agrupan por su KDS destino — ya
+    // resuelto arriba, porque el consumo de inventario necesitaba la estacion
+    // antes de escribirse — y se crea un ticket POR ESTACION involucrada.
+    // QUI-655 — nota de texto libre capturada al TOMAR el pedido. Es el camino
+    // menos estructurado de los tres y el mas parecido a como funciona un
+    // restaurante real con prisa ("poca sal", "bien cocido"): el cocinero la lee
+    // en la estacion y desmarca en consecuencia. Se lee de la fuente de verdad
+    // (`order_items.notes`) y no del DTO, porque la nota se escribio al pedir y
+    // no al confirmar el envio.
+    const firedOrderItemIds = firedItemSnapshots.map((s) => s.orderItemId);
+    const notesByOrderItem = new Map<number, string>();
+    if (firedOrderItemIds.length > 0) {
+      const noted = await tx.order_items.findMany({
+        where: { id: { in: firedOrderItemIds }, notes: { not: null } },
+        select: { id: true, notes: true },
+      });
+      for (const row of noted) {
+        if (row.notes) notesByOrderItem.set(row.id, row.notes);
+      }
+    }
 
-    // Create the kitchen_ticket + items (one ticket per fire call, one
-    // item per fired order_item). Status defaults to 'pending'; Fase F
-    // owns the KDS SSE controller that mutates these later.
-    const ticket = await tx.kitchen_tickets.create({
-      data: {
-        store_id,
-        order_id: order.id,
-        status: 'pending',
-        daily_number: dailyNumber,
-        business_date: new Date(`${businessDate}T00:00:00.000Z`),
-        fired_at: new Date(),
-        items: {
-          create: firedItemSnapshots.map((snap) => ({
-            order_item_id: snap.orderItemId,
-            product_id: snap.productId,
-            quantity: snap.quantity,
-            status: 'pending',
-          })),
+    const snapshotsByKds = new Map<number, typeof firedItemSnapshots>();
+    for (const snap of firedItemSnapshots) {
+      const kdsId = kdsByProduct.get(snap.productId) ?? defaultKds.id;
+      const bucket = snapshotsByKds.get(kdsId);
+      if (bucket) bucket.push(snap);
+      else snapshotsByKds.set(kdsId, [snap]);
+    }
+
+    const businessDateAsDate = new Date(`${businessDate}T00:00:00.000Z`);
+    const ticketIds: number[] = [];
+
+    // Orden estable por kds_id: hace el resultado determinista entre corridas
+    // y deja el ticket "primario" (el primero) siempre en la misma estacion.
+    for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
+      const snaps = snapshotsByKds.get(kdsId)!;
+
+      // El correlativo diario es POR ESTACION: cada tablero cuenta desde 1, asi
+      // cocina canta #1 y barra canta #1 el mismo dia. El advisory lock foldea
+      // la estacion en su segunda clave para que dos fires concurrentes de la
+      // MISMA estacion serialicen, y dos de estaciones distintas no se estorben.
+      // Se libera solo al commit/rollback.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate} || ':' || ${kdsId}::text)::int)`;
+      const sameDayCount = await tx.kitchen_tickets.count({
+        where: {
+          store_id,
+          kds_id: kdsId,
+          business_date: businessDateAsDate,
         },
-      },
-      include: { items: true },
-    });
+      });
+
+      const ticket = await tx.kitchen_tickets.create({
+        data: {
+          store_id,
+          order_id: order.id,
+          kds_id: kdsId,
+          status: 'pending',
+          daily_number: sameDayCount + 1,
+          business_date: businessDateAsDate,
+          fired_at: new Date(),
+          items: {
+            create: snaps.map((snap) => ({
+              order_item_id: snap.orderItemId,
+              product_id: snap.productId,
+              quantity: snap.quantity,
+              status: 'pending',
+            })),
+          },
+        },
+        include: { items: true },
+      });
+      ticketIds.push(ticket.id);
+
+      // ----------------------------------------------------------- QUI-655
+      // Persistir LO CONSUMIDO y propagar la nota, ya con los
+      // `kitchen_ticket_items` creados y con id.
+      //
+      // Estos dos registros son lo que el cocinero LEE en la estacion. Sin
+      // ellos el plato sale mal: el ticket diria "pollo" sin decir "sin salsa",
+      // y el margen de ese plato no se podria explicar despues.
+      for (const ktItem of ticket.items) {
+        const excluded = exclusionsByOrderItem.get(ktItem.order_item_id) ?? [];
+        const note = notesByOrderItem.get(ktItem.order_item_id);
+
+        if (note) {
+          // `kitchen_ticket_items.notes` existia en el schema documentando
+          // exactamente este caso ("no onions", "allergy: gluten") y el codigo
+          // nunca la escribia: columna disenada y desconectada hasta aqui.
+          await tx.kitchen_ticket_items.update({
+            where: { id: ktItem.id },
+            data: { notes: note, updated_at: new Date() },
+          });
+        }
+
+        if (excluded.length > 0) {
+          await tx.kitchen_ticket_item_exclusions.createMany({
+            data: excluded.map((componentId) => ({
+              kitchen_ticket_item_id: ktItem.id,
+              component_product_id: componentId,
+              excluded_by_user_id: user_id ?? null,
+            })),
+            // El unique (kitchen_ticket_item_id, component_product_id) hace que
+            // un reintento no duplique la exclusion.
+            skipDuplicates: true,
+          });
+        }
+      }
+    }
 
     return {
-      ticketId: ticket.id,
+      // `ticketId` es el ticket PRIMARIO del fire (la estacion de menor id).
+      // Se conserva porque el evento `kitchen.fired` y el payload SSE siguen
+      // siendo de un ticket, y migrar ese contrato a N tickets es el incremento
+      // siguiente de QUI-651. Los consumidores que solo necesitan "un id para
+      // notificar" no cambian; quien necesite todas las estaciones usa
+      // `ticketIds`.
+      ticketId: ticketIds[0],
+      ticketIds,
       firedItemSnapshots,
       cogsTotal,
       consumedLineCount,
@@ -614,6 +880,260 @@ export class KitchenFireService {
    *     works (returns null if no recipes) but the caller should
    *     short-circuit with `storeIsRestaurant` for clarity.
    */
+  /**
+   * Previsualización del envío a cocina — QUI-655.
+   *
+   * Devuelve, por item elegible, el árbol de su receta con la procedencia de cada
+   * línea (`path_recipe_ids`), para que el modal de confirmación pueda mostrar los
+   * nodos de sub-receta como agrupadores colapsables y desmarcar un nodo entero
+   * ("sin salsa criolla") en vez de obligar al cocinero a desmarcar sus tres hojas
+   * y a saber de memoria cuáles venían de la salsa.
+   *
+   * NO consume nada ni crea tickets: es una lectura. Reutiliza
+   * `prepareFireContext`, que ya resuelve receta activa + explosión del BOM +
+   * partición prepared/sin-receta, así que la previsualización y el envío real
+   * NUNCA pueden discrepar sobre qué se va a consumir.
+   *
+   * Los `prepared` SIN receta activa se devuelven en la lista con
+   * `components: []`: el ticket pide que aparezcan en el modal aunque no haya nada
+   * que desglosar, para que el cocinero los vea y los envíe igual.
+   */
+  async previewFire(
+    orderId: number,
+    candidateOrderItemIds: number[],
+  ): Promise<{
+    order_id: number;
+    items: Array<{
+      order_item_id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: number;
+      notes: string | null;
+      has_active_recipe: boolean;
+      components: Array<{
+        component_product_id: number;
+        name: string;
+        sku: string | null;
+        stock_unit: string | null;
+        /** Cantidad total para ESTA línea (ya multiplicada por su cantidad). */
+        quantity: number;
+        depth: number;
+        path_recipe_ids: number[];
+      }>;
+    }>;
+    skipped_item_ids: number[];
+  }> {
+    const ctx = await this.prepareFireContext(orderId, candidateOrderItemIds);
+    // `prepareFireContext` devuelve null cuando NINGUN item es elegible (todos ya
+    // consumidos, o ninguno es prepared). Para una previsualizacion eso no es un
+    // error: es "no hay nada que confirmar", y el modal debe poder decirlo en vez
+    // de reventar.
+    if (!ctx) {
+      return { order_id: orderId, items: [], skipped_item_ids: candidateOrderItemIds };
+    }
+
+    // Un solo lookup de catálogo para todos los componentes de todos los items:
+    // resolver el nombre por línea haría N consultas donde una alcanza, y un
+    // envío de 10 platos son decenas de hojas.
+    const componentIds = new Set<number>();
+    for (const it of ctx.preparedItems) {
+      for (const line of it.bomLines) componentIds.add(line.component_product_id);
+    }
+    const components =
+      componentIds.size > 0
+        ? await this.prisma.products.findMany({
+            where: { id: { in: [...componentIds] } },
+            select: { id: true, name: true, sku: true, stock_unit: true },
+          })
+        : [];
+    // Tipo explicito por la misma razon que arriba: el Map inferido desde un
+    // `map` sobre tuplas ensancha el valor a `{}` y los accesos fallan.
+    type ComponentMeta = {
+      id: number;
+      name: string;
+      sku: string | null;
+      stock_unit: string | null;
+    };
+    const byId = new Map<number, ComponentMeta>(
+      components.map((c) => [c.id, c as ComponentMeta]),
+    );
+
+    // La nota se lee de `order_items.notes`: es el camino de captura que el
+    // cocinero traduce a exclusiones cuando la petición no calza con un
+    // ingrediente exacto ("poca sal", "bien cocido").
+    const allItemIds = [
+      ...ctx.preparedItems.map((i) => i.orderItem.id),
+      ...ctx.recipeLessItems.map((i) => i.id),
+    ];
+    const notesRows =
+      allItemIds.length > 0
+        ? await this.prisma.order_items.findMany({
+            where: { id: { in: allItemIds } },
+            select: { id: true, notes: true },
+          })
+        : [];
+    // Tipo explicito: con el `?? null`, TS ensancha el valor del Map a `{}`.
+    const notesById = new Map<number, string | null>(
+      notesRows.map((r) => [r.id, r.notes ?? null]),
+    );
+
+    return {
+      order_id: orderId,
+      items: [
+        ...ctx.preparedItems.map((it) => ({
+          order_item_id: it.orderItem.id,
+          product_id: it.orderItem.product_id,
+          product_name: it.orderItem.product_name,
+          quantity: Number(it.orderItem.quantity || 0),
+          notes: notesById.get(it.orderItem.id) ?? null,
+          has_active_recipe: true,
+          components: it.bomLines.map((line) => {
+            const meta = byId.get(line.component_product_id);
+            return {
+              component_product_id: line.component_product_id,
+              name: meta?.name ?? `#${line.component_product_id}`,
+              sku: meta?.sku ?? null,
+              stock_unit: meta?.stock_unit ?? null,
+              // `explodeBom` ya aplicó merma y yield en cada nivel; se multiplica
+              // por la cantidad de la línea para que el modal muestre lo que
+              // realmente se va a descontar y no la receta unitaria.
+              quantity: line.quantity * Number(it.orderItem.quantity || 0),
+              depth: line.depth,
+              path_recipe_ids: line.path_recipe_ids,
+            };
+          }),
+        })),
+        ...ctx.recipeLessItems.map((it) => ({
+          order_item_id: it.id,
+          product_id: it.product_id,
+          product_name: it.product_name,
+          quantity: Number(it.quantity || 0),
+          notes: notesById.get(it.id) ?? null,
+          has_active_recipe: false,
+          components: [],
+        })),
+      ],
+      skipped_item_ids: ctx.skippedItemIds,
+    };
+  }
+
+  /**
+   * VERIFICACION DE TICKET — QUI-655.
+   *
+   * Devuelve, por cada platillo del ticket, su receta con los insumos que va a
+   * consumir y cuales vienen EXCLUIDOS. Es lo que alimenta el modal obligatorio
+   * para pasar de pendiente a en preparacion.
+   *
+   * Por que NO reusa `/preview`: el preview parte de `prepareFireContext`, que
+   * descarta los items con `inventory_consumed_at_fire = true` — una condicion del
+   * ENVIO. Al verificar, el item ya paso por el fire, asi que el preview lo excluia
+   * y el modal llegaba vacio. Esta lectura parte del TICKET, no de la elegibilidad
+   * para enviar.
+   *
+   * Contrato identico al del preview a proposito, para que el modal se reutilice
+   * sin bifurcar su codigo.
+   */
+  async getTicketVerification(ticketId: number): Promise<{
+    order_id: number;
+    items: Array<{
+      order_item_id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: number;
+      notes: string | null;
+      has_active_recipe: boolean;
+      excluded_component_ids: number[];
+      components: Array<{
+        component_product_id: number;
+        name: string;
+        sku: string | null;
+        stock_unit: string | null;
+        quantity: number;
+        depth: number;
+        path_recipe_ids: number[];
+      }>;
+    }>;
+    skipped_item_ids: number[];
+  }> {
+    const { ticket } = await this.getTicketForStore(ticketId);
+    const rawItems: any[] = (ticket as any).items ?? [];
+
+    const items: any[] = [];
+    const componentIds = new Set<number>();
+    const perItem: Array<{ item: any; bom: BomExplosionLine[] }> = [];
+
+    for (const it of rawItems) {
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { product_id: it.product_id, is_active: true },
+        select: { id: true },
+      });
+      // Sin receta activa se devuelve igual, con `components: []`: el cocinero debe
+      // verlo en el modal y poder confirmarlo, no que desaparezca.
+      const bom = recipe
+        ? await this.recipesService.explodeBom(recipe.id)
+        : [];
+      for (const l of bom) componentIds.add(l.component_product_id);
+      perItem.push({ item: it, bom });
+    }
+
+    const meta =
+      componentIds.size > 0
+        ? await this.prisma.products.findMany({
+            where: { id: { in: [...componentIds] } },
+            select: { id: true, name: true, sku: true, stock_unit: true },
+          })
+        : [];
+    type Meta = { id: number; name: string; sku: string | null; stock_unit: string | null };
+    const byId = new Map<number, Meta>(meta.map((m) => [m.id, m as Meta]));
+
+    const orderItemIds = rawItems
+      .map((i) => i.order_item_id)
+      .filter((v): v is number => typeof v === 'number');
+    const orderItems =
+      orderItemIds.length > 0
+        ? await this.prisma.order_items.findMany({
+            where: { id: { in: orderItemIds } },
+            select: { id: true, notes: true },
+          })
+        : [];
+    const notesById = new Map<number, string | null>(
+      orderItems.map((r) => [r.id, r.notes ?? null]),
+    );
+
+    for (const { item, bom } of perItem) {
+      const qty = Number(item.quantity || 0);
+      items.push({
+        order_item_id: item.order_item_id,
+        product_id: item.product_id,
+        product_name: item.product?.name ?? `#${item.product_id}`,
+        quantity: qty,
+        notes: notesById.get(item.order_item_id) ?? item.notes ?? null,
+        has_active_recipe: bom.length > 0,
+        // Lo que ya venia excluido: el modal los arranca desmarcados y por lo tanto
+        // TACHADOS, para que el cocinero vea "sin papas" sin leer una nota.
+        excluded_component_ids: (item.exclusions ?? []).map(
+          (e: any) => e.component_product_id,
+        ),
+        components: bom.map((line) => {
+          const m = byId.get(line.component_product_id);
+          return {
+            component_product_id: line.component_product_id,
+            name: m?.name ?? `#${line.component_product_id}`,
+            sku: m?.sku ?? null,
+            stock_unit: m?.stock_unit ?? null,
+            // Multiplicado por la cantidad de la linea: la receta cruda es unitaria
+            // y mostrarla asi haria que el cocinero vea menos de lo que se gasta.
+            quantity: line.quantity * qty,
+            depth: line.depth,
+            path_recipe_ids: line.path_recipe_ids,
+          };
+        }),
+      });
+    }
+
+    return { order_id: ticket.order_id, items, skipped_item_ids: [] };
+  }
+
   async prepareFireContext(
     orderId: number,
     candidateOrderItemIds: number[],
@@ -652,6 +1172,8 @@ export class KitchenFireService {
                 product_type: true,
                 track_inventory: true,
                 store_id: true,
+                // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
+                kds_id: true,
               },
             },
           },
@@ -760,6 +1282,8 @@ export class KitchenFireService {
     organization_id: number | undefined,
     result: {
       ticketId: number;
+      /** QUI-651 — un id por estacion involucrada; el SSE los empuja todos. */
+      ticketIds: number[];
       firedItemSnapshots: Array<{
         orderItemId: number;
         productId: number;
@@ -803,26 +1327,31 @@ export class KitchenFireService {
       );
     }
     try {
-      const fullTicket = await this.prisma.kitchen_tickets.findFirst({
-        where: { id: result.ticketId, store_id },
+      // QUI-651 — este es el segundo camino de fire (auto-fire desde pago / cierre
+      // de mesa / split) y tenia el MISMO defecto que el manual: empujaba solo el
+      // ticket primario, asi que en un envio de dos estaciones la segunda no se
+      // enteraba hasta el siguiente refresco.
+      const allTickets = await this.prisma.kitchen_tickets.findMany({
+        where: { id: { in: result.ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
-      if (fullTicket) {
+      for (const ticket of allTickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
-          ticket: fullTicket,
+          ticket,
           ts: Date.now(),
         });
       }
     } catch (err) {
       this.logger.warn(
-        `Failed to build SSE payload for ticket #${result.ticketId}: ${
+        `Failed to build SSE payload for tickets ${result.ticketIds.join(', ')}: ${
           (err as Error).message
         }`,
       );
     }
     return {
       kitchen_ticket_id: result.ticketId,
+      kitchen_ticket_ids: result.ticketIds,
       order_id: orderId,
       fired_item_ids,
       skipped_item_ids: [],
@@ -1135,6 +1664,33 @@ export class KitchenFireService {
       where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
       data: { status: 'delivered', updated_at: new Date() },
     });
+
+    // QUI-652 — el ticket de cocina alimenta el HECHO DE SERVICIO en
+    // `order_items`, que es donde vive la entrega desde que se desacoplo de
+    // cocina. Sin esto habria dos verdades: el plato preparado quedaria
+    // 'delivered' en el ticket y sin marca de entrega en su linea de pedido,
+    // mientras una cerveza (que nunca pasa por cocina) solo tendria la marca.
+    //
+    // Se estampa solo donde esta NULL: la primera entrega es la que ocurrio, y
+    // un re-delivery no debe mover la fecha hacia adelante.
+    const deliveredItems = await this.prisma.kitchen_ticket_items.findMany({
+      where: { kitchen_ticket_id: ticketId },
+      select: { order_item_id: true },
+    });
+    if (deliveredItems.length > 0) {
+      await this.prisma.order_items.updateMany({
+        where: {
+          id: { in: deliveredItems.map((it) => it.order_item_id) },
+          delivered_at: null,
+        },
+        data: {
+          delivered_at: new Date(),
+          delivered_by_user_id:
+            RequestContextService.getContext()?.user_id ?? null,
+          updated_at: new Date(),
+        },
+      });
+    }
 
     const full = await this.getTicketForStore(ticketId);
     this.pushKitchenEvent(store_id, {
@@ -1452,4 +2008,128 @@ export class KitchenFireService {
 
     return { data, total };
   }
+  /**
+   * Parte las lineas cuya exclusion aplica a MENOS unidades que su cantidad.
+   * QUI-655.
+   *
+   * `quantity: 3` con la excepcion en 1 pasa a `quantity: 2` (receta completa) +
+   * `quantity: 1` (con la exclusion). Devuelve los ids efectivos a firear y las
+   * exclusiones REMAPEADAS a la linea nueva — la que lleva la excepcion es la
+   * nueva, no la original, porque la original se queda con el resto homogeneo.
+   *
+   * Corre en su propia transaccion: la particion tiene que ser atomica (o se
+   * parten las dos lineas o ninguna), pero NO debe compartir transaccion con el
+   * consumo. Si el fire falla despues, la particion ya persistida sigue siendo
+   * correcta: refleja lo que el cliente pidio, y reintentar el envio consume sobre
+   * lineas ya homogeneas.
+   *
+   * Idempotencia: una linea ya partida llega con `quantity` igual a
+   * `applies_to_units`, asi que la condicion no se cumple y no se vuelve a partir.
+   */
+  private async splitLinesForExclusions(dto: FireOrderItemsDto): Promise<{
+    orderItemIds: number[];
+    exclusions: Array<{ order_item_id: number; component_product_ids: number[] }>;
+  }> {
+    const exclusions = (dto.exclusions ?? []).map((e) => ({
+      order_item_id: e.order_item_id,
+      component_product_ids: e.component_product_ids ?? [],
+      applies_to_units: e.applies_to_units,
+    }));
+
+    const partial = exclusions.filter(
+      (e) => e.applies_to_units != null && e.component_product_ids.length > 0,
+    );
+    if (partial.length === 0) {
+      return {
+        orderItemIds: dto.order_item_ids,
+        exclusions: exclusions.map((e) => ({
+          order_item_id: e.order_item_id,
+          component_product_ids: e.component_product_ids,
+        })),
+      };
+    }
+
+    const originals = await this.prisma.order_items.findMany({
+      where: { id: { in: partial.map((e) => e.order_item_id) } },
+    });
+    // Tipo explicito: el Map inferido desde tuplas ensancha el valor a `{}` y todo
+    // acceso a propiedades falla. Cuarta vez que aparece este patron en el repo.
+    type OriginalItem = (typeof originals)[number];
+    const byId = new Map<number, OriginalItem>(
+      originals.map((o) => [o.id, o] as [number, OriginalItem]),
+    );
+
+    const resultIds = [...dto.order_item_ids];
+    const remapped = new Map<number, number[]>();
+    for (const e of exclusions) {
+      remapped.set(e.order_item_id, e.component_product_ids);
+    }
+
+    await (this.prisma as any).$transaction(async (tx: Prisma.TransactionClient) => {
+      for (const e of partial) {
+        const original = byId.get(e.order_item_id);
+        if (!original) continue;
+        const units = Number(e.applies_to_units);
+        const qty = Number(original.quantity);
+        // Aplica a todas (o mas): no hay nada que partir, la linea ya es homogenea.
+        if (!Number.isFinite(units) || units <= 0 || units >= qty) continue;
+
+        const unitPrice = Number(original.unit_price);
+        const remaining = qty - units;
+
+        // La linea ORIGINAL se queda con el resto SIN exclusion, y la nueva lleva
+        // la excepcion. Al reves obligaria a mover la exclusion capturada al pedir
+        // y a reescribir la fila que el cliente ya vio en su cuenta.
+        await tx.order_items.update({
+          where: { id: original.id },
+          data: {
+            quantity: remaining,
+            total_price: new Prisma.Decimal(unitPrice * remaining),
+            updated_at: new Date(),
+          },
+        });
+
+        const created = await tx.order_items.create({
+          data: {
+            order_id: original.order_id,
+            product_id: original.product_id,
+            product_variant_id: original.product_variant_id,
+            product_name: original.product_name,
+            quantity: units,
+            unit_price: original.unit_price,
+            total_price: new Prisma.Decimal(unitPrice * units),
+            item_type: original.item_type,
+            cost_price: original.cost_price,
+            is_price_overridden: original.is_price_overridden,
+            // La parte nueva NO hereda el consumo: es justamente la que todavia
+            // no se cocino.
+            inventory_consumed_at_fire: false,
+            inventory_committed: false,
+            is_takeaway: original.is_takeaway,
+            notes: original.notes,
+            skip_kds: original.skip_kds,
+            // Puntero de agrupacion visual: la UI reagrupa las partes para que el
+            // cliente siga viendo "3 pollos" y no dos filas sueltas.
+            split_from_order_item_id:
+              original.split_from_order_item_id ?? original.id,
+            updated_at: new Date(),
+          },
+        });
+
+        // La exclusion viaja a la linea NUEVA; la original queda completa.
+        remapped.delete(original.id);
+        remapped.set(created.id, e.component_product_ids);
+        resultIds.push(created.id);
+      }
+    });
+
+    return {
+      orderItemIds: [...new Set(resultIds)],
+      exclusions: [...remapped.entries()].map(([order_item_id, ids]) => ({
+        order_item_id,
+        component_product_ids: ids,
+      })),
+    };
+  }
+
 }
