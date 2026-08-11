@@ -613,12 +613,21 @@ export class InvoiceFlowService {
 
       const stockUnits = await this.prisma.units_of_measure.findMany({
         where: { id: { in: uomIds } },
-        select: { id: true, code: true, dimension: true },
+        select: { id: true, code: true, dimension: true, factor_to_base: true },
       });
-      const stockUnitById = new Map<number, { code: string; dimension: string }>(
+      const stockUnitById = new Map<
+        number,
+        { code: string; dimension: string; factor: number }
+      >(
         stockUnits.map((u: any) => [
           Number(u.id),
-          { code: String(u.code), dimension: String(u.dimension) },
+          {
+            code: String(u.code),
+            dimension: String(u.dimension),
+            // El factor de la unidad de STOCK, que es lo que traduce la escala
+            // de la presentación a unidades BASE de la dimensión.
+            factor: Number(u.factor_to_base ?? 1) || 1,
+          },
         ]),
       );
 
@@ -641,7 +650,7 @@ export class InvoiceFlowService {
 
       const stockUnitByProduct = new Map<
         number,
-        { code: string; dimension: string } | null
+        { code: string; dimension: string; factor: number } | null
       >(
         products.map((p: any) => [
           p.id,
@@ -659,7 +668,15 @@ export class InvoiceFlowService {
         const quantity = Number(item.quantity ?? 0);
         const consumed = item.stock_units_consumed;
         if (consumed != null && quantity > 0) {
-          const scale = Number(consumed) / quantity;
+          // `consumed / quantity` da la escala en unidades de STOCK; el catálogo
+          // indexa por `factor_to_base`, que está en unidades BASE. Multiplicar
+          // por el factor de la unidad de stock es lo que hace conmensurables
+          // las dos: con la unidad mínima como unidad de stock (factor 1) la
+          // conversión es la identidad, pero con `cm` como unidad de stock una
+          // presentación de 3 m daba `300 / 3 = 100`, ninguna unidad de longitud
+          // tiene factor 100, y la línea caía a `EA` — "3 unidades" donde se
+          // vendieron 3 metros, justo el error que este resolutor evita.
+          const scale = (Number(consumed) / quantity) * stockUnit.factor;
           const scaleCode = codeByScale.get(
             `${stockUnit.dimension}|${scale}`,
           );
@@ -737,6 +754,14 @@ export class InvoiceFlowService {
         tax_amount: dianAmount(item.tax_amount),
         total_amount: dianAmount(item.total_amount),
         unit_code: unitCodeByItem.get(item.id) ?? 'EA',
+        // Escala de precio de la línea. Solo viaja cuando la cantidad está en
+        // unidad mínima: si la línea se vendió por presentación, `unit_price`
+        // ya es el precio del paquete y `quantity` cuenta paquetes, así que
+        // dividir otra vez declararía un importe N veces menor.
+        price_unit_quantity:
+          item.stock_units_consumed == null && Number(item.price_unit_quantity) > 1
+            ? String(item.price_unit_quantity)
+            : undefined,
       })),
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,

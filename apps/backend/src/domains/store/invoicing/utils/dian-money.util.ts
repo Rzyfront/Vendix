@@ -113,6 +113,21 @@ export interface DianLineAmounts {
   quantity: DianNumericInput;
   unit_price: DianNumericInput;
   discount_amount?: DianNumericInput;
+  /**
+   * QUI-648 — a cuántas unidades de la cantidad declarada corresponde
+   * `unit_price` (`products.price_unit_quantity`, la *price unit* de SAP).
+   *
+   * Sin esto el importe de la línea es `quantity × unit_price`, que para un
+   * queso a $28.000 el kilo con el stock en gramos declara **$70.000.000** por
+   * una venta de **$70.000**. Y no se queda en la línea: el mismo cálculo
+   * alimenta `dianLineExtensionTotal` —el total legal de la cabecera— y el
+   * `ValFac` del CUFE, así que el factor N se propaga al documento entero y a
+   * su huella, que es precisamente lo que la DIAN recomputa.
+   *
+   * Ausente, 0, 1 o no numérico ⇒ divisor 1, la aritmética histórica de todo el
+   * catálogo por pieza.
+   */
+  price_unit_quantity?: DianNumericInput;
 }
 
 /**
@@ -172,7 +187,18 @@ export function toDecimal(value: DianNumericInput): Prisma.Decimal {
 function lineExtensionDecimal(line: DianLineAmounts): Prisma.Decimal {
   return toDecimal(line.quantity)
     .times(toDecimal(line.unit_price))
+    .dividedBy(priceUnitDivisor(line.price_unit_quantity))
     .minus(toDecimal(line.discount_amount));
+}
+
+/**
+ * Divisor de la *price unit*: un entero > 1, o 1. Se sanea acá y no en el
+ * llamador para que ningún camino pueda dividir por cero ni por un negativo y
+ * convertir un importe legal en basura.
+ */
+function priceUnitDivisor(value: DianNumericInput): Prisma.Decimal {
+  const n = toDecimal(value);
+  return n.greaterThan(1) ? n : new Prisma.Decimal(1);
 }
 
 function formatWithScale(value: DianNumericInput, scale: number): string {

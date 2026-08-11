@@ -102,4 +102,83 @@ describe('UblCommonBuilder · unitCode en el XML emitido', () => {
       expect(xml).toContain(`<cbc:${qtyEl} unitCode="MTR">3</cbc:${qtyEl}>`);
     }
   });
+
+  /**
+   * QUI-648 — la escala de precio (`products.price_unit_quantity`) en el XML.
+   *
+   * Una línea vendida por ESCALA DE PRECIO (sin presentación) declara la
+   * cantidad en la unidad MÍNIMA y el precio de la unidad COMERCIAL: un queso a
+   * $28.000 el kilo con el stock en gramos llega acá con `quantity = 2500` (g)
+   * y `unit_price = 28000` (el kilo). El dinero real cobrado son $70.000, y lo
+   * verifica `order_items.total_price` en la venta correspondiente.
+   *
+   * Dos elementos tienen que reflejarlo:
+   *
+   * 1. `cac:Price/cbc:BaseQuantity` — el campo de UBL que declara "a cuánta
+   *    cantidad aplica este precio", que es exactamente `price_unit_quantity`.
+   *    Con `1.00` el documento afirmaba $28.000 por GRAMO.
+   * 2. `cbc:LineExtensionAmount` — `dianLineExtension()` recalcula
+   *    `quantity × unit_price − discount` (ver `invoicing/utils/dian-money.util.ts`);
+   *    sin dividir por la escala daba **70.000.000** para una venta de
+   *    **70.000**. No se quedaba en la línea: el mismo helper alimenta
+   *    `dianLineExtensionTotal()` —el total legal de la cabecera— y el `ValFac`
+   *    del CUFE, así que el factor N se propagaba al documento entero y a la
+   *    huella que la DIAN recomputa.
+   *
+   * No se pudo comprobar contra la DIAN: emitir exige habilitación de la tienda
+   * y en dev `POST /store/invoicing/from-order/:id` responde 403 antes de
+   * construir el XML.
+   */
+  it('declara la escala de precio en BaseQuantity y no infla el importe de la línea', () => {
+    // Queso: stock en g, precio por kg (price_unit_quantity = 1000).
+    const xml = serializeLines([
+      buildItem({
+        description: 'Queso campesino',
+        unit_code: 'GRM',
+        quantity: '2500',
+        unit_price: '28000.00',
+        total_amount: '70000.00',
+        price_unit_quantity: '1000',
+      }),
+    ]);
+
+    expect(xml).toMatch(
+      /<cbc:InvoicedQuantity unitCode="GRM">2500<\/cbc:InvoicedQuantity>/,
+    );
+    expect(xml).toMatch(/<cbc:LineExtensionAmount[^>]*>70000\.00</);
+    expect(xml).toMatch(
+      /<cbc:BaseQuantity unitCode="GRM">1000\.00<\/cbc:BaseQuantity>/,
+    );
+  });
+
+  it('sin escala de precio el importe y BaseQuantity quedan como siempre', () => {
+    // No-regresión: todo el catálogo por pieza pasa por acá sin escala.
+    const xml = serializeLines([
+      buildItem({ quantity: '3', unit_price: '5000.00', unit_code: 'EA' }),
+    ]);
+
+    expect(xml).toMatch(/<cbc:LineExtensionAmount[^>]*>15000\.00</);
+    expect(xml).toMatch(
+      /<cbc:BaseQuantity unitCode="EA">1\.00<\/cbc:BaseQuantity>/,
+    );
+  });
+
+  it('una escala inválida no puede producir un importe basura', () => {
+    // 0 dividiría por cero y un negativo invertiría el signo del importe legal;
+    // ambos colapsan a 1, que es el comportamiento histórico.
+    for (const bad of ['0', '-5', 'abc']) {
+      const xml = serializeLines([
+        buildItem({
+          quantity: '3',
+          unit_price: '5000.00',
+          unit_code: 'EA',
+          price_unit_quantity: bad,
+        }),
+      ]);
+      expect(xml).toMatch(/<cbc:LineExtensionAmount[^>]*>15000\.00</);
+      expect(xml).toMatch(
+        /<cbc:BaseQuantity unitCode="EA">1\.00<\/cbc:BaseQuantity>/,
+      );
+    }
+  });
 });

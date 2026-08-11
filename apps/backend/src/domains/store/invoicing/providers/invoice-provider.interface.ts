@@ -166,6 +166,16 @@ export interface ProviderInvoiceItem {
    * comportamiento histórico de todo el catálogo por pieza.
    */
   unit_code?: string;
+
+  /**
+   * QUI-648 — `products.price_unit_quantity`: a cuántas unidades de `quantity`
+   * corresponde `unit_price`. Va al XML como `cac:Price/cbc:BaseQuantity`, que
+   * es el campo de UBL que declara exactamente eso, y divide el importe de la
+   * línea. Sin él, un queso a $28.000 el kilo con el stock en gramos declara
+   * "$28.000 por gramo" y un `LineExtensionAmount` mil veces mayor que el
+   * dinero cobrado. Opcional: ausente equivale a 1, la aritmética histórica.
+   */
+  price_unit_quantity?: string;
 }
 
 export interface ProviderInvoiceTax {
