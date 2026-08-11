@@ -214,9 +214,9 @@ export class AnalyticsController {
       { key: 'percentage', header: '% Participación', type: 'percent' },
     ];
 
-    await this.emitReport(res, 'ventas_por_canal', tz, query, [
+    await this.emitReport(res, 'ventas_por_canal', tz, [,
       this.toSheet('Ventas por Canal', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -241,9 +241,9 @@ export class AnalyticsController {
       { key: 'total_revenue', header: 'Ingresos', type: 'currency' },
     ];
 
-    await this.emitReport(res, 'ventas_por_vendedor', tz, query, [
+    await this.emitReport(res, 'ventas_por_vendedor', tz, [,
       this.toSheet('Ventas por Vendedor', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -298,10 +298,10 @@ export class AnalyticsController {
       { key: 'line_total', header: 'Total Línea', type: 'currency' },
     ];
 
-    await this.emitReport(res, 'ventas', tz, query, [
+    await this.emitReport(res, 'ventas', tz, [,
       this.toSheet('Órdenes', orderColumns, result.orders, tz),
       this.toSheet('Detalle', itemColumns, result.items, tz),
-    ]);
+    ], query);
   }
 
   // ==================== PRODUCTS ANALYTICS ====================
@@ -367,9 +367,9 @@ export class AnalyticsController {
       { key: 'profit_margin', header: 'Margen (%)', type: 'number' },
     ];
 
-    await this.emitReport(res, 'productos', tz, query, [
+    await this.emitReport(res, 'productos', tz, [,
       this.toSheet('Productos', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('products/performance')
@@ -422,9 +422,9 @@ export class AnalyticsController {
       { key: 'Órdenes', header: 'Órdenes', type: 'number' },
     ];
 
-    await this.emitReport(res, 'rendimiento_productos', tz, query, [
+    await this.emitReport(res, 'rendimiento_productos', tz, [,
       this.toSheet('Rendimiento', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('products/profitability/export')
@@ -457,9 +457,9 @@ export class AnalyticsController {
       { key: 'Markup (%)', header: 'Markup (%)', type: 'number' },
     ];
 
-    await this.emitReport(res, 'rentabilidad_productos', tz, query, [
+    await this.emitReport(res, 'rentabilidad_productos', tz, [,
       this.toSheet('Rentabilidad', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   // ==================== INVENTORY ANALYTICS ====================
@@ -579,9 +579,9 @@ export class AnalyticsController {
       { key: 'reference_id', header: 'Referencia', type: 'text' },
     ];
 
-    await this.emitReport(res, 'movimientos_inventario', tz, query, [
+    await this.emitReport(res, 'movimientos_inventario', tz, [,
       this.toSheet('Movimientos', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('inventory/export')
@@ -607,9 +607,9 @@ export class AnalyticsController {
       { key: 'status', header: 'Estado', type: 'text' },
     ];
 
-    await this.emitReport(res, 'inventario', tz, query, [
+    await this.emitReport(res, 'inventario', tz, [,
       this.toSheet('Inventario', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -639,9 +639,9 @@ export class AnalyticsController {
       { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
     ];
 
-    await this.emitReport(res, 'stock_bajo', tz, query, [
+    await this.emitReport(res, 'stock_bajo', tz, [,
       this.toSheet('Stock Bajo', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   // ==================== CUSTOMERS ANALYTICS ====================
@@ -691,9 +691,9 @@ export class AnalyticsController {
       { key: 'preferred_count', header: 'Productos Preferidos', type: 'number' },
     ];
 
-    await this.emitReport(res, 'inventario_por_proveedor', tz, query, [
+    await this.emitReport(res, 'inventario_por_proveedor', tz, [,
       this.toSheet('Inventario por Proveedor', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('customers/trends')
@@ -751,9 +751,9 @@ export class AnalyticsController {
       { key: 'last_order_date', header: 'Última Orden', type: 'date' },
     ];
 
-    await this.emitReport(res, 'top_clientes', tz, query, [
+    await this.emitReport(res, 'top_clientes', tz, [,
       this.toSheet('Top Clientes', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('customers/export')
@@ -779,9 +779,9 @@ export class AnalyticsController {
       { key: 'state', header: 'Estado', type: 'text' },
     ];
 
-    await this.emitReport(res, 'clientes', tz, query, [
+    await this.emitReport(res, 'clientes', tz, [,
       this.toSheet('Clientes', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -821,9 +821,9 @@ export class AnalyticsController {
       { key: 'status', header: 'Estado', type: 'text' },
     ];
 
-    await this.emitReport(res, 'cuentas_por_cobrar', tz, query, [
+    await this.emitReport(res, 'cuentas_por_cobrar', tz, [,
       this.toSheet('Cuentas por Cobrar', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -861,9 +861,9 @@ export class AnalyticsController {
       { key: 'lifetime_value', header: 'Valor Vida', type: 'currency' },
     ];
 
-    await this.emitReport(res, 'cartera_clientes_aging', tz, query, [
+    await this.emitReport(res, 'cartera_clientes_aging', tz, [,
       this.toSheet('Cartera Clientes Aging', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('customers/abandoned-carts/summary')
@@ -910,9 +910,9 @@ export class AnalyticsController {
       { key: 'abandoned_at', header: 'Abandonado el', type: 'date' },
     ];
 
-    await this.emitReport(res, 'carritos_abandonados', tz, query, [
+    await this.emitReport(res, 'carritos_abandonados', tz, [,
       this.toSheet('Carritos Abandonados', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   // ==================== PURCHASES ANALYTICS ====================
@@ -970,9 +970,9 @@ export class AnalyticsController {
       { key: 'completed_count', header: 'Recibidas', type: 'number' },
     ];
 
-    await this.emitReport(res, 'tendencias_compra', tz, query, [
+    await this.emitReport(res, 'tendencias_compra', tz, [,
       this.toSheet('Tendencias de Compra', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   /**
@@ -1010,9 +1010,9 @@ export class AnalyticsController {
       { key: 'payment_status', header: 'Estado', type: 'text' },
     ];
 
-    await this.emitReport(res, 'cuentas_por_pagar', tz, query, [
+    await this.emitReport(res, 'cuentas_por_pagar', tz, [,
       this.toSheet('Cuentas por Pagar', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('purchases/export')
@@ -1036,9 +1036,9 @@ export class AnalyticsController {
       { key: 'last_order_date', header: 'Última Orden', type: 'date' },
     ];
 
-    await this.emitReport(res, 'compras', tz, query, [
+    await this.emitReport(res, 'compras', tz, [,
       this.toSheet('Compras', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   // ==================== REVIEWS ANALYTICS ====================
@@ -1088,9 +1088,9 @@ export class AnalyticsController {
       { key: 'last_review_date', header: 'Última Reseña', type: 'date' },
     ];
 
-    await this.emitReport(res, 'resenas_por_producto', tz, query, [
+    await this.emitReport(res, 'resenas_por_producto', tz, [,
       this.toSheet('Reseñas por Producto', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('reviews/export')
@@ -1119,9 +1119,9 @@ export class AnalyticsController {
       { key: 'Votos Útiles', header: 'Votos Útiles', type: 'number' },
     ];
 
-    await this.emitReport(res, 'resenas', tz, query, [
+    await this.emitReport(res, 'resenas', tz, [,
       this.toSheet('Reseñas', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   // ==================== FINANCIAL ANALYTICS ====================
@@ -1220,9 +1220,9 @@ export class AnalyticsController {
       { key: 'value', header: 'Valor', type: 'text', align: 'right' },
     ];
 
-    await this.emitReport(res, 'financiero', tz, query, [
+    await this.emitReport(res, 'financiero', tz, [,
       this.toSheet('Financiero', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('financial/tax-summary/export')
@@ -1258,9 +1258,9 @@ export class AnalyticsController {
       { key: 'is_compound', header: 'Compuesto', type: 'text' },
     ];
 
-    await this.emitReport(res, 'impuestos', tz, query, [
+    await this.emitReport(res, 'impuestos', tz, [,
       this.toSheet('Impuestos', columns, rows, tz),
-    ]);
+    ], query);
   }
 
   @Get('financial/cash-sessions/export')
@@ -1296,9 +1296,9 @@ export class AnalyticsController {
       { key: 'status', header: 'Estado', type: 'text' },
     ];
 
-    await this.emitReport(res, 'sesiones_caja', tz, query, [
+    await this.emitReport(res, 'sesiones_caja', tz, [,
       this.toSheet('Sesiones de Caja', columns, rows, tz),
-    ]);
+    ], query);
   }
 }
 
