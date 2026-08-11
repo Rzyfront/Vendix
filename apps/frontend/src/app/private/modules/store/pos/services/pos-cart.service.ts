@@ -1312,10 +1312,16 @@ export class PosCartService {
       !!resolution.isPackageUnit,
       resolution.unitsPerPackage ?? null,
     );
-    // QUI-648. Con presentación aplicada, `quantity` cuenta PAQUETES y el
+    // QUI-648. Con PRESENTACIÓN aplicada, `quantity` cuenta PAQUETES y el
     // precio es el del paquete completo: la escala del producto sale de la
     // ecuación (el backend excluye estas líneas por la misma razón). Al quitar
     // la presentación, la línea vuelve a su escala y a su unidad de venta.
+    //
+    // Una TARIFA DE CLIENTE ("Mayorista") no es una presentación: cambia el
+    // número del precio, que sigue expresado por unidad de precio. La línea
+    // conserva su escala y su unidad de venta, igual que sin tarifa. Por eso
+    // todo lo de abajo decide por el EMPAQUE y no por `appliedTierId != null`
+    // — ver el encabezado de `line-units.util.ts`.
     const appliedTierId = resolution.appliedPriceTierId ?? null;
     const saleUnit = this.saleUnitService.configFor(product);
 
@@ -1328,19 +1334,24 @@ export class PosCartService {
     const nextPackSize = resolution.isPackageUnit
       ? Number(resolution.unitsPerPackage ?? 1) || 1
       : 1;
+    /** La tarifa que se está aplicando es una presentación (empaque > 1). */
+    const appliesPresentation = nextPackSize > 1;
     const previousPackSize = item.is_package_unit
       ? Number(item.units_per_package ?? 1) || 1
       : 1;
     let desiredQuantity = item.quantity;
-    if (capturedInSaleUnit && nextPackSize > 1) {
+    if (capturedInSaleUnit && appliesPresentation) {
       // Unidades mínimas → paquetes.
       desiredQuantity = Math.max(1, Math.round(item.quantity / nextPackSize));
     } else if (
-      appliedTierId == null &&
+      !appliesPresentation &&
       previousPackSize > 1 &&
       saleUnit.unitsPerCapture > 1
     ) {
-      // Paquetes → unidades mínimas, al volver a la tarifa por defecto.
+      // Paquetes → unidades mínimas, al salir de la presentación. Vale tanto al
+      // volver a la tarifa por defecto como al pasar a una tarifa de cliente:
+      // en los dos casos la línea recupera su escala, y dejar la cantidad en
+      // paquetes leería "3 rollos" como "3 mm".
       desiredQuantity = item.quantity * previousPackSize;
     }
 
@@ -1351,14 +1362,17 @@ export class PosCartService {
     if (!item.is_weight_product && quantity <= 0) {
       throw new Error('Stock insuficiente para aplicar esta tarifa');
     }
-    const nextPriceUnitQuantity =
-      appliedTierId != null
-        ? null
-        : saleUnit.priceUnitQuantity > 1
-          ? saleUnit.priceUnitQuantity
-          : null;
+    // Solo la presentación borra la escala: con tarifa de cliente el precio
+    // sigue publicado "por metro", así que la línea conserva su
+    // `price_unit_quantity` y su unidad de venta (el cajero sigue viendo "3 m",
+    // no 3.000 mm).
+    const nextPriceUnitQuantity = appliesPresentation
+      ? null
+      : saleUnit.priceUnitQuantity > 1
+        ? saleUnit.priceUnitQuantity
+        : null;
     const restoresSaleUnit =
-      appliedTierId == null &&
+      !appliesPresentation &&
       !item.is_weight_product &&
       saleUnit.unitsPerCapture > 1;
     const nextSaleUnitCode = restoresSaleUnit
@@ -1368,10 +1382,15 @@ export class PosCartService {
       ? saleUnit.unitsPerCapture
       : null;
 
+    // El spread arrastra el empaque ANTERIOR de la línea; el multiplicador tiene
+    // que leer el NUEVO, o al pasar de "Rollo 20 m" a "Mayorista" seguiría
+    // creyendo que la línea cuenta paquetes.
     const multiplier = resolveLineUnits({
       ...item,
       quantity,
       applied_price_tier_id: appliedTierId,
+      is_package_unit: !!resolution.isPackageUnit,
+      units_per_package: resolution.unitsPerPackage ?? null,
       price_unit_quantity: nextPriceUnitQuantity,
     });
     const taxAmount = this.roundMoney(
@@ -1539,10 +1558,16 @@ export class PosCartService {
       // Multiplicador monetario único: peso capturado (legado), o cantidad
       // dividida por la escala del precio cuando el producto publica "$X por N
       // unidades". Con escala 1 es la cantidad, como siempre.
+      //
+      // Una línea recién agregada nunca es una presentación: el empaque solo lo
+      // resuelve `processApplyTierToCartItem`, que vuelve a correr después
+      // cuando el código pistoleado traía una (`applyScannedPresentation`).
       const lineUnits = resolveLineUnits({
         quantity,
         weight,
         is_weight_product: isWeightProduct,
+        is_package_unit: false,
+        units_per_package: null,
         price_unit_quantity: priceUnitQuantity,
       });
       const itemTotalPrice = finalUnitPrice * lineUnits;
