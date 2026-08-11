@@ -24,7 +24,7 @@ import {
  * —esa parte es de la DIAN y vive en el contrato—; esto nombra el CLIC que la
  * corrige, que es lo que le falta a alguien parado frente al formulario.
  */
-const CORRECCION_POR_VIOLACION: Record<
+export const CORRECCION_POR_VIOLACION: Record<
   FiscalRequirementViolation['code'],
   string
 > = {
@@ -39,7 +39,7 @@ const CORRECCION_POR_VIOLACION: Record<
 /** Campos que fijan la identidad fiscal de una resolución ante la DIAN. */
 type CamposInmutables = 'prefix' | 'document_type' | 'range_from' | 'resolution_number';
 
-const ROTULO_CAMPO_INMUTABLE: Record<CamposInmutables, string> = {
+export const ROTULO_CAMPO_INMUTABLE: Record<CamposInmutables, string> = {
   prefix: 'prefijo',
   document_type: 'tipo de documento',
   range_from: 'número inicial del rango',
