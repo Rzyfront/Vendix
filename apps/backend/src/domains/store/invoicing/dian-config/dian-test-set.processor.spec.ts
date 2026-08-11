@@ -47,4 +47,45 @@ describe('DianTestSetProcessor — opciones del worker', () => {
     expect(worker_options.maxStalledCount).not.toBeUndefined();
     expect(typeof worker_options.maxStalledCount).toBe('number');
   });
+
+  /**
+   * QUI-674 — el otro lado de la misma moneda.
+   *
+   * `maxStalledCount: 0` convierte un lock caducado en un `failed`. Eso es lo
+   * correcto cuando el proceso murió, y una regresión cara cuando el worker está
+   * vivo y solo estaba bloqueando el event loop: el envío a la DIAN se aborta a
+   * media corrida con los consecutivos ya reservados.
+   *
+   * BullMQ renueva el lock a la MITAD de `lockDuration` (15 s con el default de
+   * 30 s) y esa renovación es un temporizador de ESTE event loop. Si el job no lo
+   * cede, no corre. Con la firma ya troceada (caché del PKCS#12 + cesión por
+   * documento) el macrotask más largo es sub-segundo, y `lockDuration` se
+   * dimensiona con margen sobre esa cota.
+   */
+  it('declara un lockDuration explícito, no el default de 30 s de BullMQ', () => {
+    expect(worker_options.lockDuration).not.toBeUndefined();
+    expect(typeof worker_options.lockDuration).toBe('number');
+    expect(worker_options.lockDuration).toBe(120_000);
+  });
+
+  it('deja margen real sobre el default: al menos 60 s', () => {
+    // Sin esta cota inferior, alguien podría "limpiar" el 120_000 de vuelta a un
+    // valor cercano al default y el spec anterior seguiría siendo el único
+    // testigo. El umbral describe la INTENCIÓN (margen amplio), no el número.
+    expect(worker_options.lockDuration).toBeGreaterThanOrEqual(60_000);
+  });
+
+  /**
+   * TRIPWIRE — el spec original solo miraba `maxStalledCount`, así que CUALQUIER
+   * opción nueva del decorador entraba a producción sin un solo test que la
+   * nombrara. Este assert obliga a que añadir una opción sea una decisión
+   * consciente: si aparece o desaparece una clave, este test falla y hay que
+   * escribir aquí por qué existe.
+   */
+  it('el juego de opciones del worker es exactamente el declarado', () => {
+    expect(Object.keys(worker_options).sort()).toEqual([
+      'lockDuration',
+      'maxStalledCount',
+    ]);
+  });
 });

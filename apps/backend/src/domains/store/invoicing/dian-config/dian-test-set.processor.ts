@@ -41,8 +41,30 @@ import { DianTestSetJob } from './dian-test-set-job.interface';
  * Con `maxStalledCount: 0` un job estancado va a `failed` y el operador lo ve. Falla
  * ruidosa en vez de duplicar 50 números autorizados irrecuperables — el mismo
  * criterio que el resto de este flujo: preferir fallar antes de gastar.
+ *
+ * ## `lockDuration: 120_000` — por qué se sube el default (QUI-674)
+ *
+ * BullMQ renueva el lock con un temporizador que dispara a la MITAD de
+ * `lockDuration` (15 s con el default de 30 s). Ese temporizador vive en el event
+ * loop de ESTE proceso, así que si el job lo bloquea, la renovación no corre y el
+ * lock caduca — con `maxStalledCount: 0` eso es un `failed` en medio de un envío
+ * a la DIAN. Es exactamente lo que pasaba: `could not renew lock for job 27`,
+ * `Missing lock for job 28. moveToFinished`.
+ *
+ * La causa se ataca en origen (caché del PKCS#12 en `DianXmlSignerService` +
+ * cesión del event loop por documento en `DianTestService.yieldEventLoop`), y con
+ * eso el macrotask más largo del job pasa a ser UN documento: sub-segundo.
+ *
+ * `lockDuration` se dimensiona sobre esa cota nueva, no sobre la vieja: 120 s son
+ * dos órdenes de magnitud de margen sobre un documento, y cubren de sobra un
+ * primer parseo en frío, una pausa de GC o un pico del host. El coste de pasarse
+ * es acotado y benigno: un proceso que MUERA a mitad de job deja el lock retenido
+ * hasta 120 s antes de que se detecte el estancamiento, y como `maxStalledCount`
+ * es 0 el desenlace es el mismo `failed` — solo que 90 s más tarde. Errar por
+ * generoso es el lado seguro: lo que no se puede permitir es lo contrario, un
+ * lock que caduca con el worker vivo y sano.
  */
-@Processor('dian-test-set', { maxStalledCount: 0 })
+@Processor('dian-test-set', { maxStalledCount: 0, lockDuration: 120_000 })
 export class DianTestSetProcessor extends WorkerHost {
   private readonly logger = new Logger(DianTestSetProcessor.name);
 

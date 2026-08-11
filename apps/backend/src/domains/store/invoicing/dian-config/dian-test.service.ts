@@ -135,6 +135,34 @@ export class DianTestService {
     @InjectQueue('dian-test-set') private readonly testSetQueue: Queue,
   ) {}
 
+  /**
+   * Devuelve el event loop al resto del proceso durante UN turno de macrotarea.
+   *
+   * ## Por qué hace falta un `setImmediate` y no basta con `await` (QUI-674)
+   *
+   * Los bucles que arman el set son CPU pura: construir el UBL, calcular el
+   * CUFE/CUDE (SHA-384) y firmar (canonicalización C14N + `crypto.createSign()`,
+   * que es la API SÍNCRONA y no baja al threadpool). Entre el `update` de
+   * `enablement_status` y el primer `SendTestSetAsync` NO hay una sola operación
+   * de E/S real: los `await` de `sign()` resuelven promesas YA cumplidas, así que
+   * son MICROTAREAS. La cola de microtareas se drena entera antes de volver al
+   * event loop, de modo que los 50 documentos corrían en un ÚNICO macrotask
+   * ininterrumpido.
+   *
+   * Consecuencias medidas en producción: nginx devolvía 504 en rutas triviales
+   * (`/api/store/notifications?limit=15`) porque el proceso —el MISMO que sirve
+   * la API— no llegaba a atender el socket, y BullMQ registraba
+   * `could not renew lock for job` porque su temporizador de renovación (a la
+   * mitad de `lockDuration`) tampoco podía correr.
+   *
+   * `setImmediate` encola en la fase *check*, que corre DESPUÉS de la fase de
+   * timers: ceder aquí es exactamente lo que le da su turno al renovador del lock
+   * y a los sockets HTTP pendientes. Es la cesión mínima: un turno por documento.
+   */
+  private yieldEventLoop(): Promise<void> {
+    return new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
   private async getConfigById(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
       where: { id: config_id },
@@ -1113,6 +1141,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 6a-bis. Cuando el lote NO emite facturas propias —el humo de una nota— la
@@ -1267,6 +1298,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 6c. Generate the credit notes, each referencing an invoice of this same set
@@ -1394,6 +1428,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 7-8. Enviar UN DOCUMENTO POR ZIP, un `SendTestSetAsync` por documento.
