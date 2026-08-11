@@ -98,9 +98,8 @@ function silhouetteOf(format: PrintFormat): FormatSilhouette {
     <button
       type="button"
       class="chip"
-      role="radio"
       [class.chip--selected]="selected()"
-      [attr.aria-checked]="selected()"
+      [attr.aria-pressed]="selected()"
       [attr.aria-label]="label() + ', ' + silhouette().caption"
       (click)="picked.emit(format())"
     >

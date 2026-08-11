@@ -4,6 +4,7 @@ import {
   PrintDocument,
   PrintFormat,
 } from '../../../../../../../core/models/store-settings.interface';
+import type { IconName } from '../../../../../../../shared/components/icon/icons.registry';
 
 /**
  * Presentation layer of the print settings screen: how the 12 documents of
@@ -80,7 +81,7 @@ export interface PrintFamily {
   label: string;
   /** One line saying what the family has in common, so the header is not decor. */
   hint: string;
-  icon: string;
+  icon: IconName;
   documents: readonly PrintDocument[];
 }
 
