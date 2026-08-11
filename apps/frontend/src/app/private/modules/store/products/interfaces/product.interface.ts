@@ -123,6 +123,13 @@ export interface Product {
   // UI can validate dimension compatibility and show proper labels.
   stock_uom_id?: number | null;
   purchase_uom_id?: number | null;
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros publica `base_price = 5000` con
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; `1` es el default.
+   */
+  price_unit_quantity?: number | null;
   stock_uom?: { id: number; code: string; name: string; dimension: string } | null;
   purchase_uom?: { id: number; code: string; name: string; dimension: string } | null;
   created_at: Date;
@@ -384,6 +391,8 @@ export interface CreateProductDto {
   // ===== UoM FKs (Fase UoM) =====
   stock_uom_id?: number | null;
   purchase_uom_id?: number | null;
+  /** Escala del precio: unidades de stock que cubre `base_price`. Default 1. */
+  price_unit_quantity?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];

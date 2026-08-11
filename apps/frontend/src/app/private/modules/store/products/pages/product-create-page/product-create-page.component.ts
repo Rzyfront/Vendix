@@ -81,6 +81,11 @@ import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator, uomDimensionMatchValidator, notBlankValidator } from '../../utils/product-validators';
 import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
+import { SaleConfigHintComponent } from '../../components/sale-config-hint/sale-config-hint.component';
+import {
+  SaleConfigExample,
+  SaleConfigInput,
+} from '../../../../../../shared/services/pricing';
 import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import {
@@ -187,6 +192,7 @@ interface PriceTierOverrideRow {
     KeyValuePipe,
     ProductSerialsManagerModalComponent,
     SaveRequirementsModalComponent,
+    SaleConfigHintComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -565,15 +571,66 @@ export class ProductCreatePageComponent {
     this.uomTick();
     const purchaseId = Number(this.productForm?.get('purchase_uom_id')?.value ?? 0);
     const purchase = this.uomOptions().find((u) => u.id === purchaseId);
-    if (!purchase) return [];
-    const pf = Number(purchase.factor_to_base);
+    const pf = purchase ? Number(purchase.factor_to_base) : null;
+    // Sin unidad de compra la lista queda abierta: un retail que vende cable
+    // por metro define su unidad de stock sin comprar en otra. Con unidad de
+    // compra elegida se mantiene el embudo del insumo (misma dimensión, nunca
+    // más grande que lo que se compra).
     return this.uomOptions()
       .filter(
         (u) =>
-          u.dimension === purchase.dimension && Number(u.factor_to_base) <= pf,
+          !purchase ||
+          (u.dimension === purchase.dimension &&
+            Number(u.factor_to_base) <= (pf as number)),
       )
-      .map((u) => ({ value: u.id, label: `${u.name} (${u.code})` }));
+      .map((u) => {
+        const eligible = u.is_stock_eligible !== false;
+        return {
+          value: u.id,
+          label: `${u.name} (${u.code})`,
+          disabled: !eligible,
+          description: eligible
+            ? undefined
+            : 'Su equivalencia no es exacta: sirve para comprar, no para contar stock',
+        };
+      });
   });
+
+  /** Unidad de stock elegida, resuelta contra el catálogo. */
+  readonly selectedStockUom = computed<UnitOfMeasure | null>(() => {
+    this.uomTick();
+    const id = Number(this.productForm?.get('stock_uom_id')?.value ?? 0);
+    if (!id) return null;
+    return this.uomOptions().find((u) => u.id === id) ?? null;
+  });
+
+  /**
+   * Escalas de precio ofrecidas: cada unidad de la misma dimensión que quepa un
+   * número entero de veces en la unidad de stock. El comerciante elige "por
+   * metro" y el sistema guarda 1.000; nunca se le pide pensar en milímetros.
+   */
+  readonly priceScaleOptions = computed<SelectorOption[]>(() => {
+    const stock = this.selectedStockUom();
+    if (!stock) return [{ value: 1, label: 'Por unidad' }];
+    const sf = Number(stock.factor_to_base);
+    if (!Number.isFinite(sf) || sf <= 0) return [{ value: 1, label: 'Por unidad' }];
+    const options: SelectorOption[] = [];
+    for (const u of this.uomOptions()) {
+      if (u.dimension !== stock.dimension) continue;
+      const ratio = Number(u.factor_to_base) / sf;
+      if (!Number.isFinite(ratio) || ratio < 1 || !Number.isInteger(ratio)) {
+        continue;
+      }
+      options.push({
+        value: ratio,
+        label: `Por ${u.name.toLowerCase()} (${u.code})`,
+        description:
+          ratio > 1 ? `${ratio.toLocaleString('es-CO')} ${stock.code}` : undefined,
+      });
+    }
+    return options.sort((a, b) => Number(a.value) - Number(b.value));
+  });
+
   /**
    * UoM dropdown for the "purchase unit" (presentation you receive). Free
    * choice across all active units — it DRIVES the stock-unit options
@@ -665,10 +722,73 @@ export class ProductCreatePageComponent {
     };
   });
 
+  /**
+   * Todo lo que la tarjeta explicativa necesita, resuelto desde el formulario.
+   * Depende de `formUpdateTrigger` y `uomTick` porque los valores del
+   * formulario reactivo no son señales.
+   */
+  readonly saleConfigInput = computed<SaleConfigInput>(() => {
+    this.formUpdateTrigger();
+    this.uomTick();
+    const stock = this.selectedStockUom();
+    return {
+      stockUnit: stock ? { code: stock.code, name: stock.name } : null,
+      dimension: stock?.dimension ?? null,
+      priceUnitQuantity: Number(
+        this.productForm?.get('price_unit_quantity')?.value ?? 1,
+      ),
+      basePrice: Number(this.productForm?.get('base_price')?.value ?? 0),
+      hasVariants: this.hasVariants,
+      presentations: this.priceTierRows()
+        .filter((row) => row.enabled)
+        .map((row) => ({
+          name: row.tier.name,
+          packSize: this.getRowPackSize(row),
+          price: row.override_price ?? this.getTierFallbackPrice(row),
+        })),
+      catalog: this.uomOptions().map((u) => ({
+        code: u.code,
+        name: u.name,
+        dimension: u.dimension,
+        factorToBase: Number(u.factor_to_base),
+      })),
+    };
+  });
+
+  /**
+   * Un ejemplo precarga unidad de stock y escala de precio. La presentación no
+   * se crea sola: crearla exige una tarifa de la tienda, y hacerlo por debajo
+   * dejaría filas que el comerciante no pidió. El ejemplo deja el terreno listo
+   * y el paso de presentaciones queda a un clic.
+   */
+  applySaleConfigExample(example: SaleConfigExample): void {
+    const unit = this.uomOptions().find((u) => u.code === example.stockUnitCode);
+    if (!unit) return;
+    this.productForm.patchValue({
+      stock_uom_id: unit.id,
+      price_unit_quantity: example.priceUnitQuantity,
+    });
+    this.uomTick.update((t) => t + 1);
+    this.formUpdateTrigger.update((t) => t + 1);
+  }
+
   /** Re-run validator + recompute capacity when the stock dropdown changes. */
   onStockUomChange(): void {
     this.uomTick.update((t) => t + 1);
+    // La escala del precio se expresa en la unidad de stock: cambiar de
+    // milímetros a metros dejaría un "por 1.000" que ya no significa un metro.
+    // Se vuelve a 1 y el usuario elige de nuevo, en vez de arrastrar un número
+    // que mentiría en la vitrina.
+    const scaleCtrl = this.productForm.get('price_unit_quantity');
+    if (scaleCtrl && Number(scaleCtrl.value ?? 1) !== 1) {
+      scaleCtrl.setValue(1);
+    }
     this.productForm.updateValueAndValidity();
+  }
+
+  /** La escala del precio cambió: refresca la frase que la describe. */
+  onPriceUnitQuantityChange(): void {
+    this.formUpdateTrigger.update((t) => t + 1);
   }
 
   /**
@@ -1671,6 +1791,10 @@ export class ProductCreatePageComponent {
         // FKs below are the source of truth once a UoM is picked.
         stock_uom_id: [null as number | null],
         purchase_uom_id: [null as number | null],
+        // Escala del precio (price unit): a cuántas unidades de stock
+        // corresponde `base_price`. 1 = precio por unidad, el comportamiento
+        // de siempre.
+        price_unit_quantity: [1 as number],
       },
       {
         validators: [
@@ -1906,6 +2030,7 @@ export class ProductCreatePageComponent {
       // UoM FKs (Fase UoM)
       stock_uom_id: (product as any).stock_uom_id ?? null,
       purchase_uom_id: (product as any).purchase_uom_id ?? null,
+      price_unit_quantity: Number((product as any).price_unit_quantity ?? 1) || 1,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -3697,15 +3822,17 @@ export class ProductCreatePageComponent {
       // Appointment redesign phase 2 — propagar el flag al DTO
       // enviado al backend. Default `false` para preservar UX legacy.
       is_eligible_for_home_service: !!formValue.is_eligible_for_home_service,
-      // UoM FKs (Fase UoM) — only sent when the product is an ingredient.
-      // Sending `null` for non-ingredients keeps the column clean and the
-      // product list filters untouched.
-      stock_uom_id: formValue.is_ingredient
-        ? formValue.stock_uom_id ?? null
-        : null,
-      purchase_uom_id: formValue.is_ingredient
-        ? formValue.purchase_uom_id ?? null
-        : null,
+      // UoM FKs — ya no son exclusivas del insumo: una ferretería mide su
+      // cable en milímetros sin que el cable sea insumo de nada. Se envía lo
+      // que el formulario tenga; un producto por pieza sigue mandando null.
+      stock_uom_id: formValue.stock_uom_id ?? null,
+      purchase_uom_id: formValue.purchase_uom_id ?? null,
+      // Escala del precio: a cuántas unidades de stock corresponde base_price.
+      // 1 es el default y reproduce la aritmética de siempre.
+      price_unit_quantity: Math.max(
+        1,
+        Number(formValue.price_unit_quantity ?? 1) || 1,
+      ),
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
@@ -4458,6 +4585,44 @@ export class ProductCreatePageComponent {
       row.tier.units_per_package,
       row.override_units_per_package,
     );
+  }
+
+  /**
+   * Traduce el factor de una presentación a la unidad de stock del producto y,
+   * si existe, a una unidad grande del catálogo: "1 Rollo = 20.000 mm = 20 m".
+   *
+   * El número suelto ("20000") no significa nada sin la unidad, y es
+   * exactamente donde un comerciante se equivoca de tres ceros. Devuelve
+   * `null` cuando el producto no declara unidad de stock o la presentación no
+   * tiene empaque, que es el caso de todo el catálogo por pieza.
+   */
+  getRowPackExplainer(row: PriceTierOverrideRow): string | null {
+    const packSize = this.getRowPackSize(row);
+    if (packSize <= 1) return null;
+    const stock = this.selectedStockUom();
+    if (!stock) return null;
+    const sf = Number(stock.factor_to_base);
+    if (!Number.isFinite(sf) || sf <= 0) return null;
+
+    const base = `1 ${row.tier.name} = ${packSize.toLocaleString('es-CO')} ${stock.code}`;
+    const match = this.uomOptions().find(
+      (u) =>
+        u.dimension === stock.dimension &&
+        Number(u.factor_to_base) > sf &&
+        Math.abs((packSize * sf) / Number(u.factor_to_base) - 1) < 1e-9,
+    );
+    if (match) return `${base} = 1 ${match.code}`;
+
+    const readable = this.uomOptions()
+      .filter(
+        (u) => u.dimension === stock.dimension && Number(u.factor_to_base) > sf,
+      )
+      .map((u) => ({ u, value: (packSize * sf) / Number(u.factor_to_base) }))
+      .filter(({ value }) => value >= 1 && Number.isInteger(value))
+      .sort((a, b) => a.value - b.value)[0];
+    return readable
+      ? `${base} = ${readable.value.toLocaleString('es-CO')} ${readable.u.code}`
+      : base;
   }
 
   /** Whole-package acquisition cost = product cost_price * packSize. */

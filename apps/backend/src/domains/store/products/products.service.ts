@@ -29,6 +29,13 @@ import {
   assertTiersAllowed,
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
+import { resolvePackSize } from './services/packaging.util';
+import {
+  buildSaleConfigExplanation,
+  SaleConfigExplanation,
+  SaleConfigPresentation,
+  SaleConfigUnit,
+} from './services/sale-config-explainer.util';
 import { S3Service } from '@common/services/s3.service';
 import { QrService } from '@common/services/qr.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
@@ -1842,6 +1849,15 @@ export class ProductsService {
       purchase_to_stock_factor: product.purchase_to_stock_factor,
       stock_uom_id: product.stock_uom_id,
       purchase_uom_id: product.purchase_uom_id,
+      // Escala del precio: sin exponerla, el editor recargaría un producto
+      // vendido por metro como si costara eso por milímetro.
+      price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+      // Cómo se vende, en una frase. La misma que muestra el editor, para que
+      // el móvil y Vexi no tengan que reconstruirla por su cuenta.
+      sale_config_summary: await this.buildSaleConfigSummary(
+        product as any,
+        hasVariants,
+      ),
       track_inventory: product.track_inventory,
       // Flag de seriales. Se persiste vía `...productData` en update y vía el
       // bloque explícito en create, pero el form de edición lo lee de ESTE
@@ -1909,6 +1925,108 @@ export class ProductsService {
       stock_levels: product.stock_levels,
       stores: product.stores,
     };
+  }
+
+  /**
+   * Frase que describe cómo se vende el producto: unidad de stock, escala de
+   * precio y presentaciones. Se arma con el helper compartido para que el
+   * detalle de API diga exactamente lo mismo que el editor.
+   *
+   * Cuesta dos consultas y solo se pagan cuando el producto declara unidad de
+   * stock o tiene presentaciones habilitadas; el catálogo por pieza —la
+   * inmensa mayoría— sale por el camino corto sin tocar la base.
+   */
+  private async buildSaleConfigSummary(
+    product: any,
+    hasVariants: boolean,
+  ): Promise<SaleConfigExplanation | null> {
+    const tierIds: number[] = (product.product_price_tier_assignments ?? [])
+      .map((a: any) => a.price_tier_id)
+      .filter((id: any) => typeof id === 'number');
+
+    if (!product.stock_uom_id && tierIds.length === 0) return null;
+
+    let stockUnit: SaleConfigUnit | null = null;
+    let catalog: SaleConfigUnit[] = [];
+    if (product.stock_uom_id) {
+      const unit = await this.prisma.units_of_measure.findFirst({
+        where: { id: product.stock_uom_id },
+        select: {
+          code: true,
+          name: true,
+          dimension: true,
+          factor_to_base: true,
+        },
+      });
+      if (unit) {
+        stockUnit = {
+          code: unit.code,
+          name: unit.name,
+          dimension: unit.dimension,
+          factor_to_base: Number(unit.factor_to_base),
+        };
+        const siblings = await this.prisma.units_of_measure.findMany({
+          where: { dimension: unit.dimension, is_active: true },
+          select: {
+            code: true,
+            name: true,
+            dimension: true,
+            factor_to_base: true,
+          },
+        });
+        catalog = siblings.map((u) => ({
+          code: u.code,
+          name: u.name,
+          dimension: u.dimension,
+          factor_to_base: Number(u.factor_to_base),
+        }));
+      }
+    }
+
+    let presentations: SaleConfigPresentation[] = [];
+    if (tierIds.length > 0) {
+      const tiers = await this.prisma.price_tiers.findMany({
+        where: { id: { in: tierIds }, is_active: true },
+        select: {
+          id: true,
+          name: true,
+          units_per_package: true,
+          product_price_tier_overrides: {
+            where: { product_id: product.id, variant_id: null },
+            select: {
+              override_price: true,
+              override_units_per_package: true,
+            },
+          },
+        },
+      });
+      presentations = tiers
+        .map((tier) => {
+          const override = tier.product_price_tier_overrides?.[0];
+          return {
+            name: tier.name,
+            packSize: resolvePackSize(
+              tier.units_per_package,
+              override?.override_units_per_package,
+            ),
+            price:
+              override?.override_price != null
+                ? Number(override.override_price)
+                : null,
+          };
+        })
+        .filter((p) => p.packSize > 1);
+    }
+
+    return buildSaleConfigExplanation({
+      stockUnit,
+      catalog,
+      presentations,
+      hasVariants,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1),
+      basePrice:
+        product.base_price != null ? Number(product.base_price) : null,
+    });
   }
 
   async findBySlug(storeId: number, slug: string) {
