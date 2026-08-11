@@ -17,6 +17,8 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolvePackSize } from '../products/services/packaging.util';
+import { normalizePriceUnitLines } from '../products/services/price-unit.util';
 
 @Injectable()
 export class QuotationsService {
@@ -88,6 +90,22 @@ export class QuotationsService {
       context,
     );
 
+
+    // Precio por N unidades de stock: la cotizacion es un documento que se le
+    // manda al cliente, asi que el total lo recalcula el servidor por la misma
+    // razon que la orden — la escala es del producto y cualquier superficie
+    // puede llegar con la aritmetica vieja. Va ANTES del reduce del subtotal
+    // para que la cabecera salga de las lineas ya corregidas.
+    // Se excluyen las PRESENTACIONES (packSize > 1): ahi `unit_price` es el
+    // precio del paquete y `quantity` cuenta paquetes.
+    const priceUnits = await normalizePriceUnitLines(this.prisma as any, items, {
+      isPresentationAtIndex: (index) =>
+        resolvePackSize(
+          tierSnapshots[index]?.units_per_package,
+          tierSnapshots[index]?.override_units_per_package,
+        ) > 1,
+    });
+
     const subtotal = items.reduce(
       (sum, item) => sum + Number(item.total_price),
       0,
@@ -140,6 +158,7 @@ export class QuotationsService {
               applied_price_tier_id: tierSnap?.tier_id ?? null,
               applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
               stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+              price_unit_quantity: priceUnits.priceUnitByIndex[index],
               updated_at: new Date(),
             };
           }),
@@ -245,6 +264,16 @@ export class QuotationsService {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
 
         const items = updateQuotationDto.items!;
+        // Misma correccion que en create. El cliente Prisma que entra es `tx`:
+        // tomar `this.prisma` dentro de la transaccion abriria una segunda
+        // conexion del pool y perderia el scoping de tenant.
+        const priceUnits = await normalizePriceUnitLines(tx as any, items, {
+          isPresentationAtIndex: (index) =>
+            resolvePackSize(
+              tierSnapshots[index]?.units_per_package,
+              tierSnapshots[index]?.override_units_per_package,
+            ) > 1,
+        });
         const subtotal = items.reduce(
           (sum, item) => sum + Number(item.total_price),
           0,
@@ -298,6 +327,7 @@ export class QuotationsService {
                   applied_price_tier_name_snapshot:
                     tierSnap?.tier_name ?? null,
                   stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+                  price_unit_quantity: priceUnits.priceUnitByIndex[index],
                   updated_at: new Date(),
                 };
               }),
