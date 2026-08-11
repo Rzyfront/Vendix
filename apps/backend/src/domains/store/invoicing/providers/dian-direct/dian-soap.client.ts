@@ -415,9 +415,22 @@ export class DianSoapClient {
     const status_code_match = response_xml.match(
       /<b:StatusCode\b[^>]*>([\s\S]*?)<\/b:StatusCode>/,
     );
+    // `[\s\S]` y no `.`, porque la DIAN devuelve descripciones MULTILÍNEA.
+    //
+    // EL DEFECTO QUE CIERRA: `.` no cruza saltos de línea sin el flag `s`, así
+    // que un `<b:StatusDescription>` de varias líneas —la forma en que la DIAN
+    // enumera las reglas violadas de un rechazo— no matcheaba, `status_message`
+    // caía al literal `'No status message in response'` y el motivo del rechazo
+    // desaparecía del veredicto. El regex de `StatusCode` de arriba ya se había
+    // corregido por esta misma razón; este quedó atrás.
+    //
+    // `StatusMessage` lleva el mismo tratamiento: es el mismo campo en las
+    // operaciones que lo usan y tiene el mismo modo de fallo.
     const status_message_match =
-      response_xml.match(/<b:StatusMessage>(.*?)<\/b:StatusMessage>/) ||
-      response_xml.match(/<b:StatusDescription>(.*?)<\/b:StatusDescription>/);
+      response_xml.match(/<b:StatusMessage>([\s\S]*?)<\/b:StatusMessage>/) ||
+      response_xml.match(
+        /<b:StatusDescription>([\s\S]*?)<\/b:StatusDescription>/,
+      );
     const is_valid_match = response_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
     const zip_key_match = response_xml.match(/<b:ZipKey>(.*?)<\/b:ZipKey>/);
 
@@ -452,8 +465,10 @@ export class DianSoapClient {
       : zip_key
         ? 'ZIP_ACCEPTED'
         : 'NO_VERDICT';
+    // `.trim()` porque un bloque multilínea llega con el sangrado del XML
+    // pegado, y ese texto se persiste y se muestra tal cual.
     const status_message =
-      status_message_match?.[1] ||
+      status_message_match?.[1]?.trim() ||
       (zip_key
         ? 'Set de pruebas recibido por la DIAN; pendiente de consultar estado (GetStatusZip).'
         : 'No status message in response');

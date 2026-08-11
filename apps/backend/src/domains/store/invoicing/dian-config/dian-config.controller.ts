@@ -291,6 +291,38 @@ export class DianConfigController {
   }
 
   /**
+   * Transmite las notas que la fase 2 dejó GENERADAS, FIRMADAS Y SIN ENVIAR.
+   *
+   * Las lee de `last_test_result.note_phase.deferred[]` y las manda TAL CUAL:
+   * el consecutivo entra en el `SoftwareSecurityCode` y en el CUDE, así que
+   * renumerar exigiría volver a firmar y produciría otro documento. No reserva
+   * numeración nueva ni regenera nada.
+   *
+   * Es REANUDABLE: cada nota con ZipKey sale de `deferred`, así que una llamada
+   * cortada por el `proxy_read_timeout` de nginx se retoma invocando de nuevo y
+   * solo viajan las que faltan. `limit` permite partirla a mano si el bloque
+   * retenido es grande.
+   *
+   * `invoicing:write` y no `:read` porque envía documentos a la DIAN contra
+   * consecutivos autorizados: es la operación de escritura más costosa de este
+   * controlador, aunque no consuma numeración nueva.
+   */
+  @Post(':id/transmit-deferred-notes')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async transmitDeferredNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed = limit ? parseInt(limit, 10) : undefined;
+    const result = await this.dian_test_service.transmitDeferredNotes(
+      id,
+      Number.isFinite(parsed) && (parsed as number) > 0 ? parsed : undefined,
+    );
+    return this.response_service.success(result, result.message);
+  }
+
+  /**
    * Discards a batch DIAN never judged so a new test set can be sent. Write
    * operation: it releases the re-send guard that otherwise leaves the
    * configuration stuck behind a dead ZipKey.
