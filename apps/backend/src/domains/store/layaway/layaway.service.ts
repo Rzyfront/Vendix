@@ -452,7 +452,18 @@ export class LayawayService {
         target_installment = plan.layaway_installments.find(
           (i) => i.id === dto.installment_id,
         );
-        if (target_installment && target_installment.state === 'paid') {
+        // Una cuota de otro plan (o inexistente) se ignoraba en silencio: el
+        // `find` devolvía undefined, el pago se guardaba con
+        // `layaway_installment_id: null` y el endpoint respondía 200. La plata
+        // entraba al plan sin quedar imputada a ninguna cuota.
+        if (!target_installment) {
+          throw new VendixHttpException(
+            ErrorCodes.LAY_INSTALLMENT_003,
+            undefined,
+            { installment_id: dto.installment_id, plan_id },
+          );
+        }
+        if (target_installment.state === 'paid') {
           throw new VendixHttpException(ErrorCodes.LAY_INSTALLMENT_002);
         }
       } else {
@@ -478,15 +489,29 @@ export class LayawayService {
         },
       });
 
-      // 6. Marcar cuota como pagada si aplica
-      if (
-        target_installment &&
-        amount.greaterThanOrEqualTo(target_installment.amount)
-      ) {
-        await tx.layaway_installments.update({
-          where: { id: target_installment.id },
-          data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
+      // 6. Marcar cuota como pagada si aplica.
+      // Se compara el ACUMULADO imputado a la cuota, no el pago suelto. Con la
+      // comparación contra `amount` a secas, dos abonos de 2.250 sobre una
+      // cuota de 4.500 la dejaban en `pending` con la plata ya cobrada, y el
+      // cliente figuraba en mora de una cuota que había pagado completa; solo
+      // el barrido de cierre del plan la corregía.
+      if (target_installment) {
+        const imputado = await tx.layaway_payments.aggregate({
+          where: {
+            layaway_installment_id: target_installment.id,
+            state: 'succeeded',
+          },
+          _sum: { amount: true },
         });
+        // El pago recién creado ya cuenta: se agrega dentro de la transacción.
+        const acumulado = new Prisma.Decimal(imputado._sum.amount ?? 0);
+
+        if (acumulado.greaterThanOrEqualTo(target_installment.amount)) {
+          await tx.layaway_installments.update({
+            where: { id: target_installment.id },
+            data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
+          });
+        }
       }
 
       // 7. Actualizar plan

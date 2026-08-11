@@ -26,6 +26,7 @@ import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import {
   flattenBulkValidationErrors,
+  flattenValidationMessages,
   isBulkValidationError,
 } from '@common/validators/bulk-validation.util';
 import { json, urlencoded } from 'express';
@@ -215,14 +216,11 @@ async function bootstrapApi(role: VendixProcessRole) {
             validationErrors: flat,
           });
         }
-        // Formato estándar NestJS: array de strings legible para humanos.
-        const messages = errors
-          .map((e) =>
-            e.constraints
-              ? Object.values(e.constraints).join(', ')
-              : 'Valor inválido',
-          )
-          .filter(Boolean);
+        // Formato estándar NestJS: array de strings legible para humanos. Se
+        // recorre el árbol porque un error dentro de un array anidado
+        // (`items.0.total_price`) no tiene `constraints` en la raíz y quedaba
+        // como "Valor inválido", sin decir qué campo corregir.
+        const messages = flattenValidationMessages(errors);
         return new BadRequestException({
           statusCode: 400,
           message: messages,

@@ -386,6 +386,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   LAY_INSTALLMENT_001:
     'La suma de las cuotas no coincide con el saldo pendiente.',
   LAY_INSTALLMENT_002: 'La cuota seleccionada ya fue pagada.',
+  LAY_INSTALLMENT_003: 'La cuota indicada no pertenece a este plan separe.',
 
   // Withholding Tax (Retención en la Fuente)
   WHT_CONCEPT_NOT_FOUND: 'No se encontro el concepto de retencion.',
