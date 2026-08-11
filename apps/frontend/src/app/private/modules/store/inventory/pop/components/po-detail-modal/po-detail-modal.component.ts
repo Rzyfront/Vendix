@@ -21,6 +21,22 @@ import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
+/**
+ * QUI-647 — fila del calendario de pagos acordado con el proveedor.
+ * El payload del detalle (`findOne`) trae `payment_schedules` con estos
+ * campos; `status` es un String VarChar(20) con valores documentados
+ * `planned` (esperando CxP) y `materialized` (ya copiado a
+ * `ap_payment_schedules`). Se mapean también 'paid'/'partial'/'overdue'/
+ * 'canceled' defensivamente por si el motor de cobro los propaga.
+ */
+interface PoPaymentSchedule {
+  id: number;
+  scheduled_date: string;
+  amount: number | string;
+  status: string;
+  materialized_at?: string | null;
+}
+
 @Component({
   selector: 'app-po-detail-modal',
   standalone: true,
@@ -159,6 +175,72 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- QUI-647 — Plan de pagos: calendario de cuotas + saldo pendiente -->
+          <div class="rounded-lg border border-border/60 overflow-hidden">
+            <div class="px-3 py-2.5 bg-muted/20 border-b border-border/50">
+              <h4 class="text-xs text-text-muted uppercase tracking-wider font-semibold">Plan de pagos</h4>
+            </div>
+            @if (paymentSchedules().length === 0) {
+              <!-- Vacío: orden immediate (contado) o un plan sin cuotas explícitas -->
+              <div class="flex flex-col items-center py-8 text-center">
+                <div class="w-10 h-10 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                  <app-icon name="calendar" [size]="20" class="text-text-muted"></app-icon>
+                </div>
+                <p class="text-sm font-medium text-text-secondary">{{ paymentPlanEmptyTitle() }}</p>
+                <p class="text-xs text-text-muted mt-1 max-w-[260px]">{{ paymentPlanEmptyHint() }}</p>
+              </div>
+            } @else {
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="bg-muted/30 text-left text-[11px] text-text-secondary uppercase tracking-wider">
+                      <th class="py-2.5 px-3 w-10">#</th>
+                      <th class="py-2.5 px-3">Fecha</th>
+                      <th class="py-2.5 px-3 text-right w-32">Monto</th>
+                      <th class="py-2.5 px-3 text-right w-28">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (schedule of paymentSchedules(); track schedule.id; let i = $index) {
+                      <tr class="border-t border-border/50 hover:bg-muted/10 transition-colors">
+                        <td class="py-2.5 px-3 text-text-muted">{{ i + 1 }}</td>
+                        <td class="py-2.5 px-3 text-text-primary">{{ formatDate(schedule.scheduled_date) }}</td>
+                        <td class="py-2.5 px-3 text-right font-medium text-text-primary tabular-nums">
+                          {{ formatCurrency(schedule.amount) }}
+                        </td>
+                        <td class="py-2.5 px-3 text-right">
+                          <span
+                            class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                            [class]="getPaymentScheduleStatusClass(schedule.status)"
+                          >
+                            {{ getPaymentScheduleStatusLabel(schedule.status) }}
+                          </span>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                  <tfoot>
+                    @if (downPayment() > 0) {
+                      <tr class="border-t border-border/50">
+                        <td [attr.colspan]="3" class="py-2 px-3 text-right text-xs text-text-muted">Abono inicial</td>
+                        <td class="py-2 px-3 text-right text-sm text-text-secondary tabular-nums">
+                          {{ formatCurrency(downPayment()) }}
+                        </td>
+                      </tr>
+                    }
+                    <tr class="border-t-2 border-border">
+                      <td [attr.colspan]="3" class="py-3 px-3 text-right font-semibold text-text-primary">Saldo pendiente</td>
+                      <td class="py-3 px-3 text-right font-bold tabular-nums"
+                        [class]="planPendingBalance() > 0 ? 'text-destructive' : 'text-success'">
+                        {{ formatCurrency(planPendingBalance()) }}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            }
           </div>
 
           <!-- Items table -->
@@ -727,6 +809,68 @@ export class PoDetailModalComponent {
     return (po?.purchase_order_items || po?.items || []) as PurchaseOrderItem[];
   });
 
+  // ============================================================
+  // QUI-647 — Plan de pagos (calendario de cuotas de la OC)
+  // ============================================================
+
+  /** Cuotas del plan, ordenadas por fecha (el backend ya las ordena asc). */
+  readonly paymentSchedules = computed<PoPaymentSchedule[]>(() => {
+    const po = this.order() as (PurchaseOrder & { payment_schedules?: PoPaymentSchedule[] }) | null;
+    return po?.payment_schedules ?? [];
+  });
+
+  /** Modo de pago acordado: immediate | partial | deferred | installments | null. */
+  readonly paymentPlan = computed<string | null>(() => {
+    const po = this.order() as (PurchaseOrder & { payment_plan?: string | null }) | null;
+    return po?.payment_plan ?? null;
+  });
+
+  /** Abono inicial registrado al crear la orden (`down_payment_amount`). */
+  readonly downPayment = computed<number>(() => {
+    const po = this.order() as (PurchaseOrder & { down_payment_amount?: number | string | null }) | null;
+    return Number(po?.down_payment_amount ?? 0) || 0;
+  });
+
+  /**
+   * Saldo pendiente del plan = total de la orden − pagado real.
+   * `totalPaid()` suma los pagos registrados del endpoint `GET :id/payments`,
+   * que incluye el abono inicial (source 'po_advance'), así que el número ya
+   * contempla el anticipo. Se reutiliza `remainingBalance()` — la misma fuente
+   * de verdad que el tab Pagos — con su floor en 0.
+   */
+  readonly planPendingBalance = computed(() => this.remainingBalance());
+
+  /** ¿Hay un plan de pagos que mostrar? `installments` con cuotas o un modo distinto de immediate/null. */
+  readonly hasPaymentPlan = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan && plan !== 'immediate') return true;
+    return this.paymentSchedules().length > 0;
+  });
+
+  /** Título del vacío del plan según el modo de pago. */
+  readonly paymentPlanEmptyTitle = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan === 'immediate' || plan === null || !this.hasPaymentPlan()) {
+      return 'Sin plan de pagos';
+    }
+    return 'Sin cuotas programadas';
+  });
+
+  /** Hint del vacío del plan según el modo de pago. */
+  readonly paymentPlanEmptyHint = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan === 'immediate' || plan === null || !this.hasPaymentPlan()) {
+      return 'La orden se pagó al contado';
+    }
+    if (plan === 'partial') {
+      return 'Se registró un abono inicial y el saldo se paga según las condiciones acordadas';
+    }
+    if (plan === 'deferred') {
+      return 'El pago se realiza en la fecha de vencimiento indicada';
+    }
+    return 'El saldo se paga según las condiciones acordadas con el proveedor';
+  });
+
   readonly totalPaid = computed(() =>
     this.payments().reduce((sum, p) => sum + Number(p.amount || 0), 0)
   );
@@ -785,7 +929,9 @@ export class PoDetailModalComponent {
       if (tab === 'receptions' && !this.receptionsLoaded()) {
         this.loadReceptions(po.id);
       }
-      if (tab === 'payments' && !this.paymentsLoaded()) {
+      // QUI-647 — el tab Detalle muestra el saldo pendiente del plan de pagos,
+      // que deriva de los pagos reales; se cargan también aquí (ídem tab Pagos).
+      if ((tab === 'detail' || tab === 'payments') && !this.paymentsLoaded()) {
         this.loadPayments(po.id);
       }
       if (tab === 'attachments' && !this.attachmentsLoaded()) {
@@ -1094,6 +1240,34 @@ export class PoDetailModalComponent {
       credit_card: 'Tarjeta de crédito',
     };
     return labels[method] || method || 'Sin método';
+  }
+
+  // ============================================================
+  // QUI-647 — Plan de pagos: estado de cada cuota
+  // ============================================================
+
+  getPaymentScheduleStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      planned: 'Programada',
+      materialized: 'En cobro',
+      paid: 'Pagada',
+      partial: 'Parcial',
+      overdue: 'Vencida',
+      canceled: 'Cancelada',
+    };
+    return labels[status] || (status || '—');
+  }
+
+  getPaymentScheduleStatusClass(status: string): string {
+    const map: Record<string, string> = {
+      planned: 'bg-blue-100 text-blue-700',
+      materialized: 'bg-primary/10 text-primary',
+      paid: 'bg-green-100 text-green-700',
+      partial: 'bg-amber-100 text-amber-700',
+      overdue: 'bg-red-100 text-red-700',
+      canceled: 'bg-muted/40 text-text-secondary',
+    };
+    return map[status] || 'bg-muted/40 text-text-secondary';
   }
 
   getUserDisplayName(user: { first_name?: string | null; last_name?: string | null; username?: string | null; user_name?: string | null } | null | undefined): string {
