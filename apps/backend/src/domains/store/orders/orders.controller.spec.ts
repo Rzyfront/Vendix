@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service';
+import { OrderEtaService } from './services/order-eta.service';
+import { SettingsService } from '../settings/settings.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
@@ -38,6 +43,16 @@ describe('OrdersController', () => {
           provide: ResponseService,
           useValue: mockResponseService,
         },
+        // El controller fue creciendo en dependencias y este spec quedó con las
+        // dos originales: fallaba con "Nest can't resolve dependencies of the
+        // OrdersController" desde que se le inyectó PurchaseOrdersService, sin
+        // relación con lo que probaba. Los stubs quedan vacíos a propósito: los
+        // tests de acá sólo ejercitan las rutas que pasan por OrdersService.
+        { provide: PurchaseOrdersService, useValue: {} },
+        { provide: OrderEtaService, useValue: {} },
+        { provide: SettingsService, useValue: {} },
+        { provide: StorePrismaService, useValue: {} },
+        { provide: EcommercePrismaService, useValue: {} },
       ],
     }).compile();
 

@@ -2066,6 +2066,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Installment already paid',
   },
+  LAY_INSTALLMENT_003: {
+    code: 'LAY_INSTALLMENT_003',
+    httpStatus: 404,
+    devMessage: 'Installment does not belong to this layaway plan',
+  },
 
   // ===== EMPLOYEE ADVANCES =====
   ADV_FIND_001: {

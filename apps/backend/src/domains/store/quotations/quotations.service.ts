@@ -18,7 +18,40 @@ import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import { resolvePackSize } from '../products/services/packaging.util';
-import { normalizePriceUnitLines } from '../products/services/price-unit.util';
+import {
+  normalizePriceUnitLines,
+  resolveLineTotal,
+} from '../products/services/price-unit.util';
+
+/**
+ * Total BRUTO de cada línea, antes del descuento.
+ *
+ * La cabecera resta el descuento UNA sola vez
+ * (`grand_total = subtotal - descuentos + impuestos`), así que el subtotal
+ * tiene que ser bruto para que la cuenta cierre. El modal del panel manda
+ * `total_price` ya neteado (`precio × cantidad - descuento`) y sumarlo tal cual
+ * restaba el descuento dos veces: 3 unidades a $5.000 con $1.000 de descuento
+ * se guardaban en $13.000 mientras la UI mostraba $14.000, y la orden
+ * convertida heredaba el faltante porque `convertToOrder` copia los totales.
+ *
+ * El total lo deriva el servidor por la misma razón que la escala: la
+ * cotización es un documento que se le manda al cliente y no puede depender
+ * de la aritmética del cliente HTTP. Para una PRESENTACIÓN la escala resuelve
+ * a 1 (`priceUnitByIndex` en `null`), porque ahí `unit_price` es el precio del
+ * paquete y `quantity` cuenta paquetes.
+ */
+export function resolveGrossLineTotals(
+  items: Array<{ unit_price: number; quantity: number }>,
+  priceUnits: { priceUnitByIndex: Array<number | null> },
+): number[] {
+  return items.map((item, index) =>
+    resolveLineTotal(
+      Number(item.unit_price),
+      Number(item.quantity),
+      priceUnits.priceUnitByIndex[index],
+    ),
+  );
+}
 
 @Injectable()
 export class QuotationsService {
@@ -106,10 +139,9 @@ export class QuotationsService {
         ) > 1,
     });
 
-    const subtotal = items.reduce(
-      (sum, item) => sum + Number(item.total_price),
-      0,
-    );
+    const grossByIndex = resolveGrossLineTotals(items, priceUnits);
+
+    const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
     const totalDiscount = items.reduce(
       (sum, item) => sum + Number(item.discount_amount || 0),
       0,
@@ -152,7 +184,7 @@ export class QuotationsService {
               discount_amount: item.discount_amount || 0,
               tax_rate: item.tax_rate,
               tax_amount_item: item.tax_amount_item,
-              total_price: item.total_price,
+              total_price: grossByIndex[index],
               notes: item.notes,
               // Multi-tarifa snapshot
               applied_price_tier_id: tierSnap?.tier_id ?? null,
@@ -274,10 +306,9 @@ export class QuotationsService {
               tierSnapshots[index]?.override_units_per_package,
             ) > 1,
         });
-        const subtotal = items.reduce(
-          (sum, item) => sum + Number(item.total_price),
-          0,
-        );
+        const grossByIndex = resolveGrossLineTotals(items, priceUnits);
+
+        const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
         const totalDiscount = items.reduce(
           (sum, item) => sum + Number(item.discount_amount || 0),
           0,
@@ -321,7 +352,7 @@ export class QuotationsService {
                   discount_amount: item.discount_amount || 0,
                   tax_rate: item.tax_rate,
                   tax_amount_item: item.tax_amount_item,
-                  total_price: item.total_price,
+                  total_price: grossByIndex[index],
                   notes: item.notes,
                   applied_price_tier_id: tierSnap?.tier_id ?? null,
                   applied_price_tier_name_snapshot:
