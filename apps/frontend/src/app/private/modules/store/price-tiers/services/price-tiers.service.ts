@@ -34,6 +34,33 @@ interface PaginatedApiResponse<T> {
 }
 
 /**
+ * Error tipado del upsert de override.
+ *
+ * `handleError` aplana todo a un string y ahí se pierde el `error_code`, que es
+ * justo lo que el editor necesita para saber que el 409 es del código de barras
+ * (`PROD_BARCODE_DUP_001`) y pintarlo junto al campo en vez de en un toast
+ * genérico. El mensaje viaja tal cual lo redactó el backend: él distingue si el
+ * choque fue con un producto, una variante u otra presentación.
+ */
+export interface PriceTierOverrideApiError {
+  errorCode: string | null;
+  message: string;
+  status: number | null;
+}
+
+/** Type guard para el `catch` del editor de presentaciones. */
+export function isPriceTierOverrideApiError(
+  error: unknown,
+): error is PriceTierOverrideApiError {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'errorCode' in (error as Record<string, unknown>) &&
+    'message' in (error as Record<string, unknown>)
+  );
+}
+
+/**
  * Store-scoped service for managing price tiers (multi-tarifa) and
  * per-product overrides.
  *
@@ -154,8 +181,30 @@ export class PriceTiersService {
       >(`${this.apiUrl}${this.basePath}/products/${productId}/overrides/${tierId}`, dto)
       .pipe(
         map((res) => res.data),
-        catchError(this.handleError),
+        // A diferencia del resto, este endpoint conserva el `error_code`: el
+        // editor de presentaciones necesita distinguir el 409 de código de
+        // barras duplicado para anclarlo al input correcto.
+        catchError((error) =>
+          throwError(() => PriceTiersService.toOverrideError(error)),
+        ),
       );
+  }
+
+  /** Aplana un HttpErrorResponse conservando `error_code` y el mensaje del backend. */
+  private static toOverrideError(error: any): PriceTierOverrideApiError {
+    const body = error?.error ?? error;
+    const rawMessage = body?.message;
+    const message =
+      typeof rawMessage === 'string' && rawMessage.trim()
+        ? rawMessage
+        : Array.isArray(rawMessage) && rawMessage.length
+          ? rawMessage.join(', ')
+          : 'No se pudo guardar la presentación';
+    return {
+      errorCode: body?.error_code ?? null,
+      message,
+      status: typeof error?.status === 'number' ? error.status : null,
+    };
   }
 
   removeProductOverride(

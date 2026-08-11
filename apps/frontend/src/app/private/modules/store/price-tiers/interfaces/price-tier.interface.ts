@@ -79,6 +79,18 @@ export interface ProductPriceTierOverride {
    * proyecta en esta lectura para que el editor lea una sola forma por fila.
    */
   is_default?: boolean;
+  /**
+   * Código de barras de la PRESENTACIÓN (QUI-648 fase 2). Identifica el par
+   * (producto, presentación), no el producto: la "Caja x12" de dos productos
+   * distintos no comparte código. Se persiste en
+   * `product_price_tier_assignments.barcode` con unicidad por tienda.
+   *
+   * OJO — hoy `GET /store/price-tiers/products/:id/overrides` NO lo proyecta
+   * (el backend solo selecciona `price_tier_id` e `is_default` del assignment),
+   * así que en la práctica llega `undefined` y el editor arranca vacío. El
+   * campo queda declarado para cuando la lectura lo exponga.
+   */
+  barcode?: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 
@@ -136,4 +148,10 @@ export interface UpsertProductPriceTierOverrideDto {
   override_profit_margin?: number;
   /** Marca esta presentación como la que rige por defecto en el producto. */
   is_default?: boolean;
+  /**
+   * Código de barras de la presentación (máx. 64). Omitirlo deja el código como
+   * está; la cadena vacía `''` lo BORRA (el backend la normaliza a `NULL`).
+   * Un choque devuelve 409 con `error_code: 'PROD_BARCODE_DUP_001'`.
+   */
+  barcode?: string;
 }

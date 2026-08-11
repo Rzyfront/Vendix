@@ -188,6 +188,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_VALIDATE_001: 'La validacion del producto fallo.',
   PROD_PERM_001: 'No tiene permisos para acceder a este producto.',
   PROD_DUP_001: 'Ya existe un producto con estas caracteristicas.',
+  // Fallback generico. El backend redacta un mensaje mas preciso (distingue si
+  // el choque fue con un producto, una variante o una presentacion de venta),
+  // asi que las superficies que puedan anclarlo a un campo deben mostrar
+  // `message` tal cual en vez de este texto.
+  PROD_BARCODE_DUP_001: 'El codigo de barras ya esta en uso en esta tienda.',
   PROD_IMAGE_001: 'Imagen no encontrada.',
   PROD_CAT_001: 'Categoria o marca invalida.',
   PROD_SVC_001:

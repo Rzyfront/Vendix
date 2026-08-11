@@ -86,7 +86,10 @@ import {
   SaleConfigExample,
   SaleConfigInput,
 } from '../../../../../../shared/services/pricing';
-import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
+import {
+  PriceTiersService,
+  isPriceTierOverrideApiError,
+} from '../../../price-tiers/services/price-tiers.service';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import {
   PriceTier,
@@ -159,6 +162,22 @@ interface PriceTierOverrideRow {
    */
   is_default: boolean;
   initial_is_default: boolean;
+  /**
+   * Código de barras de ESTA presentación (QUI-648 fase 2). El código identifica
+   * el par (producto, presentación): pistolear la caja no puede devolver el
+   * precio de la unidad suelta. `null`/`''` => sin código.
+   */
+  barcode: string | null;
+  /** Snapshot persistido para diffear en el guardado. */
+  initial_barcode: string | null;
+  /**
+   * Mensaje del 409 `PROD_BARCODE_DUP_001` tal como lo redactó el backend (él
+   * distingue si el choque fue con un producto, una variante u otra
+   * presentación). Se pinta bajo el input y NUNCA se limpia lo que el usuario
+   * escribió: el comerciante necesita ver el código que colisionó para
+   * corregirlo.
+   */
+  barcode_error: string | null;
 }
 
 @Component({
@@ -1090,7 +1109,9 @@ export class ProductCreatePageComponent {
   // Routes a barcode scan to the currently-focused barcode input.
   // Default = product-level barcode (preserves simple-product scan behavior).
   protected readonly scanTarget = signal<
-    { kind: 'product' } | { kind: 'variant'; index: number }
+    | { kind: 'product' }
+    | { kind: 'variant'; index: number }
+    | { kind: 'presentation'; tierId: number }
   >({ kind: 'product' });
   expandedVariantIndex = signal<number | null>(null);
   stockTransferMode: 'first' | 'distribute' | 'reset' | null = null;
@@ -1479,6 +1500,15 @@ export class ProductCreatePageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((code) => {
         const target = this.scanTarget();
+        // Pistolear la caja con el foco en su fila escribe el código de ESA
+        // presentación, no el del producto: es el gesto natural del comerciante
+        // que tiene el empaque en la mano.
+        if (target.kind === 'presentation') {
+          if (this.priceTierRows().some((r) => r.tier.id === target.tierId)) {
+            this.updateTierOverrideBarcode(target.tierId, code);
+            return;
+          }
+        }
         if (target.kind === 'variant') {
           const variant = this.generatedVariants[target.index];
           if (variant) {
@@ -3945,6 +3975,24 @@ export class ProductCreatePageComponent {
           .then(() => finish())
           .catch((err) => {
             console.error('Error syncing tier overrides:', err);
+            // Código de barras duplicado: es corregible AQUÍ y solo aquí. Si
+            // navegamos, el mensaje anclado al campo se pierde y el comerciante
+            // nunca sabe cuál presentación chocó. Nos quedamos en la página.
+            const conflicts = this.rowsWithBarcodeConflict();
+            if (conflicts.length > 0) {
+              // El producto YA existe aunque veníamos de crear: sin promover a
+              // modo edición, reintentar guardaría un duplicado del producto.
+              this.product = savedProduct;
+              this.productId = savedProduct.id;
+              this.isEditMode.set(true);
+              this.toastService.error(
+                conflicts[0].barcode_error ??
+                  'El código de barras ya está en uso en esta tienda',
+                'Código de barras duplicado',
+              );
+              this.isSubmitting.set(false);
+              return;
+            }
             // El producto SÍ se guardó, pero las tarifas no: el texto NO debe
             // decir "correctamente". Warning + navegar igual (no bloquear).
             this.toastService.warning(
@@ -4421,6 +4469,13 @@ export class ProductCreatePageComponent {
                 : null;
             const enabled = enabledSet.has(tier.id);
             const isDefault = override?.is_default === true;
+            // El barcode viaja proyectado desde el assignment. Si la lectura no
+            // lo expone llega `undefined` y la fila arranca vacía, que es el
+            // estado seguro: un guardado sin tocar el campo no manda `barcode`
+            // y por tanto no borra nada.
+            const existingBarcode = override?.barcode
+              ? String(override.barcode)
+              : null;
             return {
               tier,
               enabled,
@@ -4431,6 +4486,9 @@ export class ProductCreatePageComponent {
               initial_override_units_per_package: existingUnits,
               is_default: isDefault,
               initial_is_default: isDefault,
+              barcode: existingBarcode,
+              initial_barcode: existingBarcode,
+              barcode_error: null,
             };
           });
 
@@ -4469,6 +4527,9 @@ export class ProductCreatePageComponent {
             initial_override_units_per_package: null,
             is_default: false,
             initial_is_default: false,
+            barcode: null,
+            initial_barcode: null,
+            barcode_error: null,
           }));
         this.priceTierRows.set(rows);
         this.hasLoadedPriceTiers.set(true);
@@ -4571,6 +4632,16 @@ export class ProductCreatePageComponent {
 
   /** Solo una unidad de venta puede ser la presentación por defecto. */
   canBeDefaultRow(row: PriceTierOverrideRow): boolean {
+    return row.tier.kind === 'sale_unit';
+  }
+
+  /**
+   * Solo las unidades de venta llevan código de barras: `customer_tier` dice a
+   * QUIÉN se le vende (mayorista, distribuidor), y un descuento por cliente no
+   * tiene empaque que pistolear. Ponerle código sería prometer un escaneo que
+   * ninguna caja va a producir.
+   */
+  isSaleUnitRow(row: PriceTierOverrideRow): boolean {
     return row.tier.kind === 'sale_unit';
   }
 
@@ -4717,6 +4788,25 @@ export class ProductCreatePageComponent {
     this.priceTierRows.set(next);
   }
 
+  /**
+   * Código de barras de la presentación. Se guarda crudo (sin trim) para no
+   * pelear con lo que el usuario está tecleando; la normalización ocurre al
+   * enviar. Editarlo limpia el error de duplicado anterior: el 409 describe el
+   * código viejo y dejarlo puesto haría creer que el nuevo también choca.
+   */
+  updateTierOverrideBarcode(tierId: number, value: string | null): void {
+    const next = this.priceTierRows().map((row) => {
+      if (row.tier.id !== tierId) return row;
+      return { ...row, barcode: value ?? null, barcode_error: null };
+    });
+    this.priceTierRows.set(next);
+  }
+
+  /** Error de duplicado a pintar bajo el input de la fila. */
+  getRowBarcodeError(row: PriceTierOverrideRow): string {
+    return row.barcode_error ?? '';
+  }
+
   private normalizePrice(value: number | null): number | null {
     if (value === null || value === undefined) return null;
     const n = Number(value);
@@ -4753,10 +4843,31 @@ export class ProductCreatePageComponent {
   }
 
   /**
+   * Marca en la fila el mensaje del 409 de código duplicado, tal como lo
+   * redactó el backend. Devuelve `true` cuando el error era ese, para que el
+   * caller decida si se queda en la página en vez de navegar.
+   */
+  private flagBarcodeConflict(tierId: number, err: unknown): boolean {
+    if (!isPriceTierOverrideApiError(err)) return false;
+    if (err.errorCode !== 'PROD_BARCODE_DUP_001') return false;
+    this.priceTierRows.set(
+      this.priceTierRows().map((row) =>
+        row.tier.id === tierId ? { ...row, barcode_error: err.message } : row,
+      ),
+    );
+    return true;
+  }
+
+  /** Filas con un conflicto de código de barras pendiente de corregir. */
+  readonly rowsWithBarcodeConflict = computed<PriceTierOverrideRow[]>(() =>
+    this.priceTierRows().filter((row) => !!row.barcode_error),
+  );
+
+  /**
    * Compute the diff between current rows and their initial snapshot and
    * issue the corresponding PUT/DELETE calls. Resolves when all calls finish.
-   * A row is persisted when its price OR units-per-package override changed,
-   * and removed when both are cleared.
+   * A row is persisted when its price, units-per-package OR barcode changed,
+   * and removed when all of them are cleared.
    */
   private syncTierOverridesForProduct(productId: number): Promise<void> {
     const rows = this.priceTierRows();
@@ -4770,7 +4881,24 @@ export class ProductCreatePageComponent {
         row.initial_override_units_per_package !==
         row.override_units_per_package;
       const defaultChanged = row.initial_is_default !== row.is_default;
-      if (!priceChanged && !unitsChanged && !defaultChanged) continue;
+
+      // El código vive en el ASSIGNMENT, y el assignment lo sincroniza el
+      // guardado del producto vía `enabled_price_tier_ids` — que corre ANTES
+      // que esto. Tocar el código de una fila deseleccionada recrearía el
+      // assignment que el guardado acaba de borrar, así que el barcode solo se
+      // envía en filas habilitadas.
+      const currentBarcode = (row.barcode ?? '').trim();
+      const initialBarcode = (row.initial_barcode ?? '').trim();
+      const barcodeChanged =
+        row.enabled &&
+        (currentBarcode !== initialBarcode ||
+          // Rehabilitar una tarifa recrea su assignment sin código: hay que
+          // reescribirlo aunque el texto no haya cambiado.
+          (!row.initial_enabled && currentBarcode !== ''));
+      const hasBarcode = row.enabled && currentBarcode !== '';
+
+      if (!priceChanged && !unitsChanged && !defaultChanged && !barcodeChanged)
+        continue;
 
       const hasPrice =
         row.override_price !== null && row.override_price !== undefined;
@@ -4780,20 +4908,31 @@ export class ProductCreatePageComponent {
 
       // Un cambio de default se persiste aunque no haya precio ni empaque: el
       // default vive en el assignment, no en el override, así que borrar la fila
-      // perdería la marca.
-      if (!hasPrice && !hasUnits && !row.is_default) {
+      // perdería la marca. Lo mismo aplica al código de barras.
+      if (!hasPrice && !hasUnits && !row.is_default && !hasBarcode) {
         // Nothing left to persist → delete the override (variant_id omitted).
-        operations.push(
+        // Si además había un código y quedó vacío, primero hay que mandar el
+        // `''` que lo borra del assignment: el DELETE solo toca el override.
+        const removal = () =>
           this.priceTiersService
             .removeProductOverride(productId, row.tier.id)
-            .toPromise()
-            .catch((err) => {
-              console.error(
-                `Error removing override for tier ${row.tier.id}:`,
-                err,
-              );
-              throw err;
-            }),
+            .toPromise();
+
+        operations.push(
+          (barcodeChanged
+            ? this.priceTiersService
+                .upsertProductOverride(productId, row.tier.id, { barcode: '' })
+                .toPromise()
+                .then(removal)
+            : removal()
+          ).catch((err) => {
+            console.error(
+              `Error removing override for tier ${row.tier.id}:`,
+              err,
+            );
+            this.flagBarcodeConflict(row.tier.id, err);
+            throw err;
+          }),
         );
       } else {
         operations.push(
@@ -4807,6 +4946,8 @@ export class ProductCreatePageComponent {
               // criterio cost-anchor, así que mandarlo sería redundante y el
               // precio ganaría igual. Enviar solo el default cuando cambió.
               ...(defaultChanged ? { is_default: row.is_default } : {}),
+              // Cadena vacía = borrar el código. Omitirlo = dejarlo como está.
+              ...(barcodeChanged ? { barcode: currentBarcode } : {}),
             })
             .toPromise()
             .catch((err) => {
@@ -4814,6 +4955,7 @@ export class ProductCreatePageComponent {
                 `Error upserting override for tier ${row.tier.id}:`,
                 err,
               );
+              this.flagBarcodeConflict(row.tier.id, err);
               throw err;
             }),
         );
@@ -4829,9 +4971,12 @@ export class ProductCreatePageComponent {
         // Update snapshots so subsequent edits diff correctly.
         const refreshed = this.priceTierRows().map((row) => ({
           ...row,
+          initial_enabled: row.enabled,
           initial_override_price: row.override_price,
           initial_override_units_per_package: row.override_units_per_package,
           initial_is_default: row.is_default,
+          initial_barcode: row.barcode,
+          barcode_error: null,
         }));
         this.priceTierRows.set(refreshed);
       })

@@ -562,9 +562,9 @@
                         </div>
                       </div>
 
-                      <!-- Inputs grid: price ↔ margin (bidirectional) + units -->
+                      <!-- Inputs grid: price ↔ margin (bidirectional) + units + código -->
                       <div
-                        class="grid grid-cols-1 sm:grid-cols-3 gap-x-3 md:gap-x-4 gap-y-3"
+                        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-3 md:gap-x-4 gap-y-3"
                       >
                         <!-- Price (whole-package override). Empty => tier default -->
                         <app-input
@@ -627,6 +627,34 @@
                           tooltipText="Sobrescribe las unidades por empaque de la tarifa solo para este producto. Vacío hereda el valor de la tarifa. Mínimo 2."
                           customWrapperClass="!mt-0"
                         ></app-input>
+
+                        <!-- Código de barras de ESTA presentación (QUI-648).
+                             Identifica el par (producto, presentación): pistolear
+                             la caja no puede devolver el precio de la unidad.
+                             Solo aplica a unidades de venta: una tarifa de
+                             cliente no tiene empaque que escanear. -->
+                        @if (isSaleUnitRow(row)) {
+                          <app-input
+                            label="Código de barras"
+                            type="text"
+                            [maxlength]="64"
+                            placeholder="Escanea o escribe el código"
+                            [ngModel]="row.barcode"
+                            [ngModelOptions]="{ standalone: true }"
+                            (ngModelChange)="
+                              updateTierOverrideBarcode(row.tier.id, $event)
+                            "
+                            (focusin)="
+                              scanTarget.set({
+                                kind: 'presentation',
+                                tierId: row.tier.id
+                              })
+                            "
+                            [error]="getRowBarcodeError(row)"
+                            tooltipText="Código escaneable de esta presentación (el del empaque, no el de la unidad suelta). Único en la tienda. Vacío borra el código."
+                            customWrapperClass="!mt-0"
+                          ></app-input>
+                        }
                       </div>
 
                       @if (getRowPackExplainer(row); as packHint) {
