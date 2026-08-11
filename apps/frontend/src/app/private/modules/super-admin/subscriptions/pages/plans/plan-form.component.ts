@@ -26,6 +26,10 @@ import {
   StickyHeaderActionButton,
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import {
+  defaultAIFeatureFlags,
+  normalizeAIFeatureFlags,
+} from '../../utils/ai-feature-flags.util';
 import { AiFeatureMatrixComponent } from '../../components/ai-feature-matrix.component';
 import { PricingCycleEditorComponent } from '../../components/pricing-cycle-editor.component';
 import { GraceThresholdEditorComponent } from '../../components/grace-threshold-editor.component';
@@ -582,92 +586,16 @@ export class PlanFormComponent {
     ];
   }
 
+  // Both delegate to the shared util. They used to hold their own copy of the
+  // same six-key normalizer, and since this component writes `ai_feature_flags`
+  // wholesale, the copy that fell behind the backend's key list is what deleted
+  // `realtime_voice` from every plan that got saved.
   private defaultAiFeatures(): AIFeatureFlags {
-    return {
-      text_generation: {
-        enabled: true,
-        monthly_tokens_cap: 100000,
-        degradation: 'block',
-        period: 'monthly',
-      },
-      streaming_chat: {
-        enabled: true,
-        daily_messages_cap: 100,
-        degradation: 'warn',
-        period: 'daily',
-      },
-      conversations: {
-        enabled: true,
-        retention_days: 90,
-        degradation: 'warn',
-      },
-      tool_agents: {
-        enabled: false,
-        tools_allowed: [],
-        degradation: 'block',
-      },
-      rag_embeddings: {
-        enabled: true,
-        indexed_docs_cap: 1000,
-        degradation: 'block',
-        period: 'monthly',
-      },
-      async_queue: {
-        enabled: false,
-        monthly_jobs_cap: 500,
-        degradation: 'block',
-        period: 'monthly',
-      },
-    };
+    return defaultAIFeatureFlags();
   }
 
   private normalizeAiFeatures(value: AIFeatureFlags | undefined): AIFeatureFlags {
-    const defaults = this.defaultAiFeatures();
-    const raw = (value ?? {}) as Record<string, any>;
-    const hasCanonical =
-      raw['text_generation'] ||
-      raw['streaming_chat'] ||
-      raw['conversations'] ||
-      raw['tool_agents'] ||
-      raw['rag_embeddings'] ||
-      raw['async_queue'];
-
-    if (hasCanonical) {
-      return {
-        text_generation: { ...defaults.text_generation, ...raw['text_generation'] },
-        streaming_chat: { ...defaults.streaming_chat, ...raw['streaming_chat'] },
-        conversations: { ...defaults.conversations, ...raw['conversations'] },
-        tool_agents: { ...defaults.tool_agents, ...raw['tool_agents'] },
-        rag_embeddings: { ...defaults.rag_embeddings, ...raw['rag_embeddings'] },
-        async_queue: { ...defaults.async_queue, ...raw['async_queue'] },
-      };
-    }
-
-    return {
-      ...defaults,
-      text_generation: {
-        ...defaults.text_generation,
-        enabled: raw['chat_enabled'] ?? defaults.text_generation!.enabled,
-        monthly_tokens_cap: raw['max_tokens_per_month'] ?? defaults.text_generation!.monthly_tokens_cap,
-      },
-      streaming_chat: {
-        ...defaults.streaming_chat,
-        enabled: raw['streaming_enabled'] ?? defaults.streaming_chat!.enabled,
-        daily_messages_cap: raw['max_conversations'] ?? defaults.streaming_chat!.daily_messages_cap,
-      },
-      conversations: {
-        ...defaults.conversations,
-        enabled: raw['chat_enabled'] ?? defaults.conversations!.enabled,
-      },
-      tool_agents: {
-        ...defaults.tool_agents,
-        enabled: raw['agent_enabled'] ?? raw['custom_tools_enabled'] ?? defaults.tool_agents!.enabled,
-      },
-      rag_embeddings: {
-        ...defaults.rag_embeddings,
-        enabled: raw['rag_enabled'] ?? raw['embeddings_enabled'] ?? defaults.rag_embeddings!.enabled,
-      },
-    };
+    return normalizeAIFeatureFlags(value);
   }
 
   loadPlan(id: string): void {

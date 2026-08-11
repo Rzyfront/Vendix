@@ -208,6 +208,7 @@ import {
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (ackPayChange)="ackPay.set($event)"
+      (paymentPlanChange)="paymentPlan.set($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -376,6 +377,18 @@ export class PopComponent implements OnInit, OnDestroy {
    * ver `_buildReceptionViaDispatch$`.
    */
   pricingOverrides = signal<PricingOverridesMap>(new Map());
+
+  /**
+   * QUI-647 — configuración de pago elegida en el modal. Viaja al backend en
+   * el payload de creación; el backend valida que las cuotas cierren el saldo
+   * y las persiste como plan contra la orden hasta que exista la CxP.
+   */
+  paymentPlan = signal<{
+    payment_plan: 'immediate' | 'partial' | 'deferred' | 'installments';
+    down_payment_amount: number;
+    payment_due_date?: string;
+    payment_installments: Array<{ scheduled_date: string; amount: number }>;
+  } | null>(null);
 
   cartState = signal<PopCartState | null>(null);
   cartSummary = signal<PopCartSummary | null>(null);
@@ -815,6 +828,19 @@ export class PopComponent implements OnInit, OnDestroy {
       this.popCartService.setHasVat(true);
     }
 
+    // QUI-661 Fase 4 — descuento GENERAL de pie de factura. Va al carrito, no a
+    // las líneas: el backend lo prorratea contra el peso de cada una. Se aplica
+    // sólo si el escáner lo detectó; un escaneo sin descuento no debe pisar el
+    // que el usuario haya tecleado a mano antes de escanear.
+    //
+    // El descuento POR LÍNEA no pasa por acá: viaja en cada `editedItems` y se
+    // convierte a porcentaje al agregar al carrito. Nunca se reportan los dos
+    // sobre el mismo dinero — el prompt lo prohíbe explícitamente.
+    const scannedHeaderDiscount = Number(data.scanResult?.discount_amount) || 0;
+    if (scannedHeaderDiscount > 0) {
+      this.popCartService.setDiscountAmount(scannedHeaderDiscount);
+    }
+
     let addedCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
@@ -836,6 +862,20 @@ export class PopComponent implements OnInit, OnDestroy {
         item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
       const scannedIncludeMode = scannedRate != null ? false : undefined;
 
+      // QUI-661 Fase 4: la factura imprime el descuento en PESOS y el carrito
+      // trabaja en PORCENTAJE, así que se convierte acá contra el importe neto
+      // de la línea. Se hace en este punto y no en el backend porque es el
+      // carrito el que necesita el porcentaje para su preview; el backend
+      // recibe después el porcentaje y resuelve el monto otra vez, que es su
+      // fuente de verdad.
+      const lineGross =
+        (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+      const scannedDiscountAmount = Number(item.discount_amount) || 0;
+      const scannedDiscountPct =
+        lineGross > 0 && scannedDiscountAmount > 0
+          ? Math.min(100, (scannedDiscountAmount / lineGross) * 100)
+          : undefined;
+
       if (candidate) {
         this.popCartService
           .addToCart({
@@ -855,6 +895,7 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            discount: scannedDiscountPct,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -877,6 +918,10 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            // QUI-661 Fase 4: también en el producto NUEVO. El descuento no
+            // depende de que el producto exista en el catálogo — depende de lo
+            // que imprimió la factura.
+            discount: scannedDiscountPct,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
@@ -1453,6 +1498,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, draftState);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1647,20 +1694,143 @@ export class PopComponent implements OnInit, OnDestroy {
         })),
     };
 
+    // QUI-645 — los productos NUEVOS (prebulk) no tienen nada que consultar en
+    // el backend: no hay stock, ni costo previo, ni precio de catálogo. Pero
+    // sí tienen que aparecer en el modal de confirmación, porque hoy es el
+    // único punto del flujo donde el operador puede fijarles margen y precio
+    // de venta antes de que el producto exista. Se arman filas sintéticas con
+    // la misma forma que devuelve el backend para que la UX de margen de
+    // QUI-425 las trate igual que a las existentes.
+    const newRows = this.buildNewProductPreviewRows();
+
     if (request.items.length === 0) {
+      // Solo hay productos nuevos: no hay nada que pedirle al backend, pero el
+      // modal igual debe mostrarlos para poder fijarles precio.
+      this.costPreview.set(
+        newRows.length
+          ? ({ costing_method: null, items: newRows } as any)
+          : null,
+      );
       this.loadingCostPreview.set(false);
       return;
     }
 
     this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.costPreview.set(response.success ? response.data : null);
+        const data = response.success ? response.data : null;
+        this.costPreview.set(
+          data
+            ? ({ ...data, items: [...(data.items ?? []), ...newRows] } as any)
+            : newRows.length
+              ? ({ costing_method: null, items: newRows } as any)
+              : null,
+        );
         this.loadingCostPreview.set(false);
       },
       error: () => {
-        this.costPreview.set(null);
+        this.costPreview.set(
+          newRows.length
+            ? ({ costing_method: null, items: newRows } as any)
+            : null,
+        );
         this.loadingCostPreview.set(false);
       },
+    });
+  }
+
+  /**
+   * QUI-645 — synthetic cost-preview rows for products that do not exist yet.
+   *
+   * `product_id` is a NEGATIVE index-derived id: the modal keys its pricing
+   * overrides by `${product_id}-${variant_id || 0}`, and a new product has no
+   * id to key on. Negative values can never collide with a real product id and
+   * stay stable while the cart is untouched, which is what the override map
+   * needs. `applyNewProductPricing` maps them back to the cart line.
+   */
+  private buildNewProductPreviewRows(): any[] {
+    const state = this.popCartService.currentState;
+    return state.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.is_prebulk && item.prebulk_data)
+      .map(({ item, index }) => {
+        // Cost the product will be born with: the NET unit cost of the line,
+        // discount included (QUI-661). `item.subtotal` is already Σ neto.
+        const qty = Number(item.quantity) || 1;
+        const netUnitCost = qty > 0 ? Number(item.subtotal || 0) / qty : 0;
+        const margin = Number(item.prebulk_data?.profit_margin ?? 0);
+        return {
+          product_id: -(index + 1),
+          product_variant_id: null,
+          product_name: item.prebulk_data?.name || 'Producto nuevo',
+          current_stock: 0,
+          current_cost_per_unit: 0,
+          global_stock: 0,
+          global_cost_per_unit: 0,
+          new_stock: qty,
+          new_cost_per_unit: Math.round(netUnitCost * 100) / 100,
+          incoming_quantity: qty,
+          incoming_cost: Number(item.subtotal || 0),
+          incoming_gross_cost: Number(item.unit_cost || 0) * qty,
+          unit_price_net: netUnitCost,
+          incoming_tax_per_unit:
+            qty > 0 ? Number(item.tax_amount || 0) / qty : 0,
+          incoming_tax_amount: Number(item.tax_amount || 0),
+          effective_include: !!item.prices_include_tax,
+          // A brand-new product is not a "reactivation" — it never had stock.
+          is_reactivation: false,
+          current_base_price: Number(item.prebulk_data?.base_price ?? 0),
+          current_profit_margin: margin,
+          // Decisión de negocio (QUI-645): margen 0 % por defecto. El producto
+          // nace al costo y el operador lo sube si quiere, en vez de heredar
+          // un margen implícito que nadie eligió.
+          resulting_margin: margin,
+          is_new_product: true,
+        };
+      });
+  }
+
+  /**
+   * QUI-645 — carries the margin/price the operator set in the confirmation
+   * modal back onto the cart line, so the create payload persists it and the
+   * product is born already priced instead of landing in the catalog at 0.
+   */
+  /**
+   * QUI-647 — adjunta el plan de pago al payload de creación.
+   *
+   * Solo viaja cuando el operador eligió algo distinto de `immediate`: así una
+   * orden creada sin tocar el paso de pago produce exactamente el mismo payload
+   * que antes del ticket.
+   */
+  private attachPaymentPlan(request: any): void {
+    const plan = this.paymentPlan();
+    if (!plan || plan.payment_plan === 'immediate') return;
+    request.payment_plan = plan.payment_plan;
+    if (plan.down_payment_amount > 0) {
+      request.down_payment_amount = plan.down_payment_amount;
+    }
+    if (plan.payment_due_date) {
+      request.payment_due_date = plan.payment_due_date;
+    }
+    if (plan.payment_installments.length > 0) {
+      request.payment_installments = plan.payment_installments;
+    }
+  }
+
+  private applyNewProductPricing(): void {
+    const overrides = this.pricingOverrides();
+    if (!overrides || overrides.size === 0) return;
+
+    const state = this.popCartService.currentState;
+    state.items.forEach((item, index) => {
+      if (!item.is_prebulk || !item.prebulk_data) return;
+      const override = overrides.get(`${-(index + 1)}-0`);
+      if (!override) return;
+      if (override.new_base_price !== undefined) {
+        item.prebulk_data.base_price = override.new_base_price;
+      }
+      if (override.new_profit_margin !== undefined) {
+        item.prebulk_data.profit_margin = override.new_profit_margin;
+      }
     });
   }
 
@@ -1675,10 +1845,17 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     const userId = this.authFacade.getUserId() || 0;
+    // QUI-645: baja al carrito el margen/precio fijado en el modal para los
+    // productos nuevos, antes de armar el payload.
+    this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // QUI-647: adjunta la configuración de pago elegida en el modal.
+    this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1834,10 +2011,17 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   private _createApprovedOrder$(state: PopCartState): Observable<any> {
     const userId = this.authFacade.getUserId() || 0;
+    // QUI-645: baja al carrito el margen/precio que el operador fijó en el
+    // modal para los productos nuevos, antes de armar el payload.
+    this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // QUI-647: adjunta la configuración de pago elegida en el modal.
+    this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     return this.purchaseOrdersService.createPurchaseOrder(request).pipe(
       switchMap((response) =>
@@ -2004,6 +2188,45 @@ export class PopComponent implements OnInit, OnDestroy {
       const content = Number(raw);
       if (Number.isFinite(content) && content >= 1) {
         (reqItem as any).purchase_to_stock_factor = Math.round(content);
+      }
+    });
+  }
+
+  /**
+   * QUI-648: mapea la unidad de venta capturada en el modal → campos
+   * `sale_unit_*` del ítem de compra. El backend usa `sale_unit_name` como
+   * interruptor: sin nombre no configura nada.
+   *
+   * Mismo patrón que `attachPurchaseToStockFactor`: el carrito copia
+   * `prebulk_data` completo, así que el dato puede venir de ahí o del ítem.
+   */
+  private attachSaleUnitConfig(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    request.items.forEach((reqItem, i) => {
+      const cartItem: any = state.items[i];
+      if (!cartItem) return;
+      const source = cartItem.prebulk_data ?? cartItem;
+      const name = String(source.sale_unit_name ?? '').trim();
+      if (!name) return;
+
+      const target = reqItem as any;
+      target.sale_unit_name = name;
+      const factor = Number(source.sale_unit_units_per_package);
+      if (Number.isFinite(factor) && factor >= 2) {
+        target.sale_unit_units_per_package = Math.round(factor);
+      }
+      const price = Number(source.sale_unit_price);
+      if (Number.isFinite(price) && price > 0) {
+        target.sale_unit_price = price;
+      }
+      const margin = Number(source.sale_unit_profit_margin);
+      if (Number.isFinite(margin)) {
+        target.sale_unit_profit_margin = margin;
+      }
+      if (source.sale_unit_is_default === true) {
+        target.sale_unit_is_default = true;
       }
     });
   }

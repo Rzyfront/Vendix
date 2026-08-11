@@ -65,6 +65,7 @@ import {
   VALID_REASONS_BY_SUBTYPE,
 } from './types/dispatch-note-direction.type';
 import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
+import { POOL_PUBLISHABLE_ORDER_STATES } from '../carrier/carrier-pool.contract';
 import sharp = require('sharp');
 
 const DISPATCH_NOTE_INCLUDE = {
@@ -3168,16 +3169,24 @@ export class DispatchNotesService {
    * Vendix Repartos — Fase B5. Publica una orden al pool de repartidores.
    *
    * Valida la orden (store-scoped) y la marca como disponible poniendo
-   * `dispatch_pool_at = now()` de forma IDEMPOTENTE (guard `dispatch_pool_at
-   * IS NULL`): si ya estaba en el pool, devuelve el estado actual sin error y
-   * sin re-notificar. En la transición real emite `order.awaiting_carrier`
+   * `dispatch_pool_at = now()` de forma IDEMPOTENTE: si ya estaba en el pool
+   * devuelve el estado actual (`already_pooled: true`) sin error, sin revalidar
+   * y sin re-notificar. En la transición real emite `order.awaiting_carrier`
    * ({ order_id, store_id }) para que el listener notifique a los carriers.
    *
-   * Reglas de dominio (reusan los códigos DSP_ORDER_* del flujo createFromOrder):
-   * - state ∈ {processing, pending_payment}
+   * Reglas de dominio (reusan los códigos DSP_ORDER_* del flujo createFromOrder),
+   * evaluadas SÓLO cuando la orden aún no está pooleada:
+   * - state ∈ {@link POOL_PUBLISHABLE_ORDER_STATES}
    * - delivery_type != 'direct_delivery'
-   * - dispatch_fulfillment != 'full'
-   * - sin remisión ACTIVA (dispatch_notes no anuladas) → evita doble despacho.
+   * - si `dispatch_fulfillment === 'full'`, debe quedar al menos una remisión
+   *   viva SIN parada de ruta activa (algo que el repartidor pueda tomar).
+   * - sin remisión ACTIVA (dispatch_notes no anuladas) → se crea una; con ella,
+   *   no se crea otra (evita doble despacho).
+   *
+   * IMPORTANTE: la orden queda con `dispatch_fulfillment = 'full'` (la remisión
+   * cubre todo lo pendiente). Eso es lo ESPERADO para una orden pooleada, y por
+   * eso la visibilidad del pool NO puede filtrar por ese rollup — ver
+   * `carrier/carrier-pool.contract.ts`.
    */
   async sendToDispatchPool(order_id: number) {
     const context = RequestContextService.getContext();
@@ -3200,9 +3209,30 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
     }
 
+    // ATAJO IDEMPOTENTE — va PRIMERO, antes de cualquier validación de entrada.
+    //
+    // Si la orden ya está pooleada, publicar de nuevo es un no-op y debe
+    // responder el estado actual, no un 400. Esta guarda estaba al FINAL (en el
+    // `updateMany` con `dispatch_pool_at: null`), así que las validaciones de
+    // arriba se evaluaban igual sobre una orden ya publicada: como este mismo
+    // método deja `dispatch_fulfillment = 'full'` al crear la remisión, el
+    // segundo click devolvía DSP_ORDER_STATE_001 y el operador leía "la orden no
+    // está en un estado que permita despachar" sobre una orden perfectamente
+    // pooleada. Validar DESPUÉS de resolver la idempotencia es la regla (mismo
+    // patrón que el candado de cierre de caja).
+    if (order.dispatch_pool_at) {
+      return {
+        order_id,
+        pooled_at: order.dispatch_pool_at.toISOString(),
+        already_pooled: true,
+      };
+    }
+
     // Sólo órdenes en curso de fulfillment pueden ir al pool. `processing`
     // (stock reservado) y `pending_payment` (COD, se cobra al entregar).
-    if (order.state !== 'processing' && order.state !== 'pending_payment') {
+    if (
+      !(POOL_PUBLISHABLE_ORDER_STATES as readonly string[]).includes(order.state)
+    ) {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
     }
 
@@ -3211,9 +3241,28 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
     }
 
-    // Ya despachada completamente → no tiene sentido enviarla al pool.
+    // Ya remitida al 100% → sólo se rechaza si NO queda nada que un repartidor
+    // pueda tomar. `dispatch_fulfillment === 'full'` por sí solo NO alcanza: una
+    // publicación anterior que creó la remisión y murió antes de escribir
+    // `dispatch_pool_at` (los dos pasos no comparten transacción) deja la orden
+    // en 'full' sin pool, y el guard a secas la condenaba a un 400 permanente
+    // sin más salida que anular la remisión. Lo que de verdad importa es que
+    // exista una remisión viva SIN parada de ruta activa: eso es exactamente lo
+    // que el claim del repartidor adjunta a su ruta.
     if (order.dispatch_fulfillment === 'full') {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+      const takeableNotes = await this.prisma.dispatch_notes.count({
+        where: {
+          order_id,
+          status: { in: ['draft', 'confirmed'] },
+          dispatch_route_stops: { none: { status: { not: 'released' } } },
+        },
+      });
+      if (takeableNotes === 0) {
+        throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001, undefined, {
+          order_id,
+          reason: 'order_fully_dispatched_nothing_takeable',
+        });
+      }
     }
 
     // Idempotencia de despacho: la remisión es la primitiva de inventario del
@@ -3267,13 +3316,18 @@ export class DispatchNotesService {
     });
 
     let pooled_at = now;
+    let already_pooled = false;
     if (updated.count === 0) {
-      // Ya estaba en el pool → devolvemos el estado actual sin re-notificar.
+      // Sólo alcanzable por CARRERA: dos publicaciones concurrentes de la misma
+      // orden (el atajo idempotente de arriba ya atrapó el caso secuencial). El
+      // guard `dispatch_pool_at: null` decide el ganador; el perdedor devuelve el
+      // instante del ganador y NO re-notifica.
       const existing = await this.prisma.orders.findFirst({
         where: { id: order_id },
         select: { dispatch_pool_at: true },
       });
       pooled_at = existing?.dispatch_pool_at ?? now;
+      already_pooled = true;
     } else {
       // Transición real → notificar a los carriers de la tienda.
       this.eventEmitter.emit('order.awaiting_carrier', {
@@ -3282,7 +3336,7 @@ export class DispatchNotesService {
       });
     }
 
-    return { order_id, pooled_at: pooled_at.toISOString() };
+    return { order_id, pooled_at: pooled_at.toISOString(), already_pooled };
   }
 
   async getByOrder(order_id: number) {

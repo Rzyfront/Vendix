@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
+import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { MenusController } from './menus.controller';
 import { MenusService } from './menus.service';
@@ -22,9 +23,13 @@ import { MenuAvailabilityCheckerService } from './menu-availability-checker.serv
  * No cross-store module import: tenant isolation comes from the
  * `StorePrismaService` auto-scope. The menu engineering service reads
  * recipes and order_items directly via the same scoped client.
+ *
+ * `S3Module` is imported because the carta responses expose product images:
+ * the DB stores raw S3 keys, so every read has to sign them before answering
+ * (see `vendix-s3-storage`).
  */
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  imports: [ResponseModule, PrismaModule, S3Module],
   controllers: [
     MenusController,
     MenuSectionsController,

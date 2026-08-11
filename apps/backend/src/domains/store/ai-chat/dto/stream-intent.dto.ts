@@ -118,4 +118,21 @@ export class StreamIntentDto {
   @IsOptional()
   @IsBoolean()
   speak?: boolean;
+
+  /**
+   * Replay of a turn whose transport dropped before it produced anything.
+   *
+   * The `user` row is written before the model is called, so a turn that died
+   * mid-flight already left it in the conversation. Without this flag the
+   * automatic retry would write it again and the person would see their question
+   * twice — the one visible trace a transparent recovery must not leave.
+   *
+   * The client is trusted with it because the worst it can do is *omit* a row
+   * whose content it supplied anyway. It cannot forge history, skip a guard, or
+   * reach another conversation: everything else about the turn is resolved
+   * server-side from the conversation id and the session.
+   */
+  @IsOptional()
+  @IsBoolean()
+  skip_user_message?: boolean;
 }

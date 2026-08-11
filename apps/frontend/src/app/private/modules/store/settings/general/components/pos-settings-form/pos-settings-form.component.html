@@ -1,5 +1,5 @@
 <div class="pos-settings-form">
-  @if (!settingsLoaded()) {
+  @if (showSkeleton()) {
     <div class="space-y-6" aria-hidden="true">
       @for (block of [1, 2, 3, 4]; track block) {
         <div>
@@ -15,57 +15,180 @@
     </div>
   } @else {
   <div class="space-y-6">
+    <!-- Qué gobierna esta sección y cuándo lo ve el cajero -->
+    <app-alert-banner variant="info" icon="monitor">
+      Todo lo de esta sección cambia <strong>la pantalla del cajero</strong> en Punto
+      de Venta, sólo para esta tienda. Si un cajero ya tiene el POS abierto, verá los
+      cambios cuando vuelva a iniciar sesión.
+    </app-alert-banner>
+
     <!-- Sales & Configuration -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Ventas y Operación
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Ventas y Operación</h4>
+        <p class="block-subtitle">
+          Cómo arranca cada venta y con qué herramientas cobra el cajero.
+        </p>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <app-setting-toggle
-          [formControl]="allowAnonymousSalesControl"
-          label="Ventas Anónimas"
-          description="Sin registro de cliente"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="anonymousSalesAsDefaultControl"
-          label="Anónimas por Defecto"
-          description="Tipo de venta predeterminado"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="showOnscreenKeypadControl"
-          label="Teclado Táctil"
-          description="Mostrar teclado numérico en pantalla"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="barcodeScannerEnabledControl"
-          label="Lector de Código de Barras"
-          description="Escanea códigos para buscar y agregar productos en el POS"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="allowAnonymousSalesControl"
+            label="Ventas Anónimas"
+            description="El cajero puede cobrar sin elegir cliente: la venta queda a nombre de Consumidor final"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="success" size="xsm" badgeStyle="outline">
+              Recomendado en mostrador
+            </app-badge>
+            <app-tooltip
+              content="Apagado, el POS exige seleccionar o crear un cliente antes de cobrar: una fila de 10 personas son 10 formularios. Una factura electrónica o una venta con retención pedirá los datos del adquiriente de todos modos."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Por qué
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="anonymousSalesAsDefaultControl"
+            label="Anónimas por Defecto"
+            description="El POS abre cada venta como anónima; el cajero elige cliente sólo cuando hace falta"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="warning" size="xsm" badgeStyle="outline">
+              Requiere Ventas Anónimas
+            </app-badge>
+            <app-tooltip
+              content="Sin esto, el cajero tiene que marcar 'anónima' venta por venta. Con Ventas Anónimas apagado este ajuste queda deshabilitado y no hace nada."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Por qué
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="showOnscreenKeypadControl"
+            label="Teclado Táctil"
+            description="Agrega un teclado numérico en pantalla para cantidades, montos y vueltos"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Para pantallas táctiles
+            </app-badge>
+            <app-tooltip
+              content="Imprescindible en tablet o all-in-one sin teclado físico. En un PC con teclado le quita cerca de 200 px a la grilla de productos: ahí conviene apagarlo."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Por qué
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="barcodeScannerEnabledControl"
+            label="Lector de Código de Barras"
+            description="Al escanear, el producto entra al carrito sin buscarlo a mano"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-tooltip
+              content="El lector se comporta como un teclado: el POS escucha la lectura y suma una unidad. Un producto sin código registrado en su ficha no se encuentra al escanear — hay que cargarle el código primero."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Qué necesita el producto
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Scale / Weight Products -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Ventas por Peso
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Ventas por Peso</h4>
+        <p class="block-subtitle">
+          Para lo que se cobra por kilo o libra, con báscula conectada o con el peso
+          tecleado.
+        </p>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <app-setting-toggle
-          [formControl]="scaleEnabledControl"
-          label="Habilitar Ventas por Peso"
-          description="Productos pesables (frutas, carnes, etc.)"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="allowManualWeightEntryControl"
-          label="Entrada Manual de Peso"
-          description="Ingresar peso manualmente sin báscula"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="scaleEnabledControl"
+            label="Habilitar Ventas por Peso"
+            description="En los productos pesables el POS pide el peso en vez de unidades"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="service" size="xsm" badgeStyle="outline">
+              Fruver, carnicería, granel
+            </app-badge>
+            <app-tooltip
+              content="Un producto a 12.000 $/kg pesado en 0,750 kg se cobra 9.000 $. Apagado, el POS sólo vende unidades enteras y el peso no entra en el cálculo."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Ejemplo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="allowManualWeightEntryControl"
+            label="Entrada Manual de Peso"
+            description="El cajero puede teclear el peso cuando la báscula no responde"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="warning" size="xsm" badgeStyle="outline">
+              Requiere Ventas por Peso
+            </app-badge>
+            <app-tooltip
+              content="Es la salida de emergencia si la báscula se desconecta a mitad del turno, y también la puerta para teclear 0,300 kg de algo que pesa 0,800 kg. Dejala apagada si querés que el peso venga siempre del equipo."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="alert-triangle" size="12"></app-icon>
+                Riesgo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
 
       <!-- Device configuration (visible when scale enabled) -->
@@ -76,149 +199,334 @@
           >
             Configuración de Báscula
           </h5>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <!-- Weight Unit -->
-            <div>
-              <label class="block text-xs font-medium text-text-secondary mb-1"
-                >Unidad de peso</label
-              >
+            <div class="field">
+              <label class="field__label">Unidad de peso</label>
               <select
                 [formControl]="defaultWeightUnitControl"
                 (change)="onFieldChange()"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                class="field__control"
               >
                 <option value="kg">Kilogramos (kg)</option>
                 <option value="g">Gramos (g)</option>
                 <option value="lb">Libras (lb)</option>
               </select>
-            </div>
-
-            <!-- Baud Rate -->
-            <div>
-              <label class="block text-xs font-medium text-text-secondary mb-1"
-                >Velocidad (Baud Rate)</label
-              >
-              <select
-                [formControl]="baudRateControl"
-                (change)="onFieldChange()"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option [ngValue]="9600">9600</option>
-                <option [ngValue]="19200">19200</option>
-                <option [ngValue]="38400">38400</option>
-                <option [ngValue]="115200">115200</option>
-              </select>
-            </div>
-
-            <!-- Protocol -->
-            <div>
-              <label class="block text-xs font-medium text-text-secondary mb-1"
-                >Protocolo</label
-              >
-              <select
-                [formControl]="protocolControl"
-                (change)="onFieldChange()"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="generic">Genérico</option>
-                <option value="cas">CAS</option>
-                <option value="ohaus">OHAUS</option>
-              </select>
+              <p class="field__hint">
+                Unidad en la que se captura el peso y se muestra en el tiquete. El
+                precio del producto debe estar expresado en esa misma unidad.
+              </p>
             </div>
           </div>
 
-          <!-- Test Connection Button -->
-          @if (isWebSerialSupported) {
-            <div class="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                (click)="testScaleConnection()"
-                [disabled]="testingConnection"
-                class="px-4 py-2 text-xs font-medium rounded-lg border border-primary text-primary bg-primary/5 hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {{ testingConnection ? "Conectando..." : "Probar Conexión" }}
-              </button>
-              <span class="text-[10px] text-text-muted"
-                >Solo Chrome/Edge con HTTPS o localhost</span
-              >
-            </div>
-          } @else {
-            <p class="mt-3 text-xs text-text-muted">
-              ⚠ Tu navegador no soporta WebSerial. Usa Chrome o Edge.
-            </p>
-          }
+          <!-- Puerto serie: sólo importa si hay una báscula física conectada. -->
+          <div class="mt-3">
+            <app-expandable-card [(expanded)]="scaleAdvancedOpen">
+              <div slot="header" class="card-head">
+                <app-icon name="plug" size="16"></app-icon>
+                <span class="card-head__text">
+                  <span class="card-head__title">
+                    Báscula conectada por puerto serie
+                  </span>
+                  <span class="card-head__sub">
+                    Sólo si el equipo está cableado al computador del POS. Con peso
+                    tecleado no hace falta tocar nada.
+                  </span>
+                </span>
+              </div>
+
+              <div class="p-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <!-- Baud Rate -->
+                  <div class="field">
+                    <label class="field__label">Velocidad (Baud Rate)</label>
+                    <select
+                      [formControl]="baudRateControl"
+                      (change)="onFieldChange()"
+                      class="field__control"
+                    >
+                      <option [ngValue]="9600">9600</option>
+                      <option [ngValue]="19200">19200</option>
+                      <option [ngValue]="38400">38400</option>
+                      <option [ngValue]="115200">115200</option>
+                    </select>
+                    <p class="field__hint">
+                      Debe coincidir con la velocidad configurada en la báscula; el
+                      valor está en su manual. 9600 es el más común.
+                    </p>
+                  </div>
+
+                  <!-- Protocol -->
+                  <div class="field">
+                    <label class="field__label">Protocolo</label>
+                    <select
+                      [formControl]="protocolControl"
+                      (change)="onFieldChange()"
+                      class="field__control"
+                    >
+                      <option value="generic">Genérico</option>
+                      <option value="cas">CAS</option>
+                      <option value="ohaus">OHAUS</option>
+                    </select>
+                    <p class="field__hint">
+                      Formato en el que la báscula envía el peso. Si no reconocés la
+                      marca, probá Genérico y usá el botón de abajo.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Test Connection Button -->
+                @if (isWebSerialSupported) {
+                  <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      (click)="testScaleConnection()"
+                      [disabled]="testingConnection"
+                      class="px-4 py-2 text-xs font-medium rounded-lg border border-primary text-primary bg-primary/5 hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {{ testingConnection ? "Conectando..." : "Probar Conexión" }}
+                    </button>
+                    <span class="field__hint field__hint--inline">
+                      Abre el selector de puerto del navegador y lee el peso una vez.
+                      Sólo Chrome/Edge con HTTPS o localhost.
+                    </span>
+                  </div>
+                } @else {
+                  <p class="field__hint field__hint--warning">
+                    Tu navegador no soporta WebSerial, así que no se puede probar la
+                    conexión desde acá. Usá Chrome o Edge en el equipo del POS.
+                  </p>
+                }
+              </div>
+            </app-expandable-card>
+          </div>
         </div>
       }
     </div>
 
     <!-- Cash Register -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Caja Registradora
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Caja Registradora</h4>
+        <p class="block-subtitle">
+          Arqueo del efectivo: quién abre turno, qué se registra y qué se cuenta al
+          cerrar.
+        </p>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <!--
           QUI-560: apagar la caja con sesiones abiertas corrompe el libro de
           movimientos, así que este toggle no usa el `onFieldChange` genérico:
           pasa por un preflight que revierte el switch si hay caja abierta.
         -->
-        <app-setting-toggle
-          [formControl]="cashRegisterEnabledControl"
-          label="Habilitar Caja Registradora"
-          description="Control de apertura/cierre y movimientos de efectivo"
-          (changed)="onCashRegisterEnabledChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="requireSessionForSalesControl"
-          label="Requerir Sesión Activa"
-          description="Bloquear ventas POS sin caja abierta"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="requireClosingCountControl"
-          label="Conteo Obligatorio al Cerrar"
-          description="Exigir conteo de efectivo al cerrar caja"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="trackNonCashPaymentsControl"
-          label="Registrar Pagos No Efectivo"
-          description="Incluir tarjeta/transferencia en la sesión"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="allowMultipleSessionsControl"
-          label="Múltiples Sesiones por Usuario"
-          description="Permitir abrir más de una caja por cajero"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="autoCreateDefaultRegisterControl"
-          label="Auto-crear Caja por Defecto"
-          description="Crear 'Caja 1' (POS-01) al habilitar"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="cashRegisterEnabledControl"
+            label="Habilitar Caja Registradora"
+            description="Cada turno abre caja con su base y la cierra con su conteo; todo movimiento de efectivo queda dentro de una sesión"
+            (changed)="onCashRegisterEnabledChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="success" size="xsm" badgeStyle="outline">
+              Recomendado si manejás efectivo
+            </app-badge>
+            <app-tooltip
+              content="Apagado, el POS cobra igual pero no hay arqueo: al final del día nadie puede decir si faltan o sobran 20.000 $. No se puede apagar con sesiones abiertas — primero hay que cerrarlas con su conteo."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Qué se pierde al apagarlo
+              </span>
+            </app-tooltip>
+            @if (checkingOpenSessions()) {
+              <span class="help-chip help-chip--busy">
+                <app-icon name="loader" size="12" [spin]="true"></app-icon>
+                Verificando cajas abiertas…
+              </span>
+            }
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="requireSessionForSalesControl"
+            label="Requerir Sesión Activa"
+            description="Sin caja abierta el POS no deja cobrar: primero se abre el turno"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="warning" size="xsm" badgeStyle="outline">
+              Requiere Caja Registradora
+            </app-badge>
+            <app-tooltip
+              content="Es lo que garantiza que ninguna venta en efectivo quede fuera de un arqueo. A cambio, el cajero que llega y vende sin abrir caja se topa con un bloqueo: el POS le pide abrirla en el momento."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Qué ve el cajero
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="requireClosingCountControl"
+            label="Conteo Obligatorio al Cerrar"
+            description="Al cerrar, el cajero declara el efectivo contado y el sistema registra el descuadre"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-tooltip
+              content="Si lo esperado son 1.250.000 $ y el cajero declara 1.230.000 $, queda un descuadre de −20.000 $ guardado con su nombre. Sin conteo obligatorio la caja cierra con el valor teórico y el faltante no aparece nunca."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Ejemplo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="trackNonCashPaymentsControl"
+            label="Registrar Pagos No Efectivo"
+            description="Tarjeta y transferencia quedan en la sesión, listadas aparte del efectivo"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-tooltip
+              content="El arqueo sigue siendo del efectivo; los pagos electrónicos se muestran en su propia línea para conciliar contra el datáfono. Apagado, la sesión sólo refleja efectivo y su total no cuadra con las ventas del turno."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Cómo afecta el cierre
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="allowMultipleSessionsControl"
+            label="Múltiples Sesiones por Usuario"
+            description="El mismo cajero puede tener dos cajas abiertas a la vez"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="neutral" size="xsm" badgeStyle="outline">
+              Poco habitual
+            </app-badge>
+            <app-tooltip
+              content="Sirve cuando una sola persona atiende dos puntos de cobro. Contra: con dos sesiones abiertas del mismo usuario deja de ser evidente en cuál entró cada venta. Si cada cajero usa una caja, dejalo apagado."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="alert-triangle" size="12"></app-icon>
+                Riesgo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="autoCreateDefaultRegisterControl"
+            label="Auto-crear Caja por Defecto"
+            description="Al habilitar el módulo crea 'Caja 1' (POS-01) para que el turno se pueda abrir de una"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-tooltip
+              content="Evita el arranque en seco: sin ninguna caja creada el cajero no puede abrir sesión y el POS lo bloquea. Si ya tenés tus cajas con nombre y código propios, no hace falta."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Por qué
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Customer Queue -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Cola Virtual de Clientes
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Cola Virtual de Clientes</h4>
+        <p class="block-subtitle">
+          El cliente se pre-registra desde su celular mientras espera y el cajero lo
+          toma de la lista.
+        </p>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <app-setting-toggle
-          [formControl]="customerQueueEnabledControl"
-          label="Habilitar Cola Virtual"
-          description="Clientes se pre-registran escaneando QR en tienda"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
-        <app-setting-toggle
-          [formControl]="requireEmailControl"
-          label="Requerir Email"
-          description="Email obligatorio en el formulario público"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="customerQueueEnabledControl"
+            label="Habilitar Cola Virtual"
+            description="El cliente escanea un QR en tienda y llena sus datos; el cajero lo selecciona sin teclear nada"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Sólo si atendés con fila
+            </app-badge>
+            <app-tooltip
+              content="Pensado para mostradores con cola: el cliente escribe nombre, documento y contacto mientras espera, y el cajero lo elige de la lista en un toque en vez de dictar los datos."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Para qué sirve
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="requireEmailControl"
+            label="Requerir Email"
+            description="El formulario público no se envía si el cliente no deja correo"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="warning" size="xsm" badgeStyle="outline">
+              Requiere Cola Virtual
+            </app-badge>
+            <app-tooltip
+              content="Exigilo sólo si vas a enviar el recibo o la factura por correo: cada campo obligatorio hace que más gente abandone el formulario a mitad de camino."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Cuándo exigirlo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
 
       @if (customerQueueEnabledControl.value) {
@@ -229,37 +537,37 @@
             Configuración de Cola
           </h5>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-text-secondary mb-1"
-                >Expiración (horas)</label
-              >
+            <div class="field">
+              <label class="field__label">Expiración (horas)</label>
               <input
                 type="number"
                 [formControl]="queueExpiryHoursControl"
                 (change)="onFieldChange()"
                 min="1"
                 max="48"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                class="field__control"
               />
-              <span class="text-[10px] text-text-muted mt-1"
-                >Tiempo de vida de cada entrada en cola</span
-              >
+              <p class="field__hint">
+                Horas que una entrada sigue disponible para el cajero antes de
+                descartarse sola. Con 4, quien se registró a las 10:00 desaparece de
+                la lista a las 14:00.
+              </p>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-text-secondary mb-1"
-                >Tamaño máximo de cola</label
-              >
+            <div class="field">
+              <label class="field__label">Tamaño máximo de cola</label>
               <input
                 type="number"
                 [formControl]="maxQueueSizeControl"
                 (change)="onFieldChange()"
                 min="0"
                 max="100"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                class="field__control"
               />
-              <span class="text-[10px] text-text-muted mt-1"
-                >0 = sin límite</span
-              >
+              <p class="field__hint">
+                Cuántos clientes en espera se aceptan a la vez. Con 20, el
+                cliente 21 ve el formulario cerrado hasta que la cola baje.
+                <strong>0 = sin límite.</strong>
+              </p>
             </div>
           </div>
         </div>
@@ -268,16 +576,38 @@
 
     <!-- Business Hours -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Horarios de Atención
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Horarios de Atención</h4>
+        <p class="block-subtitle">
+          Franja en la que el POS acepta cobrar. Sin la validación activa, el horario
+          es sólo informativo.
+        </p>
+      </div>
       <div class="mb-4">
-        <app-setting-toggle
-          [formControl]="enableScheduleValidationControl"
-          label="Habilitar Horarios"
-          description="Restringir ventas fuera del horario configurado"
-          (changed)="onFieldChange()"
-        ></app-setting-toggle>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="enableScheduleValidationControl"
+            label="Habilitar Horarios"
+            description="Fuera de la franja configurada el POS rechaza la venta"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="error" size="xsm" badgeStyle="outline">
+              Bloquea ventas
+            </app-badge>
+            <app-tooltip
+              content="Con el horario 09:00–19:00, una venta a las 19:40 queda bloqueada aunque el cajero esté en el local. Activalo si nadie debe facturar fuera de turno; apagalo si hacés cierres tarde o vendés en jornadas extendidas."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="alert-triangle" size="12"></app-icon>
+                Ejemplo
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
       <div class="mb-4">
         <app-selector
@@ -287,128 +617,161 @@
           (valueChange)="onScheduleModeChange()"
           size="sm"
         ></app-selector>
-        <p class="text-[10px] text-text-muted mt-1">
+        <p class="field__hint">
           @if (isCustomMode()) {
-            Personalizado: define múltiples bloques horarios por día
+            Personalizado: hasta {{ MAX_BLOCKS_PER_DAY }} bloques por día, para cerrar
+            al mediodía y reabrir en la tarde (por ejemplo 08:00–12:00 y 14:00–18:00).
           } @else {
-            Continuo: un solo bloque de apertura y cierre por día. Los horarios se configuran desde el módulo de configuración general.
+            Continuo: un solo bloque de apertura y cierre por día (por ejemplo
+            09:00–19:00). Cambiá a Personalizado si cerrás al mediodía.
           }
         </p>
       </div>
 
-      <!-- Continuous Mode -->
-      @if (!isCustomMode()) {
-        <div class="grid grid-cols-1 gap-3">
-          @for (day of daysOfWeek; track day.key) {
-            <div class="day-row">
-              <div class="day-row-top">
-                <span class="day-label">{{ day.label }}</span>
-                <button
-                  type="button"
-                  (click)="toggleDayStatus(day.key)"
-                  class="day-toggle-btn"
-                  [class.day-toggle-btn--close]="!isDayClosed(day.key)"
-                  [class.day-toggle-btn--open]="isDayClosed(day.key)"
-                >
-                  {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
-                </button>
-              </div>
-              @if (!isDayClosed(day.key)) {
-                <div class="day-times">
-                  <div class="time-field">
-                    <label class="time-label">Apertura</label>
-                    <input
-                      type="time"
-                      [value]="form.get('business_hours')?.value[day.key]?.open || ''"
-                      disabled
-                      class="time-input"
-                    />
-                  </div>
-                  <span class="time-separator">—</span>
-                  <div class="time-field">
-                    <label class="time-label">Cierre</label>
-                    <input
-                      type="time"
-                      [value]="form.get('business_hours')?.value[day.key]?.close || ''"
-                      disabled
-                      class="time-input"
-                    />
-                  </div>
-                </div>
-              } @else {
-                <span class="day-closed-label">Cerrado</span>
-              }
-            </div>
-          }
+      <app-expandable-card [(expanded)]="scheduleOpen">
+        <div slot="header" class="card-head">
+          <app-icon name="clock" size="16"></app-icon>
+          <span class="card-head__text">
+            <span class="card-head__title">Horario por día</span>
+            <span class="card-head__sub">{{ scheduleSummary() }}</span>
+          </span>
         </div>
-      }
 
-      <!-- Custom Mode (multi-block per day) -->
-      @if (isCustomMode()) {
-        <div class="grid grid-cols-1 gap-3">
-          @for (day of daysOfWeek; track day.key) {
-            <div class="day-row">
-              <div class="day-row-top">
-                <span class="day-label">{{ day.label }}</span>
-                <button
-                  type="button"
-                  (click)="toggleCustomDayStatus(day.key)"
-                  class="day-toggle-btn"
-                  [class.day-toggle-btn--close]="!isCustomDayClosed(day.key)"
-                  [class.day-toggle-btn--open]="isCustomDayClosed(day.key)"
-                >
-                  {{ isCustomDayClosed(day.key) ? "Abrir" : "Cerrar" }}
-                </button>
-              </div>
-              @if (!isCustomDayClosed(day.key)) {
-                <div class="blocks-container">
-                  @for (block of getDayBlocks(day.key); track $index) {
-                    <div class="block-row">
-                      <span class="block-label">Bloque {{ $index + 1 }}</span>
+        <div class="p-4">
+          <!-- Continuous Mode -->
+          @if (!isCustomMode()) {
+            <p class="field__hint field__hint--block">
+              En modo Continuo las horas se editan desde el horario general de la
+              tienda; acá se muestran para que puedas verificarlas. Usá Abrir/Cerrar
+              para marcar los días sin atención.
+            </p>
+            <div class="grid grid-cols-1 gap-3">
+              @for (day of daysOfWeek; track day.key) {
+                <div class="day-row">
+                  <div class="day-row-top">
+                    <span class="day-label">{{ day.label }}</span>
+                    <button
+                      type="button"
+                      (click)="toggleDayStatus(day.key)"
+                      class="day-toggle-btn"
+                      [class.day-toggle-btn--close]="!isDayClosed(day.key)"
+                      [class.day-toggle-btn--open]="isDayClosed(day.key)"
+                    >
+                      {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
+                    </button>
+                  </div>
+                  @if (!isDayClosed(day.key)) {
+                    <div class="day-times">
                       <div class="time-field">
+                        <label class="time-label">Apertura</label>
                         <input
                           type="time"
-                          [value]="block.open"
-                          (change)="onBlockTimeChange(day.key, $index, 'open', $any($event).target.value)"
+                          [value]="form.get('business_hours')?.value[day.key]?.open || ''"
+                          disabled
                           class="time-input"
                         />
                       </div>
                       <span class="time-separator">—</span>
                       <div class="time-field">
+                        <label class="time-label">Cierre</label>
                         <input
                           type="time"
-                          [value]="block.close"
-                          (change)="onBlockTimeChange(day.key, $index, 'close', $any($event).target.value)"
+                          [value]="form.get('business_hours')?.value[day.key]?.close || ''"
+                          disabled
                           class="time-input"
                         />
                       </div>
-                      @if (getDayBlocks(day.key).length > 1) {
-                        <button
-                          type="button"
-                          class="remove-block-btn"
-                          (click)="removeBlock(day.key, $index)"
-                          title="Eliminar bloque"
-                        >×</button>
-                      }
                     </div>
-                  }
-                  @if (canAddBlock(day.key)) {
-                    <button
-                      type="button"
-                      class="add-block-btn"
-                      (click)="addBlock(day.key)"
-                      title="Agregar bloque horario"
-                    >+</button>
+                  } @else {
+                    <span class="day-closed-label">Cerrado</span>
                   }
                 </div>
-              } @else {
-                <span class="day-closed-label">Cerrado</span>
+              }
+            </div>
+          }
+
+          <!-- Custom Mode (multi-block per day) -->
+          @if (isCustomMode()) {
+            <p class="field__hint field__hint--block">
+              Cada bloque es una franja en la que el POS acepta cobrar. Entre un
+              bloque y el siguiente la tienda cuenta como cerrada.
+            </p>
+            <div class="grid grid-cols-1 gap-3">
+              @for (day of daysOfWeek; track day.key) {
+                <div class="day-row">
+                  <div class="day-row-top">
+                    <span class="day-label">{{ day.label }}</span>
+                    <button
+                      type="button"
+                      (click)="toggleCustomDayStatus(day.key)"
+                      class="day-toggle-btn"
+                      [class.day-toggle-btn--close]="!isCustomDayClosed(day.key)"
+                      [class.day-toggle-btn--open]="isCustomDayClosed(day.key)"
+                    >
+                      {{ isCustomDayClosed(day.key) ? "Abrir" : "Cerrar" }}
+                    </button>
+                  </div>
+                  @if (!isCustomDayClosed(day.key)) {
+                    <div class="blocks-container">
+                      @for (block of getDayBlocks(day.key); track $index) {
+                        <div class="block-row">
+                          <span class="block-label">Bloque {{ $index + 1 }}</span>
+                          <div class="time-field">
+                            <input
+                              type="time"
+                              [value]="block.open"
+                              (change)="onBlockTimeChange(day.key, $index, 'open', $any($event).target.value)"
+                              class="time-input"
+                            />
+                          </div>
+                          <span class="time-separator">—</span>
+                          <div class="time-field">
+                            <input
+                              type="time"
+                              [value]="block.close"
+                              (change)="onBlockTimeChange(day.key, $index, 'close', $any($event).target.value)"
+                              class="time-input"
+                            />
+                          </div>
+                          @if (getDayBlocks(day.key).length > 1) {
+                            <button
+                              type="button"
+                              class="remove-block-btn"
+                              (click)="removeBlock(day.key, $index)"
+                              title="Eliminar bloque"
+                            >×</button>
+                          }
+                        </div>
+                      }
+                      @if (canAddBlock(day.key)) {
+                        <button
+                          type="button"
+                          class="add-block-btn"
+                          (click)="addBlock(day.key)"
+                          title="Agregar bloque horario"
+                        >+</button>
+                      }
+                    </div>
+                  } @else {
+                    <span class="day-closed-label">Cerrado</span>
+                  }
+                </div>
               }
             </div>
           }
         </div>
-      }
+      </app-expandable-card>
     </div>
+
+    <!-- Qué NO se configura acá, para que nadie lo busque en esta pantalla -->
+    <p class="cross-ref">
+      <app-icon name="printer" size="14"></app-icon>
+      <span>
+        La impresión del tiquete al cerrar la venta se activa en
+        <strong>Recibos y Facturación</strong>, y su tamaño de papel en
+        <strong>Formatos de Impresión</strong>.
+      </span>
+    </p>
   </div>
   }
 </div>

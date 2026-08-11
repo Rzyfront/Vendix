@@ -117,6 +117,7 @@ const BULK_EDITABLE_FIELDS: readonly string[] = [
   'dimensions',
   'stock_uom_id',
   'purchase_uom_id',
+  'price_unit_quantity',
   'service_duration_minutes',
   'service_modality',
   'service_pricing_type',

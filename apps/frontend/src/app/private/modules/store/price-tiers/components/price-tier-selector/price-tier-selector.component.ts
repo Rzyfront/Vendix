@@ -24,7 +24,7 @@ import { ESCAPE } from '@angular/cdk/keycodes';
 import { fromEvent } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { PriceTier } from '../../interfaces';
+import { PriceTier, PriceTierKind } from '../../interfaces';
 
 /**
  * Compact dropdown to select a price tier on a single sale line.
@@ -80,7 +80,7 @@ import { PriceTier } from '../../interfaces';
           >
             <span class="font-medium">Default (sin tarifa)</span>
           </button>
-          @for (tier of tiers(); track tier.id) {
+          @for (tier of visibleTiers(); track tier.id) {
             <button
               type="button"
               role="option"
@@ -92,7 +92,20 @@ import { PriceTier } from '../../interfaces';
               <div class="flex items-center justify-between gap-2 w-full">
                 <div class="flex flex-col min-w-0">
                   <span class="font-medium truncate">{{ tier.name }}</span>
-                  @if (tier.discount_percentage) {
+                  <!-- El eje se muestra siempre que convivan los dos, para que
+                       "Mayorista" (a quién le vendo) no se lea igual que "Kilo"
+                       (en qué presentación vendo). -->
+                  @if (showsBothKinds()) {
+                    <span class="text-[10px] text-text-secondary">
+                      {{
+                        tier.kind === 'sale_unit'
+                          ? 'Unidad de venta'
+                          : 'Tarifa de cliente'
+                      }}@if (tier.discount_percentage) {
+                        · {{ tier.discount_percentage }}% off
+                      }
+                    </span>
+                  } @else if (tier.discount_percentage) {
                     <span class="text-[10px] text-text-secondary">
                       {{ tier.discount_percentage }}% off
                     </span>
@@ -163,6 +176,12 @@ export class PriceTierSelectorComponent implements OnDestroy {
   readonly tiers = input.required<PriceTier[]>();
   readonly selectedTierId = input<number | null>(null);
   readonly unitsPerPackage = input<number | null>(null);
+  /**
+   * Restringe el menú a un solo eje. Sin valor muestra los dos, que es lo que
+   * necesita el POS: es la única superficie donde se elige entre varias
+   * presentaciones, y también donde se aplica una tarifa de cliente.
+   */
+  readonly kind = input<PriceTierKind | null>(null);
 
   readonly selectedTierIdChange = output<number | null>();
 
@@ -174,6 +193,19 @@ export class PriceTierSelectorComponent implements OnDestroy {
   private readonly vcr = inject(ViewContainerRef);
   private readonly destroyRef = inject(DestroyRef);
   private overlayRef: OverlayRef | null = null;
+
+  /** Tarifas que el menú realmente ofrece, ya filtradas por eje. */
+  readonly visibleTiers = computed<PriceTier[]>(() => {
+    const kind = this.kind();
+    const all = this.tiers();
+    return kind ? all.filter((tier) => tier.kind === kind) : all;
+  });
+
+  /** True cuando el menú mezcla los dos ejes y hay que etiquetarlos. */
+  readonly showsBothKinds = computed(() => {
+    const kinds = new Set(this.visibleTiers().map((tier) => tier.kind));
+    return kinds.size > 1;
+  });
 
   readonly selectedTier = computed<PriceTier | null>(() => {
     const id = this.selectedTierId();

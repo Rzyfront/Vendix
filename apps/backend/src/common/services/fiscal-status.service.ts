@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../errors';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import {
   FiscalArea,
   FiscalDetectorSignals,
@@ -450,33 +451,30 @@ export class FiscalStatusService {
       },
     });
 
-    // Identity fields prefer the scope-aware fiscal_data JSON the dashboard
-    // writes, falling back to DIAN config (NIT/DV/type) and the organization
-    // record. DIAN owns the canonical NIT once a config exists.
-    const legal_name =
-      (typeof fiscalData?.legal_name === 'string'
-        ? fiscalData.legal_name
-        : null) ??
-      organization.legal_name ??
-      null;
-    const tax_id =
-      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
-      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
-      organization.tax_id ??
-      null;
-    const nit =
-      dian?.nit ??
-      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
-      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
-      organization.tax_id ??
-      null;
-    const nit_dv =
-      dian?.nit_dv ??
-      (typeof fiscalData?.nit_dv === 'string' ? fiscalData.nit_dv : null) ??
-      (typeof fiscalData?.tax_id_dv === 'string'
-        ? fiscalData.tax_id_dv
-        : null) ??
-      null;
+    // Identidad resuelta por el resolvedor único — la ÚNICA fuente — en su
+    // variante PERMISIVA, y esto no es negociable aquí: el checklist existe para
+    // decirle al tenant QUÉ le falta. Con el resolvedor estricto, un tenant con
+    // identidad incompleta recibía un error en lugar de la lista de huecos, y no
+    // podía cargar sus datos fiscales porque leerlos lanzaba — huevo y gallina.
+    // Ver la nota de asimetría lectura/emisión en `fiscal-identity.helper.ts`.
+    //
+    // `nit_type` no vive en el contrato ancho del resolvedor porque es un
+    // detalle del campo `nit_type` del formulario, no de la identidad derivada.
+    // El NIT inicial del resolvedor viene del JSON (fuente única) o de
+    // `dian_configurations` — nunca de la columna `organizations.tax_id`,
+    // que puede estar vacía o rancia.
+    const { identity } = tryResolveTenantFiscalIdentity({
+      nit: dian?.nit ?? '',
+      fiscal_data: fiscalData ?? null,
+      organization: {
+        legal_name: organization.legal_name,
+        name: organization.name,
+      },
+    });
+    const legal_name = identity.legal_name;
+    const tax_id = identity.nit;
+    const nit = dian?.nit ?? identity.nit;
+    const nit_dv = identity.nit_dv;
     const nit_type =
       (dian?.nit_type ? String(dian.nit_type) : null) ??
       (typeof fiscalData?.nit_type === 'string' ? fiscalData.nit_type : null) ??

@@ -256,6 +256,28 @@ export class TableSessionsController {
   }
 
   /**
+   * Mark one item of the check as delivered to the customer (QUI-652).
+   * PATCH /api/store/table-sessions/:id/items/:orderItemId/deliver
+   *
+   * Works for ANY product type. A prepared dish still needs kitchen state
+   * `ready` first; anything else — a bottled beer, a water — is delivered
+   * straight from the row, because it never passes through the kitchen and so
+   * has no kitchen state to wait for.
+   */
+  @Patch(':id/items/:orderItemId/deliver')
+  @Permissions('store:table_sessions:update')
+  async markItemDelivered(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+  ) {
+    const result = await this.tableSessionsService.markItemDelivered(
+      id,
+      orderItemId,
+    );
+    return this.responseService.updated(result, 'Item marcado como entregado');
+  }
+
+  /**
    * Remove one item from the draft order backing an open table session.
    * DELETE /api/store/table-sessions/:id/items/:orderItemId
    *

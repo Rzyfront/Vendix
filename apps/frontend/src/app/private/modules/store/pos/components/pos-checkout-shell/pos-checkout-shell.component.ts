@@ -1084,6 +1084,12 @@ export class PosCheckoutShellComponent {
         product_id: Number((it.product as any).id),
         quantity: it.quantity,
         product_variant_id: it.variant_id ?? undefined,
+        // QUI-653 — la decisión "para llevar" viaja desde la línea del carrito
+        // hasta `order_items.is_takeaway`. Se propaga aquí y en
+        // `pos.component.ts`: son los DOS caminos por los que el POS empuja
+        // items a una mesa, y si solo uno lo llevara la marca dependería de qué
+        // botón usó el cajero.
+        ...(it.isTakeaway && { is_takeaway: true }),
       }));
     if (items.length === 0) {
       this.submittingDraft.set(false);

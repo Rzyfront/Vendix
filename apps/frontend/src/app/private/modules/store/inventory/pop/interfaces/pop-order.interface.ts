@@ -139,6 +139,14 @@ export function cartToPurchaseOrderRequest(
         // meaningful when VAT is on (mixed invoices).
         tax_rate: cartState.has_vat ? item.tax_rate : 0,
         tax_type: item.tax_type ?? 'iva',
+        // QUI-661: descuento comercial de la línea. Se manda el porcentaje
+        // tecleado; el backend resuelve el monto, lo persiste y lo resta de la
+        // base ANTES de derivar el IVA — por eso no se manda un precio ya
+        // rebajado: el descuento tiene que ser visible como tal para que llegue
+        // a la capa de costo y no se confunda con un precio negociado.
+        ...(Number(item.discount) > 0
+          ? { discount_percentage: Number(item.discount) }
+          : {}),
         ...(cartState.has_vat && item.prices_include_tax !== undefined
           ? { prices_include_tax: item.prices_include_tax }
           : {}),
@@ -235,6 +243,9 @@ export function cartToPurchaseOrderRequest(
     payment_terms: cartState.paymentTerms,
     shipping_method: cartState.shippingMethod,
     shipping_cost: cartState.shippingCost,
+    // QUI-661: descuento general de la factura. El backend lo prorratea por
+    // línea; acá sólo viaja el monto que el proveedor rebajó sobre el total.
+    discount_amount: cartState.discountAmount || 0,
     subtotal_amount: cartState.summary.subtotal,
     tax_amount: cartState.summary.tax_amount,
     total_amount: cartState.summary.total,

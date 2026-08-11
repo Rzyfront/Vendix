@@ -3,11 +3,13 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   OnDestroy,
   OnInit,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -26,12 +28,23 @@ import {
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
+import type {
+  FirePreview,
+  FireItemExclusion,
+  KdsConsumptionSummary,
+  KdsConsumptionHistoryRow,
+} from '../../interfaces';
+import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
+import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
 import {
   KdsConnectionState,
   KdsSseService,
+  KdsStationsService,
   KitchenMutationError,
   KitchenTicketsService,
 } from '../../services';
+import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
@@ -67,6 +80,10 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
     BadgeComponent,
     KdsTicketCardComponent,
     KdsTicketDetailModalComponent,
+    ModalComponent,
+    ButtonComponent,
+    KitchenConfirmModalComponent,
+    KdsSessionStatusBarComponent,
   ],
   templateUrl: './kds-board-page.component.html',
   styleUrl: './kds-board-page.component.scss',
@@ -74,6 +91,20 @@ import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detai
 export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly kdsSse = inject(KdsSseService);
   private readonly ticketsService = inject(KitchenTicketsService);
+  /**
+   * QUI-651 — el board es de UNA estacion. `selectedStationId` alimenta el filtro
+   * de `visibleTickets`, y `canManageTickets` decide si la primera accion de
+   * gestion tiene que pedir apertura de turno.
+   */
+  readonly stationsService = inject(KdsStationsService);
+  /**
+   * QUI-651 — gate de turno. `sessionGatePending` recuerda QUE ticket se quiso
+   * gestionar para reintentarlo tras abrir la sesion, en vez de obligar al
+   * operador a volver a buscarlo en el tablero.
+   */
+  readonly sessionGateOpen = signal(false);
+  readonly sessionGatePending = signal<number | null>(null);
+  readonly openingSession = signal(false);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -138,7 +169,21 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    */
   readonly visibleTickets = computed<KitchenTicket[]>(() => {
     const businessDate = this.currentBusinessDate();
+    // QUI-651 — el tablero es DE UNA ESTACION. Sin este filtro, un restaurante
+    // con barra + cocina caliente + postres muestra los tres flujos mezclados en
+    // cada pantalla y el personal filtra a mano, que es justo el problema que el
+    // ticket resuelve.
+    //
+    // El filtro es cliente-side sobre el stream por tienda en vez de un endpoint
+    // SSE por estacion: el backend ya empuja `ticket.created` de CADA estacion
+    // (los N tickets del fire), asi que cada tablero recibe todo y descarta lo
+    // ajeno. Cuesta ancho de banda y no correccion; partir el canal por estacion
+    // es una optimizacion posterior que no cambia lo que ve el operador.
+    const stationId = this.stationsService.selectedStationId();
     return this.tickets().filter((t) => {
+      if (stationId != null && t.kds_id != null && t.kds_id !== stationId) {
+        return false;
+      }
       const raw = t.business_date;
       if (raw == null) return true; // legacy fallback: keep
       const prefix =
@@ -322,6 +367,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
+    this.watchFullscreenChanges();
+
     // Toast when the stream recovers from a failure. We track the previous
     // state in a signal and only fire on (error|reconnecting) → open, never
     // on the initial idle/connecting → open handshake.
@@ -406,6 +453,23 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       /* el SSE/polling reconciliará */
     });
     this.kdsSse.connect(120);
+
+    // QUI-651 — cargar estaciones y, si ya hay una elegida, su turno abierto.
+    // `loadStations` autoselecciona cuando hay UNA sola activa, asi que el caso
+    // comun entra directo al tablero sin pantalla intermedia.
+    this.stationsService
+      .loadStations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          const id = this.stationsService.selectedStationId();
+          if (id != null) this.refreshStationSession(id);
+        },
+        // Silencioso: sin estaciones el tablero sigue leyendose; lo que se cae es
+        // la gestion, y de eso ya avisa el gate de turno con su propio mensaje.
+        error: () => {},
+      });
+
     this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
 
     // Deep-link `?ticket=<kitchen_ticket_id>` desde el detalle de orden.
@@ -454,6 +518,38 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   }
 
   onHeaderAction(id: string): void {
+    // QUI-651 — acceso a la configuracion de estaciones y turnos. Sin esta
+    // entrada la pantalla existe y nadie llega a ella.
+    // QUI-651 — pantalla completa real: se oculta el layout entero (sidebar y
+    // header incluidos) porque un KDS vive en una pantalla colgada en la cocina y
+    // cada pixel de cromo administrativo es espacio que no muestra tickets.
+    //
+    // El detalle de COMO se hace vive en `toggleFullscreen`: el clic de este boton
+    // es el gesto de usuario que la Fullscreen API exige, y por eso el toggle no
+    // puede dispararse desde ningun otro lado (un efecto o un temporizador seria
+    // rechazado por el navegador).
+    if (id === 'fullscreen') {
+      void this.toggleFullscreen();
+      return;
+    }
+    // QUI-651 — cerrar el turno DESDE el tablero, que es donde esta el cocinero.
+    // Obligarlo a navegar a configuracion para cerrar su propio turno seria absurdo,
+    // y era el hueco que quedaba: la apertura estaba y el cierre no.
+    if (id === 'close-session') {
+      const session = this.stationsService.openSession();
+      if (!session) return;
+      this.stationsService
+        .closeSession(session.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => this.toastService.success('Turno cerrado'),
+          error: (err: unknown) =>
+            this.toastService.error(
+              typeof err === 'string' ? err : 'No se pudo cerrar el turno',
+            ),
+        });
+      return;
+    }
     if (id === 'refresh') {
       this.forceRefresh();
     } else if (id === 'reconnect') {
@@ -526,8 +622,237 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   // ─── ticket mutations ──────────────────────────────────────────────
 
+  /**
+   * QUI-655 — cocinar exige CONFIRMAR el ticket primero.
+   *
+   * El cocinero ve cada platillo con su receta y sus insumos, con lo que quien tomo
+   * el pedido quito ya TACHADO, y puede quitar mas antes de empezar. El gate de
+   * turno sigue aplicando: se evalua en `runMutation`, al confirmar.
+   */
   startTicket(ticket: KitchenTicket): void {
-    this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+    const orderItemIds = (ticket.items ?? [])
+      .map((i) => i.order_item_id)
+      .filter((id): id is number => typeof id === 'number');
+
+    if (orderItemIds.length === 0) {
+      // Sin items no hay receta que confirmar: se avanza directo en vez de abrir un
+      // modal vacio.
+      this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+      return;
+    }
+
+    // Lo que ya venia excluido, indexado por order_item para sembrar el modal.
+    const seed = new Map<number, number[]>();
+    for (const item of ticket.items ?? []) {
+      const ids = (item.exclusions ?? []).map((e) => e.component_product_id);
+      if (ids.length > 0) seed.set(item.order_item_id, ids);
+    }
+
+    this.cookTicketId.set(ticket.id);
+    this.cookSeed.set(seed);
+    this.cookPreview.set(null);
+    this.cookPreviewLoading.set(true);
+    this.cookConfirmOpen.set(true);
+
+    // Verificacion por TICKET: `/preview` filtra por "no consumido todavia" — una
+    // condicion del envio — y al verificar el item ya paso por el fire, asi que el
+    // modal llegaba vacio.
+    this.ticketsService
+      .getTicketVerification(ticket.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.cookPreview.set(preview);
+          // La exclusion capturada viene EN la respuesta, asi que se siembra desde
+          // ahi en vez de depender de que el payload del ticket la traiga.
+          const seedFromApi = new Map<number, number[]>();
+          for (const it of preview.items ?? []) {
+            const ids = (it as any).excluded_component_ids ?? [];
+            if (ids.length > 0) seedFromApi.set(it.order_item_id, ids);
+          }
+          if (seedFromApi.size > 0) this.cookSeed.set(seedFromApi);
+          this.cookPreviewLoading.set(false);
+        },
+        error: () => {
+          // Si no se pueden leer las recetas NO se avanza a ciegas: el punto del
+          // modal es que nadie cocine sin ver que insumos se van a gastar.
+          this.cookPreviewLoading.set(false);
+          this.cookConfirmOpen.set(false);
+          this.toastService.error('No se pudieron leer las recetas del ticket');
+        },
+      });
+  }
+
+  /** Estado del modal de confirmacion de cocina en el tablero. */
+  readonly cookConfirmOpen = signal(false);
+  readonly cookPreview = signal<FirePreview | null>(null);
+  readonly cookPreviewLoading = signal(false);
+  readonly cookSeed = signal<Map<number, number[]> | null>(null);
+  private readonly cookTicketId = signal<number | null>(null);
+
+  onCookConfirmed(exclusions: FireItemExclusion[]): void {
+    const ticketId = this.cookTicketId();
+    this.cookConfirmOpen.set(false);
+    if (ticketId == null) return;
+    // NOTA: hoy el inventario ya se consumio en el fire, asi que estas exclusiones
+    // aun no cambian el descuento — se registran y se muestran. Mover el consumo a
+    // este punto es la fase siguiente, y este confirm es su disparador.
+    this.runMutation(ticketId, () => this.ticketsService.start(ticketId));
+    this.cookTicketId.set(null);
+  }
+
+  /** Pestañas del sticky header. El tablero y su configuración son secciones del
+   * mismo módulo, no destinos sueltos: como pestañas el operador ve que existe la
+   * configuración sin tener que descubrir un botón. */
+  readonly headerTabs = [
+    { id: 'board', label: 'Comandas', icon: 'flame', route: '/admin/restaurant-ops/kds', exact: true },
+    { id: 'config', label: 'Configuración', icon: 'chef-hat', route: '/admin/restaurant-ops/kds/configuracion' },
+  ];
+
+  // ------------------------------------------------------- pantalla completa
+  /**
+   * PANTALLA COMPLETA DEL KDS.
+   *
+   * Usa la Fullscreen API sobre el elemento del tablero, no una clase que colapse
+   * el layout. Tres razones concretas:
+   *
+   *  1. El navegador promueve el elemento al TOP LAYER: queda por encima del
+   *     documento entero e ignora por definicion el `overflow`, el `z-index` y los
+   *     bloques contenedores de sus ancestros. La alternativa (`position: fixed`)
+   *     funciona hoy solo porque ningun ancestro tiene `transform`, `filter` ni
+   *     `contain`; el dia que alguien le ponga un `backdrop-filter` al layout, el
+   *     `fixed` se ancla ahi y el tablero sale recortado SIN error de consola.
+   *  2. NO mueve el DOM. Portar el tablero a un `<dialog>` via `ng-template` lo
+   *     desmontaria y remontaria, y este tablero vive de un stream SSE: cada
+   *     toggle reconectaria la cocina.
+   *  3. Da el 100% de la PANTALLA, no del viewport — en una pantalla de cocina
+   *     tambien desaparece la barra del navegador.
+   *
+   * Respaldo: si `requestFullscreen()` es rechazado (webview embebida, permiso
+   * denegado por politica) se cae a `position: fixed`, que es lo mejor disponible
+   * sin la API.
+   */
+  readonly isFullscreen = signal(false);
+  /** Respaldo activo: la API fue rechazada y se posiciona con `fixed`. */
+  readonly fixedFallback = signal(false);
+
+  private readonly boardRoot =
+    viewChild.required<ElementRef<HTMLElement>>('boardRoot');
+
+  /**
+   * Salida desde la barra de turno. Existe porque en pantalla completa el sticky
+   * header no se dibuja, y con él desaparece el botón por el que se entró: la
+   * barra pasa a ser el único control visible. El clic sigue siendo un gesto de
+   * usuario, que es lo que la Fullscreen API exige.
+   */
+  exitFullscreen(): void {
+    void this.toggleFullscreen();
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    if (this.isFullscreen()) {
+      // Salir por el mismo camino por el que se entro.
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => undefined);
+      } else {
+        this.fixedFallback.set(false);
+        this.isFullscreen.set(false);
+        this.applyBackdropLock(false);
+      }
+      return;
+    }
+
+    try {
+      await this.boardRoot().nativeElement.requestFullscreen({
+        navigationUI: 'hide',
+      });
+      // `isFullscreen` NO se setea aqui: lo hace el listener de
+      // `fullscreenchange`, que es la unica fuente que tambien cubre el Esc.
+    } catch {
+      this.fixedFallback.set(true);
+      this.isFullscreen.set(true);
+      this.applyBackdropLock(true);
+    }
+  }
+
+  /**
+   * Solo para el respaldo `fixed`: sin esto el fondo sigue haciendo scroll detras
+   * del tablero y el dock de Vexi tapa una columna de tickets. En modo top layer
+   * no hace falta — el layout entero queda debajo de la capa superior.
+   */
+  private applyBackdropLock(on: boolean): void {
+    document.body.classList.toggle('kds-fullscreen', on);
+  }
+
+  /**
+   * El Esc del navegador sale de pantalla completa sin pasar por nuestro boton.
+   * Sin escuchar `fullscreenchange` la señal se queda en `true` y el boton miente:
+   * dice "Salir de pantalla completa" cuando ya se salio.
+   */
+  private watchFullscreenChanges(): void {
+    const onChange = () => {
+      const active = document.fullscreenElement === this.boardRoot().nativeElement;
+      this.isFullscreen.set(active || this.fixedFallback());
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('fullscreenchange', onChange);
+      // Salir del modulo con la clase puesta dejaria el resto del panel sin
+      // scroll y sin Vexi.
+      this.applyBackdropLock(false);
+    });
+  }
+
+  // ---------------------------------------------------- resumen del turno
+  readonly sessionSummaryOpen = signal(false);
+  readonly sessionSummary = signal<KdsConsumptionSummary | null>(null);
+  readonly sessionHistory = signal<KdsConsumptionHistoryRow[]>([]);
+  readonly loadingSessionSummary = signal(false);
+
+  /**
+   * Abre el resumen del turno ACTUAL en un modal.
+   *
+   * Antes mandaba a la pantalla de configuración: sacar al cocinero del tablero para
+   * ver su propio turno es perder el contexto de la cocina justo cuando la está
+   * operando.
+   */
+  openSessionSummary(): void {
+    const session = this.stationsService.openSession();
+    if (!session) return;
+
+    this.sessionSummaryOpen.set(true);
+    this.loadingSessionSummary.set(true);
+    this.sessionSummary.set(null);
+    this.sessionHistory.set([]);
+
+    this.stationsService
+      .getConsumptionSummary(session.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (sum) => {
+          this.sessionSummary.set(sum);
+          this.loadingSessionSummary.set(false);
+        },
+        error: () => this.loadingSessionSummary.set(false),
+      });
+
+    this.stationsService
+      .getConsumptionHistory(session.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.sessionHistory.set(rows),
+        error: () => {},
+      });
+  }
+
+  closeSessionSummary(): void {
+    this.sessionSummaryOpen.set(false);
+  }
+
+  onCookCancelled(): void {
+    this.cookConfirmOpen.set(false);
+    this.cookPreview.set(null);
+    this.cookTicketId.set(null);
   }
 
   markTicketReady(ticket: KitchenTicket): void {
@@ -600,10 +925,107 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    *    SSE nunca llega, para no dejar el spinner colgado.
    * En `error` limpiamos el id + toast (como antes).
    */
+  /**
+   * Abre el turno de la estacion y REINTENTA la accion que disparo el gate.
+   *
+   * Reintentar importa: sin esto el operador abre el turno y su clic original se
+   * perdio, asi que tiene que volver a buscar el ticket en el tablero. El
+   * reintento se resuelve por id y no guardando el observable, porque el estado
+   * del ticket pudo cambiar por SSE mientras el modal estaba abierto.
+   */
+  confirmOpenSession(): void {
+    const kdsId = this.stationsService.selectedStationId();
+    if (kdsId == null) return;
+
+    this.openingSession.set(true);
+    this.stationsService
+      .openSessionFor(kdsId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.openingSession.set(false);
+          this.sessionGateOpen.set(false);
+          const pending = this.sessionGatePending();
+          this.sessionGatePending.set(null);
+          this.toastService.success('Turno abierto');
+          if (pending != null) {
+            const ticket = this.tickets().find((t) => t.id === pending);
+            // Se re-deriva la accion del estado ACTUAL del ticket: entre el gate y
+            // la apertura, el SSE pudo haberlo movido.
+            if (ticket) this.advanceTicket(ticket);
+          }
+        },
+        error: (err: unknown) => {
+          this.openingSession.set(false);
+          // KDS_SESSION_ALREADY_OPEN cuando otro operador reclamo la estacion
+          // primero. El mensaje del backend ya lo dice; se muestra tal cual.
+          this.toastService.error(
+            typeof err === 'string' ? err : 'No se pudo abrir el turno',
+          );
+        },
+      });
+  }
+
+  /**
+   * Elegir estacion. Recarga el turno de la elegida: el gate depende de esa
+   * lectura, y arrastrar el turno de la estacion anterior dejaria gestionar
+   * tickets de una estacion con la sesion de otra.
+   */
+  selectStation(kdsId: number): void {
+    this.stationsService.selectedStationId.set(kdsId);
+    this.stationsService.openSession.set(null);
+    this.refreshStationSession(kdsId);
+  }
+
+  private refreshStationSession(kdsId: number): void {
+    this.stationsService
+      .refreshOpenSession(kdsId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ error: () => {} });
+  }
+
+  cancelOpenSession(): void {
+    this.sessionGateOpen.set(false);
+    this.sessionGatePending.set(null);
+  }
+
+  /**
+   * Avanza el ticket al siguiente estado segun donde este. Se usa para el
+   * reintento post-apertura de turno, donde solo se conserva el id.
+   */
+  private advanceTicket(ticket: KitchenTicket): void {
+    if (ticket.status === 'pending') {
+      this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
+    } else if (ticket.status === 'in_preparation') {
+      this.runMutation(ticket.id, () =>
+        this.ticketsService.markReady(ticket.id),
+      );
+    }
+    // `ready` no se avanza automaticamente: entregar es una decision de servicio
+    // y la toma el operador desde su boton, no un reintento silencioso.
+  }
+
   private runMutation(
     ticketId: number,
     obsFactory: () => import('rxjs').Observable<KitchenTicket>,
   ): void {
+    // ------------------------------------------------------------- QUI-651
+    // GATE DE TURNO. Este es el embudo unico de TODAS las mutaciones de ticket
+    // (start, ready, delivered, cancel), asi que la guarda va aca y no en cada
+    // handler: poner el chequeo en los cinco handlers deja el hueco abierto en el
+    // sexto que alguien agregue.
+    //
+    // Convencion de caja, que el ticket pide respetar: la sesion se exige AL
+    // ACTUAR, no al entrar. El tablero se LEE sin turno abierto — leer no genera
+    // dato que necesite dueno — pero gestionar un ticket consume inventario y
+    // genera COGS, y eso necesita un responsable.
+    //
+    // Y no muta NADA hasta que el turno se abra: se pide apertura y se corta.
+    if (!this.stationsService.canManageTickets()) {
+      this.sessionGatePending.set(ticketId);
+      this.sessionGateOpen.set(true);
+      return;
+    }
     this.beginMutation(ticketId);
     obsFactory()
       .pipe(takeUntilDestroyed(this.destroyRef))

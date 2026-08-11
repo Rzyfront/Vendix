@@ -38,6 +38,12 @@ import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
+import { resolvePackSize } from '../../products/services/packaging.util';
+import {
+  resolvePricedUnits,
+  resolveTierPricingCostAnchor,
+} from '../../products/services/tier-margin.util';
+import { assertTiersAllowed } from '../../products/services/tiers-variants-exclusive.util';
 
 /**
  * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
@@ -116,13 +122,24 @@ export class PurchaseOrdersService {
       quantity?: number | null;
       tax_rate?: number | null;
       prices_include_tax?: boolean | null;
+      discount_percentage?: number | null;
+      discount_amount?: number | null;
     },
     header: { prices_include_tax?: boolean | null },
+    /**
+     * QUI-661 — share of the HEADER discount that belongs to this line, already
+     * prorated by `prorateHeaderDiscount`. Kept as an explicit argument instead
+     * of a field on `item` so a caller can never accidentally double-count it
+     * by also leaving it inside `discount_amount`.
+     */
+    proratedHeaderDiscount = 0,
   ): {
     unit_price_net: number;
     tax_amount_per_unit: number;
     tax_amount: number;
     effective_include: boolean;
+    /** Total commercial discount applied to the line (own + prorated header). */
+    discount_total: number;
   } {
     const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
     const quantity = Number(item.quantity ?? 0);
@@ -130,20 +147,43 @@ export class PurchaseOrdersService {
     const effective_include =
       item.prices_include_tax ?? header.prices_include_tax ?? false;
 
+    // QUI-661 — the commercial discount is subtracted from the GROSS unit price
+    // BEFORE the VAT split. In Colombia an unconditional commercial discount
+    // reduces the taxable base, so deriving the VAT from the undiscounted price
+    // inflates the deductible VAT that reaches the declaration.
+    //
+    // `discount_amount` wins over `discount_percentage`: the user may type
+    // either, but the resolved money figure is what gets persisted and what the
+    // accounting reads. Re-deriving from the percentage at read time would give
+    // a different number the day the price changes.
+    const ownDiscount =
+      item.discount_amount != null && Number(item.discount_amount) > 0
+        ? Number(item.discount_amount)
+        : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
+    const discount_total = Math.max(
+      0,
+      ownDiscount + Number(proratedHeaderDiscount || 0),
+    );
+    // Never let a discount drive the line negative: a rebate larger than the
+    // line is a data error, and a negative cost would poison the FIFO layer.
+    const discountPerUnit =
+      quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
+    const grossAfterDiscount = gross - discountPerUnit;
+
     let unit_price_net: number;
     let tax_amount_per_unit: number;
     if (!(r > 0)) {
       // No (or invalid) tax rate → line is tax-free, cost stays as entered.
-      unit_price_net = gross;
+      unit_price_net = grossAfterDiscount;
       tax_amount_per_unit = 0;
     } else if (effective_include) {
       // Price already includes IVA: strip it out to get the net cost.
-      unit_price_net = gross / (1 + r);
-      tax_amount_per_unit = gross - unit_price_net;
+      unit_price_net = grossAfterDiscount / (1 + r);
+      tax_amount_per_unit = grossAfterDiscount - unit_price_net;
     } else {
       // IVA added on top: entered price is already net.
-      unit_price_net = gross;
-      tax_amount_per_unit = gross * r;
+      unit_price_net = grossAfterDiscount;
+      tax_amount_per_unit = grossAfterDiscount * r;
     }
 
     return {
@@ -151,7 +191,56 @@ export class PurchaseOrdersService {
       tax_amount_per_unit,
       tax_amount: tax_amount_per_unit * quantity,
       effective_include,
+      discount_total: discountPerUnit * quantity,
     };
+  }
+
+  /**
+   * QUI-661 — splits a HEADER discount across the lines, proportionally to each
+   * line's weight in the gross subtotal.
+   *
+   * The header discount cannot stay in the header. FIFO cost layers are written
+   * per line (`resolveUoMConversion` → `calculateCostOnReceipt`), so a figure
+   * that only exists on `purchase_orders.discount_amount` has no physical way to
+   * reach the product's cost — which is exactly why the pre-QUI-661 behaviour
+   * left the CxP rebated while the inventory capitalized the full price.
+   *
+   * The rounding remainder lands on the LAST line so that
+   * `Σ prorated === headerDiscount` exactly and the order total never drifts by
+   * a cent against what the supplier invoiced.
+   */
+  private prorateHeaderDiscount(
+    items: Array<{
+      unit_price?: number | null;
+      unit_cost?: number | null;
+      quantity?: number | null;
+    }>,
+    headerDiscount: number,
+  ): number[] {
+    const shares = new Array(items.length).fill(0);
+    const discount = Number(headerDiscount || 0);
+    if (!(discount > 0) || items.length === 0) return shares;
+
+    const grossPerLine = items.map(
+      (i) =>
+        Number(i.unit_price ?? i.unit_cost ?? 0) * Number(i.quantity ?? 0),
+    );
+    const grossTotal = grossPerLine.reduce((s, v) => s + v, 0);
+    // A discount over a zero-value order has nothing to attach to; dropping it
+    // is safer than dividing by zero and emitting NaN into the cost engine.
+    if (!(grossTotal > 0)) return shares;
+
+    // Never discount more than the order is worth.
+    const effective = Math.min(discount, grossTotal);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    let assigned = 0;
+    for (let i = 0; i < items.length - 1; i++) {
+      shares[i] = round2((grossPerLine[i] / grossTotal) * effective);
+      assigned += shares[i];
+    }
+    shares[items.length - 1] = round2(effective - assigned);
+    return shares;
   }
 
   /**
@@ -244,8 +333,17 @@ export class PurchaseOrdersService {
     });
 
     const factor = Number(product?.purchase_to_stock_factor ?? 1);
-    const isIngredient = !!product?.is_ingredient;
-    const hasUoM = isIngredient && factor > 0 && Number.isFinite(factor);
+    // QUI-648 — la conversión al recibir deja de ser exclusiva del insumo:
+    // comprar 5 rollos y almacenar 100.000 mm es el mismo mecanismo que
+    // comprar un saco y almacenar gramos. Lo que decide es tener las dos
+    // unidades declaradas y un factor real; un producto sin factor sigue
+    // recibiendo uno a uno, exactamente como hoy.
+    const declaresBothUoms =
+      product?.stock_uom_id != null && product?.purchase_uom_id != null;
+    const hasUoM =
+      (!!product?.is_ingredient || declaresBothUoms) &&
+      factor > 0 &&
+      Number.isFinite(factor);
 
     if (!hasUoM) {
       return {
@@ -670,17 +768,46 @@ export class PurchaseOrdersService {
           }
 
           // Price calculation
+          //
+          // QUI-661 + QUI-645: the cost a NEW product is born with must be the
+          // same NET, discounted figure the line persists in `unit_cost` — not
+          // the gross `unit_price`. Using the gross price anchored the product's
+          // margin to a cost it never had: with IVA included or a supplier
+          // discount, `cost_price` came out above what the FIFO layer would
+          // capitalize, so the product was born with an understated margin.
+          // The header discount is prorated in the totals pass below; here we
+          // honour the line's own discount and the include/added VAT mode,
+          // which is what `deriveLineTax` owns.
           let basePrice = item.base_price || 0;
-          const cost = item.unit_price || 0;
+          const cost = this.deriveLineTax(
+            item,
+            createPurchaseOrderDto,
+          ).unit_price_net;
           let margin = item.profit_margin || 0;
           if (margin > 0 && margin < 1) margin = margin * 100;
 
-          if (
-            margin > 0 &&
-            cost > 0 &&
-            (!item.base_price || item.base_price === 0)
-          ) {
-            basePrice = cost * (1 + margin / 100);
+          // QUI-645: a NEW product with margin 0 is a deliberate decision, not
+          // a missing value — it is born priced at cost and the operator can
+          // raise it later. So the price is derived whenever a base price was
+          // not pinned, including `margin === 0`, instead of leaving
+          // `base_price = 0` (which read as "free" in the catalog).
+          //
+          // QUI-648 — el costo se lleva a la ESCALA en la que el producto
+          // publica su precio antes de derivar `base_price`, porque el destino
+          // de este número es `products.base_price` (líneas de abajo) y esa
+          // columna vale por `price_unit_quantity` unidades de stock. Sobre un
+          // producto existente vendido por metro, derivar desde el costo crudo
+          // le reescribía el precio del metro con el del milímetro. Un producto
+          // NUEVO nace siempre en escala 1 —el DTO de la orden de compra no
+          // tiene `price_unit_quantity`—, así que ahí `resolvePricedUnits`
+          // devuelve 1 y el resultado es el histórico.
+          const basePriceScale = resolvePricedUnits(
+            null,
+            (existingProduct as { price_unit_quantity?: number | null } | null)
+              ?.price_unit_quantity,
+          );
+          if (cost > 0 && (!item.base_price || item.base_price === 0)) {
+            basePrice = cost * basePriceScale * (1 + margin / 100);
           }
 
           // Resolve Brand: derive a deterministic slug (mirrors the categories
@@ -942,6 +1069,18 @@ export class PurchaseOrdersService {
           await this.persistIngredientConfigToProduct(finalProductId, item, tx);
         }
 
+        // Unidad de venta (QUI-648): configurar en qué presentación se venderá
+        // el producto sin salir del flujo de compra. Corre para productos
+        // nuevos y existentes por igual, y NUNCA para un insumo puro (un insumo
+        // no se vende, de ahí que su rama fuerce has_multiple_price_tiers=false).
+        if (
+          finalProductId &&
+          item.sale_unit_name &&
+          orderType !== 'ingredient'
+        ) {
+          await this.persistSaleUnitConfigToProduct(finalProductId, item, tx);
+        }
+
         processedItems.push({
           ...item,
           product_id: finalProductId,
@@ -962,21 +1101,86 @@ export class PurchaseOrdersService {
       // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
       // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
       // consistente frente a los pagos (que pagan el bruto de factura).
+      //
+      // QUI-661: el descuento comercial YA NO se resta al final. Antes era
+      //   total = subtotal − descuento + IVA + flete
+      // con `lineTax` derivado del subtotal SIN descontar, lo que inflaba el
+      // IVA descontable que llega a la declaración. Ahora el descuento de
+      // cabecera se prorratea por línea y entra DENTRO de `deriveLineTax`, que
+      // baja `unit_price_net` antes de derivar el IVA. Como consecuencia
+      // `subtotal_amount` ya viene neto de descuento y restarlo otra vez sería
+      // contarlo dos veces.
       const round2 = (n: number) => Math.round(n * 100) / 100;
+      const headerShares = this.prorateHeaderDiscount(
+        processedItems,
+        Number(createPurchaseOrderDto.discount_amount || 0),
+      );
       let netSubtotal = 0;
       let lineTax = 0;
-      for (const item of processedItems) {
-        const d = this.deriveLineTax(item, createPurchaseOrderDto);
-        netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+      for (let i = 0; i < processedItems.length; i++) {
+        const d = this.deriveLineTax(
+          processedItems[i],
+          createPurchaseOrderDto,
+          headerShares[i],
+        );
+        netSubtotal += d.unit_price_net * Number(processedItems[i].quantity ?? 0);
         lineTax += d.tax_amount;
       }
       const subtotal = round2(netSubtotal);
       const totalAmount = round2(
-        subtotal -
-          (createPurchaseOrderDto.discount_amount || 0) +
-          round2(lineTax) +
-          (createPurchaseOrderDto.shipping_cost || 0),
+        subtotal + round2(lineTax) + (createPurchaseOrderDto.shipping_cost || 0),
       );
+
+      // ===== QUI-647: validación del plan de pago =====
+      //
+      // Se valida ANTES de escribir nada: un calendario cuyas cuotas no suman
+      // el saldo no puede cerrar la deuda nunca, y descubrirlo después de crear
+      // la orden deja al usuario con una OC a medio configurar que tiene que
+      // ir a arreglar a mano en Cuentas por Pagar — exactamente el trabajo que
+      // este ticket viene a eliminar.
+      const paymentPlan = createPurchaseOrderDto.payment_plan;
+      const downPayment = Number(
+        createPurchaseOrderDto.down_payment_amount ?? 0,
+      );
+      const installments = createPurchaseOrderDto.payment_installments ?? [];
+
+      if (paymentPlan === 'partial') {
+        if (!(downPayment > 0)) {
+          throw new BadRequestException(
+            'Un abono parcial requiere un monto abonado mayor que cero.',
+          );
+        }
+        if (downPayment > totalAmount) {
+          throw new BadRequestException(
+            `El abono ($${downPayment}) no puede superar el total de la orden ($${totalAmount}).`,
+          );
+        }
+      }
+
+      if (paymentPlan === 'installments') {
+        if (installments.length === 0) {
+          throw new BadRequestException(
+            'Un pago en cuotas requiere al menos una cuota programada.',
+          );
+        }
+        const scheduled = round2(
+          installments.reduce((sum, i) => sum + Number(i.amount || 0), 0),
+        );
+        // Se compara contra el SALDO, no contra el total: en un plan de cuotas
+        // con abono, lo que se programa es lo que queda debiendo.
+        const balance = round2(totalAmount - downPayment);
+        if (Math.abs(scheduled - balance) > 0.01) {
+          throw new BadRequestException(
+            `Las cuotas suman $${scheduled} y el saldo de la orden es $${balance}. Deben coincidir.`,
+          );
+        }
+      }
+
+      if (paymentPlan === 'deferred' && !createPurchaseOrderDto.payment_due_date) {
+        throw new BadRequestException(
+          'Un pago diferido requiere una fecha de pago.',
+        );
+      }
 
       // Generate order number
       const date = new Date();
@@ -1029,7 +1233,14 @@ export class PurchaseOrdersService {
       // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
       // would otherwise blow up here.
       const toDate = PurchaseOrdersService.toDateOrUndefined;
-      const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
+      // QUI-647: `payment_installments` es un campo del DTO, no una columna.
+      // Se saca del spread o Prisma lo rechaza como argumento desconocido; las
+      // cuotas se escriben más abajo por la relación `payment_schedules`.
+      const {
+        expected_date: rawExpectedDate,
+        payment_installments: _installmentsInput,
+        ...orderDataRest
+      } = orderData;
 
       // Fase 2: `orderType` was resolved at the top of the transaction so the
       // new-product creation block could inherit ingredient flags.
@@ -1047,16 +1258,51 @@ export class PurchaseOrdersService {
           organization_id,
           order_number,
           subtotal_amount: subtotal,
+          // QUI-661: `create()` nunca escribía el `tax_amount` de cabecera y lo
+          // dejaba en 0 mientras `total_amount` sí incluía el IVA — cabecera
+          // internamente incoherente. `update()` sí lo escribía. La métrica de
+          // compras lee la LÍNEA (ver QUI-624), pero dejar el header mintiendo
+          // es la trampa que hace caer al próximo lector.
+          tax_amount: round2(lineTax),
           total_amount: totalAmount,
           order_date: new Date(),
+          // QUI-647: el plan acordado queda en la orden. `payment_terms` ya
+          // existía como texto libre; `payment_plan` es el modo tipado que el
+          // motor lee, para no tener que interpretar una cadena.
+          ...(paymentPlan ? { payment_plan: paymentPlan } : {}),
+          ...(downPayment > 0 ? { down_payment_amount: downPayment } : {}),
+          // Las cuotas se guardan contra la ORDEN porque la CxP todavía no
+          // existe: nace con la recepción. Se materializan en
+          // `ap_payment_schedules` cuando esa CxP aparece.
+          ...(installments.length > 0
+            ? {
+                payment_schedules: {
+                  create: installments.map((i) => ({
+                    scheduled_date: new Date(i.scheduled_date),
+                    amount: i.amount,
+                    status: 'planned',
+                  })),
+                },
+              }
+            : {}),
           purchase_order_items: {
-            create: processedItems.map((item) => {
+            create: processedItems.map((item, index) => {
               // F1 IVA lifecycle: derive net/tax from the entered unit_price
               // and the effective include-tax mode (line override ?? header).
               // `unit_cost` persists the NET price (single source of truth for
               // costing); the VAT treatment for inventory cost is decided later
               // in receive() by fiscal responsibility.
-              const derived = this.deriveLineTax(item, createPurchaseOrderDto);
+              //
+              // QUI-661: the SAME prorated header share used for the order
+              // totals is passed here, so the persisted `unit_cost` — the value
+              // the FIFO engine capitalizes at reception — already carries the
+              // commercial discount. This is what closes the old gap where the
+              // CxP was rebated but the inventory was not.
+              const derived = this.deriveLineTax(
+                item,
+                createPurchaseOrderDto,
+                headerShares[index],
+              );
               return {
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
@@ -1069,6 +1315,11 @@ export class PurchaseOrdersService {
                   tax_type_enum.iva,
                 prices_include_tax: item.prices_include_tax ?? null,
                 tax_amount: derived.tax_amount,
+                // Total discount actually applied (own + prorated header), and
+                // the percentage the user typed to get there. The amount is the
+                // source of truth; the percentage is provenance only.
+                discount_amount: derived.discount_total,
+                discount_percentage: item.discount_percentage ?? 0,
                 notes: item.notes,
                 batch_number: item.batch_number,
                 manufacturing_date: toDate(item.manufacturing_date),
@@ -1306,20 +1557,28 @@ export class PurchaseOrdersService {
           stage: 'create',
         });
 
+        // QUI-661 — mismo cambio de orden que create(): el descuento entra
+        // DENTRO de la derivación (baja la base gravable) en vez de restarse
+        // al final sobre un IVA ya calculado sin descontar.
         const round2 = (n: number) => Math.round(n * 100) / 100;
+        const headerShares = this.prorateHeaderDiscount(
+          items,
+          Number(updatePurchaseOrderDto.discount_amount || 0),
+        );
         let netSubtotal = 0;
         let lineTax = 0;
-        for (const item of items) {
-          const d = this.deriveLineTax(item, updatePurchaseOrderDto);
-          netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+        for (let i = 0; i < items.length; i++) {
+          const d = this.deriveLineTax(
+            items[i],
+            updatePurchaseOrderDto,
+            headerShares[i],
+          );
+          netSubtotal += d.unit_price_net * Number(items[i].quantity ?? 0);
           lineTax += d.tax_amount;
         }
         const subtotal = round2(netSubtotal);
         const totalAmount = round2(
-          subtotal -
-            (updatePurchaseOrderDto.discount_amount || 0) +
-            round2(lineTax) +
-            (updatePurchaseOrderDto.shipping_cost || 0),
+          subtotal + round2(lineTax) + (updatePurchaseOrderDto.shipping_cost || 0),
         );
 
         data.subtotal_amount = subtotal;
@@ -1332,8 +1591,13 @@ export class PurchaseOrdersService {
         await tx.purchase_order_items.deleteMany({
           where: { purchase_order_id: id },
         });
-        for (const item of items) {
-          const derived = this.deriveLineTax(item, updatePurchaseOrderDto);
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const derived = this.deriveLineTax(
+            item,
+            updatePurchaseOrderDto,
+            headerShares[i],
+          );
           await tx.purchase_order_items.create({
             data: {
               purchase_order_id: id,
@@ -1342,6 +1606,8 @@ export class PurchaseOrdersService {
               quantity_ordered: item.quantity,
               unit_cost: derived.unit_price_net,
               unit_price_net: derived.unit_price_net,
+              discount_amount: derived.discount_total,
+              discount_percentage: item.discount_percentage ?? 0,
               tax_rate: item.tax_rate ?? null,
               tax_type:
                 (item.tax_type as tax_type_enum | undefined) ??
@@ -1485,29 +1751,55 @@ export class PurchaseOrdersService {
    *
    * `costPrice` must already be the *stock* unit cost (post UoM conversion
    * when applicable); margin math is always against the minimum stock unit.
+   *
+   * QUI-648 — ESCALAS. `costPrice` viene en unidad MÍNIMA de stock (lo escribe
+   * `CostingService` como valor / quantity_on_hand) mientras que `base_price` /
+   * `price_override` cubren `products.price_unit_quantity` de esas unidades. Un
+   * cable con el stock en milímetros guarda $3 el milímetro y $5.000 el metro:
+   * restarlos tal cual publicaba un margen del 166.566% y —peor— con un margen
+   * pinneado derivaba `base_price = costo_del_milímetro × (1+m)`, o sea que
+   * RECIBIR MERCANCÍA dejaba el cable a $3,60 el metro. Por eso el costo se sube
+   * a la escala del precio con `resolvePricedUnits`, el mismo resolutor que usan
+   * el editor de producto (`tier-margin.util`) y la analítica: las tres puntas
+   * miden el margen contra el mismo costo de referencia.
+   *
+   * `packSize` va en `null` a propósito: una PRESENTACIÓN
+   * (`price_tiers.kind = 'sale_unit'`) tiene su propio precio y su propio margen
+   * en `product_price_tier_overrides`, y no se deriva desde acá.
+   *
+   * Con `priceUnitQuantity` ausente, nulo, 0, 1 o no numérico —el catálogo
+   * histórico entero— `resolvePricedUnits` devuelve 1, el costo sale intacto
+   * (×1 es exacto en IEEE-754) y la aritmética es byte a byte la de siempre.
    */
   static resolvePricingAfterReceipt(args: {
     costPrice: number;
     existingBasePrice: number;
     newBasePrice?: number;
     newProfitMargin?: number;
+    /** `products.price_unit_quantity` del producto de la línea. */
+    priceUnitQuantity?: number | null;
   }): { basePrice: number; profitMargin: number } {
     const { costPrice, existingBasePrice } = args;
     const { newBasePrice, newProfitMargin } = args;
 
+    // Costo llevado a la escala en la que se publica el precio.
+    const costInPriceScale =
+      costPrice * resolvePricedUnits(null, args.priceUnitQuantity);
+
     if (newBasePrice !== undefined && newBasePrice !== null) {
       // Operator pinned the listing price → margin derived from new cost.
       const margin =
-        costPrice > 0
-          ? Math.round(((newBasePrice - costPrice) / costPrice) * 10000) /
-            100
+        costInPriceScale > 0
+          ? Math.round(
+              ((newBasePrice - costInPriceScale) / costInPriceScale) * 10000,
+            ) / 100
           : 0;
       return { basePrice: newBasePrice, profitMargin: margin };
     }
 
     if (newProfitMargin !== undefined && newProfitMargin !== null) {
       // Operator pinned the margin → listing price derived from new cost.
-      const basePrice = costPrice * (1 + newProfitMargin / 100);
+      const basePrice = costInPriceScale * (1 + newProfitMargin / 100);
       return {
         basePrice: Math.round(basePrice * 100) / 100,
         profitMargin: newProfitMargin,
@@ -1516,9 +1808,9 @@ export class PurchaseOrdersService {
 
     // Cost-anchor default: keep the existing base_price, recompute margin.
     const margin =
-      costPrice > 0
+      costInPriceScale > 0
         ? Math.round(
-            ((existingBasePrice - costPrice) / costPrice) * 10000,
+            ((existingBasePrice - costInPriceScale) / costInPriceScale) * 10000,
           ) / 100
         : 0;
     return { basePrice: existingBasePrice, profitMargin: margin };
@@ -1553,6 +1845,174 @@ export class PurchaseOrdersService {
    * multiplicar stock = qty × factor. Rellena cuando está vacío o difiere; nunca
    * sobreescribe con vacío. Gatea por industria (solo restaurant soporta insumos).
    */
+  /**
+   * Persiste la configuración de UNIDAD DE VENTA del producto desde la orden de
+   * compra (QUI-648). Espeja `persistIngredientConfigToProduct`: el flujo de
+   * compra ya sabía configurar un producto como insumo mientras se lo cargaba a
+   * la orden; esto hace lo mismo para la presentación en la que se venderá.
+   *
+   * Escribe TRES filas coordinadas dentro de la transacción de la OC, o ninguna:
+   *
+   *   1. `price_tiers` — la presentación, por tienda y de nombre libre
+   *      (`kind = 'sale_unit'`). Se reutiliza si ya existe con ese nombre.
+   *   2. `product_price_tier_assignments` — habilita el par (producto,
+   *      presentación). Es el allowlist que consulta la venta.
+   *   3. `product_price_tier_overrides` — factor, precio y margen del producto
+   *      para esa presentación.
+   *
+   * Escribir solo una o dos es el modo de fallo peligroso: prender
+   * `has_multiple_price_tiers` sin el assignment guarda sin error y falla recién
+   * AL VENDER con `PRICE_TIER_NOT_ALLOWED`, muy lejos de la causa.
+   */
+  private async persistSaleUnitConfigToProduct(
+    productId: number,
+    item: {
+      sale_unit_name?: string;
+      sale_unit_units_per_package?: number;
+      sale_unit_price?: number;
+      sale_unit_profit_margin?: number;
+      sale_unit_is_default?: any;
+    },
+    tx: any,
+  ): Promise<void> {
+    const name = item.sale_unit_name?.trim();
+    if (!name) return;
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        store_id: true,
+        cost_price: true,
+        price_unit_quantity: true,
+        is_ingredient: true,
+        is_sellable: true,
+      },
+    });
+    if (!product?.store_id) return;
+    // Un insumo puro no se vende, así que no puede tener presentaciones de
+    // venta. La rama de insumo del create fuerza `has_multiple_price_tiers=false`
+    // por la misma razón; esta guarda evita reactivarlo por la puerta de atrás.
+    if (product.is_ingredient && product.is_sellable === false) return;
+
+    // Multi-tarifa ⊕ variantes: configurar una presentación desde la compra es
+    // una tercera puerta a la misma regla. Lanza (no silencia) para que el
+    // comprador sepa por qué su configuración no se aplicó — la OC entera se
+    // revierte con la transacción y él decide si quita las variantes o la
+    // presentación.
+    await assertTiersAllowed(tx, productId, {
+      action: 'purchase_order_sale_unit_config',
+    });
+
+    // 1. La presentación. `(store_id, name)` es único, así que un nombre repetido
+    //    reutiliza la tarifa en vez de fallar. `is_package_unit` se deriva del
+    //    factor igual que en PriceTiersService, para no dejar el flag inconsistente.
+    const unitsPerPackage = item.sale_unit_units_per_package ?? null;
+    let tier = await tx.price_tiers.findFirst({
+      where: { store_id: product.store_id, name },
+      select: { id: true, kind: true, units_per_package: true },
+    });
+    if (!tier) {
+      tier = await tx.price_tiers.create({
+        data: {
+          store_id: product.store_id,
+          name,
+          kind: 'sale_unit',
+          discount_percentage: 0,
+          is_active: true,
+          is_default: false,
+          is_package_unit: (unitsPerPackage ?? 0) >= 2,
+          units_per_package: unitsPerPackage,
+          updated_at: new Date(),
+        },
+        select: { id: true, kind: true, units_per_package: true },
+      });
+    }
+
+    // 2. Allowlist del par (producto, presentación). El default se aplica solo si
+    //    la tarifa es una unidad de venta, y desmarcando el anterior ANTES de
+    //    marcar el nuevo: el índice único parcial no tolera dos `true` a la vez.
+    const wantsDefault =
+      item.sale_unit_is_default === true ||
+      item.sale_unit_is_default === 'true';
+    const canBeDefault = wantsDefault && tier.kind === 'sale_unit';
+    if (canBeDefault) {
+      await tx.product_price_tier_assignments.updateMany({
+        where: {
+          product_id: productId,
+          is_default: true,
+          NOT: { price_tier_id: tier.id },
+        },
+        data: { is_default: false },
+      });
+    }
+    await tx.product_price_tier_assignments.upsert({
+      where: {
+        product_id_price_tier_id: {
+          product_id: productId,
+          price_tier_id: tier.id,
+        },
+      },
+      update: canBeDefault ? { is_default: true } : {},
+      create: {
+        product_id: productId,
+        price_tier_id: tier.id,
+        is_default: canBeDefault,
+      },
+    });
+
+    // 3. Override del producto: factor + precio/margen con criterio cost-anchor.
+    const packSize = resolvePackSize(
+      tier.units_per_package,
+      unitsPerPackage,
+    );
+    const { override_price, override_profit_margin } =
+      resolveTierPricingCostAnchor({
+        unitCost: Number(product.cost_price ?? 0),
+        packSize,
+        priceUnitQuantity: product.price_unit_quantity,
+        overridePrice: item.sale_unit_price,
+        overrideMargin: item.sale_unit_profit_margin,
+      });
+
+    const existingOverride = await tx.product_price_tier_overrides.findFirst({
+      where: {
+        product_id: productId,
+        variant_id: null,
+        price_tier_id: tier.id,
+      },
+      select: { id: true },
+    });
+    const overrideData = {
+      override_price,
+      override_profit_margin,
+      override_units_per_package: unitsPerPackage,
+      updated_at: new Date(),
+    };
+    if (existingOverride) {
+      await tx.product_price_tier_overrides.update({
+        where: { id: existingOverride.id },
+        data: overrideData,
+      });
+    } else {
+      await tx.product_price_tier_overrides.create({
+        data: {
+          product_id: productId,
+          variant_id: null,
+          price_tier_id: tier.id,
+          ...overrideData,
+        },
+      });
+    }
+
+    // El master switch: sin él `resolveWithTier` delega a la cascada legacy y la
+    // presentación quedaría configurada pero inerte.
+    await tx.products.update({
+      where: { id: productId },
+      data: { has_multiple_price_tiers: true },
+    });
+  }
+
   private async persistIngredientConfigToProduct(
     productId: number,
     item: {
@@ -2045,6 +2505,21 @@ export class PurchaseOrdersService {
           // the existing base_price against the *new* cost_price so the
           // stored margin reflects reality — this is the cost-anchor rule
           // and matches what the modal displays in `resulting_margin`.
+          // QUI-648 — escala de publicación del precio del producto. Se lee UNA
+          // vez y alimenta los cuatro call-sites de
+          // `resolvePricingAfterReceipt` (producto/variante × con/sin override):
+          // el costo que entra ahí está en unidad MÍNIMA de stock y
+          // `base_price`/`price_override` cubren `price_unit_quantity` de esas
+          // unidades. Sin esto, recibir un cable vendido por metro reescribía su
+          // precio con el costo del milímetro. La variante hereda la escala del
+          // producto: `price_unit_quantity` no existe en `product_variants`.
+          const pricingScaleProduct = await tx.products.findUnique({
+            where: { id: productId },
+            select: { price_unit_quantity: true },
+          });
+          const priceUnitQuantity =
+            pricingScaleProduct?.price_unit_quantity ?? null;
+
           if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
             const dtoItem = item;
             // QUI-425: recompute margin against the SCOPED cost (the value
@@ -2072,6 +2547,7 @@ export class PurchaseOrdersService {
                   ),
                   newBasePrice: dtoItem.new_base_price,
                   newProfitMargin: dtoItem.new_profit_margin,
+                  priceUnitQuantity,
                 },
               );
               await tx.product_variants.update({
@@ -2092,6 +2568,7 @@ export class PurchaseOrdersService {
                   existingBasePrice: Number(existingProduct?.base_price ?? 0),
                   newBasePrice: dtoItem.new_base_price,
                   newProfitMargin: dtoItem.new_profit_margin,
+                  priceUnitQuantity,
                 },
               );
               await tx.products.update({
@@ -2127,6 +2604,7 @@ export class PurchaseOrdersService {
                     existingBasePrice: Number(
                       existingVariant?.price_override ?? 0,
                     ),
+                    priceUnitQuantity,
                   });
                 await tx.product_variants.update({
                   where: { id: productVariantId },
@@ -2144,6 +2622,7 @@ export class PurchaseOrdersService {
                   PurchaseOrdersService.resolvePricingAfterReceipt({
                     costPrice: Number(costForPricing),
                     existingBasePrice: Number(existingProduct?.base_price ?? 0),
+                    priceUnitQuantity,
                   });
                 await tx.products.update({
                   where: { id: productId },
@@ -3226,6 +3705,14 @@ export class PurchaseOrdersService {
       current_base_price: number;
       current_profit_margin: number;
       resulting_margin: number | null;
+      /**
+       * QUI-648 — a cuántas unidades de stock corresponde `current_base_price`.
+       * `resulting_margin` ya viene medido en esta escala; el campo viaja para
+       * que el modal pueda re-derivar el margen con el mismo cociente cuando el
+       * operador escribe un precio a mano (hoy lo hace contra
+       * `new_cost_per_unit`, que está en unidad mínima). 1 = sin escala.
+       */
+      price_unit_quantity: number;
     }> = [];
 
     for (const item of dto.items) {
@@ -3255,12 +3742,21 @@ export class PurchaseOrdersService {
       // F1 IVA lifecycle: derive the NET cost from the entered (possibly
       // gross) unit_cost + tax_rate + effective include-tax mode. The NET is
       // the cost basis for CPP/FIFO — mirrors what create/receive persist.
+      // QUI-661 — the preview must carry the line discount too, or the margin
+      // it shows is computed against a cost the order will never have. The
+      // HEADER discount is deliberately NOT prorated here: the preview runs per
+      // item without the sibling lines in scope, and guessing a share would
+      // show a cost that does not match what create() will persist.
       const derivedTax = this.deriveLineTax(
         {
           unit_cost: item.unit_cost,
           quantity: item.quantity,
           tax_rate: item.tax_rate,
           prices_include_tax: item.prices_include_tax,
+          discount_percentage: (item as { discount_percentage?: number })
+            .discount_percentage,
+          discount_amount: (item as { discount_amount?: number })
+            .discount_amount,
         },
         dto,
       );
@@ -3323,7 +3819,15 @@ export class PurchaseOrdersService {
       // overrides, and let them know what they're about to overwrite.
       const product = await this.prisma.products.findUnique({
         where: { id: item.product_id },
-        select: { name: true, base_price: true, profit_margin: true },
+        select: {
+          name: true,
+          base_price: true,
+          profit_margin: true,
+          // QUI-648 — escala de publicación del precio: sin ella el margen que
+          // muestra el modal mezcla el costo del milímetro con el precio del
+          // metro (ver `resolvePricingAfterReceipt`).
+          price_unit_quantity: true,
+        },
       });
 
       let variantName: string | undefined;
@@ -3361,10 +3865,25 @@ export class PurchaseOrdersService {
       // accepts the new cost without changing the base price. Null when the
       // new cost is 0 (e.g. reactivation of a previously-orphaned stock) to
       // avoid a divide-by-zero display.
+      //
+      // QUI-648 — se mide contra el costo llevado a la ESCALA DEL PRECIO, igual
+      // que `resolvePricingAfterReceipt`: `new_cost_per_unit` es el costo de la
+      // unidad mínima de stock y `current_base_price` cubre
+      // `price_unit_quantity` de esas unidades. Este es el número que el modal
+      // propone como margen por defecto, así que la vista previa y lo que la
+      // recepción persiste tienen que salir del mismo cociente. Con escala 1
+      // —todo el catálogo histórico— `costInPriceScale === newCostPerUnit` y el
+      // resultado es idéntico al de antes.
+      //
+      // `new_cost_per_unit` NO se re-escala a propósito: es el costo que la
+      // recepción sella en `stock_levels.cost_per_unit` / `products.cost_price`
+      // y la paridad preview↔persist de F3 depende de que siga en unidad mínima.
+      const costInPriceScale =
+        newCostPerUnit * resolvePricedUnits(null, product?.price_unit_quantity);
       const resultingMargin =
-        newCostPerUnit > 0
+        costInPriceScale > 0
           ? Math.round(
-              ((currentBasePrice - newCostPerUnit) / newCostPerUnit) * 10000,
+              ((currentBasePrice - costInPriceScale) / costInPriceScale) * 10000,
             ) / 100
           : null;
 
@@ -3395,6 +3914,10 @@ export class PurchaseOrdersService {
         current_base_price: currentBasePrice,
         current_profit_margin: currentProfitMargin,
         resulting_margin: resultingMargin,
+        price_unit_quantity: resolvePricedUnits(
+          null,
+          product?.price_unit_quantity,
+        ),
       });
     }
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { S3Module } from '../../../common/services/s3.module';
+import { QrService } from '@common/services/qr.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { InvoiceProviderModule } from './providers/invoice-provider.module';
 import { DianDirectModule } from './providers/dian-direct/dian-direct.module';
@@ -45,6 +46,10 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     InvoicingController,
   ],
   providers: [
+    // Renders the DIAN verification URL as a scannable PNG for the invoice's
+    // graphic representation. Registered as a direct provider, matching how
+    // `products.module.ts` consumes it — there is no `QrModule` in this repo.
+    QrService,
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,

@@ -46,6 +46,26 @@ export interface DianTestSetComposition {
   credit_notes: number;
 }
 
+/**
+ * Mínimo de documentos ACEPTADOS que la DIAN exige para aprobar el set.
+ *
+ * ⚠️ NO ES «CERO RECHAZOS», y esa suposición bloqueó una habilitación ya ganada.
+ *
+ * VERIFICADO contra el portal de habilitación el 2026-08-09 (NIT 902056589, modo
+ * «Software propio»), sección «Total de documentos aceptados requeridos»:
+ *
+ *     Documentos 1 · Facturas electrónicas 1 · Notas de débito 0 · Notas de crédito 0
+ *
+ * Y verificado por el veredicto: el portal declaró «Su empresa ha superado
+ * satisfactoriamente las pruebas de validación de su set de pruebas» con 30
+ * facturas aceptadas y 167 documentos rechazados acumulados. Basta UNA factura
+ * aceptada; los rechazos de notas no invalidan el set.
+ *
+ * Se lee del portal como la composición, por la misma razón: deducirlo del
+ * articulado ya costó una habilitación (ver la historia del defecto arriba).
+ */
+export const DIAN_TEST_SET_MIN_ACCEPTED_DOCUMENTS = 1;
+
 export const DIAN_TEST_SET_COMPOSITIONS: Record<
   dian_operation_mode_enum,
   DianTestSetComposition

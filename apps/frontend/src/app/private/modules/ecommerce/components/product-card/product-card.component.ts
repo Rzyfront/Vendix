@@ -167,6 +167,11 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             @if (product().pricing_type === 'weight') {
               <span class="weight-unit">/kg</span>
             }
+            @if (product().price_unit; as priceUnit) {
+              <!-- El precio de un producto medido en milímetros solo significa
+                   algo con su escala al lado: "$5.000 por m". -->
+              <span class="weight-unit">{{ priceUnit.label }}</span>
+            }
             @if (hasActiveDiscount()) {
               <span class="original-price">{{ product().base_price | currency }}</span>
             }

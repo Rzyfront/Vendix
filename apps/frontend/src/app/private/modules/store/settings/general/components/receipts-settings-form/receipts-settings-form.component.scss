@@ -2,69 +2,310 @@
   display: block;
 }
 
-// Informative banner shown only when the store is habilitado before the DIAN.
-// Reuses the same `--color-info-rgb` comma-token pattern as the textarea focus
-// ring below, which is the shape those tokens are declared in.
-.fe-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
+// ─── Etapa de emisión ──────────────────────────────────
+// La etapa decide qué documento emite la tienda, así que se pinta como un
+// recorrido de tres pasos: dónde está, qué puede hacer hoy y qué le falta. El
+// tono viaja en una custom property para que los tres estados no repitan reglas.
+// Se usa el patrón `rgba(var(--x-rgb), α)` porque así están declarados los
+// tokens de color de la app.
+.stage-card {
+  --stage-tone: var(--color-info);
+  --stage-tone-rgb: var(--color-info-rgb);
+
   padding: 0.875rem 1rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--color-info);
-  background-color: rgba(var(--color-info-rgb), 0.08);
+  border: 1px solid var(--stage-tone);
+  background-color: rgba(var(--stage-tone-rgb), 0.06);
 
-  &__icon {
-    flex-shrink: 0;
-    margin-top: 0.125rem;
-    color: var(--color-info);
+  &--pending {
+    --stage-tone: var(--color-warning);
+    --stage-tone-rgb: var(--color-warning-rgb);
   }
+
+  &--live {
+    --stage-tone: var(--color-success);
+    --stage-tone-rgb: var(--color-success-rgb);
+  }
+}
+
+.stage-track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+
+.stage-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+
+  // Separador entre pasos: el recorrido se lee de izquierda a derecha aunque la
+  // fila envuelva en móvil.
+  & + & {
+    &::before {
+      content: '›';
+      margin-right: 0.125rem;
+      color: var(--color-text-muted);
+      font-weight: 400;
+    }
+  }
+
+  &__dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    border: 1px solid currentColor;
+    font-size: 0.5625rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  &[data-state='done'] {
+    color: var(--color-success);
+    background-color: rgba(var(--color-success-rgb), 0.1);
+  }
+
+  &[data-state='current'] {
+    color: var(--stage-tone);
+    background-color: rgba(var(--stage-tone-rgb), 0.14);
+    border-color: var(--stage-tone);
+  }
+
+  &[data-state='upcoming'] {
+    color: var(--color-text-muted);
+  }
+}
+
+.stage-headline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--stage-tone);
+
+  // El icono hereda el tono del párrafo (lucide pinta con `currentColor`); sólo
+  // hace falta que no se comprima cuando el título envuelve.
+  app-icon {
+    flex-shrink: 0;
+  }
+}
+
+.stage-text {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.stage-list__title {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.stage-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  list-style: disc;
+}
+
+// ─── Prerrequisitos de producción ──────────────────────
+// Cada blocker trae `label` y `action`: se presentan como lista accionable, con
+// el paso que lo resuelve debajo del pendiente.
+.blockers {
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed rgba(var(--stage-tone-rgb), 0.4);
 
   &__title {
-    margin: 0;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--color-info);
-  }
-
-  &__text {
-    margin: 0.25rem 0 0;
-    font-size: 0.8125rem;
-    line-height: 1.45;
-    color: var(--color-text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--stage-tone);
   }
 
   &__list {
-    margin: 0.5rem 0 0;
-    padding-left: 1.1rem;
+    margin: 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    list-style: decimal;
+  }
+}
+
+.blocker {
+  &__label {
+    display: block;
     font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--color-text-secondary);
-    list-style: disc;
+    font-weight: 600;
+    color: var(--color-text-primary);
   }
 
-  // Trámite in progress: warning tone, because the store is NOT live yet and the
-  // difference decides whether it keeps emitting sale receipts.
-  &--pending {
-    border-color: var(--color-warning);
-    background-color: rgba(var(--color-warning-rgb), 0.08);
+  &__action {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.25rem;
+    margin-top: 0.125rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--color-text-secondary);
 
-    .fe-banner__icon,
-    .fe-banner__title {
-      color: var(--color-warning);
+    app-icon {
+      flex-shrink: 0;
+      margin-top: 0.0625rem;
+      color: var(--stage-tone);
     }
   }
 }
 
-.delivery-hint,
-.format-hint {
-  margin: 0.75rem 0 0;
+// ─── Encabezados de bloque ─────────────────────────────
+.block-head {
+  margin-bottom: 0.75rem;
+}
+
+.block-title {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.block-subtitle {
+  margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--color-text-secondary);
 }
 
+// ─── Celda de ajuste (toggle + indicativos) ────────────
+// `app-setting-toggle` no tiene ranura para insignias ni ayuda, así que el
+// estado y el "por qué" van en una fila propia debajo del control.
+.setting-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-cell__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+  padding-inline: 0.375rem;
+}
+
+.help-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  cursor: help;
+  border-bottom: 1px dotted var(--color-border);
+}
+
+// ─── Pistas de campo y tarjetas colapsables ────────────
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.field__hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 0.0625rem;
+    color: var(--color-text-secondary);
+  }
+}
+
+.card-head__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.card-head__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.card-head__sub {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.legal-list {
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  list-style: disc;
+}
+
+// Dice dónde SÍ se cambia lo que acá sólo se muestra.
+.cross-ref {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+  }
+}
+
 .delivery-hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
   color: var(--color-warning);
 }
 
@@ -74,6 +315,35 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+// Read-only echo of the format configured in "Formatos de Impresión". Styled as
+// a field rather than plain text so the preview button below it keeps reading as
+// the action of a control, not as a stray link.
+.format-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  &__label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+
+  &__value {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+  }
+
+  // Insignia de sólo lectura + la ayuda que dice dónde se cambia el formato.
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+  }
 }
 
 .preview-button {

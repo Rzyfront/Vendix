@@ -9,6 +9,9 @@ import {
   PriceTierQueryDto,
   UpsertProductPriceTierOverrideDto,
 } from './dto';
+import { resolvePackSize } from '../products/services/packaging.util';
+import { resolveTierPricingCostAnchor } from '../products/services/tier-margin.util';
+import { assertTiersAllowed } from '../products/services/tiers-variants-exclusive.util';
 
 /**
  * PriceTiersService
@@ -55,6 +58,7 @@ export class PriceTiersService {
           code: dto.code ?? null,
           description: dto.description ?? null,
           discount_percentage: dto.discount_percentage ?? 0,
+          kind: dto.kind ?? 'customer_tier',
           is_active: dto.is_active ?? true,
           is_default: dto.is_default ?? false,
           is_package_unit: isPackageUnit,
@@ -87,6 +91,7 @@ export class PriceTiersService {
       limit = 50,
       search,
       is_active,
+      kind,
       sort_by = 'sort_order',
       sort_order = 'asc',
     } = query ?? {};
@@ -94,6 +99,9 @@ export class PriceTiersService {
 
     const where: Prisma.price_tiersWhereInput = {
       ...(is_active !== undefined && { is_active }),
+      // Sin `kind` la lista devuelve los dos ejes, que es lo que necesitan las
+      // pantallas de administración; los selectores siempre lo pasan.
+      ...(kind !== undefined && { kind }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -143,10 +151,27 @@ export class PriceTiersService {
       }
     }
 
+    // Una presentación que YA descontó stock por empaque no puede volver a ser
+    // tarifa de cliente: las líneas vendidas quedarían apuntando a una tarifa
+    // cuyo eje ya no explica su `stock_units_consumed`.
+    if (dto.kind === 'customer_tier' && existing.kind === 'sale_unit') {
+      const soldWithPackaging = await this.prisma.order_items.findFirst({
+        where: {
+          applied_price_tier_id: id,
+          stock_units_consumed: { not: null },
+        },
+        select: { id: true },
+      });
+      if (soldWithPackaging) {
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_KIND_LOCKED);
+      }
+    }
+
     const data: Prisma.price_tiersUpdateInput = {
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.code !== undefined && { code: dto.code }),
       ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.kind !== undefined && { kind: dto.kind }),
       ...(dto.discount_percentage !== undefined && {
         discount_percentage: dto.discount_percentage,
       }),
@@ -209,47 +234,110 @@ export class PriceTiersService {
       );
     }
 
-    return this.prisma.product_price_tier_overrides.findMany({
-      where: { product_id: productId },
-      include: {
-        price_tier: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            discount_percentage: true,
-            is_active: true,
-            is_default: true,
-            is_package_unit: true,
-            units_per_package: true,
+    const [overrides, assignments] = await Promise.all([
+      this.prisma.product_price_tier_overrides.findMany({
+        where: { product_id: productId },
+        include: {
+          price_tier: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              kind: true,
+              discount_percentage: true,
+              is_active: true,
+              is_default: true,
+              is_package_unit: true,
+              units_per_package: true,
+            },
+          },
+          variant: {
+            select: { id: true, sku: true, name: true },
           },
         },
-        variant: {
-          select: { id: true, sku: true, name: true },
-        },
-      },
-      orderBy: { id: 'asc' },
-    });
+        orderBy: { id: 'asc' },
+      }),
+      this.prisma.product_price_tier_assignments.findMany({
+        where: { product_id: productId },
+        select: { price_tier_id: true, is_default: true, barcode: true },
+      }),
+    ]);
+
+    // `is_default` y `barcode` viven en el assignment (son del par
+    // producto+presentación, no del override, que además puede ser por
+    // variante). Se proyectan acá para que el editor lea una sola forma por
+    // fila: sin esto el campo de código de barras arranca vacío al reabrir un
+    // producto que sí lo tiene guardado.
+    const assignmentByTierId = new Map<
+      number,
+      { is_default: boolean; barcode: string | null }
+    >(
+      (assignments as any[]).map((a) => [
+        Number(a.price_tier_id),
+        { is_default: Boolean(a.is_default), barcode: a.barcode ?? null },
+      ]),
+    );
+
+    return overrides.map((override) => ({
+      ...override,
+      is_default:
+        assignmentByTierId.get(override.price_tier_id)?.is_default ?? false,
+      barcode: assignmentByTierId.get(override.price_tier_id)?.barcode ?? null,
+    }));
   }
 
   /**
    * Upsert an override price for (product_id, variant_id?, price_tier_id).
    * Uses the (product_id, variant_id, price_tier_id) unique constraint.
+   *
+   * Además del precio y el empaque, resuelve dos cosas nuevas:
+   *
+   * - **Margen cost-anchor** (QUI-425): el margen es un markup sobre el costo
+   *   del PAQUETE (`cost_price * packSize`). Si llegan precio y margen juntos,
+   *   el precio explícito gana y el margen se recalcula a partir de él.
+   * - **Presentación por defecto**: `is_default` se escribe en
+   *   `product_price_tier_assignments` (no en el override), porque el default
+   *   es del par producto+presentación y no depende de la variante. Marcarlo
+   *   habilita el par si hacía falta y desmarca el default anterior del mismo
+   *   producto en la MISMA transacción, para que el índice único parcial nunca
+   *   vea dos `true` a la vez.
    */
   async upsertProductOverride(
     productId: number,
     tierId: number,
     dto: UpsertProductPriceTierOverrideDto,
   ) {
-    await this.findOne(tierId);
+    const tier = await this.findOne(tierId);
 
     const product = await this.prisma.products.findFirst({
       where: { id: productId },
-      select: { id: true },
+      select: {
+        id: true,
+        store_id: true,
+        cost_price: true,
+        price_unit_quantity: true,
+      },
     });
     if (!product) {
       throw new VendixHttpException(
         ErrorCodes.PRICE_TIER_OVERRIDE_PRODUCT_001,
+      );
+    }
+
+    // Multi-tarifa ⊕ variantes: habilitar una presentación sobre un producto
+    // con variantes queda prohibido en el punto de escritura, no solo en la UI.
+    if (tier.kind === 'sale_unit') {
+      await assertTiersAllowed(this.prisma as any, productId, {
+        action: 'upsert_sale_unit_override',
+      });
+    }
+
+    // Solo una unidad de venta puede ser la presentación por defecto. El índice
+    // único parcial no puede validarlo (kind vive en otra tabla), así que la
+    // regla se enforcea acá.
+    if (dto.is_default === true && tier.kind !== 'sale_unit') {
+      throw new VendixHttpException(
+        ErrorCodes.PRICE_TIER_DEFAULT_NOT_SALE_UNIT,
       );
     }
 
@@ -266,31 +354,79 @@ export class PriceTiersService {
         },
       });
 
-    // An override row may carry a price-only, a quantity-only, or both.
-    // override_price is the price of the WHOLE PACKAGE; nullable.
-    const overridePrice = dto.override_price ?? null;
-    const overrideUnitsPerPackage = dto.override_units_per_package ?? null;
-
-    if (existing) {
-      return this.prisma.product_price_tier_overrides.update({
-        where: { id: existing.id },
-        data: {
-          override_price: overridePrice,
-          override_units_per_package: overrideUnitsPerPackage,
-          updated_at: new Date(),
-        },
+    // El costo de referencia es el de la variante cuando la hay; si no, el del
+    // producto. Sin costo el margen no es calculable y queda null.
+    let unitCost = Number(product.cost_price ?? 0);
+    if (variantId != null) {
+      const variant = await this.prisma.product_variants.findFirst({
+        where: { id: variantId, product_id: productId },
+        select: { cost_price: true },
       });
+      if (variant?.cost_price != null) {
+        unitCost = Number(variant.cost_price);
+      }
     }
 
-    return this.prisma.product_price_tier_overrides.create({
-      data: {
-        product_id: productId,
-        variant_id: variantId,
-        price_tier_id: tierId,
-        override_price: overridePrice,
-        override_units_per_package: overrideUnitsPerPackage,
-        updated_at: new Date(),
-      },
+    // packSize efectivo para medir el margen: el override enviado gana sobre el
+    // del tier, igual que en la cascada de `packaging.util`.
+    const packSize = resolvePackSize(
+      tier.units_per_package,
+      dto.override_units_per_package ?? existing?.override_units_per_package,
+    );
+
+    const { override_price: overridePrice, override_profit_margin: overrideMargin } =
+      resolveTierPricingCostAnchor({
+        unitCost,
+        packSize,
+        priceUnitQuantity: product.price_unit_quantity,
+        overridePrice: dto.override_price,
+        overrideMargin: dto.override_profit_margin,
+      });
+    const overrideUnitsPerPackage = dto.override_units_per_package ?? null;
+
+    return this.prisma.$transaction(async (tx) => {
+      const row = existing
+        ? await tx.product_price_tier_overrides.update({
+            where: { id: existing.id },
+            data: {
+              override_price: overridePrice,
+              override_profit_margin: overrideMargin,
+              override_units_per_package: overrideUnitsPerPackage,
+              updated_at: new Date(),
+            },
+          })
+        : await tx.product_price_tier_overrides.create({
+            data: {
+              product_id: productId,
+              variant_id: variantId,
+              price_tier_id: tierId,
+              override_price: overridePrice,
+              override_profit_margin: overrideMargin,
+              override_units_per_package: overrideUnitsPerPackage,
+              updated_at: new Date(),
+            },
+          });
+
+      if (dto.is_default !== undefined) {
+        await this.applyDefaultAssignment(
+          tx,
+          productId,
+          tierId,
+          dto.is_default,
+        );
+      }
+
+      // El código va después del default: si el default acaba de crear el
+      // assignment, el upsert del barcode escribe sobre esa misma fila.
+      await this.applyPresentationBarcode(
+        tx,
+        productId,
+        tierId,
+        (product as any).store_id ?? null,
+        dto.barcode,
+      );
+
+      return row;
     });
   }
 
@@ -321,6 +457,116 @@ export class PriceTiersService {
   }
 
   // ---------------------------------------------------------- Internals
+
+  /**
+   * Escribe la presentación por defecto del producto dentro de una transacción.
+   *
+   * El orden es obligatorio: **primero se desmarca** el default anterior y solo
+   * después se marca el nuevo. Al revés, el índice único parcial
+   * `(product_id) WHERE is_default` vería dos filas en `true` a mitad de la
+   * transacción y abortaría.
+   *
+   * Marcar una presentación como default también **habilita** el par
+   * (producto, presentación): `product_price_tier_assignments` es el allowlist
+   * que consulta la venta, y un default sin assignment fallaría recién al
+   * vender con `PRICE_TIER_NOT_ALLOWED`.
+   *
+   * El cliente del `$transaction` NO conserva el scoping de tenant, así que
+   * este método solo se invoca con `productId`/`tierId` ya validados contra el
+   * store por el caller.
+   */
+  private async applyDefaultAssignment(
+    tx: Prisma.TransactionClient,
+    productId: number,
+    tierId: number,
+    isDefault: boolean,
+  ): Promise<void> {
+    if (!isDefault) {
+      await tx.product_price_tier_assignments.updateMany({
+        where: { product_id: productId, price_tier_id: tierId },
+        data: { is_default: false },
+      });
+      return;
+    }
+
+    await tx.product_price_tier_assignments.updateMany({
+      where: {
+        product_id: productId,
+        is_default: true,
+        NOT: { price_tier_id: tierId },
+      },
+      data: { is_default: false },
+    });
+
+    await tx.product_price_tier_assignments.upsert({
+      where: {
+        product_id_price_tier_id: {
+          product_id: productId,
+          price_tier_id: tierId,
+        },
+      },
+      update: { is_default: true },
+      create: {
+        product_id: productId,
+        price_tier_id: tierId,
+        is_default: true,
+      },
+    });
+  }
+
+  /**
+   * Persiste el código de barras de una presentación.
+   *
+   * Vive en el assignment porque el código identifica el par (producto,
+   * presentación): la "Caja x12" de dos productos distintos no comparte
+   * código. `store_id` se copia del producto porque la unicidad es por tienda
+   * y un índice único no atraviesa un JOIN. Cadena vacía borra el código:
+   * `null` y `''` no son lo mismo bajo un índice único parcial.
+   */
+  private async applyPresentationBarcode(
+    tx: Prisma.TransactionClient,
+    productId: number,
+    tierId: number,
+    storeId: number | null,
+    barcode: string | undefined,
+  ): Promise<void> {
+    if (barcode === undefined) return;
+    const normalized = barcode.trim() || null;
+
+    if (normalized) {
+      const conflict = await tx.product_price_tier_assignments.findFirst({
+        where: {
+          barcode: normalized,
+          store_id: storeId,
+          NOT: { product_id: productId, price_tier_id: tierId },
+        },
+        select: { product_id: true },
+      });
+      if (conflict) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_BARCODE_DUP_001,
+          'El código de barras ya está en uso por otra presentación en esta tienda',
+          { barcode: normalized, conflict_type: 'presentation' },
+        );
+      }
+    }
+
+    await tx.product_price_tier_assignments.upsert({
+      where: {
+        product_id_price_tier_id: {
+          product_id: productId,
+          price_tier_id: tierId,
+        },
+      },
+      update: { barcode: normalized, store_id: storeId },
+      create: {
+        product_id: productId,
+        price_tier_id: tierId,
+        barcode: normalized,
+        store_id: storeId,
+      },
+    });
+  }
 
   private async unsetOtherDefaults(currentId: number): Promise<void> {
     await this.prisma.price_tiers.updateMany({

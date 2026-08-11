@@ -1,3 +1,8 @@
+// La fase de notas es la MISMA en los tres rieles: el backend la proyecta con
+// `buildNotePhaseView` y la expone igual en `store/invoicing`, en el rail de tenant
+// y acá. Reusar el tipo evita que una copia se desvíe.
+import type { DianTestSetNotePhase } from '../../../store/invoicing/interfaces/invoice.interface';
+
 export type SubscriptionFiscalEnvironment = 'test' | 'production';
 
 export interface SubscriptionFiscalLastTestResult {
@@ -117,7 +122,19 @@ export interface PlatformTestSetStatus {
   enablement_status: string | null;
   test_set_id: string | null;
   environment: SubscriptionFiscalEnvironment | string | null;
+  /**
+   * El registro del lote SIN `note_phase`: ese campo guarda cada nota retenida con
+   * su XML firmado, y el panel sondea este endpoint. El recuento va en
+   * `note_phase`, abajo, ya proyectado.
+   */
   last_test_result: Record<string, unknown> | null;
+  /**
+   * Rastro de la fase de notas. `null` cuando no hubo dos fases.
+   *
+   * Es el mismo tipo que consume el asistente de tiendas: el backend proyecta con
+   * la misma función, así que un segundo tipo solo podría desviarse.
+   */
+  note_phase?: DianTestSetNotePhase | null;
   wait: PlatformTestSetWait;
   composition?: PlatformTestSetComposition | null;
 }

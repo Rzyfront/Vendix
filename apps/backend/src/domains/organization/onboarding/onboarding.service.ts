@@ -10,6 +10,7 @@ import {
   CompleteOrganizationOnboardingDto,
   CompleteStoreOnboardingDto,
 } from './dto/onboarding-status.dto';
+import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
 
 @Injectable()
 export class OnboardingService {
@@ -451,7 +452,7 @@ export class OnboardingService {
       const baseMethods =
         await this.prismaService.system_payment_methods.findMany({
           where: {
-            name: { in: ['cash', 'payment_vouchers'] },
+            name: { in: [...BASE_SYSTEM_PAYMENT_METHOD_NAMES] },
             is_active: true,
           },
         });
@@ -489,7 +490,7 @@ export class OnboardingService {
       const baseMethods =
         await this.prismaService.system_payment_methods.findMany({
           where: {
-            name: { in: ['cash', 'payment_vouchers'] },
+            name: { in: [...BASE_SYSTEM_PAYMENT_METHOD_NAMES] },
             is_active: true,
           },
         });

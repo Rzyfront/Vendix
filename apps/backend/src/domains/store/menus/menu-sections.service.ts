@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -13,7 +14,10 @@ import {
 
 @Injectable()
 export class MenuSectionsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   private requireStoreId(): number {
     const storeId = RequestContextService.getContext()?.store_id;
@@ -182,7 +186,7 @@ export class MenuSectionsService {
     }
 
     try {
-      return await this.prisma.menu_section_items.create({
+      const created = await this.prisma.menu_section_items.create({
         data: {
           menu_section_id: sectionId,
           product_id: dto.product_id,
@@ -198,10 +202,31 @@ export class MenuSectionsService {
               base_price: true,
               is_sellable: true,
               is_combo: true,
+              // Misma forma que `MenusService.findFull`: el builder consume un
+              // `image_url` plano y firmado. Sin traer product_images aqui, el
+              // item recien agregado se quedaba sin imagen hasta recargar la
+              // carta — mismo origen que QUI-643, sintoma distinto.
+              product_images: {
+                select: { image_url: true },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 1,
+              },
             },
           },
         },
       });
+
+      if (!created.product) return created;
+      const { product_images, ...productRest } = created.product;
+      return {
+        ...created,
+        product: {
+          ...productRest,
+          image_url:
+            (await this.s3Service.signUrl(product_images?.[0]?.image_url)) ??
+            null,
+        },
+      };
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

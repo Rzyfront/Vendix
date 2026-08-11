@@ -1,53 +1,258 @@
-<div class="inventory-settings-form">
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Control de Stock</h4>
-      <div class="space-y-4">
-        <app-input [formControl]="lowStockThresholdControl" type="number" label="Umbral de Stock Bajo" placeholder="10"
-          min="0" size="sm" (inputChange)="onFieldChange()"></app-input>
-      </div>
+<div class="inventory-settings-form space-y-6">
+  <app-alert-banner variant="info" icon="lightbulb">
+    Estos ajustes deciden <strong>qu&eacute; stock se ve</strong> y <strong>cu&aacute;ndo te
+    avisan</strong>. Que un producto descuente existencias o no se define en la ficha
+    del producto, no aqu&iacute; &mdash; lo explicamos al final de la secci&oacute;n.
+  </app-alert-banner>
+
+  <!-- ── Alertas de stock bajo ─────────────────────────────────────── -->
+  <div class="space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <app-icon name="bell" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Alertas de stock bajo
+      </h4>
+      <app-badge variant="info" size="xs" badgeStyle="outline">Dispara notificaciones</app-badge>
     </div>
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Comportamiento</h4>
-      <div class="space-y-4">
-        <app-selector [formControl]="outOfStockActionControl" label="Acción sin stock" [options]="outOfStockActions"
-          (valueChange)="onFieldChange()" size="sm"></app-selector>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <app-input
+          [formControl]="lowStockThresholdControl"
+          type="number"
+          label="Umbral de stock bajo"
+          placeholder="10"
+          helperText="Unidades disponibles a partir de las cuales el producto se considera bajo."
+          tooltipText="Es el respaldo de la tienda: si el producto define su propio punto de reorden o su stock mínimo, ese valor manda y este se ignora para él. Cuando ninguno de los dos está cargado, se usa este número."
+          min="0"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+
+        <div class="rounded-xl border border-border bg-info-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            Cu&aacute;ndo salta la alerta
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ thresholdExample() }}</p>
+        </div>
+
+        <p class="text-xs text-text-secondary leading-relaxed">
+          El aviso llega como notificaci&oacute;n de <em>stock bajo</em> a quien la tenga
+          suscrita, y alimenta los indicadores de inventario del panel. Si el disponible
+          ya qued&oacute; en negativo no se emite alerta: eso se revisa a mano.
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <app-selector
+          [formControl]="lowStockAlertsScopeControl"
+          label="Bodegas que se consideran para la alerta"
+          [options]="lowStockAlertsScopes"
+          helpText="Define contra qu&eacute; existencias se compara el umbral."
+          tooltipText="Con varias bodegas el mismo umbral significa cosas distintas: con umbral 10, un producto con 20 unidades en una bodega y 4 en otra no avisa si se suman las dos, y sí avisa si sólo se mira la que tiene 4."
+          (valueChange)="onFieldChange()"
+          size="sm"
+        ></app-selector>
+
+        <div class="rounded-xl border border-border bg-info-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            Opci&oacute;n seleccionada
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ alertScopeEffect() }}</p>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="col-span-1 md:col-span-2 mt-2">
-    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Valoraci&oacute;n de Inventario</h4>
-    <div class="space-y-4">
-      <app-selector [formControl]="costingMethodControl" label="M&eacute;todo de costeo" [options]="costingMethods"
-        (valueChange)="onFieldChange()" size="sm"></app-selector>
-      <p class="text-xs text-amber-600 mt-2">Cambiar el m&eacute;todo de costeo puede tener implicaciones contables. Consulte con su contador antes de modificar esta configuraci&oacute;n.</p>
+  <!-- ── Stock en el punto de venta ─────────────────────────────────── -->
+  <div class="space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <app-icon name="warehouse" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Stock que ve el punto de venta
+      </h4>
     </div>
-  </div>
 
-  <div class="col-span-1 md:col-span-2 mt-2">
-    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Alcance de Bodegas</h4>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div class="space-y-2">
         <app-selector
           [formControl]="posStockScopeControl"
           label="Origen de stock en el POS"
           [options]="posStockScopes"
+          helpText="Determina de qu&eacute; bodegas el POS toma las existencias que muestra."
+          tooltipText="Si la tienda no tiene una bodega principal definida, el sistema se comporta como «todas las bodegas» en lugar de filtrar por una bodega que no existe."
           (valueChange)="onFieldChange()"
           size="sm"
         ></app-selector>
-        <p class="text-xs text-gray-500">Determina de qu&eacute; bodegas el POS descuenta inventario al vender.</p>
+
+        <div class="rounded-xl border border-border bg-info-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            Opci&oacute;n seleccionada
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ posScopeEffect() }}</p>
+        </div>
       </div>
-      <div class="space-y-2">
-        <app-selector
-          [formControl]="lowStockAlertsScopeControl"
-          label="Origen de alertas de stock bajo"
-          [options]="lowStockAlertsScopes"
-          (valueChange)="onFieldChange()"
-          size="sm"
-        ></app-selector>
-        <p class="text-xs text-gray-500">Define qu&eacute; bodegas se consideran al evaluar el umbral de stock bajo.</p>
+
+      <div class="flex items-start">
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          Este alcance define qu&eacute; existencias se <strong>muestran</strong>, no de d&oacute;nde
+          sale la mercanc&iacute;a: al vender, el sistema puede consumir stock de cualquier
+          bodega vendible. Cuarentena, aver&iacute;as y la bodega central nunca entran.
+        </app-alert-banner>
       </div>
     </div>
   </div>
+
+  <!-- ── Comportamiento sin stock ──────────────────────────────────── -->
+  <div class="space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <app-icon name="eye-off" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Comportamiento sin stock
+      </h4>
+      <app-badge variant="neutral" size="xs" badgeStyle="outline">Leer la nota</app-badge>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <app-selector
+          [formControl]="outOfStockActionControl"
+          label="Acci&oacute;n sin stock"
+          [options]="outOfStockActions"
+          helpText="Pol&iacute;tica que quer&eacute;s para un producto que llega a cero."
+          (valueChange)="onFieldChange()"
+          size="sm"
+        ></app-selector>
+
+        <div class="rounded-xl border border-border bg-info-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            Opci&oacute;n seleccionada
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ outOfStockEffect() }}</p>
+        </div>
+      </div>
+
+      <div class="flex items-start">
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          Hoy la tienda online no consulta este selector. La visibilidad de los productos
+          agotados se decide en <strong>Ecommerce &rarr; Cat&aacute;logo</strong>, con el
+          interruptor &laquo;Mostrar productos sin stock&raquo;. Cambiar esta opci&oacute;n no
+          modifica lo que ve el cliente.
+        </app-alert-banner>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Valoración de inventario ──────────────────────────────────── -->
+  <div class="space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <app-icon name="calculator" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Valoraci&oacute;n de inventario
+      </h4>
+      <app-badge variant="error" size="xs" badgeStyle="outline">Impacto contable</app-badge>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <app-selector
+          [formControl]="costingMethodControl"
+          label="M&eacute;todo de costeo"
+          [options]="costingMethods"
+          helpText="Con qu&eacute; criterio se calcula el costo de lo que vend&eacute;s."
+          tooltipText="Si la organización define un método de costeo, ése gana sobre el de la tienda. Este selector rige cuando la organización no fijó ninguno."
+          (valueChange)="onFieldChange()"
+          size="sm"
+        ></app-selector>
+
+        <div class="rounded-xl border border-border bg-info-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            M&eacute;todo seleccionado
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ costingEffect() }}</p>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <app-alert-banner variant="danger" icon="alert-triangle">
+          Cambiar el m&eacute;todo de costeo tiene implicaciones contables. Consult&aacute; con tu
+          contador antes de tocarlo.
+        </app-alert-banner>
+
+        <div class="rounded-xl border border-border bg-warning-light p-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            El cambio no es retroactivo
+          </p>
+          <p class="text-xs text-text-primary mt-1 leading-relaxed">
+            No se recalcula el hist&oacute;rico: los movimientos ya costeados conservan el
+            m&eacute;todo con el que se registraron. S&oacute;lo los movimientos nuevos usan el que
+            dejes ac&aacute;, as&iacute; que por un tiempo vas a convivir con las dos versiones.
+          </p>
+        </div>
+
+        @if (isFifo()) {
+          <app-alert-banner variant="info" icon="layers">
+            FIFO necesita capas de costo. Los productos que no las tengan cargadas
+            aparecen como dato parcial en el informe de valoraci&oacute;n hasta que reciban su
+            primera compra bajo este m&eacute;todo.
+          </app-alert-banner>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Cómo se descuenta el stock realmente ──────────────────────── -->
+  <app-expandable-card>
+    <div slot="header" class="flex items-center gap-2">
+      <app-icon name="boxes" size="16" class="text-text-secondary"></app-icon>
+      <span class="text-xs font-semibold text-text-primary">
+        C&oacute;mo se descuenta el stock, y cu&aacute;ndo puede quedar en negativo
+      </span>
+    </div>
+
+    <div class="p-4 space-y-3">
+      <div>
+        <p class="text-xs font-bold text-text-primary">
+          Qui&eacute;n decide si un producto mueve inventario
+        </p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Se define <strong>producto por producto</strong>, con la casilla de control de
+          inventario de su ficha (y su excepci&oacute;n por variante). Un producto sin ese
+          control se vende sin tocar existencias &mdash; es lo normal en servicios. No hay
+          un interruptor general de la tienda que lo apague todo.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">Reserva antes de descontar</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Al comprometer una venta, las unidades quedan <strong>reservadas</strong>: bajan
+          del disponible aunque sigan f&iacute;sicamente en la bodega, para que no se vendan dos
+          veces. Por eso el disponible y lo que hay en estante no siempre coinciden.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">
+          Cu&aacute;ndo se puede vender sin existencias
+        </p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          El POS avisa antes de cobrar si no hay existencias suficientes, pero una vez
+          confirmado el cobro <strong>la venta nunca se bloquea por stock</strong>: la
+          reserva puede dejar el disponible en n&uacute;mero negativo en lugar de frenar el
+          pago. Un disponible negativo es se&ntilde;al de sobreventa o de una entrada sin
+          registrar, y se cuadra con un ajuste de inventario.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">En el resto de los flujos s&iacute; bloquea</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Fuera del cobro (traslados, remisiones, reservas de pedidos), una operaci&oacute;n que
+          dejar&iacute;a el disponible en negativo se <strong>rechaza</strong> con un error de
+          stock insuficiente antes de escribir nada.
+        </p>
+      </div>
+    </div>
+  </app-expandable-card>
 </div>

@@ -1,4 +1,7 @@
-export type SdkType = 'openai_compatible' | 'anthropic_compatible';
+export type SdkType =
+  | 'openai_compatible'
+  | 'anthropic_compatible'
+  | 'minimax_t2a';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -302,6 +305,27 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     name: 'Azure OpenAI',
     sdkType: 'openai_compatible',
     models: [],
+  },
+  {
+    // Speech synthesis. Kept as the plain `MiniMax` name because that is what
+    // the seeded T2A configuration carries, and because `resolveApiKey` derives
+    // an environment variable from this string — a name with punctuation would
+    // produce an unusable `AI_MINIMAX_(VOZ)_API_KEY`.
+    name: 'MiniMax',
+    sdkType: 'minimax_t2a',
+    models: ['speech-2.8-hd', 'speech-2.5-hd-preview', 'speech-02-hd'],
+    defaultUrl: 'https://api.minimax.io/v1/t2a_v2',
+  },
+  {
+    // MiniMax's chat and vision models *are* OpenAI-compatible — the repo
+    // already pins MiniMax-VL-01 this way for invoice and RUT scanning. Listed
+    // apart from the entry above because only the speech endpoint needs the
+    // dedicated sdk type, and a single entry would give one of the two the
+    // wrong protocol.
+    name: 'MiniMax Chat',
+    sdkType: 'openai_compatible',
+    models: ['MiniMax-VL-01', 'MiniMax-Text-01'],
+    defaultUrl: 'https://api.minimax.io/v1',
   },
   {
     name: 'Custom',

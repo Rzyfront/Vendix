@@ -1,4 +1,4 @@
-import {Component, input, output, inject, DestroyRef} from '@angular/core';
+import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -120,10 +120,10 @@ import {
           </div>
         </div>
 
-        @if (showPreview) {
+        @if (showPreview()) {
           <div class="ticket-preview">
             <h4>Vista Previa del Ticket</h4>
-            <div class="preview-container" [innerHTML]="ticketPreview"></div>
+            <div class="preview-container" [innerHTML]="ticketPreview()"></div>
           </div>
         }
       </div>
@@ -135,16 +135,16 @@ import {
           type="button"
         >
           <i class="fas fa-eye"></i>
-          {{ showPreview ? 'Ocultar' : 'Mostrar' }} Vista Previa
+          {{ showPreview() ? 'Ocultar' : 'Mostrar' }} Vista Previa
         </button>
         <button
           class="btn btn-primary"
           (click)="printOrder()"
-          [disabled]="printing"
+          [disabled]="printing()"
           type="button"
         >
           <i class="fas fa-print"></i>
-          {{ printing ? 'Imprimiendo...' : 'Imprimir' }}
+          {{ printing() ? 'Imprimiendo...' : 'Imprimir' }}
         </button>
       </div>
     </div>
@@ -430,9 +430,13 @@ export class PosTicketPrinterComponent {
     copies: 1,
   };
 
-  showPreview: boolean = false;
-  ticketPreview: string = '';
-  printing: boolean = false;
+  // Estado de UI en señales: `ticketPreview` y `printing` se escriben desde
+  // callbacks asíncronos (subscribe / promesa), y en Zoneless una asignación a
+  // un campo plano desde ahí NO agenda detección de cambios — el botón se
+  // quedaría en "Imprimiendo..." y la vista previa nunca se pintaría.
+  readonly showPreview = signal(false);
+  readonly ticketPreview = signal('');
+  readonly printing = signal(false);
 
   constructor() {
     this.printOptions.copies = this.ticketService.configuredCopies();
@@ -456,8 +460,8 @@ export class PosTicketPrinterComponent {
   }
 
   togglePreview(): void {
-    this.showPreview = !this.showPreview;
-    if (this.showPreview && !this.ticketPreview) {
+    this.showPreview.update((visible) => !visible);
+    if (this.showPreview() && !this.ticketPreview()) {
       this.loadPreview();
     }
   }
@@ -466,7 +470,7 @@ export class PosTicketPrinterComponent {
     const data = this.ticketData();
     if (data) {
       this.ticketService.previewTicket(data).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((preview) => {
-        this.ticketPreview = preview;
+        this.ticketPreview.set(preview);
       });
     }
   }
@@ -483,11 +487,20 @@ export class PosTicketPrinterComponent {
     }
   }
 
+  /**
+   * Único camino de impresión del diálogo (QUI-667).
+   *
+   * `PosTicketService.printTicket()` va por `DocumentPrintService`: iframe
+   * oculto, `@page` resuelto desde `receipts.printing.pos_ticket` y las copias
+   * configuradas por la tienda. Además honra el resto de opciones del diálogo
+   * (cajón, email, SMS), que hasta ahora no tenían efecto porque el botón
+   * "Imprimir" iba por otro lado.
+   */
   printTicket(): void {
     const data = this.ticketData();
     if (!data) return;
 
-    this.printing = true;
+    this.printing.set(true);
 
     const options: PrintOptions = {
       ...this.printOptions,
@@ -496,53 +509,32 @@ export class PosTicketPrinterComponent {
 
     this.ticketService.printTicket(data, options).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (success) => {
-        this.printing = false;
+        this.printing.set(false);
         this.printComplete.emit(success);
         if (success) {
           this.closePrinter();
         }
       },
       error: (error) => {
-        this.printing = false;
+        this.printing.set(false);
         console.error('Error al imprimir ticket:', error);
         this.printComplete.emit(false);
       },
     });
   }
 
-  async printOrder(): Promise<void> {
-    const data = this.ticketData();
-    if (!data) return;
-
-    const printContent = await this.generatePrintContent();
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.print();
-    }
-  }
-
-  private async generatePrintContent(): Promise<string> {
-    const data = this.ticketData();
-    if (!data) return '';
-
-    const html = await this.ticketService.generateTicketHTML(data);
-
-    return `
-      <html>
-        <head>
-          <title>Ticket</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-          </style>
-        </head>
-        <body>
-          ${html}
-        </body>
-      </html>
-    `;
+  /**
+   * Acción del botón "Imprimir". Delega en `printTicket()` en vez de armar su
+   * propio documento: así los dos caminos no pueden producir papeles distintos.
+   *
+   * Antes abría `window.open('', '_blank')` + `document.write()` + `print()` con
+   * un CSS de tarjeta web (padding, fondo gris, borde redondeado, sombra), sin
+   * `@page`, sin el formato de la tienda y sin copias. En el navegador de un
+   * celular ese pop-up además lo bloquea el bloqueador o queda como una pestaña
+   * suelta que el cajero tiene que cerrar a mano.
+   */
+  printOrder(): void {
+    this.printTicket();
   }
 
   closePrinter(): void {

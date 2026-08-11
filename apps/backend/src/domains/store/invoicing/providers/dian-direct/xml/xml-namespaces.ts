@@ -45,8 +45,39 @@ export const UBL_CONSTANTS = {
    * invoice, '20'/'22' for credit notes, '30'/'32' for debit notes). Each
    * builder sets it from `DIAN_OPERATION_TYPES` per document + reference.
    */
+  /**
+   * `@schemeID` de `cac:StandardItemIdentification/cbc:ID` en toda línea de todo
+   * documento. `999` = «estándar de adopción del contribuyente».
+   *
+   * La DIAN exige el elemento (regla FAZ09 «StandardItemIdentification no
+   * informado»), y el esquema declara de DÓNDE sale el código: 001 UNSPSC, 010
+   * GTIN, 999 el propio del contribuyente. Vendix no publica catálogo UNSPSC ni
+   * GTIN, así que declarar cualquiera de esos sería afirmar un origen falso.
+   */
+  ITEM_IDENTIFICATION_SCHEME_ID: '999',
   /** Profile ID for standard invoicing */
   PROFILE_ID: 'DIAN 2.1: Factura Electrónica de Venta',
+  /**
+   * `cbc:ProfileID` de la NOTA CRÉDITO — ⚠️ DECLARADO Y TODAVÍA NO EMITIDO.
+   *
+   * `UblCreditNoteBuilder` emite hoy `PROFILE_ID`, el de la factura, y la DIAN lo
+   * observa con **CAD03** — NOTIFICACIÓN, no rechazo, así que no bloquea el set ni
+   * la emisión. Por eso quedó fuera del alcance del arreglo de las notas, que se
+   * limitó a los rechazos.
+   *
+   * El literal se captura AQUÍ y no en un plan porque es el dato caro: viene del
+   * texto que la DIAN nos devolvió en el veredicto del lote de habilitación
+   * (2026-08-09, ZipKey e2d19623-3d0a-4cc9-9954-8a70886ab9a7). Un aviso no urge,
+   * pero ensucia el diagnóstico de la corrida siguiente: cada regla observada que
+   * ya conocemos es ruido sobre las que no.
+   */
+  PROFILE_ID_CREDIT_NOTE:
+    'DIAN 2.1: Nota Crédito de Factura Electrónica de Venta',
+  /**
+   * `cbc:ProfileID` de la NOTA DÉBITO — ⚠️ DECLARADO Y TODAVÍA NO EMITIDO.
+   * Mismo estado que el de la nota crédito; su regla es **DAD03**.
+   */
+  PROFILE_ID_DEBIT_NOTE: 'DIAN 2.1: Nota Débito de Factura Electrónica de Venta',
   /**
    * `cbc:ProfileID` of the POS electronic equivalent document.
    *

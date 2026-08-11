@@ -20,6 +20,11 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
+import {
+  formatAggregateQuantity,
+  resolveSaleUnitCodes,
+  saleUnitScaleFactor,
+} from '../../products/services/sale-unit-display.util';
 
 /**
  * One row of the stock-levels report. RAW values only — numbers are plain
@@ -39,6 +44,13 @@ export interface StockLevelExportRow {
   cost_per_unit: number;
   total_value: number;
   status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
+  /**
+   * Unidad de venta en la que están expresadas las cantidades de la fila.
+   * Solo la llena el lector del EXPORT ({@link
+   * InventoryAnalyticsService.getStockLevelsForExport}); la tabla de pantalla
+   * sigue emitiendo unidades mínimas hasta que el frontend sepa rotularlas.
+   */
+  unit?: string;
 }
 
 /**
@@ -55,6 +67,8 @@ export interface MovementExportRow {
   sku: string | null;
   movement_type: movement_type_enum;
   quantity: number;
+  /** Unidad de venta en la que va `quantity`. Vacío = sin unidad que declarar. */
+  unit: string;
   from_location: string | null;
   to_location: string | null;
   user_name: string | null;
@@ -308,7 +322,57 @@ export class InventoryAnalyticsService {
   async getStockLevelsForExport(
     query: InventoryAnalyticsQueryDto,
   ): Promise<StockLevelExportRow[]> {
-    return this.buildStockLevelRows(query);
+    const rows = await this.buildStockLevelRows(query);
+    return this.expressStockRowsInSaleUnit(rows);
+  }
+
+  /**
+   * Reexpresa las cantidades del reporte de inventario en la unidad de venta.
+   *
+   * Solo el EXPORT pasa por acá, no la tabla de pantalla: el archivo tiene una
+   * columna "Unidad" donde rotular la conversión y la pantalla todavía no, y
+   * mostrar `3` sin decir "metros" sería menos claro que mostrar `3000`.
+   *
+   * `cost_per_unit` se reescala junto con la cantidad porque "unitario" se
+   * refiere a la unidad que la fila muestra: con existencias en metros y costo
+   * por milímetro, `Valor Total` dejaría de ser el producto de sus dos vecinos.
+   * `total_value` no se toca — es el mismo dinero, decidido antes de convertir.
+   */
+  private async expressStockRowsInSaleUnit(
+    rows: StockLevelExportRow[],
+  ): Promise<StockLevelExportRow[]> {
+    if (rows.length === 0) return rows;
+
+    const saleUnits = await resolveSaleUnitCodes(
+      this.prisma as any,
+      rows.map((r) => r.product_id),
+    );
+    if (saleUnits.size === 0) return rows;
+
+    return rows.map((row) => {
+      const info = saleUnits.get(row.product_id);
+      if (!info) return row;
+
+      const onHand = formatAggregateQuantity(row.quantity_on_hand, info);
+      const factor = saleUnitScaleFactor(info);
+
+      return {
+        ...row,
+        quantity_on_hand: onHand.value,
+        quantity_reserved: formatAggregateQuantity(
+          row.quantity_reserved,
+          info,
+        ).value,
+        quantity_available: formatAggregateQuantity(
+          row.quantity_available,
+          info,
+        ).value,
+        reorder_point: formatAggregateQuantity(row.reorder_point, info).value,
+        cost_per_unit:
+          factor > 1 ? Number((row.cost_per_unit * factor).toFixed(4)) : row.cost_per_unit,
+        unit: onHand.suffix,
+      };
+    });
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
@@ -1040,19 +1104,34 @@ export class InventoryAnalyticsService {
     // No Spanish header keys, no `.toISOString().split('T')[0]`, no presentation
     // fallbacks. `created_at` stays a raw Date so the emission phase
     // (ReportBuilder) formats it in the store timezone.
-    return movements.map((m) => ({
-      id: m.id,
-      created_at: m.created_at,
-      product_id: m.product_id,
-      product_name: m.products?.name ?? null,
-      sku: m.products?.sku ?? null,
-      movement_type: m.movement_type,
-      quantity: Number(m.quantity ?? 0),
-      from_location: m.from_location?.name ?? null,
-      to_location: m.to_location?.name ?? null,
-      user_name: m.users?.username ?? null,
-      reason: m.reason ?? null,
-      reference_id: m.source_order_id?.toString() ?? null,
-    }));
+    // Un movimiento se registra en unidades mínimas; el reporte lo cuenta en la
+    // unidad de venta del producto para que "entraron 3000" deje de parecer un
+    // error de digitación cuando lo que entraron fueron 3 metros.
+    const saleUnits = await resolveSaleUnitCodes(
+      this.prisma as any,
+      movements.map((m) => m.product_id),
+    );
+
+    return movements.map((m) => {
+      const info =
+        m.product_id != null ? saleUnits.get(Number(m.product_id)) : undefined;
+      const qty = formatAggregateQuantity(Number(m.quantity ?? 0), info);
+
+      return {
+        id: m.id,
+        created_at: m.created_at,
+        product_id: m.product_id,
+        product_name: m.products?.name ?? null,
+        sku: m.products?.sku ?? null,
+        movement_type: m.movement_type,
+        quantity: qty.value,
+        unit: qty.suffix,
+        from_location: m.from_location?.name ?? null,
+        to_location: m.to_location?.name ?? null,
+        user_name: m.users?.username ?? null,
+        reason: m.reason ?? null,
+        reference_id: m.source_order_id?.toString() ?? null,
+      };
+    });
   }
 }

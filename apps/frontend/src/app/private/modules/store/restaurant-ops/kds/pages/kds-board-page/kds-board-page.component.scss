@@ -11,6 +11,48 @@
   min-height: 100%;
 }
 
+/* ------------------------------------------------- PANTALLA COMPLETA (top layer)
+   El navegador saca este elemento del flujo y lo pinta en la capa superior, asi
+   que aqui no hay nada que ocultar del layout: el sidebar y el header quedan
+   debajo de la capa, no hay que colapsarlos ni tocarlos.
+
+   Chrome le da al elemento en pantalla completa un fondo negro y lo centra a su
+   tamaño intrinseco: sin el 100%/100% explicito el tablero aparece flotando en
+   medio de una pantalla negra en vez de ocuparla. */
+.kds-board:fullscreen {
+  width: 100%;
+  height: 100%;
+  min-height: 0; /* anula el `min-height: 100%` heredado del modo embebido */
+  overflow-y: auto;
+  background: var(--color-background);
+  padding: 0.75rem;
+}
+
+/* El sticky header tampoco va: titulo, subtitulo, pestañas y acciones son cromo
+   administrativo, y una pantalla colgada en la cocina no navega — muestra tickets.
+   Se oculta con `display: none` y no con un `@if` en la plantilla a proposito: un
+   `@if` desmontaria y remontaria el header en cada toggle, y la salida de este modo
+   ya vive en la barra de turno (ver `canExitFullscreen`).
+   El selector es de componente, no estructural: no depende de la forma del layout. */
+.kds-board:fullscreen app-sticky-header,
+.kds-board.is-fullscreen app-sticky-header {
+  display: none;
+}
+
+/* Respaldo cuando `requestFullscreen()` fue rechazado. Medido: hoy ningun
+   ancestro del tablero crea bloque contenedor (sin transform/filter/contain), asi
+   que el `fixed` se ancla al viewport. Si eso cambia, este respaldo se degrada —
+   por eso es el respaldo y no la estrategia principal. */
+.kds-board.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-background);
+  padding: 0.75rem;
+}
+
 .kds-board__error {
   display: flex;
   align-items: center;
@@ -231,4 +273,157 @@
   font-size: 0.75rem;
   color: var(--color-text-tertiary, #9ca3af);
   font-style: italic;
+}
+
+/* QUI-651 — cuerpo del gate de turno. El segundo párrafo explica POR QUÉ se pide
+   el turno: sin esa frase el operador lo lee como burocracia y no como lo que es
+   — el registro de quién consumió los insumos de la estación. */
+.session-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+
+  .session-gate-why {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+}
+
+/* QUI-651 — selección de estación. Tarjetas grandes a propósito: se toca en una
+   pantalla de cocina, con las manos ocupadas y muchas veces con guantes. */
+.kds-station-picker {
+  padding: 2rem 1rem;
+  text-align: center;
+
+  /* Salida de pantalla completa cuando se entró estando en el picker. Lleva texto
+     y no solo icono porque aquí no hay barra de turno que dé contexto: es el único
+     control de vista en pantalla y tiene que nombrarse. */
+  &__exit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  &__title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+  }
+
+  &__hint {
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    max-width: 640px;
+    margin: 1.25rem auto 0;
+  }
+}
+
+.kds-station-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1.1rem 0.75rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+
+  &:hover {
+    border-color: var(--color-primary, #3b82f6);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &__name {
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  &__code {
+    font-size: 0.72rem;
+    color: var(--color-text-secondary);
+    letter-spacing: 0.03em;
+  }
+}
+
+/* QUI-651 — resumen del turno en modal. Tabular y denso: se consulta de reojo
+   mientras la cocina corre, no se lee con calma. */
+.kds-sum-head {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.kds-sum-title {
+  margin: 0.8rem 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.kds-sum-empty {
+  padding: 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.kds-sum-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.6rem;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.8rem;
+    border-radius: 0.25rem;
+
+    &:nth-child(odd) {
+      background: var(--color-surface-alt, #f9fafb);
+    }
+
+    span:not(:first-child) {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.kds-sum-total {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
 }

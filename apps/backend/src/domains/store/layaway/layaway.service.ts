@@ -5,6 +5,11 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
+import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import {
+  resolveLineTotal,
+  resolvePriceUnitScale,
+} from '../products/services/price-unit.util';
 import {
   CreateLayawayDto,
   LayawayQueryDto,
@@ -44,13 +49,72 @@ export class LayawayService {
         : 1;
       const plan_number = `LAY-${String(next_number).padStart(5, '0')}`;
 
+      /**
+       * QUI-648 — el plan separé cobra con la MISMA aritmética que la venta.
+       *
+       * Antes reconstruía el total como `unit_price × quantity − descuento +
+       * impuesto`, una fórmula que no conoce ni la escala de precio ni las
+       * presentaciones. Sobre un cable publicado por metro y medido en
+       * milímetros eso cobraba el precio del metro por cada milímetro: mil
+       * veces de más, sin que nada lo frenara.
+       *
+       * Las dos correcciones son las mismas que en orders y en el cobro POS:
+       *  - `price_unit_quantity` (escala): el precio publicado cubre N
+       *    unidades de stock, así que el multiplicador es `quantity / N`. Sale
+       *    del catálogo dentro de la transacción — nunca del cliente.
+       *  - presentación aplicada: ahí `unit_price` ya es el precio del paquete
+       *    y `quantity` cuenta paquetes, así que la escala NO aplica y el
+       *    stock a reservar sale de la cascada de empaque
+       *    (`stock_units_consumed`), no de `quantity`.
+       *
+       * Con escala 1 y sin tarifa —todo lo que existe hoy— la fórmula colapsa
+       * a la histórica y ningún plan cambia de total.
+       */
+      const tierSnapshots = await resolveTierSnapshotsForItems(
+        tx,
+        dto.items,
+        context,
+      );
+
+      // La escala solo interesa en las líneas SIN presentación. `tx` sale del
+      // baseClient (sin la extensión de scoping), así que el filtro de tienda
+      // va explícito: la escala es del catálogo de ESTA tienda.
+      const scaledProductIds = Array.from(
+        new Set(
+          dto.items
+            .map((item, index) =>
+              tierSnapshots[index]?.tier_id != null ? null : item.product_id,
+            )
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      );
+      const scaleByProductId = new Map<number, number>();
+      if (scaledProductIds.length > 0) {
+        const rows = await tx.products.findMany({
+          where: { id: { in: scaledProductIds }, store_id },
+          select: { id: true, price_unit_quantity: true },
+        });
+        for (const row of rows) {
+          const scale = resolvePriceUnitScale(row.price_unit_quantity);
+          if (scale > 1) scaleByProductId.set(Number(row.id), scale);
+        }
+      }
+
       // 2. Calcular totales desde items
       let total_amount = new Prisma.Decimal(0);
-      const items_data = dto.items.map((item) => {
+      const items_data = dto.items.map((item, index) => {
+        const tierSnap = tierSnapshots[index];
         const discount = new Prisma.Decimal(item.discount_amount || 0);
         const tax = new Prisma.Decimal(item.tax_amount || 0);
-        const subtotal = new Prisma.Decimal(item.unit_price)
-          .times(item.quantity)
+        const price_unit_quantity = tierSnap
+          ? 1
+          : (scaleByProductId.get(Number(item.product_id)) ?? 1);
+        const line_total = resolveLineTotal(
+          Number(item.unit_price),
+          Number(item.quantity),
+          price_unit_quantity,
+        );
+        const subtotal = new Prisma.Decimal(line_total)
           .minus(discount)
           .plus(tax);
         total_amount = total_amount.plus(subtotal);
@@ -59,6 +123,10 @@ export class LayawayService {
           discount_amount: discount,
           tax_amount: tax,
           subtotal,
+          price_unit_quantity,
+          // Unidades REALES de stock que reserva la línea. `null` = sin
+          // empaque, la cantidad ya está en unidades de stock.
+          stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
         };
       });
 
@@ -148,6 +216,11 @@ export class LayawayService {
           true,
           tx,
           null, // expires_at: null = no expira
+          false, // skip_reservation
+          // Presentación aplicada: `quantity` cuenta paquetes, así que las
+          // unidades a descontar son las del empaque. `null` deja la cantidad
+          // tal cual, que es el comportamiento histórico.
+          item.stock_units_consumed ?? undefined,
         );
       }
 

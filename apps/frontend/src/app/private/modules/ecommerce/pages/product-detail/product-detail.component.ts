@@ -192,6 +192,13 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                   (displayPriceLabel() ? minVariantPrice() : displayPrice())
                     | currency
                 }}</span>
+                @if (product()?.price_unit; as priceUnit) {
+                  <!-- "por m": sin la escala, un cable medido en milímetros
+                       publica un número que nadie sabe leer. -->
+                  <span class="text-sm text-text-muted font-medium ml-1">{{
+                    priceUnit.label
+                  }}</span>
+                }
                 @if (selectedPriceResolution()?.isOnSale) {
                   <span
                     class="original-price"

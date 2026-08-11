@@ -238,6 +238,7 @@ export class VexiApiService {
     uiContext?: VexiUiContext,
     attachmentIds?: string[],
     speak?: boolean,
+    skipUserMessage?: boolean,
   ): Observable<string> {
     return this.http
       .post<{ data: { stream_id: string } }>(
@@ -253,6 +254,11 @@ export class VexiApiService {
           // and voice inside the same thread. Omitted rather than sent as false
           // so a chat turn's body is byte-identical to what it was before.
           speak: speak ? true : undefined,
+          // Set only when replaying a turn whose transport dropped: the `user`
+          // row is written before the model is called, so the dead attempt
+          // already left it behind. Omitted otherwise, so a normal turn's body
+          // is byte-identical to what it was before recovery existed.
+          skip_user_message: skipUserMessage ? true : undefined,
         },
       )
       .pipe(map((res) => res.data.stream_id));
@@ -340,9 +346,26 @@ export class VexiApiService {
     args: Record<string, unknown>,
     confirmationToken: string,
     conversationId?: number,
-  ): Observable<{ tool: string; output: string }> {
+    speak?: boolean,
+  ): Observable<{
+    tool: string;
+    output: string;
+    /** The tool's own sentence about what it changed. Null when it wrote none. */
+    summary?: string | null;
+    /** Present only when `speak` was asked for and the synthesis succeeded. */
+    audio_base64?: string;
+    content_type?: string;
+  }> {
     return this.http
-      .post<{ data: { tool: string; output: string } }>(
+      .post<{
+        data: {
+          tool: string;
+          output: string;
+          summary?: string | null;
+          audio_base64?: string;
+          content_type?: string;
+        };
+      }>(
         `${environment.apiUrl}/store/vexi/confirmations/apply`,
         {
           tool,
@@ -352,6 +375,11 @@ export class VexiApiService {
           // request of its own, outside the turn, so this is the only thing that
           // ties the change back to what the person asked for.
           ...(conversationId ? { conversation_id: conversationId } : {}),
+          // Asks for the acknowledgement as audio too. Omitted rather than sent
+          // as false so a chat-mode approval's body is unchanged, and it carries
+          // no text: the server speaks the summary the tool produced, so this can
+          // never become a general text-to-speech surface.
+          ...(speak ? { speak: true } : {}),
         },
       )
       .pipe(map((res) => res.data));

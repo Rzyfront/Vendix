@@ -43,6 +43,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
   let prisma: {
     promotions: { findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     order_promotions: { count: jest.Mock; create: jest.Mock };
+    products: { findMany: jest.Mock };
   };
 
   const REFERENCE_NOW = new Date('2026-06-01T12:00:00Z');
@@ -57,6 +58,12 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       order_promotions: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
+      },
+      // QUI-648: el motor lee la escala de venta del producto para contar
+      // presentaciones en vez de unidades mínimas. Por defecto ningún producto
+      // declara escala, así que el resto de las specs cuentan como siempre.
+      products: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -1196,6 +1203,363 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       // discount_amount the same method exposes for this tier.
       expect(entry.discount_amount).toBe(5000);
       expect(entry.badge_label).toBe('Desde 2 und: -$5.000');
+    });
+  });
+
+  // QUI-648 — "lleva 3" cuenta unidades de VENTA, no de stock. Un cable medido
+  // en milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la
+  // promoción se dispararía con 3 milímetros de cable (un recorte de $0,015) y
+  // no se dispararía nunca a partir de 3 metros porque 3000 ya pasó de largo
+  // cualquier tramo pensado en unidades.
+  describe('escala de venta (price_unit_quantity)', () => {
+    /** Copia local del constructor de tramos (el original vive anidado). */
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 100,
+        min_quantity: 2,
+        max_quantity: null as number | null,
+        value: 10,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    /** Cable a $5.000 el metro con stock en mm: 1 metro = 1.000 mm. */
+    function cableEnMilimetros() {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1000 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 301,
+          name: 'Lleva 3 metros, 10%',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 301,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+    }
+
+    it('no se dispara con 3 milímetros de cable', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3 mm: tres milésimas de metro, no tres metros.
+        items: [{ line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 3 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.total_discount).toBe(0);
+      expect(result.applied_promotions).toEqual([]);
+    });
+
+    it('sí se dispara con 3 metros de cable', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3.000 mm = 3 metros: la escala del producto lo vuelve 3.
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5, quantity: 3000 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.total_discount).toBeGreaterThan(0);
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(301);
+    });
+
+    it('una línea vendida por presentación ya cuenta presentaciones', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3 rollos: `stock_units_consumed` dice que el descuento de inventario
+        // es 60.000 mm, pero la promoción cuenta 3 y no 60.000.
+        items: [
+          {
+            line_id: 'l1',
+            product_id: 10,
+            unit_price: 95000,
+            quantity: 3,
+            stock_units_consumed: 60000,
+          } as any,
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(301);
+    });
+
+    // ---------------------------------------------------------------
+    // DINERO. Contar bien el tramo no basta: `unit_price` es el precio de UNA
+    // unidad de PRECIO (el metro), así que multiplicarlo por la cantidad cruda
+    // en unidades de stock infla el subtotal por N. Con N = 1.000 una venta de
+    // $12.500 se leía como $12.500.000 y un 10% se volvía $1.250.000, que
+    // dejaba la orden en cero.
+    // ---------------------------------------------------------------
+
+    /** Cable a $5.000 el metro con un 10% plano de orden. */
+    function cableConDiezPorCiento(scale: number | null = 1000) {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: scale },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 310,
+          name: 'Orden 10% OFF',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+        }),
+      ]);
+    }
+
+    it('el subtotal de 2.500 mm de cable a $5.000/m son $12.500, no $12.500.000', async () => {
+      cableConDiezPorCiento();
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 2500 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 2.500 mm = 2,5 metros × $5.000 = $12.500.
+      expect(result.subtotal).toBe(12500);
+      // 10% de $12.500. El defecto producía $1.250.000.
+      expect(result.total_discount).toBe(1250);
+      expect(result.promotional_subtotal).toBe(11250);
+      expect(result.applied_promotions[0].discount_amount).toBe(1250);
+    });
+
+    it('el precio unitario descontado sigue siendo por METRO ($4.500), no por milímetro', async () => {
+      cableConDiezPorCiento();
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 2500 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      const l1 = result.items[0]!;
+      // Lo que la escala cambia es el MULTIPLICADOR, nunca la magnitud del
+      // precio unitario: un 10% sobre $5.000/m da $4.500/m. Dividir por la
+      // cantidad cruda daría $4,5 y el POS cobraría una milésima parte.
+      expect(l1.original_unit_price).toBe(5000);
+      expect(l1.final_unit_price).toBe(4500);
+      expect(l1.final_line_total).toBe(11250);
+      expect(l1.promotion_discount).toBe(1250);
+      // `quantity` se reporta CRUDO: es la cantidad que la orden persiste.
+      expect(l1.quantity).toBe(2500);
+    });
+
+    it('el dinero NO se redondea al piso aunque el tramo sí lo haga', async () => {
+      // 3.500 mm = 3,5 metros. El TRAMO cuenta 3 (lleva 3 metros, se cumple),
+      // pero el DINERO cobra 3,5 metros: $17.500. Aplicar el mismo Math.floor
+      // del contador de tramos regalaría medio metro en cada línea.
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 3500 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.subtotal).toBe(17500);
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.total_discount).toBe(1750); // 10% de $17.500
+      const l1 = result.items[0]!;
+      expect(l1.final_unit_price).toBe(4500); // 15.750 / 3,5
+      expect(l1.final_line_total).toBe(15750);
+    });
+
+    it('una línea vendida por presentación no se divide otra vez', async () => {
+      cableConDiezPorCiento();
+
+      const result = await service.quoteDiscounts({
+        items: [
+          {
+            line_id: 'l1',
+            product_id: 10,
+            // 3 rollos a $95.000 el rollo. `unit_price` YA es el precio del
+            // paquete y `quantity` YA cuenta paquetes: dividir por la escala
+            // cobraría $285 en vez de $285.000.
+            unit_price: 95000,
+            quantity: 3,
+            stock_units_consumed: 60000,
+          } as any,
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.subtotal).toBe(285000);
+      expect(result.total_discount).toBe(28500);
+      const l1 = result.items[0]!;
+      expect(l1.final_unit_price).toBe(85500);
+      expect(l1.final_line_total).toBe(256500);
+    });
+
+    // --- No regresión: con escala 1 (todo el catálogo actual) la aritmética
+    // tiene que quedar bit a bit igual a la histórica `unit_price × quantity`.
+
+    it('no regresión — escala 1: el porcentaje plano cobra unit_price × quantity', async () => {
+      cableConDiezPorCiento(1);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 3 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.subtotal).toBe(15000);
+      expect(result.total_discount).toBe(1500);
+      expect(result.promotional_subtotal).toBe(13500);
+      const l1 = result.items[0]!;
+      expect(l1.final_unit_price).toBe(4500);
+      expect(l1.final_line_total).toBe(13500);
+    });
+
+    it('no regresión — escala 1: el tramo fixed_amount sigue siendo un monto plano', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 311,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 311,
+              min_quantity: 2,
+              max_quantity: 4,
+              value: 5000,
+              type: 'fixed_amount',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 10, unit_price: 12000, quantity: 3 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Mismos números que el caso 5 de `quantity_tiered` (que corre sin
+      // ningún producto con escala): la escala 1 no mueve nada.
+      expect(result.subtotal).toBe(36000);
+      expect(result.total_discount).toBe(5000);
+      expect(result.promotional_subtotal).toBe(31000);
+    });
+
+    it('un producto sin escala cuenta como siempre', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 302,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 302,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'l1', product_id: 10, unit_price: 100, quantity: 3 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.applied_promotions).toHaveLength(1);
+    });
+
+    // --- El empujón (`tier_progress`) mide con la misma vara que el tramo.
+    // Si contara unidades de stock, al cable al que le falta UN metro le
+    // diría "agrega 997 más" y el cliente leería un absurdo.
+
+    it('el empujón cuenta lo que falta en unidades de venta, no de stock', async () => {
+      cableEnMilimetros(); // tramo desde 3 metros, 10%
+
+      const result = await service.quoteDiscounts({
+        // 2.000 mm = 2 metros: falta 1 metro para el tramo de 3.
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 2000 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.applied_promotions).toEqual([]);
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].promotion_id).toBe(301);
+      expect(result.tier_progress[0].remaining_quantity).toBe(1);
+      expect(result.tier_progress[0].target_product_id).toBe(10);
+    });
+
+    it('no regresión — escala 1: el empujón sigue contando unidades crudas', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 303,
+          name: 'Lleva 3, 10%',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 303,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 2 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].remaining_quantity).toBe(1);
     });
   });
 });

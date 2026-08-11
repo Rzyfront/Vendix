@@ -30,7 +30,14 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
-import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import {
+  resolveTierSnapshotsForItems,
+  type TierSnapshot,
+} from '../products/services/tier-snapshot.util';
+import {
+  resolvePriceUnitScale,
+  resolvePriceUnits,
+} from '../products/services/price-unit.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -69,16 +76,11 @@ import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-t
  * `PriceResolverService.resolveWithTier` y así validar el override manual
  * contra el precio de tarifa — no contra el precio base del catálogo.
  */
-type PosTierSnapshot = {
-  tier_id: number;
-  tier_name: string;
-  stock_units_consumed: number | null;
-  discount_percentage: number;
-  units_per_package: number | null;
-  is_package_unit: boolean;
-  override_price: number | null;
-  override_units_per_package: number | null;
-};
+/**
+ * El snapshot POS es el contrato canónico de `tier-snapshot.util`. Se mantiene
+ * el alias local porque el resto del servicio lo referencia por este nombre.
+ */
+type PosTierSnapshot = TierSnapshot;
 
 @Injectable()
 export class PaymentsService {
@@ -722,8 +724,25 @@ export class PaymentsService {
         // (2) un throw en este punto revierte la transacción completa, mientras
         // que validar después del commit dejaría la venta cerrada y sólo
         // corregible con nota crédito.
+        //
+        // QUI-673 — la organización SALE DE LA RELACIÓN, no de una columna.
+        // `orders` no tiene `organization_id` (schema.prisma: sólo `store_id` +
+        // la relación `stores`), así que `order.organization_id` valía SIEMPRE
+        // `undefined`. TypeScript no lo veía porque `order` está tipado `any` en
+        // las dos ramas que lo producen. Con `undefined`, la cadena
+        // `assertInvoiceNotRequired` → `FiscalGateService.isAreaEnabled` →
+        // `getFiscalScope` reventaba dentro de Prisma, el gate capturaba el
+        // error y fallaba CERRADO devolviendo `false` con un WARN: el umbral no
+        // se evaluaba en NINGUNA venta POS y el cobro respondía 201 normal.
+        //
+        // Ambas ramas que producen `order` traen `stores` en su `include`
+        // (`createOrUpdateOrderFromPos` y `applyPosPaymentToTableSession`), así
+        // que la relación resuelve la organización sin una consulta extra
+        // dentro de la transacción. El contexto de request queda sólo como red
+        // de seguridad, igual que en `calculateTaxCategoryTaxes`.
         await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
-          organization_id: order.organization_id,
+          organization_id:
+            order.stores?.organization_id ?? context?.organization_id,
           store_id: order.store_id ?? createPosPaymentDto.store_id ?? null,
           total_amount: order.grand_total ?? 0,
           has_customer: Boolean(createPosPaymentDto.customer_id),
@@ -1506,6 +1525,12 @@ export class PaymentsService {
             undefined,
             {
               ticketId: result.kitchen_fire.kitchen_ticket_id,
+              // QUI-651 — todos los tickets del envio, para que el SSE llegue a
+              // cada estacion. Fallback al primario si el resultado viene de un
+              // camino que todavia no los expone.
+              ticketIds: result.kitchen_fire.kitchen_ticket_ids ?? [
+                result.kitchen_fire.kitchen_ticket_id,
+              ],
               firedItemSnapshots: [],
               cogsTotal: result.kitchen_fire.cogs_total || 0,
               consumedLineCount: 0,
@@ -2029,170 +2054,6 @@ export class PaymentsService {
     };
   }
 
-  /**
-   * Multi-tarifa (Fase 5.5): resuelve snapshots por línea POS.
-   *
-   * Patrón espejo de `OrdersService.resolveTierSnapshotsForItems`:
-   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna `[]` (no overhead).
-   * - Si AL MENOS UNA línea lo trae, valida server-side el permission
-   *   `store:products:apply_pricing_tier`. Bypass para super_admin / owner.
-   *   Si denegado, lanza `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)`.
-   * - Pre-carga tarifas (price_tiers.units_per_package) y los overrides por
-   *   producto (product_price_tier_overrides.override_units_per_package) para
-   *   computar `stock_units_consumed` siguiendo la cascada de packSize
-   *   (override ?? tier ?? 1). Si packSize <= 1, no hay empaque y el snapshot
-   *   queda en null.
-   * - Lenient: si la tarifa no existe en esta tienda, snapshot = null (no
-   *   crashea la venta).
-   *
-   * Devuelve un array alineado por índice con `items`.
-   */
-  private async resolveTierSnapshotsForItems(
-    tx: any,
-    items: Array<{
-      product_id?: number;
-      product_variant_id?: number | null;
-      quantity: number;
-      applied_price_tier_id?: number;
-    }>,
-    context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<Array<PosTierSnapshot | null>> {
-    const tierIdsInUse = new Set<number>();
-    for (const item of items) {
-      if (
-        item.applied_price_tier_id !== undefined &&
-        item.applied_price_tier_id !== null
-      ) {
-        tierIdsInUse.add(Number(item.applied_price_tier_id));
-      }
-    }
-
-    if (tierIdsInUse.size === 0) {
-      return items.map(() => null);
-    }
-
-    // Permission gate (server-side; UI cannot bypass).
-    const permissions = context?.permissions ?? [];
-    const isSuperAdmin = !!context?.is_super_admin;
-    const isOwner = !!context?.is_owner;
-    if (
-      !isSuperAdmin &&
-      !isOwner &&
-      !permissions.includes('store:products:apply_pricing_tier')
-    ) {
-      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
-    }
-
-    const tiers = await tx.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
-      select: {
-        id: true,
-        name: true,
-        is_package_unit: true,
-        units_per_package: true,
-        discount_percentage: true,
-      },
-    });
-    type TierRow = (typeof tiers)[number];
-    const tierById = new Map<number, TierRow>(
-      tiers.map((t: TierRow): [number, TierRow] => [t.id, t]),
-    );
-
-    const productIds = Array.from(
-      new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
-    );
-    const assignments = productIds.length
-      ? await tx.product_price_tier_assignments.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: { product_id: true, price_tier_id: true },
-        })
-      : [];
-    const allowedTierKeys = new Set(
-      assignments.map(
-        (assignment: { product_id: number; price_tier_id: number }) =>
-          `${assignment.product_id}:${assignment.price_tier_id}`,
-      ),
-    );
-
-    // Per-product packaging overrides (override_units_per_package wins over
-    // tier.units_per_package in the packSize cascade). Keyed by
-    // product_id:variant_id:price_tier_id (variant null → "null").
-    const overrides = productIds.length
-      ? await tx.product_price_tier_overrides.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIdsInUse) },
-          },
-          select: {
-            product_id: true,
-            variant_id: true,
-            price_tier_id: true,
-            override_price: true,
-            override_units_per_package: true,
-          },
-        })
-      : [];
-    type OverrideInfo = {
-      override_price: number | null;
-      override_units_per_package: number | null;
-    };
-    const overrideByKey = new Map<string, OverrideInfo>(
-      overrides.map(
-        (o: {
-          product_id: number;
-          variant_id: number | null;
-          price_tier_id: number;
-          override_price: number | null;
-          override_units_per_package: number | null;
-        }): [string, OverrideInfo] => [
-          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
-          {
-            override_price:
-              o.override_price != null ? Number(o.override_price) : null,
-            override_units_per_package: o.override_units_per_package,
-          },
-        ],
-      ),
-    );
-
-    return items.map((item) => {
-      const tierId = item.applied_price_tier_id;
-      if (tierId === undefined || tierId === null) return null;
-      const tier = tierById.get(Number(tierId));
-      if (!tier) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const productId = item.product_id;
-      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const variantId = item.product_variant_id ?? null;
-      const override = overrideByKey.get(
-        `${productId}:${variantId ?? 'null'}:${Number(tierId)}`,
-      );
-      const override_units_per_package =
-        override?.override_units_per_package ?? null;
-      const stock_units_consumed = resolveStockUnitsConsumed(
-        Number(item.quantity),
-        tier?.units_per_package,
-        override_units_per_package,
-      );
-      return {
-        tier_id: tier.id,
-        tier_name: tier.name,
-        stock_units_consumed,
-        discount_percentage: Number(tier.discount_percentage ?? 0),
-        units_per_package: tier.units_per_package ?? null,
-        is_package_unit: !!tier.is_package_unit,
-        override_price: override?.override_price ?? null,
-        override_units_per_package,
-      };
-    });
-  }
-
   private async buildPosOrderItem(
     tx: any,
     item: any,
@@ -2280,6 +2141,10 @@ export class PaymentsService {
         // aquí evita el round-trip extra que hacía `resolveCostPrice` dentro de
         // la transacción del cobro (causa del P2028).
         cost_price: true,
+        // QUI-648 — a cuántas unidades de stock corresponde `base_price`. Sale
+        // de la misma lectura que ya valida que el producto es de esta tienda:
+        // la escala NO puede venir del cliente, es del catálogo.
+        price_unit_quantity: true,
       },
     });
 
@@ -2332,6 +2197,9 @@ export class PaymentsService {
           },
           variant: variant
             ? {
+                // `id` es lo que permite al resolver elegir la fila de override
+                // de ESTA variante en vez de caer a la del producto.
+                id: variant.id,
                 price_override:
                   variant.price_override != null
                     ? Number(variant.price_override)
@@ -2377,9 +2245,40 @@ export class PaymentsService {
     const catalogFinalPrice = this.roundMoney(
       catalogUnitPrice + catalogTaxInfo.total_tax_amount,
     );
+
+    /**
+     * QUI-648 — precio por N unidades de stock en el cobro POS.
+     *
+     * `catalogUnitPrice` es el precio publicado (`base_price`), y ese precio
+     * cubre `price_unit_quantity` unidades de stock: un cable a "$5.000 el
+     * metro" guarda 5.000 con escala 1.000 y la línea llega en milímetros. El
+     * multiplicador monetario de la línea NO es la cantidad, es la cantidad
+     * dividida por la escala — 3.000 mm son 3 unidades de precio.
+     *
+     * Sin esto el cobro POS multiplicaba precio × milímetros y cobraba mil
+     * veces de más, y ninguna validación lo frenaba: este camino NO usa el
+     * total del DTO, lo reconstruye acá, así que el error nacía en el servidor
+     * y no había nada que "verificar" contra el cliente.
+     *
+     * Dos exclusiones, espejo exacto de `resolveLineUnits` en el frontend:
+     *  - Línea de PESO legado: el peso capturado ya ES el multiplicador.
+     *  - Línea con PRESENTACIÓN aplicada (`tierSnap`): `unit_price` es el
+     *    precio del paquete y `quantity` cuenta paquetes; dividir cobraría de
+     *    menos. Las unidades de stock que consume viajan aparte en
+     *    `stock_units_consumed`.
+     *
+     * Con la escala por defecto (1) `priceUnits === lineUnits` y no cambia un
+     * solo número de todo el catálogo existente.
+     */
+    const priceUnitQuantity =
+      tierSnap || Number(item.weight || 0) > 0
+        ? 1
+        : resolvePriceUnitScale(product.price_unit_quantity);
+    const priceUnits = resolvePriceUnits(lineUnits, priceUnitQuantity);
+
     const finalUnitPrice = this.resolveRequestedFinalUnitPrice(
       item,
-      lineUnits,
+      priceUnits,
       catalogFinalPrice,
     );
     const isPriceOverridden =
@@ -2413,7 +2312,8 @@ export class PaymentsService {
       description: item.description || item.notes,
       itemType: product.product_type === 'service' ? 'service' : 'physical',
       quantity: item.quantity,
-      lineUnits,
+      lineUnits: priceUnits,
+      priceUnitQuantity,
       unitBasePrice,
       finalUnitPrice,
       taxInfo,
@@ -2467,7 +2367,18 @@ export class PaymentsService {
     description?: string;
     itemType: string;
     quantity: number;
+    /**
+     * Multiplicador monetario YA convertido a unidades de precio (ver
+     * `buildPosOrderItem`). Con escala 1 es la cantidad de siempre.
+     */
     lineUnits: number;
+    /**
+     * QUI-648 — `products.price_unit_quantity` vigente al vender. Se
+     * snapshotea porque sin él el total deja de ser reproducible en cuanto el
+     * comerciante cambie el producto de "por metro" a "por rollo". `1` (o
+     * ausente) significa escala histórica y se persiste como `null`.
+     */
+    priceUnitQuantity?: number;
     unitBasePrice: number;
     finalUnitPrice: number;
     taxInfo: {
@@ -2542,6 +2453,13 @@ export class PaymentsService {
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
       stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
+      // QUI-648 — escala del precio al momento de vender. Solo se guarda
+      // cuando realmente hay escala: `null` es "una unidad de stock = una
+      // unidad de precio", que es todo el catálogo histórico.
+      price_unit_quantity:
+        params.priceUnitQuantity != null && params.priceUnitQuantity > 1
+          ? params.priceUnitQuantity
+          : null,
       // Plan KDS fire-flows: persistir la marca de "usar stock" del cajero.
       // Solo aplica a líneas `product_type='prepared'`; para el resto se
       // ignora. Default false para preservar el comportamiento retail.
@@ -2697,7 +2615,7 @@ export class PaymentsService {
     const context = RequestContextService.getContext();
     const tierSnapshots =
       dto.items && dto.items.length > 0
-        ? await this.resolveTierSnapshotsForItems(tx, dto.items, context)
+        ? await resolveTierSnapshotsForItems(tx, dto.items, context)
         : [];
 
     // Build the new order_items from the POS payload (if any).
@@ -2742,10 +2660,15 @@ export class PaymentsService {
             )
           );
         }
+        // Idem `createOrUpdateOrderFromPos`: `tax_amount_item` es por unidad
+        // de PRECIO, no por unidad de stock (QUI-648).
         const multiplier =
           Number((item as any).weight || 0) > 0
             ? 1
-            : Number(item.quantity || 1);
+            : resolvePriceUnits(
+                Number(item.quantity || 1),
+                (item as any).price_unit_quantity,
+              );
         return sum + Number(item.tax_amount_item || 0) * multiplier;
       }, 0),
     );
@@ -3093,7 +3016,7 @@ export class PaymentsService {
     // validar permiso server-side ANTES de armar items. Patrón espejo de
     // OrdersService.resolveTierSnapshotsForItems.
     const context = RequestContextService.getContext();
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
       tx,
       items,
       context,
@@ -3137,8 +3060,17 @@ export class PaymentsService {
               );
             }
 
+            // `tax_amount_item` es el impuesto de UNA unidad de precio, así
+            // que el multiplicador tiene que ser el mismo que usó el total de
+            // la línea: la cantidad convertida por la escala (QUI-648). Con
+            // escala 1 —o `null`— vuelve a ser la cantidad de siempre.
             const multiplier =
-              Number(item.weight || 0) > 0 ? 1 : Number(item.quantity || 1);
+              Number(item.weight || 0) > 0
+                ? 1
+                : resolvePriceUnits(
+                    Number(item.quantity || 1),
+                    item.price_unit_quantity,
+                  );
             return sum + Number(item.tax_amount_item || 0) * multiplier;
           }, 0),
         );

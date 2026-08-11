@@ -1,4 +1,156 @@
-import { buildOrganizationFiscalColumns } from './organization-fiscal-columns.helper';
+import {
+  buildOrganizationFiscalColumns,
+  buildTenantFiscalColumns,
+  buildStoreFiscalColumns,
+  mergeFiscalData,
+} from './organization-fiscal-columns.helper';
+
+describe('mergeFiscalData', () => {
+  it('es una fusión superficial: el payload sobrescribe claves de existing', () => {
+    const merged = mergeFiscalData(
+      { nit: '900123456', legal_name: 'Anterior', tax_responsibilities: ['O-13'] },
+      { legal_name: 'Nueva Razón Social' },
+    );
+
+    expect(merged).toEqual({
+      nit: '900123456',
+      legal_name: 'Nueva Razón Social',
+      tax_responsibilities: ['O-13'],
+    });
+  });
+
+  it('SOBRESCRIBE arrays, no los concatena (tax_responsibilities)', () => {
+    // Decisión explícita del plan §"Approach Chosen": superficial para que
+    // `tax_responsibilities` se reemplace, no se concatene. Corregir 'O-13,O-48'
+    // a 'O-13' debe dejar 'O-13' nada más.
+    const merged = mergeFiscalData(
+      { tax_responsibilities: ['O-13', 'O-48'] },
+      { tax_responsibilities: ['O-13'] },
+    );
+
+    expect(merged.tax_responsibilities).toEqual(['O-13']);
+  });
+
+  it('añade claves que no existían', () => {
+    const merged = mergeFiscalData(
+      { nit: '900123456' },
+      { municipality_code: '11001' },
+    );
+
+    expect(merged).toEqual({ nit: '900123456', municipality_code: '11001' });
+  });
+});
+
+describe('buildTenantFiscalColumns', () => {
+  it('enruta a OrganizationFiscalColumns cuando scope=organization', () => {
+    const cols = buildTenantFiscalColumns(
+      'organization',
+      { nit: '902056589', nit_type: 'NIT', person_type: 'JURIDICA' },
+      { tax_responsibilities: ['O-13'] },
+    ) as Record<string, unknown>;
+
+    expect(cols.tax_id).toBe('902056589');
+    expect(cols.verification_digit).toBe('9');
+    expect(cols.document_type).toBe('31');
+    expect(cols.person_type).toBe('1');
+    // NO debe traer columnas exclusivas de tienda:
+    expect('municipality_code' in cols).toBe(false);
+    expect('tax_id_dv' in cols).toBe(false);
+    expect('nit_type' in cols).toBe(false);
+  });
+
+  it('enruta a StoreFiscalColumns cuando scope=store', () => {
+    const cols = buildTenantFiscalColumns(
+      'store',
+      {
+        nit: '902056589',
+        nit_type: 'NIT',
+        municipality_code: '11001',
+        ciiu_code: '6201',
+      },
+      { tax_responsibilities: ['O-13'] },
+    ) as Record<string, unknown>;
+
+    expect(cols.tax_id).toBe('902056589');
+    expect(cols.tax_id_dv).toBe('9');
+    expect(cols.nit_type).toBe('NIT');
+    expect(cols.municipality_code).toBe('11001');
+    // NO debe traer columnas exclusivas de organización:
+    expect('verification_digit' in cols).toBe(false);
+    expect('document_type' in cols).toBe(false);
+  });
+
+  it('produce estado idéntico por el mismo payload entre los dos alcances cuando las columnas se solapan', () => {
+    // El mismo NIT + responsabilidades + legal_name produce columnas homólogas
+    // (tax_id, fiscal_responsibilities, tax_regime, legal_name) en ambos
+    // alcances. Las columnas que solo existen en un alcance no se comparan.
+    const org = buildTenantFiscalColumns(
+      'organization',
+      {
+        nit: '902056589',
+        nit_type: 'NIT',
+        legal_name: 'QUICKSS S.A.S.',
+        tax_responsibilities: ['O-13'],
+      },
+      { tax_responsibilities: ['O-13'] },
+    ) as Record<string, unknown>;
+    const store = buildTenantFiscalColumns(
+      'store',
+      {
+        nit: '902056589',
+        nit_type: 'NIT',
+        legal_name: 'QUICKSS S.A.S.',
+        tax_responsibilities: ['O-13'],
+      },
+      { tax_responsibilities: ['O-13'] },
+    ) as Record<string, unknown>;
+
+    for (const sharedKey of ['tax_id', 'legal_name', 'fiscal_responsibilities', 'tax_regime']) {
+      expect(org[sharedKey]).toEqual(store[sharedKey]);
+    }
+  });
+});
+
+describe('buildStoreFiscalColumns', () => {
+  it('proyecta municipality_code (que la organización no tiene)', () => {
+    const cols = buildStoreFiscalColumns(
+      { municipality_code: '44847' },
+      {},
+    );
+
+    expect(cols.municipality_code).toBe('44847');
+  });
+
+  it('deriva tax_id_dv del NIT cuando nit_type=NIT o ausente', () => {
+    const fromNit = buildStoreFiscalColumns({ nit: '902056589' }, {});
+    expect(fromNit.tax_id).toBe('902056589');
+    expect(fromNit.tax_id_dv).toBe('9');
+
+    const explicitNit = buildStoreFiscalColumns(
+      { nit: '902056589', nit_type: 'NIT' },
+      {},
+    );
+    expect(explicitNit.tax_id_dv).toBe('9');
+  });
+
+  it('no inventa DV para documentos que no son NIT', () => {
+    const cols = buildStoreFiscalColumns(
+      { nit: '1085123456', nit_type: 'CC' },
+      {},
+    );
+    expect(cols.tax_id).toBe('1085123456');
+    expect(cols.tax_id_dv).toBeNull();
+  });
+
+  it('conserva letras en NIT_EXTRANJERIA sin saneado de dígitos', () => {
+    const cols = buildStoreFiscalColumns(
+      { nit: 'ES-B12345678', nit_type: 'NIT_EXTRANJERIA' },
+      {},
+    );
+    expect(cols.tax_id).toBe('ES-B12345678');
+    expect(cols.tax_id_dv).toBeNull();
+  });
+});
 
 describe('buildOrganizationFiscalColumns', () => {
   describe('semántica PATCH', () => {

@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -13,6 +13,8 @@ import { DateRangeFilterComponent } from '../../components/date-range-filter/dat
 import { PurchasesSummary, PurchasesBySupplier, AnalyticsService } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
+import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
@@ -32,13 +34,14 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
     ExportButtonComponent,
     DateRangeFilterComponent,
     AnalyticsCardComponent,
+    ResponsiveDataViewComponent,
   ],
   template: `
     <div class="pb-6">
       <!-- Stats Cards -->
       @if (loading()) {
         <div class="stats-container">
-          @for (i of [1, 2, 3, 4]; track i) {
+          @for (i of [1, 2, 3, 4, 5]; track i) {
             <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
               <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
               <div class="h-8 bg-gray-200 rounded w-3/4"></div>
@@ -48,37 +51,46 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
       } @else {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats
-            title="Total Órdenes"
-            [value]="summary()?.total_orders || 0"
-            smallText="Órdenes de compra"
-            iconName="shopping-cart"
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-600"
-          ></app-stats>
-
-          <app-stats
-            title="Total Gastado"
+            title="Comprado (sin IVA)"
             [value]="summary()?.total_spent | currency"
-            smallText="Gasto total en proveedores"
+            [smallText]="growthLabel(summary()?.total_spent_growth)"
             iconName="dollar-sign"
             iconBgColor="bg-green-100"
             iconColor="text-green-600"
           ></app-stats>
 
           <app-stats
-            title="Pendientes"
+            [title]="taxCardTitle()"
+            [value]="taxCardValue() | currency"
+            [smallText]="taxCardHint()"
+            iconName="receipt"
+            iconBgColor="bg-indigo-100"
+            iconColor="text-indigo-600"
+          ></app-stats>
+
+          <app-stats
+            title="Órdenes"
+            [value]="summary()?.total_orders || 0"
+            [smallText]="growthLabel(summary()?.total_orders_growth)"
+            iconName="shopping-cart"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
+
+          <app-stats
+            title="Pendientes de recibir"
             [value]="summary()?.pending_orders || 0"
-            smallText="Sin completar"
+            [smallText]="pendingUnitsLabel()"
             iconName="clock"
             iconBgColor="bg-yellow-100"
             iconColor="text-yellow-600"
           ></app-stats>
 
           <app-stats
-            title="Completadas"
-            [value]="summary()?.completed_orders || 0"
-            smallText="Completadas"
-            iconName="check-circle"
+            title="Ticket promedio"
+            [value]="summary()?.average_order_value | currency"
+            [smallText]="growthLabel(summary()?.average_order_value_growth)"
+            iconName="calculator"
             iconBgColor="bg-emerald-100"
             iconColor="text-emerald-600"
           ></app-stats>
@@ -166,6 +178,32 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
         </app-card>
       </div>
 
+      <!-- Órdenes por estado: hace visible QUÉ quedó fuera del gasto y por qué -->
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+        class="md:mt-4"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Órdenes por estado</span>
+          <span class="text-xs text-[var(--color-text-secondary)]">
+            Solo los estados marcados como comprometidos suman al gasto
+          </span>
+        </div>
+        <div class="p-4">
+          <app-responsive-data-view
+            [data]="statusRows()"
+            [columns]="statusColumns"
+            [cardConfig]="statusCardConfig"
+            [loading]="loading()"
+            emptyTitle="Sin órdenes"
+            emptyMessage="Sin órdenes de compra en el período."
+          ></app-responsive-data-view>
+        </div>
+      </app-card>
+
       <!-- Quick Links -->
       <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
         <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Compras</span>
@@ -197,6 +235,114 @@ export class PurchaseSummaryComponent implements OnInit {
     preset: 'thisMonth'});
 
   readonly purchasesViews: AnalyticsView[] = getViewsByCategory('purchases');
+
+  private static readonly STATUS_LABELS: Record<string, string> = {
+    draft: 'Borrador',
+    approved: 'Aprobada',
+    partial: 'Recepción parcial',
+    received: 'Recibida',
+    cancelled: 'Cancelada',
+  };
+
+  /**
+   * A `null` growth means the previous window had NO base to compare against.
+   * Rendering it as "0 %" would assert "sin cambios" about a period that did not
+   * exist, which reads as a flat business instead of a new one.
+   */
+  growthLabel(growth: number | null | undefined): string {
+    if (growth === null || growth === undefined) {
+      return 'Sin base de comparación';
+    }
+    const sign = growth > 0 ? '+' : '';
+    return `${sign}${growth.toFixed(1)} % vs período anterior`;
+  }
+
+  /**
+   * The VAT card names what the figure ACTUALLY is for this store. A store that
+   * is not VAT-responsible (O-49) capitalizes purchase VAT into inventory cost:
+   * it never reaches a declaration, so labelling it "descontable" would lie.
+   */
+  readonly taxCardTitle = computed(() => {
+    const s = this.summary();
+    if (!s) return 'IVA de compras';
+    if (s.capitalized_tax_amount > 0 && s.deductible_tax_amount === 0) {
+      return 'IVA capitalizado';
+    }
+    return 'IVA descontable';
+  });
+
+  readonly taxCardValue = computed(() => {
+    const s = this.summary();
+    if (!s) return 0;
+    if (s.capitalized_tax_amount > 0 && s.deductible_tax_amount === 0) {
+      return s.capitalized_tax_amount;
+    }
+    return s.deductible_tax_amount || s.total_tax_amount;
+  });
+
+  readonly taxCardHint = computed(() => {
+    const s = this.summary();
+    if (!s) return '';
+    if (s.capitalized_tax_amount > 0 && s.deductible_tax_amount === 0) {
+      return 'Entra al costo del inventario';
+    }
+    return 'Se descuenta en la declaración';
+  });
+
+  readonly pendingUnitsLabel = computed(() => {
+    const units = this.summary()?.pending_units ?? 0;
+    if (units <= 0) return 'Sin unidades faltantes';
+    return `${units.toLocaleString('es-CO')} unidades faltantes`;
+  });
+
+  /**
+   * Columnas del desglose por estado. Se usa el sistema de tablas y no markup
+   * propio: en móvil una tabla cruda obliga a scroll horizontal, y acá el dato
+   * clave —si el estado cuenta al gasto— es justo el que se perdía de vista.
+   */
+  readonly statusColumns: TableColumn[] = [
+    { key: 'label', label: 'Estado', priority: 1 },
+    { key: 'count', label: 'Órdenes', align: 'right', priority: 1 },
+    {
+      key: 'committed',
+      label: 'Cuenta al gasto',
+      priority: 1,
+      badge: true,
+      transform: (value: any) => (value ? 'Sí' : 'No'),
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { true: '#16a34a', false: '#6b7280' },
+        size: 'sm',
+      },
+    },
+  ];
+
+  readonly statusCardConfig: ItemListCardConfig = {
+    titleKey: 'label',
+    badgeKey: 'committed',
+    badgeTransform: (value: any) => (value ? 'Cuenta al gasto' : 'Fuera del gasto'),
+    badgeConfig: {
+      type: 'custom',
+      colorMap: { true: '#16a34a', false: '#6b7280' },
+      size: 'sm',
+    },
+    footerKey: 'count',
+    footerLabel: 'Órdenes',
+  };
+
+  readonly statusRows = computed(() => {
+    const s = this.summary();
+    if (!s?.orders_by_status) return [];
+    const committed = s.committed_states ?? [];
+    return Object.entries(s.orders_by_status)
+      .map(([status, count]) => ({
+        status,
+        label: PurchaseSummaryComponent.STATUS_LABELS[status] ?? status,
+        count,
+        committed: committed.includes(status),
+      }))
+      .sort((a, b) => b.count - a.count);
+  });
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();

@@ -4,7 +4,7 @@ import { Observable, of } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
-export type UomDimension = 'mass' | 'volume' | 'count';
+export type UomDimension = 'mass' | 'volume' | 'length' | 'count';
 
 export interface UnitOfMeasure {
   id: number;
@@ -13,8 +13,24 @@ export interface UnitOfMeasure {
   dimension: UomDimension;
   is_base: boolean;
   factor_to_base: string | number;
+  /**
+   * Si la unidad puede ser la unidad de STOCK de un producto. El inventario es
+   * `Int` en la unidad base, así que una unidad con factor no entero —la
+   * pulgada son 25,4 mm— perdería mercancía en cada conversión. Sirve como
+   * unidad de compra o de presentación, nunca de stock. El backend rechaza lo
+   * contrario con `PROD_UOM_NOT_STOCK_ELIGIBLE`.
+   */
+  is_stock_eligible?: boolean;
   is_active: boolean;
 }
+
+/** Etiqueta en español de cada dimensión, para agrupar los selectores. */
+export const UOM_DIMENSION_LABELS: Record<UomDimension, string> = {
+  mass: 'Peso',
+  volume: 'Volumen',
+  length: 'Longitud',
+  count: 'Conteo',
+};
 
 export interface UomApiResponse<T> {
   success: boolean;

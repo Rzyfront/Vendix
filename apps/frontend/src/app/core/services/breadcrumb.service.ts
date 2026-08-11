@@ -1390,6 +1390,27 @@ export class BreadcrumbService {
       parent: 'Configuración',
       icon: 'sliders',
     },
+    // Configuración General pasó de una pantalla única a seis pestañas con ruta
+    // propia, y `findRouteMatch` exige coincidencia exacta antes de probar
+    // patrones: una URL de 4 segmentos NO cae en la entrada de 3 de arriba, así
+    // que sin esto las seis pestañas mostraban el breadcrumb por defecto
+    // ("Panel Principal / Dashboard").
+    //
+    // Es UNA entrada con patrón y no seis literales a propósito. `parent` se
+    // resuelve por TÍTULO con un `find`, y hay seis entradas tituladas 'General'
+    // y cinco 'Configuración': un `parent: 'General'` en las pestañas encontraba
+    // primero la de `/organization/settings/general` y la miga terminaba
+    // enlazando al panel de organización. Repitiendo título y padre de la
+    // entrada de arriba, la miga queda "Configuración / General" igual que
+    // cuando era una sola pantalla, sin introducir ambigüedad nueva. La pestaña
+    // concreta ya se ve en las pestañas del sticky-header y en el `title` del
+    // documento, que cada ruta hija declara.
+    {
+      path: '/admin/settings/general/:tab',
+      title: 'General',
+      parent: 'Configuración',
+      icon: 'sliders',
+    },
     {
       path: '/admin/settings/users',
       title: 'Usuarios',

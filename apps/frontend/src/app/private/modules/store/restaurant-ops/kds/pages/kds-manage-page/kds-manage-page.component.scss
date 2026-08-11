@@ -1,0 +1,224 @@
+/* Gestión de KDS — QUI-651. Denso y tabular: es una pantalla de configuración que
+   se consulta, no un tablero que se opera con las manos ocupadas. */
+
+.kds-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 0 2rem;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.section-stats {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+}
+
+.empty,
+.muted {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.station-list,
+.session-list,
+.sum-list,
+.hist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.station-row,
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, #fff);
+
+  /* Una estación inactiva se atenúa pero NO se oculta: su historial de turnos
+     sigue siendo auditable y el operador tiene que poder encontrarla. */
+  &.is-off {
+    opacity: 0.6;
+  }
+}
+
+.session-row {
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-primary, #3b82f6);
+  }
+}
+
+.station-main,
+.session-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.station-name,
+.session-station {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.station-meta,
+.session-meta {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+}
+
+.station-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.session-cost {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+
+  strong {
+    font-size: 0.95rem;
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── Formulario ─────────────────────────────────────────────────────── */
+
+.station-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.default-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.form-hint {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+}
+
+/* ── Detalle del turno ──────────────────────────────────────────────── */
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+}
+
+.detail-title {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.sum-list li,
+.hist-list li {
+  display: grid;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.3rem;
+  font-size: 0.8rem;
+
+  &:nth-child(odd) {
+    background: var(--color-surface-alt, #f9fafb);
+  }
+}
+
+.sum-list li {
+  grid-template-columns: 1fr auto auto;
+}
+
+/* El historial lleva pedido + plato + insumo: es la vista que explica de dónde
+   salió cada peso del resumen, así que necesita las cinco columnas. */
+.hist-list li {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+}
+
+.sum-qty,
+.sum-cost,
+.hist-qty,
+.hist-cost {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sum-name,
+.hist-order,
+.hist-dish,
+.hist-ing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-total {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 640px) {
+  /* En móvil las cinco columnas del historial no caben: se apilan pedido/plato
+     arriba y las cifras abajo, en vez de comprimirse a texto ilegible. */
+  .hist-list li {
+    grid-template-columns: 1fr auto;
+  }
+}

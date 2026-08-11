@@ -1,5 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, stores, inventory_locations, addresses } from '@prisma/client';
+import {
+  Prisma,
+  stores,
+  inventory_locations,
+  addresses,
+  cash_registers,
+  kds,
+} from '@prisma/client';
 import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
 
@@ -58,13 +65,74 @@ export interface StoreBootstrapInput {
     name?: string;
     code?: string;
   };
+  /**
+   * Optional identifiers for the default cash register. Defaults to
+   * `Caja principal` / `PRINCIPAL` (see `DEFAULT_CASH_REGISTER`).
+   */
+  cash_register_overrides?: {
+    name?: string;
+    code?: string;
+  };
+  /**
+   * Optional identifiers for the default KDS station. Only consulted when the
+   * store's industries include `restaurant`. Defaults to `Cocina` / `COCINA`.
+   */
+  kds_overrides?: {
+    name?: string;
+    code?: string;
+  };
 }
 
 export interface StoreBootstrapResult {
   store: stores;
   default_location: inventory_locations;
   address: addresses | null;
+  /**
+   * The store's default cash register. Always present for stores created
+   * through this helper — a store must be able to charge without any prior
+   * configuration (QUI-654).
+   */
+  default_cash_register: cash_registers;
+  /**
+   * The store's default KDS station, or `null` when the store's industries do
+   * not include `restaurant` — a retail store has nothing to cook.
+   */
+  default_kds: kds | null;
 }
+
+/**
+ * Identifiers of the cash register every store is born with. Kept as a
+ * module constant so the bootstrap path, the superadmin path and the backfill
+ * migration all agree on the same `code` — the backfill relies on it to stay
+ * idempotent against `@@unique([store_id, code])`.
+ */
+export const DEFAULT_CASH_REGISTER = {
+  name: 'Caja principal',
+  code: 'PRINCIPAL',
+  description:
+    'Caja creada automaticamente para que la tienda pueda cobrar sin configuracion previa.',
+} as const;
+
+/**
+ * Identifiers of the KDS station every restaurant store is born with.
+ *
+ * `code` MUST match the backfill in
+ * `prisma/migrations/20260809050000_kds_stations_and_sessions/migration.sql`:
+ * the unique `(store_id, code)` is what makes the migration (existing stores)
+ * and this bootstrap (new stores) converge on one row instead of two.
+ */
+export const DEFAULT_KDS = {
+  name: 'Cocina',
+  code: 'COCINA',
+  description:
+    'Estacion creada automaticamente para que la tienda tenga tablero sin configurar nada.',
+} as const;
+
+/**
+ * Industry that makes a store need a kitchen display. Kept next to the default
+ * so the gate and the identifiers travel together.
+ */
+const KDS_INDUSTRY = 'restaurant';
 
 /**
  * StoreBootstrapHelper
@@ -156,6 +224,165 @@ export class StoreBootstrapHelper {
     // transaction we rely on explicit `organization_id` and `store_id`
     // fields — which this helper always sets.
     return (this.prisma as any).$transaction(exec);
+  }
+
+  /**
+   * Ensure the store owns at least one cash register, creating the default one
+   * when it owns none. Idempotent by design: re-running it never produces a
+   * second register.
+   *
+   * Why this is public and takes an explicit `store_id`
+   * ---------------------------------------------------
+   * There are THREE store-creation paths, not two. The organization service
+   * and the onboarding wizard both funnel through
+   * `createStoreWithDefaultLocation`, but `SuperadminStoresService.create`
+   * writes `stores` directly and is **not** transactional. Rather than
+   * refactor that path's transaction model (out of scope), it calls this same
+   * method after its store row exists. One implementation, three call sites.
+   *
+   * Idempotency contract
+   * --------------------
+   * The guard is "does this store have ANY cash register", not "does it have
+   * one with code PRINCIPAL". A store where the operator already created
+   * `CAJA-1` must not also get a `PRINCIPAL` it never asked for.
+   *
+   * `location_id` is deliberately left NULL: the POS resolves its sale
+   * location from `stores.default_location_id`, and pinning the register to a
+   * location here would override that cascade for every new store.
+   *
+   * Why it opens its own transaction when none is passed
+   * ---------------------------------------------------
+   * The scoped services each expose an explicit allow-list of models, and
+   * `cash_registers` is not on `GlobalPrismaService`'s. `$transaction`
+   * delegates to the raw `baseClient`, so the callback client carries EVERY
+   * model — at the cost of losing the tenant filter, which is why every write
+   * below names `store_id` explicitly.
+   */
+  async ensureDefaultCashRegister(
+    params: {
+      store_id: number;
+      name?: string;
+      code?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<cash_registers> {
+    if (!tx) {
+      return (this.prisma as any).$transaction((t: Prisma.TransactionClient) =>
+        this.ensureDefaultCashRegister(params, t),
+      );
+    }
+    const client = tx;
+
+    const existing = await client.cash_registers.findFirst({
+      where: { store_id: params.store_id },
+      orderBy: { id: 'asc' },
+    });
+    if (existing) return existing;
+
+    const now = new Date();
+    try {
+      return await client.cash_registers.create({
+        data: {
+          store_id: params.store_id,
+          name: params.name ?? DEFAULT_CASH_REGISTER.name,
+          code: params.code ?? DEFAULT_CASH_REGISTER.code,
+          description: DEFAULT_CASH_REGISTER.description,
+          is_active: true,
+          location_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+    } catch (e: any) {
+      // P2002 on (store_id, code) means a concurrent caller won the race.
+      // Read theirs instead of failing the whole bootstrap over a register
+      // that now exists anyway.
+      if (e?.code === 'P2002') {
+        const raced = await client.cash_registers.findFirst({
+          where: { store_id: params.store_id },
+          orderBy: { id: 'asc' },
+        });
+        if (raced) return raced;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Ensure a restaurant store owns at least one KDS station, creating the
+   * default one when it owns none. Idempotent, same contract as
+   * `ensureDefaultCashRegister`.
+   *
+   * Returns `null` for stores that do not need a station — that is a valid
+   * outcome, not a failure: a retail store has nothing to cook, and creating an
+   * empty board for it would put a dead module in its panel.
+   *
+   * Why `is_default: true` matters beyond convenience
+   * -------------------------------------------------
+   * `fireOrderItemsInTx` resolves each item's destination station through
+   * `products.kds_id ?? <default station>`, and fails loudly with
+   * KITCHEN_FIRE_NO_DEFAULT_KDS when there is no default. So this row is not a
+   * nicety: without it a restaurant store cannot send anything to the kitchen.
+   *
+   * The DB carries a partial unique index (`kds_one_default_per_store`,
+   * `WHERE is_default`), so a concurrent caller cannot produce a second default.
+   */
+  async ensureDefaultKds(
+    params: {
+      store_id: number;
+      industries?: readonly string[] | null;
+      name?: string;
+      code?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<kds | null> {
+    const industries = (params.industries ?? []) as string[];
+    if (!industries.includes(KDS_INDUSTRY)) return null;
+
+    if (!tx) {
+      return (this.prisma as any).$transaction((t: Prisma.TransactionClient) =>
+        this.ensureDefaultKds(params, t),
+      );
+    }
+    const client = tx;
+
+    // Guard is "does this store have ANY station", mirroring the cash register:
+    // a restaurant that already configured BARRA must not also get a COCINA it
+    // never asked for.
+    const existing = await client.kds.findFirst({
+      where: { store_id: params.store_id },
+      orderBy: { id: 'asc' },
+    });
+    if (existing) return existing;
+
+    const now = new Date();
+    try {
+      return await client.kds.create({
+        data: {
+          store_id: params.store_id,
+          name: params.name ?? DEFAULT_KDS.name,
+          code: params.code ?? DEFAULT_KDS.code,
+          description: DEFAULT_KDS.description,
+          is_active: true,
+          is_default: true,
+          location_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+    } catch (e: any) {
+      // P2002 covers both unique indexes here: (store_id, code) and the partial
+      // one-default-per-store. Either way a station now exists — read the
+      // winner instead of failing the bootstrap over it.
+      if (e?.code === 'P2002') {
+        const raced = await client.kds.findFirst({
+          where: { store_id: params.store_id },
+          orderBy: { id: 'asc' },
+        });
+        if (raced) return raced;
+      }
+      throw e;
+    }
   }
 
   private validateInput(input: StoreBootstrapInput): void {
@@ -321,10 +548,45 @@ export class StoreBootstrapHelper {
       },
     });
 
+    // 5) Default cash register. A store that cannot charge is not operable,
+    //    and until QUI-654 nothing in either creation path created one — the
+    //    first cashier hit an empty register list and had to configure it
+    //    before selling. Inside the same transaction on purpose: a store must
+    //    never exist without its caja, and a listener would admit that window.
+    const default_cash_register = await this.ensureDefaultCashRegister(
+      {
+        store_id: store.id,
+        name: input.cash_register_overrides?.name,
+        code: input.cash_register_overrides?.code,
+      },
+      client,
+    );
+
+    // 6) Default KDS station, only for stores that cook. Same transaction and
+    //    same reason as the caja: `fireOrderItemsInTx` refuses to fire without a
+    //    default station, so a restaurant store committed without one could take
+    //    orders and never send them to the kitchen.
+    //
+    //    `store.industries` is read from the PERSISTED row rather than from
+    //    `input.store_data.industries`, because the store row applies the
+    //    `['retail']` default when the caller passes nothing — reading the input
+    //    would miss that and could gate on a value the DB does not hold.
+    const default_kds = await this.ensureDefaultKds(
+      {
+        store_id: store.id,
+        industries: store.industries as unknown as string[],
+        name: input.kds_overrides?.name,
+        code: input.kds_overrides?.code,
+      },
+      client,
+    );
+
     return {
       store: storeWithDefault,
       default_location,
       address,
+      default_cash_register,
+      default_kds,
     };
   }
 }

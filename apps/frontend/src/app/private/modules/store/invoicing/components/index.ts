@@ -8,5 +8,6 @@ export * from './resolutions/resolutions.component';
 export * from './resolutions/resolution-create/resolution-create.component';
 export * from './resolutions/resolutions-page.component';
 export * from './dian-config/dian-config.component';
+export * from './dian-config/dian-axis-detail.component';
 export * from './dian-config/dian-config-wizard.component';
 export * from './dian-config/dian-setup-guide.component';
