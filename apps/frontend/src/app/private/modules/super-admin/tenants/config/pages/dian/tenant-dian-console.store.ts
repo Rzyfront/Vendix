@@ -67,20 +67,23 @@ export interface TenantEmissionStatus {
 /**
  * Estado DIAN del tenant abierto, compartido por las cinco sub-vistas.
  *
- * ## Por qué el agregado se compone AQUÍ y no llega hecho
+ * ## De dónde sale cada pieza
  *
- * `GET {rail}/dian-config/fiscal-readiness` existe en el rail del comerciante
- * (`store/invoicing`) pero **no en el de super admin**: `TenantDianConfigController`
- * no lo declara, así que la petición caería en `dian-config/:configId` y
- * `ParseIntPipe` la rechazaría con un 400 sobre el literal. Mientras ese endpoint
- * no exista en el rail de tenants, los cuatro ejes se componen desde el cliente
- * con las tres lecturas que el rail SÍ expone:
+ * `GET {rail}/dian-config/fiscal-readiness` **ya existe también en el rail de
+ * super admin**, así que el checklist de los cuatro ejes llega hecho en UNA
+ * lectura. Antes se componía aquí pidiendo `dian-config/:id/production-readiness`
+ * una vez por configuración: un N+1 que además abría la puerta a que cada consola
+ * compusiera el estado a su manera y acabaran mostrando checklists distintos
+ * sobre la misma tienda.
  *
- * - `dian-config` — las configuraciones, con su `configuration_type`.
- * - `dian-config/:id/production-readiness` — el checklist por configuración.
- * - `resolutions` — TODAS las resoluciones, de todos los documentos, con
- *   `technical_key_set` y `resolution_number` (el checklist sólo devuelve las de
- *   factura de venta activas, que no bastan para la vista de Numeración).
+ * Siguen haciendo falta dos lecturas más, y no por inercia:
+ *
+ * - `dian-config` — las configuraciones **con sus diez campos de certificado**
+ *   (vigencia, huella, titular, emisor, serie, custodia KMS), que el agregado no
+ *   devuelve y sin los cuales la vista de Certificado no puede pintarse.
+ * - `resolutions` — TODAS las resoluciones del tenant. El agregado sólo lista las
+ *   de ejes CON configuración, así que un tenant con numeración registrada y sin
+ *   habilitación aún se vería sin resoluciones en la vista de Numeración.
  *
  * La regla que el agregado del backend impone se respeta igual: **los cuatro
  * ejes se publican SIEMPRE**, tengan configuración o no. Un eje ausente de la
@@ -316,35 +319,45 @@ export class TenantDianConsoleStore {
   }
 
   /**
-   * Checklist de cada configuración existente.
+   * Checklist de cada configuración existente, en UNA lectura.
    *
-   * El fallo de UNA no tumba las demás: `catchError` la reporta como `null`, que
-   * la tarjeta lee como «sin evaluar» — honesto y distinto de «cumple todo».
+   * El agregado del rail (`dian-config/fiscal-readiness`) ya evalúa los cuatro
+   * ejes con el MISMO `evaluateProductionReadiness` que bloquea la emisión, así
+   * que aquí sólo hay que indexar por `config_id`. Antes esto era un `forkJoin`
+   * de una petición por configuración; el N+1 desapareció con el endpoint, y con
+   * él el riesgo de que esta consola compusiera un checklist distinto del que ve
+   * el comerciante sobre la misma tienda.
+   *
+   * Un fallo NO tumba la vista: se devuelve el mapa vacío, que las tarjetas leen
+   * como «sin evaluar» — honesto, y distinto de «cumple todo». Los ejes siguen
+   * pintándose desde `dian-config`.
    */
   private loadReadiness(configs: readonly TenantDianConfigRow[]) {
     if (!configs.length) {
       return of(new Map<number, ProductionReadinessReport | null>());
     }
 
-    return forkJoin(
-      configs.map((config) =>
-        this.api.getDianProductionReadiness(config.id).pipe(
-          map(
-            (response: unknown) =>
-              [
-                config.id,
-                this.unwrapObject(response) as ProductionReadinessReport | null,
-              ] as const,
-          ),
-          catchError(() =>
-            of([config.id, null] as readonly [
-              number,
-              ProductionReadinessReport | null,
-            ]),
-          ),
-        ),
-      ),
-    ).pipe(map((entries) => new Map(entries)));
+    return this.api.getFiscalReadiness().pipe(
+      map((response: unknown) => {
+        const envelope = this.unwrapObject(response) as {
+          axes?: readonly {
+            config_id?: number | null;
+            readiness?: ProductionReadinessReport | null;
+          }[];
+        } | null;
+
+        const byConfigId = new Map<number, ProductionReadinessReport | null>();
+        for (const axis of envelope?.axes ?? []) {
+          // Un eje sin configuración trae `config_id: null` — es legítimo y no
+          // se indexa: no hay tarjeta de configuración a la que pertenezca.
+          if (typeof axis?.config_id === 'number') {
+            byConfigId.set(axis.config_id, axis.readiness ?? null);
+          }
+        }
+        return byConfigId;
+      }),
+      catchError(() => of(new Map<number, ProductionReadinessReport | null>())),
+    );
   }
 
   /**
