@@ -9,7 +9,7 @@ import { colors, colorScales, spacing, typography, borderRadius } from '@/shared
 import { Icon } from '@/shared/components/icon/icon';
 import { formatCurrency } from '@/shared/utils/currency';
 import { OrderService, CustomerService } from '@/features/store/services';
-import { useCartStore } from '@/features/store/pos/store/cart.store';
+import { useCartStore, getLineSubtotal } from '@/features/store/pos/store/cart.store';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
@@ -216,10 +216,18 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
           product_sku: i.product.sku || undefined,
           variant_sku: i.variant?.sku || undefined,
           quantity: i.quantity,
+          // `unit_price` es el precio PUBLICADO (por `price_unit_quantity`
+          // unidades de stock, o por paquete si la linea lleva presentacion).
+          // El total lo resuelve `getLineSubtotal`, que aplica la escala y
+          // redondea una sola vez al final: 2.500 mm de un cable a $5.000/m
+          // son $12.500, no $12.500.000 ni $25.000.
           unit_price: Number(i.unitPrice.toFixed(2)),
-          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
           tax_amount_item: Number(i.taxAmount.toFixed(2)),
           cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          // El backend re-resuelve `stock_units_consumed` desde la tarifa; el
+          // cliente solo declara CUAL presentacion aplico.
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
         })),
         subtotal: Number(summary.subtotal.toFixed(2)),
         tax_amount: Number(summary.taxAmount.toFixed(2)),
@@ -296,10 +304,18 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
           product_sku: i.product.sku || undefined,
           variant_sku: i.variant?.sku || undefined,
           quantity: i.quantity,
+          // `unit_price` es el precio PUBLICADO (por `price_unit_quantity`
+          // unidades de stock, o por paquete si la linea lleva presentacion).
+          // El total lo resuelve `getLineSubtotal`, que aplica la escala y
+          // redondea una sola vez al final: 2.500 mm de un cable a $5.000/m
+          // son $12.500, no $12.500.000 ni $25.000.
           unit_price: Number(i.unitPrice.toFixed(2)),
-          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
           tax_amount_item: Number(i.taxAmount.toFixed(2)),
           cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          // El backend re-resuelve `stock_units_consumed` desde la tarifa; el
+          // cliente solo declara CUAL presentacion aplico.
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
         })),
         subtotal: Number(summary.subtotal.toFixed(2)),
         tax_amount: Number(summary.taxAmount.toFixed(2)),

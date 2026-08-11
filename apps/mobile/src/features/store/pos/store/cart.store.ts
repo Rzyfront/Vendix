@@ -9,6 +9,12 @@ import type {
   Product,
   ProductVariant,
 } from '@/features/store/types';
+import {
+  resolveLineTotal,
+  resolvePriceUnitQuantity,
+  resolveStockUnitsConsumed,
+  type SaleUnitPresentation,
+} from '@/features/store/pricing';
 
 interface CustomItemData {
   name: string;
@@ -19,10 +25,30 @@ interface CustomItemData {
 }
 
 interface CartActions {
-  addItem: (product: Product, variant?: ProductVariant | null, quantity?: number) => void;
+  /**
+   * Agrega una línea al carrito.
+   *
+   * @param presentation Presentación de venta (`price_tiers.kind='sale_unit'`)
+   *   ya resuelta con `resolveSaleUnitPresentations`. Cuando llega, `quantity`
+   *   cuenta PAQUETES, el precio de la línea es el del paquete completo y el
+   *   inventario descontará `quantity × packSize`. Sin ella el comportamiento
+   *   es exactamente el histórico.
+   */
+  addItem: (
+    product: Product,
+    variant?: ProductVariant | null,
+    quantity?: number,
+    presentation?: SaleUnitPresentation | null,
+  ) => void;
   addCustomItem: (custom: CustomItemData) => void;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => void;
+  /**
+   * Cambia (o quita, con `null`) la presentación de una línea ya en el
+   * carrito. Recalcula precio, total y consumo de stock con las mismas reglas
+   * que `addItem`.
+   */
+  applyPresentation: (itemId: string, presentation: SaleUnitPresentation | null) => void;
   setCustomer: (customer: PosCustomer | null) => void;
   setNotes: (notes: string) => void;
   setMode: (mode: PosMode) => void;
@@ -88,30 +114,72 @@ function isPriceTaxInclusive(product: Product): boolean {
 }
 
 /**
+ * Escala de precio EFECTIVA de una línea.
+ *
+ * Una línea con presentación aplicada NO usa `price_unit_quantity`: ahí
+ * `unitPrice` ya es el precio del paquete completo y `quantity` cuenta
+ * paquetes, así que dividir otra vez cobraría de menos. Es exactamente la
+ * exclusión que el backend expresa con `options.hasTierAtIndex` en
+ * `normalizePriceUnitLines`.
+ */
+function getEffectivePriceUnitQuantity(item: {
+  priceUnitQuantity?: number | null;
+  appliedPriceTierId?: number | null;
+}): number {
+  if (item.appliedPriceTierId != null) return 1;
+  return resolvePriceUnitQuantity(item.priceUnitQuantity);
+}
+
+/**
+ * Subtotal NETO de una línea (sin impuesto cuando el precio es tax-exclusive).
+ *
+ * Es el reemplazo de `unitPrice × quantity`: aplica la escala del producto y
+ * redondea a centavos UNA sola vez, al final. Con `price_unit_quantity = 1`
+ * —todo el catálogo histórico— y `quantity` entera devuelve exactamente
+ * `unitPrice × quantity`: cero regresión.
+ */
+export function getLineSubtotal(item: CartItem): number {
+  return resolveLineTotal(
+    item.unitPrice,
+    item.quantity,
+    getEffectivePriceUnitQuantity(item),
+  );
+}
+
+/**
  * Impuesto y precio final de una línea.
  *
  * Con precio tax-exclusive el impuesto se suma encima. Con precio
  * tax-inclusive el impuesto ya está adentro, así que hay que EXTRAERLO
  * (`p * rate / (1 + rate)`), no ponerlo en 0: `summary.taxAmount` se manda al
- * backend como `tax_amount` al crear la orden (`pos-payment-modal.tsx:225`,
- * `shipping-modal.tsx:126`) y se imprime como "IVA" en el footer, así que un
+ * backend como `tax_amount` al crear la orden (`pos-payment-modal.tsx`,
+ * `shipping-modal.tsx`) y se imprime como "IVA" en el footer, así que un
  * 0 acá declara una venta gravada con IVA cero.
+ *
+ * El impuesto se calcula sobre el subtotal YA escalado, nunca sobre
+ * `unitPrice × quantity`: la base gravable de 2.500 mm de cable a $5.000/m son
+ * $12.500, no $12.500.000.
  */
-function computeLineTax(
+function computeLineAmounts(
   unitPrice: number,
   quantity: number,
+  priceUnitQuantity: number,
   rateSum: number,
   inclusive: boolean,
-): { taxAmount: number; finalPrice: number } {
+): { taxAmount: number; finalPrice: number; totalPrice: number } {
+  const lineSubtotal = resolveLineTotal(unitPrice, quantity, priceUnitQuantity);
   if (!inclusive) {
+    const taxAmount = lineSubtotal * rateSum;
     return {
-      taxAmount: unitPrice * quantity * rateSum,
+      taxAmount,
       finalPrice: unitPrice * (1 + rateSum),
+      totalPrice: lineSubtotal + taxAmount,
     };
   }
   return {
-    taxAmount: (unitPrice * quantity * rateSum) / (1 + rateSum),
+    taxAmount: (lineSubtotal * rateSum) / (1 + rateSum),
     finalPrice: unitPrice,
+    totalPrice: lineSubtotal,
   };
 }
 
@@ -122,16 +190,59 @@ function getSellableUnitPrice(product: Product, variant?: ProductVariant | null)
   return Number(product.base_price) || 0;
 }
 
-function buildCartItem(product: Product, variant?: ProductVariant | null, quantity: number = 1): CartItem {
-  const unitPrice = getSellableUnitPrice(product, variant);
+/**
+ * Campos de presentación de una línea. Con `presentation` nula quedan todos
+ * apagados y la línea vuelve a la aritmética por unidad de stock.
+ */
+function buildPresentationFields(
+  quantity: number,
+  presentation?: SaleUnitPresentation | null,
+): Pick<
+  CartItem,
+  'appliedPriceTierId' | 'appliedPriceTierName' | 'isPackageUnit' | 'unitsPerPackage' | 'stockUnitsConsumed'
+> {
+  if (!presentation) {
+    return {
+      appliedPriceTierId: null,
+      appliedPriceTierName: null,
+      isPackageUnit: false,
+      unitsPerPackage: null,
+      stockUnitsConsumed: null,
+    };
+  }
+  const packSize = presentation.packSize;
+  return {
+    appliedPriceTierId: presentation.tierId,
+    appliedPriceTierName: presentation.name,
+    isPackageUnit: packSize > 1,
+    unitsPerPackage: packSize > 1 ? packSize : null,
+    stockUnitsConsumed: resolveStockUnitsConsumed(quantity, packSize),
+  };
+}
+
+function buildCartItem(
+  product: Product,
+  variant?: ProductVariant | null,
+  quantity: number = 1,
+  presentation?: SaleUnitPresentation | null,
+): CartItem {
+  // Con presentación el precio de la línea es el del PAQUETE completo, ya
+  // resuelto por `resolveSaleUnitPresentations` (override explícito o regla de
+  // descuento sobre el precio por unidad de stock).
+  const unitPrice = presentation
+    ? presentation.unitPrice
+    : getSellableUnitPrice(product, variant);
+  const priceUnitQuantity = presentation
+    ? 1
+    : resolvePriceUnitQuantity(product.price_unit_quantity);
   const rateSum = getTaxRateSum(product);
-  const { taxAmount, finalPrice } = computeLineTax(
+  const { taxAmount, finalPrice, totalPrice } = computeLineAmounts(
     unitPrice,
     quantity,
+    priceUnitQuantity,
     rateSum,
     isPriceTaxInclusive(product),
   );
-  const totalPrice = quantity * finalPrice;
   const variant_display_name = variant?.name || variant?.attributes || undefined;
 
   return {
@@ -144,24 +255,41 @@ function buildCartItem(product: Product, variant?: ProductVariant | null, quanti
     totalPrice,
     taxAmount,
     variant_display_name,
+    priceUnitQuantity: resolvePriceUnitQuantity(product.price_unit_quantity),
+    ...buildPresentationFields(quantity, presentation),
   };
 }
 
 function recalcItem(item: CartItem): CartItem {
   const rateSum = getTaxRateSum(item.product);
-  const unitPrice = getSellableUnitPrice(item.product, item.variant);
-  const { taxAmount, finalPrice } = computeLineTax(
+  // Una línea con presentación conserva el precio del paquete que resolvió al
+  // agregarse; sin presentación se re-lee la cascada del producto/variante.
+  const unitPrice =
+    item.appliedPriceTierId != null
+      ? item.unitPrice
+      : getSellableUnitPrice(item.product, item.variant);
+  const { taxAmount, finalPrice, totalPrice } = computeLineAmounts(
     unitPrice,
     item.quantity,
+    getEffectivePriceUnitQuantity(item),
     rateSum,
     isPriceTaxInclusive(item.product),
   );
-  const totalPrice = item.quantity * finalPrice;
-  return { ...item, unitPrice, taxAmount, finalPrice, totalPrice };
+  return {
+    ...item,
+    unitPrice,
+    taxAmount,
+    finalPrice,
+    totalPrice,
+    stockUnitsConsumed: resolveStockUnitsConsumed(
+      item.quantity,
+      item.unitsPerPackage,
+    ),
+  };
 }
 
 function computeSummary(items: CartItem[], discounts: CartDiscount[]): CartSummary {
-  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const subtotal = items.reduce((sum, i) => sum + getLineSubtotal(i), 0);
   const taxAmount = items.reduce((sum, i) => sum + i.taxAmount, 0);
   const discountAmount = discounts.reduce((sum, d) => sum + d.amount, 0);
   const total = subtotal + taxAmount - discountAmount;
@@ -173,10 +301,17 @@ function computeSummary(items: CartItem[], discounts: CartDiscount[]): CartSumma
 export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   ...initialState,
 
-  addItem: (product, variant, quantity = 1) => {
+  addItem: (product, variant, quantity = 1, presentation = null) => {
     const { items } = get();
+    // La presentación participa de la IDENTIDAD de la línea: 2 bultos y 3 kilos
+    // del mismo producto son DOS líneas, no una de 5. Fusionarlas perdería el
+    // packSize de una de las dos y el inventario descontaría de menos.
+    const tierId = presentation?.tierId ?? null;
     const existing = items.find(
-      (i) => i.product.id === product.id && (i.variant?.id ?? null) === (variant?.id ?? null),
+      (i) =>
+        i.product.id === product.id &&
+        (i.variant?.id ?? null) === (variant?.id ?? null) &&
+        (i.appliedPriceTierId ?? null) === tierId,
     );
 
     if (existing) {
@@ -186,17 +321,42 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
       const summary = computeSummary(updated, get().discounts);
       set({ items: updated, summary });
     } else {
-      const newItem = buildCartItem(product, variant, quantity);
+      const newItem = buildCartItem(product, variant, quantity, presentation);
       const updated = [...items, newItem];
       const summary = computeSummary(updated, get().discounts);
       set({ items: updated, summary });
     }
   },
 
+  applyPresentation: (itemId, presentation) => {
+    const { items, discounts } = get();
+    const target = items.find((i) => i.id === itemId);
+    if (!target || target.itemType === 'custom') return;
+
+    const unitPrice = presentation
+      ? presentation.unitPrice
+      : getSellableUnitPrice(target.product, target.variant);
+    const next = recalcItem({
+      ...target,
+      unitPrice,
+      ...buildPresentationFields(target.quantity, presentation),
+    });
+    const updated = items.map((i) => (i.id === itemId ? next : i));
+    set({ items: updated, summary: computeSummary(updated, discounts) });
+  },
+
   addCustomItem: (custom) => {
     const { items, discounts } = get();
-    const taxAmount = custom.price * custom.quantity * (custom.taxRate ?? 0);
-    const finalPrice = custom.price * (1 + (custom.taxRate ?? 0));
+    // Un ítem libre nunca tiene escala ni presentación: su precio es el que el
+    // cajero tipeó, por unidad. Pasa por el mismo helper para que el redondeo
+    // del total sea el mismo que el de una línea de catálogo.
+    const { taxAmount, finalPrice, totalPrice } = computeLineAmounts(
+      custom.price,
+      custom.quantity,
+      1,
+      custom.taxRate ?? 0,
+      false,
+    );
     const newItem: CartItem = {
       id: generateItemId(),
       product: {
@@ -238,10 +398,12 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
       quantity: custom.quantity,
       unitPrice: custom.price,
       finalPrice,
-      totalPrice: custom.quantity * finalPrice,
+      totalPrice,
       taxAmount: taxAmount,
       variant_display_name: custom.description || undefined,
       itemType: 'custom',
+      priceUnitQuantity: 1,
+      ...buildPresentationFields(custom.quantity, null),
     };
     const updated = [...items, newItem];
     const summary = computeSummary(updated, discounts);
@@ -272,7 +434,7 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
 
   applyDiscount: (type, value, description) => {
     const { items, discounts } = get();
-    const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+    const subtotal = items.reduce((sum, i) => sum + getLineSubtotal(i), 0);
     const taxAmount = items.reduce((sum, i) => sum + i.taxAmount, 0);
     const preDiscountTotal = subtotal + taxAmount;
     const amount = type === 'percentage' ? (value / 100) * preDiscountTotal : value;

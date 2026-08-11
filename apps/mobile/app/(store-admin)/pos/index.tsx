@@ -16,7 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
-import { useCartStore } from '@/features/store/pos/store/cart.store';
+import { useCartStore, getLineSubtotal } from '@/features/store/pos/store/cart.store';
+import type { SaleUnitPresentation } from '@/features/store/pricing';
 import { CashRegisterService } from '@/features/pos/services/cash-register.service';
 import { PosTicketService, type PosTicketData } from '@/features/pos/services/pos-ticket.service';
 import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
@@ -42,6 +43,7 @@ import {
   PosPaymentModal,
   PosOrderCreateModal,
   PosLayawayConfigModal,
+  PosPresentationModal,
   PosCashOpenModal,
   PosCashCloseModal,
   PosCashMovementModal,
@@ -984,6 +986,12 @@ function buildPosTicketData(order: { orderNumber: string } & PosReceiptData): Po
       // backend. El renderizador omite la línea cuando es 0 en vez de imprimir
       // un `Imp: 0.00%` inventado.
       tax: Number(item.taxAmount) || 0,
+      // QUI-648 — la presentación en el papel. Sin esto un bulto x50 se imprime
+      // igual que una unidad suelta y el cliente no puede auditar qué compró.
+      // El renderizador ya sabe pintarlos (`PosTicketItem`).
+      appliedPriceTierName: item.appliedPriceTierName ?? null,
+      isPackageUnit: item.isPackageUnit === true,
+      unitsPerPackage: item.unitsPerPackage ?? null,
     })),
     subtotal: Number(order.summary?.subtotal) || 0,
     tax: Number(order.summary?.taxAmount) || 0,
@@ -1921,10 +1929,17 @@ const PaymentSheet = ({
           variant_sku: i.variant?.sku || undefined,
           variant_attributes: parseVariantAttributes(i.variant?.attributes),
           quantity: i.quantity,
+          // `unit_price` es el precio PUBLICADO (por `price_unit_quantity`
+          // unidades de stock, o por paquete si la linea lleva presentacion).
+          // El total lo resuelve `getLineSubtotal`, que aplica la escala y
+          // redondea una sola vez al final.
           unit_price: Number(i.unitPrice.toFixed(2)),
-          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
           tax_amount_item: Number(i.taxAmount.toFixed(2)),
           cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          // El backend re-resuelve `stock_units_consumed` desde la tarifa; el
+          // cliente solo declara CUAL presentacion aplico.
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
         })),
         subtotal: Number(summary.subtotal.toFixed(2)),
         tax_amount: Number(summary.taxAmount.toFixed(2)),
@@ -2274,6 +2289,9 @@ const PosScreen = () => {
   }, [windowWidth, numColumns]);
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  // QUI-648 — selector de presentación de venta (bulto, caja, rollo).
+  const [showPresentations, setShowPresentations] = useState(false);
+  const [presentationProduct, setPresentationProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [showCartModal, setShowCartModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -2487,6 +2505,32 @@ const PosScreen = () => {
     return list;
   }, [products, activeFilters]);
 
+  /**
+   * QUI-648 — catálogo de presentaciones de la TIENDA
+   * (`price_tiers.kind='sale_unit'`). Se pide una sola vez por sesión de POS y
+   * se cruza en memoria con el allowlist de cada producto: el catálogo es de
+   * tienda, el allowlist es del par (producto, presentación).
+   */
+  const { data: saleUnitTiers = [] } = useQuery({
+    queryKey: ['pos-sale-unit-tiers'],
+    queryFn: () => ProductService.getSaleUnitTiers(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  /**
+   * Presentaciones ofrecibles del producto abierto en el selector. Solo se
+   * dispara cuando el producto tiene allowlist: un producto sin presentaciones
+   * ni siquiera abre el modal, así que esta query no corre.
+   */
+  const { data: productPresentations = [], isFetching: presentationsLoading } = useQuery({
+    queryKey: ['pos-product-presentations', presentationProduct?.id],
+    queryFn: () =>
+      ProductService.getSaleUnitPresentations(presentationProduct!, {
+        tiers: saleUnitTiers,
+      }),
+    enabled: !!presentationProduct && showPresentations,
+  });
+
   const handleProductPress = useCallback(
     (product: Product) => {
       const hasVariants = (product.product_variants?.length ?? 0) > 0;
@@ -2504,12 +2548,39 @@ const PosScreen = () => {
       if (hasVariants) {
         setSelectedProduct(product);
         setShowVariants(true);
-      } else {
-        addItem(product, null, 1);
-        toastSuccess(`${product.name} agregado`);
+        return;
       }
+
+      // Multi-tarifa ⊕ variantes es exclusivo por regla de negocio, así que
+      // esta rama solo se alcanza para productos SIN variantes. Con allowlist
+      // el cajero elige la presentación; sin allowlist se agrega suelto,
+      // exactamente como antes de esta feature.
+      if ((product.enabled_price_tier_ids?.length ?? 0) > 0) {
+        setPresentationProduct(product);
+        setShowPresentations(true);
+        return;
+      }
+
+      addItem(product, null, 1);
+      toastSuccess(`${product.name} agregado`);
     },
     [addItem],
+  );
+
+  const handlePresentationSelect = useCallback(
+    (presentation: SaleUnitPresentation | null) => {
+      const product = presentationProduct;
+      setShowPresentations(false);
+      setPresentationProduct(null);
+      if (!product) return;
+      addItem(product, null, 1, presentation);
+      toastSuccess(
+        presentation
+          ? `${product.name} · ${presentation.name} agregado`
+          : `${product.name} agregado`,
+      );
+    },
+    [presentationProduct, addItem],
   );
 
   const handleVariantSelect = useCallback(
@@ -2574,10 +2645,17 @@ const PosScreen = () => {
           product_sku: i.product.sku || undefined,
           variant_sku: i.variant?.sku || undefined,
           quantity: i.quantity,
+          // `unit_price` es el precio PUBLICADO (por `price_unit_quantity`
+          // unidades de stock, o por paquete si la linea lleva presentacion).
+          // El total lo resuelve `getLineSubtotal`, que aplica la escala y
+          // redondea una sola vez al final.
           unit_price: Number(i.unitPrice.toFixed(2)),
-          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
           tax_amount_item: Number(i.taxAmount.toFixed(2)),
           cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          // El backend re-resuelve `stock_units_consumed` desde la tarifa; el
+          // cliente solo declara CUAL presentacion aplico.
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
         })),
         subtotal: Number(summary.subtotal.toFixed(2)),
         tax_amount: Number(summary.taxAmount.toFixed(2)),
@@ -2850,6 +2928,19 @@ const PosScreen = () => {
         onClose={() => {
           setShowVariants(false);
           setSelectedProduct(null);
+        }}
+      />
+
+      {/* Selector de presentación de venta (QUI-648) */}
+      <PosPresentationModal
+        visible={showPresentations}
+        product={presentationProduct}
+        presentations={productPresentations}
+        loading={presentationsLoading}
+        onSelect={handlePresentationSelect}
+        onClose={() => {
+          setShowPresentations(false);
+          setPresentationProduct(null);
         }}
       />
 

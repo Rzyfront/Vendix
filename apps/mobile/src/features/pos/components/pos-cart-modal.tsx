@@ -203,6 +203,18 @@ export function PosCartModal({
                 renderItem={({ item }) => {
                   const sku = item.variant?.sku || item.product.sku;
                   const isCustom = item.itemType === 'custom';
+                  // QUI-648 — "c/u" miente en dos casos: cuando el precio está
+                  // publicado por N unidades de stock (un cable a $5.000 "c/u"
+                  // con cantidad 2500 se lee como $12,5 millones) y cuando la
+                  // línea se vende por presentación (el precio es del paquete).
+                  // La etiqueta dice cuál de los tres casos es.
+                  const stockUnit = item.product.stock_uom?.code || 'unid';
+                  const scale = Number(item.priceUnitQuantity ?? 1);
+                  const unitLabel = item.appliedPriceTierName
+                    ? `por ${item.appliedPriceTierName}`
+                    : scale > 1
+                      ? `por ${scale} ${stockUnit}`
+                      : 'c/u';
                   return (
                     <View style={styles.cartItem}>
                       {/* Row 1: Image + Info + Remove */}
@@ -242,8 +254,13 @@ export function PosCartModal({
                           <View style={styles.itemMeta}>
                             {sku ? <Text style={styles.itemSku}>{sku}</Text> : null}
                             <Text style={styles.itemUnitPrice}>
-                              {formatCurrency(item.finalPrice)} c/u
+                              {formatCurrency(item.finalPrice)} {unitLabel}
                             </Text>
+                            {item.isPackageUnit && item.unitsPerPackage ? (
+                              <Text style={styles.itemSku}>
+                                descuenta {item.unitsPerPackage} {stockUnit}
+                              </Text>
+                            ) : null}
                             {item.taxAmount > 0 ? (
                               <View style={styles.itemTaxBadge}>
                                 <Text style={styles.itemTaxBadgeText}>
