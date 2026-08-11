@@ -1434,6 +1434,34 @@ export const ErrorCodes = {
     devMessage:
       'An active resolution with the same prefix and document type already exists for this accounting entity',
   },
+  /**
+   * The resolution contradicts what `FISCAL_DOCUMENT_REQUIREMENTS` declares for
+   * its `document_type`: a missing DIAN authorization number, a missing ClTec on
+   * the sales invoice, or — the dangerous one — a ClTec stored on a document
+   * whose key is built with the Software-PIN. That last case is not cosmetic:
+   * `invoice-flow.service.ts` injects `resolution.technical_key` for every type
+   * and `dian-direct.provider.ts` prefers it over `config.software_pin`, so the
+   * CUDS/CUDE gets signed with the wrong 14th field, the DIAN rejects the
+   * document and the authorized consecutive it consumed is gone for good.
+   * 422 rather than 400: the payload is well-formed, the fiscal combination is not.
+   */
+  INVOICING_RESOLUTION_008: {
+    code: 'INVOICING_RESOLUTION_008',
+    httpStatus: 422,
+    devMessage:
+      'Resolution contradicts the DIAN requirements declared for its fiscal document type',
+  },
+  INVOICING_RESOLUTION_009: {
+    code: 'INVOICING_RESOLUTION_009',
+    httpStatus: 400,
+    devMessage:
+      'Authorized numbering range is incoherent (bounds below 1, inverted, or shrunk under an already consumed number)',
+  },
+  INVOICING_RESOLUTION_010: {
+    code: 'INVOICING_RESOLUTION_010',
+    httpStatus: 400,
+    devMessage: 'Resolution validity window is inverted or empty',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
