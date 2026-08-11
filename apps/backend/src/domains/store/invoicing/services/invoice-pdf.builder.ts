@@ -59,7 +59,20 @@ export interface InvoicePdfData {
 
   // DIAN
   cufe?: string;
+  /** DIAN verification URL returned by the provider, persisted on `invoices.qr_code`. */
   qr_code?: string;
+  /**
+   * `qr_code` rendered as a PNG, ready for `doc.image()`.
+   *
+   * Passed in rather than generated here for the same reason as
+   * `company_logo_buffer`: this builder is a static class, so it cannot inject
+   * `QrService`, and keeping it free of I/O leaves it testable without `qrcode`.
+   *
+   * When absent the section degrades to the URL as text — which is what it used
+   * to do unconditionally, and the reason a printed invoice carried no scannable
+   * code at all: a PDF hyperlink works on screen and vanishes on paper.
+   */
+  qr_code_buffer?: Buffer;
 
   // Pago
   payment_form?: string;
@@ -315,7 +328,7 @@ export class InvoicePdfBuilder {
         // --- QR Code ---
         if (data.qr_code) {
           doc.moveDown(0.5);
-          this.drawQrSection(doc, L, data.qr_code);
+          this.drawQrSection(doc, L, data.qr_code, data.qr_code_buffer);
         }
 
         // --- Footer ---
@@ -1006,12 +1019,20 @@ export class InvoicePdfBuilder {
     doc.fillColor('#000000');
   }
 
+  /**
+   * Verification block: the scannable QR first, the URL underneath as backup.
+   *
+   * The QR is what makes the printed invoice verifiable — the acquirer points a
+   * phone at the paper. The URL stays because a hyperlink still helps on screen
+   * and because a QR damaged by a worn thermal head leaves something readable,
+   * but it is no longer the only thing printed.
+   */
   private static drawQrSection(
     doc: PDFKit.PDFDocument,
     L: PdfLayout,
     qr_url: string,
+    qr_buffer?: Buffer,
   ): void {
-    // Show QR verification URL as text
     doc
       .font('Helvetica')
       .fontSize(this.fs(L, 7))
@@ -1020,6 +1041,25 @@ export class InvoicePdfBuilder {
         align: 'center',
         width: L.content,
       });
+
+    if (qr_buffer) {
+      // Sized off the printable width, never a fixed pixel box: on `thermal_80`
+      // the content is ~207 pt, so a 200 pt code would eat the margins. Capped
+      // so it never dominates a letter sheet either.
+      const side = Math.min(L.roll ? 84 : 110, L.content);
+      const x = L.margin + (L.content - side) / 2;
+      const y = doc.y + 3;
+      try {
+        doc.image(qr_buffer, x, y, { fit: [side, side] });
+        // `doc.image` does not advance the cursor, and on roll formats the whole
+        // page height is derived from where the cursor ends — so failing to
+        // advance it here would make the sheet too short and clip the footer.
+        doc.y = y + side + 3;
+      } catch {
+        // A malformed buffer must not take the invoice down with it: the URL
+        // below still prints and the document stays valid.
+      }
+    }
 
     doc
       .font('Helvetica')
