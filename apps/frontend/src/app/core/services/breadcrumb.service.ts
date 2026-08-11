@@ -1390,47 +1390,26 @@ export class BreadcrumbService {
       parent: 'Configuración',
       icon: 'sliders',
     },
-    // Las seis pestañas de Configuración General. `findRouteMatch` prueba
-    // coincidencia exacta y después patrones con `:param`, así que una ruta de 4
-    // segmentos NO cae en la entrada de 3 de arriba: sin estas entradas el
-    // breadcrumb de las seis pestañas caía al valor por defecto
-    // ("Panel Principal / Dashboard"). Los ids, los títulos y los iconos son los
-    // mismos de `SETTINGS_TABS` en `general-settings.routes.ts`.
+    // Configuración General pasó de una pantalla única a seis pestañas con ruta
+    // propia, y `findRouteMatch` exige coincidencia exacta antes de probar
+    // patrones: una URL de 4 segmentos NO cae en la entrada de 3 de arriba, así
+    // que sin esto las seis pestañas mostraban el breadcrumb por defecto
+    // ("Panel Principal / Dashboard").
+    //
+    // Es UNA entrada con patrón y no seis literales a propósito. `parent` se
+    // resuelve por TÍTULO con un `find`, y hay seis entradas tituladas 'General'
+    // y cinco 'Configuración': un `parent: 'General'` en las pestañas encontraba
+    // primero la de `/organization/settings/general` y la miga terminaba
+    // enlazando al panel de organización. Repitiendo título y padre de la
+    // entrada de arriba, la miga queda "Configuración / General" igual que
+    // cuando era una sola pantalla, sin introducir ambigüedad nueva. La pestaña
+    // concreta ya se ve en las pestañas del sticky-header y en el `title` del
+    // documento, que cada ruta hija declara.
     {
-      path: '/admin/settings/general/negocio',
-      title: 'Negocio',
-      parent: 'General',
-      icon: 'store',
-    },
-    {
-      path: '/admin/settings/general/venta',
-      title: 'Venta',
-      parent: 'General',
-      icon: 'shopping-cart',
-    },
-    {
-      path: '/admin/settings/general/logistica',
-      title: 'Logística',
-      parent: 'General',
-      icon: 'truck',
-    },
-    {
-      path: '/admin/settings/general/reservas',
-      title: 'Reservas',
-      parent: 'General',
-      icon: 'calendar-clock',
-    },
-    {
-      path: '/admin/settings/general/mesas',
-      title: 'Mesas',
-      parent: 'General',
-      icon: 'utensils',
-    },
-    {
-      path: '/admin/settings/general/notificaciones',
-      title: 'Notificaciones',
-      parent: 'General',
-      icon: 'bell',
+      path: '/admin/settings/general/:tab',
+      title: 'General',
+      parent: 'Configuración',
+      icon: 'sliders',
     },
     {
       path: '/admin/settings/users',
