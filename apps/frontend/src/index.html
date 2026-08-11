@@ -16,7 +16,20 @@
          resueltos por Host, sin firma ni vencimiento; CloudFront rutea esas rutas
          al backend. El apps/frontend/public/manifest.webmanifest desplegado al
          bucket S3 queda ENSOMBRECIDO por ese behavior y sólo sirve como último
-         recurso genérico (marca Vendix) si el behavior no aplica. -->
+         recurso genérico (marca Vendix) si el behavior no aplica.
+
+         INFRAESTRUCTURA REQUERIDA (no basta con desplegar este HTML). Ambas
+         distribuciones necesitan un cache behavior `manifest.webmanifest` y otro
+         `pwa/*` apuntando al origen `vendix-backend-api`, y el header `Host`
+         DEBE estar en la cache key o CloudFront le sirve el manifest de un
+         tenant a otro:
+           E1I27OYFJX7VYJ  vendix.online + *.vendix.online  (ForwardedValues Host)
+           E3I95HVZBIX74T  dominios propios, tenant-only
+                           (cache policy `vendix-tenant-host` +
+                            origin request policy managed `Managed-HostHeaderOnly`)
+         Sin esos behaviors, S3 responde el manifest genérico y `/pwa/*.png`
+         devuelve el index.html: todo tenant instala con el logo de Vendix y iOS
+         se queda sin ícono porque el apple-touch-icon de abajo no resuelve. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#2F6F4E" />
     <link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png" />

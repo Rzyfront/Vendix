@@ -94,6 +94,19 @@ interface CachedPwaIcon {
  *     that expires.
  *  2. `resolveIconBuffer()` NEVER fails: a tenant with no usable logo installs
  *     with the Vendix brand icon rather than with a broken image.
+ *
+ * REACHABILITY (learned the hard way): in production the viewer hits the
+ * CloudFront distribution, not this API. Both `/manifest.webmanifest` and
+ * `/pwa/*` need a cache behavior pointing at the `vendix-backend-api` origin
+ * with the `Host` header in the CACHE KEY — without it CloudFront serves one
+ * tenant's manifest to every other. Those behaviors are listed in
+ * `apps/frontend/src/index.html`. This service shipped once without them and
+ * was dead code in production: S3 answered the static manifest instead and
+ * every tenant installed with the Vendix logo.
+ *
+ * Whatever this service caches is dropped by `PwaCacheService` when a tenant
+ * changes its branding; both sides share the key builders in
+ * `@common/config/pwa-cache-keys`.
  */
 @Injectable()
 export class PublicPwaService {
