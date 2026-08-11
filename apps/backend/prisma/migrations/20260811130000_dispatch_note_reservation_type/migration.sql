@@ -1,0 +1,23 @@
+-- DATA IMPACT:
+-- Tables affected: ninguna (solo el tipo enum reservation_type_enum)
+-- Expected row changes: 0
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: ADD VALUE IF NOT EXISTS
+-- Approval: plan docs/plans/inventario-consolidacion-cierre.md paso 10 — aprobado en chat
+--
+-- `stock_reservations.reserved_for_id` es un id de otra tabla y sólo significa
+-- algo junto a `reserved_for_type`. Las remisiones standalone (sin
+-- `sales_order_id` ni `order_id`) llavean sus reservas por `dispatch_notes.id`
+-- y hasta hoy lo hacían bajo `order`, así que la remisión #42 y la orden #42
+-- compartían llave. Consecuencias vivas: el guard de idempotencia de la entrega
+-- contaba reservas de la orden ajena, y anular la remisión cancelaba las
+-- reservas de esa orden.
+--
+-- Este valor separa los dos espacios de nombres. Viaja SOLO en su propia
+-- migración porque Postgres no permite USAR un valor de enum recién agregado
+-- dentro de la misma transacción que lo crea; la reclasificación de las filas
+-- ya escritas bajo `order` es una mutación de datos y vive en su propia
+-- migración condicionada al conteo de exposición en producción (paso 11).
+
+ALTER TYPE "reservation_type_enum" ADD VALUE IF NOT EXISTS 'dispatch_note';

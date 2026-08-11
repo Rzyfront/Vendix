@@ -362,7 +362,12 @@ export class DispatchNoteEventsListener {
               item.product_variant_id ?? undefined,
               location_id,
               item.dispatched_quantity,
-              'order',
+              // El id que llevamos es `dispatch_notes.id`, así que el tipo TIENE
+              // que ser 'dispatch_note'. Con 'order' esta reserva quedaba en el
+              // mismo espacio de nombres que la orden del mismo número, y desde
+              // ahí el guard de la entrega y el release de la anulación leían y
+              // escribían filas ajenas. Ver `ReservationRefType`.
+              'dispatch_note',
               dispatch_note.id,
               undefined,
               false, // Don't validate availability — already confirmed by user
@@ -429,18 +434,26 @@ export class DispatchNoteEventsListener {
       //    liberó/canceló antes de entregar (caso stock fantasma) no deja
       //    filas 'consumed', así que igual deduce (el bug que este refactor
       //    corrige).
+      //
+      // El par que se consulta es ('dispatch_note', dispatch_note.id), NO
+      // ('order', dispatch_note.id): con 'order' este guard contaba las reservas
+      // de la ORDEN cuyo id coincidía con el de la remisión, y decidía omitir o
+      // repetir la deducción por el estado de un documento que no tiene nada que
+      // ver. El writer (handleConfirmed) escribe con el mismo par: si uno de los
+      // dos vuelve a 'order', el guard deja de encontrar sus propias filas y el
+      // re-disparo deduce dos veces.
       if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
         const [active, consumed] = await Promise.all([
           this.prisma.withoutScope().stock_reservations.count({
             where: {
-              reserved_for_type: 'order',
+              reserved_for_type: 'dispatch_note',
               reserved_for_id: dispatch_note.id,
               status: 'active',
             },
           }),
           this.prisma.withoutScope().stock_reservations.count({
             where: {
-              reserved_for_type: 'order',
+              reserved_for_type: 'dispatch_note',
               reserved_for_id: dispatch_note.id,
               status: 'consumed',
             },
@@ -596,10 +609,15 @@ export class DispatchNoteEventsListener {
 
       if (was_confirmed) {
         if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
-          // Standalone dispatch: cancel the reservations we made on confirm
+          // Standalone dispatch: cancel the reservations we made on confirm.
+          // El par es ('dispatch_note', dispatch_note.id) — el mismo con el que
+          // handleConfirmed las creó. Con 'order' esto CANCELABA las reservas de
+          // la orden cuyo id coincidía con el de la remisión: anular una remisión
+          // liberaba stock apartado para una venta ajena, que quedaba vendible
+          // dos veces.
           try {
             await this.stockLevelManager.releaseReservationsByReference(
-              'order',
+              'dispatch_note',
               dispatch_note.id,
               'cancelled',
             );

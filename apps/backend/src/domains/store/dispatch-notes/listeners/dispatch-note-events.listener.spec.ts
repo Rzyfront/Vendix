@@ -184,16 +184,54 @@ describe('DispatchNoteEventsListener — handleDelivered → OrderStockCommitSer
       sales_order_id: null,
     });
 
-    // Guard evaluado contra la referencia = dispatch_note.id (900).
+    // Guard evaluado contra el PAR ('dispatch_note', dispatch_note.id) — el id
+    // sale de `dispatch_notes`, así que el tipo tiene que decir eso.
     expect(prismaMock.stock_reservations.count).toHaveBeenCalledWith({
       where: {
-        reserved_for_type: 'order',
+        reserved_for_type: 'dispatch_note',
         reserved_for_id: 900,
         status: 'active',
       },
     });
     // Early-return: NO se delega la deducción → sin doble descuento.
     expect(orderStockCommitMock.commitDispatchDelivery).not.toHaveBeenCalled();
+  });
+
+  it('(c2) COLISIÓN DE ESPACIO DE NOMBRES: el guard de la remisión #900 no consulta jamás las reservas de la ORDEN #900', async () => {
+    // Escenario del defecto: existe una orden #900 con reservas ya consumidas y
+    // una remisión standalone que casualmente también es la #900. Con
+    // `reserved_for_type:'order'` el guard leía las filas de la ORDEN, veía
+    // active=0/consumed>0 y omitía una deducción que nunca había ocurrido: la
+    // mercancía salía físicamente y el stock quedaba intacto.
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(
+      buildStandaloneDispatchNote(),
+    );
+    // El mock responde SOLO al espacio de nombres de la remisión; cualquier
+    // consulta bajo 'order' devuelve las cifras de la orden ajena.
+    prismaMock.stock_reservations.count.mockImplementation((args: any) => {
+      const where = args?.where ?? {};
+      if (where.reserved_for_type === 'order') {
+        // Reservas de la ORDEN #900: active=0, consumed=3 (ya entregada).
+        return Promise.resolve(where.status === 'active' ? 0 : 3);
+      }
+      // Reservas de la REMISIÓN #900: activas, primer disparo.
+      return Promise.resolve(where.status === 'active' ? 2 : 0);
+    });
+
+    await listener.handleDelivered({
+      dispatch_note_id: 900,
+      dispatch_number: 'REM-1',
+      store_id: 100,
+      order_id: null,
+      sales_order_id: null,
+    });
+
+    // Ninguna de las dos consultas del guard usa el espacio 'order'.
+    for (const call of prismaMock.stock_reservations.count.mock.calls) {
+      expect(call[0].where.reserved_for_type).toBe('dispatch_note');
+    }
+    // Y por eso la entrega SÍ deduce: la remisión tiene sus reservas activas.
+    expect(orderStockCommitMock.commitDispatchDelivery).toHaveBeenCalledTimes(1);
   });
 
   it('(d) standalone primer disparo: hay reservas activas (active>0) ⇒ delega en commitDispatchDelivery', async () => {
@@ -236,6 +274,58 @@ describe('DispatchNoteEventsListener — handleDelivered → OrderStockCommitSer
 
     expect(orderStockCommitMock.commitDispatchDelivery).not.toHaveBeenCalled();
     expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+  });
+
+  // ─── El PAR completo: writer y release, no sólo el guard ──────────────────
+  //
+  // El guard, el writer (`handleConfirmed`) y el release al anular
+  // (`handleVoided`) tienen que usar el MISMO espacio de nombres. Si uno solo
+  // vuelve a 'order' el defecto reaparece por el otro extremo: con el writer en
+  // 'order' el guard no encuentra sus propias filas y el re-disparo deduce dos
+  // veces; con el release en 'order' anular la remisión #900 cancela las
+  // reservas de la ORDEN #900. Por eso los tres se fijan aquí.
+
+  it('(f) handleConfirmed standalone: reserva bajo ("dispatch_note", note.id), nunca bajo "order"', async () => {
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(
+      buildStandaloneDispatchNote(),
+    );
+
+    await listener.handleConfirmed({
+      dispatch_note_id: 900,
+      dispatch_number: 'REM-1',
+      store_id: 100,
+      order_id: null,
+      sales_order_id: null,
+    });
+
+    expect(stockLevelManagerMock.reserveStock).toHaveBeenCalledTimes(1);
+    // Firma posicional: (product, variant, location, qty, refType, refId, ...)
+    const args = stockLevelManagerMock.reserveStock.mock.calls[0];
+    expect(args[4]).toBe('dispatch_note');
+    expect(args[5]).toBe(900);
+  });
+
+  it('(g) handleVoided de una remisión standalone confirmada: cancela SUS reservas, no las de la orden del mismo número', async () => {
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue({
+      ...buildStandaloneDispatchNote(),
+      // Confirmada pero NO entregada → rama que sólo libera reservas.
+      confirmed_at: new Date('2026-08-11T12:00:00Z'),
+      delivered_at: null,
+      direction: 'outbound',
+    });
+
+    await listener.handleVoided({
+      dispatch_note_id: 900,
+      dispatch_number: 'REM-1',
+      store_id: 100,
+      order_id: null,
+      sales_order_id: null,
+      void_reason: 'prueba',
+    });
+
+    expect(
+      stockLevelManagerMock.releaseReservationsByReference,
+    ).toHaveBeenCalledWith('dispatch_note', 900, 'cancelled');
   });
 });
 

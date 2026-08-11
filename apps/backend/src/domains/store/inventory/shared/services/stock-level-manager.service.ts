@@ -22,6 +22,24 @@ import {
   ResolvedCostingMethod,
 } from './costing-method-resolver.service';
 
+/**
+ * Espacio de nombres de una reserva. `stock_reservations.reserved_for_id` es un
+ * id de OTRA tabla y sólo significa algo junto a este tipo: la llave real es el
+ * par `(reserved_for_type, reserved_for_id)`, nunca el id suelto.
+ *
+ * `dispatch_note` existe porque las remisiones standalone (sin `sales_order_id`
+ * ni `order_id`) llavean por `dispatch_notes.id` y antes lo hacían bajo `order`
+ * — de modo que la remisión #42 y la orden #42 compartían llave. Cualquier
+ * lectura, liberación o conteo de reservas DEBE pasar el tipo que corresponde a
+ * la tabla de la que salió el id; mezclar los dos vuelve a abrir la colisión.
+ */
+export type ReservationRefType =
+  | 'order'
+  | 'transfer'
+  | 'adjustment'
+  | 'layaway'
+  | 'dispatch_note';
+
 export interface UpdateStockParams {
   product_id: number;
   variant_id?: number;
@@ -676,7 +694,7 @@ export class StockLevelManager {
     variant_id: number | undefined,
     location_id: number,
     quantity: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     user_id?: number,
     validate_availability = true,
@@ -792,7 +810,7 @@ export class StockLevelManager {
     product_id: number,
     variant_id: number | undefined,
     location_id: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     tx?: any,
   ): Promise<void> {
@@ -884,7 +902,7 @@ export class StockLevelManager {
    *   `decrementOnHand` se ignora en este branch.
    */
   async releaseReservationsByReference(
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     status: 'consumed' | 'cancelled' = 'consumed',
     tx?: any,

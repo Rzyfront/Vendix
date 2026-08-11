@@ -4,6 +4,7 @@ import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/defau
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
 import { syncDenormalizedProductStock } from '../helpers/sync-product-stock.helper';
+import type { ReservationRefType } from './stock-level-manager.service';
 
 @Injectable()
 export class InventoryIntegrationService {
@@ -11,13 +12,20 @@ export class InventoryIntegrationService {
 
   /**
    * Reserve stock for a specific order
+   *
+   * `orderType` era `string`: un seam sin tipo por el que cualquier literal
+   * entraba, y por el que la colisión de espacios de nombres de las remisiones
+   * standalone pudo escribirse sin que el compilador dijera nada. Tipado ahora
+   * con `ReservationRefType`, que documenta que la llave es el PAR
+   * `(orderType, orderId)` y que el tipo debe nombrar la tabla de la que salió
+   * el id.
    */
   async reserveStock(
     organizationId: number,
     productId: number,
     locationId: number,
     quantity: number,
-    orderType: string,
+    orderType: ReservationRefType,
     orderId: number,
     productVariantId?: number,
   ) {
@@ -83,14 +91,15 @@ export class InventoryIntegrationService {
   }
 
   /**
-   * Release reserved stock
+   * Release reserved stock. Mismo contrato de llave que {@link reserveStock}:
+   * el par `(orderType, orderId)`, con el tipo nombrando la tabla del id.
    */
   async releaseStock(
     organizationId: number,
     productId: number,
     locationId: number,
     quantity: number,
-    orderType: string,
+    orderType: ReservationRefType,
     orderId: number,
     productVariantId?: number,
   ) {

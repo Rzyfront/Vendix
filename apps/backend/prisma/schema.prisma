@@ -4043,11 +4043,19 @@ enum adjustment_type_enum {
   manual_correction
 }
 
+// `reserved_for_id` NO es único por sí solo: es un id de otra tabla y sólo
+// significa algo junto a `reserved_for_type`. Las remisiones standalone (sin
+// `sales_order_id` ni `order_id`) llavean sus reservas por `dispatch_notes.id`,
+// y antes de existir este valor lo hacían bajo `order` — de modo que la remisión
+// #42 y la orden #42 compartían llave: el guard de idempotencia de la entrega
+// contaba reservas ajenas, y anular la remisión cancelaba las reservas de la
+// orden. `dispatch_note` separa los dos espacios de nombres.
 enum reservation_type_enum {
   order
   transfer
   adjustment
   layaway
+  dispatch_note
 }
 
 enum reservation_status_enum {
