@@ -41,6 +41,27 @@ export interface DianTechnicalResponseData {
     error_messages?: string[];
     raw_response?: string;
   } | null;
+  /**
+   * Resultado de la vía de validación sincrónica (`SendBillSync`).
+   *
+   * Va ANIDADO, no al nivel del lote, porque una validación no reemplaza al envío:
+   * el backend conserva el registro del lote —su ZipKey y sus claves de documento
+   * son la única forma de preguntar por él después— y cuelga el diagnóstico aquí.
+   *
+   * Es el único campo del registro que responde «¿el documento está bien?» sin
+   * ambigüedad: `is_valid` viene del `IsValid` que la DIAN devolvió en la misma
+   * llamada, y `error_messages` trae las reglas violadas con su código.
+   */
+  validation?: {
+    executed_at?: string | null;
+    is_valid?: boolean;
+    dian_response?: {
+      status_code?: string;
+      status_message?: string;
+      error_messages?: string[];
+      raw_response?: string;
+    } | null;
+  } | null;
 }
 
 interface NameCheck {
@@ -126,6 +147,44 @@ const ZIP_NAME_LENGTH = 24;
                 <li class="text-[11px] text-error break-words">{{ err }}</li>
               }
             </ul>
+          </div>
+        }
+
+        <!-- Validación sincrónica. Va antes del historial de consultas porque es
+             el único veredicto que no admite interpretación: la DIAN dijo IsValid
+             en la misma llamada, con las reglas violadas y su código. El sondeo
+             por ZipKey, en cambio, puede no llegar nunca a un veredicto. -->
+        @if (validation(); as v) {
+          <div class="pt-2 border-t border-border space-y-1">
+            <p class="text-[11px] font-medium text-text-secondary">
+              Validación sincrónica (SendBillSync) — no se envió al set de pruebas
+            </p>
+            <div class="flex items-center gap-2 text-[11px]">
+              <app-icon
+                [name]="v.is_valid ? 'check-circle' : 'alert-triangle'"
+                [size]="12"
+                [class]="v.is_valid ? 'text-success shrink-0' : 'text-error shrink-0'"
+              ></app-icon>
+              <span [class]="v.is_valid ? 'text-success' : 'text-error'">
+                {{ v.is_valid ? 'IsValid = true, sin reglas violadas' : 'IsValid = false' }}
+              </span>
+              @if (v.executed_at) {
+                <span class="text-text-secondary">· {{ v.executed_at }}</span>
+              }
+            </div>
+            @if (validationErrors().length) {
+              <ul class="space-y-0.5 pt-1">
+                @for (err of validationErrors(); track err) {
+                  <li class="text-[11px] text-error break-words font-mono">{{ err }}</li>
+                }
+              </ul>
+            }
+            @if (validationRaw(); as vraw) {
+              <pre
+                class="text-[10px] leading-relaxed overflow-x-auto max-h-72 overflow-y-auto text-text-secondary bg-[var(--color-surface)] rounded p-2 mt-1"
+                >{{ vraw }}</pre
+              >
+            }
           </div>
         }
 
@@ -228,13 +287,32 @@ export class DianTechnicalResponseComponent {
 
   readonly pollHistory = computed(() => this.result()?.poll_history ?? []);
 
+  readonly validation = computed(() => this.result()?.validation ?? null);
+
+  /**
+   * Las reglas violadas se muestran APARTE de `errors`, no fundidas con ellas: un
+   * error del lote y una regla de validación responden preguntas distintas
+   * («¿qué pasó con mi envío?» contra «¿qué está mal en mi documento?»), y la
+   * segunda es la accionable. Fundirlas dejaría al tenant sin saber cuál corregir.
+   */
+  readonly validationErrors = computed<string[]>(
+    () => this.validation()?.dian_response?.error_messages ?? [],
+  );
+
+  readonly validationRaw = computed<string | null>(() =>
+    this.prettify(this.validation()?.dian_response?.raw_response),
+  );
+
+  readonly prettyRaw = computed<string | null>(() =>
+    this.prettify(this.response()?.raw_response),
+  );
+
   /**
    * El sobre viene en una sola línea. Se parte entre etiquetas y se indenta por
    * profundidad; sin librería, porque el CSP de la app bloquea recursos externos
    * y un resaltador no aporta sobre un XML que se lee una vez para diagnosticar.
    */
-  readonly prettyRaw = computed<string | null>(() => {
-    const raw = this.response()?.raw_response;
+  private prettify(raw: string | null | undefined): string | null {
     if (!raw) return null;
 
     const parts = raw
@@ -255,5 +333,5 @@ export class DianTechnicalResponseComponent {
         return indented;
       })
       .join('\n');
-  });
+  }
 }

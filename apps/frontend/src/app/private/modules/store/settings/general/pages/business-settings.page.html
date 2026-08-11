@@ -1,0 +1,80 @@
+<div class="settings-page">
+  <div class="page-intro">
+    <div class="page-intro__icon">
+      <app-icon name="store" size="16"></app-icon>
+    </div>
+    <p class="page-intro__text">
+      <span class="page-intro__lead">Define quién es tu negocio.</span>
+      El nombre, la moneda, la zona horaria y los tipos de negocio viajan a cada
+      documento que emites y deciden qué módulos ve el menú lateral de tu equipo.
+      El logotipo y los colores se aplican en la app de tu tienda y en el panel.
+    </p>
+  </div>
+
+  <!-- Identidad y General -->
+  <app-settings-section
+    anchorId="section-identity"
+    icon="user"
+    iconTone="blue"
+    title="Identidad y General"
+    hint="Cambiar los tipos de negocio agrega o quita módulos para toda la tienda.">
+    <!-- `markTouchedRequest` es el reemplazo del `viewChild` del padre: cuando el
+         guardado encuentra el formulario inválido incrementa el contador, el
+         shell navega hasta acá y el formulario pinta sus propios errores.
+         `servicesValueChange` y `formValidityChange` mantienen al store al día
+         mientras esta página está montada. -->
+    <app-general-settings-form
+      [settings]="store.settings().general"
+      [services]="store.settings().services"
+      [panelUi]="store.settings().panel_ui"
+      [markTouchedRequest]="store.markTouchedRequest()"
+      (settingsChange)="store.onSectionChange('general', $event)"
+      (panelUiChange)="store.onSectionChange('panel_ui', $event)"
+      (servicesValueChange)="store.setServicesValue($event)"
+      (formValidityChange)="store.setGeneralFormValidity($event)" />
+  </app-settings-section>
+
+  <!-- Personalización -->
+  <app-settings-section
+    anchorId="section-branding"
+    icon="palette"
+    iconTone="pink"
+    title="Personalización"
+    hint="El logo y el favicon se publican al guardar; el logo también reemplaza el del panel.">
+    <app-app-settings-form
+      [settings]="store.settings().app"
+      (settingsChange)="store.onSectionChange('app', $event)"
+      (pendingLogoUpload)="store.onPendingAppLogo($event)"
+      (pendingFaviconUpload)="store.onPendingAppFavicon($event)" />
+
+    @if (store.isVendixDomain()) {
+      <div class="vendix-info-box">
+        <div class="vendix-info-content">
+          <div class="vendix-info-icon">
+            <app-icon name="help-circle" size="18"></app-icon>
+          </div>
+          <div class="vendix-info-text">
+            <p class="vendix-info-title">
+              ¿No ves los cambios de personalización en tu tienda?
+            </p>
+            <p class="vendix-info-description">
+              Estás navegando desde el dominio de Vendix. Los cambios de marca,
+              colores y logotipo se aplican en el entorno personalizado de tu
+              tienda. Visita tu app para ver cómo se ve tu marca.
+            </p>
+            @if (store.storeAppUrl()) {
+              <a
+                [href]="store.storeAppUrl()"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="vendix-info-link">
+                <app-icon name="external-link" size="14"></app-icon>
+                Ir a mi app
+              </a>
+            }
+          </div>
+        </div>
+      </div>
+    }
+  </app-settings-section>
+</div>

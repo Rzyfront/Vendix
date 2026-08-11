@@ -18,7 +18,10 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
 
 import { SettingsService as OrganizationSettingsService } from '../../organization/settings/settings.service';
-import { SettingsService as StoreSettingsService } from '../../store/settings/settings.service';
+import {
+  KNOWN_SECTIONS,
+  SettingsService as StoreSettingsService,
+} from '../../store/settings/settings.service';
 
 import { TenantSettingsFiscalDataDto } from './dto/tenant-settings-fiscal-data.dto';
 import { TenantSettingsUpdateDto } from './dto/tenant-settings-update.dto';
@@ -42,6 +45,29 @@ const PERMISOS_ESCRITURA = [
 
 /** Nivel del que se leen y en el que se escriben los settings del tenant. */
 type NivelSettings = 'store' | 'organization';
+
+/**
+ * Secciones que la consola muestra pero NO deja editar en crudo porque tienen
+ * formulario propio en otra pestaña del rail, y ese formulario es el que aplica
+ * las reglas de dominio. El valor es la etiqueta de la pestaña dueña.
+ *
+ * POR QUÉ VIVEN AQUÍ Y NO EN `SettingsService`: no son una regla del dominio de
+ * settings —el backend acepta escribir `panel_ui` y `fiscal_data` por el camino
+ * normal—, son un mapa de la NAVEGACIÓN de la consola de super admin: nombran
+ * pestañas que sólo existen en esta UI. Meterlas en el servicio de tienda le
+ * haría conocer una pantalla y las volvería una regla para todos sus
+ * consumidores, incluido el panel del comerciante, que no tiene estas pestañas.
+ */
+const SECCIONES_DELEGADAS: Readonly<Record<string, string>> = {
+  panel_ui: 'Módulos',
+  fiscal_data: 'Identidad fiscal',
+};
+
+/** Forma del catálogo de secciones que viaja en el envelope de settings. */
+interface CatalogoSecciones {
+  readonly known_sections: string[];
+  readonly delegated_sections: Record<string, string>;
+}
 
 /**
  * Configuración de un tenant desde la consola de super admin.
@@ -90,15 +116,19 @@ export class TenantSettingsController {
       this.opciones(PERMISOS_LECTURA),
       async (resuelto) => {
         if (this.nivel(resuelto) === 'organization') {
+          const settings = await this.leerSettingsOrganizacion();
           return {
             ...this.cabecera(resuelto, 'organization'),
-            settings: await this.leerSettingsOrganizacion(),
+            ...this.catalogo('organization', settings),
+            settings,
           };
         }
 
+        const settings = await this.storeSettings.getSettings();
         return {
           ...this.cabecera(resuelto, 'store'),
-          settings: await this.storeSettings.getSettings(),
+          ...this.catalogo('store', settings),
+          settings,
         };
       },
     );
@@ -123,9 +153,13 @@ export class TenantSettingsController {
       this.opciones(PERMISOS_ESCRITURA),
       async (resuelto) => {
         if (this.nivel(resuelto) === 'organization') {
+          const settings = await this.actualizarSettingsOrganizacion(
+            dto.settings,
+          );
           return {
             ...this.cabecera(resuelto, 'organization'),
-            settings: await this.actualizarSettingsOrganizacion(dto.settings),
+            ...this.catalogo('organization', settings),
+            settings,
           };
         }
 
@@ -133,9 +167,14 @@ export class TenantSettingsController {
         // Se relee como hace el controlador de tienda: `updateSettings`
         // devuelve el JSON persistido, no la proyección (branding → `app`,
         // URLs de S3 firmadas) que el consumidor espera.
+        const settings = await this.storeSettings.getSettings();
         return {
           ...this.cabecera(resuelto, 'store'),
-          settings: await this.storeSettings.getSettings(),
+          // El catálogo también viaja en el PATCH: la consola repinta su estado
+          // con lo que devuelve el guardado, y sin esto perdería la lista justo
+          // después de escribir.
+          ...this.catalogo('store', settings),
+          settings,
         };
       },
     );
@@ -174,7 +213,7 @@ export class TenantSettingsController {
   @ApiOperation({
     summary: 'Actualizar la identidad legal/tributaria del tenant',
     description:
-      'Fusión parcial sobre `settings.fiscal_data`; el resto de secciones no se toca. En una organización de NIT único escribe en organization_settings, que es donde su propio panel lo lee.',
+      'Fusión superficial sobre `settings.fiscal_data` (mergeFiscalData en common/helpers/); el resto de secciones no se toca. En una organización de NIT único escribe en organization_settings, que es donde su propio panel lo lee.',
   })
   async updateFiscalData(
     @Param('scope') scope: TenantScopeSegment,
@@ -230,6 +269,36 @@ export class TenantSettingsController {
       organization_id: scope.organization_id,
       store_id: scope.store_id,
       fiscal_scope: scope.fiscal_scope,
+    };
+  }
+
+  /**
+   * Catálogo de secciones que acompaña a los settings.
+   *
+   * EXISTE PORQUE LA CONSOLA MENTÍA: mantenía su propia copia de
+   * `KNOWN_SECTIONS` y se quedó tres entradas corta (`accounting_flows`, `vexi`,
+   * `app`). Resultado: marcaba esas secciones como descartadas por el saneador
+   * y deshabilitaba «Guardar» sobre escrituras que el backend sí persiste. La
+   * lista tiene un solo dueño —el saneador— y por eso viaja desde aquí en vez
+   * de duplicarse en el cliente.
+   *
+   * A NIVEL ORGANIZACIÓN NO HAY LISTA BLANCA: `organization_settings` se
+   * reemplaza entero (sólo se sanean las URLs de assets), así que cualquier
+   * clave presente se conserva. Devolver ahí la lista de tienda a secas
+   * repetiría el mismo defecto al revés, marcando como descartable algo que sí
+   * se guarda; por eso se une con las claves realmente almacenadas, que son
+   * exactamente las que la consola puede llegar a mostrar.
+   */
+  private catalogo(nivel: NivelSettings, settings: unknown): CatalogoSecciones {
+    const base = [...KNOWN_SECTIONS] as string[];
+    const presentes =
+      nivel === 'organization' && settings && typeof settings === 'object'
+        ? Object.keys(settings as Record<string, unknown>)
+        : [];
+
+    return {
+      known_sections: [...new Set([...base, ...presentes])],
+      delegated_sections: { ...SECCIONES_DELEGADAS },
     };
   }
 

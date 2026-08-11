@@ -43,6 +43,15 @@ export class InventoryTransactionsService {
           transaction_date: data.transactionDate || new Date(),
           user_id: data.userId,
           order_item_id: data.orderItemId,
+          // QUI-651 — quién cocinó (sesión de estación) frente a `user_id`, que
+          // es quién pidió que se cocine. NULL es válido: el fire puede ocurrir
+          // antes de que la estación abra sesión.
+          kds_session_id: data.kdsSessionId ?? null,
+          // QUI-651 — costo del movimiento por fila. Habilita el historial y el
+          // resumen de consumo por turno sin recomputar, que no serviría porque
+          // las capas FIFO ya se movieron.
+          unit_cost: data.unitCost ?? null,
+          total_cost: data.totalCost ?? null,
         },
         include: {
           products: {

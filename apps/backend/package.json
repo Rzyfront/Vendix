@@ -37,6 +37,7 @@
     "migrate:cost-price": "ts-node -r tsconfig-paths/register scripts/backfill-cost-price.ts",
     "migrate:cart-conversions": "ts-node -r tsconfig-paths/register scripts/backfill-cart-conversions.ts",
     "migrate:membership-role-permissions": "ts-node -r tsconfig-paths/register scripts/backfill-membership-role-permissions.ts",
+    "migrate:wallet-payment-method": "ts-node -r tsconfig-paths/register scripts/backfill-wallet-payment-method.ts",
     "// ----- DOCKER -----": "",
     "docker:build": "npm run build",
     "docker:start": "npm run start:prod",

@@ -57,6 +57,7 @@ export interface SpeechSource {
   synthesize(
     text: string,
     params: SpeechCacheParams,
+    currency?: string,
   ): Promise<CachedAudio | null>;
   pickFiller(previous?: string | null): string;
   fillerAudio(
@@ -103,6 +104,12 @@ export class VexiSpeechTurn {
     private readonly source: SpeechSource,
     private readonly params: SpeechCacheParams,
     private readonly startedAt: number = Date.now(),
+    /**
+     * Store currency, for the spoken rendering of amounts. Held on the turn
+     * rather than looked up per segment: it cannot change mid-answer, and the
+     * synthesis path is the one place where an extra query is unaffordable.
+     */
+    private readonly currency?: string,
   ) {}
 
   /**
@@ -234,7 +241,11 @@ export class VexiSpeechTurn {
 
   private async run(job: QueuedSegment): Promise<void> {
     try {
-      const audio = await this.source.synthesize(job.text, this.params);
+      const audio = await this.source.synthesize(
+        job.text,
+        this.params,
+        this.currency,
+      );
       // No audio means the provider failed or the segment cleaned down to
       // nothing. Either way the turn degrades to text-only — captions and
       // history are unaffected, which is the correct direction to fail.

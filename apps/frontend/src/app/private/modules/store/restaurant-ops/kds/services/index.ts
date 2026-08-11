@@ -8,3 +8,4 @@ export type {
   KdsConnectionState,
   KdsReconnectAttempt,
 } from './kds-sse.service';
+export { KdsStationsService } from './kds-stations.service';

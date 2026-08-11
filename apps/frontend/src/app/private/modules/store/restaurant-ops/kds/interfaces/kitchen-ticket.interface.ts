@@ -40,6 +40,21 @@ export interface KitchenTicketProductRef {
 }
 
 export interface KitchenTicketItem {
+  /**
+   * QUI-655 — insumos que NO se van a usar en este plato, tal como los quito
+   * quien tomo el pedido. El KDS los muestra TACHADOS en el modal de confirmacion
+   * para que el cocinero vea "sin papas" sin tener que leer una nota.
+   */
+  exclusions?: Array<{
+    component_product_id: number;
+    path_recipe_ids: number[];
+  }>;
+  /**
+   * QUI-653 — el plato va empacado para llevar. Lo decide quien toma el pedido
+   * pero lo EJECUTA la cocina, asi que el flag viaja con el ticket: sin esto el
+   * cocinero emplata en loza algo que debia salir en caja.
+   */
+  order_item?: { is_takeaway: boolean } | null;
   id: number;
   kitchen_ticket_id: number;
   order_item_id: number;
@@ -69,7 +84,13 @@ export interface KitchenTicket {
   id: number;
   store_id: number;
   order_id: number;
+  /**
+   * QUI-651 — el consecutivo diario es POR ESTACION: cada tablero cuenta desde 1,
+   * asi cocina canta #1 y barra canta #1 el mismo dia.
+   */
   daily_number?: number | null;
+  /** QUI-651 — estacion que prepara este ticket. NOT NULL en la DB. */
+  kds_id?: number;
   order?: { order_number: string } | null;
   table_id?: number | null;
   status: KitchenTicketStatus;

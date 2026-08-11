@@ -1,7 +1,235 @@
 import {
   TEST_SET_STALL_AFTER_MS,
   analyzeTestSetWait,
+  resolveTestSetProof,
+  resolveTestSetWait,
 } from './test-set-wait.util';
+
+/**
+ * ESTE RESOLVEDOR EXISTE PORQUE SU AUSENCIA BORRÓ UNA HABILITACIÓN EN LA UI.
+ *
+ * `last_test_result` cumple dos papeles incompatibles: puntero al lote en vuelo y
+ * prueba de que la DIAN aprobó el set. El 2026-08-09 la plataforma quedó habilitada
+ * a las 05:59Z, un reenvío accidental sobrescribió el registro a las 18:53Z, y
+ * descartar ese lote a las 19:41Z dejó la UI diciendo «habilitación pendiente».
+ */
+describe('resolveTestSetProof', () => {
+  const evidence = { zip_key: 'aprobado', dian_response: { success: true } };
+  const latest = { zip_key: 'fallido', rejected: true, abandoned: true };
+
+  it('antepone la evidencia durable cuando la config está habilitada', () => {
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: evidence,
+        last_test_result: latest,
+      }),
+    ).toBe(evidence);
+  });
+
+  it('la antepone también con el set aprobado pero aún sin habilitar', () => {
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'test_set_passed',
+        enablement_evidence: evidence,
+        last_test_result: latest,
+      }),
+    ).toBe(evidence);
+  });
+
+  it('DURANTE la habilitación devuelve el último lote — es la única fuente', () => {
+    // Anteponer una evidencia vieja aquí esconderÍa el intento en curso, que es
+    // justo lo que el operador necesita ver.
+    for (const status of ['not_started', 'testing', 'rejected']) {
+      expect(
+        resolveTestSetProof({
+          enablement_status: status,
+          enablement_evidence: evidence,
+          last_test_result: latest,
+        }),
+      ).toBe(latest);
+    }
+  });
+
+  it('cae al último lote si la evidencia falta, aun estando habilitada', () => {
+    // Configuraciones habilitadas antes de que `enablement_evidence` existiera.
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: null,
+        last_test_result: latest,
+      }),
+    ).toBe(latest);
+  });
+
+  /**
+   * Una evidencia SIN veredicto no puede anteponerse: haría lo contrario de lo que
+   * esta función busca — leer «no pasó» sobre una habilitación real, perdiendo el
+   * respaldo del último lote. La primera versión de este resolvedor rompió cinco
+   * casos del spec de readiness por eso, y el spec tenía razón.
+   */
+  it('ignora una evidencia que no lleva veredicto', () => {
+    const stub = { track_id: 'track-1' };
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: stub,
+        last_test_result: { success: true },
+      }),
+    ).toEqual({ success: true });
+  });
+
+  it('acepta la evidencia con veredicto en cualquiera de sus dos formas', () => {
+    const plano = { success: true };
+    const anidado = { dian_response: { success: true } };
+    for (const ev of [plano, anidado]) {
+      expect(
+        resolveTestSetProof({
+          enablement_status: 'enabled',
+          enablement_evidence: ev,
+          last_test_result: latest,
+        }),
+      ).toBe(ev);
+    }
+  });
+
+  it('antepone también una evidencia que registra un veredicto NEGATIVO', () => {
+    // `success: false` sigue siendo un veredicto: si el estado dice que el set
+    // pasó y la evidencia dice lo contrario, esa contradicción debe ser visible,
+    // no taparse con el último lote.
+    const negativa = { success: false, zip_key: 'raro' };
+    expect(
+      resolveTestSetProof({
+        enablement_status: 'enabled',
+        enablement_evidence: negativa,
+        last_test_result: latest,
+      }),
+    ).toBe(negativa);
+  });
+
+  it('un lote descartado ya no puede tapar una habilitación concedida', () => {
+    // El caso exacto del 2026-08-09: `abandoned: true` hacía que
+    // `analyzeTestSetWait` devolviera «descartado, ejecuta un set nuevo».
+    const proof = resolveTestSetProof({
+      enablement_status: 'enabled',
+      enablement_evidence: evidence,
+      last_test_result: { abandoned: true, zip_key: null },
+    });
+    expect(proof).toBe(evidence);
+  });
+});
+
+/**
+ * ESTA COMPOSICIÓN ES LA QUE CUATRO SUPERFICIES CONSUMEN, Y DOS LA HACÍAN MAL.
+ *
+ * `analyzeTestSetWait(resolveTestSetProof(config))` estaba escrito a mano en
+ * cuatro sitios. En dos —el sondeo del asistente cada 15 s y la salida del lote
+ * descartado— faltaba la mitad de dentro: llamaban a `analyzeTestSetWait` a secas
+ * sobre `last_test_result`. El resultado era una configuración `enabled`
+ * respondiendo `wait.state: 'abandoned'`, con la insignia diciendo «Habilitado» y
+ * la tarjeta de espera ofreciendo ejecutar un set nuevo.
+ *
+ * Los casos de abajo prueban la composición, no sus mitades: cada mitad ya tiene
+ * los suyos, y las dos estaban bien por separado. Lo que falló fue juntarlas.
+ */
+describe('resolveTestSetWait', () => {
+  const NOW = new Date('2026-08-09T20:00:00.000Z').getTime();
+
+  /** La evidencia que la DIAN dejó el 2026-08-09 a las 05:59Z. */
+  const evidence = {
+    zip_key: 'e2d19623-aprobado',
+    dian_response: { success: true },
+  };
+
+  /** El lote de las 18:53Z, rechazado y descartado a las 19:41Z. */
+  const discarded = {
+    zip_key: null,
+    abandoned: true,
+    pending: false,
+    rejected: true,
+    abandoned_batches: [{ zip_key: '16bea3b2-rechazado' }],
+  };
+
+  it('una habilitación concedida NO se lee como lote descartado', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'enabled',
+        enablement_evidence: evidence,
+        last_test_result: discarded,
+      },
+      NOW,
+    );
+
+    // Antes daba 'abandoned' con next_actions ['run_test_set']: la UI le pedía
+    // rehacer la habilitación a una configuración que la DIAN ya había habilitado.
+    expect(wait.state).toBe('passed');
+    expect(wait.next_actions).toEqual([]);
+  });
+
+  it('vale igual con el set aprobado y la producción todavía sin habilitar', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'test_set_passed',
+        enablement_evidence: evidence,
+        last_test_result: discarded,
+      },
+      NOW,
+    );
+    expect(wait.state).toBe('passed');
+  });
+
+  it('DURANTE la habilitación describe el lote en vuelo, no una evidencia vieja', () => {
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'testing',
+        enablement_evidence: evidence,
+        last_test_result: {
+          zip_key: 'en-vuelo',
+          pending: true,
+          executed_at: new Date(NOW - 60_000).toISOString(),
+          documents: [{ cufe: 'c1', number: 'SETP1' }],
+        },
+      },
+      NOW,
+    );
+
+    // Esconder el intento en curso detrás de una evidencia anterior sería el
+    // defecto opuesto, y es el que el operador necesita ver.
+    expect(wait.state).toBe('processing');
+    expect(wait.reason).toContain('en-vuelo');
+  });
+
+  it('respeta el reloj inyectado, así que el estancamiento es medible', () => {
+    const executed_at = new Date(NOW - TEST_SET_STALL_AFTER_MS - 1).toISOString();
+    const wait = resolveTestSetWait(
+      {
+        enablement_status: 'testing',
+        enablement_evidence: null,
+        last_test_result: {
+          zip_key: 'viejo',
+          pending: true,
+          executed_at,
+          documents: [{ cufe: 'c1', number: 'SETP1' }],
+        },
+      },
+      NOW,
+    );
+    expect(wait.state).toBe('stalled');
+  });
+
+  it('sin evidencia se comporta exactamente como la composición manual', () => {
+    // Garantiza que extraer la composición no cambió nada para las dos
+    // superficies que ya la hacían bien.
+    const config = {
+      enablement_status: 'enabled' as string | null,
+      enablement_evidence: null as unknown,
+      last_test_result: discarded as unknown,
+    };
+    expect(resolveTestSetWait(config, NOW)).toEqual(
+      analyzeTestSetWait(resolveTestSetProof(config), NOW),
+    );
+  });
+});
 
 /**
  * Estos casos existen por un bug de producción, no por cobertura.

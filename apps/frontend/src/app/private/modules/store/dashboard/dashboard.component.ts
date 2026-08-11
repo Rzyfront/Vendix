@@ -338,7 +338,7 @@ export class DashboardComponent {
         placeholder: 'Seleccionar período',
       },
     ];
-    if (this.selectedPreset() === 'custom') {
+    if ((this.selectedPreset() as string) === 'custom') {
       filters.push(
         { key: 'start_date', label: 'Fecha inicio', type: 'date' },
         { key: 'end_date', label: 'Fecha fin', type: 'date' },

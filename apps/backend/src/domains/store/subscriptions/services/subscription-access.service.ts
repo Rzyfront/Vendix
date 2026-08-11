@@ -62,10 +62,18 @@ const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
 /**
  * States in which `lock_reason` can carry the real cause of the lock. Any other
  * state short-circuits the lookup so the happy path never pays for it.
+ *
+ * `pending_payment` is in the set (QUI-676) because a recovery checkout started
+ * from grace/suspended CARRIES its motive forward: `transition()` leaves
+ * `lock_reason` intact on the way into `pending_payment` (only active/trial
+ * clear it). So a store whose plan was retired and that is now settling an
+ * invoice still owes no money, and must keep being told so. `active`/`trial` —
+ * the hot path `StoreOperationsGuard` walks on every store write — stay out and
+ * never touch the DB.
  */
 const LOCK_REASON_STATES: ReadonlySet<store_subscription_state_enum> = new Set<
   store_subscription_state_enum
->(['grace_soft', 'grace_hard', 'suspended', 'blocked']);
+>(['grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment']);
 
 /**
  * Central AI gate for the SaaS subscription system.
@@ -639,6 +647,27 @@ export class SubscriptionAccessService {
       case 'active':
       case 'trial':
         return { mode: 'allow', severity: 'info' };
+      // QUI-676 — `pending_payment` means "a charge is IN FLIGHT", not "the
+      // customer did not pay". It had no case here, so it fell into
+      // `default: block/blocker` and an unconfirmed Wompi webhook locked the
+      // entire store out of every write under /api/store/**.
+      //
+      // A store that just handed us its card cannot be treated worse than one
+      // that is five days past due (`grace_soft` → warn). Blocking is still
+      // reachable and still correct — via `suspended`, `blocked`, `cancelled`
+      // and `expired` — but it must be the OUTCOME of the charge, not its
+      // waiting room.
+      //
+      // The window is bounded outside this mapping: after 60 minutes
+      // `ReconcileStuckPendingJob` voids the stale invoice and reverts the
+      // subscription to `pending_revert_state`, so `pending_payment` is a
+      // transient state by construction, not an indefinite free pass.
+      case 'pending_payment':
+        return {
+          mode: 'warn',
+          severity: 'warning',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
+        };
       case 'grace_soft':
         return {
           mode: 'warn',

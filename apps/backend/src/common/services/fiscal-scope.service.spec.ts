@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 
+import { VendixHttpException } from 'src/common/errors';
 import { FiscalScopeService } from './fiscal-scope.service';
 
 describe('FiscalScopeService', () => {
@@ -23,6 +24,69 @@ describe('FiscalScopeService', () => {
     await expect(service.getFiscalScope(1)).resolves.toBe('STORE');
     await expect(service.getFiscalScope(1)).resolves.toBe('STORE');
     expect(client.organizations.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * QUI-673 — el camino que dejó pasar la regresión.
+   *
+   * `getFiscalScope` no validaba su argumento: un llamador que pasaba
+   * `undefined` (leyendo `order.organization_id`, columna inexistente en
+   * `orders`) llegaba hasta Prisma y reventaba con un mensaje que no nombraba
+   * la causa. `FiscalGateService` captura cualquier error y falla cerrado, así
+   * que el defecto se reducía a un WARN ilegible y el umbral de 5 UVT dejaba
+   * de evaluarse en silencio.
+   */
+  describe('getFiscalScope argument guard', () => {
+    it.each([
+      ['undefined', undefined],
+      ['null', null],
+      ['zero', 0],
+      ['NaN', Number.NaN],
+    ])(
+      'fails with a typed error naming organization_id when it is %s, without reaching Prisma',
+      async (_label, organization_id) => {
+        const client = { organizations: { findUnique: jest.fn() } };
+        const service = createService(client);
+
+        await expect(
+          service.getFiscalScope(organization_id as any),
+        ).rejects.toBeInstanceOf(VendixHttpException);
+
+        // El mensaje debe nombrar el argumento culpable: es lo único que el
+        // WARN fail-closed del gate deja ver en producción.
+        await expect(
+          service.getFiscalScope(organization_id as any),
+        ).rejects.toThrow(/organization_id/i);
+
+        expect(client.organizations.findUnique).not.toHaveBeenCalled();
+      },
+    );
+
+    it('carries the ORG_CONTEXT_001 code so the failure is typed, not generic', async () => {
+      const service = createService({ organizations: { findUnique: jest.fn() } });
+
+      await expect(
+        service.getFiscalScope(undefined as any),
+      ).rejects.toMatchObject({ errorCode: 'ORG_CONTEXT_001' });
+    });
+
+    it('still resolves normally for a valid organization id', async () => {
+      const client = {
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            fiscal_scope: 'ORGANIZATION',
+            operating_scope: 'ORGANIZATION',
+            account_type: 'MULTI_STORE_ORG',
+          }),
+        },
+      };
+      const service = createService(client);
+
+      await expect(service.getFiscalScope(42)).resolves.toBe('ORGANIZATION');
+      expect(client.organizations.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 42 } }),
+      );
+    });
   });
 
   it('rejects operating STORE with consolidated fiscal scope', () => {

@@ -29,7 +29,7 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 
-import { PriceTier } from '../../interfaces';
+import { PriceTier, PriceTierKind } from '../../interfaces';
 import { PriceTiersService, PriceTierCacheService } from '../../services';
 
 interface PriceTiersStats {
@@ -78,6 +78,9 @@ export class PriceTiersListPageComponent implements OnInit {
 
   readonly searchTerm = signal('');
   readonly statusFilter = signal<'all' | 'active' | 'inactive'>('all');
+  /** `null` = ambos ejes. La lista de administración los muestra juntos con la
+   * columna Tipo; el filtro permite aislar uno. */
+  readonly kindFilter = signal<PriceTierKind | null>(null);
   filterValues: FilterValues = {};
 
   readonly totalPages = computed(() =>
@@ -95,6 +98,16 @@ export class PriceTiersListPageComponent implements OnInit {
         { value: 'false', label: 'Inactivas' },
       ],
     },
+    {
+      key: 'kind',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'customer_tier', label: 'Tarifas de cliente' },
+        { value: 'sale_unit', label: 'Unidades de venta' },
+      ],
+    },
   ];
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
@@ -109,6 +122,14 @@ export class PriceTiersListPageComponent implements OnInit {
 
   readonly tableColumns: TableColumn[] = [
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
+    {
+      key: 'kind',
+      label: 'Tipo',
+      priority: 1,
+      width: '150px',
+      transform: (value: string | null) =>
+        value === 'sale_unit' ? 'Unidad de venta' : 'Tarifa de cliente',
+    },
     {
       key: 'code',
       label: 'Código',
@@ -221,6 +242,9 @@ export class PriceTiersListPageComponent implements OnInit {
     } else if (this.statusFilter() === 'inactive') {
       query['is_active'] = false;
     }
+    if (this.kindFilter()) {
+      query['kind'] = this.kindFilter();
+    }
 
     this.priceTiersService
       .listPaginated(query)
@@ -269,6 +293,8 @@ export class PriceTiersListPageComponent implements OnInit {
     } else {
       this.statusFilter.set('all');
     }
+    const kindValue = values['kind'] as PriceTierKind | '' | undefined;
+    this.kindFilter.set(kindValue ? kindValue : null);
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadTiers();
   }
@@ -276,6 +302,7 @@ export class PriceTiersListPageComponent implements OnInit {
   clearFilters(): void {
     this.searchTerm.set('');
     this.statusFilter.set('all');
+    this.kindFilter.set(null);
     this.filterValues = {};
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadTiers();

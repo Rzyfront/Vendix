@@ -1,35 +1,104 @@
-<div class="operations-settings-form">
+<div class="operations-settings-form space-y-5">
+  <app-alert-banner variant="info" icon="lightbulb">
+    Dos relojes distintos: uno promete al cliente cu&aacute;ndo estar&aacute; listo su pedido, el
+    otro decide cu&aacute;ndo el tablero de cocina arranca una jornada nueva. Ninguno toca
+    precios, impuestos ni el cierre de caja.
+  </app-alert-banner>
+
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Tiempos de Preparación</h4>
-      <div class="space-y-4">
-        <app-input
-          [formControl]="defaultPrepTimeControl"
-          type="number"
-          label="Tiempo de preparación por defecto"
-          placeholder="15"
-          helperText="minutos — usado cuando el producto no tiene tiempo definido"
-          min="0"
-          size="sm"
-          (inputChange)="onFieldChange()"
-        ></app-input>
+    <!-- ── Tiempos de preparación ─────────────────────────────────── -->
+    <div class="space-y-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <app-icon name="timer" size="16" class="text-text-secondary"></app-icon>
+        <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+          Tiempos de preparaci&oacute;n
+        </h4>
+        <app-badge variant="success" size="xs" badgeStyle="outline">15 min recomendado</app-badge>
       </div>
+
+      <app-input
+        [formControl]="defaultPrepTimeControl"
+        type="number"
+        label="Tiempo de preparaci&oacute;n por defecto (minutos)"
+        placeholder="15"
+        helperText="S&oacute;lo se usa en los productos que no traen su propio tiempo de preparaci&oacute;n."
+        tooltipText="El tiempo del producto siempre manda. Si un producto define 25 minutos, se usan 25 y este ajuste se ignora para ese producto. Cuando el pedido lleva varias l&iacute;neas, gana la m&aacute;s lenta: 5 min + 20 min ⇒ 20 min para todo el pedido."
+        min="0"
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+
+      <div class="rounded-xl border border-border bg-info-light p-3">
+        <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+          Qu&eacute; promete este valor
+        </p>
+        <p class="text-xs text-text-primary mt-1 leading-relaxed">{{ prepExample() }}</p>
+      </div>
+
+      @if (prepMinutes() === 0) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          Con 0 minutos el pedido se promete listo en el instante del pago. Sirve para
+          venta de mostrador sin preparaci&oacute;n; para cocina deja una promesa imposible
+          de cumplir.
+        </app-alert-banner>
+      }
+
+      <p class="text-xs text-text-secondary leading-relaxed">
+        El valor viaja a la hora estimada de listo y de entrega de cada pedido, que es
+        lo que ve el cliente y el equipo en el detalle de la orden. El color del
+        tablero de cocina <strong>no</strong> depende de este ajuste: lo calcula con el
+        tiempo de cada producto.
+      </p>
     </div>
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Cierre de día</h4>
-      <div class="space-y-4">
-        <app-input
-          [formControl]="ticketClosingHourControl"
-          type="number"
-          label="Hora de cierre de tickets"
-          placeholder="3"
-          helperText="hora (0-23) a la que el KDS limpia y reinicia los tickets del día"
-          min="0"
-          max="23"
-          size="sm"
-          (inputChange)="onFieldChange()"
-        ></app-input>
+
+    <!-- ── Cierre del tablero de tickets ──────────────────────────── -->
+    <div class="space-y-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <app-icon name="moon" size="16" class="text-text-secondary"></app-icon>
+        <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+          Cierre del tablero de tickets
+        </h4>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">Afecta al tablero de cocina</app-badge>
       </div>
+
+      <app-input
+        [formControl]="ticketClosingHourControl"
+        type="number"
+        label="Hora de cierre de tickets (0&ndash;23)"
+        placeholder="3"
+        helperText="Hora en la que el tablero de cocina se limpia y la numeraci&oacute;n de tickets vuelve al #1."
+        tooltipText="Es la frontera de la jornada de cocina, no un horario de atenci&oacute;n. Con 3, la jornada corre de las 03:00 de un d&iacute;a a las 03:00 del siguiente, as&iacute; que un ticket de la 01:00 cuenta para el d&iacute;a anterior y conserva su consecutivo."
+        min="0"
+        max="23"
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+
+      <div class="rounded-xl border border-border bg-info-light p-3">
+        <p class="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+          Con {{ closingHour() }} configurado
+        </p>
+        <p class="text-xs text-text-primary mt-1 leading-relaxed">
+          La jornada de cocina va de las {{ closingHourLabel() }} de un d&iacute;a a las
+          {{ closingHourLabel() }} del siguiente. Un plato disparado a la 01:00 cuenta
+          para el d&iacute;a anterior; a las {{ closingHourLabel() }} el tablero se vac&iacute;a y
+          el consecutivo de tickets de cada estaci&oacute;n vuelve a empezar en #1.
+        </p>
+      </div>
+
+      @if (closingHourInServiceWindow()) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          A las {{ closingHourLabel() }} normalmente hay servicio abierto: el tablero se
+          vaciar&iacute;a en plena operaci&oacute;n y los tickets en curso saldr&iacute;an de pantalla.
+          Eleg&iacute; una hora en la que la cocina est&eacute; cerrada.
+        </app-alert-banner>
+      }
+
+      <p class="text-xs text-text-secondary leading-relaxed">
+        S&oacute;lo mueve el tablero de cocina y la numeraci&oacute;n de sus tickets. No cambia la
+        fecha de las ventas, ni los reportes, ni el cierre de caja: esos siguen usando
+        el d&iacute;a calendario.
+      </p>
     </div>
   </div>
 </div>

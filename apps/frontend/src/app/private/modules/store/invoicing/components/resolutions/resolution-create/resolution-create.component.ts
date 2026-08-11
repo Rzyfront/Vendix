@@ -1,8 +1,17 @@
-import { Component, DestroyRef, computed, inject, input, output, signal, effect } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
+
 import { InvoiceResolution } from '../../../interfaces/invoice.interface';
 import {
   createResolution,
@@ -13,234 +22,164 @@ import {
   updateResolutionSuccess,
 } from '../../../state/actions/invoicing.actions';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
-import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import {
-  DianResolutionScanResult,
-  RESOLUTION_SCAN_FIELD_LABELS,
-} from '../../../../../../../shared/components/dian-resolution-scanner/interfaces/resolution-scan-result.interface';
+  DianResolutionFormComponent,
+  configurationTypeFor,
+  isFiscalDocumentType,
+  type DianConfigurationType,
+  type DianResolutionFormValue,
+  type FiscalDocumentType,
+  type FiscalReadinessResolution,
+} from '../../../../../../../shared/components/dian';
 
+/**
+ * Fila editable, venga de donde venga.
+ *
+ * `GET {rail}/resolutions` devuelve `InvoiceResolution` (con la ClTec cruda) y
+ * el agregado de estado fiscal devuelve `FiscalReadinessResolution` (que sólo
+ * reporta `technical_key_set`). Las dos superficies abren ESTE modal, así que
+ * el modal normaliza en vez de obligar a cada host a traducir — una traducción
+ * por host es una oportunidad más de perder el `document_type` por el camino.
+ */
+export type EditableResolution = InvoiceResolution | FiscalReadinessResolution;
+
+/**
+ * Modal de alta/edición de resolución de numeración.
+ *
+ * ## Qué hace y qué NO hace
+ *
+ * NO tiene formulario propio: envuelve `DianResolutionFormComponent`, el
+ * formulario COMPARTIDO con la consola de super admin. Antes sí lo tenía, y ese
+ * formulario no conocía `document_type`: toda resolución creada desde aquí se
+ * guardaba como factura electrónica de venta. Como el generador de consecutivos
+ * busca la fila POR tipo de documento, registrar el rango del documento soporte
+ * secuestraba la numeración de FEV — la siguiente factura de venta salía con un
+ * consecutivo que la DIAN no autorizó para ella, y el número gastado no se
+ * recupera.
+ *
+ * Lo que sí es suyo: la PERSISTENCIA. El formulario compartido emite el payload
+ * y no llama al backend, porque cada consola persiste distinto. Este módulo usa
+ * NgRx, así que aquí se despachan `createResolution` / `updateResolution` y se
+ * escucha el par éxito/fallo para cerrar o mostrar el error del backend tal
+ * como lo redactó.
+ */
 @Component({
   selector: 'vendix-resolution-create',
   standalone: true,
-  imports: [
-    ReactiveFormsModule,
-    ModalComponent,
-    ButtonComponent,
-    InputComponent,
-  ],
+  imports: [ModalComponent, DianResolutionFormComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="isEditing() ? 'Editar Resolución' : 'Nueva Resolución'"
+      [title]="isEditing() ? 'Editar resolución' : 'Nueva resolución'"
+      [subtitle]="modalSubtitle()"
       size="md"
     >
       <div class="p-4">
-        <form [formGroup]="resolutionForm" (ngSubmit)="onSubmit()" class="space-y-4">
-
-          @if (unverifiedFields().length > 0) {
-            <!-- La IA precargó estos campos pero no pudo verificarlos (o los leyó
-                 con baja confianza). Se listan porque la resolución autoriza
-                 numeración legal: un dígito mal leído se descubre cuando la DIAN
-                 rechaza la primera factura. -->
-            <div
-              class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
-              role="note"
-            >
-              <p class="font-semibold mb-1">
-                Verifica estos campos precargados por IA
-              </p>
-              <ul class="list-disc pl-5 space-y-0.5">
-                @for (key of unverifiedFields(); track key) {
-                  <li>{{ scanFieldLabel(key) }}</li>
-                }
-              </ul>
-            </div>
-          }
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Número de Resolución"
-              formControlName="resolution_number"
-              [control]="resolutionForm.get('resolution_number')"
-              placeholder="Ej: 18764000001"
-              [required]="true"
-            ></app-input>
-
-            <app-input
-              label="Prefijo"
-              formControlName="prefix"
-              [control]="resolutionForm.get('prefix')"
-              placeholder="Ej: FE"
-              [required]="true"
-            ></app-input>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Rango Desde"
-              type="number"
-              formControlName="range_from"
-              [control]="resolutionForm.get('range_from')"
-              [required]="true"
-              min="1"
-            ></app-input>
-
-            <app-input
-              label="Rango Hasta"
-              type="number"
-              formControlName="range_to"
-              [control]="resolutionForm.get('range_to')"
-              [required]="true"
-              min="1"
-            ></app-input>
-          </div>
-
-          <app-input
-            label="Fecha de Resolución"
-            type="date"
-            formControlName="resolution_date"
-            [control]="resolutionForm.get('resolution_date')"
-            [required]="true"
-          ></app-input>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Válida Desde"
-              type="date"
-              formControlName="valid_from"
-              [control]="resolutionForm.get('valid_from')"
-              [required]="true"
-            ></app-input>
-
-            <app-input
-              label="Válida Hasta"
-              type="date"
-              formControlName="valid_to"
-              [control]="resolutionForm.get('valid_to')"
-              [required]="true"
-            ></app-input>
-          </div>
-
-          <app-input
-            label="Clave Técnica"
-            formControlName="technical_key"
-            [control]="resolutionForm.get('technical_key')"
-            placeholder="Clave técnica DIAN (opcional)"
-          ></app-input>
-
-        </form>
-      </div>
-
-      <!-- Footer -->
-      <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()">
-            Cancelar
-          </app-button>
-
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [disabled]="resolutionForm.invalid || submitting()"
-            [loading]="submitting()">
-            {{ isEditing() ? 'Actualizar' : 'Crear' }} Resolución
-          </app-button>
-        </div>
+        <!-- El formulario se reconstruye por resolución: su siembra corre una
+             sola vez por fila y un modal reutilizado mostraría los datos de la
+             resolución anterior. -->
+        @if (isOpen()) {
+          <app-dian-resolution-form
+            [configurationType]="configurationType()"
+            [resolution]="formResolution()"
+            [documentType]="documentType()"
+            [saving]="submitting()"
+            [errorText]="errorText()"
+            scannerScope="store"
+            (save)="onSave($event)"
+            (cancel)="onClose()"
+          ></app-dian-resolution-form>
+        }
       </div>
     </app-modal>
-  `
+  `,
 })
 export class ResolutionCreateComponent {
   readonly isOpen = input<boolean>(false);
-  readonly resolution = input<InvoiceResolution | null>(null);
+  readonly resolution = input<EditableResolution | null>(null);
+
   /**
-   * Resultado de un escaneo IA con el que precargar el formulario. Entra como
-   * input (y no como una llamada del padre) porque el padre no tiene acceso al
-   * FormGroup: así el modal sigue siendo el único dueño de su formulario.
+   * Habilitación a la que pertenece una resolución NUEVA. En edición manda el
+   * `document_type` de la fila: mover una resolución de eje la sacaría de la
+   * habilitación que la autorizó.
    */
-  readonly prefill = input<DianResolutionScanResult | null>(null);
+  readonly configurationTypeInput = input<DianConfigurationType>('invoicing', {
+    alias: 'configurationType',
+  });
+
+  /** Preselección del documento dentro del eje, para el alta. */
+  readonly documentType = input<FiscalDocumentType | null>(null);
+
   readonly isOpenChange = output<boolean>();
+  /** Se guardó algo. El host recarga lo que tenga que recargar. */
+  readonly saved = output<void>();
+
+  private readonly store = inject(Store);
+  private readonly actions$ = inject(Actions);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly submitting = signal(false);
-  /** Campos que el escáner marcó para confirmación manual. */
-  readonly unverifiedFields = computed(
-    () => this.prefill()?.requires_manual_confirmation ?? [],
+  /** Error del backend, ya redactado. Se muestra crudo dentro del formulario. */
+  readonly errorText = signal<string | null>(null);
+
+  readonly isEditing = computed(() => this.resolution() !== null);
+
+  /**
+   * La fila normalizada al tipo que entiende el formulario compartido.
+   *
+   * `technical_key_set` se deriva de la presencia del valor cuando la fila viene
+   * de `GET resolutions` (que sí devuelve la ClTec) y se respeta tal cual cuando
+   * viene del agregado (que sólo reporta su presencia). De él depende que editar
+   * una factura de venta sin retocar la clave NO dispare `TECHNICAL_KEY_REQUIRED`
+   * y obligue a reteclear un secreto que el servidor nunca devuelve.
+   */
+  readonly formResolution = computed<FiscalReadinessResolution | null>(() => {
+    const row = this.resolution();
+    if (!row) return null;
+
+    const legacy = row as Partial<InvoiceResolution>;
+    const aggregate = row as Partial<FiscalReadinessResolution>;
+
+    return {
+      id: row.id,
+      document_type: this.documentTypeOf(row),
+      prefix: row.prefix ?? null,
+      range_from: row.range_from,
+      range_to: row.range_to,
+      current_number: row.current_number,
+      valid_from: String(row.valid_from),
+      valid_to: String(row.valid_to),
+      is_active: row.is_active,
+      technical_key_set:
+        aggregate.technical_key_set ?? Boolean(legacy.technical_key),
+      resolution_number: row.resolution_number ?? null,
+      resolution_date: row.resolution_date ? String(row.resolution_date) : null,
+    };
+  });
+
+  /** Eje efectivo: el de la fila en edición, el del input en alta. */
+  readonly configurationType = computed<DianConfigurationType>(() => {
+    const row = this.resolution();
+    if (!row) return this.configurationTypeInput();
+    return configurationTypeFor(this.documentTypeOf(row));
+  });
+
+  readonly modalSubtitle = computed(() =>
+    this.isEditing()
+      ? 'Los campos cambian según el documento que numera'
+      : 'Elige primero qué documento numera este rango',
   );
-  resolutionForm: FormGroup;
-
-  private fb = inject(FormBuilder);
-  private store = inject(Store);
-  private actions$ = inject(Actions);
-  private destroyRef = inject(DestroyRef);
-
-  readonly isEditing = () => !!this.resolution();
 
   constructor() {
-    this.resolutionForm = this.fb.group({
-      resolution_number: ['', [Validators.required]],
-      prefix: ['', [Validators.required]],
-      range_from: [null, [Validators.required, Validators.min(1)]],
-      range_to: [null, [Validators.required, Validators.min(1)]],
-      resolution_date: ['', [Validators.required]],
-      valid_from: ['', [Validators.required]],
-      valid_to: ['', [Validators.required]],
-      technical_key: [''],
-    });
-
+    // Abrir en limpio: un error del intento anterior sobre un formulario nuevo
+    // acusa a datos que ya no están en pantalla.
     effect(() => {
-      const res = this.resolution();
-      if (res) {
-        this.resolutionForm.patchValue({
-          resolution_number: res.resolution_number,
-          prefix: res.prefix,
-          range_from: res.range_from,
-          range_to: res.range_to,
-          resolution_date: res.resolution_date?.split('T')[0] || '',
-          valid_from: res.valid_from?.split('T')[0] || '',
-          valid_to: res.valid_to?.split('T')[0] || '',
-          technical_key: res.technical_key || '',
-        });
-      } else {
-        this.resolutionForm.reset();
+      if (this.isOpen()) {
+        this.errorText.set(null);
+        this.submitting.set(false);
       }
-    });
-
-    // Declarado DESPUÉS del efecto de `resolution` a propósito: cuando el padre
-    // abre el modal en modo creación y precarga en el mismo flush, el reset de
-    // arriba corre primero y este patch queda encima. Al revés, el reset borraría
-    // lo escaneado.
-    effect(() => {
-      const scan = this.prefill();
-      if (!scan) return;
-
-      // Solo se copia lo que tiene valor: un campo que la IA no leyó se queda
-      // vacío para que el usuario lo escriba, en vez de recibir un cero o una
-      // fecha inventada.
-      const patch: Record<string, string | number> = {};
-      if (scan.resolution_number.value) {
-        patch['resolution_number'] = scan.resolution_number.value;
-      }
-      if (scan.prefix.value) patch['prefix'] = scan.prefix.value;
-      if (scan.range_from.value !== null) {
-        patch['range_from'] = scan.range_from.value;
-      }
-      if (scan.range_to.value !== null) patch['range_to'] = scan.range_to.value;
-      if (scan.resolution_date.value) {
-        patch['resolution_date'] = scan.resolution_date.value;
-      }
-      if (scan.valid_from.value) patch['valid_from'] = scan.valid_from.value;
-      if (scan.valid_to.value) patch['valid_to'] = scan.valid_to.value;
-      if (scan.technical_key.value) {
-        patch['technical_key'] = scan.technical_key.value;
-      }
-
-      this.resolutionForm.patchValue(patch);
-      this.resolutionForm.markAllAsTouched();
     });
 
     this.actions$
@@ -250,7 +189,8 @@ export class ResolutionCreateComponent {
       )
       .subscribe(() => {
         this.submitting.set(false);
-        this.resolutionForm.reset();
+        this.errorText.set(null);
+        this.saved.emit();
         this.isOpenChange.emit(false);
       });
 
@@ -259,52 +199,55 @@ export class ResolutionCreateComponent {
         ofType(createResolutionFailure, updateResolutionFailure),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => {
+      .subscribe(({ error }) => {
         this.submitting.set(false);
+        // El modal NO se cierra: cerrar sobre un fallo tira lo tecleado y deja
+        // al usuario adivinando qué campo rechazó el backend.
+        this.errorText.set(
+          error || 'No se pudo guardar la resolución. Revisa los datos.',
+        );
       });
   }
 
-  onSubmit(): void {
-    if (this.resolutionForm.invalid) {
-      this.resolutionForm.markAllAsTouched();
-      return;
-    }
-
+  /**
+   * Persiste el payload YA validado contra el contrato por el formulario.
+   *
+   * `technical_key` viaja sólo si el formulario la incluyó: en edición, un campo
+   * vacío significa «deja la que está», y mandar `''` la destruiría sin que
+   * nadie lo pidiera.
+   */
+  onSave(value: DianResolutionFormValue): void {
     this.submitting.set(true);
-    const formValue = this.resolutionForm.value;
+    this.errorText.set(null);
 
     const payload = {
-      resolution_number: formValue.resolution_number,
-      prefix: formValue.prefix,
-      range_from: Number(formValue.range_from),
-      range_to: Number(formValue.range_to),
-      resolution_date: formValue.resolution_date,
-      valid_from: formValue.valid_from,
-      valid_to: formValue.valid_to,
-      technical_key: formValue.technical_key || undefined,
+      resolution_number: value.resolution_number,
+      resolution_date: value.resolution_date,
+      prefix: value.prefix,
+      range_from: value.range_from,
+      range_to: value.range_to,
+      valid_from: value.valid_from,
+      valid_to: value.valid_to,
+      document_type: value.document_type,
+      is_active: value.is_active,
+      ...(value.technical_key ? { technical_key: value.technical_key } : {}),
     };
 
-    const res = this.resolution();
-    if (this.isEditing() && res) {
-      this.store.dispatch(updateResolution({
-        id: res.id,
-        resolution: payload,
-      }));
-    } else {
-      this.store.dispatch(createResolution({
-        resolution: payload,
-      }));
+    const row = this.resolution();
+    if (row) {
+      this.store.dispatch(updateResolution({ id: row.id, resolution: payload }));
+      return;
     }
+    this.store.dispatch(createResolution({ resolution: payload }));
   }
 
   onClose(): void {
     this.isOpenChange.emit(false);
   }
 
-  /** Etiqueta legible de un campo señalado por el escáner. */
-  scanFieldLabel(key: string): string {
-    return (
-      (RESOLUTION_SCAN_FIELD_LABELS as Record<string, string>)[key] ?? key
-    );
+  /** Tipo de la fila, con el mismo defecto que aplica el backend cuando falta. */
+  private documentTypeOf(row: EditableResolution): FiscalDocumentType {
+    const raw = (row as Partial<FiscalReadinessResolution>).document_type;
+    return isFiscalDocumentType(raw) ? raw : 'sales_invoice';
   }
 }

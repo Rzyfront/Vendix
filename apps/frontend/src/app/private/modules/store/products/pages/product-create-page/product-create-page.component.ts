@@ -10,6 +10,8 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { KdsStationsService } from '../../../restaurant-ops/kds/services';
+import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
 import { map, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
@@ -79,7 +81,15 @@ import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator, uomDimensionMatchValidator, notBlankValidator } from '../../utils/product-validators';
 import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
-import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
+import { SaleConfigHintComponent } from '../../components/sale-config-hint/sale-config-hint.component';
+import {
+  SaleConfigExample,
+  SaleConfigInput,
+} from '../../../../../../shared/services/pricing';
+import {
+  PriceTiersService,
+  isPriceTierOverrideApiError,
+} from '../../../price-tiers/services/price-tiers.service';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import {
   PriceTier,
@@ -145,6 +155,29 @@ interface PriceTierOverrideRow {
   override_units_per_package: number | null;
   // Snapshot of the persisted units-per-package to detect dirty edits on save.
   initial_override_units_per_package: number | null;
+  /**
+   * Presentación por defecto del producto: la que rige en TODA superficie de
+   * venta (tienda online, POS, cotizaciones). Solo una fila puede tenerlo, y
+   * solo si la tarifa es `sale_unit` — elegir entre varias es exclusivo del POS.
+   */
+  is_default: boolean;
+  initial_is_default: boolean;
+  /**
+   * Código de barras de ESTA presentación (QUI-648 fase 2). El código identifica
+   * el par (producto, presentación): pistolear la caja no puede devolver el
+   * precio de la unidad suelta. `null`/`''` => sin código.
+   */
+  barcode: string | null;
+  /** Snapshot persistido para diffear en el guardado. */
+  initial_barcode: string | null;
+  /**
+   * Mensaje del 409 `PROD_BARCODE_DUP_001` tal como lo redactó el backend (él
+   * distingue si el choque fue con un producto, una variante u otra
+   * presentación). Se pinta bajo el input y NUNCA se limpia lo que el usuario
+   * escribió: el comerciante necesita ver el código que colisionó para
+   * corregirlo.
+   */
+  barcode_error: string | null;
 }
 
 @Component({
@@ -178,6 +211,7 @@ interface PriceTierOverrideRow {
     KeyValuePipe,
     ProductSerialsManagerModalComponent,
     SaveRequirementsModalComponent,
+    SaleConfigHintComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -478,6 +512,8 @@ export class ProductCreatePageComponent {
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
+  /** QUI-651 — estaciones de KDS para el selector del plato preparado. */
+  private readonly kdsStationsService = inject(KdsStationsService);
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
   private readonly fiscalGate = inject(FiscalGateService);
@@ -554,15 +590,66 @@ export class ProductCreatePageComponent {
     this.uomTick();
     const purchaseId = Number(this.productForm?.get('purchase_uom_id')?.value ?? 0);
     const purchase = this.uomOptions().find((u) => u.id === purchaseId);
-    if (!purchase) return [];
-    const pf = Number(purchase.factor_to_base);
+    const pf = purchase ? Number(purchase.factor_to_base) : null;
+    // Sin unidad de compra la lista queda abierta: un retail que vende cable
+    // por metro define su unidad de stock sin comprar en otra. Con unidad de
+    // compra elegida se mantiene el embudo del insumo (misma dimensión, nunca
+    // más grande que lo que se compra).
     return this.uomOptions()
       .filter(
         (u) =>
-          u.dimension === purchase.dimension && Number(u.factor_to_base) <= pf,
+          !purchase ||
+          (u.dimension === purchase.dimension &&
+            Number(u.factor_to_base) <= (pf as number)),
       )
-      .map((u) => ({ value: u.id, label: `${u.name} (${u.code})` }));
+      .map((u) => {
+        const eligible = u.is_stock_eligible !== false;
+        return {
+          value: u.id,
+          label: `${u.name} (${u.code})`,
+          disabled: !eligible,
+          description: eligible
+            ? undefined
+            : 'Su equivalencia no es exacta: sirve para comprar, no para contar stock',
+        };
+      });
   });
+
+  /** Unidad de stock elegida, resuelta contra el catálogo. */
+  readonly selectedStockUom = computed<UnitOfMeasure | null>(() => {
+    this.uomTick();
+    const id = Number(this.productForm?.get('stock_uom_id')?.value ?? 0);
+    if (!id) return null;
+    return this.uomOptions().find((u) => u.id === id) ?? null;
+  });
+
+  /**
+   * Escalas de precio ofrecidas: cada unidad de la misma dimensión que quepa un
+   * número entero de veces en la unidad de stock. El comerciante elige "por
+   * metro" y el sistema guarda 1.000; nunca se le pide pensar en milímetros.
+   */
+  readonly priceScaleOptions = computed<SelectorOption[]>(() => {
+    const stock = this.selectedStockUom();
+    if (!stock) return [{ value: 1, label: 'Por unidad' }];
+    const sf = Number(stock.factor_to_base);
+    if (!Number.isFinite(sf) || sf <= 0) return [{ value: 1, label: 'Por unidad' }];
+    const options: SelectorOption[] = [];
+    for (const u of this.uomOptions()) {
+      if (u.dimension !== stock.dimension) continue;
+      const ratio = Number(u.factor_to_base) / sf;
+      if (!Number.isFinite(ratio) || ratio < 1 || !Number.isInteger(ratio)) {
+        continue;
+      }
+      options.push({
+        value: ratio,
+        label: `Por ${u.name.toLowerCase()} (${u.code})`,
+        description:
+          ratio > 1 ? `${ratio.toLocaleString('es-CO')} ${stock.code}` : undefined,
+      });
+    }
+    return options.sort((a, b) => Number(a.value) - Number(b.value));
+  });
+
   /**
    * UoM dropdown for the "purchase unit" (presentation you receive). Free
    * choice across all active units — it DRIVES the stock-unit options
@@ -654,10 +741,73 @@ export class ProductCreatePageComponent {
     };
   });
 
+  /**
+   * Todo lo que la tarjeta explicativa necesita, resuelto desde el formulario.
+   * Depende de `formUpdateTrigger` y `uomTick` porque los valores del
+   * formulario reactivo no son señales.
+   */
+  readonly saleConfigInput = computed<SaleConfigInput>(() => {
+    this.formUpdateTrigger();
+    this.uomTick();
+    const stock = this.selectedStockUom();
+    return {
+      stockUnit: stock ? { code: stock.code, name: stock.name } : null,
+      dimension: stock?.dimension ?? null,
+      priceUnitQuantity: Number(
+        this.productForm?.get('price_unit_quantity')?.value ?? 1,
+      ),
+      basePrice: Number(this.productForm?.get('base_price')?.value ?? 0),
+      hasVariants: this.hasVariants,
+      presentations: this.priceTierRows()
+        .filter((row) => row.enabled)
+        .map((row) => ({
+          name: row.tier.name,
+          packSize: this.getRowPackSize(row),
+          price: row.override_price ?? this.getTierFallbackPrice(row),
+        })),
+      catalog: this.uomOptions().map((u) => ({
+        code: u.code,
+        name: u.name,
+        dimension: u.dimension,
+        factorToBase: Number(u.factor_to_base),
+      })),
+    };
+  });
+
+  /**
+   * Un ejemplo precarga unidad de stock y escala de precio. La presentación no
+   * se crea sola: crearla exige una tarifa de la tienda, y hacerlo por debajo
+   * dejaría filas que el comerciante no pidió. El ejemplo deja el terreno listo
+   * y el paso de presentaciones queda a un clic.
+   */
+  applySaleConfigExample(example: SaleConfigExample): void {
+    const unit = this.uomOptions().find((u) => u.code === example.stockUnitCode);
+    if (!unit) return;
+    this.productForm.patchValue({
+      stock_uom_id: unit.id,
+      price_unit_quantity: example.priceUnitQuantity,
+    });
+    this.uomTick.update((t) => t + 1);
+    this.formUpdateTrigger.update((t) => t + 1);
+  }
+
   /** Re-run validator + recompute capacity when the stock dropdown changes. */
   onStockUomChange(): void {
     this.uomTick.update((t) => t + 1);
+    // La escala del precio se expresa en la unidad de stock: cambiar de
+    // milímetros a metros dejaría un "por 1.000" que ya no significa un metro.
+    // Se vuelve a 1 y el usuario elige de nuevo, en vez de arrastrar un número
+    // que mentiría en la vitrina.
+    const scaleCtrl = this.productForm.get('price_unit_quantity');
+    if (scaleCtrl && Number(scaleCtrl.value ?? 1) !== 1) {
+      scaleCtrl.setValue(1);
+    }
     this.productForm.updateValueAndValidity();
+  }
+
+  /** La escala del precio cambió: refresca la frase que la describe. */
+  onPriceUnitQuantityChange(): void {
+    this.formUpdateTrigger.update((t) => t + 1);
   }
 
   /**
@@ -959,7 +1109,9 @@ export class ProductCreatePageComponent {
   // Routes a barcode scan to the currently-focused barcode input.
   // Default = product-level barcode (preserves simple-product scan behavior).
   protected readonly scanTarget = signal<
-    { kind: 'product' } | { kind: 'variant'; index: number }
+    | { kind: 'product' }
+    | { kind: 'variant'; index: number }
+    | { kind: 'presentation'; tierId: number }
   >({ kind: 'product' });
   expandedVariantIndex = signal<number | null>(null);
   stockTransferMode: 'first' | 'distribute' | 'reset' | null = null;
@@ -1348,6 +1500,15 @@ export class ProductCreatePageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((code) => {
         const target = this.scanTarget();
+        // Pistolear la caja con el foco en su fila escribe el código de ESA
+        // presentación, no el del producto: es el gesto natural del comerciante
+        // que tiene el empaque en la mano.
+        if (target.kind === 'presentation') {
+          if (this.priceTierRows().some((r) => r.tier.id === target.tierId)) {
+            this.updateTierOverrideBarcode(target.tierId, code);
+            return;
+          }
+        }
         if (target.kind === 'variant') {
           const variant = this.generatedVariants[target.index];
           if (variant) {
@@ -1366,7 +1527,12 @@ export class ProductCreatePageComponent {
     // autogenramos si el slug está vacío, así un edit manual gana sin tener
     // que trackear un flag `dirty` separado.
     this.setupAutoSlugGeneration();
-  }
+  
+    // QUI-651 — cargar estaciones para el selector del plato preparado. Va aca y no
+    // en un ngOnInit porque el componente no implementa OnInit: el resto de su
+    // inicializacion tambien vive en el constructor.
+    this.loadKdsStations();
+}
 
   /**
    * Autogen del slug desde el nombre del producto.
@@ -1631,6 +1797,11 @@ export class ProductCreatePageComponent {
         consultation_template_id: [null],
         preconsultation_template_id: [null],
         preparation_time_minutes: [null as number | null],
+        // QUI-651 — estacion de preparacion del plato. NULL significa "cae en el
+        // KDS por defecto de la tienda", que es lo que hace funcionar el caso de
+        // una sola estacion sin configurar nada. Solo significativo para
+        // product_type='prepared'.
+        kds_id: [null as number | null],
         // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
         // ===== Restaurant Suite toggles (Fase B) =====
@@ -1650,6 +1821,10 @@ export class ProductCreatePageComponent {
         // FKs below are the source of truth once a UoM is picked.
         stock_uom_id: [null as number | null],
         purchase_uom_id: [null as number | null],
+        // Escala del precio (price unit): a cuántas unidades de stock
+        // corresponde `base_price`. 1 = precio por unidad, el comportamiento
+        // de siempre.
+        price_unit_quantity: [1 as number],
       },
       {
         validators: [
@@ -1870,6 +2045,7 @@ export class ProductCreatePageComponent {
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
       preparation_time_minutes: product.preparation_time_minutes || null,
+      kds_id: (product as any).kds_id ?? null,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
       // Restaurant Suite toggles (Fase B)
@@ -1884,6 +2060,7 @@ export class ProductCreatePageComponent {
       // UoM FKs (Fase UoM)
       stock_uom_id: (product as any).stock_uom_id ?? null,
       purchase_uom_id: (product as any).purchase_uom_id ?? null,
+      price_unit_quantity: Number((product as any).price_unit_quantity ?? 1) || 1,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -2049,6 +2226,27 @@ export class ProductCreatePageComponent {
 
   toggleVariants(isChecked: boolean): void {
     if (isChecked) {
+      // Multi-tarifa ⊕ variantes. Multi-tarifa gana: si el producto ya se vende
+      // en presentaciones, el camino para usar variantes es desactivarla, no
+      // apilar los dos ejes. El backend lo rechaza igual
+      // (PRODUCT_TIERS_VARIANTS_EXCLUSIVE); acá se dice ANTES de perder el
+      // trabajo de configurar atributos.
+      if (this.isMultiTierEnabled) {
+        this.dialogService
+          .confirm({
+            title: 'Multi-tarifa desactiva variantes',
+            message:
+              'Este producto se vende en presentaciones (multi-tarifa): bulto y kilo, rollo y metro. ' +
+              'Las variantes y las presentaciones son excluyentes porque el precio y el descuento de stock ' +
+              'no pueden depender de dos ejes a la vez. Desactiva multi-tarifa si necesitas variantes.',
+            confirmText: 'Entendido',
+            cancelText: 'Cancelar',
+            confirmVariant: 'primary',
+          })
+          .then(() => {});
+        return;
+      }
+
       const currentSku = this.productForm.get('sku')?.value;
       if (!currentSku || currentSku.trim() === '') {
         this.dialogService
@@ -3161,6 +3359,7 @@ export class ProductCreatePageComponent {
       service_pricing_type: 'Tipo de precio del servicio',
       service_instructions: 'Instrucciones del servicio',
       preparation_time_minutes: 'Tiempo de preparación',
+      kds_id: 'Estación de preparación',
     };
 
     // (a) Errores de FormControl ------------------------------------------
@@ -3589,6 +3788,10 @@ export class ProductCreatePageComponent {
       product_type: formValue.is_ingredient
         ? 'physical'
         : formValue.product_type || 'physical',
+      // QUI-651 — se envia explicitamente null cuando no hay estacion elegida, no
+      // se omite: omitirlo en una edicion dejaria la estacion anterior pegada al
+      // plato aunque el operador la haya limpiado.
+      kds_id: formValue.kds_id ? Number(formValue.kds_id) : null,
       preparation_time_minutes: formValue.preparation_time_minutes
         ? Number(formValue.preparation_time_minutes)
         : undefined,
@@ -3649,15 +3852,17 @@ export class ProductCreatePageComponent {
       // Appointment redesign phase 2 — propagar el flag al DTO
       // enviado al backend. Default `false` para preservar UX legacy.
       is_eligible_for_home_service: !!formValue.is_eligible_for_home_service,
-      // UoM FKs (Fase UoM) — only sent when the product is an ingredient.
-      // Sending `null` for non-ingredients keeps the column clean and the
-      // product list filters untouched.
-      stock_uom_id: formValue.is_ingredient
-        ? formValue.stock_uom_id ?? null
-        : null,
-      purchase_uom_id: formValue.is_ingredient
-        ? formValue.purchase_uom_id ?? null
-        : null,
+      // UoM FKs — ya no son exclusivas del insumo: una ferretería mide su
+      // cable en milímetros sin que el cable sea insumo de nada. Se envía lo
+      // que el formulario tenga; un producto por pieza sigue mandando null.
+      stock_uom_id: formValue.stock_uom_id ?? null,
+      purchase_uom_id: formValue.purchase_uom_id ?? null,
+      // Escala del precio: a cuántas unidades de stock corresponde base_price.
+      // 1 es el default y reproduce la aritmética de siempre.
+      price_unit_quantity: Math.max(
+        1,
+        Number(formValue.price_unit_quantity ?? 1) || 1,
+      ),
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
@@ -3770,6 +3975,24 @@ export class ProductCreatePageComponent {
           .then(() => finish())
           .catch((err) => {
             console.error('Error syncing tier overrides:', err);
+            // Código de barras duplicado: es corregible AQUÍ y solo aquí. Si
+            // navegamos, el mensaje anclado al campo se pierde y el comerciante
+            // nunca sabe cuál presentación chocó. Nos quedamos en la página.
+            const conflicts = this.rowsWithBarcodeConflict();
+            if (conflicts.length > 0) {
+              // El producto YA existe aunque veníamos de crear: sin promover a
+              // modo edición, reintentar guardaría un duplicado del producto.
+              this.product = savedProduct;
+              this.productId = savedProduct.id;
+              this.isEditMode.set(true);
+              this.toastService.error(
+                conflicts[0].barcode_error ??
+                  'El código de barras ya está en uso en esta tienda',
+                'Código de barras duplicado',
+              );
+              this.isSubmitting.set(false);
+              return;
+            }
             // El producto SÍ se guardó, pero las tarifas no: el texto NO debe
             // decir "correctamente". Warning + navegar igual (no bloquear).
             this.toastService.warning(
@@ -4124,7 +4347,59 @@ export class ProductCreatePageComponent {
    * Handler for the "Activar precios multi-tarifa" toggle. Lazy-loads the
    * tier catalog the first time it's enabled.
    */
+  /**
+   * ¿Activar multi-tarifa costaría variantes? Gobierna el aviso permanente de la
+   * sección; el diálogo de `onMultiTierToggle` es la confirmación del costo.
+   */
+  get multiTierWouldRemoveVariants(): boolean {
+    return this.hasVariants && !this.isMultiTierEnabled;
+  }
+
+  /** Multi-tarifa activa ⇒ la sección de variantes queda cerrada e informada. */
+  get variantsBlockedByMultiTier(): boolean {
+    return this.isMultiTierEnabled;
+  }
+
   onMultiTierToggle(enabled: boolean): void {
+    // Multi-tarifa ⊕ variantes: activar presentaciones sobre un producto con
+    // variantes las elimina. Se pide confirmación explícita con el costo en
+    // números (cuántas variantes y cuánto stock vuelve al stock base) en vez de
+    // dejar que el backend lo rechace al guardar.
+    if (enabled && this.hasVariants) {
+      const count = this.generatedVariants.length;
+      const stock = this.totalVariantStock;
+      this.dialogService
+        .confirm({
+          title: 'Multi-tarifa desactiva variantes',
+          message:
+            'Las presentaciones de venta y las variantes son excluyentes: el precio y el descuento de ' +
+            'stock no pueden depender de dos ejes a la vez. ' +
+            (count > 0
+              ? `Al activar multi-tarifa se eliminarán las ${count} variante${
+                  count === 1 ? '' : 's'
+                } de este producto` +
+                (stock > 0
+                  ? ` y sus ${stock} unidades volverán al stock base.`
+                  : '.')
+              : 'Al activar multi-tarifa se desactivará la configuración de variantes.'),
+          confirmText: 'Activar multi-tarifa',
+          cancelText: 'Cancelar',
+          confirmVariant: 'danger',
+        })
+        .then((confirmed: boolean) => {
+          if (!confirmed) {
+            // El toggle ya se pintó encendido: hay que devolverlo a su estado.
+            this.productForm
+              .get('has_multiple_price_tiers')
+              ?.setValue(false, { emitEvent: false });
+            return;
+          }
+          this.applyVariantToggle(false);
+          this.onMultiTierToggle(true);
+        });
+      return;
+    }
+
     this.productForm
       .get('has_multiple_price_tiers')
       ?.setValue(enabled, { emitEvent: false });
@@ -4193,6 +4468,14 @@ export class ProductCreatePageComponent {
                 ? Number(override.override_units_per_package)
                 : null;
             const enabled = enabledSet.has(tier.id);
+            const isDefault = override?.is_default === true;
+            // El barcode viaja proyectado desde el assignment. Si la lectura no
+            // lo expone llega `undefined` y la fila arranca vacía, que es el
+            // estado seguro: un guardado sin tocar el campo no manda `barcode`
+            // y por tanto no borra nada.
+            const existingBarcode = override?.barcode
+              ? String(override.barcode)
+              : null;
             return {
               tier,
               enabled,
@@ -4201,6 +4484,11 @@ export class ProductCreatePageComponent {
               initial_override_price: existingPrice,
               override_units_per_package: existingUnits,
               initial_override_units_per_package: existingUnits,
+              is_default: isDefault,
+              initial_is_default: isDefault,
+              barcode: existingBarcode,
+              initial_barcode: existingBarcode,
+              barcode_error: null,
             };
           });
 
@@ -4237,6 +4525,11 @@ export class ProductCreatePageComponent {
             initial_override_price: null,
             override_units_per_package: null,
             initial_override_units_per_package: null,
+            is_default: false,
+            initial_is_default: false,
+            barcode: null,
+            initial_barcode: null,
+            barcode_error: null,
           }));
         this.priceTierRows.set(rows);
         this.hasLoadedPriceTiers.set(true);
@@ -4315,6 +4608,43 @@ export class ProductCreatePageComponent {
     this.priceTierRows.set(next);
   }
 
+  /**
+   * Marca una presentación como la por defecto del producto. Se comporta como
+   * un radio: marcar una desmarca el resto en el mismo set, porque el backend
+   * garantiza un único default por producto vía índice único parcial y enviar
+   * dos sería un conflicto garantizado.
+   *
+   * Volver a pulsar la que ya estaba marcada la desmarca (queda sin default y
+   * el producto vuelve a venderse en su unidad principal).
+   */
+  toggleDefaultTierRow(tierId: number): void {
+    const current = this.priceTierRows();
+    const alreadyDefault = current.some(
+      (row) => row.tier.id === tierId && row.is_default,
+    );
+    this.priceTierRows.set(
+      current.map((row) => ({
+        ...row,
+        is_default: alreadyDefault ? false : row.tier.id === tierId,
+      })),
+    );
+  }
+
+  /** Solo una unidad de venta puede ser la presentación por defecto. */
+  canBeDefaultRow(row: PriceTierOverrideRow): boolean {
+    return row.tier.kind === 'sale_unit';
+  }
+
+  /**
+   * Solo las unidades de venta llevan código de barras: `customer_tier` dice a
+   * QUIÉN se le vende (mayorista, distribuidor), y un descuento por cliente no
+   * tiene empaque que pistolear. Ponerle código sería prometer un escaneo que
+   * ninguna caja va a producir.
+   */
+  isSaleUnitRow(row: PriceTierOverrideRow): boolean {
+    return row.tier.kind === 'sale_unit';
+  }
+
   // ─── Pack size + price/margin helpers ───────────────────────────────────
 
   /**
@@ -4326,6 +4656,44 @@ export class ProductCreatePageComponent {
       row.tier.units_per_package,
       row.override_units_per_package,
     );
+  }
+
+  /**
+   * Traduce el factor de una presentación a la unidad de stock del producto y,
+   * si existe, a una unidad grande del catálogo: "1 Rollo = 20.000 mm = 20 m".
+   *
+   * El número suelto ("20000") no significa nada sin la unidad, y es
+   * exactamente donde un comerciante se equivoca de tres ceros. Devuelve
+   * `null` cuando el producto no declara unidad de stock o la presentación no
+   * tiene empaque, que es el caso de todo el catálogo por pieza.
+   */
+  getRowPackExplainer(row: PriceTierOverrideRow): string | null {
+    const packSize = this.getRowPackSize(row);
+    if (packSize <= 1) return null;
+    const stock = this.selectedStockUom();
+    if (!stock) return null;
+    const sf = Number(stock.factor_to_base);
+    if (!Number.isFinite(sf) || sf <= 0) return null;
+
+    const base = `1 ${row.tier.name} = ${packSize.toLocaleString('es-CO')} ${stock.code}`;
+    const match = this.uomOptions().find(
+      (u) =>
+        u.dimension === stock.dimension &&
+        Number(u.factor_to_base) > sf &&
+        Math.abs((packSize * sf) / Number(u.factor_to_base) - 1) < 1e-9,
+    );
+    if (match) return `${base} = 1 ${match.code}`;
+
+    const readable = this.uomOptions()
+      .filter(
+        (u) => u.dimension === stock.dimension && Number(u.factor_to_base) > sf,
+      )
+      .map((u) => ({ u, value: (packSize * sf) / Number(u.factor_to_base) }))
+      .filter(({ value }) => value >= 1 && Number.isInteger(value))
+      .sort((a, b) => a.value - b.value)[0];
+    return readable
+      ? `${base} = ${readable.value.toLocaleString('es-CO')} ${readable.u.code}`
+      : base;
   }
 
   /** Whole-package acquisition cost = product cost_price * packSize. */
@@ -4420,6 +4788,25 @@ export class ProductCreatePageComponent {
     this.priceTierRows.set(next);
   }
 
+  /**
+   * Código de barras de la presentación. Se guarda crudo (sin trim) para no
+   * pelear con lo que el usuario está tecleando; la normalización ocurre al
+   * enviar. Editarlo limpia el error de duplicado anterior: el 409 describe el
+   * código viejo y dejarlo puesto haría creer que el nuevo también choca.
+   */
+  updateTierOverrideBarcode(tierId: number, value: string | null): void {
+    const next = this.priceTierRows().map((row) => {
+      if (row.tier.id !== tierId) return row;
+      return { ...row, barcode: value ?? null, barcode_error: null };
+    });
+    this.priceTierRows.set(next);
+  }
+
+  /** Error de duplicado a pintar bajo el input de la fila. */
+  getRowBarcodeError(row: PriceTierOverrideRow): string {
+    return row.barcode_error ?? '';
+  }
+
   private normalizePrice(value: number | null): number | null {
     if (value === null || value === undefined) return null;
     const n = Number(value);
@@ -4456,10 +4843,31 @@ export class ProductCreatePageComponent {
   }
 
   /**
+   * Marca en la fila el mensaje del 409 de código duplicado, tal como lo
+   * redactó el backend. Devuelve `true` cuando el error era ese, para que el
+   * caller decida si se queda en la página en vez de navegar.
+   */
+  private flagBarcodeConflict(tierId: number, err: unknown): boolean {
+    if (!isPriceTierOverrideApiError(err)) return false;
+    if (err.errorCode !== 'PROD_BARCODE_DUP_001') return false;
+    this.priceTierRows.set(
+      this.priceTierRows().map((row) =>
+        row.tier.id === tierId ? { ...row, barcode_error: err.message } : row,
+      ),
+    );
+    return true;
+  }
+
+  /** Filas con un conflicto de código de barras pendiente de corregir. */
+  readonly rowsWithBarcodeConflict = computed<PriceTierOverrideRow[]>(() =>
+    this.priceTierRows().filter((row) => !!row.barcode_error),
+  );
+
+  /**
    * Compute the diff between current rows and their initial snapshot and
    * issue the corresponding PUT/DELETE calls. Resolves when all calls finish.
-   * A row is persisted when its price OR units-per-package override changed,
-   * and removed when both are cleared.
+   * A row is persisted when its price, units-per-package OR barcode changed,
+   * and removed when all of them are cleared.
    */
   private syncTierOverridesForProduct(productId: number): Promise<void> {
     const rows = this.priceTierRows();
@@ -4472,7 +4880,25 @@ export class ProductCreatePageComponent {
       const unitsChanged =
         row.initial_override_units_per_package !==
         row.override_units_per_package;
-      if (!priceChanged && !unitsChanged) continue;
+      const defaultChanged = row.initial_is_default !== row.is_default;
+
+      // El código vive en el ASSIGNMENT, y el assignment lo sincroniza el
+      // guardado del producto vía `enabled_price_tier_ids` — que corre ANTES
+      // que esto. Tocar el código de una fila deseleccionada recrearía el
+      // assignment que el guardado acaba de borrar, así que el barcode solo se
+      // envía en filas habilitadas.
+      const currentBarcode = (row.barcode ?? '').trim();
+      const initialBarcode = (row.initial_barcode ?? '').trim();
+      const barcodeChanged =
+        row.enabled &&
+        (currentBarcode !== initialBarcode ||
+          // Rehabilitar una tarifa recrea su assignment sin código: hay que
+          // reescribirlo aunque el texto no haya cambiado.
+          (!row.initial_enabled && currentBarcode !== ''));
+      const hasBarcode = row.enabled && currentBarcode !== '';
+
+      if (!priceChanged && !unitsChanged && !defaultChanged && !barcodeChanged)
+        continue;
 
       const hasPrice =
         row.override_price !== null && row.override_price !== undefined;
@@ -4480,19 +4906,33 @@ export class ProductCreatePageComponent {
         row.override_units_per_package !== null &&
         row.override_units_per_package !== undefined;
 
-      if (!hasPrice && !hasUnits) {
+      // Un cambio de default se persiste aunque no haya precio ni empaque: el
+      // default vive en el assignment, no en el override, así que borrar la fila
+      // perdería la marca. Lo mismo aplica al código de barras.
+      if (!hasPrice && !hasUnits && !row.is_default && !hasBarcode) {
         // Nothing left to persist → delete the override (variant_id omitted).
-        operations.push(
+        // Si además había un código y quedó vacío, primero hay que mandar el
+        // `''` que lo borra del assignment: el DELETE solo toca el override.
+        const removal = () =>
           this.priceTiersService
             .removeProductOverride(productId, row.tier.id)
-            .toPromise()
-            .catch((err) => {
-              console.error(
-                `Error removing override for tier ${row.tier.id}:`,
-                err,
-              );
-              throw err;
-            }),
+            .toPromise();
+
+        operations.push(
+          (barcodeChanged
+            ? this.priceTiersService
+                .upsertProductOverride(productId, row.tier.id, { barcode: '' })
+                .toPromise()
+                .then(removal)
+            : removal()
+          ).catch((err) => {
+            console.error(
+              `Error removing override for tier ${row.tier.id}:`,
+              err,
+            );
+            this.flagBarcodeConflict(row.tier.id, err);
+            throw err;
+          }),
         );
       } else {
         operations.push(
@@ -4502,6 +4942,12 @@ export class ProductCreatePageComponent {
               override_units_per_package: hasUnits
                 ? Number(row.override_units_per_package)
                 : undefined,
+              // El margen NO se envía: el backend lo deriva del precio con
+              // criterio cost-anchor, así que mandarlo sería redundante y el
+              // precio ganaría igual. Enviar solo el default cuando cambió.
+              ...(defaultChanged ? { is_default: row.is_default } : {}),
+              // Cadena vacía = borrar el código. Omitirlo = dejarlo como está.
+              ...(barcodeChanged ? { barcode: currentBarcode } : {}),
             })
             .toPromise()
             .catch((err) => {
@@ -4509,6 +4955,7 @@ export class ProductCreatePageComponent {
                 `Error upserting override for tier ${row.tier.id}:`,
                 err,
               );
+              this.flagBarcodeConflict(row.tier.id, err);
               throw err;
             }),
         );
@@ -4524,8 +4971,12 @@ export class ProductCreatePageComponent {
         // Update snapshots so subsequent edits diff correctly.
         const refreshed = this.priceTierRows().map((row) => ({
           ...row,
+          initial_enabled: row.enabled,
           initial_override_price: row.override_price,
           initial_override_units_per_package: row.override_units_per_package,
+          initial_is_default: row.is_default,
+          initial_barcode: row.barcode,
+          barcode_error: null,
         }));
         this.priceTierRows.set(refreshed);
       })
@@ -4631,4 +5082,44 @@ export class ProductCreatePageComponent {
         },
       });
   }
+  // ------------------------------------------------------------- QUI-651
+  /**
+   * Estaciones de KDS de la tienda, para el selector del plato preparado.
+   *
+   * Se cargan solo cuando la tienda es restaurante: pedirlas en una tienda retail
+   * seria una llamada garantizada a devolver vacio.
+   */
+  readonly kdsStations = signal<KdsStation[]>([]);
+
+  readonly kdsStationOptions = computed<SelectorOption[]>(() =>
+    this.kdsStations()
+      .filter((s) => s.is_active)
+      .map((s) => ({
+        value: s.id,
+        label: s.is_default ? `${s.name} (por defecto)` : s.name,
+      })),
+  );
+
+  /**
+   * El campo de estacion solo aplica a platos preparados: el fire excluye
+   * explicitamente todo lo que no sea `prepared`, asi que en cualquier otro tipo
+   * la estacion no se leeria nunca.
+   */
+  isPreparedProduct(): boolean {
+    return this.productForm.get('product_type')?.value === 'prepared';
+  }
+
+  private loadKdsStations(): void {
+    if (!this.isRestaurant()) return;
+    this.kdsStationsService
+      .loadStations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (stations) => this.kdsStations.set(stations),
+        // Silencioso: sin estaciones el selector no se muestra y el plato cae en el
+        // KDS por defecto, que es el comportamiento correcto.
+        error: () => {},
+      });
+  }
+
 }

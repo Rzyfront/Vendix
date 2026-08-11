@@ -25,6 +25,81 @@
   color: var(--color-text-primary);
 }
 
+.section-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+
+  code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: var(--color-neutral-100);
+    border: 1px solid var(--color-border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+  }
+}
+
+// Disparador del tooltip de ayuda. Mismo tratamiento que el de
+// payroll-settings-form para que el ícono de "?" se lea igual en toda la app.
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  cursor: help;
+  transition: color 160ms ease;
+
+  &:hover {
+    color: var(--color-info);
+  }
+}
+
+// ─── Ayuda colapsable ───────────────────────────────────
+
+.help-card-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+
+  app-icon {
+    color: var(--color-info);
+  }
+}
+
+.help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-secondary);
+  }
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--color-text-muted);
+  }
+
+  strong {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+}
+
 // ─── Color Grid ─────────────────────────────────────────
 // auto-fill adapts to actual container width (not viewport)
 
@@ -47,13 +122,23 @@
 }
 
 .color-card-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 700;
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 10px;
+}
+
+.color-card-hint {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
 }
 
 .color-card-row {
@@ -119,7 +204,7 @@
 
 .brand-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   min-height: 76px;
   padding: 12px;
@@ -161,7 +246,7 @@
 
 .brand-content {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   flex: 1;
@@ -173,7 +258,9 @@
 }
 
 .brand-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 700;
   color: var(--color-text-secondary);
@@ -183,6 +270,13 @@
   margin-bottom: 3px;
 }
 
+.brand-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
 .brand-actions {
   display: flex;
   align-items: center;
@@ -190,11 +284,10 @@
   flex-shrink: 0;
 }
 
+// Antes truncaba con ellipsis en una línea. El copy ahora dice formato, peso y
+// forma recomendada, así que se deja envolver: truncar la ayuda la vuelve inútil.
 .brand-help {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 12px;
   line-height: 1.35;
   color: var(--color-text-secondary);
@@ -218,6 +311,76 @@
   }
 }
 
+// ─── Vista previa de la paleta ──────────────────────────
+// Los colores se pintan con [style.background] desde `brandPalette()`: son
+// datos del usuario, no tokens del tema, así que aquí sólo va la geometría.
+
+.palette-preview {
+  // Tinta de la vista previa. Deliberadamente NO es un token de tema: va encima
+  // de un color arbitrario elegido por el operador, donde --color-text-primary
+  // sería ilegible la mitad de las veces. El halo garantiza el contraste sobre
+  // cualquier fondo, claro u oscuro, en ambos temas.
+  --preview-ink: #fff;
+  --preview-ink-halo: 0 1px 2px rgba(0, 0, 0, 0.45);
+
+  margin-top: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.palette-preview__bar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 14px;
+}
+
+.palette-preview__bar-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--preview-ink);
+  text-shadow: var(--preview-ink-halo);
+}
+
+.palette-preview__body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+}
+
+.palette-preview__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--preview-ink);
+  text-shadow: var(--preview-ink-halo);
+}
+
+// El acento suele ser claro (default #FFFFFF): sin borde desaparecería sobre
+// la superficie y el operador creería que el color no se aplicó.
+.palette-preview__chip--accent {
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  text-shadow: none;
+}
+
+.palette-preview__note {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
 @media (min-width: 640px) {
   .brand-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -233,9 +396,5 @@
   .brand-content {
     flex-direction: column;
     gap: 8px;
-  }
-
-  .brand-help {
-    white-space: normal;
   }
 }

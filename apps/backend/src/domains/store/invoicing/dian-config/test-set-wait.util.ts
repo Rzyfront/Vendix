@@ -22,6 +22,113 @@
  */
 export const TEST_SET_STALL_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Devuelve el lote que PRUEBA la habilitación, que no siempre es el último.
+ *
+ * EL DEFECTO QUE CIERRA — ocurrió en producción el 2026-08-09
+ *
+ * `last_test_result` cumple DOS papeles incompatibles: es el puntero al lote en
+ * vuelo y es la prueba de que la DIAN aprobó el set. Cinco superficies leen de él
+ * el estado de la habilitación (`analyzeTestSetWait` en el panel fiscal y en el
+ * cron, `hasPassedTestSet` en la readiness y en el gate de promoción, y el
+ * endpoint de estado), así que un lote posterior lo sobrescribe y con él la
+ * prueba.
+ *
+ * Pasó exactamente así: la plataforma quedó habilitada a las 05:59Z; a las 18:53Z
+ * un reenvío accidental escribió su propio resultado —rechazado, porque la DIAN
+ * cierra el set al aprobarlo— y a las 19:41Z descartar ese lote dejó
+ * `enablement_status` en `testing`. La UI pasó a decir «habilitación pendiente»
+ * sobre una configuración que la DIAN había habilitado catorce horas antes.
+ *
+ * La prueba durable existe y sobrevivió: `enablement_evidence` se escribe SOLO en
+ * éxito y `enabled_at` guarda el instante que la DIAN concedió. Esta función las
+ * antepone al último lote, para que un intento posterior pueda fallar, ser
+ * descartado o quedar a medias sin borrar un hecho ya ocurrido.
+ *
+ * Pura, como el resto de este archivo: las cinco superficies tienen que coincidir
+ * en la respuesta, y una función compartida sin E/S es la única forma de
+ * garantizarlo.
+ *
+ * LOS TRES CAMPOS SON OBLIGATORIOS, Y ESO ES LA MITAD DEL ARREGLO
+ *
+ * La primera versión los declaró opcionales. Con eso, un `select` de Prisma que
+ * no pidiera `enablement_evidence` typecheaba limpio, la función recibía
+ * `undefined`, `looksLikeVerdict` devolvía `false` y caía al último lote — el
+ * comportamiento exacto que esta función existe para evitar. Pasó en
+ * `getTestResults`, que seleccionaba cinco columnas y no esa: el arreglo quedó
+ * inerte en esa ruta durante todo su despliegue.
+ *
+ * Obligatorios, un `select` incompleto no compila. Es el mismo criterio que
+ * `SharedTechnicalKeyFinding` ya aplica en `fiscal-production-readiness`: «un
+ * campo opcional ausente se leería como “sin hallazgo” y la comprobación fallaría
+ * en abierto». Aquí el fallo en abierto es leer «no pasó» sobre una habilitación
+ * concedida.
+ */
+export function resolveTestSetProof(config: {
+  enablement_status: string | null;
+  enablement_evidence: unknown;
+  last_test_result: unknown;
+}): unknown {
+  const passed =
+    config.enablement_status === 'test_set_passed' ||
+    config.enablement_status === 'enabled';
+
+  // La evidencia manda cuando el estado dice que el set pasó. Fuera de ese caso
+  // se devuelve el último lote tal cual: durante la habilitación el lote en vuelo
+  // ES la única fuente, y anteponer una evidencia vieja escondería el intento en
+  // curso.
+  //
+  // PERO SOLO SI LA EVIDENCIA ES UN VEREDICTO, no cualquier objeto no vacío.
+  //
+  // `enablement_evidence` se escribe con el `result_data` completo del lote que
+  // pasó, así que lleva `dian_response.success` o `success`. Hay configuraciones
+  // —y fixtures— cuya evidencia es un resto sin veredicto (`{ track_id }`), y
+  // anteponerla haría LO CONTRARIO de lo que esta función busca: leer «no pasó»
+  // sobre una habilitación real, perdiendo el respaldo del último lote. La primera
+  // versión de esto rompió cinco casos del spec de readiness por exactamente eso,
+  // y el spec tenía razón.
+  if (passed && looksLikeVerdict(config.enablement_evidence)) {
+    return config.enablement_evidence;
+  }
+  return config.last_test_result;
+}
+
+/**
+ * La lectura de la espera SOBRE LA PRUEBA CORRECTA, en un solo paso.
+ *
+ * POR QUÉ EXISTE ESTA COMPOSICIÓN Y NO CUATRO COPIAS DE ELLA
+ *
+ * `analyzeTestSetWait(resolveTestSetProof(config))` estaba escrito a mano en
+ * cuatro superficies, y en dos de ellas faltaba la mitad de dentro: el sondeo del
+ * asistente y la salida del lote descartado llamaban a `analyzeTestSetWait` a
+ * secas. Una composición correcta pero opcional es una composición que alguien va
+ * a olvidar; ya se olvidó dos veces.
+ *
+ * A partir de acá, quien necesite el estado de la espera llama a ESTO. Llamar a
+ * `analyzeTestSetWait` directo sigue siendo válido —el cron lo usa sobre un
+ * registro que ya trae resuelto— pero deja de ser el camino por defecto.
+ */
+export function resolveTestSetWait(
+  config: {
+    enablement_status: string | null;
+    enablement_evidence: unknown;
+    last_test_result: unknown;
+  },
+  now: number = Date.now(),
+): TestSetWaitAnalysis {
+  return analyzeTestSetWait(resolveTestSetProof(config), now);
+}
+
+/** ¿Este registro lleva un veredicto de la DIAN, o es solo un objeto cualquiera? */
+function looksLikeVerdict(record: unknown): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const data = record as Record<string, any>;
+  return (
+    typeof data.success === 'boolean' ||
+    typeof data?.dian_response?.success === 'boolean'
+  );
+}
+
 export type TestSetWaitState =
   | 'idle'
   | 'processing'

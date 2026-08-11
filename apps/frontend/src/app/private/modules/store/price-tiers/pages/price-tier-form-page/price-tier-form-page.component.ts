@@ -22,6 +22,7 @@ import { startWith } from 'rxjs';
 
 import {
   InputComponent,
+  SelectorComponent,
   TextareaComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
@@ -33,6 +34,7 @@ import {
 import {
   CreatePriceTierDto,
   PriceTier,
+  PriceTierKind,
   UpdatePriceTierDto,
 } from '../../interfaces';
 import { PriceTiersService, PriceTierCacheService } from '../../services';
@@ -43,6 +45,13 @@ import { PriceTiersService, PriceTierCacheService } from '../../services';
  */
 interface PriceTierFormControls {
   name: FormControl<string>;
+  /**
+   * Eje de la tarifa. `customer_tier` = a quién le vendo (mayorista, minorista);
+   * `sale_unit` = en qué presentación vendo (rollo, metro, bulto, kilo). Se pide
+   * explícitamente al crear porque ambos viven en la misma tabla y los
+   * selectores filtran por este valor.
+   */
+  kind: FormControl<PriceTierKind>;
   code: FormControl<string>;
   description: FormControl<string>;
   discount_percentage: FormControl<number | null>;
@@ -80,6 +89,7 @@ function optionalIntegerValidator(): ValidatorFn {
     StickyHeaderComponent,
     CardComponent,
     InputComponent,
+    SelectorComponent,
     TextareaComponent,
     SettingToggleComponent,
   ],
@@ -87,6 +97,24 @@ function optionalIntegerValidator(): ValidatorFn {
   styleUrl: './price-tier-form-page.component.scss',
 })
 export class PriceTierFormPageComponent implements OnInit {
+  /**
+   * Los dos ejes que conviven sobre `price_tiers`. La etiqueta describe el uso
+   * real, no el nombre técnico, porque "tarifa" a secas es justo la palabra
+   * ambigua que este campo desambigua.
+   */
+  readonly kindOptions = [
+    {
+      value: 'customer_tier',
+      label: 'Tarifa de cliente (a quién le vendo)',
+      description: 'Mayorista, minorista, distribuidor',
+    },
+    {
+      value: 'sale_unit',
+      label: 'Unidad de venta (en qué presentación vendo)',
+      description: 'Bulto, kilo, rollo, metro, palada',
+    },
+  ];
+
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -102,6 +130,7 @@ export class PriceTierFormPageComponent implements OnInit {
 
   readonly form: FormGroup<PriceTierFormControls> =
     this.fb.nonNullable.group<PriceTierFormControls>({
+      kind: this.fb.nonNullable.control<PriceTierKind>('customer_tier'),
       name: this.fb.nonNullable.control('', {
         validators: [Validators.required, Validators.maxLength(100)],
       }),
@@ -189,6 +218,7 @@ export class PriceTierFormPageComponent implements OnInit {
   private patchForm(tier: PriceTier): void {
     this.form.patchValue({
       name: tier.name ?? '',
+      kind: tier.kind ?? 'customer_tier',
       code: tier.code ?? '',
       description: tier.description ?? '',
       discount_percentage:
@@ -236,6 +266,7 @@ export class PriceTierFormPageComponent implements OnInit {
 
     const payload: CreatePriceTierDto = {
       name: raw.name.trim(),
+      kind: raw.kind,
       code: raw.code?.trim() ? raw.code.trim() : undefined,
       description: raw.description?.trim() ? raw.description.trim() : undefined,
       discount_percentage:

@@ -55,6 +55,20 @@ export interface ExtractedLineItem {
   presentation?: string | null;
   pack_size?: number | null;
   uom_hint?: string | null;
+  /**
+   * QUI-661 Fase 4 — descuento COMERCIAL de la línea, en dinero, tal como lo
+   * imprime la factura ("Dcto", "Desc.", "-10%").
+   *
+   * Es comercial y no financiero: un descuento por pronto pago NO va acá,
+   * porque no rebaja el precio del bien — es una condición de pago que va a
+   * cuenta de resultado. Meterlo aquí rebajaría el costo capitalizado del
+   * inventario por algo que no es una rebaja de precio, y ninguna validación
+   * posterior lo atraparía porque el número es plausible. El prompt lo separa
+   * explícitamente y el de pronto pago viaja en `early_payment_discount`.
+   *
+   * Opcional: los escaneos anteriores a esta fase no lo emiten.
+   */
+  discount_amount?: number | null;
 }
 
 export interface InvoiceScanResult {
@@ -73,6 +87,20 @@ export interface InvoiceScanResult {
   line_items: ExtractedLineItem[];
   subtotal: number;
   tax_amount: number;
+  /**
+   * QUI-661 Fase 4 — descuento COMERCIAL de pie de factura (sobre el total).
+   * El backend lo prorratea por línea antes de derivar el IVA. Opcional:
+   * los escaneos anteriores a esta fase no lo emiten.
+   */
+  discount_amount?: number | null;
+  /**
+   * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura
+   * ("2% si paga antes de 10 días"). Se extrae para MOSTRARLO, no para
+   * aplicarlo: es un descuento financiero, va a cuenta de resultado y se
+   * decide en el momento del pago (QUI-647), no al valorar el inventario.
+   * Nunca entra al cálculo de la orden.
+   */
+  early_payment_discount?: number | null;
   total: number;
   confidence: number;
   /**
@@ -154,6 +182,15 @@ export class ConfirmScannedInvoiceItemDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  /**
+   * QUI-661 Fase 4 — descuento comercial de la línea, en dinero. Viaja del
+   * modal de confirmación al backend, que lo persiste y lo resta de la base
+   * ANTES de derivar el IVA.
+   */
+  @IsOptional()
+  @IsNumber()
+  discount_amount?: number;
 }
 
 export class ConfirmScannedInvoiceDto {

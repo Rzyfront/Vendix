@@ -226,10 +226,27 @@ export type { PopProductConfigResult };
               </form>
             }
 
+            <!-- QUI-648: la configuración de venta (unidad de medida y
+                 presentación adicional) no se despliega sola. Comprar es el
+                 camino frecuente; configurar cómo se venderá es la excepción,
+                 así que entra detrás de un interruptor y solo entonces se
+                 muestra lo que haya que mostrar. Arranca abierto si el producto
+                 YA trae configuración distinta de la de por defecto, para no
+                 esconder lo que existe. -->
+            @if (!ingredientMode()) {
+              <app-setting-toggle
+                label="Configurar venta"
+                description="Unidad de medida y venta en otra presentación (bulto, rollo, caja)."
+                [ngModel]="showSaleConfig()"
+                [ngModelOptions]="{ standalone: true }"
+                (changed)="showSaleConfig.set($event)"
+              ></app-setting-toggle>
+            }
+
             <!-- Sale UoM selector. Excluyente con la captura de consumo:
                  se muestra solo para producto retail (no insumo) en ambos
                  modos. Insumo → bloque app-pop-uom-capture (abajo). -->
-            @if (!ingredientMode()) {
+            @if (!ingredientMode() && showSaleConfig()) {
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
                   >Unidad de medida</label
@@ -261,10 +278,106 @@ export type { PopProductConfigResult };
               </div>
             }
 
-            <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional). -->
-            @if (ingredientMode()) {
+            <!-- Unidad de venta (QUI-648). Compro en una presentación y vendo en
+                 otra: bulto de 50 kg vendido por bulto y por kilo. Alcanza a
+                 retail, ferretería y distribuidora — a diferencia del bloque de
+                 insumo, NO se gatea por restaurante. -->
+            @if (saleUnitBlockedByVariants()) {
+              <div
+                class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  size="14"
+                  class="text-amber-600 shrink-0 mt-0.5"
+                ></app-icon>
+                <span>
+                  Este producto usa variantes, así que no puede venderse en
+                  presentaciones: el precio y el descuento de stock no pueden
+                  depender de dos ejes a la vez. Quita las variantes desde el
+                  producto si necesitas venderlo por bulto y por unidad.
+                </span>
+              </div>
+            }
+
+            @if (canConfigureSaleUnit()) {
+              <div class="rounded-lg border border-border p-3 space-y-3">
+                <div>
+                  <p class="text-sm font-medium text-text-primary">
+                    Unidad de venta adicional
+                  </p>
+                  <p class="text-xs text-text-secondary">
+                    Opcional. Define en qué presentación se venderá además de la
+                    unidad principal. El stock siempre se descuenta en la unidad
+                    mínima.
+                  </p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <app-input
+                    label="Nombre de la presentación"
+                    placeholder="Ej: Bulto 50 kg"
+                    [ngModel]="saleUnitName()"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="saleUnitName.set($event)"
+                    customWrapperClass="!mt-0"
+                  ></app-input>
+                  <app-input
+                    label="Unidades de stock que consume"
+                    type="number"
+                    [min]="2"
+                    placeholder="Ej: 50"
+                    [ngModel]="saleUnitFactor()"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="saleUnitFactor.set($event)"
+                    customWrapperClass="!mt-0"
+                  ></app-input>
+                </div>
+                @if (saleUnitName()) {
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <app-input
+                      label="Precio de la presentación"
+                      [currency]="true"
+                      [ngModel]="saleUnitPrice()"
+                      [ngModelOptions]="{ standalone: true }"
+                      (ngModelChange)="onSaleUnitPriceChange($event)"
+                      customWrapperClass="!mt-0"
+                    ></app-input>
+                    <app-input
+                      label="Margen (%)"
+                      type="number"
+                      [ngModel]="saleUnitMargin()"
+                      [ngModelOptions]="{ standalone: true }"
+                      (ngModelChange)="onSaleUnitMarginChange($event)"
+                      [disabled]="saleUnitPackageCost() <= 0"
+                      [error]="
+                        saleUnitPackageCost() <= 0
+                          ? 'Define el costo para calcular el margen'
+                          : ''
+                      "
+                      customWrapperClass="!mt-0"
+                    ></app-input>
+                  </div>
+                  <app-setting-toggle
+                    label="Usar como presentación por defecto"
+                    description="Se usará en tienda online, POS y cotizaciones. En el POS se puede elegir otra por línea."
+                    [ngModel]="saleUnitIsDefault()"
+                    [ngModelOptions]="{ standalone: true }"
+                    (changed)="saleUnitIsDefault.set($event)"
+                  ></app-setting-toggle>
+                }
+              </div>
+            }
+
+            <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional).
+                 QUI-648: deja de ser exclusivo del insumo. Comprar 5 rollos y
+                 almacenar 100.000 mm es el mismo mecanismo que comprar un saco
+                 y almacenar gramos; lo único que lo reservaba a insumos era
+                 este gate de UI. Para retail entra detrás del interruptor de
+                 configuración, así que el flujo de compra de siempre no cambia
+                 hasta que alguien lo pide. -->
+            @if (ingredientMode() || showSaleConfig()) {
               <app-pop-uom-capture
-                [isIngredient]="true"
+                [isIngredient]="ingredientMode()"
                 [initialPurchaseUomId]="purchaseUomId()"
                 [initialStockUomId]="stockUomId()"
                 [initialUnitCost]="initialUnitCost()"
@@ -724,6 +837,98 @@ export class PopProductConfigModalComponent {
   /** Create-mode ingredient classification (mirrors prebulk). */
   readonly isIngredient = signal(false);
   readonly isSellable = signal(true);
+
+  // ─── Unidad de venta (QUI-648) ────────────────────────────────────────────
+  // Compro bultos de 50 kg y acá defino que se vende por bulto y por kilo, sin
+  // salir del flujo de compra. Espeja el bloque de insumo, pero al revés en el
+  // gating: las presentaciones son de retail/ferretería/distribuidora, no de
+  // restaurante, así que NO se gatean por `storeSupportsIngredients`.
+  readonly saleUnitName = signal('');
+  readonly saleUnitFactor = signal<number | null>(null);
+  readonly saleUnitPrice = signal<number | null>(null);
+  readonly saleUnitMargin = signal<number | null>(null);
+  readonly saleUnitIsDefault = signal(false);
+
+  /** El bloque solo aplica a productos que se venden. */
+  /**
+   * Multi-tarifa ⊕ variantes. Un insumo puro no se vende (no tiene presentación
+   * de venta) y un producto con variantes tampoco puede tenerla: son dos ejes de
+   * precio y de descuento de stock que ninguna superficie de venta sabe
+   * combinar. `hasVariantsToggle` entra en la cuenta porque el operador puede
+   * estar creando las variantes en la pestaña de al lado, en esta misma compra.
+   */
+  readonly canConfigureSaleUnit = computed(
+    () =>
+      !this.ingredientMode() &&
+      this.showSaleConfig() &&
+      !this.productHasVariants &&
+      !this.hasVariantsToggle(),
+  );
+
+  /** Solo para explicar la ausencia del bloque cuando la causa son variantes. */
+  readonly saleUnitBlockedByVariants = computed(
+    () =>
+      !this.ingredientMode() &&
+      this.showSaleConfig() &&
+      (this.productHasVariants || this.hasVariantsToggle()),
+  );
+
+  /** Costo del paquete = costo unitario × factor, para derivar el margen. */
+  readonly saleUnitPackageCost = computed(() => {
+    const factor = Number(this.saleUnitFactor() ?? 0);
+    const unitCost = Number(
+      this.capturedUnitCost() ??
+        this.identityForm?.get('unitCost')?.value ??
+        this.product()?.cost ??
+        this.product()?.cost_price ??
+        0,
+    );
+    if (!Number.isFinite(unitCost) || unitCost <= 0) return 0;
+    return unitCost * (factor > 1 ? factor : 1);
+  });
+
+  /**
+   * Bidireccional precio ↔ margen, misma fórmula que el editor de producto y que
+   * el backend: markup sobre el costo del PAQUETE. Escribir margen deriva precio.
+   */
+  onSaleUnitMarginChange(value: number | null): void {
+    this.saleUnitMargin.set(value);
+    const packageCost = this.saleUnitPackageCost();
+    if (packageCost <= 0 || value === null || !Number.isFinite(Number(value))) {
+      return;
+    }
+    this.saleUnitPrice.set(
+      Number((packageCost * (1 + Number(value) / 100)).toFixed(2)),
+    );
+  }
+
+  /** Escribir precio deriva el margen (el precio explícito es el ancla). */
+  onSaleUnitPriceChange(value: number | null): void {
+    this.saleUnitPrice.set(value);
+    const packageCost = this.saleUnitPackageCost();
+    if (packageCost <= 0 || value === null || !Number.isFinite(Number(value))) {
+      return;
+    }
+    this.saleUnitMargin.set(
+      Number((((Number(value) - packageCost) / packageCost) * 100).toFixed(2)),
+    );
+  }
+
+  /**
+   * Campos que viajan al ítem de compra. Sin nombre no se envía nada: el backend
+   * usa `sale_unit_name` como interruptor de todo el bloque.
+   */
+  protected saleUnitPayload(): Record<string, unknown> {
+    const name = this.saleUnitName().trim();
+    if (!name || !this.canConfigureSaleUnit()) return {};
+    return {
+      sale_unit_name: name,
+      sale_unit_units_per_package: this.saleUnitFactor() ?? undefined,
+      sale_unit_price: this.saleUnitPrice() ?? undefined,
+      sale_unit_profit_margin: this.saleUnitMargin() ?? undefined,
+      sale_unit_is_default: this.saleUnitIsDefault(),
+    };
+  }
   /** Live create quantity (read from the form, kept in sync). */
   readonly createQuantity = signal<number>(1);
   /**
@@ -745,6 +950,15 @@ export class PopProductConfigModalComponent {
   hasVariantsToggle = signal(false);
   requiresLotToggle = signal(false);
   selectedPricingType = signal<'unit' | 'weight'>('unit');
+
+  /**
+   * Interruptor del bloque de configuración de venta (unidad de medida +
+   * presentación adicional). Colapsado por defecto: la compra no debería
+   * mostrar de entrada decisiones de venta. Gobierna también
+   * `canConfigureSaleUnit`, así que cerrarlo es no configurar — el payload no
+   * arrastra valores de un bloque que el comprador dejó cerrado.
+   */
+  readonly showSaleConfig = signal(false);
 
   // Multi-variant selection (for adding new items)
   selectedVariantIds = new Set<number>();
@@ -1258,6 +1472,10 @@ export class PopProductConfigModalComponent {
         // UoM FKs only travel for ingredients; retail stays null.
         purchase_uom_id: ingredient ? this.purchaseUomId() : null,
         stock_uom_id: ingredient ? this.stockUomId() : null,
+        // Unidad de venta (QUI-648). Viaja en prebulkData porque el carrito copia
+        // `prebulk_data` completo; `pop.component` lo mapea a los campos
+        // `sale_unit_*` del ítem de compra.
+        ...this.saleUnitPayload(),
         // F1: contenido por envase (solo insumo, caso count→masa/volumen).
         // Viaja dentro de prebulkData porque el carrito copia `prebulk_data`
         // completo; `pop.component` lo mapea a `purchase_to_stock_factor`.
@@ -1354,6 +1572,7 @@ export class PopProductConfigModalComponent {
               purchase_uom_id: this.purchaseUomId(),
               stock_uom_id: this.stockUomId(),
               contentPerPackage: this.resolvedContentPerPackage(),
+              ...this.saleUnitPayload(),
             });
 
             this.creatingVariants.set(false);
@@ -1392,6 +1611,7 @@ export class PopProductConfigModalComponent {
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
           contentPerPackage: this.resolvedContentPerPackage(),
+          ...this.saleUnitPayload(),
         });
       } else {
         this.confirmed.emit({
@@ -1406,6 +1626,7 @@ export class PopProductConfigModalComponent {
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
           contentPerPackage: this.resolvedContentPerPackage(),
+          ...this.saleUnitPayload(),
         });
       }
     } else {
@@ -1420,6 +1641,7 @@ export class PopProductConfigModalComponent {
         purchase_uom_id: this.purchaseUomId(),
         stock_uom_id: this.stockUomId(),
         contentPerPackage: this.resolvedContentPerPackage(),
+        ...this.saleUnitPayload(),
       });
     }
 
@@ -1576,6 +1798,15 @@ export class PopProductConfigModalComponent {
     // Pre-fill pricing type
     this.selectedPricingType.set(
       this.initialPricingType() || this.product()?.pricing_type || 'unit',
+    );
+
+    // El bloque de configuración de venta arranca cerrado, salvo que el
+    // producto ya venga con algo distinto de lo de por defecto: esconder una
+    // configuración existente detrás de un interruptor apagado sería mentirle
+    // al comprador sobre cómo se está vendiendo.
+    this.showSaleConfig.set(
+      this.selectedPricingType() === 'weight' ||
+        (this.product() as any)?.has_multiple_price_tiers === true,
     );
 
     // Pre-fill variant toggle and selection

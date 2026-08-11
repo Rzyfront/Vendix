@@ -29,6 +29,7 @@ import { VexiAttachmentsService } from './vexi-attachments.service';
 import { VexiUiChannelService } from './vexi-ui-channel.service';
 import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
+import { VexiSpeechService } from './vexi-speech.service';
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -62,6 +63,7 @@ export class VexiController {
     private readonly tasks: VexiTaskService,
     private readonly activity: VexiActivityService,
     private readonly embeddingBackfill: EmbeddingBackfillService,
+    private readonly speech: VexiSpeechService,
   ) {}
 
   /**
@@ -116,10 +118,72 @@ export class VexiController {
       output,
     });
 
+    // The sentence the tool wrote about its own change, which is what the person
+    // gets told. Extracted here rather than in the browser so the text that is
+    // spoken and the text that is shown are the same string by construction —
+    // two renderings of one truth, never two truths.
+    const summary = this.applySummary(output);
+
+    // Voice mode only. A spoken approval that answers only in writing leaves the
+    // person waiting for a reply they were never going to hear, which is exactly
+    // how an applied change ends up looking like a hung one.
+    //
+    // A failed synthesis degrades to text: `synthesize()` returns null instead of
+    // throwing, and losing the audio of an acknowledgement must never lose the
+    // acknowledgement — much less suggest the write did not happen. It already
+    // happened, above.
+    let audio: { audioBase64: string; contentType: string } | null = null;
+    if (dto.speak && summary) {
+      // La moneda va también acá porque el resumen de una escritura es
+      // justamente donde aparecen los montos: "subí el precio de la Coca a
+      // $3.500" es el caso típico de este camino, no la excepción.
+      const [params, currency] = await Promise.all([
+        this.speech.resolveParams(),
+        this.speech.resolveCurrency(),
+      ]);
+      audio = await this.speech.synthesize(summary, params, currency);
+    }
+
     return this.responseService.success(
-      { tool: dto.tool, output },
+      {
+        tool: dto.tool,
+        output,
+        summary,
+        ...(audio && {
+          audio_base64: audio.audioBase64,
+          content_type: audio.contentType,
+        }),
+      },
       'Cambio aplicado',
     );
+  }
+
+  /**
+   * The human sentence inside a tool's applied output.
+   *
+   * Write tools answer with `JSON.stringify({ summary, data, note })`, so the
+   * sentence is already written — by the code that made the change, which is the
+   * only place that knows what actually happened. Anything reconstructed out here
+   * from the arguments would describe the *request*, and those differ: a price
+   * change re-computes against the value in force at confirm time, not the one the
+   * preview showed.
+   *
+   * Returns null rather than a fallback phrase when there is nothing quotable. The
+   * caller decides what to say when the tool said nothing, and a generic "listo"
+   * invented here would be indistinguishable from one the tool meant.
+   */
+  private applySummary(output: string): string | null {
+    try {
+      const parsed = JSON.parse(output) as { summary?: unknown };
+      return typeof parsed?.summary === 'string' && parsed.summary.trim()
+        ? parsed.summary.trim()
+        : null;
+    } catch {
+      // Not every tool answers with JSON, and a plain-string answer is already
+      // the sentence — as long as it is short enough to be one.
+      const text = output?.trim();
+      return text && text.length <= 400 ? text : null;
+    }
   }
 
   /**

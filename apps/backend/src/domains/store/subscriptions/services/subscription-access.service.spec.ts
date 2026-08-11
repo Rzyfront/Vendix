@@ -138,6 +138,42 @@ describe('SubscriptionAccessService', () => {
     expect(r.reason).toBe('SUBSCRIPTION_008');
   });
 
+  // QUI-676 — `pending_payment` had no case in stateToMode() and fell into the
+  // `default: block/blocker` branch, so an unconfirmed Wompi webhook locked the
+  // whole store out of /api/store/** writes. A charge IN FLIGHT is not an
+  // unpaid debt: it warns like grace_soft. The real blocks (suspended, blocked,
+  // cancelled, expired) are the OUTCOME of the charge, not its waiting room.
+  describe('QUI-676 — pending_payment is a charge in flight, not a debt', () => {
+    it('state=pending_payment → warn SUBSCRIPTION_007 on the store write gate', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'pending_payment' }) as any,
+      );
+      const r = await service.canUseModule(1, 'orders');
+      expect(r.mode).toBe('warn');
+      expect(r.severity).toBe('warning');
+      expect(r.reason).toBe('SUBSCRIPTION_007');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('state=pending_payment → warn (allowed) on the AI gate', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'pending_payment' }) as any,
+      );
+      const r = await service.canUseAIFeature(1, 'text_generation');
+      expect(r.mode).toBe('warn');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('never answers the draft blocker code for pending_payment', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'pending_payment' }) as any,
+      );
+      const r = await service.canUseModule(1, 'orders');
+      expect(r.reason).not.toBe('SUBSCRIPTION_002');
+      expect(r.severity).not.toBe('blocker');
+    });
+  });
+
   it('feature disabled in plan → block SUBSCRIPTION_005', async () => {
     resolverMock.resolveSubscription.mockResolvedValue(
       resolved({
@@ -574,6 +610,33 @@ describe('SubscriptionAccessService', () => {
       // canUseModule keeps grace_hard writable (warn), severity unchanged.
       expect(r.mode).toBe('warn');
       expect(r.severity).toBe('critical');
+      expect(r.allowed).toBe(true);
+    });
+
+    // QUI-676 — a recovery checkout started from grace/suspended CARRIES its
+    // motive into pending_payment: transition() only clears `lock_reason` on
+    // the way into active/trial. So the retired-plan truth must survive while
+    // the charge settles instead of reverting to the past-due story.
+    it('state=pending_payment + plan retired → warn SUBSCRIPTION_011 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'pending_payment' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      expect(r.mode).toBe('warn');
+      expect(r.severity).toBe('warning');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('state=pending_payment + lock_reason=null → warn SUBSCRIPTION_007 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'pending_payment' }) as any,
+      );
+      const svc = serviceWithLockReason(null);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_007');
+      expect(r.mode).toBe('warn');
       expect(r.allowed).toBe(true);
     });
 

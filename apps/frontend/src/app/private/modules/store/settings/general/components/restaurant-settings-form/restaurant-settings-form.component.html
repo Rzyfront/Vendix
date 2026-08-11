@@ -1,11 +1,48 @@
 <div class="restaurant-settings-form space-y-6">
+  <app-alert-banner variant="info" icon="scan-line">
+    Cada mesa tiene su propio código QR. Al escanearlo, el comensal abre la
+    tienda pública con la mesa ya identificada (<code>/?mesa=&lt;código&gt;</code>).
+    Los QR se generan en <strong>Restaurante › Mesas</strong>; lo que configuras
+    acá es qué ocurre después del escaneo.
+  </app-alert-banner>
+
   <div>
-    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Cobro en mesa</h4>
-    <div class="flex items-start justify-between gap-4">
-      <div class="flex-1">
-        <p class="text-sm font-medium text-[var(--color-text-primary)]">Habilitar cobro desde la mesa</p>
-        <p class="text-xs text-[var(--color-text-muted)] mt-1">
-          Permite cobrar la cuenta directamente desde la vista de la mesa. Si está desactivado, solo se muestra el estado del pago.
+    <h4 class="settings-kicker">
+      <app-icon name="credit-card" [size]="13"></app-icon>
+      Cobro en mesa
+    </h4>
+    <div class="setting-row">
+      <div class="setting-row__copy">
+        <p class="setting-row__label">
+          <span>Habilitar cobro desde la mesa</span>
+          <app-tooltip
+            content="Ejemplo: la mesa 4 pidió $85.000 y quiere pagar. Con el cobro en mesa ACTIVO, el mesero cierra la cuenta desde la pantalla de la mesa sin pasar por el POS, y el comensal también puede pagar desde su teléfono. Con el cobro INACTIVO la pantalla de la mesa sólo informa cuánto debe y el pago se registra en el POS."
+            position="top"
+          >
+            <span class="help-icon">
+              <app-icon name="help-circle" [size]="13"></app-icon>
+            </span>
+          </app-tooltip>
+          <app-badge variant="service" size="xs" badgeStyle="outline">
+            Sólo restaurantes
+          </app-badge>
+        </p>
+        <p class="setting-row__desc">
+          Abre dos caminos de pago que van más allá de la pantalla de la mesa:
+        </p>
+        <ul class="setting-row__list">
+          <li>
+            Tu equipo ve el botón <strong>Cobrar</strong> en la pantalla de la
+            mesa y cierra la cuenta desde ahí.
+          </li>
+          <li>
+            El comensal que escaneó el QR puede pagar su cuenta desde su propio
+            teléfono.
+          </li>
+        </ul>
+        <p class="setting-row__desc">
+          Si lo desactivas, la mesa sólo muestra el estado del pago y el cobro
+          se hace únicamente desde el POS.
         </p>
       </div>
       <app-toggle
@@ -17,19 +54,24 @@
   </div>
 
   <div>
-    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Mesas</h4>
+    <h4 class="settings-kicker">
+      <app-icon name="concierge-bell" [size]="13"></app-icon>
+      Mesas
+    </h4>
     <div class="space-y-4">
       <div>
-        <p class="text-sm font-medium text-[var(--color-text-primary)]">Modo de escaneo QR</p>
-        <p class="text-xs text-[var(--color-text-muted)] mt-1">
-          Define qué ocurre cuando un cliente escanea el código QR de una mesa.
+        <p class="setting-row__label">Modo de escaneo QR</p>
+        <p class="settings-hint">
+          Define qué ocurre cuando un comensal escanea el QR de una mesa. Elige
+          según cuánta autonomía quieras darle: en dos de los cuatro modos puede
+          pedir sin mesero.
         </p>
       </div>
       <div class="qr-behavior-grid" role="radiogroup" aria-label="Modo de escaneo QR" [formGroup]="form">
         @for (opt of qrScanBehaviors; track opt.value) {
           <label
             class="qr-behavior-card"
-            [class.selected]="opt.value === qrScanBehaviorControl.value"
+            [class.selected]="opt.value === selectedBehavior()"
           >
             <input
               type="radio"
@@ -42,8 +84,19 @@
               <app-icon [name]="opt.icon" [size]="20" />
             </span>
             <h3 class="qr-behavior-title">{{ opt.title }}</h3>
+            @if (opt.badge) {
+              <span class="qr-behavior-badges">
+                <app-badge [variant]="opt.badge.variant" size="xs" badgeStyle="outline">
+                  {{ opt.badge.text }}
+                </app-badge>
+              </span>
+            }
             <p class="qr-behavior-desc">{{ opt.description }}</p>
-            @if (opt.value === qrScanBehaviorControl.value) {
+            <p class="qr-behavior-guest">
+              <app-icon name="smartphone" [size]="12" />
+              <span>{{ opt.guest }}</span>
+            </p>
+            @if (opt.value === selectedBehavior()) {
               <span class="qr-behavior-check" aria-hidden="true">
                 <app-icon name="check" [size]="14" />
               </span>
@@ -52,11 +105,27 @@
         }
       </div>
 
-      <div class="flex items-start justify-between gap-4 pt-2">
-        <div class="flex-1">
-          <p class="text-sm font-medium text-[var(--color-text-primary)]">Auto-disparar a cocina</p>
-          <p class="text-xs text-[var(--color-text-muted)] mt-1">
-            Cuando un cliente escanea el QR, envía automáticamente los items de la orden a cocina (KDS) sin intervención del mesero.
+      <div class="setting-row">
+        <div class="setting-row__copy">
+          <p class="setting-row__label">
+            <span>Auto-disparar a cocina</span>
+            <app-tooltip
+              content="No se dispara al escanear: se dispara cuando el comensal AGREGA platos a su cuenta desde el teléfono. Con el auto-disparo activo, esos platos entran a la pantalla de cocina (KDS) sin que un mesero los revise, igual que si alguien hubiera pulsado «Enviar a cocina» en el POS. Ejemplo: si un comensal agrega 6 platos por error, cocina ya los está preparando."
+              position="top"
+            >
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="13"></app-icon>
+              </span>
+            </app-tooltip>
+            <app-badge variant="warning" size="xs" badgeStyle="outline">
+              Avanzado
+            </app-badge>
+          </p>
+          <p class="setting-row__desc">
+            Cuando el comensal agrega platos a su cuenta desde el QR, los platos
+            preparados se envían a cocina de inmediato, sin que un mesero los
+            confirme. Si lo dejas apagado, los platos quedan en la cuenta y tu
+            equipo decide cuándo dispararlos.
           </p>
         </div>
         <app-toggle
@@ -65,6 +134,65 @@
           (changed)="onFieldChange()"
         ></app-toggle>
       </div>
+
+      @if (autoFireHasNoEffect()) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          El auto-disparo está activo pero no hará nada: en el modo
+          <strong>{{ selectedBehaviorOption().title }}</strong> el comensal no
+          puede agregar platos por su cuenta. Sólo tiene efecto con
+          <strong>Abrir cuenta</strong> o <strong>Requiere mesero</strong>.
+        </app-alert-banner>
+      }
+
+      <app-expandable-card [(expanded)]="qrHelpOpen">
+        <div slot="header" class="help-card-header">
+          <app-icon name="list-checks" [size]="16"></app-icon>
+          <span>Cómo funciona el QR de mesa, de principio a fin</span>
+        </div>
+        <ul class="help-list">
+          <li>
+            <app-icon name="scan-line" [size]="14"></app-icon>
+            <span>
+              <strong>1. El comensal escanea.</strong> El QR lleva un código
+              propio de la mesa, así que la tienda pública sabe en qué mesa está
+              sentado sin que él escriba nada.
+            </span>
+          </li>
+          <li>
+            <app-icon name="book-open" [size]="14"></app-icon>
+            <span>
+              <strong>2. Ve la carta.</strong> Esto ocurre en los cuatro modos.
+              Lo que cambia es si además puede pedir y si la mesa cambia de
+              estado.
+            </span>
+          </li>
+          <li>
+            <app-icon name="receipt" [size]="14"></app-icon>
+            <span>
+              <strong>3. Pide, o espera.</strong> Con <em>Abrir cuenta</em> pide
+              directo. Con <em>Requiere mesero</em> pide sólo después de que tu
+              equipo confirme. Con <em>Solo carta</em> y
+              <em>Marcar mesa ocupada</em> no puede pedir: el pedido lo toma el
+              mesero.
+            </span>
+          </li>
+          <li>
+            <app-icon name="credit-card" [size]="14"></app-icon>
+            <span>
+              <strong>4. Paga.</strong> Si el cobro en mesa está activo, puede
+              pagar desde su teléfono o el mesero cierra desde la mesa. Si no,
+              el pago se registra en el POS.
+            </span>
+          </li>
+          <li>
+            <app-icon name="alert-circle" [size]="14"></app-icon>
+            <span>
+              Cambiar cualquiera de estos ajustes afecta a los escaneos
+              siguientes, no a las cuentas ya abiertas.
+            </span>
+          </li>
+        </ul>
+      </app-expandable-card>
     </div>
   </div>
 </div>

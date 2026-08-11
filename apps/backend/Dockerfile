@@ -25,4 +25,15 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 # Environment files are NOT copied - secrets are loaded from AWS Secrets Manager in production
 EXPOSE 3000
+# Un solo entrypoint para los dos roles del backend (QUI-674). `main.ts` lee
+# VENDIX_PROCESS_ROLE y decide:
+#
+#   (sin definir) | all -> API + workers BullMQ + @Cron   <- comportamiento histórico
+#   api                 -> solo servidor HTTP
+#   worker              -> solo trabajo de fondo, sin abrir puerto
+#
+# Que el rol viaje por variable de entorno y no por CMD es lo que mantiene el
+# despliegue con UNA imagen y UN comando: el contenedor worker se lanza con el
+# mismo `docker run` y un `-e VENDIX_PROCESS_ROLE=worker`. Y como el default es
+# `all`, un despliegue que no la defina arranca exactamente como siempre.
 CMD ["node", "dist/src/main.js"]

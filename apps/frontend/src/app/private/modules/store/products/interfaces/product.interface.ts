@@ -78,6 +78,13 @@ export interface Product {
   consultation_template_id?: number;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   online_purchase_url?: string | null;
   online_purchase_qr_code?: string | null;
   online_purchase_domain_id?: number | null;
@@ -116,6 +123,13 @@ export interface Product {
   // UI can validate dimension compatibility and show proper labels.
   stock_uom_id?: number | null;
   purchase_uom_id?: number | null;
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros publica `base_price = 5000` con
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; `1` es el default.
+   */
+  price_unit_quantity?: number | null;
   stock_uom?: { id: number; code: string; name: string; dimension: string } | null;
   purchase_uom?: { id: number; code: string; name: string; dimension: string } | null;
   created_at: Date;
@@ -194,6 +208,13 @@ export interface ProductVariant {
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   image_id?: number;
   created_at: Date;
   updated_at: Date;
@@ -347,6 +368,13 @@ export interface CreateProductDto {
   consultation_template_id?: number | null;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
   // ===== Restaurant Suite toggles (Fase B) =====
   is_sellable?: boolean;
   is_ingredient?: boolean;
@@ -363,6 +391,8 @@ export interface CreateProductDto {
   // ===== UoM FKs (Fase UoM) =====
   stock_uom_id?: number | null;
   purchase_uom_id?: number | null;
+  /** Escala del precio: unidades de stock que cubre `base_price`. Default 1. */
+  price_unit_quantity?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -450,6 +480,13 @@ export interface CreateProductVariantDto {
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;
+  /**
+   * QUI-651 — estación de preparación del plato. Solo significativo para
+   * `product_type='prepared'`. `null` = cae en el KDS por defecto de la tienda,
+   * que es lo que hace funcionar una tienda de una sola estación sin configurar
+   * un solo plato.
+   */
+  kds_id?: number | null;
 }
 
 export interface CreateProductImageDto {

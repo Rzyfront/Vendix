@@ -31,6 +31,7 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
+import { KdsModule } from './kds/kds.module';
 import { LayawayModule } from './layaway/layaway.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
@@ -99,6 +100,7 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     CouponsModule,
     QuotationsModule,
     CashRegistersModule,
+    KdsModule,
     LayawayModule,
     WithholdingTaxModule,
     ExogenousModule,

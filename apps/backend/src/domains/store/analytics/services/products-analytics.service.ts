@@ -18,12 +18,49 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  formatAggregateQuantity,
+  resolveSaleUnitCodes,
+  saleUnitScaleFactor,
+} from '../../products/services/sale-unit-display.util';
+import { resolvePricedUnits } from '../../products/services/tier-margin.util';
 
 @Injectable()
 export class ProductsAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
+
+  /**
+   * Costo de catálogo llevado a la MISMA escala en la que se publica
+   * `base_price`, para poder restarlos.
+   *
+   * `products.cost_price` es el promedio ponderado por UNIDAD MÍNIMA de stock
+   * —lo escribe `CostingService` como `valor / quantity_on_hand`—, mientras que
+   * `base_price` cubre `price_unit_quantity` de esas unidades. Un cable con el
+   * stock en milímetros y `price_unit_quantity = 1000` guarda $3 el milímetro y
+   * $5.000 el metro: restarlos tal cual comparaba peras con manzanas y publicaba
+   * un margen del 99,94% donde el negocio gana 40%. Y no es un número
+   * decorativo: es con el que el comerciante decide si sube o baja el precio.
+   *
+   * Se sube el COSTO a la escala del precio y no al revés porque la escala
+   * comercial es la que el comerciante entiende y la que ya usan las columnas
+   * vecinas del reporte —el costo del metro es el del milímetro × 1.000—. Bajar
+   * el precio a la unidad mínima daría el mismo porcentaje pero imprimiría
+   * "Precio Base $5" para un cable que se vende a $5.000 el metro.
+   *
+   * `resolvePricedUnits` es el mismo resolutor que usa el editor de producto
+   * (`tier-margin.util`), así que la analítica y el formulario miden el margen
+   * contra el mismo costo de referencia. Con `price_unit_quantity` ausente,
+   * nulo o 1 —el catálogo abrumadoramente mayoritario— devuelve 1 y el costo
+   * sale intacto: cero regresión sobre los números de hoy.
+   */
+  private costInPriceScale(
+    costPrice: number,
+    priceUnitQuantity?: number | null,
+  ): number {
+    return costPrice * resolvePricedUnits(null, priceUnitQuantity);
+  }
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -177,6 +214,11 @@ export class ProductsAnalyticsService {
           return null;
         }
 
+        // Acá NO se reescala el costo, y es a propósito: `avgPrice` es
+        // `revenue / units` con `units` en unidades de STOCK, o sea dinero por
+        // unidad mínima —la misma vara con la que `cost_price` está guardado—.
+        // Multiplicar el costo por `price_unit_quantity` como en las columnas
+        // de catálogo rompería este margen, que hoy es correcto.
         const costPrice = product ? Number(product.cost_price || 0) : 0;
         const avgPrice = units > 0 ? revenue / units : 0;
         const profitMargin =
@@ -236,6 +278,7 @@ export class ProductsAnalyticsService {
         sku: true,
         base_price: true,
         cost_price: true,
+        price_unit_quantity: true,
         stock_quantity: true,
         product_images: {
           select: { image_url: true },
@@ -312,7 +355,13 @@ export class ProductsAnalyticsService {
       const revenue = sales?.totalPrice || 0;
       const orderCount = sales?.count || 0;
       const basePrice = Number(p.base_price || 0);
-      const costPrice = Number(p.cost_price || 0);
+      // Costo en la escala del precio (ver `costInPriceScale`): la fila muestra
+      // ambos juntos, así que `Precio Costo` tiene que medir lo mismo que
+      // `Precio Base` o el margen que las acompaña no se puede reproducir.
+      const costPrice = this.costInPriceScale(
+        Number(p.cost_price || 0),
+        p.price_unit_quantity,
+      );
       const profitMargin =
         costPrice > 0 && basePrice > 0
           ? ((basePrice - costPrice) / basePrice) * 100
@@ -375,6 +424,7 @@ export class ProductsAnalyticsService {
         sku: true,
         base_price: true,
         cost_price: true,
+        price_unit_quantity: true,
         stock_quantity: true,
       },
       orderBy: { name: 'asc' },
@@ -412,24 +462,42 @@ export class ProductsAnalyticsService {
       ]),
     );
 
+    // Unidad de venta por producto: "Stock" y "Unidades Vendidas" son cantidades
+    // guardadas en la unidad mínima de inventario, y sin traducir imprimen 3000
+    // donde el comerciante vendió 3 metros.
+    const saleUnits = await resolveSaleUnitCodes(this.prisma as any, productIds);
+
     return products.map((p) => {
       const sales = salesMap.get(p.id);
       const unitsSold = sales?.quantity || 0;
       const revenue = sales?.totalPrice || 0;
       const basePrice = Number(p.base_price || 0);
-      const costPrice = Number(p.cost_price || 0);
+      // `Precio Costo` viaja en la misma escala que `Precio Base` (ver
+      // `costInPriceScale`); si no, `Margen (%)` restaba el costo del milímetro
+      // al precio del metro y publicaba 99,94% donde el negocio gana 40%.
+      const costPrice = this.costInPriceScale(
+        Number(p.cost_price || 0),
+        p.price_unit_quantity,
+      );
       const profitMargin =
         costPrice > 0 && basePrice > 0
           ? ((basePrice - costPrice) / basePrice) * 100
           : null;
+
+      const info = saleUnits.get(p.id);
+      const sold = formatAggregateQuantity(unitsSold, info);
+      const stock = formatAggregateQuantity(p.stock_quantity || 0, info);
 
       return {
         name: p.name,
         sku: p.sku || '',
         base_price: basePrice,
         cost_price: costPrice,
-        stock_quantity: p.stock_quantity || 0,
-        units_sold: unitsSold,
+        stock_quantity: stock.value,
+        units_sold: sold.value,
+        // Una sola columna de unidad para toda la fila: stock y ventas del
+        // mismo producto se miden con la misma vara, por construcción.
+        unit: sold.suffix,
         revenue,
         profit_margin:
           profitMargin !== null ? Number(profitMargin.toFixed(2)) : null,
@@ -519,52 +587,50 @@ export class ProductsAnalyticsService {
       },
     });
 
-    // Get refunded quantities per product via refunds -> refund_items relation
-    const refundsWithItems = await this.prisma.refunds.findMany({
-      where: {
-        state: { in: ['completed', 'approved'] as any },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      select: {
-        refund_items: {
-          select: {
-            order_item_id: true,
-            quantity: true,
-            refund_amount: true,
-          },
-        },
-      },
-    });
+    // QUI-621: refund-rate uses POLICY A — refunds of orders SOLD in the
+    // period, even when the refund itself happens later. The previous code
+    // used `refunds.created_at` (Policy B) — refunds PROCESSED in the period —
+    // which divided refunds of OTHER periods by sales of THIS period. When
+    // the two ranges didn't match, the rate was meaningless (e.g. negative
+    // when a refund-heavy month had low sales).
+    //
+    // Policy A: join refund_items → order_items → orders filtered by sales
+    // window. The SQL below does that join in one pass.
+    const rawClient = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const refundByProduct = await rawClient.$queryRaw<
+      Array<{
+        product_id: number;
+        refunded_qty: string | number;
+        refunded_amount: string | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        oi.product_id AS product_id,
+        COALESCE(SUM(ri.quantity), 0)::decimal AS refunded_qty,
+        COALESCE(SUM(ri.refund_amount), 0)::decimal AS refunded_amount
+      FROM refund_items ri
+      JOIN refunds r ON r.id = ri.refund_id
+      JOIN order_items oi ON oi.id = ri.order_item_id
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+        AND o.state IN ('delivered', 'finished')
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+        AND r.state IN ('completed', 'approved')
+      GROUP BY oi.product_id
+    `);
 
-    // Collect all order_item_ids from refund_items
-    const refundedOrderItemIds = refundsWithItems
-      .flatMap((r) => r.refund_items.map((ri) => ri.order_item_id))
-      .filter(Boolean);
-
-    const refundedOrderItems =
-      refundedOrderItemIds.length > 0
-        ? await this.prisma.order_items.findMany({
-            where: { id: { in: refundedOrderItemIds } },
-            select: { id: true, product_id: true },
-          })
-        : [];
-
-    const refundByProduct = new Map<
-      number | null,
+    const refundsByProduct = new Map<
+      number,
       { quantity: number; amount: number }
     >();
-    for (const refund of refundsWithItems) {
-      for (const ri of refund.refund_items) {
-        const oi = refundedOrderItems.find((o) => o.id === ri.order_item_id);
-        if (!oi?.product_id) continue;
-        const existing = refundByProduct.get(oi.product_id) || {
-          quantity: 0,
-          amount: 0,
-        };
-        existing.quantity += Number(ri.quantity || 0);
-        existing.amount += Number(ri.refund_amount || 0);
-        refundByProduct.set(oi.product_id, existing);
-      }
+    for (const r of refundByProduct) {
+      refundsByProduct.set(Number(r.product_id), {
+        quantity: Number(r.refunded_qty),
+        amount: Number(r.refunded_amount),
+      });
     }
 
     const productIds = completedItems
@@ -594,7 +660,7 @@ export class ProductsAnalyticsService {
         const unitsSold = Number(r._sum.quantity || 0);
         const revenue = Number(r._sum.total_price || 0);
         const orderCount = r._count.id || 0;
-        const refunds = refundByProduct.get(r.product_id) || {
+        const refunds = refundsByProduct.get(r.product_id) || {
           quantity: 0,
           amount: 0,
         };
@@ -672,6 +738,7 @@ export class ProductsAnalyticsService {
         sku: true,
         base_price: true,
         cost_price: true,
+        price_unit_quantity: true,
         product_categories: {
           select: { categories: { select: { name: true } } },
         },
@@ -682,6 +749,7 @@ export class ProductsAnalyticsService {
       sku: string | null;
       base_price: any;
       cost_price: any;
+      price_unit_quantity: number | null;
       product_categories: { categories: { name: string } }[];
     }[];
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -715,7 +783,17 @@ export class ProductsAnalyticsService {
         const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
         const markup = totalCost > 0 ? (profit / totalCost) * 100 : 0;
         const basePrice = product ? Number(product.base_price || 0) : 0;
-        const catalogCostPrice = product ? Number(product.cost_price || 0) : 0;
+        // El par catálogo (`catalog_base_price` / `catalog_cost_price`) se
+        // publica en la escala comercial, la única en la que restarlos tiene
+        // sentido (ver `costInPriceScale`). `unit_cost` de arriba NO se toca:
+        // multiplica `units_sold`, que está en unidades de stock, y llevarlo a
+        // la escala comercial descuadraría `total_cost`, `profit` y `margin`.
+        const catalogCostPrice = product
+          ? this.costInPriceScale(
+              Number(product.cost_price || 0),
+              product.price_unit_quantity,
+            )
+          : 0;
         const catalogMargin =
           catalogCostPrice > 0 && basePrice > 0
             ? ((basePrice - catalogCostPrice) / basePrice) * 100
@@ -789,34 +867,64 @@ export class ProductsAnalyticsService {
     const exportQuery = { ...query, page: undefined, limit: 10000 };
     const result = await this.getProductPerformance(exportQuery);
     const rows = Array.isArray(result) ? result : result.data || [];
-    return rows.map((r: any) => ({
-      Producto: r.product_name,
-      SKU: r.sku,
-      'Unidades Vendidas': r.units_sold,
-      Ingresos: r.revenue,
-      Devoluciones: r.refunded_units,
-      'Monto Devuelto': r.refunded_amount,
-      'Tasa Devolución (%)': r.return_rate,
-      Órdenes: r.order_count,
-    }));
+    // Unidades vendidas y devueltas son la MISMA magnitud: se convierten con la
+    // misma unidad o la tasa de devolución de la fila dejaría de tener sentido.
+    const saleUnits = await resolveSaleUnitCodes(
+      this.prisma as any,
+      rows.map((r: any) => r.product_id),
+    );
+    return rows.map((r: any) => {
+      const info = saleUnits.get(Number(r.product_id));
+      const sold = formatAggregateQuantity(r.units_sold, info);
+      const refunded = formatAggregateQuantity(r.refunded_units, info);
+      return {
+        Producto: r.product_name,
+        SKU: r.sku,
+        'Unidades Vendidas': sold.value,
+        Unidad: sold.suffix,
+        Ingresos: r.revenue,
+        Devoluciones: refunded.value,
+        'Monto Devuelto': r.refunded_amount,
+        'Tasa Devolución (%)': r.return_rate,
+        Órdenes: r.order_count,
+      };
+    });
   }
 
   async getProductProfitabilityForExport(query: ProductsAnalyticsQueryDto) {
     const exportQuery = { ...query, page: undefined, limit: 10000 };
     const result = await this.getProductProfitability(exportQuery);
     const rows = (result as any).products || (result as any).data || [];
-    return rows.map((r: any) => ({
-      Producto: r.product_name,
-      SKU: r.sku,
-      Categoría: r.category || '',
-      'Unidades Vendidas': r.units_sold,
-      Ingresos: r.revenue,
-      'Costo Unitario (Receta)': r.unit_cost,
-      'Costo Total': r.total_cost,
-      Ganancia: r.profit,
-      'Margen (%)': r.margin,
-      'Markup (%)': r.markup,
-    }));
+    const saleUnits = await resolveSaleUnitCodes(
+      this.prisma as any,
+      rows.map((r: any) => r.product_id),
+    );
+    return rows.map((r: any) => {
+      const info = saleUnits.get(Number(r.product_id));
+      const sold = formatAggregateQuantity(r.units_sold, info);
+      // `Costo Unitario` acompaña a la cantidad convertida: si la fila dice
+      // 3 m, el costo tiene que ser por metro o `Costo Total` deja de ser el
+      // producto de sus dos vecinos. `Costo Total`, `Ganancia`, `Margen` y
+      // `Markup` no se tocan: son agregados y no dependen de la escala.
+      const factor = saleUnitScaleFactor(info);
+      const unitCost =
+        factor > 1
+          ? Number((Number(r.unit_cost ?? 0) * factor).toFixed(4))
+          : r.unit_cost;
+      return {
+        Producto: r.product_name,
+        SKU: r.sku,
+        Categoría: r.category || '',
+        'Unidades Vendidas': sold.value,
+        Unidad: sold.suffix,
+        Ingresos: r.revenue,
+        'Costo Unitario (Receta)': unitCost,
+        'Costo Total': r.total_cost,
+        Ganancia: r.profit,
+        'Margen (%)': r.margin,
+        'Markup (%)': r.markup,
+      };
+    });
   }
 
   // ---------------------------------------------------------- Fase G helpers

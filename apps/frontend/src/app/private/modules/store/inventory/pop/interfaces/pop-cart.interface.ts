@@ -234,6 +234,12 @@ export interface PopCartSummary {
   subtotal: number;
   /** IVA cycle (F1): total tax (IVA) = Σ line_tax. */
   tax_amount: number;
+  /**
+   * QUI-661 — total commercial discount already reflected in `subtotal` and
+   * `tax_amount`: per-line discounts plus the general one. Shown so the user
+   * sees the rebate as its own figure instead of an unexplained lower base.
+   */
+  discount_amount: number;
   shipping_cost: number;
   /** Gross total = subtotal (net) + tax_amount (IVA) + shipping. */
   total: number;
@@ -278,6 +284,14 @@ export interface PopCartState {
   expectedDate?: Date;
   shippingMethod?: string;
   shippingCost: number;
+  /**
+   * QUI-661 — descuento comercial GENERAL sobre la factura del proveedor, en
+   * dinero. El backend lo prorratea por línea contra el peso de cada una en el
+   * subtotal bruto y lo aplica ANTES de derivar el IVA; no se queda en la
+   * cabecera porque las capas de costo se escriben por línea y un descuento
+   * que sólo vive en el header no tiene forma de llegar al costo del producto.
+   */
+  discountAmount: number;
   paymentTerms?: string;
   notes?: string;
   internalNotes?: string;
@@ -310,6 +324,12 @@ export interface AddToPopCartRequest {
    * caso count→masa/volumen. El carrito lo transporta preferentemente dentro
    * de `prebulk_data`; este campo top-level queda listo para propagación futura.
    */
+  /**
+   * QUI-661 Fase 4 — descuento comercial de la línea, en PORCENTAJE (10 = 10%).
+   * El carrito trabaja en porcentaje; el escáner de facturas extrae un MONTO y
+   * lo convierte al agregar, porque la factura imprime pesos, no porcentajes.
+   */
+  discount?: number;
   contentPerPackage?: number;
   /**
    * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner

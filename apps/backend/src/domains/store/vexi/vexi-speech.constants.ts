@@ -55,6 +55,17 @@ export const SYNTHESIS_PREFETCH_DEPTH = 3;
  * tengo" like a person would.
  *
  * Short on purpose: a filler longer than the wait it covers becomes the wait.
+ *
+ * Colombian register, not neutral Spanish. This is the one thing Vexi says that
+ * carries no information at all, so its only job is to sound like a person from
+ * the same place as the listener — "dame un momentico" and "ya mismo te digo"
+ * do that, "aguarda un instante" does not. The bank had `dejame`, a voseo form
+ * that reads as Rioplatense; corrected to `déjame`.
+ *
+ * Fourteen rather than eight because the rotation only forbids the *immediate*
+ * repeat: with eight, a person who asks six things in a row hears most of the
+ * bank and starts recognising it. Each phrase costs one synthesis, once, on the
+ * first warm pass.
  */
 export const VOICE_FILLERS = [
   'Mmm, dame un segundo.',
@@ -63,8 +74,14 @@ export const VOICE_FILLERS = [
   'Ya voy con eso.',
   'Un momento.',
   'Listo, ya lo tengo.',
-  'Ajá, dejame ver.',
+  'Ajá, déjame ver.',
   'Voy a mirarlo.',
+  'Ok, te entiendo.',
+  'Ok, vamos a revisar esto.',
+  'Claro, dame un momentico.',
+  'Bueno, veamos.',
+  'Ya mismo te digo.',
+  'Listo, dame un segundito.',
 ] as const;
 
 /**
@@ -73,6 +90,83 @@ export const VOICE_FILLERS = [
  * delay the actual answer to say something that carries no information.
  */
 export const FILLER_GRACE_MS = 250;
+
+/**
+ * Spoken name of a currency, by ISO code.
+ *
+ * A synthesizer handed "$1.500.000" reads a symbol, and handed "COP" reads three
+ * letters: "ce-o-pe". Neither is what a shopkeeper says. The listener needs the
+ * word, and the word depends on the store — the same amount is "pesos" in Bogotá
+ * and "soles" in Lima.
+ *
+ * Plural because the amount is what precedes it and amounts are almost never
+ * one. An unmapped code falls back to the code itself: the synthesizer will
+ * spell it out, which is wrong but honest, and far better than guessing "pesos"
+ * for a currency that is not.
+ */
+export const CURRENCY_SPOKEN_WORDS: Record<string, string> = {
+  COP: 'pesos',
+  USD: 'dólares',
+  EUR: 'euros',
+  MXN: 'pesos',
+  ARS: 'pesos',
+  CLP: 'pesos',
+  UYU: 'pesos',
+  DOP: 'pesos',
+  PEN: 'soles',
+  BRL: 'reales',
+  BOB: 'bolivianos',
+  GTQ: 'quetzales',
+  CRC: 'colones',
+  PAB: 'balboas',
+  PYG: 'guaraníes',
+  VES: 'bolívares',
+};
+
+/** Currency assumed when the store has none resolved. Vendix is CO-first. */
+export const DEFAULT_SPOKEN_CURRENCY = 'COP';
+
+/**
+ * Prompt block injected only when the turn is going to be dictated.
+ *
+ * A conditional block rather than a second `system_prompt` for voice, so there
+ * stays exactly one Vexi. Two prompts would diverge — the persona, the tool
+ * rules and the tenant guardrails would have to be maintained twice, and the
+ * copy that gets edited less would quietly become a different assistant.
+ *
+ * The first rule is the one that is not about style. The first audio segment is
+ * cut at ~40 characters (see `SEGMENT_TARGETS`), so an answer that opens with
+ * "Según los datos de tu tienda…" spends its entire opening segment on a
+ * preamble and the listener waits a full extra synthesis round trip to hear the
+ * number. Leading with the datum is worth hundreds of milliseconds of perceived
+ * latency, which is why it sits at the top rather than among the niceties.
+ *
+ * Reaches the model only if the application's stored `system_prompt` contains
+ * the matching `{{speech_register}}` placeholder — `interpolate()` leaves an
+ * unmatched placeholder verbatim, so the key must exist on every snapshot even
+ * when it is empty, or the template syntax leaks into the prompt.
+ */
+export const SPEECH_REGISTER_BLOCK = `## Registro hablado (este turno se dicta en voz alta)
+
+La persona te está ESCUCHANDO, no leyendo. Eso cambia cómo respondes:
+
+- Empieza por el dato, nunca por el preámbulo. "Tienes 47 ventas hoy" arranca antes que "Según los datos de tu tienda, hoy registras…". Esto es latencia, no estilo: el primer trozo de audio se corta a unos 40 caracteres, así que el dato tiene que caber ahí.
+- Sin markdown de ningún tipo: nada de asteriscos, listas numeradas o con guiones, tablas, encabezados, bloques de código ni emojis. Nada de eso se oye, solo estorba.
+- Frases cortas, una idea por frase. Tres frases como máximo, salvo que te pidan detalle explícitamente.
+- Nunca digas "como ves en la tabla", "en la lista", "arriba" ni "abajo": quien te escucha no está viendo nada.
+- Si hay muchos ítems, di el total y los dos o tres que importan, y ofrece el resto. No dictes catálogos.
+- Los montos en lenguaje natural, con la moneda de la tienda.
+- Si vas a pedir una confirmación, dila en una sola frase y termina preguntando.`;
+
+/**
+ * Digits below which an unseparated integer is left alone.
+ *
+ * Four is the threshold because that is where a synthesizer stops reading a
+ * number as a quantity: "1500" often comes out as "mil quinientos" but "1500000"
+ * comes out as a digit stream. Grouping it into "1.500.000" is what makes it a
+ * number again. Below four there is nothing to group.
+ */
+export const MIN_GROUPED_DIGITS = 4;
 
 /** Upper bound on one uploaded audio turn, before base64 expansion. */
 export const MAX_TURN_AUDIO_BYTES = 8 * 1024 * 1024;

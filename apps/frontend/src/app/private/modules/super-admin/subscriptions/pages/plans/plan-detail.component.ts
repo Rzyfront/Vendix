@@ -3,6 +3,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import { SubscriptionPlan } from '../../interfaces/subscription-admin.interface';
+import { formatFeatureCap } from '../../utils/ai-feature-flags.util';
 import {
   ButtonComponent,
   IconComponent,
@@ -180,13 +181,6 @@ export class PlanDetailComponent {
   }
 
   getFeatureCapLabel(value: any): string {
-    if (!value) return '';
-    if (value.monthly_tokens_cap) return `${value.monthly_tokens_cap.toLocaleString()} tokens/mes`;
-    if (value.daily_messages_cap) return `${value.daily_messages_cap.toLocaleString()} mensajes/día`;
-    if (value.monthly_jobs_cap) return `${value.monthly_jobs_cap.toLocaleString()} jobs/mes`;
-    if (value.retention_days) return `${value.retention_days} días retención`;
-    if (value.indexed_docs_cap) return `${value.indexed_docs_cap.toLocaleString()} docs`;
-    if (value.tools_allowed?.length) return `${value.tools_allowed.length} tools`;
-    return '';
+    return formatFeatureCap(value);
   }
 }

@@ -49,6 +49,67 @@ import { BlocklistModule } from './common/services/blocklist/blocklist.module';
 import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
 import { InventoryCostingModule } from './domains/store/inventory/shared/inventory-costing.module';
 
+/**
+ * Rol del proceso: qué mitad del backend levanta ESTA instancia.
+ *
+ * - `all`    — servidor HTTP **y** trabajo de fondo (workers BullMQ + `@Cron`).
+ *              Es lo que Vendix ha hecho siempre y es el DEFAULT.
+ * - `api`    — solo servidor HTTP. No registra workers ni deja crones montados.
+ * - `worker` — solo trabajo de fondo. Sin servidor HTTP.
+ */
+export type VendixProcessRole = 'all' | 'api' | 'worker';
+
+/**
+ * ## Por qué existe este interruptor (QUI-674)
+ *
+ * Los 11 workers de BullMQ y TODOS los `@Cron` viven en el mismo proceso Node
+ * que sirve la API (`JobsModule` + `QueueModule` se importan aquí arriba). Un
+ * job CPU-bound —firmar el set de pruebas DIAN— detenía el event loop del
+ * proceso entero, y nginx respondía 504 en rutas triviales de la API mientras
+ * BullMQ perdía el lock de su propio job.
+ *
+ * La mitigación (caché del PKCS#12 + cesión del event loop) baja la probabilidad;
+ * separar los procesos quita la clase de fallo: un worker que se bloquee ya no
+ * puede tumbar la API porque no comparte su event loop.
+ *
+ * ## EL DEFAULT ES EL COMPORTAMIENTO ACTUAL — deliberadamente
+ *
+ * Cualquier valor que no sea exactamente `api` o `worker` (variable ausente,
+ * vacía, con espacios, mal escrita) resuelve a `all`. La razón es asimétrica:
+ * un despliegue que se olvide de la variable y arranque como hoy no pierde nada,
+ * mientras que uno que resolviera a `api` por un typo se quedaría **sin nadie**
+ * ejecutando cobros, recordatorios, provisiones ni reintentos — en silencio y
+ * sin un solo error en los logs. Ante la duda, se hace todo.
+ *
+ * El caso simétrico (`worker` por typo en el contenedor de la API) se evita en
+ * el despliegue pasando SIEMPRE el rol con `-e`, que tiene prioridad sobre
+ * `--env-file`, de modo que un valor rancio en `/opt/vendix/.env` nunca decide.
+ */
+export function resolveVendixProcessRole(
+  raw: string | undefined = process.env.VENDIX_PROCESS_ROLE,
+): VendixProcessRole {
+  const value = (raw ?? '').trim().toLowerCase();
+  if (value === 'api') return 'api';
+  if (value === 'worker') return 'worker';
+  return 'all';
+}
+
+/**
+ * Distingue «no se configuró» de «se configuró mal».
+ *
+ * `resolveVendixProcessRole` colapsa ambos casos en `all` a propósito, pero un
+ * typo merece un WARN en el arranque: el operador cree haber separado los
+ * procesos y en realidad tiene dos instancias haciendo lo mismo.
+ */
+export function isKnownVendixProcessRole(
+  raw: string | undefined = process.env.VENDIX_PROCESS_ROLE,
+): boolean {
+  const value = (raw ?? '').trim().toLowerCase();
+  return (
+    value === '' || value === 'all' || value === 'api' || value === 'worker'
+  );
+}
+
 @Module({
   imports: [
     SecretsModule,

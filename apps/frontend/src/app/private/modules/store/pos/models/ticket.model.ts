@@ -12,7 +12,23 @@ export interface TicketItem {
   appliedPriceTierName?: string | null;
   isPackageUnit?: boolean;
   unitsPerPackage?: number | null;
+  /**
+   * QUI-648 — el tiquete muestra la MISMA escala que el cajero capturó: "3 m",
+   * no "3000". La conversión a milímetros o gramos es interna y no aparece en
+   * ningún papel que vea el cliente. Ausentes = línea por pieza (lo histórico).
+   */
+  saleUnitCode?: string | null;
+  saleQuantity?: number | null;
   serials?: string[];
+  /**
+   * QUI-653 — la línea se empaca y el cliente se la lleva, aunque pertenezca al
+   * pedido de una mesa. El tiquete la marca porque es lo que el cliente revisa
+   * al pagar y lo que el mesero usa para saber qué entregar empacado.
+   *
+   * Opcional: un tiquete de venta retail normal no lleva esta dimensión, y
+   * `undefined` se comporta como "consumo en el lugar".
+   */
+  isTakeaway?: boolean;
 }
 
 export interface TicketData {

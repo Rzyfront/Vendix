@@ -112,6 +112,32 @@ export class AIChatController {
       // tool trace still get persisted.
       const abort = new AbortController();
 
+      // Keeps the connection alive through the quiet stretches of a turn.
+      //
+      // The quietest window of a spoken turn is the one right AFTER the text
+      // finished: the segmenter flushes its tail and the synthesizer works
+      // through it, emitting nothing meanwhile. Any intermediary with an idle
+      // read timeout kills the socket there, the browser reports a transport
+      // error with no HTTP status to show for it, and the person sees "se cayó
+      // la conexión" on a turn whose answer was already generated and persisted.
+      //
+      // Written as a `setInterval` inside this Observable and NOT as
+      // `merge(frames$, interval(...))` — the shape the notifications stream
+      // uses — because `merge` only completes once every source completes, and
+      // an `interval` never does. Merging would keep this response open forever
+      // and defeat the `subscriber.complete()` below, which is what makes the
+      // browser close promptly on `done`.
+      //
+      // The frame carries no `type`, so the client's `ai-chunk` listener never
+      // sees it: what matters is bytes on the wire, not their meaning. 15 s
+      // rather than the 30 s of the notifications stream because this path also
+      // has to survive intermediaries whose idle limit is 30 s, and three
+      // latidos inside nginx's 60 s default is the margin that makes a single
+      // dropped one harmless.
+      const heartbeat = setInterval(() => {
+        subscriber.next({ data: `: heartbeat ${Date.now()}` } as MessageEvent);
+      }, 15_000);
+
       const stream = async () => {
         try {
           for await (const chunk of this.chatService.sendMessageStream(
@@ -152,7 +178,12 @@ export class AIChatController {
 
       // Runs on client disconnect and on `subscriber.complete()`. Harmless in the
       // completion case: `done` is the last frame, so by then the queue is empty.
-      return () => abort.abort();
+      // Clearing the heartbeat here is what keeps a finished turn from leaving a
+      // timer alive for the life of the process — one per turn adds up fast.
+      return () => {
+        clearInterval(heartbeat);
+        abort.abort();
+      };
     });
   }
 

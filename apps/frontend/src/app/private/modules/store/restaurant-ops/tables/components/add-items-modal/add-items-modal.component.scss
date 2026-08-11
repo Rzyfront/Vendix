@@ -117,3 +117,39 @@
     color: var(--color-primary, #3b82f6);
   }
 }
+
+/* QUI-653 — toggle "Para llevar" por línea.
+   Es un <button> con aria-pressed y no un app-toggle porque vive dentro de una
+   fila densa de producto: un switch completo compite visualmente con el stepper
+   de cantidad, que es la acción principal de la fila. */
+.takeaway-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--color-warning, #fb923c);
+    color: var(--color-warning-700, #b45309);
+  }
+
+  /* Estado activo: mismo par de tokens que el badge de la fila de la mesa, para
+     que "para llevar" se lea igual en los dos sitios. */
+  &.is-on {
+    background-color: var(--color-warning-100, #fef3c7);
+    border-color: var(--color-warning, #fb923c);
+    color: var(--color-warning-700, #b45309);
+  }
+}

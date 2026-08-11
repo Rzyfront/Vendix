@@ -431,7 +431,7 @@ export class OrgConsolidationDetailComponent {
 
   readonly reportTabs: ScrollableTab[] = [
     { id: 'overview', label: 'Resumen', icon: 'layout-dashboard' },
-    { id: 'intercompany', label: 'Intercompañía', icon: 'git-compare' },
+    { id: 'intercompany', label: 'Intercompañía', icon: 'arrow-right-left' },
     { id: 'trial-balance', label: 'Balance de prueba', icon: 'scale' },
     { id: 'balance-sheet', label: 'Balance general', icon: 'wallet' },
     { id: 'income-statement', label: 'Estado de resultados', icon: 'file-bar-chart' },

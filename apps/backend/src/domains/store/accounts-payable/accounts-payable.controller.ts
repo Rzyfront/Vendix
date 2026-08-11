@@ -11,6 +11,7 @@ import { ResponseService } from '../../../common/responses/response.service';
 import { ApQueryDto } from './dto/ap-query.dto';
 import { RegisterApPaymentDto } from './dto/register-ap-payment.dto';
 import { ScheduleApPaymentDto } from './dto/schedule-ap-payment.dto';
+import { ApDueNotificationsJob } from './jobs/ap-due-notifications.job';
 
 @ApiTags('Accounts Payable')
 @Controller('store/accounts-payable')
@@ -21,6 +22,7 @@ export class AccountsPayableController {
     private readonly aging_service: ApAgingService,
     private readonly scheduling_service: ApSchedulingService,
     private readonly bank_export_service: ApBankExportService,
+    private readonly due_notifications_job: ApDueNotificationsJob,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -89,6 +91,23 @@ export class AccountsPayableController {
     return this.response_service.success(
       result,
       'Archivo de exportación generado',
+    );
+  }
+
+  /**
+   * QUI-647 — fuerza el barrido de vencimientos que el cron corre a diario.
+   *
+   * Existe porque un cron sin disparador manual no se puede verificar ni operar:
+   * si un día no corre, la única salida sería esperar 24 horas. Reutiliza el
+   * permiso de lectura de CxP — no muta nada, solo emite notificaciones.
+   */
+  @Post('sweep-due')
+  @Permissions('store:accounts_payable:read')
+  async sweepDue() {
+    await this.due_notifications_job.sweepDueSchedules();
+    return this.response_service.success(
+      { swept: true },
+      'Barrido de vencimientos ejecutado',
     );
   }
 

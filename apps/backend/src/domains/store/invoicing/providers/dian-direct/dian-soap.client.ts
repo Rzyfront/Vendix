@@ -415,9 +415,22 @@ export class DianSoapClient {
     const status_code_match = response_xml.match(
       /<b:StatusCode\b[^>]*>([\s\S]*?)<\/b:StatusCode>/,
     );
+    // `[\s\S]` y no `.`, porque la DIAN devuelve descripciones MULTILÍNEA.
+    //
+    // EL DEFECTO QUE CIERRA: `.` no cruza saltos de línea sin el flag `s`, así
+    // que un `<b:StatusDescription>` de varias líneas —la forma en que la DIAN
+    // enumera las reglas violadas de un rechazo— no matcheaba, `status_message`
+    // caía al literal `'No status message in response'` y el motivo del rechazo
+    // desaparecía del veredicto. El regex de `StatusCode` de arriba ya se había
+    // corregido por esta misma razón; este quedó atrás.
+    //
+    // `StatusMessage` lleva el mismo tratamiento: es el mismo campo en las
+    // operaciones que lo usan y tiene el mismo modo de fallo.
     const status_message_match =
-      response_xml.match(/<b:StatusMessage>(.*?)<\/b:StatusMessage>/) ||
-      response_xml.match(/<b:StatusDescription>(.*?)<\/b:StatusDescription>/);
+      response_xml.match(/<b:StatusMessage>([\s\S]*?)<\/b:StatusMessage>/) ||
+      response_xml.match(
+        /<b:StatusDescription>([\s\S]*?)<\/b:StatusDescription>/,
+      );
     const is_valid_match = response_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
     const zip_key_match = response_xml.match(/<b:ZipKey>(.*?)<\/b:ZipKey>/);
 
@@ -452,8 +465,10 @@ export class DianSoapClient {
       : zip_key
         ? 'ZIP_ACCEPTED'
         : 'NO_VERDICT';
+    // `.trim()` porque un bloque multilínea llega con el sangrado del XML
+    // pegado, y ese texto se persiste y se muestra tal cual.
     const status_message =
-      status_message_match?.[1] ||
+      status_message_match?.[1]?.trim() ||
       (zip_key
         ? 'Set de pruebas recibido por la DIAN; pendiente de consultar estado (GetStatusZip).'
         : 'No status message in response');
@@ -737,6 +752,39 @@ export class DianSoapClient {
   /**
    * Builds the SOAP envelope for GetStatus.
    */
+  /**
+   * Consulta los rangos de numeración autorizados para un OFE.
+   *
+   * `accountCode` es el NIT del obligado; `accountCodeT` el del proveedor
+   * tecnológico, que en software propio es el MISMO NIT; `softwareCode` el GUID
+   * del software registrado.
+   *
+   * Devuelve la respuesta cruda a propósito: los nombres de campo del
+   * `NumberRangeResponse` se leen de lo que la DIAN conteste, no se adivinan. Ese
+   * es el punto — dejar de transcribir.
+   */
+  async getNumberingRange(
+    account_code: string,
+    account_code_t: string,
+    software_code: string,
+    environment: 'test' | 'production',
+    credentials?: WsSecurityCredentials,
+  ) {
+    const endpoint = DIAN_ENDPOINTS[environment].url;
+    const soap_action = DIAN_SOAP_ACTIONS.GetNumberingRange;
+    const soap_body = await this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:GetNumberingRange>
+      <wcf:accountCode>${account_code}</wcf:accountCode>
+      <wcf:accountCodeT>${account_code_t}</wcf:accountCodeT>
+      <wcf:softwareCode>${software_code}</wcf:softwareCode>
+    </wcf:GetNumberingRange>`,
+      credentials,
+    );
+    return this.executeWithRetry(endpoint, soap_action, soap_body);
+  }
+
   private async buildGetStatusEnvelope(
     tracking_id: string,
     endpoint: string,

@@ -1,4 +1,7 @@
-export type SdkType = 'openai_compatible' | 'anthropic_compatible';
+export type SdkType =
+  | 'openai_compatible'
+  | 'anthropic_compatible'
+  | 'minimax_t2a';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -194,6 +197,16 @@ export interface AISpeechRequestOptions {
   voice?: string;
   responseFormat?: 'mp3' | 'pcm' | 'wav' | (string & {});
   speed?: number;
+  /**
+   * Output gain, as a multiplier over the provider's own default (1 = unchanged).
+   *
+   * Optional per request for the same reason `speed` is: it is a voice
+   * parameter, so it belongs to the application an operator edits, not only to
+   * the provider config that until now could be reached solely by SQL. A
+   * provider that has no notion of volume ignores it — `openai-compatible`
+   * builds its request body key by key, so an unknown field never travels.
+   */
+  vol?: number;
   provider?: Record<string, any>;
 }
 
@@ -282,6 +295,20 @@ export interface AIProviderConfig {
   apiKey: string;
   modelId: string;
   baseUrl?: string;
+  /**
+   * The `ai_engine_configs.model_type` column, carried here so a provider does
+   * not have to rediscover it from `settings`.
+   *
+   * Before this existed, `OpenAICompatibleProvider.getModelType()` only read
+   * `settings.model_type` — a key nothing writes, since the superadmin DTO
+   * persists `model_type` as its own column. The two were never connected, so
+   * every speech and transcription configuration was tested as if it were text:
+   * `testConnection()` fell through to `chat()` and hit `/chat/completions` with
+   * an audio model, which answers `Model <id> does not exist`. The message named
+   * the model while the actual fault was the endpoint, which is why no change of
+   * model ever fixed it.
+   */
+  modelType?: AIModelType;
   settings?: Record<string, any>;
 }
 

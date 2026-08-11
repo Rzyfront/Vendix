@@ -1434,6 +1434,34 @@ export const ErrorCodes = {
     devMessage:
       'An active resolution with the same prefix and document type already exists for this accounting entity',
   },
+  /**
+   * The resolution contradicts what `FISCAL_DOCUMENT_REQUIREMENTS` declares for
+   * its `document_type`: a missing DIAN authorization number, a missing ClTec on
+   * the sales invoice, or — the dangerous one — a ClTec stored on a document
+   * whose key is built with the Software-PIN. That last case is not cosmetic:
+   * `invoice-flow.service.ts` injects `resolution.technical_key` for every type
+   * and `dian-direct.provider.ts` prefers it over `config.software_pin`, so the
+   * CUDS/CUDE gets signed with the wrong 14th field, the DIAN rejects the
+   * document and the authorized consecutive it consumed is gone for good.
+   * 422 rather than 400: the payload is well-formed, the fiscal combination is not.
+   */
+  INVOICING_RESOLUTION_008: {
+    code: 'INVOICING_RESOLUTION_008',
+    httpStatus: 422,
+    devMessage:
+      'Resolution contradicts the DIAN requirements declared for its fiscal document type',
+  },
+  INVOICING_RESOLUTION_009: {
+    code: 'INVOICING_RESOLUTION_009',
+    httpStatus: 400,
+    devMessage:
+      'Authorized numbering range is incoherent (bounds below 1, inverted, or shrunk under an already consumed number)',
+  },
+  INVOICING_RESOLUTION_010: {
+    code: 'INVOICING_RESOLUTION_010',
+    httpStatus: 400,
+    devMessage: 'Resolution validity window is inverted or empty',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
@@ -1868,6 +1896,23 @@ export const ErrorCodes = {
     code: 'DIAN_TEST_SET_007',
     httpStatus: 404,
     devMessage: 'DIAN test set job not found',
+  },
+  /**
+   * Two active resolutions declare the SAME number and range, so which one a
+   * caller gets depends on row order rather than on configuration.
+   *
+   * Why this is fatal rather than a warning: a consecutive already delivered to
+   * DIAN can never be reused — DIAN rejects duplicated numbering permanently. Two
+   * active twins advance `current_number` independently, so the one left behind
+   * will re-issue numbers the other already sent, and every document it emits
+   * from then on is dead on arrival. Failing to emit costs a legible error;
+   * emitting costs the remainder of the range.
+   */
+  DIAN_TEST_SET_008: {
+    code: 'DIAN_TEST_SET_008',
+    httpStatus: 409,
+    devMessage:
+      'More than one active numbering resolution declares the same number and range; deactivate the duplicate before emitting',
   },
   /**
    * A RADIAN event references a document that DIAN never accepted. Events attach
@@ -3240,6 +3285,36 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PROD_UOM_NOT_STOCK_ELIGIBLE: {
+    code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',
+    httpStatus: 400,
+    devMessage:
+      'Esta unidad no puede ser la unidad de stock: su factor de conversión no es entero y el inventario se lleva en enteros de la unidad base. Úsala como unidad de compra o de presentación.',
+  },
+  PROD_UOM_CONVERSION_REQUIRED: {
+    code: 'PROD_UOM_CONVERSION_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El producto tiene existencias, capas de costo, lotes o recetas expresados en su unidad de stock actual. Cambiar la unidad exige el flag explícito `stock_uom_conversion: "convert"`, que convierte todo en la misma transacción.',
+  },
+  PRODUCT_TIERS_VARIANTS_EXCLUSIVE: {
+    code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
+    httpStatus: 409,
+    devMessage:
+      'Multi-tarifa y variantes son excluyentes: un producto que se vende en varias presentaciones no puede tener variantes. Elimina las variantes o desactiva multi-tarifa.',
+  },
+  PRICE_TIER_KIND_LOCKED: {
+    code: 'PRICE_TIER_KIND_LOCKED',
+    httpStatus: 409,
+    devMessage:
+      'La presentación ya tiene ventas con descuento de stock por empaque: no puede convertirse en tarifa de cliente',
+  },
+  PRICE_TIER_DEFAULT_NOT_SALE_UNIT: {
+    code: 'PRICE_TIER_DEFAULT_NOT_SALE_UNIT',
+    httpStatus: 422,
+    devMessage:
+      'Solo una unidad de venta puede marcarse como presentación por defecto del producto',
+  },
 
   // notification sounds
   NOTIFICATION_SOUND_INVALID: {
@@ -3409,6 +3484,82 @@ export const ErrorCodes = {
     code: 'KITCHEN_FIRE_ALL_ALREADY_CONSUMED',
     httpStatus: 409,
     devMessage: 'Todos los items ya fueron enviados a cocina (idempotente)',
+  },
+  // QUI-651 — el fire rutea cada item a su estacion y cae en el KDS por defecto
+  // cuando el plato no declara uno. Sin KDS por defecto no hay a donde rutear:
+  // se falla fuerte en vez de mandar el ticket a un tablero que nadie mira.
+  KITCHEN_FIRE_NO_DEFAULT_KDS: {
+    code: 'KITCHEN_FIRE_NO_DEFAULT_KDS',
+    httpStatus: 422,
+    devMessage:
+      'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
+  },
+  // QUI-655 — el cliente no puede excluir un producto arbitrario del consumo:
+  // el componente tiene que pertenecer al BOM explotado de ESE plato, o el
+  // consumo dejaría de reflejar la receta y el costeo se volvería inauditable.
+  KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM: {
+    code: 'KITCHEN_FIRE_EXCLUSION_NOT_IN_BOM',
+    httpStatus: 422,
+    devMessage:
+      'El componente excluido no pertenece a la receta explotada de ese plato',
+  },
+  // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
+  KDS_NOT_FOUND: {
+    code: 'KDS_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Estación de cocina no encontrada',
+  },
+  KDS_DUP_CODE: {
+    code: 'KDS_DUP_CODE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una estación de cocina con ese código',
+  },
+  // El fire rutea con `products.kds_id ?? <default>`, así que degradar o
+  // desactivar el default dejaría a la tienda sin destino para sus tickets.
+  KDS_DEFAULT_PROTECTED: {
+    code: 'KDS_DEFAULT_PROTECTED',
+    httpStatus: 409,
+    devMessage:
+      'No se puede desactivar ni degradar la estación por defecto sin promover otra antes',
+  },
+  KDS_DEFAULT_MUST_BE_ACTIVE: {
+    code: 'KDS_DEFAULT_MUST_BE_ACTIVE',
+    httpStatus: 422,
+    devMessage:
+      'La estación por defecto debe estar activa: el fire filtra por is_active',
+  },
+  KDS_HAS_OPEN_SESSION: {
+    code: 'KDS_HAS_OPEN_SESSION',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene una sesión abierta: ciérrala antes de desactivarla',
+  },
+  KDS_SESSION_NOT_FOUND: {
+    code: 'KDS_SESSION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Sesión de estación no encontrada',
+  },
+  // La sesión RECLAMA la estación. El índice único parcial
+  // `kds_sessions_one_open_per_kds` es la garantía real; este código traduce su
+  // P2002 para que dos operadores concurrentes reciban un mensaje legible.
+  KDS_SESSION_ALREADY_OPEN: {
+    code: 'KDS_SESSION_ALREADY_OPEN',
+    httpStatus: 409,
+    devMessage: 'La estación ya tiene una sesión abierta',
+  },
+  KDS_SESSION_ALREADY_CLOSED: {
+    code: 'KDS_SESSION_ALREADY_CLOSED',
+    httpStatus: 409,
+    devMessage: 'La sesión de estación ya está cerrada',
+  },
+  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
+  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
+  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
+    code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
+    httpStatus: 409,
+    devMessage:
+      'El plato preparado debe estar listo en cocina antes de marcarse entregado',
   },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',

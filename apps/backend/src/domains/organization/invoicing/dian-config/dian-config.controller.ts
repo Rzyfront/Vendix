@@ -195,10 +195,19 @@ export class OrgDianConfigController {
   async runTestSet(
     @Param('id', ParseIntPipe) id: number,
     @Body('resolution_id', ParseIntPipe) resolution_id: number,
+    // Las dos vías de diagnóstico se exponen aquí también: una configuración de
+    // organización se habilita por el mismo camino, y dejarla sin ellas obligaría
+    // a diagnosticarla desde otra superficie con otro contexto fiscal.
+    @Query('smoke') smoke?: string,
+    @Query('validate') validate?: string,
   ) {
     const result = await this.dian_test_service.enqueueTestSet(
       id,
       resolution_id,
+      {
+        smoke: smoke === 'true' || smoke === '1',
+        validate_only: validate === 'true' || validate === '1',
+      },
     );
     return this.response_service.success(result);
   }

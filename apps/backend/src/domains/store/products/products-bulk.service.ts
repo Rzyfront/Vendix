@@ -26,6 +26,14 @@ import * as XLSX from 'xlsx';
 
 type BulkExcelTemplateRequest = 'products' | 'services';
 
+/** Fila del catálogo global de unidades, indexada por código para la carga. */
+type UomCatalogEntry = {
+  id: number;
+  code: string;
+  name: string;
+  is_stock_eligible: boolean;
+};
+
 @Injectable()
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
@@ -93,9 +101,23 @@ export class ProductsBulkService {
     'Tiempo Preparación (min)': 'preparation_time_minutes',
     'Tipo Precio': 'pricing_type',
     'Impuestos IDs': 'tax_category_ids',
+    // Códigos del catálogo global de unidades (mm, m, g, kg, unit...).
+    'Unidad de stock': 'stock_uom_code',
+    'Unidad de compra': 'purchase_uom_code',
+    'Precio por N unidades': 'price_unit_quantity',
   };
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
+    // Unidades (QUI-648): se aceptan las variantes que un comerciante escribe
+    // a mano cuando reusa una plantilla vieja.
+    'unidad de stock': 'stock_uom_code',
+    'unidad stock': 'stock_uom_code',
+    'unidad de inventario': 'stock_uom_code',
+    'unidad de compra': 'purchase_uom_code',
+    'unidad compra': 'purchase_uom_code',
+    'precio por n unidades': 'price_unit_quantity',
+    'precio por n': 'price_unit_quantity',
+    'escala de precio': 'price_unit_quantity',
     nombre: 'name',
     sku: 'sku',
     'precio base': 'base_price',
@@ -360,6 +382,78 @@ export class ProductsBulkService {
         'Error al procesar el archivo: ' + error.message,
       );
     }
+  }
+
+  /**
+   * Resuelve las columnas de unidad de una fila contra el catálogo global y
+   * deja los FKs listos para el DTO.
+   *
+   * Se valida acá y no en el servicio de productos porque una fila mala debe
+   * fallar nombrando el código que el comerciante escribió —"la unidad 'in' no
+   * sirve como unidad de stock"— y no un id que no existe en su archivo. Una
+   * fila sin estas columnas sale intacta: las plantillas viejas siguen
+   * importando igual que siempre.
+   */
+  private applyUnitColumns(
+    product: Record<string, any>,
+    catalog: Map<string, UomCatalogEntry>,
+  ): void {
+    const resolve = (raw: any): UomCatalogEntry | null => {
+      if (raw === undefined || raw === null) return null;
+      const code = String(raw).trim().toLowerCase();
+      if (!code) return null;
+      const unit = catalog.get(code);
+      if (!unit) {
+        throw new BadRequestException(
+          `La unidad "${raw}" no existe en el catálogo. Usa un código válido (mm, cm, m, g, kg, ml, L, unit...).`,
+        );
+      }
+      return unit;
+    };
+
+    const stock = resolve(product.stock_uom_code);
+    if (stock) {
+      if (!stock.is_stock_eligible) {
+        throw new BadRequestException(
+          `${stock.name} (${stock.code}) no puede ser la unidad de stock porque su factor de conversión no es entero. Úsala como unidad de compra o define el stock en una unidad exacta.`,
+        );
+      }
+      product.stock_uom_id = stock.id;
+    }
+    delete product.stock_uom_code;
+
+    const purchase = resolve(product.purchase_uom_code);
+    if (purchase) product.purchase_uom_id = purchase.id;
+    delete product.purchase_uom_code;
+
+    if (product.price_unit_quantity !== undefined) {
+      const scale = Number(product.price_unit_quantity);
+      if (!Number.isInteger(scale) || scale < 1) {
+        throw new BadRequestException(
+          `"Precio por N unidades" debe ser un entero mayor o igual a 1; llegó "${product.price_unit_quantity}".`,
+        );
+      }
+      product.price_unit_quantity = scale;
+    }
+  }
+
+  /** Catálogo de unidades indexado por código en minúsculas. */
+  private async loadUomCatalogByCode(): Promise<Map<string, UomCatalogEntry>> {
+    const rows = await this.prisma.units_of_measure.findMany({
+      where: { is_active: true },
+      select: { id: true, code: true, name: true, is_stock_eligible: true },
+    });
+    return new Map(
+      rows.map((u) => [
+        u.code.toLowerCase(),
+        {
+          id: u.id,
+          code: u.code,
+          name: u.name,
+          is_stock_eligible: u.is_stock_eligible,
+        },
+      ]),
+    );
   }
 
   private stripCatalogOnlyIgnoredFields(
@@ -857,6 +951,11 @@ export class ProductsBulkService {
       'Peso',
       'En Oferta',
       'Precio Oferta',
+      // Unidades (QUI-648). Una fila sin estas columnas se importa con los
+      // valores de siempre, así que las plantillas viejas siguen sirviendo.
+      'Unidad de stock',
+      'Unidad de compra',
+      'Precio por N unidades',
     ];
   }
 
@@ -1391,6 +1490,10 @@ export class ProductsBulkService {
 
     await this.accessValidationService.validateStoreAccess(storeId, user);
 
+    // Una sola lectura del catálogo para todo el lote: son dos docenas de
+    // filas globales y resolverlas por producto sería una consulta por fila.
+    const uomCatalog = await this.loadUomCatalogByCode();
+
     const results: BulkUploadItemResultDto[] = [];
     let successful = 0;
     let failed = 0;
@@ -1410,6 +1513,10 @@ export class ProductsBulkService {
             fields: ignoredCatalogFields,
           });
         }
+
+        // Unidades por código (QUI-648) antes de validar: el resto del flujo
+        // ya trabaja con los FKs resueltos.
+        this.applyUnitColumns(productData as any, uomCatalog);
 
         // Pre-procesar: Crear marcas y categorías si son strings
         await this.preprocessProductData(productData, storeId);
@@ -2036,6 +2143,11 @@ export class ProductsBulkService {
       'consultation_template_id',
       'preconsultation_template_id',
       'has_multiple_price_tiers',
+      // Unidades y escala de precio (QUI-648): llegan ya resueltas a FK por
+      // `applyUnitColumns`.
+      'stock_uom_id',
+      'purchase_uom_id',
+      'price_unit_quantity',
     ];
 
     for (const field of newCatalogFields) {
@@ -2142,6 +2254,11 @@ export class ProductsBulkService {
       'consultation_template_id',
       'preconsultation_template_id',
       'has_multiple_price_tiers',
+      // Unidades y escala de precio (QUI-648): llegan ya resueltas a FK por
+      // `applyUnitColumns`.
+      'stock_uom_id',
+      'purchase_uom_id',
+      'price_unit_quantity',
     ];
 
     for (const field of newCatalogFields) {

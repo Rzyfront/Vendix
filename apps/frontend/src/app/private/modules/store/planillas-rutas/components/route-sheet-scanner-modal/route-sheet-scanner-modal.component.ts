@@ -21,6 +21,10 @@ import { SpinnerComponent } from '../../../../../../shared/components/spinner/sp
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { StepsLineComponent } from '../../../../../../shared/components/steps-line/steps-line.component';
+import {
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
+} from '../../../../../../shared/components/ai-discard-toggle/ai-discard-toggle.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   CurrencyPipe,
@@ -95,6 +99,7 @@ interface EditableStopDecision {
     StepsLineComponent,
     CurrencyPipe,
     AiReviewAckComponent,
+    AiDiscardToggleComponent,
   ],
   template: `
     <app-modal
@@ -286,8 +291,10 @@ interface EditableStopDecision {
 
             <div class="space-y-3">
               @for (stop of editableStops(); track $index; let i = $index) {
+                <!-- QUI-644: parada descartada = no viaja en la liquidación. -->
                 <div
                   class="rounded-lg border p-3 space-y-3"
+                  [class]="isDiscarded(i) ? discardedRowClasses : ''"
                   [class.border-border]="stop.stop_id !== null && !stop.already_settled"
                   [class.bg-surface]="stop.stop_id !== null && !stop.already_settled"
                   [class.border-red-200]="stop.stop_id === null"
@@ -313,11 +320,19 @@ interface EditableStopDecision {
                         </app-badge>
                       }
                     </div>
-                    @if (stop.net_total > 0) {
-                      <span class="text-sm font-semibold text-text-primary">
-                        {{ stop.net_total | currency }}
-                      </span>
-                    }
+                    <div class="flex items-center gap-2">
+                      @if (stop.net_total > 0) {
+                        <span class="text-sm font-semibold text-text-primary">
+                          {{ stop.net_total | currency }}
+                        </span>
+                      }
+                      <app-ai-discard-toggle
+                        [discarded]="isDiscarded(i)"
+                        [label]="stop.remision_number || 'la parada'"
+                        size="sm"
+                        (toggled)="toggleDiscard(i)"
+                      ></app-ai-discard-toggle>
+                    </div>
                   </div>
 
                   @if (stop.stop_id === null) {
@@ -542,6 +557,41 @@ export class RouteSheetScannerModalComponent {
    * `requestAttention()` en vez de liquidar la ruta.
    */
   readonly aiAck = signal(false);
+
+  // ===== QUI-644: descarte de paradas de la precarga =====
+  /**
+   * Índices de `editableStops()` que NO se liquidan. Se descarta por posición
+   * porque una parada sin resolver (`stop_id === null`) no tiene id. Reinicio
+   * obligatorio en `resetWizard`: el contenido proyectado en `app-modal` no se
+   * destruye al cerrar (QUI-438).
+   */
+  readonly discardedIndexes = signal<Set<number>>(new Set());
+  protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
+
+  isDiscarded(index: number): boolean {
+    return this.discardedIndexes().has(index);
+  }
+
+  toggleDiscard(index: number): void {
+    const next = new Set(this.discardedIndexes());
+    if (next.has(index)) {
+      next.delete(index);
+    } else {
+      next.add(index);
+    }
+    this.discardedIndexes.set(next);
+  }
+
+  /** Paradas que sí se liquidan. */
+  readonly keptStops = computed(() =>
+    this.editableStops().filter((_, i) => !this.discardedIndexes().has(i)),
+  );
+
+  readonly keptCount = computed(() => this.keptStops().length);
+
+  readonly allDiscarded = computed(
+    () => this.editableStops().length > 0 && this.keptCount() === 0,
+  );
   private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly selectedFile = signal<File | null>(null);
   readonly filePreviewUrl = signal<string | null>(null);
@@ -897,7 +947,7 @@ export class RouteSheetScannerModalComponent {
     // Only send resolved, NOT-yet-settled stops. Already-terminal stops are
     // reconciled by the backend (returned in `skipped`); re-sending them is
     // unnecessary and was the source of the previous 400.
-    const stops: ConfirmRouteSheetStopDto[] = this.editableStops()
+    const stops: ConfirmRouteSheetStopDto[] = this.keptStops()
       .filter((s) => s.stop_id !== null && !s.already_settled)
       .map((s) => {
         const decision: ConfirmRouteSheetStopDto = {
@@ -1065,6 +1115,8 @@ export class RouteSheetScannerModalComponent {
   }
 
   resetWizard(): void {
+    // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
+    this.discardedIndexes.set(new Set());
     this.currentStep.set(1);
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);

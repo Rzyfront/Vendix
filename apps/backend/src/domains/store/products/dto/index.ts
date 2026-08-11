@@ -304,6 +304,29 @@ export class CreateProductDto {
   @Min(1)
   purchase_to_stock_factor?: number;
 
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros guarda `base_price = 5000` y
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; con el default `1` la
+   * aritmética queda idéntica a la histórica.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
+  price_unit_quantity?: number;
+
+  /**
+   * Autorización explícita para convertir existencias, reservas, capas de
+   * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
+   * opera. Sin este flag el cambio se rechaza: convertir en silencio
+   * multiplicaría el inventario sin que nadie lo pidiera.
+   */
+  @IsOptional()
+  @IsIn(['convert'])
+  stock_uom_conversion?: 'convert';
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -419,6 +442,21 @@ export class CreateProductDto {
   @Max(10080)
   @Type(() => Number)
   preparation_time_minutes?: number;
+
+  /**
+   * QUI-651 — estacion de preparacion del plato. Solo significativo para
+   * `product_type = 'prepared'`.
+   *
+   * NULL significa "cae en el KDS por defecto de la tienda", que es lo que hace
+   * funcionar el caso de una sola estacion sin configurar nada. Se acepta null
+   * explicito para poder LIMPIAR la estacion en una edicion: sin eso, un plato
+   * asignado a barra no podria volver a "la que sea".
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  kds_id?: number | null;
 
   // Consultation-specific fields
   @IsOptional()
@@ -624,6 +662,29 @@ export class UpdateProductDto {
   @Min(1)
   purchase_to_stock_factor?: number;
 
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros guarda `base_price = 5000` y
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; con el default `1` la
+   * aritmética queda idéntica a la histórica.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
+  price_unit_quantity?: number;
+
+  /**
+   * Autorización explícita para convertir existencias, reservas, capas de
+   * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
+   * opera. Sin este flag el cambio se rechaza: convertir en silencio
+   * multiplicaría el inventario sin que nadie lo pidiera.
+   */
+  @IsOptional()
+  @IsIn(['convert'])
+  stock_uom_conversion?: 'convert';
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -700,6 +761,21 @@ export class UpdateProductDto {
   @Max(10080)
   @Type(() => Number)
   preparation_time_minutes?: number;
+
+  /**
+   * QUI-651 — estacion de preparacion del plato. Solo significativo para
+   * `product_type = 'prepared'`.
+   *
+   * NULL significa "cae en el KDS por defecto de la tienda", que es lo que hace
+   * funcionar el caso de una sola estacion sin configurar nada. Se acepta null
+   * explicito para poder LIMPIAR la estacion en una edicion: sin eso, un plato
+   * asignado a barra no podria volver a "la que sea".
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  kds_id?: number | null;
 
   // Consultation-specific fields
   @IsOptional()

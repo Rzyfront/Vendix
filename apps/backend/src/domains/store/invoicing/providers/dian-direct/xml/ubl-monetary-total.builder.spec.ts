@@ -70,6 +70,45 @@ describe('UblCommonBuilder monetary totals', () => {
     return doc.end({ prettyPrint: false });
   }
 
+  describe('rule FAZ09 — StandardItemIdentification informado en toda línea', () => {
+    it('emite el código del ítem con schemeID 999 cuando el llamador lo aporta', () => {
+      const xml = buildLines([
+        item({ item_code: 'SKU-001' }),
+        item({ item_code: 'SKU-002' }),
+      ]);
+
+      const ids = [
+        ...xml.matchAll(
+          /<cac:StandardItemIdentification><cbc:ID schemeID="999">([^<]*)<\/cbc:ID><\/cac:StandardItemIdentification>/g,
+        ),
+      ].map((m) => m[1]);
+
+      expect(ids).toEqual(['SKU-001', 'SKU-002']);
+    });
+
+    it('cae al número de línea cuando no hay código, porque el elemento es obligatorio', () => {
+      // La DIAN rechaza la línea sin `StandardItemIdentification` (FAZ09), así que
+      // la ausencia de catálogo no puede traducirse en omitir el elemento.
+      const xml = buildLines([item({}), item({}), item({})]);
+
+      const ids = [
+        ...xml.matchAll(
+          /<cac:StandardItemIdentification><cbc:ID schemeID="999">([^<]*)<\/cbc:ID><\/cac:StandardItemIdentification>/g,
+        ),
+      ].map((m) => m[1]);
+
+      expect(ids).toEqual(['1', '2', '3']);
+    });
+
+    it('nunca emite el elemento vacío: un código en blanco cae al número de línea', () => {
+      const xml = buildLines([item({ item_code: '   ' })]);
+
+      expect(xml).toContain(
+        '<cac:StandardItemIdentification><cbc:ID schemeID="999">1</cbc:ID></cac:StandardItemIdentification>',
+      );
+    });
+  });
+
   describe('rule FAU14 — header equals the sum of the lines', () => {
     it('holds when lines carry discounts', () => {
       const items = [

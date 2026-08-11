@@ -1,10 +1,3 @@
-import {
-  AbstractControl,
-  ValidationErrors,
-  ValidatorFn,
-  Validators,
-} from '@angular/forms';
-
 import type { SubscriptionFiscalEnvironment } from '../../subscriptions/interfaces/fiscal-billing.interface';
 
 /**
@@ -18,6 +11,25 @@ import type { SubscriptionFiscalEnvironment } from '../../subscriptions/interfac
 export const ENVIRONMENT_OPTIONS = [
   { value: 'test', label: 'Sandbox DIAN' },
   { value: 'production', label: 'Producción DIAN' },
+];
+
+/**
+ * Ambientes que ofrece el formulario de CONFIGURACIÓN DIAN. Solo sandbox.
+ *
+ * POR QUÉ NO INCLUYE PRODUCCIÓN
+ *
+ * `PATCH superadmin/subscriptions/fiscal/config` rechaza con 400 cualquier
+ * `environment: 'production'`: la vía es `POST promote-to-production`, que exige el
+ * reporte de readiness completo —incluida la aprobación del set de pruebas por la
+ * DIAN—. Ofrecer producción en este selector solo produciría un 400 después de que
+ * el operador llenó el formulario.
+ *
+ * `ENVIRONMENT_OPTIONS` se conserva con los dos porque las pestañas de
+ * resoluciones y documento soporte la usan para filtrar y para formularios que no
+ * escriben `dian_configurations.environment`.
+ */
+export const DIAN_CONFIG_ENVIRONMENT_OPTIONS = [
+  { value: 'test', label: 'Sandbox DIAN' },
 ];
 
 export const FILTER_ENVIRONMENT_OPTIONS = [
@@ -42,67 +54,25 @@ export const RESOLUTION_DOCUMENT_TYPE_OPTIONS = [
 ];
 
 // ── Validadores ────────────────────────────────────────────────────────────
-
-/** IDs de entidad: enteros positivos. Un `0` o un `-1` no referencian nada. */
-export const numericIdValidator = Validators.pattern(/^[1-9]\d*$/);
-
-export const optionalNumericIdValidator: ValidatorFn = (
-  control: AbstractControl,
-): ValidationErrors | null => {
-  const value = control.value;
-  if (value === null || value === undefined || value === '') return null;
-  return /^[1-9]\d*$/.test(String(value)) ? null : { numeric_id: true };
-};
-
-/**
- * La DIAN emite `software_id` y `test_set_id` como UUID. Un valor pegado con un
- * espacio de más lo acepta el endpoint DIAN y luego nunca clasifica, lo que es
- * indistinguible de una cola atascada — el backend ya valida con `@IsUUID`, y
- * esto lo adelanta al formulario en vez de esperar un 400.
- */
-const UUID_RE =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
-export const uuidValidator: ValidatorFn = (
-  control: AbstractControl,
-): ValidationErrors | null => {
-  const value = control.value;
-  if (value === null || value === undefined || value === '') return null;
-  return UUID_RE.test(String(value).trim()) ? null : { dian_uuid: true };
-};
-
-/** El NIT viaja a la DIAN sin separadores; se admite el DV pegado con guion. */
-export const nitFormatValidator: ValidatorFn = (
-  control: AbstractControl,
-): ValidationErrors | null => {
-  const value = control.value;
-  if (value === null || value === undefined || value === '') return null;
-  return /^\d{5,15}(-\d)?$/.test(String(value).trim())
-    ? null
-    : { nit_format: true };
-};
-
-export const rangoFinalGreaterValidator: ValidatorFn = (
-  group: AbstractControl,
-): ValidationErrors | null => {
-  const inicio = Number(group.get('rango_inicial')?.value);
-  const fin = Number(group.get('rango_final')?.value);
-  if (!Number.isFinite(inicio) || !Number.isFinite(fin)) return null;
-  if (fin <= inicio) return { rango_final_invalid: true };
-  return null;
-};
-
-export const confirmProductionValidator: ValidatorFn = (
-  group: AbstractControl,
-): ValidationErrors | null => {
-  const environment = group.get('environment')?.value;
-  const enabled = group.get('is_enabled')?.value;
-  const confirmed = group.get('confirm_production')?.value;
-  if (environment === 'production' && enabled && !confirmed) {
-    return { confirm_production_required: true };
-  }
-  return null;
-};
+//
+// SE MUDARON A `shared/utils/dian-validators.ts`.
+//
+// Vivían solo acá, y este es el riel de MENOR riesgo: un operador interno de
+// Vendix, una sola configuración. Las tres superficies que usan los comerciantes
+// —asistente de tienda, host de tenant y el formulario del asistente de activación
+// fiscal— no tenían ninguno, así que la validación estaba invertida respecto al
+// riesgo. Se re-exportan desde acá para no romper a quien ya importaba de este
+// archivo; los consumidores nuevos deben importar de `shared/utils`.
+export {
+  confirmProductionValidator,
+  nitFormatValidator,
+  numericIdValidator,
+  optionalNumericIdValidator,
+  rangoFinalGreaterValidator,
+  // Renombrado en la mudanza: `uuidValidator` a secas no decía de quién era el
+  // UUID ni por qué acepta cualquier versión.
+  dianUuidValidator as uuidValidator,
+} from '../../../../../shared/utils/dian-validators';
 
 // ── Etiquetas ──────────────────────────────────────────────────────────────
 

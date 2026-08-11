@@ -138,7 +138,7 @@ export class UblInvoiceBuilder {
     }
 
     // 4. Supplier party
-    UblCommonBuilder.buildSupplierParty(doc, issuer);
+    UblCommonBuilder.buildSupplierParty(doc, issuer, control?.prefix);
 
     // 5. Customer party
     UblCommonBuilder.buildCustomerParty(doc, customer);

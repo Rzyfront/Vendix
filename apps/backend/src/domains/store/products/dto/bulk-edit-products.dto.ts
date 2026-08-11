@@ -184,6 +184,17 @@ export class BulkEditableChangesDto {
   @Type(() => Number)
   purchase_uom_id?: number;
 
+  /**
+   * Escala del precio: unidades de stock que cubre `base_price`. Editarla en
+   * masa es lo que permite pasar un catálogo entero de "por unidad" a "por
+   * metro" sin abrir producto por producto.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
+  price_unit_quantity?: number;
+
   // ===== Servicio =====
   @IsOptional()
   @IsInt()

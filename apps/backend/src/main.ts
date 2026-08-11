@@ -1,6 +1,20 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { AppModule } from './app.module';
+import {
+  Logger,
+  ValidationPipe,
+  BadRequestException,
+  INestApplication,
+  Type,
+} from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { Worker } from 'bullmq';
+import {
+  AppModule,
+  VendixProcessRole,
+  isKnownVendixProcessRole,
+  resolveVendixProcessRole,
+} from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
 import { DomainConfigService } from '@common/config/domain.config';
@@ -10,11 +24,133 @@ import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
 import { isPwaIconVariant } from '@common/config/image-presets';
 import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
+import {
+  flattenBulkValidationErrors,
+  isBulkValidationError,
+} from '@common/validators/bulk-validation.util';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
 import { Server } from 'http';
 
+/**
+ * Worker de BullMQ que se construye pero NO arranca su bucle de consumo.
+ *
+ * ## Por qué esto y no «no registrar el provider»
+ *
+ * Los 11 `@Processor` del repo viven repartidos en una docena de módulos de
+ * dominio. Volverlos condicionales exigiría tocar los doce y dejaría el
+ * interruptor duplicado en doce sitios, donde el próximo `@Processor` se
+ * olvidaría de él en silencio.
+ *
+ * `@nestjs/bullmq` construye cada worker con `new BullExplorer._workerClass(...)`,
+ * y expone `BullModule.workerClass` como API pública precisamente para sustituir
+ * esa clase (su caso documentado es BullMQ Pro). Sustituirla por esta subclase
+ * fuerza `autorun: false` en TODOS los workers, presentes y futuros, desde un
+ * único punto: el worker se instancia, `instance.worker.on(...)` y `close()`
+ * siguen funcionando como espera el explorer, pero nunca pide un job a Redis.
+ *
+ * Sigue siendo un objeto `Worker` real a propósito: un doble falso obligaría a
+ * reimplementar EventEmitter y el ciclo de cierre del explorer, y cualquier
+ * hueco ahí reventaría en el arranque de producción, no en un test.
+ *
+ * Coste: las conexiones ociosas a Redis del worker inerte (Redis es un
+ * contenedor aparte en `vendix-net`, así que no compite por el event loop).
+ */
+class DormantWorker extends Worker {
+  constructor(name: string, processor?: any, opts?: any) {
+    super(name, processor, { ...(opts ?? {}), autorun: false });
+  }
+}
+
+/**
+ * Desmonta los `@Cron` ya montados por `ScheduleModule`.
+ *
+ * `SchedulerOrchestrator` los monta en `onApplicationBootstrap`, así que esto
+ * SOLO puede correr después de `app.init()` — de ahí el `init()` explícito antes
+ * de `listen()` en modo `api`. Se desmontan también intervalos y timeouts porque
+ * el registro los gobierna igual y un `@Interval` futuro no debe colarse.
+ *
+ * `ScheduleModule.forRoot({ cronJobs: false })` sería más limpio, pero ese
+ * `forRoot` vive dentro de `JobsModule` y ahí el interruptor no puede leerse por
+ * proceso sin acoplar el módulo a la variable de entorno.
+ */
+function unmountScheduledJobs(app: INestApplication): number {
+  const registry = app.get(SchedulerRegistry, { strict: false });
+  let unmounted = 0;
+
+  // Se copia la lista antes de borrar: se está mutando el mismo registro que se
+  // recorre.
+  for (const name of Array.from(registry.getCronJobs().keys())) {
+    registry.deleteCronJob(name);
+    unmounted++;
+  }
+  for (const name of [...registry.getIntervals()]) {
+    registry.deleteInterval(name);
+    unmounted++;
+  }
+  for (const name of [...registry.getTimeouts()]) {
+    registry.deleteTimeout(name);
+    unmounted++;
+  }
+
+  return unmounted;
+}
+
+/**
+ * Proceso worker: mismo grafo de módulos, sin servidor HTTP.
+ *
+ * `createApplicationContext` instancia todos los providers —y con ellos los
+ * `@Processor` y los `@Cron`— sin abrir un puerto ni montar el router. Es el
+ * mismo `AppModule`, así que el trabajo de fondo ve exactamente los mismos
+ * servicios que veía cuando compartía proceso con la API.
+ *
+ * `enableShutdownHooks()` sí se activa aquí (la API nunca lo tuvo): en el cierre
+ * ordenado `BullExplorer.onApplicationShutdown` cierra los workers, lo que da a
+ * un job en vuelo la oportunidad de terminar en vez de dejar su lock huérfano.
+ */
+async function bootstrapWorker(): Promise<void> {
+  const logger = new Logger('BootstrapWorker');
+
+  // El resolvedor de dominio es estático y lo consultan jobs que construyen URLs
+  // (correos, aprovisionamiento de dominios), así que se inicializa igual que en
+  // la API.
+  DomainConfigService.initialize();
+
+  const app = await NestFactory.createApplicationContext(AppModule);
+  app.enableShutdownHooks();
+
+  logger.log('⚙️  Vendix Backend arrancó como WORKER (sin servidor HTTP)');
+  logger.log('   Consume las colas BullMQ y ejecuta los @Cron programados.');
+}
+
 async function bootstrap() {
+  const role = resolveVendixProcessRole();
+
+  if (!isKnownVendixProcessRole()) {
+    new Logger('Bootstrap').warn(
+      `VENDIX_PROCESS_ROLE="${process.env.VENDIX_PROCESS_ROLE}" no se reconoce. ` +
+        'Se arranca como "all" (API + trabajo de fondo), que es el comportamiento ' +
+        'histórico. Valores válidos: all | api | worker.',
+    );
+  }
+
+  if (role === 'worker') {
+    await bootstrapWorker();
+    return;
+  }
+
+  await bootstrapApi(role);
+}
+
+async function bootstrapApi(role: VendixProcessRole) {
+  if (role === 'api') {
+    // DEBE quedar antes de `NestFactory.create`: el explorer lee esta clase en
+    // `onModuleInit`, que corre dentro del `init()` de la app. (El otro efecto
+    // del setter, `BullModule._workerClass`, solo lo consume la opción legacy
+    // `registerQueue({ processors })`, que este repo no usa.)
+    BullModule.workerClass = DormantWorker as unknown as Type;
+  }
+
   const app = await NestFactory.create(AppModule);
 
   // Increase payload limit for base64 images
@@ -62,6 +198,36 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+      // QUI-606: el `exceptionFactory` del ValidationPipe global detecta si
+      // el árbol de errores viene de una carga masiva (patrón
+      // `customers.<rowIndex>.<field>`) y, en ese caso, aplana los errores
+      // al shape canónico `BulkRowError` con `row`, `column`, `value`,
+      // `code` y `suggestion`. Para el resto de endpoints mantiene el
+      // formato estándar de NestJS.
+      exceptionFactory: (errors) => {
+        if (isBulkValidationError(errors)) {
+          const flat = flattenBulkValidationErrors(errors);
+          return new BadRequestException({
+            statusCode: 400,
+            message: `Se encontraron ${flat.length} error(es) de validación en la carga masiva`,
+            error_code: 'CUST_BULK_VALIDATION',
+            validationErrors: flat,
+          });
+        }
+        // Formato estándar NestJS: array de strings legible para humanos.
+        const messages = errors
+          .map((e) =>
+            e.constraints
+              ? Object.values(e.constraints).join(', ')
+              : 'Valor inválido',
+          )
+          .filter(Boolean);
+        return new BadRequestException({
+          statusCode: 400,
+          message: messages,
+          error: 'Bad Request',
+        });
       },
     }),
   ); // Build dynamic CORS origins based on base domain configuration
@@ -358,6 +524,20 @@ async function bootstrap() {
   const prismaService = app.get(GlobalPrismaService);
   await prismaService.enableShutdownHooks(app);
 
+  // `init()` explícito: `listen()` lo llamaría igual, pero desmontar los `@Cron`
+  // exige un punto ENTRE el arranque de los hooks (que los monta) y la apertura
+  // del puerto. Todo el cableado HTTP de arriba ya ocurrió, así que el orden
+  // efectivo es idéntico al de siempre.
+  await app.init();
+
+  if (role === 'api') {
+    const unmounted = unmountScheduledJobs(app);
+    new Logger('Bootstrap').log(
+      `🧵 Modo API: ${unmounted} tarea(s) programada(s) desmontada(s) y ` +
+        'workers BullMQ inertes. El trabajo de fondo lo ejecuta el proceso worker.',
+    );
+  }
+
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
 
@@ -374,5 +554,12 @@ async function bootstrap() {
   logger.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);
   logger.log(`❤️  Health Check: http://localhost:${port}/api/health`);
   logger.log(`📄  API Docs: http://localhost:${port}/api-docs`);
+  // Se registra el rol efectivo para que «¿este despliegue quedó con workers?»
+  // se responda leyendo los logs, no deduciéndolo de la ausencia de jobs.
+  logger.log(
+    role === 'api'
+      ? '🧵 Rol del proceso: api (sin workers ni tareas programadas)'
+      : '🧵 Rol del proceso: all (API + workers + tareas programadas, comportamiento histórico)',
+  );
 }
 bootstrap();

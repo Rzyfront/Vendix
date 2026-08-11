@@ -1,0 +1,229 @@
+<app-modal
+  [isOpen]="isOpen()"
+  size="lg"
+  [title]="title()"
+  [showCloseButton]="true"
+  (cancel)="onCancel()"
+>
+  <app-icon slot="header" name="flame" [size]="20" class="text-primary" />
+
+  @if (isLoading()) {
+    <p class="kc-loading">Cargando recetas…</p>
+  } @else if (!hasItems()) {
+    <!-- Ningún item elegible: ya se enviaron todos, o ninguno es plato preparado.
+         Se dice explícitamente en vez de mostrar un modal vacío. -->
+    <p class="kc-empty">No hay platos elegibles para enviar a cocina.</p>
+  } @else {
+    <p class="kc-hint">{{ hintText() }}</p>
+
+    <div class="kc-items">
+      @for (item of items(); track trackItem($index, item)) {
+        <section class="kc-item">
+          <header class="kc-item-head">
+            <span class="kc-item-name">
+              {{ item.product_name }}
+              @if (item.quantity > 1) {
+                <span class="kc-qty">×{{ item.quantity }}</span>
+              }
+            </span>
+          </header>
+
+          <!-- La nota del pedido va ARRIBA del árbol: es lo que el cocinero tiene
+               que leer para saber qué desmarcar. Enterrarla abajo la vuelve
+               decorativa. -->
+          @if (item.notes) {
+            <p class="kc-note">
+              <app-icon name="message-square" [size]="12" />
+              {{ item.notes }}
+            </p>
+          }
+
+          @if (!item.has_active_recipe) {
+            <p class="kc-no-recipe">
+              Sin receta activa: no hay ingredientes que descontar. Se envía igual.
+            </p>
+          } @else if (item.components.length === 0) {
+            <!--
+              QUI-655 — receta ACTIVA que explota a cero componentes. Ocurre cuando
+              la receta se guardó mal: merma del 100%, o rendimiento en cero, dejan
+              el rendimiento efectivo en 0 y la explosión de BOM devuelve vacío.
+              Sin este aviso el modal mostraba el plato con la lista de ingredientes
+              en blanco y el botón intacto: el cocinero no podía distinguir "este
+              plato no lleva insumos" de "la receta está rota", y el envío salía sin
+              descontar nada, en silencio.
+            -->
+            <p class="kc-no-recipe">
+              La receta está activa pero no arroja ingredientes — revisá su
+              rendimiento y su merma (una merma del 100% deja el rendimiento en
+              cero). Si se envía así, no se descuenta inventario.
+            </p>
+          } @else {
+            <!--
+              QUI-655 — ¿a cuántas unidades aplica la excepción? Solo con
+              `quantity > 1` y algo desmarcado: con una unidad la pregunta no tiene
+              respuestas distintas, y sin exclusión no hay nada que acotar.
+
+              Al confirmar con menos que el total, el backend PARTE la línea: 3
+              pollos con la excepción en 1 quedan como 2 completos + 1 sin el
+              insumo. Las otras 2 consumen su receta entera y el inventario refleja
+              exactamente eso.
+            -->
+            @if (item.quantity > 1 && excludedCountFor(item.order_item_id) > 0) {
+              <div class="kc-units">
+                <span class="kc-units-label">Aplicar a</span>
+                @for (n of unitOptions(item); track n) {
+                  <button
+                    type="button"
+                    class="kc-unit-btn"
+                    [class.is-on]="unitsFor(item) === n"
+                    (click)="setUnitsFor(item, n)"
+                  >
+                    {{ n }}
+                  </button>
+                }
+                <span class="kc-units-of">de {{ item.quantity }}</span>
+              </div>
+            }
+
+            <ul class="kc-tree">
+              @for (node of treeFor(item.order_item_id); track trackNode($index, node)) {
+                <li class="kc-node">
+                  <div class="kc-row">
+                    <button
+                      type="button"
+                      class="kc-check"
+                      [class.is-off]="!isNodeChecked(item.order_item_id, node)"
+                      [class.is-partial]="isNodePartial(item.order_item_id, node)"
+                      [attr.aria-pressed]="isNodeChecked(item.order_item_id, node)"
+                      (click)="toggleNode(item.order_item_id, node)"
+                    >
+                      <app-icon
+                        [name]="
+                          isNodePartial(item.order_item_id, node)
+                            ? 'minus'
+                            : isNodeChecked(item.order_item_id, node)
+                              ? 'check'
+                              : 'x'
+                        "
+                        [size]="12"
+                      />
+                    </button>
+
+                    @if (node.kind === 'recipe') {
+                      <button
+                        type="button"
+                        class="kc-collapse"
+                        (click)="toggleCollapse(node.key)"
+                      >
+                        <app-icon
+                          [name]="isCollapsed(node.key) ? 'chevron-right' : 'chevron-down'"
+                          [size]="12"
+                        />
+                      </button>
+                    }
+
+                    <span
+                      class="kc-label"
+                      [class.is-off]="!isNodeChecked(item.order_item_id, node)"
+                    >
+                      {{ node.label }}
+                    </span>
+
+                    @if (node.component) {
+                      <span class="kc-amount">
+                        {{ node.component.quantity }}
+                        {{ node.component.stock_unit ?? '' }}
+                      </span>
+                    }
+                  </div>
+
+                  @if (node.children.length > 0 && !isCollapsed(node.key)) {
+                    <ul class="kc-tree kc-tree-nested">
+                      @for (child of node.children; track trackNode($index, child)) {
+                        <li class="kc-node">
+                          <div class="kc-row">
+                            <button
+                              type="button"
+                              class="kc-check"
+                              [class.is-off]="!isNodeChecked(item.order_item_id, child)"
+                              [class.is-partial]="isNodePartial(item.order_item_id, child)"
+                              [attr.aria-pressed]="isNodeChecked(item.order_item_id, child)"
+                              (click)="toggleNode(item.order_item_id, child)"
+                            >
+                              <app-icon
+                                [name]="
+                                  isNodePartial(item.order_item_id, child)
+                                    ? 'minus'
+                                    : isNodeChecked(item.order_item_id, child)
+                                      ? 'check'
+                                      : 'x'
+                                "
+                                [size]="12"
+                              />
+                            </button>
+                            <span
+                              class="kc-label"
+                              [class.is-off]="!isNodeChecked(item.order_item_id, child)"
+                            >
+                              {{ child.label }}
+                            </span>
+                            @if (child.component) {
+                              <span class="kc-amount">
+                                {{ child.component.quantity }}
+                                {{ child.component.stock_unit ?? '' }}
+                              </span>
+                            }
+                          </div>
+                        </li>
+                      }
+                    </ul>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </section>
+      }
+    </div>
+
+    @if (hasAnyExclusion()) {
+      <p class="kc-warn">
+        <app-icon name="alert-triangle" [size]="12" />
+        {{ excludedCount() }} ingrediente(s) excluido(s).
+        <!--
+          Honestidad de estado: en modo cocinar el inventario YA se descontó al
+          enviar, así que desmarcar aquí se registra y se muestra en el ticket pero
+          todavía no cambia el stock. Decirlo evita que el cocinero crea que ahorró
+          insumos que ya salieron. Se quita cuando el consumo se mueva a este punto.
+        -->
+        @if (mode() === 'cook') {
+          Queda registrado en el ticket, pero el descuento de inventario ya ocurrió
+          al enviar a cocina.
+        } @else {
+          No se descuentan del inventario ni entran al costo de este envío.
+        }
+      </p>
+    }
+  }
+
+  <app-button
+    slot="footer"
+    variant="secondary"
+    (clicked)="onCancel()"
+    [disabled]="isSubmitting()"
+  >
+    Cancelar
+  </app-button>
+  <app-button
+    slot="footer"
+    variant="primary"
+    [loading]="isSubmitting()"
+    [disabled]="!hasItems() || isLoading()"
+    (clicked)="onConfirm()"
+  >
+    <app-icon slot="icon" name="flame" [size]="14" />
+    <!-- Camino rápido: mientras nadie desmarque nada el botón dice "sin cambios",
+         para que el envío de hora pico sea un solo toque. -->
+    {{ confirmLabel() }}
+  </app-button>
+</app-modal>
