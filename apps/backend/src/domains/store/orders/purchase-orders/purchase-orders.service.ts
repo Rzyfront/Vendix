@@ -550,11 +550,17 @@ export class PurchaseOrdersService {
     // pago contra "hoy" en el CALENDARIO local (fecha-sólo, sin convertir a
     // instante: pasar a UTC correría la fecha un día en tiendas con offset
     // negativo). Se resuelve ANTES del $transaction para no abrir una segunda
-    // lectura dentro de la transacción.
+    // lectura dentro de la transacción, y SOLO cuando el plan trae fechas que
+    // validar (deferred/installments) — un plan immediate/partial o una orden
+    // sin plan no paga la consulta de settings.
     const ctxStoreId = RequestContextService.getStoreId();
-    const storeTz = ctxStoreId
-      ? await resolveStoreTimezone(this.prisma, ctxStoreId)
-      : DEFAULT_STORE_TIMEZONE;
+    const planNeedsDateValidation =
+      createPurchaseOrderDto.payment_plan === 'deferred' ||
+      createPurchaseOrderDto.payment_plan === 'installments';
+    const storeTz =
+      planNeedsDateValidation && ctxStoreId
+        ? await resolveStoreTimezone(this.prisma, ctxStoreId)
+        : DEFAULT_STORE_TIMEZONE;
 
     // La transacción devuelve la orden + (si hubo abono) el pago de anticipo
     // registrado: el evento contable se emite por FUERA, después del commit.
