@@ -182,12 +182,37 @@ export class ProductsAnalyticsService {
       take: query.limit || 10,
     });
 
+<<<<<<< HEAD
+=======
+    // QUI-622 review: units_without_cost via SUM(quantity) filtrado por
+    // cost_price IS NULL — mismo patron que products/profitability (QUI-623).
+    // El calculo anterior usaba COUNT(*) (filas) que no es units.
+    const coverageMap = new Map<number, { units_without_cost: number }>();
+>>>>>>> 3dcd84c99 (fix(analytics): QUI-622 getStoreId -> RequestContext + dedup productIds)
     const productIds = results
       .map((r) => r.product_id)
       .filter(Boolean) as number[];
-
-    if (productIds.length === 0) {
-      return [];
+    if (productIds.length > 0) {
+      const contextStoreId = RequestContextService.getContext()?.store_id ?? 0;
+      const coverageRows = await (this.prisma as any).$queryRaw<
+        Array<{ product_id: number; units_without_cost: bigint }>
+      >`
+        SELECT oi.product_id AS product_id,
+               COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
+        FROM order_items oi
+        INNER JOIN orders o ON o.id = oi.order_id
+        WHERE o.store_id = ${contextStoreId}
+          AND o.state IN (${Prisma.join(this.COMPLETED_STATES.map((s) => Prisma.raw(`'${s}'`)))})
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+          AND oi.product_id IN (${Prisma.join(productIds.map((id) => Prisma.raw(`${id}`)))})
+        GROUP BY oi.product_id
+      `;
+      for (const row of coverageRows) {
+        coverageMap.set(Number(row.product_id), {
+          units_without_cost: Number(row.units_without_cost),
+        });
+      }
     }
 
     // Cost from the per-line snapshot (`order_items.cost_price` at sale time).
