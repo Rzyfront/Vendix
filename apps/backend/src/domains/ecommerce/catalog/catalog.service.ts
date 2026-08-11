@@ -30,6 +30,16 @@ export class CatalogService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
+  /**
+   * Catálogo global de unidades, cacheado por proceso. Es de solo lectura y
+   * cambia únicamente cuando el equipo agrega una unidad nueva, así que pagar
+   * una consulta por producto para leerlo sería gratuito solo en la demo.
+   */
+  private uomByIdCache: Map<
+    number,
+    { code: string; name: string; dimension: string; factor_to_base: number }
+  > | null = null;
+
   async getProducts(query: CatalogQueryDto) {
     const {
       search,
@@ -923,6 +933,9 @@ export class CatalogService {
               product.__default_sale_unit.tier.units_per_package,
           }
         : null,
+      // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
+      // sobre un producto que se mide en milímetros.
+      price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
@@ -1020,6 +1033,9 @@ export class CatalogService {
               product.__default_sale_unit.tier.units_per_package,
           }
         : null,
+      // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
+      // sobre un producto que se mide en milímetros.
+      price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: ahora reflejan stock_levels.
@@ -1173,6 +1189,7 @@ export class CatalogService {
     if (!product?.id || product.__default_sale_unit !== undefined) {
       return product;
     }
+    await this.hydrateStockUnit(product);
     try {
       product.__default_sale_unit = await resolveDefaultSaleUnit(
         this.prisma as any,
@@ -1184,6 +1201,96 @@ export class CatalogService {
       product.__default_sale_unit = null;
     }
     return product;
+  }
+
+  /**
+   * Código de la unidad de stock del producto, para publicar el precio en la
+   * escala del comerciante ("$5.000 por metro") en vez de un número sin unidad.
+   *
+   * El catálogo de unidades es global, diminuto e inmutable en runtime, así que
+   * se lee una vez por proceso: la vitrina no puede pagar una consulta por
+   * producto para mostrar dos palabras.
+   */
+  private async hydrateStockUnit(product: any): Promise<void> {
+    if (!product?.stock_uom_id) {
+      product.__stock_unit = null;
+      return;
+    }
+    try {
+      if (!this.uomByIdCache) {
+        const rows = await this.storePrisma.units_of_measure.findMany({
+          where: { is_active: true },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            dimension: true,
+            factor_to_base: true,
+          },
+        });
+        this.uomByIdCache = new Map(
+          rows.map((u) => [
+            u.id,
+            {
+              code: u.code,
+              name: u.name,
+              dimension: u.dimension as string,
+              factor_to_base: Number(u.factor_to_base),
+            },
+          ]),
+        );
+      }
+      product.__stock_unit =
+        this.uomByIdCache.get(Number(product.stock_uom_id)) ?? null;
+    } catch {
+      product.__stock_unit = null;
+    }
+  }
+
+  /**
+   * Escala en la que se publica el precio: "por metro" cuando el producto vive
+   * en milímetros y su precio cubre 1.000. `null` cuando el precio es por
+   * unidad, que es todo el catálogo histórico.
+   *
+   * No aplica cuando hay presentación por defecto: ahí el precio publicado ya
+   * es el del paquete completo y hablar de escala confundiría dos cosas.
+   */
+  private buildPriceUnit(product: any): {
+    quantity: number;
+    stock_unit_code: string | null;
+    reference_unit_code: string | null;
+    label: string;
+  } | null {
+    if (product?.__default_sale_unit) return null;
+    const quantity = Number(product?.price_unit_quantity ?? 1);
+    if (!Number.isFinite(quantity) || quantity <= 1) return null;
+
+    const stock = product.__stock_unit ?? null;
+    if (!stock) {
+      return {
+        quantity,
+        stock_unit_code: null,
+        reference_unit_code: null,
+        label: `por ${quantity.toLocaleString('es-CO')} unidades`,
+      };
+    }
+
+    const reference = this.uomByIdCache
+      ? Array.from(this.uomByIdCache.values()).find(
+          (u) =>
+            u.dimension === stock.dimension &&
+            Math.abs(u.factor_to_base / stock.factor_to_base - quantity) < 1e-9,
+        )
+      : undefined;
+
+    return {
+      quantity,
+      stock_unit_code: stock.code,
+      reference_unit_code: reference?.code ?? null,
+      label: reference
+        ? `por ${reference.code}`
+        : `por ${quantity.toLocaleString('es-CO')} ${stock.code}`,
+    };
   }
 
   private getTotalTaxRate(product: any): number {
