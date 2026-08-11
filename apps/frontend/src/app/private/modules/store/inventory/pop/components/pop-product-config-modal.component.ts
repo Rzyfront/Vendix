@@ -226,10 +226,27 @@ export type { PopProductConfigResult };
               </form>
             }
 
+            <!-- QUI-648: la configuración de venta (unidad de medida y
+                 presentación adicional) no se despliega sola. Comprar es el
+                 camino frecuente; configurar cómo se venderá es la excepción,
+                 así que entra detrás de un interruptor y solo entonces se
+                 muestra lo que haya que mostrar. Arranca abierto si el producto
+                 YA trae configuración distinta de la de por defecto, para no
+                 esconder lo que existe. -->
+            @if (!ingredientMode()) {
+              <app-setting-toggle
+                label="Configurar venta"
+                description="Unidad de medida y venta en otra presentación (bulto, rollo, caja)."
+                [ngModel]="showSaleConfig()"
+                [ngModelOptions]="{ standalone: true }"
+                (changed)="showSaleConfig.set($event)"
+              ></app-setting-toggle>
+            }
+
             <!-- Sale UoM selector. Excluyente con la captura de consumo:
                  se muestra solo para producto retail (no insumo) en ambos
                  modos. Insumo → bloque app-pop-uom-capture (abajo). -->
-            @if (!ingredientMode()) {
+            @if (!ingredientMode() && showSaleConfig()) {
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
                   >Unidad de medida</label
@@ -837,6 +854,7 @@ export class PopProductConfigModalComponent {
   readonly canConfigureSaleUnit = computed(
     () =>
       !this.ingredientMode() &&
+      this.showSaleConfig() &&
       !this.productHasVariants &&
       !this.hasVariantsToggle(),
   );
@@ -845,6 +863,7 @@ export class PopProductConfigModalComponent {
   readonly saleUnitBlockedByVariants = computed(
     () =>
       !this.ingredientMode() &&
+      this.showSaleConfig() &&
       (this.productHasVariants || this.hasVariantsToggle()),
   );
 
@@ -925,6 +944,15 @@ export class PopProductConfigModalComponent {
   hasVariantsToggle = signal(false);
   requiresLotToggle = signal(false);
   selectedPricingType = signal<'unit' | 'weight'>('unit');
+
+  /**
+   * Interruptor del bloque de configuración de venta (unidad de medida +
+   * presentación adicional). Colapsado por defecto: la compra no debería
+   * mostrar de entrada decisiones de venta. Gobierna también
+   * `canConfigureSaleUnit`, así que cerrarlo es no configurar — el payload no
+   * arrastra valores de un bloque que el comprador dejó cerrado.
+   */
+  readonly showSaleConfig = signal(false);
 
   // Multi-variant selection (for adding new items)
   selectedVariantIds = new Set<number>();
@@ -1764,6 +1792,15 @@ export class PopProductConfigModalComponent {
     // Pre-fill pricing type
     this.selectedPricingType.set(
       this.initialPricingType() || this.product()?.pricing_type || 'unit',
+    );
+
+    // El bloque de configuración de venta arranca cerrado, salvo que el
+    // producto ya venga con algo distinto de lo de por defecto: esconder una
+    // configuración existente detrás de un interruptor apagado sería mentirle
+    // al comprador sobre cómo se está vendiendo.
+    this.showSaleConfig.set(
+      this.selectedPricingType() === 'weight' ||
+        (this.product() as any)?.has_multiple_price_tiers === true,
     );
 
     // Pre-fill variant toggle and selection
