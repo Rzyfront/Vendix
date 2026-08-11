@@ -304,6 +304,19 @@ export class CreateProductDto {
   @Min(1)
   purchase_to_stock_factor?: number;
 
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros guarda `base_price = 5000` y
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; con el default `1` la
+   * aritmética queda idéntica a la histórica.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
+  price_unit_quantity?: number;
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -638,6 +651,19 @@ export class UpdateProductDto {
   @Type(() => Number)
   @Min(1)
   purchase_to_stock_factor?: number;
+
+  /**
+   * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
+   * Un cable medido en milímetros guarda `base_price = 5000` y
+   * `price_unit_quantity = 1000`: "$5.000 por metro". El total de una línea es
+   * `unit_price * quantity / price_unit_quantity`; con el default `1` la
+   * aritmética queda idéntica a la histórica.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
+  price_unit_quantity?: number;
 
   @IsOptional()
   @IsArray()
