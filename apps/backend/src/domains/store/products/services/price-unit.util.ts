@@ -128,7 +128,19 @@ export type PriceUnitAdjustableLine = {
    */
   final_unit_price?: number | null;
   total_price?: number | null;
+  /**
+   * Impuesto de la línea, tal como lo calculó el cliente. Se corrige cuando la
+   * base cambia, y además sirve de testigo de magnitud: bajo la hipótesis de
+   * que el cliente sí aplicó la escala, `neto + tax_amount_item` ES el bruto
+   * que ese cliente armó (ver `resolveGrossTotal`).
+   */
   tax_amount_item?: number | null;
+  /**
+   * Tasa del impuesto de la línea como FRACCIÓN (`0.19` = 19%), la convención
+   * que fijan los DTO de venta (`Max(1)`). No se persiste desde acá: es el
+   * tercer testigo de en qué magnitud el cliente construyó `total_price`.
+   */
+  tax_rate?: number | null;
   /**
    * Peso capturado de una línea de PESO (`products.pricing_type='weight'`). En
    * esas líneas `quantity` vale 1 y el multiplicador real es este campo, con su
@@ -151,48 +163,108 @@ const sameMoney = (a: number, b: number): boolean => Math.abs(a - b) < 0.005;
  * contra las filas ya persistidas.
  *
  * El problema es que un cliente puede construir `total_price` en BRUTO. El POS
- * web lo hace hoy contra `PUT /store/orders/:id/items`: manda `unit_price`
- * neto, `final_unit_price` bruto y `total_price = final_unit_price × unidades`
- * (bruto). Comparar el esperado neto (`unit_price × quantity / N`) contra ese
- * bruto es comparar peras con manzanas: la diferencia que sale de ahí no es el
- * desfase de la escala sino el IVA de la línea, y aplicarla como delta de
- * cabecera le restaría el IVA a un `subtotal` que ya venía neto y correcto.
- * Con `N = 1` nunca se dispara —esta función entera solo corre para productos
- * con escala—, y por eso el defecto es invisible hoy.
+ * web lo hace hoy contra `PUT /store/orders/:id/items` y contra
+ * `POST /store/quotations`: manda `unit_price` neto y `total_price` con el
+ * impuesto adentro. Comparar el esperado neto (`unit_price × quantity / N`)
+ * contra ese bruto es comparar peras con manzanas: la diferencia que sale de
+ * ahí no es el desfase de la escala sino el IVA de la línea, y aplicarla como
+ * delta de cabecera le restaría el IVA a un `subtotal` que ya venía neto y
+ * correcto. Con `N = 1` nunca se dispara —esta función entera solo corre para
+ * productos con escala—, y por eso el defecto es invisible en el catálogo
+ * histórico.
  *
- * La salida NO es suponer una magnitud sino LEERLA. `unit_price` y
- * `final_unit_price` son las dos caras del mismo precio unitario, así que su
- * razón ES `1/(1+tasa)` sin consultar la base ni asumir la tarifa. Con eso, el
- * total recibido se lee en sus dos interpretaciones posibles y gana la que
- * cuadra con la aritmética:
+ * La salida NO es suponer una magnitud sino LEERLA: reconstruir el BRUTO de un
+ * neto dado con los testigos que la propia línea trae, y quedarse con la
+ * lectura que cuadra con lo que llegó. Los testigos, en orden de confianza:
  *
- *   1. ¿Cuadra con el esperado leído en NETO? → el cliente ya aplicó la escala
- *      y mandó neto. No se toca nada.
- *   2. ¿Cuadra con el esperado leído en BRUTO? → el cliente ya aplicó la
- *      escala pero la mandó en bruto. La línea se re-expresa en neto (que es
- *      lo que la columna significa) y la CABECERA NO SE MUEVE: no hubo
- *      desfase de escala que compensar.
- *   3. Ninguna cuadra → el cliente no aplicó la escala. La línea se corrige y
- *      el delta de cabecera se calcula contra la base NETA sin escalar
- *      (`unit_price × quantity`), que es exactamente el dinero que la escala
- *      quita — nunca contra el total del cliente, cuya magnitud es incierta.
+ *   1. `final_unit_price` — las dos caras del MISMO precio unitario, así que su
+ *      razón ES `1+tasa` sin consultar la base ni asumir la tarifa. Es también
+ *      la única lectura EXACTA: si el cliente armó el total como
+ *      `final_unit_price × unidades`, multiplicar el neto por esa razón lo
+ *      devuelve sin error de redondeo.
+ *   2. `tax_amount_item` — el impuesto que el cliente calculó para ESA línea,
+ *      así que `bruto = neto + impuesto` respeta su propia base sin
+ *      re-derivarla. Es el único testigo del camino vivo: el POS web cotiza
+ *      con `unit_price` + `tax_amount_item` + `total_price` y SIN
+ *      `final_unit_price` (`pos.component.ts#onQuote`). Por ese agujero una
+ *      cotización de 2 m a $3.781,51 el metro perdía $229,44 de IVA: el bruto
+ *      de $9.000 se leía como un desfase de escala y el reescalado
+ *      proporcional bajaba el IVA de $1.436,97 a $1.207,54.
+ *   3. `tax_rate` — la tasa declarada, como fracción. Va última porque se
+ *      aplica al neto que calculamos nosotros y no al que el cliente usó para
+ *      su impuesto: con un descuento de línea en el medio las dos bases dejan
+ *      de coincidir.
  *
- * Sin `final_unit_price` (o con una línea sin impuesto, donde bruto == neto)
- * las dos lecturas coinciden y el comportamiento es idéntico al histórico.
+ * Sin ninguno de los tres —o con una línea exenta, donde bruto == neto— no hay
+ * segunda lectura posible y el comportamiento es idéntico al histórico.
+ *
+ * Con eso, el total recibido se clasifica así:
+ *
+ *   1. ¿Cuadra con el esperado en NETO? → el cliente ya aplicó la escala y
+ *      mandó neto. No se toca nada.
+ *   2. ¿Cuadra con el esperado en BRUTO? → ya aplicó la escala pero la mandó
+ *      en bruto. La línea se re-expresa en neto (que es lo que la columna
+ *      significa) y la CABECERA NO SE MUEVE: no hubo desfase de escala que
+ *      compensar, así que el impuesto tampoco se toca.
+ *   3. Ninguna cuadra → no aplicó la escala. La línea se corrige y el delta de
+ *      cabecera se mide contra la base NETA sin escalar (`unit_price ×
+ *      quantity`), que es exactamente el dinero que la escala quita.
  */
-function readTotalAsNet(received: number, line: PriceUnitAdjustableLine): number {
-  const gross = Number(line.final_unit_price ?? NaN);
-  const net = Number(line.unit_price ?? NaN);
+function resolveGrossTotal(
+  net: number,
+  line: PriceUnitAdjustableLine,
+): number | null {
+  const netTotal = Number(net);
+  if (!Number.isFinite(netTotal) || netTotal <= 0) return null;
+
+  const unitNet = Number(line.unit_price ?? NaN);
+  const unitGross = Number(line.final_unit_price ?? NaN);
   if (
-    !Number.isFinite(gross) ||
-    !Number.isFinite(net) ||
-    gross <= 0 ||
-    net <= 0 ||
-    gross <= net
+    Number.isFinite(unitNet) &&
+    Number.isFinite(unitGross) &&
+    unitNet > 0 &&
+    unitGross > unitNet
   ) {
-    return received;
+    return roundMoney(netTotal * (unitGross / unitNet));
   }
-  return roundMoney(received * (net / gross));
+
+  const tax = Number(line.tax_amount_item ?? NaN);
+  if (Number.isFinite(tax) && tax > 0) return roundMoney(netTotal + tax);
+
+  const rate = Number(line.tax_rate ?? NaN);
+  if (Number.isFinite(rate) && rate > 0) {
+    return roundMoney(netTotal * (1 + rate));
+  }
+
+  return null;
+}
+
+/**
+ * ¿`received` es `rebuilt`, el BRUTO reconstruido de un neto conocido?
+ *
+ * El medio centavo de `sameMoney` no alcanza acá, y no por gusto: el cliente
+ * redondea a centavos su precio unitario CON impuesto antes de multiplicarlo
+ * por `units`, así que su bruto arrastra hasta medio centavo POR unidad
+ * mientras la reconstrucción parte de un neto exacto. La medición en dev llegó
+ * con `total_price = 9.000,00` contra 8.999,99 reconstruido —un centavo sobre 2
+ * unidades de precio— y con medio centavo esa línea se leía como desfase de
+ * escala. El uno por mil cubre además a los clientes que redondean el ticket o
+ * el precio con impuesto del catálogo en vez de la línea.
+ *
+ * Aflojar la comparación es seguro porque la hipótesis rival no está a
+ * centavos: si el cliente no aplicó la escala, su total está a un factor N
+ * (≥ 2, en la práctica 1.000) del otro. Ninguna tolerancia de centavos por
+ * unidad —ni de uno por mil— puede confundir las dos.
+ */
+function sameGross(
+  received: number,
+  rebuilt: number | null,
+  units: number,
+): boolean {
+  if (rebuilt == null) return false;
+  const perUnit = 0.01 + 0.005 * Math.max(1, Math.abs(Number(units) || 0));
+  const tolerance = Math.max(perUnit, Math.abs(rebuilt) * 0.001);
+  return Math.abs(received - rebuilt) <= tolerance;
 }
 
 export type PriceUnitNormalization = {
@@ -279,26 +351,42 @@ export async function normalizePriceUnitLines<T extends PriceUnitAdjustableLine>
     // Neto SIN escala: la aritmética histórica, y la única base contra la que
     // se puede medir cuánto dinero quita la escala.
     const unscaled = roundMoney(unitPrice * quantity);
+    // Unidades de PRECIO (el multiplicador de `expected`) frente a unidades de
+    // stock (el de `unscaled`): cada lectura se compara con la tolerancia del
+    // multiplicador que la construyó.
+    const priceUnits = resolvePriceUnits(quantity, n);
 
     const received = roundMoney(Number(line.total_price ?? 0));
-    const receivedAsNet = readTotalAsNet(received, line);
 
     // Caso 1 — el cliente ya aplicó la escala y mandó neto: nada que hacer.
     if (sameMoney(received, expected)) return;
 
     // Caso 2 — ya aplicó la escala pero la mandó en bruto: la línea se
-    // re-expresa en la magnitud de la columna y la cabecera no se mueve.
-    if (sameMoney(receivedAsNet, expected)) {
+    // re-expresa en la magnitud de la columna y la cabecera no se mueve. El
+    // impuesto queda INTACTO a propósito: su base —el neto escalado— es la que
+    // ya venía, y reescalarlo por la razón bruto/neto es justamente el defecto
+    // que este caso existe para evitar.
+    if (sameGross(received, resolveGrossTotal(expected, line), priceUnits)) {
       line.total_price = expected;
       result.adjusted += 1;
       return;
     }
 
     // Caso 3 — no aplicó la escala. El delta de cabecera es el efecto puro de
-    // la escala medido en neto; el total del cliente solo se usa como
-    // respaldo cuando no reconocemos ninguna de las dos lecturas (una línea
-    // con el total editado a mano), que es el comportamiento histórico.
-    const previous = sameMoney(received, unscaled) ? received : receivedAsNet;
+    // la escala medido en neto, así que hay que reconocer en qué magnitud vino
+    // el total sin escalar: el neto crudo se usa tal cual y su bruto se
+    // reemplaza por el neto que le corresponde.
+    //
+    // Si no reconocemos ninguna de las cuatro lecturas —un total editado a
+    // mano— se usa el recibido tal como llegó, que es el comportamiento
+    // histórico y el único con la falla acotada: la cabecera se mueve como
+    // máximo la diferencia contra el número que el propio cliente mandó, nunca
+    // por una conversión inventada sobre una magnitud que no reconocimos.
+    const previous =
+      sameMoney(received, unscaled) ||
+      sameGross(received, resolveGrossTotal(unscaled, line), quantity)
+        ? unscaled
+        : received;
 
     // El impuesto viaja proporcional al total: la tasa no cambia, cambia la
     // base. Sin total previo no hay proporción, así que queda en 0 y el

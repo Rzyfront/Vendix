@@ -167,6 +167,143 @@ describe('price-unit.util', () => {
       expect(result.subtotalDelta).toBe(-14_985_000);
     });
 
+    /**
+     * EL AGUJERO QUE DEJABA `final_unit_price` COMO ÚNICO TESTIGO.
+     *
+     * El camino vivo no manda `final_unit_price`: el POS web cotiza con
+     * `unit_price` neto + `tax_amount_item` + `total_price` bruto
+     * (`pos.component.ts#onQuote`). Sin el testigo unitario la función no podía
+     * reconstruir el bruto esperado, leía el IVA como desfase de escala y
+     * reescalaba el impuesto proporcional a la corrección del total.
+     *
+     * Medido en dev contra `POST /store/quotations` con el producto 394 (escala
+     * 1.000, $5.000/m) — 2 m a $3.781,51 el metro:
+     *   correcto → neto 7.563,02 + IVA 1.436,97 = 9.000,00
+     *   obtenido → neto 7.563,02 + IVA 1.207,54 = 8.770,56
+     * El IVA salía multiplicado por 7563,02/9000 ≈ 0,8403. Faltaban $229,44.
+     */
+    it('lee el bruto desde tax_amount_item cuando no viene final_unit_price', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000, // 2 m de un cable en mm
+          unit_price: 3781.51, // neto por metro
+          tax_rate: 0.19,
+          tax_amount_item: 1436.97,
+          total_price: 9000, // bruto y YA escalado: 3.781,51 × 2 × 1,19
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      // La línea queda en la magnitud de la columna (neta y escalada)...
+      expect(lines[0].total_price).toBe(7563.02);
+      // ...y el IVA NO se toca: su base no cambió, solo la magnitud del total.
+      expect(lines[0].tax_amount_item).toBe(1436.97);
+      expect(result.subtotalDelta).toBe(0);
+      expect(result.taxDelta).toBe(0);
+    });
+
+    it('lee el bruto desde tax_rate cuando es el único testigo', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000,
+          unit_price: 3781.51,
+          tax_rate: 0.19,
+          total_price: 9000, // bruto y YA escalado
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      expect(lines[0].total_price).toBe(7563.02);
+      expect(result.subtotalDelta).toBe(0);
+      expect(result.taxDelta).toBe(0);
+    });
+
+    /**
+     * El simétrico del anterior: el mismo cliente, los mismos testigos, pero el
+     * bruto tampoco aplicó la escala (3.781,51 × 2.000 × 1,19). Acá SÍ hay
+     * desfase de escala y hay que corregir las dos magnitudes de la cabecera —
+     * medidas contra el neto sin escalar, no contra el bruto recibido.
+     */
+    it('corrige neto e IVA cuando el bruto sin final_unit_price tampoco aplicó la escala', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000,
+          unit_price: 3781.51,
+          tax_rate: 0.19,
+          tax_amount_item: 1_436_973.8, // IVA del neto sin escalar
+          total_price: 8_999_993.8, // 7.563.020 × 1,19
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      expect(lines[0].total_price).toBe(7563.02);
+      expect(lines[0].tax_amount_item).toBe(1436.97);
+      // Delta = efecto puro de la escala en neto: 7.563,02 − 7.563.020
+      expect(result.subtotalDelta).toBeCloseTo(-7_555_456.98, 2);
+      expect(result.taxDelta).toBeCloseTo(-1_435_536.83, 2);
+      expect(result.adjusted).toBe(1);
+    });
+
+    /**
+     * El testigo nuevo no puede secuestrar la lectura NETA sin escalar: acá el
+     * total llegó crudo en neto y el delta tiene que medirse contra él, no
+     * contra su bruto reconstruido.
+     */
+    it('el testigo de impuesto no confunde un neto sin escalar con un bruto', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000,
+          unit_price: 3781.51,
+          tax_amount_item: 1_436_973.8,
+          total_price: 7_563_020, // neto SIN escalar
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      expect(lines[0].total_price).toBe(7563.02);
+      expect(lines[0].tax_amount_item).toBe(1436.97);
+      expect(result.subtotalDelta).toBeCloseTo(-7_555_456.98, 2);
+    });
+
+    it('no mueve nada cuando la línea ya vino neta y escalada con su impuesto', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000,
+          unit_price: 3781.51,
+          tax_rate: 0.19,
+          tax_amount_item: 1436.97,
+          total_price: 7563.02, // neto y YA escalado
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      expect(lines[0].total_price).toBe(7563.02);
+      expect(lines[0].tax_amount_item).toBe(1436.97);
+      expect(result.adjusted).toBe(0);
+      expect(result.subtotalDelta).toBe(0);
+      expect(result.taxDelta).toBe(0);
+    });
+
     it('excluye las líneas con presentación aplicada', async () => {
       const lines = [
         {
