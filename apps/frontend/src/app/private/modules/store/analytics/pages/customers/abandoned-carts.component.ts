@@ -32,7 +32,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
-import { comparisonLabelFor } from '../../utils/comparison-label.util';
+import { comparisonLabelFor, DatePresetLike } from '../../utils/comparison-label.util';
 
 @Component({
   selector: 'vendix-abandoned-carts',
@@ -137,12 +137,12 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     this.store.dispatch(AbandonedCartsActions.setDateRange({ dateRange: range }));
   }
 
-  getGrowthText(growth?: number): string {
+  getGrowthText(growth?: number | null): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
-    // QUI-609: derive the comparison label from the active preset (was the
+    // QUI-628: derive the comparison label from the active preset (was the
     // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
-    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset as DatePresetLike)}`;
   }
 
   getAbandonmentRate(): string {
