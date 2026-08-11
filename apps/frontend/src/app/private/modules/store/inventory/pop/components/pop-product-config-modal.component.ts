@@ -368,10 +368,16 @@ export type { PopProductConfigResult };
               </div>
             }
 
-            <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional). -->
-            @if (ingredientMode()) {
+            <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional).
+                 QUI-648: deja de ser exclusivo del insumo. Comprar 5 rollos y
+                 almacenar 100.000 mm es el mismo mecanismo que comprar un saco
+                 y almacenar gramos; lo único que lo reservaba a insumos era
+                 este gate de UI. Para retail entra detrás del interruptor de
+                 configuración, así que el flujo de compra de siempre no cambia
+                 hasta que alguien lo pide. -->
+            @if (ingredientMode() || showSaleConfig()) {
               <app-pop-uom-capture
-                [isIngredient]="true"
+                [isIngredient]="ingredientMode()"
                 [initialPurchaseUomId]="purchaseUomId()"
                 [initialStockUomId]="stockUomId()"
                 [initialUnitCost]="initialUnitCost()"

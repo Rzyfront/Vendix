@@ -3263,6 +3263,12 @@ export const ErrorCodes = {
     devMessage:
       'Esta unidad no puede ser la unidad de stock: su factor de conversión no es entero y el inventario se lleva en enteros de la unidad base. Úsala como unidad de compra o de presentación.',
   },
+  PROD_UOM_CONVERSION_REQUIRED: {
+    code: 'PROD_UOM_CONVERSION_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El producto tiene existencias, capas de costo, lotes o recetas expresados en su unidad de stock actual. Cambiar la unidad exige el flag explícito `stock_uom_conversion: "convert"`, que convierte todo en la misma transacción.',
+  },
   PRODUCT_TIERS_VARIANTS_EXCLUSIVE: {
     code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
     httpStatus: 409,

@@ -2334,6 +2334,52 @@ export class ProductsService {
       if (sanitizedDto.stock_uom_id !== undefined) {
         await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
       }
+
+      // Cambiar la unidad de stock de un producto que YA opera no es renombrar
+      // una etiqueta: existencias, capas de costo, lotes y recetas están
+      // escritos en la unidad vieja. Se exige el flag explícito porque una
+      // conversión silenciosa multiplicaría el inventario por mil sin que
+      // nadie lo pidiera.
+      const stockUomChanged =
+        sanitizedDto.stock_uom_id !== undefined &&
+        existingProduct.stock_uom_id != null &&
+        Number(sanitizedDto.stock_uom_id) !==
+          Number(existingProduct.stock_uom_id);
+      let pendingUomConversion: {
+        from: number;
+        to: number;
+      } | null = null;
+      if (stockUomChanged) {
+        const [levels, layers, batches, recipeLines] = await Promise.all([
+          this.prisma.stock_levels.count({
+            where: { product_id: id, NOT: { quantity_on_hand: 0 } },
+          }),
+          this.prisma.inventory_cost_layers.count({
+            where: { product_id: id, NOT: { quantity_remaining: 0 } },
+          }),
+          this.prisma.inventory_batches.count({
+            where: { product_id: id, NOT: { quantity: 0 } },
+          }),
+          this.prisma.recipe_items.count({
+            where: { component_product_id: id },
+          }),
+        ]);
+        const hasData = levels + layers + batches + recipeLines > 0;
+        if (hasData) {
+          if (sanitizedDto.stock_uom_conversion !== 'convert') {
+            throw new VendixHttpException(
+              ErrorCodes.PROD_UOM_CONVERSION_REQUIRED,
+              `El producto tiene existencias, costos, lotes o recetas expresados en su unidad actual. Envía "stock_uom_conversion": "convert" para convertirlos, o deja la unidad como está.`,
+            );
+          }
+          pendingUomConversion = {
+            from: Number(existingProduct.stock_uom_id),
+            to: Number(sanitizedDto.stock_uom_id),
+          };
+        }
+      }
+      delete (sanitizedDto as any).stock_uom_conversion;
+      delete (productData as any).stock_uom_conversion;
       const derivedFactor = uomFkTouched
         ? await this.derivePurchaseToStockFactor(
             effectiveStockUomId,
@@ -2344,6 +2390,18 @@ export class ProductsService {
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
+          // La conversión va PRIMERO y en la misma transacción: si algo no
+          // divide exacto, el producto no llega a cambiar de unidad.
+          if (pendingUomConversion) {
+            await this.stockLevelManager.convertStockUom({
+              product_id: id,
+              from_uom_id: pendingUomConversion.from,
+              to_uom_id: pendingUomConversion.to,
+              user_id: RequestContextService.getUserId(),
+              tx: prisma,
+            });
+          }
+
           // Actualizar producto
           const product = await prisma.products.update({
             where: { id },

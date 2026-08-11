@@ -317,6 +317,16 @@ export class CreateProductDto {
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
 
+  /**
+   * Autorización explícita para convertir existencias, reservas, capas de
+   * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
+   * opera. Sin este flag el cambio se rechaza: convertir en silencio
+   * multiplicaría el inventario sin que nadie lo pidiera.
+   */
+  @IsOptional()
+  @IsIn(['convert'])
+  stock_uom_conversion?: 'convert';
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -664,6 +674,16 @@ export class UpdateProductDto {
   @Type(() => Number)
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
+
+  /**
+   * Autorización explícita para convertir existencias, reservas, capas de
+   * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
+   * opera. Sin este flag el cambio se rechaza: convertir en silencio
+   * multiplicaría el inventario sin que nadie lo pidiera.
+   */
+  @IsOptional()
+  @IsIn(['convert'])
+  stock_uom_conversion?: 'convert';
 
   @IsOptional()
   @IsArray()

@@ -330,8 +330,17 @@ export class PurchaseOrdersService {
     });
 
     const factor = Number(product?.purchase_to_stock_factor ?? 1);
-    const isIngredient = !!product?.is_ingredient;
-    const hasUoM = isIngredient && factor > 0 && Number.isFinite(factor);
+    // QUI-648 — la conversión al recibir deja de ser exclusiva del insumo:
+    // comprar 5 rollos y almacenar 100.000 mm es el mismo mecanismo que
+    // comprar un saco y almacenar gramos. Lo que decide es tener las dos
+    // unidades declaradas y un factor real; un producto sin factor sigue
+    // recibiendo uno a uno, exactamente como hoy.
+    const declaresBothUoms =
+      product?.stock_uom_id != null && product?.purchase_uom_id != null;
+    const hasUoM =
+      (!!product?.is_ingredient || declaresBothUoms) &&
+      factor > 0 &&
+      Number.isFinite(factor);
 
     if (!hasUoM) {
       return {
