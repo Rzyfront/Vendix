@@ -358,31 +358,38 @@ export class S3Service {
    * `getOrCreatePwaIcon` treats an existing derived object as authoritative and
    * never re-renders it, so WITHOUT this the icon a tenant installed with is
    * frozen forever: changing the logo or the brand color has no visible effect.
-   * Best-effort per variant — one failed delete must not abort the rest, and a
-   * missing object is the normal case (not every variant has been requested).
    *
-   * @returns how many objects were actually deleted
+   * Deletes run CONCURRENTLY and without a preceding HeadObject: this sits in
+   * the request path of a settings save, and four sequential head+delete pairs
+   * would add eight S3 round-trips to a user-facing PUT. `DeleteObject` is
+   * idempotent — deleting an object that was never derived is a no-op, so the
+   * existence check bought nothing but latency.
+   *
+   * Best-effort: one failed delete must not abort the rest, nor fail the write
+   * that triggered it.
+   *
+   * @returns how many deletes completed without error (an object that never
+   *          existed counts as one — S3 does not distinguish)
    */
   async deleteDerivedPwaIcons(basePath: string): Promise<number> {
     const prefix = this.s3PathHelper.buildPwaIconPath(basePath);
-    let deleted = 0;
 
-    for (const variant of PWA_ICON_VARIANTS) {
-      const key = `${prefix}/${variant}.png`;
+    const results = await Promise.allSettled(
+      PWA_ICON_VARIANTS.map((variant) =>
+        this.deleteFile(`${prefix}/${variant}.png`),
+      ),
+    );
 
-      if (!(await this.objectExists(key))) continue;
-
-      try {
-        await this.deleteFile(key);
-        deleted++;
-      } catch (error) {
+    for (const result of results) {
+      if (result.status === 'rejected') {
         this.logger.warn(
-          `Could not drop derived PWA icon ${key}: ${this.describeError(error)}`,
+          `Could not drop a derived PWA icon under ${prefix}: ` +
+            `${this.describeError(result.reason)}`,
         );
       }
     }
 
-    return deleted;
+    return results.filter((result) => result.status === 'fulfilled').length;
   }
 
   /**

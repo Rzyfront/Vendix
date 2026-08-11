@@ -484,8 +484,26 @@ export class SettingsService {
      */
     let appLogoUrl: string | null | undefined;
 
+    /**
+     * Si esta petición tocó algún insumo del manifest / ícono instalable.
+     *
+     * Se captura AQUÍ y no comparando settings al final porque la sección `app`
+     * —la vía por la que el panel cambia el logo— se aplica aparte
+     * (`updateStoreBranding`), luego se BORRA del dto y `currentSettings` se
+     * re-lee ya con el branding nuevo. Para cuando el flujo llega al upsert,
+     * el "antes" y el "después" son idénticos y una comparación no ve nada.
+     */
+    let pwaSourceTouched = false;
+
     // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
+      pwaSourceTouched = [
+        dto.app.logo_url,
+        dto.app.favicon_url,
+        dto.app.name,
+        dto.app.primary_color,
+      ].some((value) => value !== undefined);
+
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
       // This prevents storing signed URLs that expire after 24 hours.
       // `normalizeImageKey` conserva el `null` de un borrado explícito.
@@ -696,11 +714,17 @@ export class SettingsService {
     // el logo viven en `stores`, los colores y el favicon en este branding.
     // Ambos se cachean en S3 + Redis y no se re-derivan solos, así que sin este
     // drop la PWA de la tienda conserva el logo anterior (ver PwaCacheService).
-    const storeFieldsFeedPwa =
+    //
+    // Tres señales, porque el branding llega por tres caminos distintos:
+    // `app` (ya capturada arriba, antes de que se borre del dto), `general`
+    // (escribe `stores.name` / `stores.logo_url`) y el resto de secciones, que
+    // sí sobreviven hasta aquí y se detectan comparando.
+    const generalFeedsPwa =
       dto.general?.name !== undefined || dto.general?.logo_url !== undefined;
 
     if (
-      storeFieldsFeedPwa ||
+      pwaSourceTouched ||
+      generalFeedsPwa ||
       this.brandingAffectsPwa(currentSettings, updatedSettings)
     ) {
       await this.pwaCache.invalidateStore(store_id);

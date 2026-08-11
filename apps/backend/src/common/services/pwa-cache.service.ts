@@ -120,7 +120,7 @@ export class PwaCacheService {
 
     this.logger.log(
       `PWA cache invalidated: ${domains.length} hostname(s), ` +
-        `${keys.length} cache key(s), ${dropped} derived icon(s)`,
+        `${keys.length} cache key(s), ${dropped} derived icon slot(s)`,
     );
   }
 
