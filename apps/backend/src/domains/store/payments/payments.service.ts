@@ -34,6 +34,10 @@ import {
   resolveTierSnapshotsForItems,
   type TierSnapshot,
 } from '../products/services/tier-snapshot.util';
+import {
+  resolvePriceUnitScale,
+  resolvePriceUnits,
+} from '../products/services/price-unit.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -2137,6 +2141,10 @@ export class PaymentsService {
         // aquí evita el round-trip extra que hacía `resolveCostPrice` dentro de
         // la transacción del cobro (causa del P2028).
         cost_price: true,
+        // QUI-648 — a cuántas unidades de stock corresponde `base_price`. Sale
+        // de la misma lectura que ya valida que el producto es de esta tienda:
+        // la escala NO puede venir del cliente, es del catálogo.
+        price_unit_quantity: true,
       },
     });
 
@@ -2237,9 +2245,40 @@ export class PaymentsService {
     const catalogFinalPrice = this.roundMoney(
       catalogUnitPrice + catalogTaxInfo.total_tax_amount,
     );
+
+    /**
+     * QUI-648 — precio por N unidades de stock en el cobro POS.
+     *
+     * `catalogUnitPrice` es el precio publicado (`base_price`), y ese precio
+     * cubre `price_unit_quantity` unidades de stock: un cable a "$5.000 el
+     * metro" guarda 5.000 con escala 1.000 y la línea llega en milímetros. El
+     * multiplicador monetario de la línea NO es la cantidad, es la cantidad
+     * dividida por la escala — 3.000 mm son 3 unidades de precio.
+     *
+     * Sin esto el cobro POS multiplicaba precio × milímetros y cobraba mil
+     * veces de más, y ninguna validación lo frenaba: este camino NO usa el
+     * total del DTO, lo reconstruye acá, así que el error nacía en el servidor
+     * y no había nada que "verificar" contra el cliente.
+     *
+     * Dos exclusiones, espejo exacto de `resolveLineUnits` en el frontend:
+     *  - Línea de PESO legado: el peso capturado ya ES el multiplicador.
+     *  - Línea con PRESENTACIÓN aplicada (`tierSnap`): `unit_price` es el
+     *    precio del paquete y `quantity` cuenta paquetes; dividir cobraría de
+     *    menos. Las unidades de stock que consume viajan aparte en
+     *    `stock_units_consumed`.
+     *
+     * Con la escala por defecto (1) `priceUnits === lineUnits` y no cambia un
+     * solo número de todo el catálogo existente.
+     */
+    const priceUnitQuantity =
+      tierSnap || Number(item.weight || 0) > 0
+        ? 1
+        : resolvePriceUnitScale(product.price_unit_quantity);
+    const priceUnits = resolvePriceUnits(lineUnits, priceUnitQuantity);
+
     const finalUnitPrice = this.resolveRequestedFinalUnitPrice(
       item,
-      lineUnits,
+      priceUnits,
       catalogFinalPrice,
     );
     const isPriceOverridden =
@@ -2273,7 +2312,8 @@ export class PaymentsService {
       description: item.description || item.notes,
       itemType: product.product_type === 'service' ? 'service' : 'physical',
       quantity: item.quantity,
-      lineUnits,
+      lineUnits: priceUnits,
+      priceUnitQuantity,
       unitBasePrice,
       finalUnitPrice,
       taxInfo,
@@ -2327,7 +2367,18 @@ export class PaymentsService {
     description?: string;
     itemType: string;
     quantity: number;
+    /**
+     * Multiplicador monetario YA convertido a unidades de precio (ver
+     * `buildPosOrderItem`). Con escala 1 es la cantidad de siempre.
+     */
     lineUnits: number;
+    /**
+     * QUI-648 — `products.price_unit_quantity` vigente al vender. Se
+     * snapshotea porque sin él el total deja de ser reproducible en cuanto el
+     * comerciante cambie el producto de "por metro" a "por rollo". `1` (o
+     * ausente) significa escala histórica y se persiste como `null`.
+     */
+    priceUnitQuantity?: number;
     unitBasePrice: number;
     finalUnitPrice: number;
     taxInfo: {
@@ -2402,6 +2453,13 @@ export class PaymentsService {
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
       stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
+      // QUI-648 — escala del precio al momento de vender. Solo se guarda
+      // cuando realmente hay escala: `null` es "una unidad de stock = una
+      // unidad de precio", que es todo el catálogo histórico.
+      price_unit_quantity:
+        params.priceUnitQuantity != null && params.priceUnitQuantity > 1
+          ? params.priceUnitQuantity
+          : null,
       // Plan KDS fire-flows: persistir la marca de "usar stock" del cajero.
       // Solo aplica a líneas `product_type='prepared'`; para el resto se
       // ignora. Default false para preservar el comportamiento retail.
@@ -2602,10 +2660,15 @@ export class PaymentsService {
             )
           );
         }
+        // Idem `createOrUpdateOrderFromPos`: `tax_amount_item` es por unidad
+        // de PRECIO, no por unidad de stock (QUI-648).
         const multiplier =
           Number((item as any).weight || 0) > 0
             ? 1
-            : Number(item.quantity || 1);
+            : resolvePriceUnits(
+                Number(item.quantity || 1),
+                (item as any).price_unit_quantity,
+              );
         return sum + Number(item.tax_amount_item || 0) * multiplier;
       }, 0),
     );
@@ -2997,8 +3060,17 @@ export class PaymentsService {
               );
             }
 
+            // `tax_amount_item` es el impuesto de UNA unidad de precio, así
+            // que el multiplicador tiene que ser el mismo que usó el total de
+            // la línea: la cantidad convertida por la escala (QUI-648). Con
+            // escala 1 —o `null`— vuelve a ser la cantidad de siempre.
             const multiplier =
-              Number(item.weight || 0) > 0 ? 1 : Number(item.quantity || 1);
+              Number(item.weight || 0) > 0
+                ? 1
+                : resolvePriceUnits(
+                    Number(item.quantity || 1),
+                    item.price_unit_quantity,
+                  );
             return sum + Number(item.tax_amount_item || 0) * multiplier;
           }, 0),
         );
