@@ -296,5 +296,32 @@
         <strong>+57</strong>) para que el número quede completo.
       </p>
     </div>
+
+    <!-- Vencimientos de Cuentas por Pagar -->
+    <div>
+      <h4 class="section-kicker">
+        <app-icon name="calendar-clock" [size]="13"></app-icon>
+        <span>Vencimientos de Cuentas por Pagar</span>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">
+          Para toda la tienda
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        Con cuántos días de anticipación se avisa que una cuota a un proveedor
+        está por vencer. El aviso de la cuota <strong>ya vencida</strong> se
+        sigue enviando siempre, sin importar este valor.
+      </p>
+      <div class="max-w-sm">
+        <app-input
+          [formControl]="apDueSoonDaysControl"
+          type="number"
+          label="Aviso de vencimiento CxP (días antes)"
+          [min]="0"
+          [max]="30"
+          helperText="Anticipación del aviso de pago a proveedor por vencer"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      </div>
+    </div>
   </div>
 </div>

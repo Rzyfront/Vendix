@@ -52,6 +52,11 @@ export interface NotificationsSettings {
   sound_id?: string | null;
   sound_volume?: number;
   sound_muted?: boolean;
+  /**
+   * Anticipación del aviso de vencimiento de cuotas de CxP, en días (0-30).
+   * La consume el cron `ApDueNotificationsJob` por tienda.
+   */
+  ap_due_soon_days?: number;
 }
 
 /**
@@ -247,6 +252,10 @@ export class NotificationsSettingsForm implements OnInit {
       Validators.min(0),
       Validators.max(100),
     ]),
+    ap_due_soon_days: new FormControl<number>(1, [
+      Validators.min(0),
+      Validators.max(30),
+    ]),
   });
 
   // Typed getters for FormControls
@@ -300,6 +309,10 @@ export class NotificationsSettingsForm implements OnInit {
 
   get soundVolumeControl(): FormControl<number> {
     return this.form.get('sound_volume') as FormControl<number>;
+  }
+
+  get apDueSoonDaysControl(): FormControl<number> {
+    return this.form.get('ap_due_soon_days') as FormControl<number>;
   }
 
   get isSoundMuted(): boolean {
