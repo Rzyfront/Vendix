@@ -15,6 +15,50 @@ import {
   isActionableCheck,
 } from '../providers/fiscal-production-readiness.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
+import {
+  DIAN_CONFIGURATION_TYPES,
+  defaultDocumentTypeFor,
+  documentTypesFor,
+  requirementsFor,
+  type DianConfigurationType,
+} from '../fiscal-document-requirements';
+import type {
+  FiscalReadinessAxis,
+  FiscalReadinessResponse,
+} from './dto/fiscal-readiness.dto';
+
+/**
+ * Lo que `getFiscalReadiness` selecciona de `dian_configurations`.
+ *
+ * Se declara explícito —y no se infiere del `select`— para que quitar un campo
+ * de la consulta rompa la COMPILACIÓN y no la evaluación en producción.
+ * `enablement_evidence` y `last_test_result` son los dos que más caro cuesta
+ * olvidar: sin la evidencia, `resolveTestSetProof` cae al último lote y lee «no
+ * pasó» sobre una habilitación que la DIAN ya concedió.
+ */
+type FiscalReadinessConfigRow = {
+  id: number;
+  organization_id: number;
+  store_id: number | null;
+  accounting_entity_id: number;
+  configuration_type: DianConfigurationType;
+  operation_mode: string;
+  environment: string;
+  enablement_status: string;
+  software_id: string | null;
+  software_pin_encrypted: string | null;
+  certificate_s3_key: string | null;
+  certificate_password_encrypted: string | null;
+  certificate_kms_key_id: string | null;
+  certificate_expiry: Date | null;
+  certificate_fingerprint: string | null;
+  certificate_nit: string | null;
+  enablement_evidence: unknown;
+  test_set_id: string | null;
+  last_test_result: unknown;
+  nit: string | null;
+  nit_dv: string | null;
+};
 
 @Injectable()
 export class DianConfigService {
@@ -360,8 +404,38 @@ export class DianConfigService {
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined)
+    // `environment` NO SUBE A PRODUCCIÓN POR AQUÍ.
+    //
+    // El camino correcto es `promoteToProduction`, que exige `readiness.ready` y
+    // escribe TRES cosas: `environment`, `enablement_status: 'enabled'` y
+    // `enabled_at`. Este PATCH plano escribía solo la primera, así que dejaba la
+    // configuración apuntando a `vpfe.dian.gov.co` con `enablement_status` todavía
+    // en habilitación — y la emisión acepta ese estado. Resultado: cada documento
+    // se rechazaba por software no habilitado, gastando un consecutivo autorizado
+    // irrecuperable por intento.
+    //
+    // Bajar a 'test' sí se permite: apunta al endpoint de pruebas, no puede
+    // producir una emisión productiva falsa, y es el camino para repetir la
+    // habilitación.
+    //
+    // Y solo se bloquea el CAMBIO real: si ya está en producción, reenviar
+    // 'production' es un no-op. Rechazarlo sin esa condición rompería cualquier
+    // PATCH del formulario que devuelva el objeto completo con su valor actual.
+    if (dto.environment !== undefined) {
+      if (
+        dto.environment === 'production' &&
+        config.environment !== 'production'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_ENABLEMENT_001,
+          'El paso a producción no se hace editando la configuración. Usa ' +
+            'promoteToProduction, que verifica la habilitación (readiness) y marca ' +
+            'enablement_status antes de cambiar el ambiente.',
+          { dian_configuration_id: config.id, attempted: dto.environment },
+        );
+      }
       update_data.environment = dto.environment;
+    }
     if (dto.test_set_id !== undefined)
       update_data.test_set_id = dto.test_set_id;
     // Empty string means "go back to in-process custody", so it must reach the
@@ -498,10 +572,31 @@ export class DianConfigService {
     }
 
     if (status === 'enabled') {
-      this.readiness.assertProductionReady({
-        ...config,
-        enablement_status: status,
-      });
+      // `enabled` REGISTRA UN HECHO DE LA DIAN, no concede permiso de emitir.
+      //
+      // Aquí se exigía `assertProductionReady`, que incluye tener la resolución de
+      // numeración de PRODUCCIÓN. La DIAN separa las dos cosas y su propio correo de
+      // habilitación lo dice: «ha finalizado el proceso de pruebas y actualmente se
+      // encuentra en estado habilitado», y a continuación pide, como paso
+      // POSTERIOR, «asociar y crear la numeración necesaria». Exigir la numeración
+      // para registrar el estado dejaba al campo incapaz de expresar la realidad:
+      // la plataforma estaba habilitada por la DIAN y en base seguía en
+      // `test_set_passed`.
+      //
+      // La compuerta de emisión productiva no se relaja: sigue en
+      // `promoteToProduction`, que exige `readiness.ready`, y en el gate que corre
+      // antes de cada emisión. Lo que se separa es el REGISTRO del hecho.
+      // Sobre la prueba DURABLE. Con el último lote, un reenvío fallido posterior
+      // impedía marcar `enabled` una configuración que la DIAN ya había aprobado —
+      // y descartar ese lote la degradaba, que es lo que pasó el 2026-08-09.
+      if (!this.readiness.hasPassedTestSetForConfig(config)) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_ENABLEMENT_001,
+          'No se puede marcar la configuración como habilitada: la DIAN todavía no ' +
+            'aprobó el set de pruebas. Ejecuta el set y espera su veredicto.',
+          { dian_configuration_id: config.id },
+        );
+      }
     }
 
     return this.prisma.dian_configurations.update({
@@ -614,10 +709,28 @@ export class DianConfigService {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    // La clave técnica del rango la asigna la DIAN por NIT: si está compartida con
+    // otro NIT, el CUFE que calculamos no coincide con el que la DIAN recomputa y
+    // el documento se rechaza con el consecutivo gastado. Se resuelve antes de
+    // evaluar porque el evaluador es sincrónico por diseño.
+    const shared_technical_key =
+      await this.readiness.findResolutionsSharingTechnicalKey(
+        {
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type: config.configuration_type,
+        },
+        // La evaluación se hace COMO SI fuera producción, así que el detector
+        // también: en habilitación la ClTec compartida es lo normal.
+        'production',
+      );
+
     const report = this.readiness.evaluateProductionReadiness({
       ...config,
       environment: 'production',
       enablement_status: 'enabled',
+      shared_technical_key,
     });
 
     const resolutions = await this.prisma.invoice_resolutions.findMany({
@@ -694,6 +807,206 @@ export class DianConfigService {
         is_habilitacion_range: isHabilitacionResolution(r.prefix),
         is_expired: r.valid_to < now,
         is_exhausted: r.current_number >= r.range_to,
+      })),
+    };
+  }
+
+  /**
+   * Estado agregado de LAS CUATRO habilitaciones DIAN de la entidad fiscal.
+   *
+   * ## Qué contesta que `:id/production-readiness` no puede
+   *
+   * El checklist por `configId` exige saber de antemano que la configuración
+   * existe. Los ejes que todavía NO se han configurado no tienen id por el que
+   * preguntar, así que la pregunta que el comerciante realmente se hace al
+   * abrir el panel —«¿qué me falta en cada eje?»— no tenía endpoint.
+   *
+   * La consecuencia no era teórica: el documento soporte, la nómina y el
+   * documento equivalente quedaban invisibles hasta que alguien los creaba, y
+   * nadie los creaba porque no se veían. Por eso LOS CUATRO EJES SE DEVUELVEN
+   * SIEMPRE y el que no tiene configuración se reporta con
+   * `enablement_status: 'not_started'` y `config_id: null` — un eje ausente de
+   * la lista se lee como «no aplica», que es exactamente la lectura errónea
+   * que hay que evitar.
+   *
+   * La lista de ejes sale de `DIAN_CONFIGURATION_TYPES`, no de un literal
+   * local: añadir una habilitación al enum de Prisma la hace aparecer aquí
+   * sola, sin que nadie tenga que acordarse de esta pantalla.
+   */
+  async getFiscalReadiness(): Promise<FiscalReadinessResponse> {
+    const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    // MISMO predicado que `getConfigs`. Es el que decide de quién es la
+    // configuración: con `fiscal_scope=ORGANIZATION` vive en la organización
+    // (`store_id: null`) y con `STORE` cuelga de la tienda del contexto.
+    // Saltárselo mostraría la habilitación de una tienda dentro de otra.
+    const configs = await this.prisma
+      .withoutScope()
+      .dian_configurations.findMany({
+        where:
+          fiscalScope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id },
+        orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
+        // Selección explícita y no la fila entera: deja auditable que
+        // `enablement_evidence` y `last_test_result` viajan (los exige
+        // `resolveTestSetProof`; sin la evidencia caería al último lote y
+        // leería «no pasó» sobre una habilitación ya concedida) y que los dos
+        // secretos cifrados se leen SOLO para comprobar su presencia — nunca
+        // se copian a la respuesta, que solo lleva el informe de booleanos.
+        select: {
+          id: true,
+          organization_id: true,
+          store_id: true,
+          accounting_entity_id: true,
+          configuration_type: true,
+          operation_mode: true,
+          environment: true,
+          enablement_status: true,
+          software_id: true,
+          software_pin_encrypted: true,
+          certificate_s3_key: true,
+          certificate_password_encrypted: true,
+          certificate_kms_key_id: true,
+          certificate_expiry: true,
+          certificate_fingerprint: true,
+          certificate_nit: true,
+          enablement_evidence: true,
+          test_set_id: true,
+          last_test_result: true,
+          nit: true,
+          nit_dv: true,
+        },
+      });
+
+    const axes = await Promise.all(
+      DIAN_CONFIGURATION_TYPES.map((configuration_type) =>
+        this.buildFiscalReadinessAxis(
+          configuration_type,
+          // `find` sobre la lista YA ordenada: la predeterminada primero y, a
+          // igualdad, la más antigua. Mismo criterio de desempate que
+          // `getConfigs`, para que el panel y el listado no señalen a
+          // configuraciones distintas cuando un eje tiene varias.
+          configs.find((c) => c.configuration_type === configuration_type) ??
+            null,
+        ),
+      ),
+    );
+
+    return { fiscal_scope: fiscalScope, axes };
+  }
+
+  /** Un eje del estado fiscal agregado. Ver {@link getFiscalReadiness}. */
+  private async buildFiscalReadinessAxis(
+    configuration_type: DianConfigurationType,
+    config: FiscalReadinessConfigRow | null,
+  ): Promise<FiscalReadinessAxis> {
+    // El rótulo se deriva del contrato en vez de escribirse aquí: un rótulo
+    // duplicado es un rótulo que termina desincronizado. El documento por
+    // defecto del eje es el que lo representa (`equivalent_document` →
+    // «Documento equivalente POS», nunca la factura de venta).
+    const label = requirementsFor(
+      defaultDocumentTypeFor(configuration_type),
+    ).label;
+
+    if (!config) {
+      return {
+        configuration_type,
+        label,
+        config_id: null,
+        environment: null,
+        // EXISTE y está sin empezar. No es lo mismo que no aparecer.
+        enablement_status: 'not_started',
+        readiness: null,
+        resolutions: [],
+      };
+    }
+
+    // La ClTec del rango la asigna la DIAN por NIT y alimenta el CUFE: si está
+    // compartida con otro NIT, el CUFE que calculamos no coincide con el que la
+    // DIAN recomputa y el documento se rechaza con el consecutivo ya gastado.
+    //
+    // Se resuelve AQUÍ y se pasa como dato porque `evaluateProductionReadiness`
+    // es sincrónico a propósito. Omitirlo lo dejaría en `undefined`, que la
+    // comprobación distingue de `null`: `null` es «comprobado y limpio»,
+    // `undefined` es «no comprobado» y falla en abierto.
+    const shared_technical_key =
+      await this.readiness.findResolutionsSharingTechnicalKey(
+        {
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type,
+        },
+        // Se evalúa COMO SI fuera producción, así que el detector también: en
+        // habilitación la DIAN reparte la MISMA ClTec de prueba a todos y
+        // compartirla ahí no es un hallazgo.
+        'production',
+      );
+
+    const readiness = this.readiness.evaluateProductionReadiness({
+      ...config,
+      // Igual que `getProductionReadiness`: se evalúa como si el eje ya
+      // estuviera promovido, para que el comerciante vea lo que le falta
+      // ADEMÁS de la promoción misma y no una lista que se resuelve sola.
+      environment: 'production',
+      enablement_status: 'enabled',
+      shared_technical_key,
+    });
+
+    // TODOS los documentos que cubre el eje, vía contrato: la habilitación de
+    // facturación numera factura, nota crédito y nota débito, y mostrar solo la
+    // factura escondería justo el rango que falta.
+    const resolutions = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findMany({
+        // Filtro de tenant EXPLÍCITO: `withoutScope()` no aplica ninguno, y la
+        // entidad contable sale de una configuración que el predicado fiscal de
+        // arriba ya acotó a este comerciante.
+        where: {
+          organization_id: config.organization_id,
+          accounting_entity_id: config.accounting_entity_id,
+          document_type: { in: documentTypesFor(configuration_type) },
+        },
+        select: {
+          id: true,
+          document_type: true,
+          // Ambos viajan porque el formulario de edición los EXIGE: sin ellos
+          // el host tendría que pedir `GET resolutions` sólo para rellenarlos, o
+          // —peor— el comerciante reteclearía a mano el número que la DIAN
+          // autorizó. Ninguno es secreto; el único que no sale es la ClTec.
+          resolution_number: true,
+          resolution_date: true,
+          prefix: true,
+          range_from: true,
+          range_to: true,
+          current_number: true,
+          valid_from: true,
+          valid_to: true,
+          is_active: true,
+          technical_key: true,
+        },
+        orderBy: [{ document_type: 'asc' }, { id: 'desc' }],
+      });
+
+    return {
+      configuration_type,
+      label,
+      config_id: config.id,
+      // El estado REAL, no el hipotético con el que se evaluó el checklist.
+      environment: config.environment,
+      enablement_status: config.enablement_status,
+      readiness,
+      resolutions: resolutions.map(({ technical_key, ...rest }) => ({
+        ...rest,
+        // La ClTec se ELIMINA, no se enmascara: quien la tiene puede
+        // reconstruir la huella fiscal del comerciante. Solo viaja su
+        // presencia. Mismo criterio que `tenant-resolutions.controller.ts`.
+        technical_key_set: Boolean(technical_key),
       })),
     };
   }

@@ -41,6 +41,14 @@ export interface VexiStreamIntent {
    * switch modes between turns of the same conversation.
    */
   speak?: boolean;
+  /**
+   * Replay of a turn whose transport dropped before it produced anything.
+   *
+   * Tells `sendMessageStream` the `user` row already exists. Necessary because
+   * that row is written before the model is called, so a turn that died mid-flight
+   * left it behind and a retry would duplicate the person's question.
+   */
+  skip_user_message?: boolean;
 }
 
 /**

@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   OnInit,
   computed,
   effect,
@@ -9,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ReactiveFormsModule,
   FormGroup,
@@ -82,8 +84,46 @@ export class GeneralSettingsForm implements OnInit {
   readonly panelUi = input<PanelUISettings | undefined>(undefined);
   readonly panelUiChange = output<PanelUISettings | undefined>();
 
+  /**
+   * Valor actual del sub-grupo `services`.
+   *
+   * OPCIONAL a propósito: el otro consumidor de este formulario
+   * (`store-configuration-modal`) sólo cablea `[settings]` y `(settingsChange)`
+   * y no debe romperse ni necesitar cambios.
+   *
+   * Existe porque Configuración General se partió en rutas hijas: el padre ya no
+   * puede leer `form.get('services')` por `viewChild` en el momento de guardar
+   * —el formulario está desmontado si el usuario está en otra pestaña—, así que
+   * el valor se empuja al store en cuanto cambia.
+   */
+  readonly servicesValueChange = output<any>();
+
+  /**
+   * Validez del formulario completo. OPCIONAL, por lo mismo que arriba.
+   *
+   * El padre la necesita para decidir si abortar el guardado sin tener el
+   * componente montado. `form.valid` es una propiedad, no una señal, así que se
+   * puentea desde `statusChanges` (más los puntos donde el patch la cambia con
+   * `emitEvent: false` y no habría emisión).
+   */
+  readonly formValidityChange = output<boolean>();
+
+  /**
+   * Contador que el padre incrementa para pedir que el formulario marque todos
+   * sus controles como touched+dirty y así se pinten los mensajes de error.
+   *
+   * Es un contador y no un booleano para que dos intentos de guardado seguidos
+   * vuelvan a pedirlo. Arranca en 0 = nadie lo pidió, que es lo que ve el
+   * consumidor que no cablea el input.
+   */
+  readonly markTouchedRequest = input<number>(0);
+
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  /** Última validez emitida, para no repetir emisiones idénticas. */
+  private lastEmittedValidity: boolean | null = null;
 
   readonly modulesHiddenByIndustries = signal<string[]>([]);
 
@@ -160,6 +200,19 @@ export class GeneralSettingsForm implements OnInit {
       this.modulesHiddenByIndustries.set(
         getModulesHiddenByIndustries(sanitized.industries),
       );
+
+      // El patch usa `emitEvent: false`, así que `statusChanges` NO emite y el
+      // padre se quedaría con la validez previa al patch. Se publica a mano.
+      this.emitFormValidity();
+    });
+
+    // El padre pide marcar touched cuando aborta un guardado por formulario
+    // inválido. El contador arranca en 0 (nadie lo pidió); un valor > 0 al
+    // montar es legítimo — significa que el padre navegó hasta acá justamente
+    // para que se vean los errores.
+    effect(() => {
+      if (this.markTouchedRequest() === 0) return;
+      this.markAllAsTouched(this.form);
     });
 
     // Propagate changes from the services sub-form up to the parent's
@@ -177,6 +230,11 @@ export class GeneralSettingsForm implements OnInit {
     this.servicesForm.valueChanges
       .pipe(debounceTime(50))
       .subscribe(() => {
+        // `services` viaja aparte de las secciones de primer nivel, así que el
+        // padre lo necesita aunque el formulario completo esté inválido: sin
+        // esto, un guardado desde otra pestaña persistiría el valor rancio.
+        this.servicesValueChange.emit(this.servicesForm.value);
+        this.emitFormValidity();
         if (this.form.valid) {
           this.settingsChange.emit(this.form.value);
         }
@@ -292,7 +350,44 @@ export class GeneralSettingsForm implements OnInit {
   }
 
   async ngOnInit() {
+    // En ngOnInit y no en el constructor: los outputs del componente todavía no
+    // están cableados cuando corre el constructor y la primera emisión se
+    // perdería.
+    this.emitFormValidity();
+    this.form.statusChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.emitFormValidity());
+
     await this.loadCurrencies();
+  }
+
+  /** Publica `form.valid` sólo cuando cambió respecto de la última emisión. */
+  private emitFormValidity(): void {
+    const valid = this.form.valid;
+    if (this.lastEmittedValidity === valid) return;
+    this.lastEmittedValidity = valid;
+    this.formValidityChange.emit(valid);
+  }
+
+  /**
+   * Marca recursivamente todos los controles del formulario (y de sus
+   * sub-grupos) como touched + dirty para que afloren los mensajes de error bajo
+   * cada campo inválido.
+   *
+   * Vivía en el padre, que la invocaba a través del `viewChild` justo antes de
+   * mostrar el toast de 'formulario incompleto'. Con Configuración General
+   * partida en rutas hijas el padre ya no tiene esa referencia, así que la
+   * responsabilidad baja al formulario y se dispara por `markTouchedRequest`.
+   */
+  private markAllAsTouched(form: FormGroup): void {
+    form.markAllAsTouched();
+    Object.values(form.controls).forEach((ctrl) => {
+      if (ctrl instanceof FormGroup) {
+        this.markAllAsTouched(ctrl);
+      } else {
+        ctrl.markAsDirty();
+      }
+    });
   }
 
   async loadCurrencies() {
@@ -330,6 +425,7 @@ export class GeneralSettingsForm implements OnInit {
     this.modulesHiddenByIndustries.set(
       getModulesHiddenByIndustries(this.industriesControl.value),
     );
+    this.emitFormValidity();
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
     }

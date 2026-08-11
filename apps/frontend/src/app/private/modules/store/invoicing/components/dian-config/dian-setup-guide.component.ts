@@ -1,6 +1,9 @@
 import { Component, computed, input } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { DianConfig } from '../../interfaces/invoice.interface';
+import {
+  DianConfig,
+  InvoiceResolution,
+} from '../../interfaces/invoice.interface';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   BadgeComponent,
@@ -30,6 +33,18 @@ interface TestResultEvidence {
   zip_key?: string | null;
   executed_at?: string | null;
 }
+
+/**
+ * `invoice_resolutions.document_type` existe en la base con default
+ * `sales_invoice` y el backend lo devuelve, pero `InvoiceResolution` todavía no
+ * lo declara. Se ensancha acá —sin tocar el contrato compartido— y una
+ * resolución sin el campo se lee como factura de venta, que es el default de la
+ * columna: comparar en estricto contra un campo que el tipo no declara
+ * reproduciría el mismo paso gris que este arreglo elimina.
+ */
+type ResolutionWithDocumentType = InvoiceResolution & {
+  document_type?: string | null;
+};
 
 /**
  * Guía contextual de habilitación DIAN para tiendas.
@@ -102,6 +117,29 @@ interface TestResultEvidence {
 export class DianSetupGuideComponent {
   readonly config = input.required<DianConfig | null>();
 
+  /**
+   * Resoluciones del tenant. Opcional a propósito: hoy hay consumidores que sólo
+   * pasan «config», y no deben perder nada por no pasarla.
+   */
+  readonly resolutions = input<InvoiceResolution[]>([]);
+
+  /**
+   * ¿El tenant tiene resolución de numeración de factura de venta vigente?
+   *
+   * POR QUÉ NO SE MIRA «last_test_result»: esa es evidencia del último envío, no
+   * del tenant. Un tenant con tres resoluciones activas cuyo último lote no
+   * persistió «resolution_id» veía este paso gris mientras el de conexión y firma
+   * salía verde — un lote firmado y enviado sin resolución es imposible, así que
+   * la guía se contradecía a sí misma.
+   */
+  private readonly hasSalesInvoiceResolution = computed(() =>
+    (this.resolutions() as ResolutionWithDocumentType[]).some(
+      (r) =>
+        r.is_active === true &&
+        (r.document_type ?? 'sales_invoice') === 'sales_invoice',
+    ),
+  );
+
   readonly checklist = computed<ChecklistItem[]>(() => {
     const cfg = this.config();
     // `last_test_result` es la única evidencia DURABLE de haber llegado a hablar
@@ -136,7 +174,9 @@ export class DianSetupGuideComponent {
       },
       {
         label: 'Resolución de numeración asignada',
-        done: !!test?.resolution_id,
+        // El respaldo sobre «last_test_result» se conserva para el consumidor que
+        // no pasa «resolutions»: sin él, ese consumidor quedaría peor que antes.
+        done: this.hasSalesInvoiceResolution() || !!test?.resolution_id,
       },
       {
         // Evidencia MÁS fuerte que el test de conexión, que da por «conectado» un

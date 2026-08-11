@@ -7,6 +7,14 @@ import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { BullModule } from '@nestjs/bullmq';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+// Reutilizado tal cual, igual que `DianTestService`: la plataforma necesita el
+// MISMO reporte de readiness y la MISMA guarda de promoción que un tenant, y
+// duplicarlos fue justo lo que dejó al riel de plataforma promoviendo a
+// producción sin comprobar que la DIAN aprobó su set de habilitación.
+import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+// `DianConfigService` la necesita en su constructor. `EncryptionService`, su otra
+// dependencia, ya llega por `EncryptionModule`, que es @Global.
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 // Reused as-is from the store domain: the scanner is stateless and only needs
 // AIEngineService (a @Global() provider), so the platform gets the same
 // extraction and the same validation rules instead of a second copy.
@@ -34,6 +42,8 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
   providers: [
     ManualCertificateIssuerAdapter,
     DianTestService,
+    DianConfigService,
+    FiscalScopeService,
     ResolutionScannerService,
     PlatformOrgService,
     FiscalProductionReadinessService,

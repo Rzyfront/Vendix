@@ -1,3 +1,5 @@
+import type { PrintFormat, PrintingSettings } from '@/shared/print/print-formats';
+
 export interface AppSettings {
   name: string;
   primary_color: string;
@@ -128,6 +130,35 @@ export interface ReceiptsSettings {
   email_receipt: boolean;
   receipt_header: string;
   receipt_footer: string;
+  /** Issue (and transmit) the electronic invoice right after the sale closes. */
+  auto_issue_invoice?: boolean;
+  /** Printed copies of the electronic invoice per sale. 0 = do not print. */
+  invoice_copies?: number;
+  /** Email the electronic invoice + its XML to the customer. */
+  send_invoice_email?: boolean;
+  /** Also print the POS ticket alongside the invoice (kitchen/warehouse copy). */
+  print_pos_ticket?: boolean;
+  /** Hand the printed graphic representation to the buyer. */
+  deliver_printed?: boolean;
+  /**
+   * @deprecated Superseded by `printing.invoice`. Kept so rows written before
+   * the per-document block stay valid.
+   */
+  invoice_format?: PrintFormat;
+  /**
+   * @deprecated Superseded by `printing.pos_ticket`. Still honoured as a
+   * fallback while stores are migrated.
+   */
+  pos_ticket_format?: PrintFormat;
+  /** @deprecated Superseded by `printing.pos_ticket.copies`. */
+  pos_ticket_copies?: number;
+  /**
+   * Per-document print configuration, per STORE — nothing is inherited from
+   * the organization. Absent entries fall back to `PRINT_DEFAULTS`. Lives under
+   * `receipts` rather than as a new top-level section because the backend's
+   * `KNOWN_SECTIONS` drops unknown sections while still answering 200.
+   */
+  printing?: PrintingSettings;
 }
 
 export interface StoreSettings {

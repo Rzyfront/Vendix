@@ -86,6 +86,51 @@ export class DianConfigApiService {
     );
   }
 
+  /**
+   * Alta de resolución de numeración.
+   *
+   * Va por `{rail}/resolutions`, igual que la lectura: el rail lo resuelve
+   * `DIAN_API_CONTEXT`, así que el MISMO formulario compartido escribe en la
+   * tienda del comerciante o en la del tenant abierto en la consola de super
+   * admin sin que el componente sepa cuál de las dos es.
+   *
+   * `payload` va sin tipar contra un DTO propio a propósito: el contrato lo
+   * declara `DianResolutionFormValue`
+   * (`shared/components/dian/dian-resolution-form/`), que ya usa los nombres de
+   * `CreateResolutionDto`. Duplicar aquí una interfaz paralela crearía un tercer
+   * sitio donde el contrato puede desincronizarse.
+   */
+  createResolution(payload: Record<string, unknown>): Observable<any> {
+    return this.http.post(this.getApiUrl('resolutions'), payload);
+  }
+
+  updateResolution(
+    id: number,
+    payload: Record<string, unknown>,
+  ): Observable<any> {
+    return this.http.patch(this.getApiUrl(`resolutions/${id}`), payload);
+  }
+
+  // ── Estado fiscal agregado ────────────────────────────────
+
+  /**
+   * Estado de las CUATRO habilitaciones DIAN de una vez, tenga configuración o
+   * no cada una.
+   *
+   * Existe porque `dian-config/:id/production-readiness` responde por `configId`
+   * y, para preguntarle algo, hay que saber ya que la configuración existe. Eso
+   * deja mudos justamente los ejes que nadie ha creado —documento soporte,
+   * nómina, documento equivalente—, que se vuelven invisibles en el panel y por
+   * eso nadie los crea. Este endpoint declara los cuatro siempre y reporta
+   * `not_started` en lugar de ausencia.
+   *
+   * Responde `{ success, data: FiscalReadinessResponse }`; el tipo del agregado
+   * vive en `shared/components/dian/fiscal-readiness.interface.ts`.
+   */
+  getFiscalReadiness(): Observable<any> {
+    return this.http.get(this.getApiUrl('dian-config/fiscal-readiness'));
+  }
+
   // ── DIAN Config ─────────────────────────────────────────
 
   getDianDashboard(): Observable<any> {

@@ -83,6 +83,88 @@ describe('SubscriptionStateService', () => {
     expect(result.state).toBe('pending_payment');
   });
 
+  // QUI-676 — every state that may legally ENTER pending_payment must be able
+  // to come back out of it, because the checkout paths write that origin state
+  // verbatim into `pending_revert_state` and the rollback paths have nothing
+  // else to go on. `trial` and `draft` were missing, so a trial conversion (or
+  // a first purchase) whose Wompi webhook never arrived could not be reverted:
+  // ReconcileStuckPendingJob threw "Illegal transition pending_payment ->
+  // trial" every 5 minutes and the store stayed parked in pending_payment.
+  describe('QUI-676 — pending_payment rollback symmetry', () => {
+    it.each([
+      ['trial', 'trial_conversion whose webhook never arrived'],
+      ['draft', 'first purchase abandoned before the gateway confirmed'],
+    ])(
+      'pending_payment → %s is legal and persists the revert',
+      async (revertState) => {
+        prismaMock.$queryRaw.mockResolvedValue([
+          { id: 100, state: 'pending_payment' },
+        ]);
+        prismaMock.store_subscriptions.update.mockResolvedValue({
+          id: 100,
+          state: revertState,
+        });
+
+        const result = await service.transition(10, revertState as any, {
+          reason: 'reconcile_stuck_pending_change',
+          triggeredByJob: 'reconcile-stuck-pending',
+        });
+
+        const updArg = prismaMock.store_subscriptions.update.mock.calls[0][0];
+        expect(updArg.data.state).toBe(revertState);
+
+        const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
+        expect(evtArg.data.from_state).toBe('pending_payment');
+        expect(evtArg.data.to_state).toBe(revertState);
+        expect(result.state).toBe(revertState);
+      },
+    );
+
+    it('does not throw SUBSCRIPTION_010 reverting pending_payment → trial', async () => {
+      prismaMock.$queryRaw.mockResolvedValue([
+        { id: 100, state: 'pending_payment' },
+      ]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 100,
+        state: 'trial',
+      });
+
+      await expect(
+        service.transition(10, 'trial', {
+          reason: 'reconcile_stuck_pending_change',
+        }),
+      ).resolves.toMatchObject({ state: 'trial' });
+    });
+
+    // The symmetry is the invariant, not the two literals above: assert it
+    // over the whole map so a future edge added into pending_payment without
+    // its way back fails here instead of in production.
+    it('every state that can enter pending_payment can also leave to it', () => {
+      const states = [
+        'draft',
+        'trial',
+        'active',
+        'pending_payment',
+        'grace_soft',
+        'grace_hard',
+        'suspended',
+        'blocked',
+        'cancelled',
+        'expired',
+        'no_plan',
+      ] as const;
+
+      const stranded = states.filter(
+        (s) =>
+          s !== 'pending_payment' &&
+          service.isLegalTransition(s, 'pending_payment') &&
+          !service.isLegalTransition('pending_payment', s),
+      );
+
+      expect(stranded).toEqual([]);
+    });
+  });
+
   it('legal transition active → grace_soft persists new state + creates event', async () => {
     prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'active' }]);
     prismaMock.store_subscriptions.update.mockResolvedValue({

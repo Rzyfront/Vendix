@@ -55,3 +55,194 @@
   flex-direction: column;
   gap: 12px;
 }
+
+// ─── Encabezado del toggle de política ──────────────────
+
+.policy-toggle__label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  cursor: help;
+  transition: color 160ms ease;
+
+  &:hover {
+    color: var(--color-info);
+  }
+}
+
+// ─── Comparativa ON / OFF ───────────────────────────────
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.policy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-neutral-100);
+  // La cara no vigente se atenúa: el operador debe distinguir de un vistazo
+  // bajo qué política está operando hoy, no leer las dos con el mismo peso.
+  opacity: 0.72;
+  transition: opacity 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+// `--color-primary` no compone con /opacity: para el borde suave se usa el
+// canal RGB del token, que sí acepta alfa.
+.policy-card--current {
+  opacity: 1;
+  border-color: rgba(var(--color-primary-rgb), 0.45);
+  background: var(--color-surface);
+}
+
+.policy-card__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.policy-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.policy-card--current .policy-card__icon {
+  color: var(--color-primary);
+}
+
+.policy-card__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.policy-card__effect {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.policy-card__tradeoff {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--color-text-secondary);
+  }
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
+
+.policy-card__gain app-icon {
+  color: var(--color-success);
+}
+
+.policy-card__cost app-icon {
+  color: var(--color-warning);
+}
+
+// ─── Ayuda colapsable ───────────────────────────────────
+
+.help-card-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--color-text-primary);
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--color-info);
+  }
+}
+
+.flow-help {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.flow-help__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+
+  app-icon {
+    color: var(--color-text-muted);
+  }
+}
+
+.flow-help__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+
+  strong {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+}
+
+.flow-help__note {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+
+  strong {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+  }
+}
+
+@media (min-width: 768px) {
+  .policy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -515,6 +515,26 @@
       color: var(--color-error);
     }
   }
+
+  /* QUI-653 — "Para llevar" en la fila. Va junto al nombre y no en la columna
+     de estado, porque no es un estado del item: es una propiedad de cómo se
+     entrega, y convive con el estado de cocina sin competir por el mismo hueco.
+     Se usa el shade del token en vez de primary/opacity porque `/opacity` no
+     compone sobre estas variables. */
+  .item-takeaway {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-left: 0.4rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.75rem;
+    background-color: var(--color-warning-100);
+    color: var(--color-warning-700);
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
 }
 
 @media (max-width: 640px) {

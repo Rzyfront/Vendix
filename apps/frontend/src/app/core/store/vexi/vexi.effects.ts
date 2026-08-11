@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
-import { Observable, interval, of } from 'rxjs';
+import { Observable, interval, of, timer } from 'rxjs';
 import {
   switchMap,
   map,
@@ -30,6 +30,17 @@ export class VexiEffects {
    * running for ten minutes costs 120 requests instead of 600.
    */
   private static readonly TASK_POLL_MS = 5000;
+
+  /**
+   * Wait before asking the server whether a dropped turn actually finished.
+   *
+   * The assistant row is written *after* the last frame is yielded, so querying
+   * the instant the socket dies races that write and would report a failure over
+   * a turn that completed a few milliseconds later. 700 ms is comfortably longer
+   * than that write and short enough that the person reads it as the answer
+   * arriving, not as a hang.
+   */
+  private static readonly RECONCILE_DELAY_MS = 700;
 
   /**
    * States after which nothing changes, so polling stops.
@@ -176,28 +187,126 @@ export class VexiEffects {
   sendMessage$ = createEffect(() =>
     this.actions$.pipe(
       ofType(VexiActions.sendMessage),
-      switchMap(({ conversationId, content, attachmentIds, speak }) =>
-        this.chatApi
-          .createStreamIntent(
-            conversationId,
-            content,
-            this.uiContext.build(),
-            attachmentIds,
-            speak,
-          )
-          .pipe(
-            switchMap((streamId) =>
-              this.streamTurn(conversationId, streamId, speak === true),
-            ),
-            startWith(VexiActions.streamStarted({ conversationId })),
-            catchError((error) =>
-              of(
-                VexiActions.sendMessageFailure({
-                  error: error?.message || 'No pude enviar el mensaje',
-                }),
+      switchMap(
+        ({
+          conversationId,
+          content,
+          attachmentIds,
+          speak,
+          isRetry,
+          skipUserMessage,
+        }) =>
+          this.chatApi
+            .createStreamIntent(
+              conversationId,
+              content,
+              this.uiContext.build(),
+              attachmentIds,
+              speak,
+              skipUserMessage,
+            )
+            .pipe(
+              switchMap((streamId) =>
+                this.streamTurn(
+                  conversationId,
+                  streamId,
+                  speak === true,
+                  isRetry === true,
+                ),
+              ),
+              startWith(VexiActions.streamStarted({ conversationId })),
+              catchError((error) =>
+                of(
+                  VexiActions.sendMessageFailure({
+                    error: error?.message || 'No pude enviar el mensaje',
+                  }),
+                ),
               ),
             ),
+      ),
+    ),
+  );
+
+  /**
+   * Decides what a dropped connection actually meant, before saying anything.
+   *
+   * Three outcomes, in the order they are checked, because each one is strictly
+   * better for the person than the next:
+   *
+   * 1. **The answer is already there.** The backend keeps draining its generator
+   *    after the browser disconnects, so a turn whose socket died late is usually
+   *    a turn that finished. The server's copy replaces the truncated buffer and
+   *    nothing is said — the person never learns there was a problem. This is the
+   *    common case, and reporting a failure over it was the actual bug.
+   * 2. **Nothing happened yet.** No text emitted, no tool run, and no reply
+   *    persisted: the turn is inert, so it is sent again silently. Bounded to one
+   *    attempt by `wasRetry`, and `skipUserMessage` keeps the replay from writing
+   *    the person's question a second time.
+   * 3. **It really broke.** Anything else — text half-emitted, a tool already
+   *    executed, a retry that dropped too. Those cannot be replayed without
+   *    duplicating an effect, so this is the only path that shows the notice.
+   *
+   * The small delay is not cosmetic: the assistant row is written *after* the last
+   * frame, so querying the instant the socket dies races the very write this is
+   * looking for and would send a finished turn down path 3.
+   */
+  streamDropped$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.streamDropped),
+      withLatestFrom(this.store.select(VexiSelectors.selectLastTurn)),
+      mergeMap(([drop, lastTurn]) =>
+        timer(VexiEffects.RECONCILE_DELAY_MS).pipe(
+          switchMap(() => this.chatApi.getConversation(drop.conversationId)),
+          mergeMap((conversation) => {
+            const messages = conversation.messages ?? [];
+            const last = messages[messages.length - 1];
+
+            // The turn completed. `loadMessagesSuccess` carries the real answer;
+            // `streamReconciled` drops the partial buffer and clears the spinner
+            // without ever setting `error`.
+            if (last?.role === 'assistant') {
+              return of(
+                VexiActions.loadMessagesSuccess({ messages }),
+                VexiActions.streamReconciled(),
+              );
+            }
+
+            const replayable =
+              !drop.emittedText &&
+              !drop.ranTools &&
+              !drop.wasRetry &&
+              lastTurn?.conversationId === drop.conversationId;
+
+            if (replayable && lastTurn) {
+              return of(
+                VexiActions.sendMessage({
+                  ...lastTurn,
+                  isRetry: true,
+                  // Only when the dead attempt got far enough to persist the
+                  // question. It writes that row before calling the model, so a
+                  // trailing `user` row is the evidence that it did.
+                  skipUserMessage: last?.role === 'user',
+                }),
+              );
+            }
+
+            return of(
+              VexiActions.streamError({
+                error: 'Se perdió la conexión con Vexi. Intenta de nuevo.',
+              }),
+            );
+          }),
+          // The reconciliation query itself failing says nothing new about the
+          // turn, so it falls back to the honest message rather than swallowing
+          // the drop.
+          catchError(() =>
+            of(
+              VexiActions.streamError({
+                error: 'Se perdió la conexión con Vexi. Intenta de nuevo.',
+              }),
+            ),
           ),
+        ),
       ),
     ),
   );
@@ -216,7 +325,7 @@ export class VexiEffects {
         this.facadeProposal$,
         this.store.select(VexiSelectors.selectActiveConversationId),
       ),
-      switchMap(([, proposal, conversationId]) => {
+      switchMap(([{ speak }, proposal, conversationId]) => {
         if (!proposal) {
           return of(
             VexiActions.confirmProposalFailure({
@@ -231,6 +340,7 @@ export class VexiEffects {
             proposal.arguments,
             proposal.confirmationToken,
             conversationId ?? undefined,
+            speak,
           )
           .pipe(
             map((result) =>
@@ -238,6 +348,14 @@ export class VexiEffects {
                 tool: proposal.tool,
                 output: result.output,
                 domain: proposal.preview?.domain,
+                // Falls back to the sentence the card was already showing. The
+                // tool is the better source — it re-computes against the values in
+                // force at confirm time — but a change that landed must always
+                // produce a visible acknowledgement, even from a tool that wrote
+                // no summary at all.
+                summary: result.summary ?? proposal.preview?.message ?? null,
+                audioBase64: result.audio_base64,
+                contentType: result.content_type,
               }),
             ),
             catchError((error) =>
@@ -256,6 +374,45 @@ export class VexiEffects {
   );
 
   /**
+   * Plays the spoken acknowledgement of an approved change.
+   *
+   * `dispatch: false` because there is no state to change: the visible turn was
+   * already appended by the reducer, and audio is browser state — an mp3 in the
+   * store is megabytes the devtools cannot render and nothing ever reads back.
+   *
+   * Goes through the same `startTurn` / `enqueue` / `finishTurn` sequence as a
+   * streamed turn, which buys the interruption semantics for free: claiming a turn
+   * id stops whatever was still playing. That is the behaviour you want — the
+   * person just approved something, so the acknowledgement is the newest thing to
+   * say and has to talk over the tail of the question that proposed it.
+   */
+  confirmProposalAudio$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(VexiActions.confirmProposalSuccess),
+        map(({ audioBase64, contentType }) => {
+          if (!audioBase64) return;
+
+          // Namespaced so it can never collide with a stream id: those are UUIDs
+          // minted by the server, and a collision would make the player drop this
+          // audio as belonging to an interrupted turn.
+          const turnId = `confirm-${Date.now()}`;
+          this.voice.startTurn(turnId);
+          this.voice.enqueue(turnId, {
+            index: 0,
+            audio_base64: audioBase64,
+            content_type: contentType ?? 'audio/mpeg',
+          });
+          // Immediately: a single segment turn has nothing more coming, and
+          // without this the player would hold it waiting for an index 1 that
+          // never arrives.
+          this.voice.finishTurn(turnId);
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  /**
    * Opens the EventSource and turns each frame into an action.
    *
    * Built by hand rather than with a helper because the teardown is the whole
@@ -265,6 +422,7 @@ export class VexiEffects {
     conversationId: number,
     streamId: string,
     speak = false,
+    isRetry = false,
   ): Observable<Action> {
     const url = this.chatApi.getStreamUrl(conversationId, streamId);
 
@@ -284,6 +442,16 @@ export class VexiEffects {
     return new Observable<Action>((subscriber) => {
       const source = new EventSource(url);
 
+      // Side effects this turn already produced, read only by `onerror`.
+      //
+      // They are what separates a drop that can be retried transparently from
+      // one that must not be: re-sending a turn that already ran a tool would
+      // run it twice, and re-sending one that already emitted text would
+      // duplicate the answer. A turn that dropped before either is inert, so
+      // replaying it costs a provider call and nothing else.
+      let emittedText = false;
+      let ranTools = false;
+
       source.addEventListener('ai-chunk', (event) => {
         let chunk: VexiStreamChunk;
         try {
@@ -295,6 +463,7 @@ export class VexiEffects {
         switch (chunk.type) {
           case 'text':
             if (chunk.content) {
+              emittedText = true;
               subscriber.next(
                 VexiActions.receiveStreamChunk({ content: chunk.content }),
               );
@@ -303,6 +472,7 @@ export class VexiEffects {
 
           case 'tool_call': {
             if (!chunk.tool) break;
+            ranTools = true;
             const { id, name, arguments: args } = chunk.tool;
             subscriber.next(
               VexiActions.toolCallStarted({ id, name, arguments: args }),
@@ -446,13 +616,39 @@ export class VexiEffects {
         }
       });
 
-      // Transport-level failure. EventSource retries by itself, which for an
-      // agent turn means re-running tools, so the connection is closed here
-      // and the user is told instead.
+      // Transport-level failure — and NOT, by itself, a failed turn.
+      //
+      // The connection dying says nothing about whether the answer exists: the
+      // backend keeps draining its generator after the browser goes away
+      // (`ai-chat.controller.ts`) precisely so the assistant reply and its tool
+      // trace still get persisted. Announcing an error here was reporting a
+      // failure over a turn that had already finished — the most common shape of
+      // it being a spoken turn whose text was complete and whose synthesis tail
+      // was the quiet stretch an idle timeout cut through.
+      //
+      // So this reports the *drop*, and the reconciliation effect decides what it
+      // meant. `EventSource` is still not allowed to reconnect on its own: the
+      // intent is single-use, so its retry would be answered with "la sesión ya
+      // se consumió", and a replay that did work could re-run tools.
       source.onerror = () => {
+        // Releases the player before anything else. Without this the queue keeps
+        // waiting on an index that will never arrive and holds every segment
+        // behind the gap — audio that was already synthesized and paid for, and
+        // the reason a cut turn sometimes went silent early instead of just
+        // ending. The `done` and `error` frames already did this; the transport
+        // path was the one exit that did not.
+        this.voice.finishTurn(streamId);
+
         subscriber.next(
-          VexiActions.streamError({
-            error: 'Se perdió la conexión con Vexi. Intenta de nuevo.',
+          VexiActions.streamDropped({
+            conversationId,
+            // What the turn already caused, which is what decides whether it can
+            // be retried. Tracked locally rather than read from the store: these
+            // describe this EventSource, and a turn the person interrupted must
+            // not be judged by the state of the one that replaced it.
+            emittedText,
+            ranTools,
+            wasRetry: isRetry,
           }),
         );
         subscriber.complete();

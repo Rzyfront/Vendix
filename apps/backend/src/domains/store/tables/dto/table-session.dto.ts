@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   Min,
@@ -66,6 +67,36 @@ export class TableSessionAddItemDto {
   @Type(() => Number)
   @Min(1)
   price_tier_id?: number;
+
+  /**
+   * QUI-653 — el plato se empaca y el cliente se lo lleva, aunque siga
+   * perteneciendo al pedido y a la cuenta de esta mesa. El resultado es un
+   * pedido mixto: parte se consume en la mesa, parte se lleva.
+   *
+   * NO se reinterpreta `orders.delivery_type`: es order-level y cambiarlo metria
+   * la orden en los flujos de remision, donde no tiene nada que hacer.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_takeaway?: boolean;
+
+  /**
+   * QUI-655 — insumos que el cliente pidio SIN, capturados al tomar el pedido.
+   *
+   * Es LA INTENCION, no el consumo: se registra lo que el mesero marco al agregar
+   * el plato ("sin papas"), y el KDS lo muestra tachado para que el cocinero lo
+   * vea sin tener que leer una nota. El consumo real se decide al confirmar en
+   * cocina, y puede diferir — esa diferencia es dato de auditoria.
+   *
+   * Opcional por diseno: los tres caminos de captura convergen en el modal de
+   * cocina y ninguno es obligatorio.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  excluded_component_ids?: number[];
 }
 
 /**

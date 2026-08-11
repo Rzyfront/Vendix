@@ -16,6 +16,8 @@ import { catchError, of, switchMap, tap } from 'rxjs';
 
 import {
   AiReviewAckComponent,
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
   BadgeComponent,
   BadgeVariant,
   ButtonComponent,
@@ -98,6 +100,7 @@ const ACCEPTED_MIMETYPES = [
     StepsLineComponent,
     CurrencyPipe,
     AiReviewAckComponent,
+    AiDiscardToggleComponent,
   ],
   template: `
     <app-modal
@@ -426,7 +429,7 @@ const ACCEPTED_MIMETYPES = [
             <div class="space-y-3">
               @for (m of editableMembers(); track m.row_number) {
                 <app-card [responsive]="true">
-                  <div class="space-y-3" [class.opacity-50]="m.excluded">
+                  <div class="space-y-3" [class]="m.excluded ? discardedRowClasses : ''">
                     <!-- Row header: name summary + status + exclude -->
                     <div class="flex items-start justify-between gap-2">
                       <div class="min-w-0">
@@ -449,14 +452,19 @@ const ACCEPTED_MIMETYPES = [
                         >
                           {{ m.status === 'ready' ? 'OK' : (m.status === 'warning' ? 'Revisar' : 'Error') }}
                         </app-badge>
-                        <label class="flex items-center gap-1 text-xs text-text-secondary cursor-pointer">
-                          <input
-                            type="checkbox"
-                            [checked]="m.excluded"
-                            (change)="onMemberExcludeToggle(m, $any($event.target).checked)"
-                          />
-                          Excluir
-                        </label>
+                        <!--
+                          QUI-644: mismo control de descarte que el resto de
+                          las precargas con IA. Reemplaza el checkbox "Excluir"
+                          propio de esta pantalla: la exclusión ya existía acá,
+                          pero con su propia implementación, que es exactamente
+                          lo que el componente compartido viene a unificar.
+                        -->
+                        <app-ai-discard-toggle
+                          [discarded]="!!m.excluded"
+                          [label]="memberName(m)"
+                          size="sm"
+                          (toggled)="onMemberExcludeToggle(m, !m.excluded)"
+                        ></app-ai-discard-toggle>
                         <button
                           type="button"
                           aria-label="Eliminar socio"
@@ -648,6 +656,9 @@ export class MemberBulkScannerModalComponent {
    * `requestAttention()` en vez de emitir el commit del roster.
    */
   readonly aiAck = signal(false);
+
+  /** QUI-644: clases compartidas de la fila descartada. */
+  protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
   private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
 
   /** Phase-1 upload state. */

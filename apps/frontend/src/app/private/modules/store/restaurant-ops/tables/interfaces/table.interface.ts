@@ -117,6 +117,12 @@ export interface TableSessionOrder {
    * contract (no "Cliente General" sentinel — true anonymous is `null`).
    */
   customer?: TableSessionCustomerRef | null;
+  /**
+   * QUI-653 — la orden tiene items para consumo en la mesa Y items para llevar.
+   * Es DERIVADO en el backend a partir de las líneas, no una columna: así no
+   * puede quedar desincronizado de ellas.
+   */
+  is_mixed_order?: boolean;
   order_items: TableSessionOrderItem[];
 }
 
@@ -134,6 +140,23 @@ export interface TableSessionOrderItem {
   unit_price: number | string;
   total_price: number | string;
   inventory_consumed_at_fire: boolean;
+  /**
+   * QUI-653 — el item se empaca y el cliente se lo lleva, aunque siga
+   * perteneciendo a la cuenta de esta mesa. La cabecera marca "pedido mixto"
+   * cuando la orden tiene items de los dos tipos.
+   */
+  is_takeaway: boolean;
+  /**
+   * QUI-652 — HECHO DE SERVICIO: ¿el cliente lo recibió? Es independiente del
+   * estado de cocina (¿se cocinó?) y aplica a TODO item, incluido el que nunca
+   * pasa por cocina. `null` = no entregado todavía.
+   *
+   * Antes la entrega vivía solo en `kitchen_ticket_items.status`, y como el fire
+   * excluye todo lo que no sea `prepared`, una cerveza en botella no tenía
+   * ningún estado de entrega alcanzable.
+   */
+  delivered_at: string | null;
+  delivered_by_user_id: number | null;
   /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
@@ -217,6 +240,13 @@ export interface TableSessionAddItem {
   product_variant_id?: number;
   quantity: number;
   price_tier_id?: number;
+  /**
+   * QUI-653 — el plato se empaca y el cliente se lo lleva, aunque siga
+   * perteneciendo a la cuenta de esta mesa. No se reinterpreta
+   * `orders.delivery_type`: es order-level y cambiarlo metería la orden en los
+   * flujos de remisión, donde no tiene nada que hacer.
+   */
+  is_takeaway?: boolean;
 }
 
 export type SplitMode = 'equal' | 'custom';

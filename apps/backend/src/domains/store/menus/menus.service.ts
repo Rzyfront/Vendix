@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -11,7 +12,10 @@ import {
 
 @Injectable()
 export class MenusService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   private requireStoreId(): number {
     const storeId = RequestContextService.getContext()?.store_id;
@@ -124,22 +128,36 @@ export class MenusService {
 
     // Aplana la imagen principal de cada producto (product_images[0]) a un
     // campo plano `image_url`, contrato que consume el builder de la carta.
+    //
+    // La key cruda de S3 se FIRMA antes de responder: el contrato S3 de Vendix
+    // guarda key en DB y firma al leer (ver `vendix-s3-storage`). Sin firmar,
+    // el <img> del builder no resuelve el recurso y cae al placeholder por
+    // defecto (QUI-643). `signUrl` es async, por eso los dos niveles de map
+    // pasan por `Promise.all`: un await dentro de un `.map()` síncrono
+    // devolvería `Promise[]` serializado como `{}`, no la URL.
     return {
       ...menu,
-      sections: menu.sections.map((section) => ({
-        ...section,
-        items: section.items.map((item) => {
-          if (!item.product) return item;
-          const { product_images, ...productRest } = item.product;
-          return {
-            ...item,
-            product: {
-              ...productRest,
-              image_url: product_images?.[0]?.image_url ?? null,
-            },
-          };
-        }),
-      })),
+      sections: await Promise.all(
+        menu.sections.map(async (section) => ({
+          ...section,
+          items: await Promise.all(
+            section.items.map(async (item) => {
+              if (!item.product) return item;
+              const { product_images, ...productRest } = item.product;
+              return {
+                ...item,
+                product: {
+                  ...productRest,
+                  image_url:
+                    (await this.s3Service.signUrl(
+                      product_images?.[0]?.image_url,
+                    )) ?? null,
+                },
+              };
+            }),
+          ),
+        })),
+      ),
     };
   }
 

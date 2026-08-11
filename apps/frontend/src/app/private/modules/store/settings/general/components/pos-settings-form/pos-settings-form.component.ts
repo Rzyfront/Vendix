@@ -1,4 +1,15 @@
-import { Component, OnInit, DestroyRef, effect, inject, input, output, signal, Injector } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  Injector,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -6,6 +17,11 @@ import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
+import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../../../../shared/components/tooltip/tooltip.component';
+import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   PosSettings,
   BusinessHours,
@@ -21,7 +37,16 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
-  imports: [ReactiveFormsModule, SettingToggleComponent, SelectorComponent],
+  imports: [
+    ReactiveFormsModule,
+    SettingToggleComponent,
+    SelectorComponent,
+    AlertBannerComponent,
+    BadgeComponent,
+    TooltipComponent,
+    ExpandableCardComponent,
+    IconComponent,
+  ],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })
@@ -29,6 +54,22 @@ export class PosSettingsForm implements OnInit {
   readonly settings = input.required<PosSettings>();
   readonly settingsLoaded = input<boolean>(false);
   readonly settingsChange = output<PosSettings>();
+
+  /**
+   * El esqueleto sólo tiene sentido mientras no hay datos que pintar.
+   *
+   * `settingsLoaded` es opcional y hay consumidores que no lo pasan (el modal de
+   * configuración de tienda de la organización), así que atarlo únicamente a esa
+   * bandera dejaba el formulario en esqueleto permanente aunque los ajustes ya
+   * hubieran llegado por `settings`. Se cae al dato real, que es la autoridad.
+   */
+  readonly showSkeleton = computed(
+    () => !this.settingsLoaded() && !this.settings(),
+  );
+
+  /** Bloques colapsados por defecto para que la vista de entrada sea corta. */
+  readonly scaleAdvancedOpen = signal(false);
+  readonly scheduleOpen = signal(false);
 
   private destroyRef = inject(DestroyRef);
 
@@ -271,9 +312,11 @@ export class PosSettingsForm implements OnInit {
 
   ngOnInit() {
     // Defer wiring until data is loaded so dependent controls don't react to
-    // null bootstrap values.
+    // null bootstrap values. `settings()` cuenta como dato cargado: hay
+    // consumidores que nunca pasan `settingsLoaded` y sin esa salida los
+    // controles dependientes jamás se enlazaban.
     effect(() => {
-      if (this.settingsLoaded() && !this.wireDone) {
+      if ((this.settingsLoaded() || !!this.settings()) && !this.wireDone) {
         this.wireDone = true;
         this.wireDependentControls();
       }
@@ -549,5 +592,41 @@ export class PosSettingsForm implements OnInit {
   canAddBlock(day: string): boolean {
     const blocks = this.getDayBlocks(day);
     return blocks.length < this.MAX_BLOCKS_PER_DAY;
+  }
+
+  /**
+   * Resumen legible de la semana para el encabezado del bloque colapsado, así
+   * el operador sabe qué horario tiene guardado sin abrirlo.
+   *
+   * Es un método y no un `computed`: la fuente es `form.get(...).value`, que no
+   * es señal — un `computed` se evaluaría una sola vez y mostraría siempre el
+   * horario inicial.
+   */
+  scheduleSummary(): string {
+    const isClosed = (key: string) =>
+      this.isCustomMode() ? this.isCustomDayClosed(key) : this.isDayClosed(key);
+
+    const openDays = this.daysOfWeek.filter((day) => !isClosed(day.key));
+    if (openDays.length === 0) return 'Todos los días cerrados';
+
+    const first = openDays[0];
+    const dayHours = this.form.get('business_hours')?.value?.[first.key];
+    const range = this.isCustomMode()
+      ? this.getDayBlocks(first.key)
+          .map((block) => `${block.open}–${block.close}`)
+          .join(' y ')
+      : dayHours
+        ? `${dayHours.open}–${dayHours.close}`
+        : '';
+
+    const closedLabels = this.daysOfWeek
+      .filter((day) => isClosed(day.key))
+      .map((day) => day.label);
+
+    const opened = `${openDays.length} ${openDays.length === 1 ? 'día abierto' : 'días abiertos'}`;
+    const sample = range ? ` · ${first.label} ${range}` : '';
+    const closed = closedLabels.length ? ` · Cierra ${closedLabels.join(', ')}` : '';
+
+    return `${opened}${sample}${closed}`;
   }
 }

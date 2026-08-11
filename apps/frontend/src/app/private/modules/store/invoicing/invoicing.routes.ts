@@ -58,9 +58,32 @@ export const invoicingRoutes: Routes = [
                     import('./components/resolutions/resolutions-page.component').then((c) => c.ResolutionsPageComponent),
             },
             {
+                // Las cuatro habilitaciones DIAN y, colgando de cada una, su
+                // detalle. El detalle es una RUTA y no un panel escondido:
+                // `app-table` envuelve su cuerpo en `@defer (on viewport)` y el
+                // IntersectionObserver no dispara bajo un ancestro con
+                // `display:none`, así que una sub-sección oculta se queda con el
+                // esqueleto para siempre. Además hace enlazable el estado de un
+                // eje concreto.
                 path: 'dian-config',
-                loadComponent: () =>
-                    import('./components/dian-config/dian-config.component').then((m) => m.DianConfigComponent),
+                children: [
+                    {
+                        path: '',
+                        pathMatch: 'full',
+                        // `axisDetailRoute` le dice a la vista de ejes que aquí
+                        // SÍ existe detalle por eje. No se asume: este mismo
+                        // componente lo monta la consola de super admin bajo su
+                        // propio árbol de rutas, donde ese hijo no existe.
+                        data: { axisDetailRoute: true },
+                        loadComponent: () =>
+                            import('./components/dian-config/dian-config.component').then((m) => m.DianConfigComponent),
+                    },
+                    {
+                        path: ':configurationType',
+                        loadComponent: () =>
+                            import('./components/dian-config/dian-axis-detail.component').then((m) => m.DianAxisDetailComponent),
+                    },
+                ],
             },
         ],
     },

@@ -20,6 +20,10 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  formatQuantityInSaleUnit,
+  resolveSaleUnitCodes,
+} from '../../products/services/sale-unit-display.util';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -61,12 +65,22 @@ export interface OrderExportRow {
 /**
  * One row per ORDER LINE. Carries NO order-level totals (that lives in
  * {@link OrderExportRow}); `order_number` is the join key back to the order.
+ *
+ * `quantity` viaja en la UNIDAD DE VENTA del producto (ver
+ * `sale-unit-display.util.ts`), no en la unidad mínima de inventario: un cable
+ * vendido "3 metros" sale como `3` + `unit: 'm'` y no como `3000`. Con eso la
+ * fila vuelve a ser aritméticamente cierta —`quantity × unit_price =
+ * line_total`—, que era imposible mientras la cantidad estuviera en milímetros
+ * y el precio en metros. Un producto sin unidad ni escala declaradas emite la
+ * misma cantidad de siempre y `unit` vacío.
  */
 export interface OrderItemExportRow {
   order_number: string;
   product_name: string;
   sku: string;
   quantity: number;
+  /** Unidad de venta de la fila (`m`, `g`, `Caja x 12`). Vacío = sin unidad. */
+  unit: string;
   unit_price: number;
   line_total: number;
 }
@@ -315,6 +329,9 @@ export class SalesAnalyticsService {
         const product = productMap.get(r.product_id as number);
         const revenue = Number(r._sum.total_price || 0);
         const units = Number(r._sum.quantity || 0);
+        // QUI-648: margen ya consistente — ver la nota de la rama no paginada.
+        // `avgPrice` sale de dividir por unidades de STOCK, la misma escala en
+        // la que vive `cost_price`; no se multiplica por `price_unit_quantity`.
         const costPrice = product ? Number(product.cost_price || 0) : 0;
         const avgPrice = units > 0 ? revenue / units : 0;
         const profitMargin =
@@ -399,6 +416,12 @@ export class SalesAnalyticsService {
       const product = productMap.get(r.product_id as number);
       const revenue = Number(r._sum.total_price || 0);
       const units = Number(r._sum.quantity || 0);
+      // QUI-648: este margen NO necesita corrección de escala. `avgPrice` es
+      // `revenue / units` con `units` en unidades de STOCK, así que ya es
+      // dinero por unidad mínima, la misma vara en la que `products.cost_price`
+      // guarda el promedio ponderado. El defecto de escala solo aparece cuando
+      // el costo se enfrenta a `base_price`, que cubre `price_unit_quantity`
+      // unidades (ver `ProductsAnalyticsService.costInPriceScale`).
       const costPrice = product ? Number(product.cost_price || 0) : 0;
       const avgPrice = units > 0 ? revenue / units : 0;
       const profitMargin =
@@ -1058,6 +1081,20 @@ export class SalesAnalyticsService {
     let truncated = false;
     let cursorId: number | undefined;
 
+    /**
+     * Contexto de unidad por línea, recogido durante el paginado y aplicado al
+     * final. Se difiere a propósito: resolver la unidad producto por producto
+     * dentro del bucle sería un N+1 sobre un export que puede traer 100.000
+     * órdenes; al final se resuelve todo el catálogo involucrado de una vez.
+     */
+    const unitContexts: Array<{
+      row: OrderItemExportRow;
+      productId: number | null;
+      lineScale: number | null;
+      stockUnitsConsumed: number | null;
+      presentationName: string | null;
+    }> = [];
+
     // Cursor pagination on the unique `id` (stable, unique) pulls the FULL range
     // without an offset penalty and without dropping rows silently.
     // eslint-disable-next-line no-constant-condition
@@ -1138,13 +1175,25 @@ export class SalesAnalyticsService {
         });
 
         for (const item of order.order_items) {
-          items.push({
+          const row: OrderItemExportRow = {
             order_number: order.order_number,
             product_name: item.product_name,
             sku: item.products?.sku || item.variant_sku || '',
             quantity: Number(item.quantity),
+            unit: '',
             unit_price: Number(item.unit_price),
             line_total: Number(item.total_price),
+          };
+          items.push(row);
+          unitContexts.push({
+            row,
+            productId: item.product_id ?? null,
+            // Snapshot de la línea, no el valor vigente del catálogo: si hoy se
+            // cambia la escala del producto, el reporte del año pasado tiene
+            // que seguir diciendo lo que dijo entonces.
+            lineScale: item.price_unit_quantity ?? null,
+            stockUnitsConsumed: item.stock_units_consumed ?? null,
+            presentationName: item.applied_price_tier_name_snapshot ?? null,
           });
         }
       }
@@ -1158,6 +1207,53 @@ export class SalesAnalyticsService {
       }
     }
 
+    await this.applySaleUnits(unitContexts);
+
     return { orders, items, truncated };
+  }
+
+  /**
+   * Reescribe `quantity` de cada línea a la unidad en que el producto se vende
+   * y llena `unit`. Se ejecuta una sola vez sobre todo el dataset del export.
+   *
+   * Las líneas cuyo producto no declara unidad ni escala no aparecen en el mapa
+   * y salen intactas: ese es el camino del catálogo mayoritario y la garantía
+   * de que el archivo de un comercio normal es byte a byte el de siempre.
+   */
+  private async applySaleUnits(
+    contexts: Array<{
+      row: OrderItemExportRow;
+      productId: number | null;
+      lineScale: number | null;
+      stockUnitsConsumed: number | null;
+      presentationName: string | null;
+    }>,
+  ): Promise<void> {
+    if (contexts.length === 0) return;
+
+    const saleUnits = await resolveSaleUnitCodes(
+      this.prisma as any,
+      contexts.map((c) => c.productId),
+    );
+
+    for (const context of contexts) {
+      const info =
+        context.productId != null ? saleUnits.get(context.productId) : undefined;
+
+      // Sin presentación, la escala manda: la del snapshot si la línea la
+      // guardó, y si no la vigente del producto (líneas anteriores a QUI-648).
+      const scale = context.lineScale ?? info?.priceUnitQuantity ?? null;
+
+      const display = formatQuantityInSaleUnit(context.row.quantity, {
+        priceUnitQuantity: scale,
+        stockUomCode: info?.stockUomCode,
+        saleUnitCode: info?.saleUnitCodeForScale(scale) ?? null,
+        presentationName: context.presentationName,
+        stockUnitsConsumed: context.stockUnitsConsumed,
+      });
+
+      context.row.quantity = display.value;
+      context.row.unit = display.suffix;
+    }
   }
 }

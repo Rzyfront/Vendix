@@ -42,6 +42,10 @@ export class StorePrismaService extends BasePrismaService {
     'cash_registers',
     'cash_register_sessions',
     'cash_register_movements',
+    // QUI-651 — estaciones de preparacion. Ambos tienen `store_id` propio, asi
+    // que el auto-scope por tienda aplica igual que en cash_registers.
+    'kds',
+    'kds_sessions',
     'layaway_plans',
     'exogenous_reports',
     'bookings',
@@ -1327,6 +1331,15 @@ export class StorePrismaService extends BasePrismaService {
 
   get cash_register_movements() {
     return this.scoped_client.cash_register_movements;
+  }
+
+  // KDS models (QUI-651)
+  get kds() {
+    return this.scoped_client.kds;
+  }
+
+  get kds_sessions() {
+    return this.scoped_client.kds_sessions;
   }
 
   // Layaway models

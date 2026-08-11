@@ -46,3 +46,39 @@ export function resolveStockUnitsConsumed(
   const packSize = resolvePackSize(tierUnits, overrideUnits);
   return packSize > 1 ? quantity * packSize : null;
 }
+
+/**
+ * Unidades de stock que hay que mover al devolver parte de una línea.
+ *
+ * Devolver 1 bulto de 50 repone 50 unidades, no 1: la línea guardó cuántas
+ * consumió al venderse (`stock_units_consumed`) y la devolución mueve la parte
+ * proporcional de ese número. Sin ese snapshot —líneas anteriores a la feature
+ * o ventas sin presentación— la cantidad devuelta ya está en unidades de stock
+ * y se devuelve tal cual, que es el comportamiento histórico.
+ *
+ * El redondeo es al entero más cercano porque el inventario es `Int`; una
+ * devolución parcial de un paquete indivisible es una decisión del operador,
+ * no un error de este cálculo.
+ */
+export function resolveRefundStockUnits(
+  refundedQuantity: number,
+  soldQuantity?: number | null,
+  soldStockUnitsConsumed?: number | null,
+): number {
+  const refunded = Number(refundedQuantity);
+  const sold = Number(soldQuantity);
+  const consumed = Number(soldStockUnitsConsumed);
+
+  if (
+    !Number.isFinite(consumed) ||
+    soldStockUnitsConsumed == null ||
+    consumed <= 0 ||
+    !Number.isFinite(sold) ||
+    sold <= 0
+  ) {
+    return refunded;
+  }
+
+  if (refunded >= sold) return consumed;
+  return Math.round((consumed * refunded) / sold);
+}

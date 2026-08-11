@@ -4,7 +4,11 @@ import {
   lastClauseEnd,
   hasWordCharacter,
 } from './vexi-speech.segmenter';
-import { stripMarkdownForSpeech, VexiSpeechService } from './vexi-speech.service';
+import {
+  localizeNumbersForSpeech,
+  stripMarkdownForSpeech,
+  VexiSpeechService,
+} from './vexi-speech.service';
 import { VexiSpeechCache } from './vexi-speech.cache';
 import { SEGMENT_TARGETS, VOICE_FILLERS } from './vexi-speech.constants';
 
@@ -211,6 +215,94 @@ describe('stripMarkdownForSpeech', () => {
   });
 });
 
+describe('localizeNumbersForSpeech', () => {
+  it('moves the currency word after the amount, the way it is spoken', () => {
+    expect(localizeNumbersForSpeech('Vendiste $1.500.000 hoy', 'COP')).toBe(
+      'Vendiste 1.500.000 pesos hoy',
+    );
+    expect(localizeNumbersForSpeech('El total es COP 45.000', 'COP')).toBe(
+      'El total es 45.000 pesos',
+    );
+    expect(localizeNumbersForSpeech('Costó 45.000 COP', 'COP')).toBe(
+      'Costó 45.000 pesos',
+    );
+  });
+
+  it('speaks the currency of the store, not of the symbol', () => {
+    // "$" is not a currency. The same character is pesos in Bogotá and dollars
+    // in Miami, and only the store knows which.
+    expect(localizeNumbersForSpeech('Son $20', 'USD')).toBe('Son 20 dólares');
+    expect(localizeNumbersForSpeech('Son $20', 'PEN')).toBe('Son 20 soles');
+  });
+
+  it('spells an unmapped code instead of guessing pesos', () => {
+    // Wrong but honest. Guessing a currency name is how a report ends up
+    // claiming an amount in a unit it was never denominated in.
+    expect(localizeNumbersForSpeech('Son XOF 500', 'XOF')).toBe('Son 500 XOF');
+  });
+
+  it('groups a long integer so it reads as a quantity', () => {
+    // Ungrouped, a synthesizer reads this as a digit stream: "uno cinco cero
+    // cero cero cero cero".
+    expect(localizeNumbersForSpeech('Tenés 1500000 en caja', 'COP')).toBe(
+      'Tenés 1.500.000 en caja',
+    );
+    expect(localizeNumbersForSpeech('Son 45000 unidades', 'COP')).toBe(
+      'Son 45.000 unidades',
+    );
+  });
+
+  it('leaves short numbers and already-grouped ones alone', () => {
+    expect(localizeNumbersForSpeech('Quedan 47 ventas', 'COP')).toBe(
+      'Quedan 47 ventas',
+    );
+    expect(localizeNumbersForSpeech('Son 999 unidades', 'COP')).toBe(
+      'Son 999 unidades',
+    );
+    expect(localizeNumbersForSpeech('Ya son 1.500.000', 'COP')).toBe(
+      'Ya son 1.500.000',
+    );
+  });
+
+  it('never regroups something that carries a decimal', () => {
+    // Grouping the integer part of "1500.50" would produce "1.500.50", which is
+    // not a number in any locale — it is worse than leaving it untouched.
+    expect(localizeNumbersForSpeech('El promedio es 1500.50', 'COP')).toBe(
+      'El promedio es 1500.50',
+    );
+    expect(localizeNumbersForSpeech('El factor es 3.14', 'COP')).toBe(
+      'El factor es 3.14',
+    );
+    expect(localizeNumbersForSpeech('Son 1500,75 unidades', 'COP')).toBe(
+      'Son 1500,75 unidades',
+    );
+  });
+
+  it('never touches an identifier that happens to contain digits', () => {
+    // The guard that matters most in practice. Vexi names SKUs, NITs, order
+    // numbers and phone numbers constantly, and none of them is a quantity.
+    expect(localizeNumbersForSpeech('El SKU es QA-1234567', 'COP')).toBe(
+      'El SKU es QA-1234567',
+    );
+    expect(localizeNumbersForSpeech('NIT 900123456-7', 'COP')).toBe(
+      'NIT 900123456-7',
+    );
+    expect(localizeNumbersForSpeech('La orden ORD2024001 llegó', 'COP')).toBe(
+      'La orden ORD2024001 llegó',
+    );
+  });
+
+  it('says percent as a word', () => {
+    expect(localizeNumbersForSpeech('Subió 12%', 'COP')).toBe(
+      'Subió 12 por ciento',
+    );
+  });
+
+  it('defaults to the CO currency when the store resolved none', () => {
+    expect(localizeNumbersForSpeech('Son $500')).toBe('Son 500 pesos');
+  });
+});
+
 describe('VexiSpeechCache', () => {
   let cache: VexiSpeechCache;
   const params = {
@@ -218,6 +310,9 @@ describe('VexiSpeechCache', () => {
     voice: 'shimmer',
     format: 'mp3',
     speed: 1,
+    // Obligatorio desde que el volumen entro a la clave de cache: un params
+    // sin vol produce una clave distinta a la que warmFillers pinneo.
+    vol: 1,
   };
   const audio = { audioBase64: 'AAAA', contentType: 'audio/mpeg' };
 
@@ -285,12 +380,16 @@ describe('VexiSpeechService', () => {
   let cache: VexiSpeechCache;
   let aiEngine: { runSpeech: jest.Mock };
   let prisma: { ai_engine_applications: { findUnique: jest.Mock } };
+  let settings: { getStoreCurrency: jest.Mock };
 
   const params = {
     model: 'gpt-4o-mini-tts',
     voice: 'shimmer',
     format: 'mp3',
     speed: 1,
+    // Obligatorio desde que el volumen entro a la clave de cache: un params
+    // sin vol produce una clave distinta a la que warmFillers pinneo.
+    vol: 1,
   };
 
   beforeEach(() => {
@@ -303,11 +402,13 @@ describe('VexiSpeechService', () => {
       }),
     };
     prisma = { ai_engine_applications: { findUnique: jest.fn() } };
+    settings = { getStoreCurrency: jest.fn().mockResolvedValue('COP') };
 
     service = new VexiSpeechService(
       prisma as any,
       aiEngine as any,
       cache,
+      settings as any,
     );
   });
 
@@ -325,7 +426,24 @@ describe('VexiSpeechService', () => {
         voice: 'coral',
         format: 'wav',
         speed: 1.1,
+        // Sin vol en la metadata, así que cae al default del proveedor. El
+        // respaldo NO sube el volumen a propósito: un respaldo que lo subiera
+        // escondería que la configuración real no se pudo leer.
+        vol: 1,
       });
+    });
+
+    it('reads the volume an operator configured', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        metadata: {
+          speech: { voice: 'coral', response_format: 'wav', speed: 1, vol: 1.5 },
+        },
+        config: { model_id: 'gpt-4o-mini-tts' },
+      });
+
+      // El volumen entra a la clave de caché, así que leerlo mal no da audio
+      // silencioso: da el audio VIEJO, y el ajuste parece no hacer nada.
+      await expect(service.resolveParams()).resolves.toMatchObject({ vol: 1.5 });
     });
 
     it('falls back to the seeded defaults when the row is missing', async () => {
@@ -426,6 +544,70 @@ describe('VexiSpeechService', () => {
         expect(next).not.toBe(previous);
         previous = next;
       }
+    });
+
+    it('spreads across the bank instead of walking a fixed cycle', () => {
+      // Properties, not a sequence: the pick is random, so asserting an exact
+      // order would be asserting the PRNG. What matters is that no consecutive
+      // pair repeats and that the pool is genuinely being used — the previous
+      // implementation satisfied the first and failed the second, walking the
+      // bank in order so that four picks told you the fifth.
+      const seen: string[] = [];
+      let previous: string | null = null;
+
+      for (let i = 0; i < 20; i++) {
+        const next = service.pickFiller(previous);
+        expect(next).not.toBe(previous);
+        seen.push(next);
+        previous = next;
+      }
+
+      expect(new Set(seen).size).toBeGreaterThanOrEqual(5);
+      // Every pick has to be a real phrase from the bank, never undefined from
+      // an index walked off the end.
+      for (const phrase of seen) {
+        expect(VOICE_FILLERS).toContain(phrase);
+      }
+    });
+
+    it('always answers with something speakable, even for an unknown previous', () => {
+      // A bank that changed between deploys leaves conversations remembering a
+      // phrase that no longer exists. Filtering it out must not empty the pool.
+      const phrase = service.pickFiller('una frase que ya no está en el banco');
+
+      expect(VOICE_FILLERS).toContain(phrase);
+    });
+
+    it('remembers the last phrase per conversation, not globally', () => {
+      service.rememberFiller(1, VOICE_FILLERS[0]);
+      service.rememberFiller(2, VOICE_FILLERS[3]);
+
+      // Two people talking at once must not shape each other's rotation.
+      expect(service.lastFiller(1)).toBe(VOICE_FILLERS[0]);
+      expect(service.lastFiller(2)).toBe(VOICE_FILLERS[3]);
+      expect(service.lastFiller(99)).toBeNull();
+    });
+
+    it('ignores a null phrase so a failed synthesis does not erase the guard', () => {
+      service.rememberFiller(1, VOICE_FILLERS[0]);
+      service.rememberFiller(1, null);
+
+      // `usedFiller()` is null when the bank could not be synthesized. Writing
+      // that through would drop the repeat guard for the next turn.
+      expect(service.lastFiller(1)).toBe(VOICE_FILLERS[0]);
+    });
+
+    it('bounds the memory so a long-lived process cannot grow it forever', () => {
+      for (let id = 1; id <= 600; id++) {
+        service.rememberFiller(id, VOICE_FILLERS[id % VOICE_FILLERS.length]);
+      }
+
+      // Oldest-first eviction: the earliest conversations are gone, the recent
+      // ones survive. Losing an old one costs at most one audible repeat.
+      expect(service.lastFiller(1)).toBeNull();
+      expect(service.lastFiller(600)).toBe(
+        VOICE_FILLERS[600 % VOICE_FILLERS.length],
+      );
     });
 
     it('serves a warmed filler without touching the provider', async () => {

@@ -4,6 +4,10 @@ import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../../../../environments/environment';
 import { AsyncJobStatus } from '../../../../../core/utils/async-job-poll.util';
+// El reporte de readiness es EL MISMO que el del riel de tiendas: el backend
+// delega en su implementación bajo contexto de plataforma. Reusar el tipo evita
+// que una copia se desvíe de la otra.
+import { DianProductionReadiness } from '../../../store/invoicing/interfaces/invoice.interface';
 import {
   ApiEnvelope,
   CreatePlatformResolutionDto,
@@ -55,6 +59,47 @@ export class FiscalBillingAdminService {
         `${this.base}/certificate`,
         formData,
       )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Qué falta para que la PLATAFORMA emita en producción.
+   *
+   * Tipado con `DianProductionReadiness` —el del riel de tiendas— a propósito: el
+   * backend delega en la MISMA implementación bajo contexto de plataforma, así que
+   * un segundo tipo solo podría desviarse del real. Este endpoint no existía, y su
+   * ausencia era la razón por la que el paso a producción de la plataforma no
+   * comprobaba que la DIAN hubiera aprobado su set de habilitación.
+   *
+   * Solo lectura: se puede consultar en cualquier estado y no muta nada.
+   */
+  getProductionReadiness(): Observable<DianProductionReadiness> {
+    return this.http
+      .get<ApiEnvelope<DianProductionReadiness>>(
+        `${this.base}/production-readiness`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Pasa la plataforma a producción. ÚNICA vía: `saveConfig` rechaza con 400
+   * cualquier `environment: 'production'`.
+   *
+   * Responde 412 con la lista de faltantes si el readiness no está listo, así que
+   * la UI no tiene que adivinar por qué se negó — puede pintar la misma lista que
+   * muestra el reporte.
+   */
+  promoteToProduction(): Observable<{
+    promoted: MaskedDianConfiguration;
+    status: SubscriptionFiscalStatus;
+  }> {
+    return this.http
+      .post<
+        ApiEnvelope<{
+          promoted: MaskedDianConfiguration;
+          status: SubscriptionFiscalStatus;
+        }>
+      >(`${this.base}/promote-to-production`, {})
       .pipe(map((res) => res.data));
   }
 

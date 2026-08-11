@@ -1,0 +1,77 @@
+// Estilos compartidos por las seis páginas de Configuración General.
+//
+// Los estilos de componente en Angular son scoped: cada página los declara con
+// `styleUrls: ['./_settings-page.scss']` porque NO se heredan del shell. Sólo
+// vive aquí lo que es común a todas — la pila de tarjetas y el bloque de
+// introducción. Lo propio de una página va en su propio archivo.
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+// ─── Pila de secciones ──────────────────────────────────
+// Una columna en todos los anchos: cada pestaña muestra pocas tarjetas, así que
+// las dos columnas de la vista monolítica ya no compran nada y romperían el
+// orden de lectura.
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 80px; // Espacio para la barra inferior en móvil
+}
+
+// ─── Introducción de la página ──────────────────────────
+
+.page-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 12px 14px;
+}
+
+.page-intro__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  background: var(--color-info-50);
+  color: var(--color-info-600);
+}
+
+.page-intro__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  min-width: 0;
+}
+
+.page-intro__lead {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+// ─── Overrides responsive (siempre al final del archivo) ─
+
+@media (min-width: 768px) {
+  .settings-page {
+    gap: 20px;
+    padding-bottom: 40px;
+  }
+
+  .page-intro {
+    padding: 14px 16px;
+  }
+
+  .page-intro__text {
+    font-size: 13.5px;
+  }
+}

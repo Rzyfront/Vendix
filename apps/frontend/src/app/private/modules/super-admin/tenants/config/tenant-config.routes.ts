@@ -97,16 +97,25 @@ export class TenantConfigShellComponent {
   );
 
   /**
-   * Todas las sub-rutas son hojas de UN segmento, así que el último segmento de
-   * la URL identifica la pestaña. Se compara contra la lista en vez de pintar
-   * el segmento crudo: una URL desconocida cae en la primera pestaña y no deja
-   * el tablist sin selección.
+   * Qué pestaña está activa, leída de la URL.
+   *
+   * Se busca el ÚLTIMO segmento que coincida con una pestaña, no el último
+   * segmento a secas: «Documentos electrónicos» tiene sub-rutas propias
+   * (`…/configuration/dian/numeracion`), así que mirar sólo la cola devolvería
+   * `numeracion` —que no es ninguna pestaña de este nivel— y el tablist marcaría
+   * «Ajustes» mientras el operador edita la numeración del tenant.
+   *
+   * Una URL sin ningún segmento reconocible cae en la primera pestaña, para no
+   * dejar el tablist sin selección.
    */
   protected readonly activeTabId = computed<string>(() => {
     const path = this.currentUrl().split('?')[0].split('#')[0];
     const segments = path.split('/').filter(Boolean);
-    const last = segments[segments.length - 1] ?? '';
-    return CONFIG_TABS.find((tab) => tab.path === last)?.id ?? CONFIG_TABS[0].id;
+    for (let index = segments.length - 1; index >= 0; index--) {
+      const match = CONFIG_TABS.find((tab) => tab.path === segments[index]);
+      if (match) return match.id;
+    }
+    return CONFIG_TABS[0].id;
   });
 
   protected onTabChange(tabId: string): void {
@@ -136,10 +145,16 @@ export const TENANT_CONFIG_ROUTES: Routes = [
     path: '',
     component: TenantConfigShellComponent,
     providers: [...provideSuperadminDianApi()],
+    // Cada hoja declara su propio `title` (formato «Sección - Ámbito», el mismo
+    // de `users.routes.ts`). Sin él, `BreadcrumbService` no encuentra entrada
+    // para una URL de cinco segmentos, su efecto de título se abstiene y la
+    // pestaña del navegador se queda con el rótulo de la pantalla anterior
+    // —«General»— sin importar en qué sub-sección esté soporte.
     children: [
       { path: '', pathMatch: 'full', redirectTo: DEFAULT_TAB },
       {
         path: 'settings',
+        title: 'Ajustes - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-settings.component').then(
             (c) => c.TenantSettingsComponent,
@@ -147,6 +162,7 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'modules',
+        title: 'Módulos - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-modules.component').then(
             (c) => c.TenantModulesComponent,
@@ -154,20 +170,28 @@ export const TENANT_CONFIG_ROUTES: Routes = [
       },
       {
         path: 'fiscal',
+        title: 'Identidad fiscal - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-fiscal.component').then(
             (c) => c.TenantFiscalComponent,
           ),
       },
       {
+        // Documentos electrónicos es, a su vez, una sección con cinco vistas
+        // propias (Habilitaciones · Certificado · Numeración · Set de pruebas ·
+        // Bitácora), así que entra por `loadChildren` y no por `loadComponent`:
+        // su shell necesita su propio `router-outlet` y su propio store de rama.
+        // El título lo declara cada hoja, no este nodo, porque el nodo nunca es
+        // la URL final.
         path: 'dian',
-        loadComponent: () =>
-          import('./pages/tenant-dian-host.component').then(
-            (c) => c.TenantDianHostComponent,
+        loadChildren: () =>
+          import('./pages/dian/tenant-dian.routes').then(
+            (m) => m.TENANT_DIAN_ROUTES,
           ),
       },
       {
         path: 'domains',
+        title: 'Dominios - Configuración del tenant',
         loadComponent: () =>
           import('./pages/tenant-domains.component').then(
             (c) => c.TenantDomainsComponent,

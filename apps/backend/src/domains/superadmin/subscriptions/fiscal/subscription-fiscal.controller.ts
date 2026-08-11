@@ -105,6 +105,47 @@ export class SubscriptionFiscalController {
     );
   }
 
+  /**
+   * Qué falta para que la plataforma emita en producción.
+   *
+   * Espeja `GET store/invoicing/dian-config/:id/production-readiness`. Este riel
+   * tenía `habilitation_readiness` —«¿puedo empezar?»— y no este reporte —«¿puedo
+   * salir a producción?»—, que es el que trae el chequeo `test_set_evidence`.
+   * Solo lectura: no muta nada y se puede consultar en cualquier estado.
+   */
+  @Get('production-readiness')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary: 'Production readiness checklist for the platform DIAN config',
+  })
+  async getProductionReadiness(): Promise<any> {
+    const report = await this.fiscalService.getProductionReadiness();
+    return this.responseService.success(
+      report,
+      'Production readiness retrieved',
+    );
+  }
+
+  /**
+   * Pasa la plataforma a producción, con la guarda completa de readiness.
+   *
+   * Es la ÚNICA vía. `PATCH config` rechaza `environment: 'production'` desde que
+   * se descubrió que volteaba el ambiente de la configuración —el que usa el
+   * proveedor para firmar y transmitir— sin comprobar que la DIAN hubiera
+   * aprobado el set de habilitación.
+   */
+  @Post('promote-to-production')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Promote the platform DIAN config to production' })
+  async promoteToProduction(): Promise<any> {
+    const result = await this.fiscalService.promoteToProduction();
+    return this.responseService.updated(
+      result,
+      'Plataforma promovida a producción',
+    );
+  }
+
   // ─────────────────────────────────────────────────────────
   // DIAN test set (habilitación) for the platform's own NIT
   // ─────────────────────────────────────────────────────────
@@ -127,14 +168,29 @@ export class SubscriptionFiscalController {
     description:
       'Vía de humo: emite UNA factura y gasta UN consecutivo, para comprobar si la DIAN ingiere el envío sin quemar los 50. No habilita.',
   })
-  async runTestSet(@Query('smoke') smoke?: string): Promise<any> {
+  @ApiQuery({
+    name: 'validate',
+    required: false,
+    description:
+      'Vía de validación: emite el MISMO documento y lo somete a SendBillSync, que responde en la misma llamada con IsValid y la lista completa de reglas violadas. No lleva testSetId, así que no puede rechazar el set ni consumir un intento de habilitación.',
+  })
+  async runTestSet(
+    @Query('smoke') smoke?: string,
+    @Query('validate') validate?: string,
+  ): Promise<any> {
     const isSmoke = smoke === 'true' || smoke === '1';
-    const result = await this.fiscalService.runTestSet({ smoke: isSmoke });
+    const isValidateOnly = validate === 'true' || validate === '1';
+    const result = await this.fiscalService.runTestSet({
+      smoke: isSmoke,
+      validate_only: isValidateOnly,
+    });
     return this.responseService.success(
       result,
-      isSmoke
-        ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
-        : 'Set de pruebas encolado: se está construyendo y firmando',
+      isValidateOnly
+        ? 'Validación encolada: 1 documento por SendBillSync, sin enviar al set de pruebas'
+        : isSmoke
+          ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
+          : 'Set de pruebas encolado: se está construyendo y firmando',
     );
   }
 

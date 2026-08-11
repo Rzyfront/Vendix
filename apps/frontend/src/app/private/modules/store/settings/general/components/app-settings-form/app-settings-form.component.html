@@ -1,9 +1,17 @@
 <div class="app-settings-form">
   <p class="form-intro">
-    Configura el logo, favicon y colores de la app administrativa.
+    El logo, el favicon y los colores que definas acá son la identidad visual de
+    la tienda: se aplican al panel administrativo, a la tienda pública y a la
+    pestaña del navegador.
   </p>
 
-  <div class="space-y-4">
+  <app-alert-banner variant="info" icon="upload">
+    Las imágenes se suben cuando presionas <strong>Guardar</strong>. Elegir un
+    archivo sólo muestra la vista previa: si sales de esta pantalla sin guardar,
+    la imagen se descarta.
+  </app-alert-banner>
+
+  <div class="space-y-4 mt-4">
     <!-- Brand Assets Section -->
     <div>
       <h4 class="section-kicker">Recursos de Marca</h4>
@@ -18,13 +26,34 @@
                 class="brand-preview-img"
               />
             } @else {
-              <app-icon name="image" size="18" class="text-gray-300" />
+              <app-icon name="image" size="18" class="text-muted" />
             }
           </div>
           <div class="brand-content">
             <div class="brand-copy">
-              <label class="brand-label">Logo de la app</label>
-              <span class="brand-help">PNG, JPG o SVG. Máx 2MB.</span>
+              <label class="brand-label">
+                <span>Logo de la app</span>
+                <app-tooltip
+                  content="Se usa en el encabezado del panel y en la cabecera de la tienda pública. Es la MISMA imagen que el logo de la tienda: subirla acá la reemplaza en los dos lugares, y borrarla la borra en ambos. Recomendado: PNG con fondo transparente, alto de 96 a 200 px, formato horizontal."
+                  position="top"
+                >
+                  <span class="help-icon">
+                    <app-icon name="help-circle" [size]="13" />
+                  </span>
+                </app-tooltip>
+              </label>
+              <span class="brand-help">
+                PNG, JPG o SVG · máx 2 MB · fondo transparente y formato
+                horizontal.
+              </span>
+              <div class="brand-badges">
+                <app-badge variant="info" size="xs" badgeStyle="outline">
+                  Panel y tienda pública
+                </app-badge>
+                <app-badge variant="warning" size="xs" badgeStyle="outline">
+                  Compartido con la tienda
+                </app-badge>
+              </div>
             </div>
             <div class="brand-actions">
               <app-button variant="outline" size="sm" (clicked)="openLogoModal()">
@@ -55,13 +84,30 @@
                 class="brand-preview-img"
               />
             } @else {
-              <app-icon name="sparkles" size="17" class="text-gray-300" />
+              <app-icon name="sparkles" size="17" class="text-muted" />
             }
           </div>
           <div class="brand-content">
             <div class="brand-copy">
-              <label class="brand-label">Favicon de la app</label>
-              <span class="brand-help">PNG o ICO. Máx 1MB.</span>
+              <label class="brand-label">
+                <span>Favicon de la app</span>
+                <app-tooltip
+                  content="Es el ícono diminuto de la pestaña del navegador y del acceso directo cuando alguien guarda la tienda en su teléfono. Se ve a 16 x 16 px: un logo con texto se vuelve una mancha. Usa el símbolo de la marca, cuadrado, sobre fondo transparente (ideal 512 x 512 px)."
+                  position="top"
+                >
+                  <span class="help-icon">
+                    <app-icon name="help-circle" [size]="13" />
+                  </span>
+                </app-tooltip>
+              </label>
+              <span class="brand-help">
+                PNG o ICO · máx 1 MB · cuadrado, sólo el símbolo (sin texto).
+              </span>
+              <div class="brand-badges">
+                <app-badge variant="info" size="xs" badgeStyle="outline">
+                  Pestaña del navegador
+                </app-badge>
+              </div>
             </div>
             <div class="brand-actions">
               <app-button variant="outline" size="sm" (clicked)="openFaviconModal()">
@@ -82,48 +128,129 @@
           </div>
         </div>
       </div>
+
+      <!-- Guía colapsable: dónde termina viéndose cada recurso -->
+      <app-expandable-card [(expanded)]="assetsHelpOpen" class="mt-3">
+        <div slot="header" class="help-card-header">
+          <app-icon name="eye" [size]="16" />
+          <span>¿Dónde se ve cada recurso?</span>
+        </div>
+        <ul class="help-list">
+          <li>
+            <app-icon name="layout-dashboard" [size]="14" />
+            <span>
+              <strong>Panel administrativo</strong> — el logo aparece en el
+              encabezado que ves ahora mismo.
+            </span>
+          </li>
+          <li>
+            <app-icon name="store" [size]="14" />
+            <span>
+              <strong>Tienda pública</strong> — el logo encabeza la vitrina que
+              ven tus clientes. Si el módulo de ecommerce tiene un logo propio
+              configurado, ese tiene prioridad sobre este.
+            </span>
+          </li>
+          <li>
+            <app-icon name="globe" [size]="14" />
+            <span>
+              <strong>Pestaña del navegador</strong> — el favicon, tanto en el
+              panel como en la tienda pública.
+            </span>
+          </li>
+          <li>
+            <app-icon name="smartphone" [size]="14" />
+            <span>
+              <strong>Acceso directo en el teléfono</strong> — el favicon es el
+              ícono cuando alguien agrega la tienda a su pantalla de inicio.
+            </span>
+          </li>
+        </ul>
+      </app-expandable-card>
     </div>
 
     <!-- Color Scheme Section -->
     <div>
       <h3 class="brand-heading">Colores de la Marca</h3>
-      <div class="color-grid">
-        <!-- Primary Color -->
-        <div class="color-card">
-          <label class="color-card-label">Primario</label>
-          <div class="color-card-row">
-            <input type="color" [value]="primaryColorControl.value"
-              (change)="onColorPickerChange('primary_color', $event)"
-              class="color-picker" />
-            <input type="text" [formControl]="primaryColorControl" (input)="onFieldChange()"
-              class="color-hex-input"
-              placeholder="#000000" />
+      <p class="section-hint">
+        Escribe el color en hexadecimal de 6 dígitos (por ejemplo
+        <code>#2F6F4E</code>) o elígelo con el selector. Los cambios se ven en
+        toda la app después de guardar.
+      </p>
+
+      @if (hasInvalidHex()) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          Hay un color con formato inválido. Mientras no sean tres hexadecimales
+          de 6 dígitos (como <strong>#7ED7A5</strong>), los cambios de esta
+          sección no se guardan.
+        </app-alert-banner>
+      }
+
+      <div class="color-grid mt-3">
+        @for (color of colorHelp; track color.key) {
+          <div class="color-card">
+            <label class="color-card-label">
+              <span>{{ color.label }}</span>
+              <app-tooltip [content]="color.tooltip" position="top">
+                <span class="help-icon">
+                  <app-icon name="help-circle" [size]="13" />
+                </span>
+              </app-tooltip>
+            </label>
+            <div class="color-card-row">
+              <input
+                type="color"
+                [value]="colorControlFor(color.key).value"
+                [attr.aria-label]="'Selector de color ' + color.label"
+                (change)="onColorPickerChange(color.key, $event)"
+                class="color-picker"
+              />
+              <input
+                type="text"
+                [formControl]="colorControlFor(color.key)"
+                (input)="onFieldChange()"
+                [attr.aria-label]="'Color ' + color.label + ' en hexadecimal'"
+                class="color-hex-input"
+                placeholder="#000000"
+              />
+            </div>
+            <span class="color-card-hint">{{ color.hint }}</span>
           </div>
+        }
+      </div>
+
+      <!-- Vista previa viva: muestra la paleta en vez de describirla -->
+      <div class="palette-preview" aria-label="Vista previa de la paleta">
+        <div
+          class="palette-preview__bar"
+          [style.background]="brandPalette().primary"
+        >
+          <span class="palette-preview__bar-label">Encabezado</span>
         </div>
-        <!-- Secondary Color -->
-        <div class="color-card">
-          <label class="color-card-label">Secundario</label>
-          <div class="color-card-row">
-            <input type="color" [value]="secondaryColorControl.value"
-              (change)="onColorPickerChange('secondary_color', $event)"
-              class="color-picker" />
-            <input type="text" [formControl]="secondaryColorControl" (input)="onFieldChange()"
-              class="color-hex-input"
-              placeholder="#000000" />
-          </div>
+        <div class="palette-preview__body">
+          <span
+            class="palette-preview__chip"
+            [style.background]="brandPalette().primary"
+          >
+            Acción principal
+          </span>
+          <span
+            class="palette-preview__chip"
+            [style.background]="brandPalette().secondary"
+          >
+            Acción de apoyo
+          </span>
+          <span
+            class="palette-preview__chip palette-preview__chip--accent"
+            [style.background]="brandPalette().accent"
+          >
+            Acento
+          </span>
         </div>
-        <!-- Accent Color -->
-        <div class="color-card">
-          <label class="color-card-label">Acento</label>
-          <div class="color-card-row">
-            <input type="color" [value]="accentColorControl.value"
-              (change)="onColorPickerChange('accent_color', $event)"
-              class="color-picker" />
-            <input type="text" [formControl]="accentColorControl" (input)="onFieldChange()"
-              class="color-hex-input"
-              placeholder="#000000" />
-          </div>
-        </div>
+        <p class="palette-preview__note">
+          Vista previa aproximada. Si el texto de un botón no se lee acá,
+          tampoco se leerá en la app.
+        </p>
       </div>
     </div>
   </div>

@@ -72,6 +72,17 @@
           <span class="kds-card__name">
             {{ item.product?.name || ('Producto #' + item.product_id) }}
           </span>
+          <!--
+            QUI-653 — "Para llevar" va en su PROPIO @if, fuera de la cadena de
+            estado de abajo: empacar es una instruccion de ejecucion, no un
+            estado del plato, y dentro de un @else if la ocultaria cualquier
+            insignia de urgencia. El cocinero tiene que verla siempre.
+          -->
+          @if (item.order_item?.is_takeaway) {
+            <app-badge variant="info" size="xs" title="Este plato se empaca para llevar">
+              <app-icon name="shopping-bag" [size]="10" /> Para llevar
+            </app-badge>
+          }
           <!-- Per-dish status: recipe-readiness takes priority over the
                urgency tier (a recipe-less dish can't be cooked anyway). -->
           @if (!itemHasRecipe(item)) {

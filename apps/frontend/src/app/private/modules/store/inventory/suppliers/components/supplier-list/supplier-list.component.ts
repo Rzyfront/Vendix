@@ -58,6 +58,8 @@ export class SupplierListComponent {
   readonly filter = output<FilterValues>();
   readonly create = output<void>();
   readonly edit = output<Supplier>();
+  /** QUI-656 — abrir el perfil del proveedor (lectura). */
+  readonly view = output<Supplier>();
   readonly delete = output<Supplier>();
   readonly sort = output<{
     column: string;
@@ -210,12 +212,14 @@ export class SupplierListComponent {
   }
 
   /**
-   * Row click opens the edit modal — suppress in read-only mode.
-   * STORE_ADMIN can still see the row (read), just can't edit it.
+   * QUI-656 — el click en la fila abre el PERFIL, no el modal de edición.
+   *
+   * Antes abría edición y quedaba muerto en modo solo-lectura: quien solo puede
+   * leer no obtenía nada al hacer click. El perfil es lectura, así que responde
+   * para todos; editar sigue disponible en la acción explícita de la fila.
    */
   onRowClick(supplier: Supplier): void {
-    if (!this.canMutate()) return;
-    this.edit.emit(supplier);
+    this.view.emit(supplier);
   }
 
   // Helper methods

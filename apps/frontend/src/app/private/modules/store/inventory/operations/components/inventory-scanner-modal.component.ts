@@ -26,6 +26,8 @@ import {
   InputsearchComponent,
   ToastService,
   AiReviewAckComponent,
+  AiDiscardToggleComponent,
+  AI_DISCARDED_ROW_CLASSES,
 } from '../../../../../../shared/components';
 
 import { InventoryService, InventoryScannerService } from '../../services';
@@ -62,6 +64,7 @@ interface EditableCountRow extends MatchedCountProduct {
     SpinnerComponent,
     InputsearchComponent,
     AiReviewAckComponent,
+    AiDiscardToggleComponent,
   ],
   template: `
     <app-modal
@@ -286,9 +289,11 @@ interface EditableCountRow extends MatchedCountProduct {
                 </thead>
                 <tbody>
                   @for (item of editableItems(); track $index; let i = $index) {
+                    <!-- QUI-644: descarte reversible en vez de borrado. -->
                     <tr
                       class="border-b border-border/50 hover:bg-muted/20"
                       [class.bg-amber-50]="item.match_status === 'new'"
+                      [class]="isDiscarded(i) ? discardedRowClasses : ''"
                     >
                       <td class="py-2 pr-3">
                         <ng-container
@@ -334,14 +339,12 @@ interface EditableCountRow extends MatchedCountProduct {
                         />
                       </td>
                       <td class="py-2 pl-3">
-                        <button
-                          type="button"
-                          (click)="removeRow(i)"
-                          class="text-red-500 hover:text-red-700 p-1"
-                          title="Eliminar"
-                        >
-                          <app-icon name="trash-2" [size]="14"></app-icon>
-                        </button>
+                        <app-ai-discard-toggle
+                          [discarded]="isDiscarded(i)"
+                          [label]="item.description"
+                          size="sm"
+                          (toggled)="toggleDiscard(i)"
+                        ></app-ai-discard-toggle>
                       </td>
                     </tr>
                   }
@@ -355,6 +358,7 @@ interface EditableCountRow extends MatchedCountProduct {
                 <div
                   class="bg-surface border border-border rounded-lg p-3 space-y-2"
                   [class.bg-amber-50]="item.match_status === 'new'"
+                  [class]="isDiscarded(i) ? discardedRowClasses : ''"
                 >
                   <div class="flex items-start justify-between gap-2">
                     <div class="flex-1 min-w-0">
@@ -406,13 +410,17 @@ interface EditableCountRow extends MatchedCountProduct {
                       class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
                     />
                   </div>
-                  <button
-                    type="button"
-                    (click)="removeRow(i)"
-                    class="text-xs text-red-500 hover:text-red-700 font-medium"
-                  >
-                    Eliminar
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <app-ai-discard-toggle
+                      [discarded]="isDiscarded(i)"
+                      [label]="item.description"
+                      size="sm"
+                      (toggled)="toggleDiscard(i)"
+                    ></app-ai-discard-toggle>
+                    <span class="text-xs text-text-secondary">
+                      {{ isDiscarded(i) ? 'Descartado' : 'Descartar' }}
+                    </span>
+                  </div>
                 </div>
               }
             </div>
@@ -620,6 +628,35 @@ export class InventoryScannerModalComponent {
    * clic a `requestAttention()` en vez de ejecutar la carga.
    */
   readonly aiAck = signal(false);
+
+  // ===== QUI-644: descarte de ítems de la precarga =====
+  /** Índices marcados para NO cargarse. Se reinicia en `resetWizard`. */
+  readonly discardedIndexes = signal<Set<number>>(new Set());
+  protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
+
+  isDiscarded(index: number): boolean {
+    return this.discardedIndexes().has(index);
+  }
+
+  toggleDiscard(index: number): void {
+    const next = new Set(this.discardedIndexes());
+    if (next.has(index)) {
+      next.delete(index);
+    } else {
+      next.add(index);
+    }
+    this.discardedIndexes.set(next);
+  }
+
+  readonly keptItems = computed(() =>
+    this.editableItems().filter((_, i) => !this.discardedIndexes().has(i)),
+  );
+
+  readonly keptCount = computed(() => this.keptItems().length);
+
+  readonly allDiscarded = computed(
+    () => this.editableItems().length > 0 && this.keptCount() === 0,
+  );
   private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
 
   readonly scanResponse = signal<InventoryCountScanResponse | null>(null);
@@ -1019,7 +1056,10 @@ export class InventoryScannerModalComponent {
     const locationId = this.selectedLocationId();
     if (!locationId) return;
 
-    const validItems = this.editableItems().filter(
+    // QUI-644: los descartados nunca llegan al backend. Se filtran ANTES del
+    // guard de "sin producto" para que descartar una línea rota sea justamente
+    // la salida que desbloquea el envío.
+    const validItems = this.keptItems().filter(
       (item) => item.selected_product_id != null,
     );
     if (validItems.length === 0) {
@@ -1092,6 +1132,8 @@ export class InventoryScannerModalComponent {
   }
 
   resetWizard(): void {
+    // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
+    this.discardedIndexes.set(new Set());
     this.currentStep.set(0);
     this.selectedLocationId.set(null);
     this.selectedFile.set(null);

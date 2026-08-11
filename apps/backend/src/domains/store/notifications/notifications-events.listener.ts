@@ -493,6 +493,68 @@ export class NotificationsEventsListener {
     );
   }
 
+  /**
+   * QUI-647 — cuota de Cuentas por Pagar que está por vencer.
+   *
+   * Espejo de `installment.due_soon` del lado del cliente: aquel avisa que un
+   * cliente nos debe, este que le debemos al proveedor. Antes de este ticket el
+   * módulo de notificaciones no mencionaba `accounts_payable` en ninguna línea.
+   */
+  @OnEvent('ap_installment.due_soon')
+  async handleApInstallmentDueSoon(event: {
+    store_id: number;
+    accounts_payable_id: number;
+    schedule_id: number;
+    supplier_id: number;
+    supplier_name: string;
+    document_number: string | null;
+    amount: number;
+    scheduled_date: Date;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'ap_installment_due_soon',
+      'Pago a proveedor por vencer',
+      `Cuota de $${event.amount} a ${event.supplier_name} vence pronto`,
+      {
+        accounts_payable_id: event.accounts_payable_id,
+        schedule_id: event.schedule_id,
+        supplier_id: event.supplier_id,
+        due_date: event.scheduled_date,
+      },
+    );
+  }
+
+  /**
+   * QUI-647 — cuota de CxP ya vencida. Se re-emite en cada barrido mientras
+   * siga impaga: una deuda vencida avisada una sola vez y luego callada hace
+   * creer al operador que se resolvió.
+   */
+  @OnEvent('ap_installment.overdue')
+  async handleApInstallmentOverdue(event: {
+    store_id: number;
+    accounts_payable_id: number;
+    schedule_id: number;
+    supplier_id: number;
+    supplier_name: string;
+    document_number: string | null;
+    amount: number;
+    scheduled_date: Date;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'ap_installment_overdue',
+      'Pago a proveedor vencido',
+      `Cuota de $${event.amount} a ${event.supplier_name} está vencida`,
+      {
+        accounts_payable_id: event.accounts_payable_id,
+        schedule_id: event.schedule_id,
+        supplier_id: event.supplier_id,
+        due_date: event.scheduled_date,
+      },
+    );
+  }
+
   @OnEvent('layaway.payment_reminder')
   async handleLayawayPaymentReminder(event: {
     store_id: number;

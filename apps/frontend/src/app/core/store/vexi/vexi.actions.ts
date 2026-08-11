@@ -97,6 +97,26 @@ export const sendMessage = createAction(
      * still asked by voice.
      */
     speak?: boolean;
+    /**
+     * Marks this send as the automatic replay of a turn whose transport dropped
+     * before it produced anything.
+     *
+     * Travels on the turn rather than living as a flag in the store for the same
+     * reason `speak` does: it describes one attempt. A counter in global state
+     * would either block the retry of an unrelated later turn or reset itself at
+     * the wrong moment — and the only thing it has to guarantee is that recovery
+     * never loops, which is a property of the attempt, not of the session.
+     */
+    isRetry?: boolean;
+    /**
+     * Tells the backend the `user` row for this turn already exists.
+     *
+     * Separate from `isRetry` because they answer different questions: `isRetry`
+     * bounds recovery to one attempt, this one prevents a duplicated question.
+     * A retry needs it only when the dead attempt got far enough to write the
+     * row, which is something only the server can say.
+     */
+    skipUserMessage?: boolean;
   }>(),
 );
 
@@ -179,11 +199,34 @@ export const proposalReceived = createAction(
   }>(),
 );
 
-export const confirmProposal = createAction('[Vexi] Confirm Proposal');
+/**
+ * `speak` is declared by the surface that knows the mode.
+ *
+ * The card can be approved from the panel in chat mode or in voice mode, and only
+ * the panel knows which. Reading a global flag here would answer for whichever
+ * mode happened to be set last rather than for the approval actually given.
+ */
+export const confirmProposal = createAction(
+  '[Vexi] Confirm Proposal',
+  props<{ speak?: boolean }>(),
+);
 
 export const confirmProposalSuccess = createAction(
   '[Vexi] Confirm Proposal Success',
-  props<{ tool: string; output: string; domain?: string }>(),
+  props<{
+    tool: string;
+    output: string;
+    domain?: string;
+    /**
+     * What the tool said it changed. Becomes the visible turn that closes the
+     * confirmation — without it, approving cleared the card and the conversation
+     * said nothing, which reads exactly like the change never happened.
+     */
+    summary?: string | null;
+    /** Set in voice mode, so the acknowledgement is heard and not only read. */
+    audioBase64?: string;
+    contentType?: string;
+  }>(),
 );
 
 export const confirmProposalFailure = createAction(
@@ -199,6 +242,42 @@ export const streamError = createAction(
   '[Vexi] Stream Error',
   props<{ error: string }>(),
 );
+
+/**
+ * The transport died. Whether the *turn* died is a separate question.
+ *
+ * Dispatched instead of `streamError` so the reconciliation effect can ask the
+ * server what actually happened before anything is said to the person. The
+ * backend finishes draining its generator after the browser disconnects, so a
+ * dropped socket very often sits on top of an answer that is already written to
+ * `ai_messages` — announcing a failure there is simply wrong.
+ *
+ * The payload is what the dead turn already caused, because that is what decides
+ * whether it may be replayed.
+ */
+export const streamDropped = createAction(
+  '[Vexi] Stream Dropped',
+  props<{
+    conversationId: number;
+    /** A turn that already said something cannot be re-sent without duplicating it. */
+    emittedText: boolean;
+    /** A turn that already ran a tool cannot be re-sent without running it twice. */
+    ranTools: boolean;
+    /** Whether this turn was itself the retry. Bounds recovery to one attempt. */
+    wasRetry: boolean;
+  }>(),
+);
+
+/**
+ * The drop turned out to be cosmetic: the answer was already persisted.
+ *
+ * Distinct from `streamComplete` because the two build the final message from
+ * opposite sources. `streamComplete` appends what the browser accumulated in
+ * `streamingContent`; here that buffer is incomplete by definition, so the
+ * messages come from the server and the buffer is discarded. Reusing
+ * `streamComplete` would append a truncated copy next to the real one.
+ */
+export const streamReconciled = createAction('[Vexi] Stream Reconciled');
 
 // Archive conversation
 export const archiveConversation = createAction(

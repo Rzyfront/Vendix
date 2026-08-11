@@ -91,6 +91,30 @@ const SUGGESTIONS: readonly string[] = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="vexi-panel" [class.vexi-panel--left]="anchorLeft()">
+      <!-- Asa de arrastre. Existe porque el dock esconde su avatar mientras este
+           panel está abierto, y esa avatar ERA el único asa: sin estas barras el
+           conjunto quedaría inmóvil justo cuando más molesta su posición.
+
+           Va arriba y abajo porque el panel se ancla contra cualquiera de las
+           cuatro esquinas y el borde que queda a mano cambia con la posición.
+
+           El arrastre no se maneja acá: la posición, la máquina de gestos y el
+           regreso al borde viven en el dock, y un segundo escritor de la posición
+           dejaría al settle sin saber de uno de los dos. Lo que sale de acá son
+           los eventos crudos.
+
+           (Sin comillas invertidas en este literal: una sola cierra la plantilla
+           y Angular falla con "Code 1010".) -->
+      <span
+        class="vexi-panel__grip"
+        role="separator"
+        aria-label="Arrastra para mover a Vexi"
+        (pointerdown)="gripDown.emit($event)"
+        (pointermove)="gripMove.emit($event)"
+        (pointerup)="gripUp.emit($event)"
+        (pointercancel)="gripCancel.emit($event)"
+      ></span>
+
       <header class="vexi-panel__header">
         <button
           type="button"
@@ -148,6 +172,30 @@ const SUGGESTIONS: readonly string[] = [
         </button>
       </header>
 
+      <!-- Modo voz: la avatar arriba, animada mientras habla, y los captions
+           DEBAJO de ella. Va acá, hermana de la cabecera, y no dentro de
+           .vexi-panel__body: ese body es flex en FILA para poner el cajón de
+           conversaciones al costado, así que un tercer hermano ahí se acomodaba
+           AL LADO de los captions y les robaba el ancho —el texto quedaba
+           partido en columnas de siete caracteres. La raíz .vexi-panel sí es
+           flex column, que es la dirección que este bloque necesita.
+           Sigue fuera de #scroller, así que tampoco se va con el scroll. -->
+      @if (voiceUi()) {
+        <div class="vexi-voice__stage">
+          <span
+            class="vexi-voice__portrait"
+            [class.is-speaking]="voiceSpeaking()"
+            aria-hidden="true"
+          >
+            <app-vexi-avatar
+              [expression]="voiceExpression()"
+              [voice]="voiceSpeaking()"
+            />
+          </span>
+          <p class="vexi-voice__status" role="status">{{ voiceStatus() }}</p>
+        </div>
+      }
+
       <div class="vexi-panel__body">
         <!-- Kept in the DOM and collapsed by width instead of destroyed: an
              @if would drop and rebuild the list on every toggle, which cannot
@@ -174,31 +222,18 @@ const SUGGESTIONS: readonly string[] = [
           </div>
         </aside>
 
-        <!-- Modo voz: la avatar grande arriba, animada mientras habla. Vive
-             fuera de #scroller para que no se vaya con el scroll de los
-             captions — es el ancla visual del modo, no una entrada más. -->
-        @if (voiceUi()) {
-          <div class="vexi-voice__stage">
-            <span
-              class="vexi-voice__portrait"
-              [class.is-speaking]="voiceSpeaking()"
-              aria-hidden="true"
-            >
-              <app-vexi-avatar
-                [expression]="voiceExpression()"
-                [voice]="voiceSpeaking()"
-              />
-            </span>
-            <p class="vexi-voice__status" role="status">{{ voiceStatus() }}</p>
-          </div>
-        }
-
         <div
           #scroller
           class="vexi-panel__messages"
           [class.vexi-panel__messages--captions]="voiceUi()"
         >
-          @if (showEmptyState()) {
+          <!-- El estado vacío es del modo chat. En modo voz sobra y estorba: el
+               escenario de arriba ya muestra la avatar y el estado, así que
+               renderizar los dos daba DOS avatares a la vez —una en el escenario
+               y otra chica dentro del hilo— más un bloque de bienvenida y sus
+               chips de sugerencia debajo del botón de micrófono. Los chips además
+               escriben en el composer de texto, que en modo voz no existe. -->
+          @if (showEmptyState() && !voiceUi()) {
             <div class="vexi-empty">
               <span class="vexi-empty__portrait" aria-hidden="true">
                 <app-vexi-avatar [expression]="'idle'" />
@@ -221,6 +256,12 @@ const SUGGESTIONS: readonly string[] = [
               </div>
             </div>
           }
+
+          <!-- Modo voz sin nada dicho todavía: el área de captions queda
+               vacía a propósito. No va ningún cartel de relleno — el estado ya
+               lo dice la avatar de arriba y la instrucción ya la dice el botón
+               de micrófono de abajo; un texto en el medio solo compite con los
+               dos por la atención. -->
 
           @for (message of renderedMessages(); track message.id) {
             @if (message.role === 'user') {
@@ -418,6 +459,20 @@ const SUGGESTIONS: readonly string[] = [
         </button>
       </form>
       }
+
+      <!-- La segunda barra va acá, FUERA del @if que alterna los dos composers
+           —el de texto y el de voz— para que exista en los dos modos. Metida
+           dentro de una de las ramas desaparecería justo al pasar a voz, que es
+           el modo en que el panel más estorba donde está. -->
+      <span
+        class="vexi-panel__grip"
+        role="separator"
+        aria-label="Arrastra para mover a Vexi"
+        (pointerdown)="gripDown.emit($event)"
+        (pointermove)="gripMove.emit($event)"
+        (pointerup)="gripUp.emit($event)"
+        (pointercancel)="gripCancel.emit($event)"
+      ></span>
     </section>
   `,
   styles: [
@@ -457,6 +512,50 @@ const SUGGESTIONS: readonly string[] = [
       .vexi-panel--left {
         right: auto;
         left: 0;
+      }
+
+      /* Asa de arrastre: la rayita centrada de una hoja móvil, que es la
+         convención que la gente ya sabe leer sin que nadie se lo explique.
+
+         El flex 0 0 auto es obligatorio: el panel es flex en columna y su cuerpo
+         crece con flex 1 1 auto, así que sin esto las dos barras se
+         comprimirían a cero en cuanto la conversación llenara el alto —justo
+         cuando el panel es más grande y más estorba su posición.
+
+         El touch-action en none también: sin eso el navegador reclama el flujo
+         del puntero para hacer scroll y pointermove deja de disparar a mitad del
+         arrastre. Es la misma razón por la que .vexi-dock lo lleva.
+
+         El área táctil es más alta que la rayita visible —12px de caja para 4px
+         de barra— porque una diana de 4px no se agarra con el pulgar. */
+      .vexi-panel__grip {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        height: 12px;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .vexi-panel__grip::before {
+        content: '';
+        display: block;
+        width: 34px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--color-border, rgba(0, 0, 0, 0.18));
+        transition: background 160ms ease;
+      }
+
+      .vexi-panel__grip:hover::before {
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.55);
+      }
+
+      .vexi-panel__grip:active {
+        cursor: grabbing;
       }
 
       .vexi-panel__header {
@@ -852,13 +951,28 @@ const SUGGESTIONS: readonly string[] = [
         gap: 6px;
         padding: 14px 12px 10px;
         border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
-        /* flex-shrink:0 es obligatorio aquí: el escenario es hermano del
-           contenedor de scroll dentro de un flex column, y sin esto los captions
-           lo comprimen hasta hacerlo desaparecer en una conversación larga. */
+        /* flex-shrink:0 es obligatorio aquí: el escenario es hermano de
+           .vexi-panel__body —que crece con flex: 1 1 auto— dentro de la columna
+           del panel, y sin esto los captions lo comprimen hasta hacerlo
+           desaparecer en una conversación larga. */
         flex-shrink: 0;
       }
 
+      /* position: relative NO es decorativo acá. app-vexi-avatar tiene
+         :host { position: absolute; inset: 0 }, así que se resuelve contra el
+         ancestro POSICIONADO más cercano, no contra su padre. Sin esto el avatar
+         se escapaba de la caja de 96px y se estiraba hasta el panel entero:
+         desbordaba por la izquierda y tapaba el texto. La regla ng-deep de abajo
+         (width/height 100%) no podía salvarlo: ese 100% también se resolvía
+         contra el panel. .vexi-empty__portrait ya lo documenta arriba; este
+         bloque, añadido después para el modo voz, no lo siguió. Cualquier caja
+         nueva que envuelva la avatar necesita position: relative y tamaño.
+
+         Sin comillas invertidas en este comentario a propósito: el bloque styles
+         es un template literal y una comilla invertida lo termina, con errores
+         TS1005 a 200 líneas de distancia del backtick. */
       .vexi-voice__portrait {
+        position: relative;
         display: block;
         width: 96px;
         height: 96px;
@@ -873,6 +987,51 @@ const SUGGESTIONS: readonly string[] = [
       .vexi-voice__portrait ::ng-deep .vexi-avatar {
         width: 100%;
         height: 100%;
+      }
+
+      /* El nacimiento: la contraparte del velo del dock.
+         Allá la avatar se encoge y se va detrás del panel; acá nace creciendo y
+         apareciendo, para que las dos mitades se lean como un solo movimiento y
+         no como dos avatares distintas.
+
+         Es animation y no transition porque estos retratos no cambian de estado:
+         se INSERTAN. Una transition sobre un elemento que acaba de entrar al DOM
+         no tiene valor previo del que partir y no dispara nada.
+
+         Y va sobre app-vexi-avatar, no sobre la caja que la envuelve, por la
+         misma regla de un transform un dueño que rige el dock:
+         .vexi-voice__portrait ya es dueña de scale(1.04) cuando habla, y una
+         animation sobre transform le arrebataría ese valor durante su corrida
+         para devolverlo de golpe al terminar. El host de la avatar no tiene
+         transform propio, y vexi-breathe vive en .vexi-avatar__body, que es
+         descendiente: las dos capas se multiplican en vez de pelearse.
+
+         (Sin comillas invertidas en todo el bloque styles: es un template
+         literal y una sola comilla lo cierra, con errores TS1005 a doscientas
+         lineas de distancia.) */
+      @keyframes vexi-emerge {
+        from {
+          opacity: 0;
+          transform: scale(0.62);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .vexi-voice__portrait ::ng-deep app-vexi-avatar,
+      .vexi-empty__portrait ::ng-deep app-vexi-avatar {
+        animation: vexi-emerge 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+      }
+
+      /* La avatar de cada turno recibe la version corta y sin rebote a
+         proposito. Un hilo con historial inserta las suyas TODAS a la vez al
+         abrir el panel, y a 24px un pop con overshoot multiplicado por quince
+         se lee como un parpadeo del hilo entero. Corta y plana, el hilo se
+         asienta; y un turno nuevo sigue teniendo su entrada. */
+      .vexi-turn__avatar ::ng-deep app-vexi-avatar {
+        animation: vexi-emerge 140ms ease-out both;
       }
 
       .vexi-voice__status {
@@ -1112,6 +1271,15 @@ const SUGGESTIONS: readonly string[] = [
         .vexi-voice__mic {
           transition: none;
         }
+
+        /* El nacimiento se apaga entero, no se acorta: lo que molesta de este
+           efecto con reduced-motion es el crecimiento, y sin el crecimiento el
+           desvanecido solo no comunica nada. La avatar aparece ya puesta. */
+        .vexi-voice__portrait ::ng-deep app-vexi-avatar,
+        .vexi-empty__portrait ::ng-deep app-vexi-avatar,
+        .vexi-turn__avatar ::ng-deep app-vexi-avatar {
+          animation: none;
+        }
       }
 
       /* Mobile overrides last: source order decides which rule wins between
@@ -1164,6 +1332,25 @@ export class VexiPanelComponent {
   readonly openInVoice = input(false);
 
   readonly closed = output<void>();
+
+  /**
+   * Eventos crudos de las dos barras de arrastre, para que el dock los conduzca.
+   *
+   * Salen sin interpretar —sin umbral, sin decidir si es tap o arrastre— porque
+   * la máquina de gestos, la posición y el regreso al borde ya viven en el dock.
+   * Interpretarlos acá significaría un segundo escritor de la posición, y el
+   * `settle` no sabría de uno de los dos.
+   *
+   * Son cuatro y no uno porque el arrastre necesita el flujo completo: el `down`
+   * captura el puntero, los `move` mueven, y hacen falta las DOS salidas —`up` y
+   * `cancel`— porque el sistema operativo puede quitar el puntero a mitad
+   * (llamada, notificación, gesto de navegación) y sin el `cancel` el dock se
+   * quedaría creyendo que todavía lo están arrastrando.
+   */
+  readonly gripDown = output<PointerEvent>();
+  readonly gripMove = output<PointerEvent>();
+  readonly gripUp = output<PointerEvent>();
+  readonly gripCancel = output<PointerEvent>();
 
   protected readonly suggestions = SUGGESTIONS;
 
@@ -1595,7 +1782,11 @@ export class VexiPanelComponent {
    * keyboard shortcut reaches it, and the card never pre-focuses it.
    */
   protected confirmProposal(): void {
-    this.facade.confirmProposal();
+    // The mode is read here, at the moment of the approval, and not from a flag
+    // the effect could consult later: the person can be listening when they tap
+    // Aprobar and reading by the time the acknowledgement comes back, and what
+    // decides whether it is spoken is how they gave the approval.
+    this.facade.confirmProposal(this.voiceUi());
   }
 
   protected rejectProposal(): void {

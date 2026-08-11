@@ -1,4 +1,11 @@
-import { Controller, Post, Body, Get, UseGuards, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  UseGuards,
+  Res,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { CustomersBulkService } from './customers-bulk.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -42,7 +49,15 @@ export class CustomersBulkController {
   }
 
   /**
-   * Carga masiva desde JSON directo
+   * Carga masiva desde JSON directo.
+   *
+   * La validación DTO corre a través del `ValidationPipe` global de
+   * `main.ts`, cuyo `exceptionFactory` detecta el patrón
+   * `customers.<rowIndex>.<field>` y aplana los errores al shape canónico
+   * `BulkRowError` (`row`, `column`, `field`, `value`, `message`, `code`,
+   * `suggestion`). Esos errores llegan al cliente en
+   * `response.error.details.validationErrors` para que el modal de carga
+   * masiva los pinte por fila.
    */
   @Post('upload')
   @Permissions('store:customers:create')

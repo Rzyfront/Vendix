@@ -14,7 +14,7 @@ import { isPlatformBrowser } from '@angular/common';
 import { VexiAvatarComponent, VexiExpression } from './vexi-avatar.component';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
 import { VexiPanelComponent } from './vexi-panel.component';
-import { VexiDockPositionService, DOCK_SIZE } from './vexi-dock-position.service';
+import { VexiDockPositionService } from './vexi-dock-position.service';
 import { VexiPresenceService } from './vexi-presence.service';
 import { VexiRealtimeService } from '../../../core/services/vexi-realtime.service';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
@@ -97,6 +97,10 @@ const FAREWELL_MAX_MS = 15_000;
   host: {
     '(window:resize)': 'onViewportChange()',
     '(window:orientationchange)': 'onViewportChange()',
+    // Publicada en el host y no en el ancla para que herede hasta la avatar: su
+    // flotación se mide contra el diámetro, y un span suelto dentro del ancla no
+    // la alcanzaría sin repetir la variable.
+    '[style.--vexi-dock-size]': 'dockSizeVar()',
   },
   template: `
     <!-- The anchor owns the transform so the panel travels with the dock while
@@ -113,10 +117,12 @@ const FAREWELL_MAX_MS = 15_000;
         [class.vexi-dock--dragging]="mode() === 'drag'"
         [class.vexi-dock--voice]="voiceActive()"
         [class.vexi-dock--wobble]="wobbling()"
+        [class.vexi-dock--covered]="panelOpen()"
         role="button"
-        tabindex="0"
+        [attr.tabindex]="panelOpen() ? -1 : 0"
         [attr.aria-label]="ariaLabel()"
         [attr.aria-expanded]="panelOpen()"
+        [attr.aria-hidden]="panelOpen()"
         (pointerdown)="onPointerDown($event)"
         (pointermove)="onPointerMove($event)"
         (pointerup)="onPointerUp()"
@@ -125,10 +131,34 @@ const FAREWELL_MAX_MS = 15_000;
         (keydown.enter)="togglePanel()"
         (keydown.space)="togglePanel()"
       >
-        <!-- The halo replaces the old standalone ring: two concentric pulses
-             on the same 94px circle read as a rendering glitch, and the halo
-             carries the same "I'm listening" signal with real contrast. -->
-        <app-vexi-avatar [expression]="expression()" [voice]="voiceActive()" />
+        <!-- El velo existe para tener un transform PROPIO, no por estructura.
+             La cadena ya tiene tres dueños y ninguno se puede compartir:
+             .vexi-dock__anchor lleva la posición (drag + settle), .vexi-dock
+             lleva vexi-wobble y .vexi-avatar__body lleva vexi-breathe.
+             Poner el encogido de ocultación en .vexi-dock chocaría con el
+             wobble, que togglePanel() dispara en el MISMO instante en que cambia
+             panelOpen — la colisión no sería un riesgo, sería simultánea por
+             construcción.
+
+             Y es position:absolute con inset:0, no un span pelado, a propósito:
+             un elemento con transform se vuelve el bloque contenedor de sus
+             descendientes absolutos, y app-vexi-avatar es :host con
+             position:absolute e inset:0. Con un envoltorio de 0x0 la avatar
+             colapsaría a nada.
+
+             (Sin comillas invertidas en todo este literal: una sola cierra la
+             plantilla y Angular falla con "Code 1010".)
+
+             El halo reemplaza al anillo suelto de antes: dos pulsos
+             concéntricos sobre el mismo círculo de 94px leen como un glitch de
+             render, y el halo lleva la misma señal de "te estoy escuchando"
+             con contraste de verdad. -->
+        <span
+          class="vexi-dock__veil"
+          [class.vexi-dock__veil--hidden]="panelOpen()"
+        >
+          <app-vexi-avatar [expression]="expression()" [voice]="voiceActive()" />
+        </span>
       </div>
 
       @if (hintText(); as hint) {
@@ -150,6 +180,10 @@ const FAREWELL_MAX_MS = 15_000;
             [anchorLeft]="anchoredLeft()"
             [openInVoice]="openPanelInVoice()"
             (closed)="closePanel()"
+            (gripDown)="onGripDown($event)"
+            (gripMove)="onPointerMove($event)"
+            (gripUp)="onPointerUp()"
+            (gripCancel)="onPointerCancel()"
           />
         </div>
       }
@@ -169,8 +203,13 @@ const FAREWELL_MAX_MS = 15_000;
       }
 
       /* Carries the position. Sized like the dock so the hint (bottom: 100%)
-         and the panel (inset: 0) keep resolving against the same box. The
-         fallback must track DOCK_SIZE in vexi-dock-position.service.ts. */
+         and the panel (inset: 0) keep resolving against the same box.
+
+         La variable la publica el host desde dockSizeVar(), que es el mismo
+         número con el que el servicio recorta e imanta la posición: el recorte
+         por tamaño de pantalla no puede vivir en una media query de aquí, o el
+         dock se imantaría reservando 94px para un círculo de 56. El fallback
+         solo cubre el frame previo a la hidratación. */
       .vexi-dock__anchor {
         position: absolute;
         top: 0;
@@ -243,6 +282,55 @@ const FAREWELL_MAX_MS = 15_000;
         80% {
           transform: translateX(-2px);
         }
+      }
+
+      /* Capa exclusiva del ocultamiento. Ver el comentario del template para por
+         qué no puede compartir elemento con el wobble ni ser un span sin caja.
+         Hereda el cursor del dock para que el hueco no cambie de puntero. */
+      /* La salida y la entrada duran lo mismo pero no se sienten igual, y eso es
+         deliberado. Yéndose usa ease-in: acelera al final, que es cómo se ve
+         algo que se mete detrás de otra cosa. Volviendo usa un cubic-bezier con
+         rebase leve, que es cómo se ve algo que se asoma. Un ease simétrico en
+         las dos direcciones haría que aparecer y desaparecer se leyeran como el
+         mismo gesto reproducido al revés, y aparecer es el que tiene que llamar
+         la atención. */
+      .vexi-dock__veil {
+        position: absolute;
+        inset: 0;
+        display: block;
+        transition:
+          opacity 200ms ease-out,
+          transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      /* Se esconde HACIA ARRIBA porque ahí está el panel: .vexi-panel se ancla
+         con bottom: calc(100% + 12px), siempre encima del dock, y pinta por
+         delante al ir después en el DOM. Así que subir encogiendo lee como
+         meterse detrás de la ventana, y el regreso lee como asomarse por su
+         borde inferior. La dirección es fija: el panel nunca voltea en
+         vertical — solo el globo de pista tiene su variante --below.
+
+         La visibility va con delay en vez de sumarse a la transición porque no
+         interpola: cambiaría al primer frame y la avatar desaparecería de golpe
+         en lugar de irse. Con el delay cae justo cuando ya no se ve, y es lo que
+         la saca del árbol de accesibilidad además del aria-hidden. */
+      .vexi-dock__veil--hidden {
+        opacity: 0;
+        transform: translateY(-14px) scale(0.72);
+        visibility: hidden;
+        transition:
+          opacity 200ms ease-in,
+          transform 200ms ease-in,
+          visibility 0s linear 200ms;
+      }
+
+      /* El puntero se apaga en el dock y no en el velo: el velo es solo pintura
+         —la avatar ya tiene pointer-events en none— y el que recibe los gestos es
+         .vexi-dock. Dejarlo activo mientras está invisible daría un círculo
+         fantasma de 96px que se puede arrastrar sobre el panel. */
+      .vexi-dock--covered {
+        pointer-events: none;
+        cursor: default;
       }
 
       .vexi-dock__panel {
@@ -324,6 +412,18 @@ const FAREWELL_MAX_MS = 15_000;
 
         .vexi-dock--wobble {
           animation: none;
+        }
+
+        /* La avatar sigue apareciendo y desapareciendo —eso es información, no
+           adorno— pero sin desplazarse ni encogerse. Solo el cross-fade, que es
+           lo que prefers-reduced-motion permite. Sin esta regla el velo sería
+           lo único del dock que se sigue moviendo. */
+        .vexi-dock__veil,
+        .vexi-dock__veil--hidden {
+          transform: none;
+          transition:
+            opacity 200ms linear,
+            visibility 0s linear 200ms;
         }
       }
     `,
@@ -499,12 +599,37 @@ export class VexiDockComponent {
   });
 
   /**
+   * Orientación del panel y la burbuja, congelada mientras dura un arrastre.
+   *
+   * Sin esto el arrastre se rompe al cruzar la mitad de la pantalla: los dos
+   * predicados de abajo derivan de `position()`, que se reescribe en CADA
+   * `pointermove`, así que al pasar el eje `anchoredLeft` cambia, el panel salta
+   * de `right: 0` a `left: 0` y se teletransporta ~370px lateralmente debajo del
+   * dedo. El dock en sí no salta —`grabOffset` se mide contra el dock, no contra
+   * la barra— pero el conjunto sí, y desde el otro lado del vidrio eso se lee
+   * exactamente como perder el agarre y recuperarlo.
+   *
+   * Se congela al entrar en `drag` y se libera cuando termina el asentado, no al
+   * soltar: al final del glide el dock ya está clavado en su borde, así que el
+   * único reacomodo del panel coincide con un movimiento que ya existe y pasa
+   * desapercibido. Un solo salto al aterrizar en vez de uno por píxel.
+   */
+  private readonly anchorFrozen = signal<{
+    left: boolean;
+    top: boolean;
+  } | null>(null);
+
+  /**
    * True when the dock sits on the left half of the viewport, so the panel and
    * the bubble open rightward instead of off-screen.
    */
   protected readonly anchoredLeft = computed(() => {
+    const frozen = this.anchorFrozen();
+    // El return temprano es lo que corta la dependencia de `position()`: con el
+    // ancla congelada este computed deja de recalcularse durante el gesto.
+    if (frozen) return frozen.left;
     if (!this.isBrowser) return false;
-    return this.position().x + DOCK_SIZE / 2 < window.innerWidth / 2;
+    return this.position().x + this.positionService.size() / 2 < window.innerWidth / 2;
   });
 
   /**
@@ -513,8 +638,10 @@ export class VexiDockComponent {
    * publishes a fresh position object.
    */
   protected readonly anchoredTop = computed(() => {
+    const frozen = this.anchorFrozen();
+    if (frozen) return frozen.top;
     if (!this.isBrowser) return false;
-    return this.position().y + DOCK_SIZE / 2 < window.innerHeight / 2;
+    return this.position().y + this.positionService.size() / 2 < window.innerHeight / 2;
   });
 
   protected readonly ariaLabel = computed(() =>
@@ -630,6 +757,55 @@ export class VexiDockComponent {
     }, LONG_PRESS_MS);
   }
 
+  /**
+   * Arrastre desde una de las barras del panel.
+   *
+   * Puerta aparte de `onPointerDown` a propósito, no por comodidad. Esa entra en
+   * `'pending'` y arranca el temporizador de 450 ms hacia modo voz, y resuelve un
+   * `pointerup` sin movimiento como tap —que cerraría el panel—. Las dos cosas
+   * son defectos en una barra de arrastre: agarrar el asa de una hoja no puede
+   * abrir el micrófono ni cerrar la ventana que estás intentando mover.
+   *
+   * Y por eso mismo no hay umbral de 8 px: ese umbral existe para desambiguar un
+   * gesto sobre la avatar, que sirve para tres cosas. La barra sirve para una,
+   * así que el arrastre empieza en el primer píxel.
+   *
+   * `grabOffset` se calcula igual que en el camino de la avatar aunque el puntero
+   * esté lejos del dock —el panel está 12 px por encima—: al ser puntero menos
+   * posición del dock, conserva la distancia relativa y el conjunto se mueve
+   * rígido en vez de saltar para centrarse bajo el dedo.
+   */
+  protected onGripDown(event: PointerEvent): void {
+    if (!this.isBrowser || this.mode() !== 'idle') return;
+
+    this.activePointerId = event.pointerId;
+    this.origin = { x: event.clientX, y: event.clientY };
+
+    const { x, y } = this.position();
+    this.grabOffset = { x: event.clientX - x, y: event.clientY - y };
+
+    // Sobre la barra, que es donde nacieron los eventos: sin esto el flujo se
+    // corta en cuanto el puntero sale de sus 12 px de alto, o sea de inmediato.
+    (event.target as Element).setPointerCapture?.(event.pointerId);
+
+    // Antes de entrar en drag, no después: el panel está abierto y es el caso
+    // donde el flip de orientación a mitad de gesto se ve más.
+    this.freezeAnchor();
+    this.mode.set('drag');
+  }
+
+  /**
+   * Fija la orientación actual para el resto del gesto. Se llama con el ancla
+   * todavía libre, así que los predicados devuelven el valor real calculado.
+   */
+  private freezeAnchor(): void {
+    if (!this.isBrowser) return;
+    this.anchorFrozen.set({
+      left: this.anchoredLeft(),
+      top: this.anchoredTop(),
+    });
+  }
+
   protected onPointerMove(event: PointerEvent): void {
     if (event.pointerId !== this.activePointerId) return;
 
@@ -643,6 +819,10 @@ export class VexiDockComponent {
       if (Math.hypot(dx, dy) <= DRAG_THRESHOLD_PX) return;
 
       this.cancelHoldTimer();
+      // Mismo congelado que en la barra: este camino arrastra desde la avatar,
+      // con el panel cerrado casi siempre, pero la burbuja de saludo también se
+      // reorienta con estos predicados y saltaría igual.
+      this.freezeAnchor();
       this.mode.set('drag');
     }
 
@@ -805,6 +985,9 @@ export class VexiDockComponent {
     this.settleTimer = setTimeout(() => {
       this.settling.set(false);
       this.settleTimer = null;
+      // Liberar acá y no en el pointerup es lo que convierte el reacomodo del
+      // panel en un solo salto, y encima tapado por la llegada del dock.
+      this.anchorFrozen.set(null);
     }, SETTLE_MS);
   }
 
@@ -909,5 +1092,6 @@ export class VexiDockComponent {
     this.holdTimer = null;
   }
 
-  protected readonly dockSize = DOCK_SIZE;
+  /** Diámetro vigente como valor CSS, para la custom property del host. */
+  protected readonly dockSizeVar = computed(() => `${this.positionService.size()}px`);
 }

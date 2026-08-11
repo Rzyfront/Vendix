@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
+import { resolveTestSetProof } from '../dian-config/test-set-wait.util';
 import { EncryptionService } from '@common/services/encryption.service';
 
 type DianConfigurationType =
@@ -107,8 +108,23 @@ export interface ProductionReadinessReport {
   waiting_on_dian: ProductionReadinessCheck[];
 }
 
+/**
+ * Clave técnica compartida entre NIT distintos, si la hay.
+ *
+ * `null` significa COMPROBADO Y LIMPIO. Es obligatorio en `ReadinessConfig` para
+ * que un llamador no pueda omitirlo: un campo opcional ausente se leería como
+ * «sin hallazgo» y la comprobación fallaría en abierto, que es exactamente el
+ * modo de fallo que este archivo existe para evitar.
+ */
+export type SharedTechnicalKeyFinding = {
+  resolution_id: number;
+  foreign: Array<{ resolution_id: number; tax_id: string | null }>;
+};
+
 /** Shape `assertProductionReady` / `evaluateProductionReadiness` need. */
 type ReadinessConfig = {
+  /** Resultado de `findResolutionsSharingTechnicalKey`. `null` = comprobado y limpio. */
+  shared_technical_key: SharedTechnicalKeyFinding | null;
   id: number;
   operation_mode: string;
   environment: string;
@@ -122,7 +138,13 @@ type ReadinessConfig = {
   certificate_expiry: Date | null;
   certificate_fingerprint?: string | null;
   certificate_nit?: string | null;
-  enablement_evidence?: unknown;
+  /**
+   * Obligatorio por la misma razón que `shared_technical_key`: ausente se leería
+   * como «sin evidencia» y `resolveTestSetProof` caería al último lote, leyendo
+   * «no pasó» sobre una habilitación que la DIAN concedió. Un `select` que no la
+   * pida debe romper en compilación, no en producción.
+   */
+  enablement_evidence: unknown;
   test_set_id: string | null;
   last_test_result: unknown;
   nit?: string | null;
@@ -392,7 +414,16 @@ export class FiscalProductionReadinessService {
     }
 
     if (requireProduction) {
-      this.assertProductionReady(config);
+      this.assertProductionReady({
+        ...config,
+        // Se consulta aquí, donde hay `params` y contexto async, y se pasa como
+        // dato: `assertProductionReady` y `evaluateProductionReadiness` son
+        // sincrónicos a propósito para que el gate y la lista no puedan divergir.
+        shared_technical_key: await this.findResolutionsSharingTechnicalKey(
+          params,
+          config.environment,
+        ),
+      });
       // La DIAN no emite resolución de numeración para la nómina electrónica
       // (el DSPNE numera con su propio consecutivo NumNE, no con una
       // invoice_resolutions), por lo que exigir una resolución activa bloquearía
@@ -426,6 +457,18 @@ export class FiscalProductionReadinessService {
     const certValid =
       !!config.certificate_expiry && config.certificate_expiry > new Date();
 
+    // La clave técnica del rango está LIGADA AL NIT: la DIAN la asigna por cada
+    // rango de numeración de cada NIT, y alimenta el CUFE. Dos NIT distintos no
+    // pueden compartirla — si la comparten, al menos uno calcula un CUFE que la
+    // DIAN recomputa distinto y rechaza, con el consecutivo ya gastado.
+    //
+    // Llega COMO DATO en `config` y no se consulta aquí: esta función es sincrónica
+    // y pura a propósito, para que la lista que ve el comerciante no pueda divergir
+    // del gate que bloquea la emisión. El campo es OBLIGATORIO en `ReadinessConfig`
+    // justamente para que ningún llamador pueda omitirlo y dejar la comprobación
+    // fallando en abierto.
+    const shared_cltec = config.shared_technical_key;
+
     const checks: ProductionReadinessCheck[] = [
       {
         key: 'operation_mode',
@@ -437,7 +480,10 @@ export class FiscalProductionReadinessService {
       {
         key: 'test_set_evidence',
         label: 'Set de pruebas aprobado por la DIAN',
-        satisfied: this.hasPassedTestSet(config.last_test_result),
+        // Sobre la prueba DURABLE, no sobre el último lote: un reenvío posterior
+        // sobrescribe `last_test_result` y borraría un hecho ya ocurrido. Ver
+        // `resolveTestSetProof`.
+        satisfied: this.hasPassedTestSetForConfig(config),
         action: 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
         owner: 'tenant',
         blocked_by: 'dian',
@@ -545,6 +591,47 @@ export class FiscalProductionReadinessService {
           'los secretos DIAN están cifrados con la llave de respaldo visible en el repositorio.',
         owner: 'platform',
       },
+      {
+        key: 'technical_key_per_nit',
+        label: 'Clave técnica propia del rango (no compartida con otro NIT)',
+        // `=== null` y no `!shared_cltec`: distingue COMPROBADO Y LIMPIO (null) de
+        // NO COMPROBADO (undefined). El campo es obligatorio en `ReadinessConfig`,
+        // pero eso NO lo garantiza TypeScript: `StorePrismaService` expone sus
+        // modelos sobre un `scoped_client: any`, así que un llamador que difunda una
+        // fila leída por ahí compila sin el campo y lo pasa como `undefined`.
+        // Con `!shared_cltec` ese caso daba `satisfied: true` y la comprobación
+        // pasaba en vacío — el fallo en abierto que este archivo existe para evitar.
+        satisfied: shared_cltec === null,
+        // El caso más común no es contaminación entre tenants: es seguir con la
+        // resolución de HABILITACIÓN. La DIAN reparte a todos el mismo rango de
+        // prueba (`SETP`), y ese rango NO es facturable. Producción exige una
+        // «Autorización de Numeración de Facturación» propia, solicitada en MUISCA,
+        // que trae su prefijo, su rango y SU clave técnica. Decirlo así convierte un
+        // mensaje desconcertante en el siguiente paso.
+        action: shared_cltec === undefined
+          ? 'No se comprobó si la clave técnica está compartida con otro NIT. ' +
+            'El llamador debe resolver `shared_technical_key` con ' +
+            '`findResolutionsSharingTechnicalKey` antes de evaluar: sin ese dato la ' +
+            'comprobación no puede afirmar nada, y afirmar que está limpia sería ' +
+            'peor que no comprobarla.'
+          : shared_cltec
+          ? `La clave técnica de la resolución ${shared_cltec.resolution_id} está ` +
+            `compartida con ${shared_cltec.foreign.length} resolución(es) de otro NIT ` +
+            `(${shared_cltec.foreign
+              .map((f) => `res ${f.resolution_id} → NIT ${f.tax_id ?? 'sin NIT'}`)
+              .join('; ')}). La DIAN asigna una clave técnica por rango y por NIT, y ` +
+            'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
+            'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
+            'el consecutivo ya gastado. ' +
+            'SI LA RESOLUCIÓN ES LA DE HABILITACIÓN (prefijo SETP), esto es lo ' +
+            'esperado y no hay nada que corregir en ella: ese rango es el sandbox de ' +
+            'la DIAN, lo comparten todos los contribuyentes y NO es facturable. Lo ' +
+            'que falta es la resolución de PRODUCCIÓN: solicítala en MUISCA (Formato ' +
+            '1876), asocia el rango en el portal, y regístrala aquí con su propio ' +
+            'prefijo y su propia clave técnica.'
+          : '',
+        owner: 'tenant',
+      },
       this.buildSecretsEnvelopeWarning(config),
       this.buildPrivateKeyCustodyWarning(config),
       this.buildCertificateExpiryWarning(config.certificate_expiry),
@@ -619,10 +706,121 @@ export class FiscalProductionReadinessService {
     }
   }
 
+  /**
+   * ¿La DIAN aprobó el set de pruebas?
+   *
+   * Público porque `enablement_status: 'enabled'` lo necesita, y NO debe exigir
+   * readiness de producción: son dos cosas distintas y la DIAN las separa. Su
+   * correo de habilitación dice «ha finalizado el proceso de pruebas y actualmente
+   * se encuentra en estado habilitado», y en la MISMA carta pide, como paso
+   * posterior, «asociar y crear la numeración necesaria». O sea: habilitado ocurre
+   * ANTES de tener numeración de producción.
+   *
+   * Se expone el predicado en vez de duplicarlo para que el registro del estado y
+   * el checklist no puedan divergir — el mismo criterio que protege al resto del
+   * archivo.
+   */
+  hasPassedTestSetPublic(lastTestResult: unknown): boolean {
+    return this.hasPassedTestSet(lastTestResult);
+  }
+
+  /**
+   * ¿Pasó el set de pruebas, según la prueba DURABLE y no según el último lote?
+   *
+   * Preferir esta sobre `hasPassedTestSetPublic` cuando se tenga la configuración
+   * entera. `last_test_result` es a la vez el puntero al lote en vuelo y la prueba
+   * de la habilitación, así que un intento posterior la sobrescribe: el 2026-08-09
+   * un reenvío accidental y su posterior descarte dejaron la plataforma leyéndose
+   * como «habilitación pendiente» catorce horas después de que la DIAN la
+   * habilitara. `resolveTestSetProof` antepone `enablement_evidence`, que solo se
+   * escribe en éxito.
+   */
+  hasPassedTestSetForConfig(config: {
+    enablement_status: string | null;
+    enablement_evidence: unknown;
+    last_test_result: unknown;
+  }): boolean {
+    return this.hasPassedTestSet(resolveTestSetProof(config));
+  }
+
   private hasPassedTestSet(lastTestResult: unknown): boolean {
     if (!lastTestResult || typeof lastTestResult !== 'object') return false;
     const data = lastTestResult as Record<string, any>;
     return data?.dian_response?.success === true || data?.success === true;
+  }
+
+  /**
+   * ¿La clave técnica de la resolución activa está compartida con otro NIT?
+   *
+   * La `ClTec` la asigna la DIAN **por cada rango de numeración de cada NIT** y
+   * alimenta el CUFE sin viajar en el XML, así que la DIAN la recompone de su lado
+   * a partir del NIT y el rango. Compartirla entre NIT distintos garantiza que al
+   * menos uno de ellos emita un CUFE que no coincide con el recomputado — y el
+   * consecutivo se gasta igual.
+   *
+   * No se valida la LONGITUD de la clave a propósito: el anexo no publica su
+   * formato, y afirmar un largo deducido es el error que ya costó una habilitación
+   * con la composición del set de pruebas. Lo que sí está publicado, y es lo que
+   * se comprueba, es que la clave pertenece a un único par (NIT, rango).
+   */
+  async findResolutionsSharingTechnicalKey(
+    params: ResolveConfigParams,
+    environment?: string,
+  ): Promise<SharedTechnicalKeyFinding | null> {
+    // SOLO APLICA A PRODUCCIÓN, y esto es una corrección de la primera versión.
+    //
+    // En habilitación la DIAN asigna a TODO contribuyente el MISMO rango de
+    // prueba: prefijo `SETP`, resolución `18760000001`, rango 990000000-995000000
+    // y la MISMA clave técnica. Verificado contra el portal de habilitación de dos
+    // NIT distintos. Compartirla ahí no es contaminación entre tenants — es cómo
+    // funciona el ambiente de pruebas.
+    //
+    // La primera versión de este check no lo distinguía y habría bloqueado a todo
+    // tenant en habilitación, que es justo cuando más necesita emitir. La regla de
+    // «una ClTec por (NIT, rango)» rige la numeración de PRODUCCIÓN, que sí sale de
+    // una resolución propia solicitada en MUISCA.
+    if (environment !== 'production') return null;
+
+    const document_type =
+      params.document_type ?? this.defaultDocumentType(params.configuration_type);
+    const own = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          organization_id: params.organization_id,
+          accounting_entity_id: params.accounting_entity_id,
+          document_type,
+          is_active: true,
+        },
+        select: {
+          id: true,
+          technical_key: true,
+          accounting_entity: { select: { tax_id: true } },
+        },
+      });
+    if (!own?.technical_key) return null;
+
+    const others = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findMany({
+        where: { technical_key: own.technical_key, id: { not: own.id } },
+        select: {
+          id: true,
+          accounting_entity: { select: { tax_id: true } },
+        },
+      });
+
+    const own_nit = this.onlyDigits(own.accounting_entity?.tax_id);
+    const foreign = others
+      .filter(
+        (o) => this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
+      )
+      .map((o) => ({
+        resolution_id: o.id,
+        tax_id: o.accounting_entity?.tax_id ?? null,
+      }));
+
+    return foreign.length ? { resolution_id: own.id, foreign } : null;
   }
 
   private async assertResolutionReady(params: ResolveConfigParams): Promise<void> {

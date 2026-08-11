@@ -35,6 +35,18 @@ interface TenantSettingsEnvelope {
   readonly store_id: number | null;
   readonly fiscal_scope: 'STORE' | 'ORGANIZATION';
   readonly settings: Record<string, unknown>;
+  /**
+   * Secciones que el saneador del backend conserva. Llegan del servidor
+   * —dueño único de la lista— en vez de duplicarse aquí: el espejo local que
+   * había antes se quedó tres entradas corto (`accounting_flows`, `vexi`,
+   * `app`) y la consola bloqueaba escrituras que sí se persisten.
+   *
+   * Opcionales porque una respuesta vieja (caché, despliegue a mitad) puede no
+   * traerlas; ver `isKnown()` para el criterio de respaldo.
+   */
+  readonly known_sections?: readonly string[];
+  /** Secciones con formulario propio en otra pestaña → etiqueta de la pestaña. */
+  readonly delegated_sections?: Readonly<Record<string, string>>;
 }
 
 interface TenantSettingsResponse {
@@ -42,44 +54,47 @@ interface TenantSettingsResponse {
 }
 
 /**
- * Secciones que el saneador del backend conserva (`KNOWN_SECTIONS` de
- * `store/settings/settings.service.ts`). Una sección fuera de esta lista se
- * descarta EN SILENCIO y el PATCH responde 200 igual, así que la consola avisa
- * antes de dejar creer que el cambio se guardó.
+ * Etiquetas legibles por sección.
+ *
+ * ES SÓLO UN DICCIONARIO DE PRESENTACIÓN, NO UN ESPEJO DE VALIDEZ: una clave
+ * ausente aquí se pinta con su nombre crudo y nada más. Que este mapa quede
+ * corto jamás debe bloquear una escritura — ése fue exactamente el defecto que
+ * se corrigió al borrar el espejo local de `KNOWN_SECTIONS`.
  */
-const KNOWN_SECTIONS: ReadonlySet<string> = new Set([
-  'general',
-  'inventory',
-  'checkout',
-  'notifications',
-  'pos',
-  'receipts',
-  'branding',
-  'fonts',
-  'publication',
-  'operations',
-  'panel_ui',
-  'ecommerce',
-  'module_flows',
-  'fiscal_status',
-  'fiscal_data',
-  'dispatch',
-  'restaurant',
-  'membership',
-  'services',
-  'reservations',
-  'availability',
-]);
+const SECTION_LABELS: Readonly<Record<string, string>> = {
+  general: 'General',
+  inventory: 'Inventario',
+  checkout: 'Checkout',
+  notifications: 'Notificaciones',
+  pos: 'POS',
+  receipts: 'Recibos y facturas',
+  branding: 'Marca',
+  fonts: 'Tipografías',
+  publication: 'Publicación',
+  operations: 'Operaciones',
+  panel_ui: 'Interfaz del panel',
+  ecommerce: 'E-commerce',
+  module_flows: 'Flujos de módulos',
+  fiscal_status: 'Estado fiscal',
+  fiscal_data: 'Datos fiscales',
+  dispatch: 'Despacho',
+  restaurant: 'Restaurante',
+  membership: 'Membresías',
+  services: 'Servicios',
+  reservations: 'Reservas',
+  availability: 'Disponibilidad',
+  accounting_flows: 'Flujos contables',
+  vexi: 'Vexi',
+  app: 'App (alias legado)',
+  _schema_version: 'Versión del esquema',
+};
 
 /**
- * Secciones con superficie dedicada en otra pestaña. Se listan igual —esconder
- * datos del tenant nunca ayuda a soporte— pero el editor crudo se niega a
- * guardarlas: hay un formulario que aplica las reglas de dominio.
+ * Prefijo de las claves que el propio sistema de settings escribe para su
+ * contabilidad interna (`_schema_version`). No son configuración del tenant ni
+ * un error suyo, así que se rotulan «Metadato» y no «Sección no reconocida».
  */
-const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
-  panel_ui: 'Módulos',
-  fiscal_data: 'Identidad fiscal',
-};
+const METADATA_PREFIX = '_';
 
 /**
  * Ajustes del tenant: navegador de secciones con edición cruda por sección.
@@ -164,9 +179,23 @@ const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
                   [class.text-text-secondary]="section !== activeSection()"
                   (click)="selectSection(section)"
                 >
-                  <span class="truncate">{{ section }}</span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate">{{ sectionLabel(section) }}</span>
+                    <!--
+                      La clave cruda se muestra SIEMPRE junto a la etiqueta: es
+                      la que soporte necesita para hablar con un dev, y la que
+                      viaja en el PATCH. La etiqueta no la sustituye nunca.
+                    -->
+                    <span
+                      class="block truncate font-mono text-[10px] font-normal text-text-secondary"
+                    >
+                      {{ section }}{{ keyCountSuffix(section) }}
+                    </span>
+                  </span>
                   @if (delegatedTo(section); as owner) {
                     <app-badge variant="neutral" size="xs">{{ owner }}</app-badge>
+                  } @else if (isMetadata(section)) {
+                    <app-badge variant="info" size="xs">Metadato</app-badge>
                   } @else if (!isKnown(section)) {
                     <app-badge variant="warning" size="xs">?</app-badge>
                   }
@@ -182,7 +211,7 @@ const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
                 <header class="flex flex-wrap items-start justify-between gap-2">
                   <div class="min-w-0">
                     <h2 class="text-base font-semibold text-text-primary">
-                      {{ section }}
+                      {{ sectionLabel(section) }}
                     </h2>
                     <p class="mt-0.5 text-xs text-text-secondary">
                       Se envía como un PATCH de
@@ -192,12 +221,20 @@ const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
                       — las demás secciones no se tocan.
                     </p>
                   </div>
-                  <app-badge
-                    [variant]="isKnown(section) ? 'neutral' : 'warning'"
-                    size="sm"
-                  >
-                    {{ isKnown(section) ? 'Sección conocida' : 'Sección no reconocida' }}
-                  </app-badge>
+                  @if (isMetadata(section)) {
+                    <app-badge variant="info" size="sm">Metadato</app-badge>
+                  } @else {
+                    <app-badge
+                      [variant]="isKnown(section) ? 'neutral' : 'warning'"
+                      size="sm"
+                    >
+                      {{
+                        isKnown(section)
+                          ? 'Sección conocida'
+                          : 'Sección no reconocida'
+                      }}
+                    </app-badge>
+                  }
                 </header>
 
                 @if (delegatedTo(section); as owner) {
@@ -205,6 +242,13 @@ const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
                     Esta sección tiene formulario propio en la pestaña «{{ owner }}»,
                     que aplica sus reglas de dominio. Aquí se muestra en solo
                     lectura para no crear un segundo camino de escritura.
+                  </app-alert-banner>
+                } @else if (isMetadata(section)) {
+                  <app-alert-banner variant="info" icon="info">
+                    Contabilidad interna del propio sistema de settings —la
+                    escribe el migrador, no el tenant—. Se muestra en solo
+                    lectura porque tocarla a mano descuadraría la versión del
+                    esquema.
                   </app-alert-banner>
                 } @else if (!isKnown(section)) {
                   <app-alert-banner variant="warning" icon="alert-triangle">
@@ -215,9 +259,10 @@ const DELEGATED_SECTIONS: Readonly<Record<string, string>> = {
 
                 <textarea
                   [formControl]="draft"
-                  rows="18"
+                  [rows]="draftRows()"
+                  [readOnly]="!isEditable(section) || !canWrite()"
                   spellcheck="false"
-                  class="w-full rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] disabled:opacity-60"
+                  class="w-full rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] disabled:opacity-60 read-only:opacity-70"
                   [attr.aria-label]="'JSON de la sección ' + section"
                 ></textarea>
 
@@ -313,11 +358,36 @@ export class TenantSettingsComponent {
     this.store.can(TENANT_CAPABILITY.settingsWrite),
   );
 
-  protected readonly sections = computed<string[]>(() =>
-    Object.keys(this.envelope()?.settings ?? {}).sort((a, b) =>
-      a.localeCompare(b),
-    ),
-  );
+  /**
+   * Lista blanca del saneador tal como la declara el backend. `null` significa
+   * «el servidor no la mandó», que NO es lo mismo que «lista vacía»: ver
+   * `isKnown()`.
+   */
+  private readonly knownSections = computed<ReadonlySet<string> | null>(() => {
+    const declaradas = this.envelope()?.known_sections;
+    return Array.isArray(declaradas) ? new Set(declaradas) : null;
+  });
+
+  private readonly delegatedSections = computed<
+    Readonly<Record<string, string>>
+  >(() => this.envelope()?.delegated_sections ?? {});
+
+  /**
+   * Orden del índice: primero las secciones reales (alfabéticas), después las
+   * que el saneador no reconoce y, al final, los metadatos.
+   *
+   * ANTES ORDENABA A SECAS CON `localeCompare` y `_schema_version` ganaba por
+   * el guion bajo, así que la pantalla abría sobre una clave de contabilidad
+   * interna y lo primero que veía soporte era una alerta ámbar.
+   */
+  protected readonly sections = computed<string[]>(() => {
+    const rango = (clave: string): number =>
+      this.isMetadata(clave) ? 2 : this.isKnown(clave) ? 0 : 1;
+
+    return Object.keys(this.envelope()?.settings ?? {}).sort(
+      (a, b) => rango(a) - rango(b) || a.localeCompare(b),
+    );
+  });
 
   protected readonly dirty = computed(
     () => this.draftValue() !== this.pristine(),
@@ -338,8 +408,18 @@ export class TenantSettingsComponent {
     const section = this.activeSection();
     if (!section) return false;
     if (!this.canWrite() || this.saving()) return false;
-    if (this.delegatedTo(section) || !this.isKnown(section)) return false;
+    if (!this.isEditable(section)) return false;
     return this.dirty() && this.parseError() === null;
+  });
+
+  /**
+   * Alto del editor ajustado al contenido. Un `rows="18"` fijo dejaba media
+   * pantalla en blanco para `_schema_version`, cuyo valor cabe en un carácter.
+   * El techo evita que una sección enorme empuje los botones fuera de la vista.
+   */
+  protected readonly draftRows = computed<number>(() => {
+    const lineas = this.draftValue().split('\n').length;
+    return Math.min(24, Math.max(4, lineas + 1));
   });
 
   /**
@@ -376,8 +456,7 @@ export class TenantSettingsComponent {
           const data = response?.data ?? null;
           this.envelope.set(data);
           this.loading.set(false);
-          const first = this.sections()[0] ?? null;
-          this.selectSection(this.activeSection() ?? first);
+          this.selectSection(this.activeSection() ?? this.preferredSection());
         },
         error: (err: unknown) => {
           this.loading.set(false);
@@ -407,12 +486,64 @@ export class TenantSettingsComponent {
     this.draft.setValue(this.pristine());
   }
 
+  /**
+   * ¿El saneador del backend conserva esta sección?
+   *
+   * RESPALDO DEFENSIVO: si el envelope no trae `known_sections` —respuesta
+   * antigua en caché, despliegue a mitad— se responde `true`, es decir NO se
+   * bloquea. El criterio es deliberado: negar una escritura legítima deja a
+   * soporte sin salida y sin explicación, mientras que dejar pasar una que el
+   * saneador descartará termina en un 200 con la sección intacta, que el propio
+   * editor repinta desde la respuesta del backend. El daño no es simétrico.
+   */
   protected isKnown(section: string): boolean {
-    return KNOWN_SECTIONS.has(section);
+    const declaradas = this.knownSections();
+    return declaradas ? declaradas.has(section) : true;
+  }
+
+  /** Contabilidad interna del sistema de settings, no configuración del tenant. */
+  protected isMetadata(section: string): boolean {
+    return section.startsWith(METADATA_PREFIX);
   }
 
   protected delegatedTo(section: string): string | null {
-    return DELEGATED_SECTIONS[section] ?? null;
+    return this.delegatedSections()[section] ?? null;
+  }
+
+  /** Sólo se edita lo que el backend acepta y nadie más gobierna. */
+  protected isEditable(section: string): boolean {
+    return (
+      !this.isMetadata(section) &&
+      !this.delegatedTo(section) &&
+      this.isKnown(section)
+    );
+  }
+
+  /** Etiqueta legible; la clave cruda NUNCA se sustituye, se muestra al lado. */
+  protected sectionLabel(section: string): string {
+    return SECTION_LABELS[section] ?? section;
+  }
+
+  /**
+   * Sufijo con el número de claves de primer nivel («· 7»), para que soporte
+   * distinga de un vistazo lo configurado de lo vacío. Un escalar no tiene
+   * claves y no lleva sufijo.
+   */
+  protected keyCountSuffix(section: string): string {
+    const value = this.envelope()?.settings?.[section];
+    if (Array.isArray(value)) return ` · ${value.length}`;
+    if (value === null || typeof value !== 'object') return '';
+    return ` · ${Object.keys(value as Record<string, unknown>).length}`;
+  }
+
+  /**
+   * Sección con la que abrir la pantalla: `general` si el tenant la tiene,
+   * porque es la portada natural de la configuración. Nunca un metadato: el
+   * orden de `sections()` ya los manda al final.
+   */
+  private preferredSection(): string | null {
+    const disponibles = this.sections();
+    return disponibles.find((s) => s === 'general') ?? disponibles[0] ?? null;
   }
 
   protected askSave(): void {
@@ -423,7 +554,8 @@ export class TenantSettingsComponent {
 
   protected saveMessage(section: string): string {
     return (
-      `Se reemplazará la sección «${section}» de ${this.store.tenantName()} con el JSON del editor. ` +
+      `Se reemplazará la sección «${this.sectionLabel(section)}» (${section}) de ` +
+      `${this.store.tenantName()} con el JSON del editor. ` +
       'El backend la fusiona sobre las demás secciones y aplica los mismos guards de transición ' +
       'que el panel del comerciante, así que un cambio inválido se rechaza — pero uno válido y ' +
       'equivocado sí se aplica sobre datos productivos.'

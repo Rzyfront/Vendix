@@ -2,6 +2,188 @@
   display: block;
 }
 
+// ─── Encabezados de bloque ─────────────────────────────
+// Cada bloque dice de qué se ocupa antes del primer control, para que el
+// operador pueda escanear la pantalla en vez de leer 20 toggles sueltos.
+
+.block-head {
+  margin-bottom: 0.75rem;
+}
+
+.block-title {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.block-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+// ─── Celda de ajuste (toggle + indicativos) ────────────
+// El `app-setting-toggle` no tiene ranura para insignias ni ayuda, así que el
+// estado y el "por qué" viven en una fila propia justo debajo del control.
+
+.setting-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-cell__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+  padding-inline: 0.375rem;
+}
+
+.help-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  cursor: help;
+  border-bottom: 1px dotted var(--color-border);
+
+  &--busy {
+    color: var(--color-info);
+    cursor: default;
+    border-bottom-color: transparent;
+  }
+}
+
+// ─── Campos que no son toggle ──────────────────────────
+// Un label, el control y una pista de una línea que dice qué cambia el valor.
+
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.field__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.field__control {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  min-height: 40px;
+  font-size: 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-info);
+    box-shadow: 0 0 0 3px rgba(var(--color-info-rgb), 0.12);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  // Evita el zoom automático de iOS al enfocar el control.
+  @media (max-width: 767px) {
+    font-size: 16px;
+    min-height: 44px;
+  }
+}
+
+.field__hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+
+  &--inline {
+    margin: 0;
+    flex: 1;
+    min-width: 12rem;
+  }
+
+  &--block {
+    margin-bottom: 0.75rem;
+  }
+
+  &--warning {
+    margin-top: 0.75rem;
+    color: var(--color-warning);
+  }
+}
+
+// ─── Encabezado de tarjeta colapsable ──────────────────
+// El resumen viaja en el encabezado para que colapsar no esconda el dato.
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 0.0625rem;
+    color: var(--color-text-secondary);
+  }
+}
+
+.card-head__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.card-head__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.card-head__sub {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+// ─── Referencia cruzada ────────────────────────────────
+// Dice qué NO se configura acá, para que nadie busque el control en esta
+// pantalla.
+
+.cross-ref {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+  }
+}
+
 // ─── Day Row (mobile-first) ────────────────────────────
 
 .day-row {

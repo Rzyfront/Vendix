@@ -23,6 +23,21 @@ import {
 } from '../../../utils/dian-money.util';
 
 /**
+ * Campos de dirección que los builders UBL saben emitir. Es el subconjunto
+ * común de `DianIssuerData` y `DianCustomerData`, extraído para que las dos
+ * formas de dirección —envuelta en `cac:Address` y plana— compartan firma.
+ */
+interface DianAddressFields {
+  address_line?: string;
+  city_code?: string;
+  city_name?: string;
+  department_code?: string;
+  department_name?: string;
+  country_code?: string;
+  postal_code?: string;
+}
+
+/**
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
  * Used by both invoice and credit note builders.
  */
@@ -30,6 +45,48 @@ export class UblCommonBuilder {
   /** DIAN scheme agency attributes shared by every sts:* identifier. */
   private static readonly DIAN_SCHEME_AGENCY_NAME =
     'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)';
+
+  /**
+   * Responsabilidades ACEPTADAS por `cbc:TaxLevelCode` (Anexo 1.9).
+   *
+   * NO es el catálogo de la casilla 53 del RUT. Son dos listas distintas y ese es
+   * el defecto que esto cierra: una migración escribió las responsabilidades del
+   * RUT (`O-05, O-07, O-14, O-42, O-48`) en el campo que alimenta este elemento, y
+   * la DIAN respondió FAJ26 «Responsabilidad informada por emisor no valida según
+   * lista». Antes declaraba `O-13;O-47`, que sí están en la enumeración — por eso
+   * FAJ26 no aparecía.
+   *
+   * `R-99-PN` es el valor «ninguna de las anteriores» de la propia lista, y es el
+   * respaldo correcto: un contribuyente cuyas responsabilidades del RUT no caen en
+   * ninguna de estas categorías no declara ninguna, no inventa una.
+   */
+  private static readonly TAX_LEVEL_CODES = new Set([
+    'O-13', // Gran contribuyente
+    'O-15', // Autorretenedor
+    'O-23', // Agente de retención IVA
+    'O-47', // Régimen simple de tributación
+    'R-99-PN', // No responsable / ninguna de las anteriores
+  ]);
+
+  /** Valor «ninguna de las anteriores» de la lista de responsabilidades. */
+  static readonly TAX_LEVEL_CODE_NONE = 'R-99-PN';
+
+  /**
+   * Filtra a la enumeración de `cbc:TaxLevelCode`.
+   *
+   * Acepta la forma con punto y coma que el anexo permite (`'O-13;O-15'`), descarta
+   * lo que no pertenece a la lista, y devuelve `R-99-PN` cuando no queda nada.
+   * Nunca propaga un código del RUT que la DIAN rechazaría.
+   */
+  static toTaxLevelCode(value?: string | null): string {
+    const kept = String(value ?? '')
+      .split(';')
+      .map((code) => code.trim())
+      .filter((code) => UblCommonBuilder.TAX_LEVEL_CODES.has(code));
+    return kept.length
+      ? kept.join(';')
+      : UblCommonBuilder.TAX_LEVEL_CODE_NONE;
+  }
 
   /**
    * Builds the UBLExtensions element with the full DIAN `sts:DianExtensions`
@@ -127,10 +184,30 @@ export class UblCommonBuilder {
       .att('schemeName', '31') // 31 = NIT
       .txt(software_security.provider_nit ?? options?.issuer_nit ?? '');
 
-    // NOTE: the DIAN sts schema names this element `softwareID` (lowercase 's'),
-    // NOT `SoftwareID`. Using the wrong casing fails schema validation.
+    // `sts:SoftwareID` con S MAYÚSCULA.
+    //
+    // Aquí decía `softwareID` en minúscula, con un comentario que afirmaba que la
+    // mayúscula «falla la validación de esquema» — sin citar fuente. La medición
+    // dice lo contrario: la validación sincrónica del 2026-08-08 devolvió TRES
+    // reglas del mismo bloque diciendo «no informado» sobre valores que el XML SÍ
+    // llevaba:
+    //
+    //   FAB24a  «No se encuentra informado el código de software»
+    //   FAB25   «No informado el literal “195”»          <- schemeAgencyID
+    //   FAB26   «No informado el literal “CO, DIAN (…)”» <- schemeAgencyName
+    //
+    // Los dos literales están presentes y son exactos, y van pegados como
+    // atributos de ESTE elemento. Que la DIAN los declare ausentes significa que
+    // su XPath no encuentra el elemento que los porta: tres reglas, un nombre mal
+    // escrito. Es el mismo patrón que FAB10a con `CorporateRegistrationScheme`.
+    //
+    // Corrobora la mayúscula el propio repositorio: los builders de nómina
+    // (`nomina-individual.builder.ts`, `nomina-adjustment.builder.ts`) emiten
+    // `SoftwareID`. Y el comentario anterior es exactamente la forma de error que
+    // `dian-test-set-composition.ts` documenta: una afirmación sin fuente que cada
+    // relectura confirmaba.
     software
-      .ele(UBL_NAMESPACES.STS, 'softwareID')
+      .ele(UBL_NAMESPACES.STS, 'SoftwareID')
       .att('schemeAgencyID', '195')
       .att('schemeAgencyName', agency_name)
       .txt(software_security.software_id);
@@ -211,8 +288,19 @@ export class UblCommonBuilder {
 
   /**
    * Builds the supplier (emisor) party element.
+   *
+   * `numbering_prefix` es el prefijo de la resolución de numeración (el mismo
+   * que viaja en `sts:AuthorizedInvoices/sts:Prefix`). Identifica el PUNTO DE
+   * FACTURACIÓN y va en `cac:PartyLegalEntity/cac:CorporateRegistrationScheme`
+   * — ver la nota de FAJ49/FAJ50 más abajo. Es opcional porque el documento
+   * soporte construye su emisor a partir de un tercero no obligado a facturar,
+   * que no tiene resolución propia: ahí el grupo se omite.
    */
-  static buildSupplierParty(parent: any, issuer: DianIssuerData): void {
+  static buildSupplierParty(
+    parent: any,
+    issuer: DianIssuerData,
+    numbering_prefix?: string,
+  ): void {
     const supplier = parent.ele(UBL_NAMESPACES.CAC, 'AccountingSupplierParty');
     // AdditionalAccountID = tipo de persona/organización ('1' Jurídica default,
     // '2' Natural). The tax regime ('48'/'49') belongs in TaxLevelCode, not here.
@@ -256,17 +344,21 @@ export class UblCommonBuilder {
     // literal 'No aplica'. The regime is NOT emitted as a 48/49 code, and it no
     // longer lives in AdditionalAccountID (which is now the person type).
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
-    tax_level.att('listName', 'No aplica').txt(issuer.tax_scheme);
+    tax_level
+      .att('listName', 'No aplica')
+      .txt(UblCommonBuilder.toTaxLevelCode(issuer.tax_scheme));
 
-    UblCommonBuilder.buildAddress(
-      tax_scheme.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
-      issuer,
-    );
+    UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer);
 
-    tax_scheme
-      .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(DIAN_TAX_CODES.IVA);
+    // `cac:TaxScheme` se valida como PAR (ID, Name). El anexo exige `cbc:Name`
+    // junto a `cbc:ID` y la DIAN notifica FAJ41 «el contenido de este elemento
+    // no corresponde al nombre y código valido» cuando el nombre falta —
+    // XPath `/Invoice/cac:AccountingSupplierParty/…/cac:TaxScheme/cbc:Name`.
+    const issuer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+    issuer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    issuer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'Name')
+      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
     // Party legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
@@ -281,6 +373,38 @@ export class UblCommonBuilder {
       .att('schemeID', issuer.nit_dv)
       .att('schemeName', issuer.document_type || '31')
       .txt(issuer.nit);
+
+    // FAJ49 + FAJ50 (espejos CAJ49/CAJ50 en nota crédito y DAJ49/DAJ50 en nota
+    // débito, las tres de severidad RECHAZO). `cac:CorporateRegistrationScheme`
+    // identifica el PUNTO DE FACTURACIÓN, y de ese punto cuelgan la autorización
+    // de numeración y el software habilitado para usarla. El anexo define
+    // FAB10a como la comparación
+    //
+    //   sts:AuthorizedInvoices/sts:Prefix
+    //     == cac:PartyLegalEntity/cac:CorporateRegistrationScheme/cbc:ID
+    //
+    // Sin el grupo no hay lado derecho contra el que comparar, así que la DIAN
+    // no resuelve el punto — y en cascada no resuelve la autorización (FAD05e
+    // «el número no existe para la autorización») ni el software autorizado
+    // para ella (FAB24a presencia, FAB27b huella, FAB25/FAB26 atributos). Es el
+    // mismo racimo de un solo XPath ausente que ya produjo FAJ28/29/32 con la
+    // dirección fiscal: siete reglas, un elemento.
+    //
+    // En la vía asincrónica el efecto era peor que un rechazo: la DIAN devolvía
+    // ZipKey y no clasificaba el lote en el set de pruebas, así que el portal
+    // quedaba en «Recibidos 0» y `GetStatus` respondía código 66 —«TrackId no
+    // existe en los registros de la DIAN»— sobre un CUFE que ella misma había
+    // validado como correcto por la vía sincrónica.
+    //
+    // `cbc:Name` (FAJ51) es el número de matrícula mercantil: 6-12 dígitos,
+    // 0..1, solo notificación. NO se emite. Vendix no almacena la matrícula, y
+    // declarar un número inventado afirmaría un registro que no existe.
+    if (numbering_prefix) {
+      legal
+        .ele(UBL_NAMESPACES.CAC, 'CorporateRegistrationScheme')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .txt(numbering_prefix);
+    }
 
     // Contact
     if (issuer.email || issuer.phone) {
@@ -313,6 +437,24 @@ export class UblCommonBuilder {
       );
 
     const party = customer_party.ele(UBL_NAMESPACES.CAC, 'Party');
+
+    // `cac:PartyIdentification` es obligatorio cuando el adquiriente es
+    // consumidor final, es decir cuando `AdditionalAccountID = "2"`. La DIAN
+    // rechaza con FAK61 «Si el valor de AdditionalAccountID es igual a "2" y el
+    // grupo no es informado» — XPath
+    // `//cac:AccountingCustomerParty/cac:Party/cac:PartyIdentification`.
+    //
+    // Se emite siempre y no solo para el tipo "2": el documento del adquiriente
+    // es información legítima en ambos casos, y condicionarlo al tipo de persona
+    // reintroduciría la misma clase de defecto en cuanto el tipo se derive mal.
+    // En UBL `PartyIdentification` precede a `PartyName` en la secuencia.
+    party
+      .ele(UBL_NAMESPACES.CAC, 'PartyIdentification')
+      .ele(UBL_NAMESPACES.CBC, 'ID')
+      .att('schemeAgencyID', '195')
+      .att('schemeAgencyName', UblCommonBuilder.DIAN_SCHEME_AGENCY_NAME)
+      .att('schemeName', customer.document_type)
+      .txt(customer.document_number);
 
     // Party name
     party
@@ -353,16 +495,14 @@ export class UblCommonBuilder {
       .txt(customer.tax_responsibilities?.[0] || 'R-99-PN');
 
     if (customer.city_code) {
-      UblCommonBuilder.buildAddress(
-        tax_scheme.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
-        customer,
-      );
+      UblCommonBuilder.buildRegistrationAddress(tax_scheme, customer);
     }
 
-    tax_scheme
-      .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(DIAN_TAX_CODES.IVA);
+    const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+    customer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    customer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'Name')
+      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
     // Legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
@@ -391,22 +531,54 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds an address element (used for PhysicalLocation and RegistrationAddress).
+   * `cac:PhysicalLocation` es un `LocationType`: CONTIENE un `cac:Address`.
+   *
+   * No sirve para `cac:RegistrationAddress`, que ya ES un `AddressType` — para
+   * ese usar `buildRegistrationAddress`. Los dos compartían este método y el
+   * envoltorio de más dejaba la dirección fiscal del emisor fuera de la ruta
+   * donde la DIAN la busca (ver `buildAddressFields`).
    */
   static buildAddress(
     parent: any,
-    address: {
-      address_line?: string;
-      city_code?: string;
-      city_name?: string;
-      department_code?: string;
-      department_name?: string;
-      country_code?: string;
-      postal_code?: string;
-    },
+    address: DianAddressFields,
   ): void {
-    const addr = parent.ele(UBL_NAMESPACES.CAC, 'Address');
+    UblCommonBuilder.buildAddressFields(
+      parent.ele(UBL_NAMESPACES.CAC, 'Address'),
+      address,
+    );
+  }
 
+  /**
+   * `cac:RegistrationAddress` ES un `AddressType`, así que sus campos cuelgan
+   * DIRECTAMENTE de él: los XPath del anexo son
+   * `…/cac:PartyTaxScheme/cac:RegistrationAddress/cbc:ID` y
+   * `…/cac:RegistrationAddress/cbc:CountrySubentityCode`.
+   *
+   * Antes se reutilizaba `buildAddress`, que interpone un `cac:Address`. El dato
+   * viajaba completo pero un nivel más abajo del que la DIAN consulta, así que
+   * los tres XPath resolvían a nada y respondía con tres reglas por una sola
+   * causa: FAJ28 «no fue informado el conjunto de elementos …» sobre el grupo,
+   * más FAJ29 y FAJ32 «este código no corresponde a un valor válido de la
+   * lista» sobre el municipio y el departamento que sí estaban informados.
+   */
+  static buildRegistrationAddress(
+    parent: any,
+    address: DianAddressFields,
+  ): void {
+    UblCommonBuilder.buildAddressFields(
+      parent.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
+      address,
+    );
+  }
+
+  /**
+   * Emite el conjunto de campos de dirección DENTRO del elemento recibido, sin
+   * crear envoltorio. Es el cuerpo común de las dos formas de arriba.
+   */
+  private static buildAddressFields(
+    addr: any,
+    address: DianAddressFields,
+  ): void {
     addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(address.city_code || '11001');
     addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(address.city_name || 'Bogotá');
     addr
@@ -550,7 +722,57 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds `cac:LegalMonetaryTotal` so it satisfies the DIAN arithmetic rules.
+   * Builds `cac:PaymentMeans`, the payment group the DIAN requires on every
+   * document with cardinality `1..N`.
+   *
+   * WHY THIS IS SHARED AND NOT INLINE
+   *
+   * The invoice, the equivalent document and the support document each grew
+   * their own inline copy of this block, and the two notes grew NONE. The DIAN
+   * rejected all 20 notes of the habilitación set for exactly that:
+   *
+   *   CAN01  «Rechazo si grupo no informado»  /CreditNote/cac:PaymentMeans
+   *   DAN01  «Rechazo si grupo no informado»  /DebitNote/cac:PaymentMeans
+   *
+   * A group that four document types need is not a per-builder detail. The two
+   * notes consume it from here so a fifth omission cannot happen the same way.
+   *
+   * The three existing inline copies are deliberately NOT migrated in this
+   * change: they are the code path the DIAN accepted 30 times during the
+   * habilitación, and this ships against a live habilitación that must not
+   * regress. Migrating them is a separate, independently verifiable change.
+   *
+   * UBL fixes the order `Delivery → DeliveryTerms → PaymentMeans →
+   * PaymentTerms → AllowanceCharge → TaxTotal → (monetary total)`, so callers
+   * must invoke this AFTER the parties and BEFORE the tax totals.
+   *
+   * Field defaults follow the same convention the invoice builder already uses:
+   * `payment_form` '1' = contado, `payment_means` '10' = efectivo. `DAN04`
+   * makes `PaymentDueDate` mandatory on credit sales, so it is always emitted,
+   * falling back to the issue date when no due date exists.
+   */
+  static buildPaymentMeans(
+    parent: any,
+    data: {
+      payment_form?: string;
+      payment_means?: string;
+      due_date?: string;
+      issue_date: string;
+    },
+  ): void {
+    const payment_means = parent.ele(UBL_NAMESPACES.CAC, 'PaymentMeans');
+    payment_means.ele(UBL_NAMESPACES.CBC, 'ID').txt(data.payment_form || '1');
+    payment_means
+      .ele(UBL_NAMESPACES.CBC, 'PaymentMeansCode')
+      .txt(data.payment_means || '10');
+    payment_means
+      .ele(UBL_NAMESPACES.CBC, 'PaymentDueDate')
+      .txt(data.due_date || data.issue_date);
+  }
+
+  /**
+   * Builds the document's monetary-total group so it satisfies the DIAN
+   * arithmetic rules.
    *
    * The defect this replaces: the header published the GROSS subtotal as
    * `LineExtensionAmount` while every line published its NET amount
@@ -569,8 +791,31 @@ export class UblCommonBuilder {
    *
    * Shared by invoice, credit note, debit note and support document — the block
    * was duplicated four times and drifted independently.
+   *
+   * THE WRAPPER ELEMENT IS NOT THE SAME FOR EVERY DOCUMENT. UBL 2.1 names the
+   * debit note's group `cac:RequestedMonetaryTotal`; every other document uses
+   * `cac:LegalMonetaryTotal`. It is not a synonym and not a mirror — the DIAN
+   * publishes a different XPath per document type (Anexo Técnico 1.9 §11.4.6):
+   *
+   *   CAU01  /CreditNote/cac:LegalMonetaryTotal
+   *   DAU01  /DebitNote/cac:RequestedMonetaryTotal        <- 1..1, obligatorio
+   *
+   * Emitting `LegalMonetaryTotal` inside a `DebitNote` therefore publishes the
+   * amounts where nothing reads them. That single wrong name produced FOUR
+   * rejections at once on all 10 debit notes of the set, because the CUDE and
+   * the arithmetic rules both resolve through it:
+   *
+   *   DAD06  CUDE mal calculado — ValFac and ValTot resolve to
+   *          /DebitNote/cac:RequestedMonetaryTotal/{LineExtensionAmount,PayableAmount};
+   *          absent, the DIAN hashes empty strings and gets another key
+   *   DAU02  bruto no cuadra con las líneas
+   *   DAU04  base imponible no cuadra
+   *   DAU06  bruto + tributos no cuadra
+   *
+   * The arithmetic was never wrong: it is the same function that backed the 30
+   * accepted invoices. Only the envelope was misnamed.
    */
-  static buildLegalMonetaryTotal(
+  static buildMonetaryTotal(
     parent: any,
     data: {
       discount_amount: string;
@@ -578,6 +823,13 @@ export class UblCommonBuilder {
       items: ProviderInvoiceItem[];
     },
     currency: string,
+    /**
+     * UBL name of the group. Defaults to `LegalMonetaryTotal`, which is correct
+     * for every document type EXCEPT the debit note.
+     */
+    element_name:
+      | 'LegalMonetaryTotal'
+      | 'RequestedMonetaryTotal' = 'LegalMonetaryTotal',
   ): void {
     const line_extension = dianLineExtensionTotal(data.items);
     const document_discount = UblCommonBuilder.documentDiscount(data);
@@ -590,7 +842,7 @@ export class UblCommonBuilder {
       { value: document_discount, sign: -1 },
     ]);
 
-    const monetary = parent.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
+    const monetary = parent.ele(UBL_NAMESPACES.CAC, element_name);
     monetary
       .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
       .att('currencyID', currency)
@@ -614,6 +866,52 @@ export class UblCommonBuilder {
   }
 
   /**
+   * `cac:LegalMonetaryTotal` — the group name every document uses EXCEPT the
+   * debit note. Kept as the named entry point so the four callers that are
+   * legitimately `LegalMonetaryTotal` (invoice, credit note, equivalent document,
+   * support document) read as a statement of which group they emit rather than
+   * as a default they happen to inherit.
+   */
+  static buildLegalMonetaryTotal(
+    parent: any,
+    data: {
+      discount_amount: string;
+      tax_amount: string;
+      items: ProviderInvoiceItem[];
+    },
+    currency: string,
+  ): void {
+    UblCommonBuilder.buildMonetaryTotal(
+      parent,
+      data,
+      currency,
+      'LegalMonetaryTotal',
+    );
+  }
+
+  /**
+   * `cac:RequestedMonetaryTotal` — the debit note's group, and ONLY the debit
+   * note's. See `buildMonetaryTotal` for why using the wrong one costs four
+   * rejection rules (DAD06, DAU02, DAU04, DAU06) at once.
+   */
+  static buildRequestedMonetaryTotal(
+    parent: any,
+    data: {
+      discount_amount: string;
+      tax_amount: string;
+      items: ProviderInvoiceItem[];
+    },
+    currency: string,
+  ): void {
+    UblCommonBuilder.buildMonetaryTotal(
+      parent,
+      data,
+      currency,
+      'RequestedMonetaryTotal',
+    );
+  }
+
+  /**
    * Builds invoice line items.
    */
   static buildInvoiceLines(
@@ -622,13 +920,54 @@ export class UblCommonBuilder {
     taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
+    UblCommonBuilder.buildDocumentLines(parent, items, taxes, currency, {
+      line_element: 'InvoiceLine',
+      quantity_element: 'InvoicedQuantity',
+    });
+  }
+
+  /**
+   * Emite las líneas de un documento —cantidad, descuento, `cac:TaxTotal` de
+   * línea, ítem y precio— para los tres tipos que comparten estructura en UBL.
+   *
+   * `InvoiceLineType`, `CreditNoteLineType` y `DebitNoteLineType` difieren SOLO
+   * en el nombre del elemento de cantidad (`InvoicedQuantity` /
+   * `CreditedQuantity` / `DebitedQuantity`); el resto de la secuencia UBL es
+   * idéntico, incluido el orden `AllowanceCharge → TaxTotal → Item → Price`.
+   *
+   * Antes cada builder escribía su propia línea, y esa duplicación ya dejó
+   * arreglos afuera dos veces:
+   *
+   *   - FAZ09 (`cac:StandardItemIdentification`) se arregló en la factura y hubo
+   *     que replicarlo a mano en las notas.
+   *   - `cac:TaxTotal` de línea nunca llegó a ellas — reglas CAS01b y DAS01b,
+   *     que alcanzan a 20 de los 50 documentos que exige el set de habilitación.
+   *
+   * Un solo cuerpo hace imposible que la próxima regla alcance a un tipo de
+   * documento y no a los otros.
+   */
+  static buildDocumentLines(
+    parent: any,
+    items: ProviderInvoiceItem[],
+    taxes: ProviderInvoiceTax[],
+    currency: string,
+    options: {
+      line_element: 'InvoiceLine' | 'CreditNoteLine' | 'DebitNoteLine';
+      quantity_element:
+        | 'InvoicedQuantity'
+        | 'CreditedQuantity'
+        | 'DebitedQuantity';
+    },
+  ): void {
     items.forEach((item, index) => {
-      const line = parent.ele(UBL_NAMESPACES.CAC, 'InvoiceLine');
+      const line = parent.ele(UBL_NAMESPACES.CAC, options.line_element);
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
 
       line
-        .ele(UBL_NAMESPACES.CBC, 'InvoicedQuantity')
-        .att('unitCode', 'EA') // Each (unit)
+        .ele(UBL_NAMESPACES.CBC, options.quantity_element)
+        // Unidad realmente vendida; `EA` (each) cuando el producto no declara
+        // unidad, que es todo el catálogo por pieza.
+        .att('unitCode', item.unit_code || 'EA')
         .txt(item.quantity);
 
       // Same function the header uses, so header and lines cannot disagree.
@@ -688,14 +1027,37 @@ export class UblCommonBuilder {
       // dianRate, not the raw string: tax_rate arrives from a Decimal(5,2), so
       // 19.00 serialized as '19' and reached the XML without decimals.
       category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(dianRate(tax_rate));
-      category
-        .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-        .ele(UBL_NAMESPACES.CBC, 'ID')
-        .txt(tax_code);
+      // Mismo par (ID, Name) que en la cabecera. FAS01b compara «Porcentaje,
+      // Nombre y ID» de la línea contra el TaxTotal de cabecera para exigir que
+      // exista uno por cada tributo de línea «con las características
+      // correspondiente al mismo impuesto». La cabecera sí emitía el nombre y la
+      // línea no, así que la línea no coincidía con su propio impuesto.
+      const line_scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+      line_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(tax_code);
+      line_scheme
+        .ele(UBL_NAMESPACES.CBC, 'Name')
+        .txt(DIAN_TAX_NAMES[tax_code] || tax_code);
 
-      // Item description
+      // Item description + identificación estándar del ítem.
+      //
+      // `cac:StandardItemIdentification` es obligatorio: la DIAN rechaza la línea
+      // sin él con la regla FAZ09 «StandardItemIdentification no informado». No se
+      // emitía en ningún tipo de documento, así que el defecto alcanzaba también a
+      // la emisión real, no solo a la habilitación.
+      //
+      // `schemeID="999"` = «estándar de adopción del contribuyente». Es el valor
+      // correcto mientras Vendix no publique catálogo UNSPSC (001) ni GTIN (010):
+      // declarar uno de esos sin tenerlo sería una afirmación falsa sobre el
+      // origen del código. El número de línea es la caída cuando el llamador no
+      // aporta código — identifica el ítem dentro del documento, que es lo que la
+      // regla pide, sin inventar un catálogo que no existe.
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
+      ubl_item
+        .ele(UBL_NAMESPACES.CAC, 'StandardItemIdentification')
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .att('schemeID', UBL_CONSTANTS.ITEM_IDENTIFICATION_SCHEME_ID)
+        .txt(item.item_code?.trim() || String(index + 1));
 
       // Price
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
@@ -705,7 +1067,7 @@ export class UblCommonBuilder {
         .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
+        .att('unitCode', item.unit_code || 'EA')
         .txt('1.00');
     });
   }

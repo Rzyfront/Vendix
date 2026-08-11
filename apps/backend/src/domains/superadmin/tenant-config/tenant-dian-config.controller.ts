@@ -196,6 +196,43 @@ export class TenantDianConfigController {
   }
 
   /**
+   * Estado de LAS CUATRO habilitaciones DIAN del tenant, en una sola respuesta.
+   *
+   * Delega en el MISMO agregado del rail del comerciante
+   * (`DianConfigService.getFiscalReadiness`). No existía aquí, así que la consola
+   * de soporte componía los cuatro ejes desde el cliente con un N+1 —`dian-config`
+   * + un `:id/production-readiness` por configuración + `resolutions`— y esa
+   * composición es, literalmente, una segunda implementación del agregado: en
+   * cuanto una de las dos cambie, soporte y comerciante leerán checklists
+   * distintos sobre el mismo NIT y nadie sabrá cuál miente.
+   *
+   * Declarada ANTES de `dian-config/:configId` a propósito, igual que los demás
+   * literales de esta sección: Nest resuelve en orden de declaración y la ruta
+   * paramétrica se tragaría el path, dejando que `ParseIntPipe` respondiera 400
+   * sobre el literal `fiscal-readiness`.
+   */
+  @Get('dian-config/fiscal-readiness')
+  @Permissions('superadmin:tenants:dian:read')
+  @ApiOperation({
+    summary: 'Estado agregado de las cuatro habilitaciones DIAN del tenant',
+    description:
+      'Los cuatro ejes viajan SIEMPRE: el que no tiene configuración se reporta como not_started con config_id null, nunca ausente. La clave técnica no viaja: solo technical_key_set.',
+  })
+  async getFiscalReadiness(
+    @Req() req: RequestWithUser,
+    @Param('scope') scope: TenantScopeSegment,
+    @Param('tenantId', ParseIntPipe) tenantId: number,
+  ) {
+    const result = await this.runAs(req, scope, tenantId, () =>
+      this.storeDian.getFiscalReadiness(),
+    );
+    return this.response.success(
+      this.redactFiscalReadiness(result),
+      'Estado fiscal agregado del tenant obtenido',
+    );
+  }
+
+  /**
    * Estado DIAN del tenant en una sola llamada.
    *
    * Existe porque la ficha de soporte necesita las tres respuestas a la vez y
@@ -584,17 +621,38 @@ export class TenantDianConfigController {
     @Param('tenantId', ParseIntPipe) tenantId: number,
     @Param('configId', ParseIntPipe) configId: number,
     @Body('resolution_id', ParseIntPipe) resolutionId: number,
+    // Vía de humo: 1 documento al set. Vía de validación: 1 documento por
+    // `SendBillSync`, sin `testSetId`. Se exponen aquí porque esta consola es la
+    // ÚNICA forma de diagnosticar un tenant cuyo portal de la DIAN no controlamos
+    // — sin ellas, diagnosticar a HIDRO exigiría gastarle 50 consecutivos.
+    @Query('smoke') smoke?: string,
+    @Query('validate') validate?: string,
   ) {
+    const isSmoke = smoke === 'true' || smoke === '1';
+    const isValidateOnly = validate === 'true' || validate === '1';
+
     const result = await this.runAs(req, scope, tenantId, async () => {
       const config = await this.storeDian.getConfigById(configId);
       // Se proyecta ANTES de encolar: después, el worker ya puede haber
       // reservado el bloque y `current_number` diría el rango siguiente.
-      const consumes = await this.projectConsumedRange(config, resolutionId);
-      const job = await this.dianTest.enqueueTestSet(configId, resolutionId);
+      const consumes = await this.projectConsumedRange(config, resolutionId, {
+        diagnostic: isSmoke || isValidateOnly,
+      });
+      const job = await this.dianTest.enqueueTestSet(configId, resolutionId, {
+        smoke: isSmoke,
+        validate_only: isValidateOnly,
+      });
       return { ...job, consumes };
     });
 
-    return this.response.success(result, 'Set de pruebas encolado');
+    return this.response.success(
+      result,
+      isValidateOnly
+        ? 'Validación encolada: 1 documento por SendBillSync, sin enviar al set'
+        : isSmoke
+          ? 'Prueba de humo encolada: 1 documento, 1 consecutivo'
+          : 'Set de pruebas encolado',
+    );
   }
 
   @Post('dian-config/:configId/abandon-test-set')
@@ -721,6 +779,10 @@ export class TenantDianConfigController {
   private async projectConsumedRange(
     config: { operation_mode?: string | null },
     resolution_id: number,
+    // Las vías de diagnóstico emiten UN documento. Sin este parámetro la consola
+    // advertiría que va a quemar 50 consecutivos cuando va a quemar 1, y el
+    // operador decidiría sobre un dato falso justo en la advertencia irreversible.
+    options: { diagnostic?: boolean } = {},
   ) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id: resolution_id },
@@ -737,7 +799,14 @@ export class TenantDianConfigController {
     if (!resolution) return null;
 
     const operation_mode = config.operation_mode as any;
-    const total = testSetSize(resolveTestSetComposition(operation_mode));
+    const diagnostic_composition = {
+      invoices: 1,
+      debit_notes: 0,
+      credit_notes: 0,
+    };
+    const total = options.diagnostic
+      ? testSetSize(diagnostic_composition)
+      : testSetSize(resolveTestSetComposition(operation_mode));
     const number_from = Math.max(
       resolution.range_from,
       (resolution.current_number ?? 0) + 1,
@@ -747,7 +816,13 @@ export class TenantDianConfigController {
       resolution_id: resolution.id,
       prefix: resolution.prefix,
       resolution_number: resolution.resolution_number,
+      // `composition` describe lo que la DIAN EXIGE para habilitar; `total_documents`
+      // y `diagnostic` describen lo que ESTE envío va a gastar. Son dos cosas
+      // distintas y confundirlas es lo que hacía que un envío de 1 documento se
+      // anunciara como 50.
       composition: buildTestSetCompositionView(operation_mode),
+      total_documents: total,
+      diagnostic: options.diagnostic === true,
       number_from,
       number_to: number_from + total - 1,
       range_to: resolution.range_to,
@@ -806,6 +881,65 @@ export class TenantDianConfigController {
         return { ...rest, technical_key_set: Boolean(technical_key) };
       }),
     } as T;
+  }
+
+  /**
+   * Barrido de clave técnica sobre el agregado de los cuatro ejes.
+   *
+   * `getFiscalReadiness` ya elimina la ClTec en origen y publica `technical_key_set`
+   * —así está escrito su contrato en `dto/fiscal-readiness.dto.ts`— y este método NO
+   * repara nada hoy. Existe porque en un rail cross-tenant el que mira no es el dueño
+   * del NIT: si mañana un `select` del agregado vuelve a arrastrar la columna, el
+   * panel del comerciante se la enseñaría a su propio dueño mientras que aquí se la
+   * enseñaría a un tercero. La garantía se ancla en el borde que la necesita.
+   *
+   * Es idempotente: cuando el agregado ya resolvió `technical_key_set` se respeta ese
+   * valor —incluido `false`— en vez de recalcularlo desde una columna ya ausente,
+   * que es como una redacción defensiva acaba mintiendo sobre lo que sí está cargado.
+   */
+  private redactFiscalReadiness<T>(readiness: T): T {
+    if (!readiness || typeof readiness !== 'object') return readiness;
+
+    const source = readiness as Record<string, any>;
+    if (!Array.isArray(source.axes)) return readiness;
+
+    return {
+      ...source,
+      axes: source.axes.map((axis: any) => {
+        if (!axis || typeof axis !== 'object') return axis;
+        return {
+          ...axis,
+          // El checklist del eje no lleva resoluciones hoy, pero pasa por el
+          // mismo tamiz que el de `:configId` para que la regla sea una sola.
+          readiness: this.redactReadiness(axis.readiness),
+          resolutions: Array.isArray(axis.resolutions)
+            ? axis.resolutions.map((resolution: any) =>
+                this.sinClaveTecnica(resolution),
+              )
+            : axis.resolutions,
+        };
+      }),
+    } as T;
+  }
+
+  /**
+   * Quita la ClTec de una fila de resolución y deja solo su presencia.
+   *
+   * Mismo criterio —y misma razón— que `tenant-resolutions.controller.ts::sinClaveTecnica`:
+   * la clave alimenta el CUFE, así que quien la tiene puede fabricar el identificador
+   * único de un documento a nombre del comerciante. Se ELIMINA, no se enmascara.
+   */
+  private sinClaveTecnica(resolution: any) {
+    if (!resolution || typeof resolution !== 'object') return resolution;
+
+    const { technical_key, technical_key_set, ...rest } = resolution as Record<
+      string,
+      any
+    >;
+    return {
+      ...rest,
+      technical_key_set: Boolean(technical_key_set ?? technical_key),
+    };
   }
 
   private toPositiveInt(value: string | undefined, fallback: number): number {

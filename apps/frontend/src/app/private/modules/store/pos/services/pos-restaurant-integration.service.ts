@@ -1,4 +1,8 @@
 import { Injectable, inject, signal, computed, DestroyRef } from '@angular/core';
+import type {
+  FirePreview,
+  FireItemExclusion,
+} from '../../restaurant-ops/kds/interfaces';
 import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
@@ -203,15 +207,46 @@ export class PosRestaurantIntegrationService {
    * the recipe stock + emits the COGS auto-entry; the kitchen ticket is
    * returned so the POS can refresh the UI.
    */
+  /**
+   * QUI-655 — previsualiza el envio para el modal de confirmacion del POS.
+   *
+   * El POS es el SEGUNDO camino de envio a cocina (el primero es el detalle de
+   * mesa) y el ticket pide el modal en AMBOS: sin esto, un envio hecho desde el
+   * POS consume la receta completa sin darle al cajero la chance de excluir.
+   */
+  previewFire(
+    orderId: number,
+    orderItemIds: number[],
+  ): Observable<FirePreview> {
+    return this.http
+      .post<ApiResponse<FirePreview>>(
+        `${this.apiUrl}/store/kitchen-fire/preview`,
+        { order_id: orderId, order_item_ids: orderItemIds },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError((err) =>
+          throwError(() => this.toMessage(err, 'No se pudo leer las recetas')),
+        ),
+      );
+  }
+
   fireOrderItems(
     orderId: number,
     orderItemIds: number[],
     notes?: string,
+    /** QUI-655 — exclusiones confirmadas en el modal. Ausente = todo marcado. */
+    exclusions?: FireItemExclusion[],
   ): Observable<FireOrderItemsResponse> {
     return this.http
       .post<ApiResponse<FireOrderItemsResponse>>(
         `${this.apiUrl}/store/kitchen-fire`,
-        { order_id: orderId, order_item_ids: orderItemIds, notes },
+        {
+          order_id: orderId,
+          order_item_ids: orderItemIds,
+          notes,
+          ...(exclusions && exclusions.length > 0 && { exclusions }),
+        },
       )
       .pipe(
         map((res) => res.data),

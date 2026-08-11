@@ -9,6 +9,7 @@ import {
   IsDateString,
   IsArray,
   IsBoolean,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { IsIn } from 'class-validator';
@@ -112,10 +113,28 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   is_sellable?: boolean;
 
-  @ApiProperty({ description: 'Discount percentage (optional)' })
+  /**
+   * QUI-661 — commercial discount granted by the supplier on THIS line.
+   *
+   * The user may type either the percentage or the money amount and the UI
+   * derives the other. When both arrive, `discount_amount` wins: it is the
+   * figure that gets persisted, that lowers the taxable base, and that the
+   * costing engine capitalizes. The percentage travels only as provenance.
+   */
+  @ApiProperty({ description: 'Line discount percentage (optional)' })
   @IsNumber()
   @IsOptional()
   discount_percentage?: number;
+
+
+  @ApiProperty({
+    description:
+      'QUI-661: line discount as a money amount. Wins over discount_percentage.',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  discount_amount?: number;
 
   @ApiProperty({ description: 'Tax rate (optional)' })
   @IsNumber()
@@ -238,6 +257,67 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   has_multiple_price_tiers?: any;
 
+  // ===== Unidad de venta (QUI-648) ================================================
+  // Configurar la presentación en la que se venderá el producto, sin salir del
+  // flujo de compra: compro bultos de 50 kg y acá defino que se vende por bulto
+  // y por kilo. Espeja el patrón del bloque de insumo (purchase_uom_id /
+  // stock_uom_id / purchase_to_stock_factor), que ya configura el producto desde
+  // la orden de compra.
+  //
+  // El servicio persiste las TRES filas de forma coordinada o ninguna:
+  // `price_tiers` (kind='sale_unit'), `product_price_tier_assignments` (allowlist
+  // que consulta la venta) y `product_price_tier_overrides` (factor + precio).
+
+  @ApiProperty({
+    description:
+      'Nombre libre de la presentación de venta (Bulto 50 kg, Kilo, Rollo, Metro).',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sale_unit_name?: string;
+
+  @ApiProperty({
+    description:
+      'Unidades de stock que consume una unidad de esa presentación (50 para un bulto de 50 kg). Entero >= 2.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  sale_unit_units_per_package?: number;
+
+  @ApiProperty({
+    description: 'Precio de la presentación completa. Gana sobre el margen.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_price?: number;
+
+  @ApiProperty({
+    description:
+      'Margen de la presentación (markup sobre el costo del paquete). Se ignora si llega precio explícito.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_profit_margin?: number;
+
+  @ApiProperty({
+    description:
+      'Marca la presentación como la que rige por defecto en toda superficie de venta.',
+    required: false,
+  })
+  @IsOptional()
+  sale_unit_is_default?: any;
+
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()
   @IsOptional()
@@ -268,6 +348,24 @@ export class PurchaseOrderItemDto {
   @IsString()
   @IsOptional()
   category_names?: string;
+}
+
+
+/**
+ * QUI-647 — una cuota del calendario de pago acordado con el proveedor.
+ *
+ * Vive contra la ORDEN, no contra la CxP: la CxP nace con la recepción, así que
+ * al crear la orden todavía no hay a qué colgarla. Se materializa en
+ * `ap_payment_schedules` cuando la CxP existe.
+ */
+export class PurchaseOrderInstallmentDto {
+  @ApiProperty({ description: 'Fecha programada de la cuota (YYYY-MM-DD)' })
+  @IsDateString()
+  scheduled_date: string;
+
+  @ApiProperty({ description: 'Monto de la cuota' })
+  @IsNumber()
+  amount: number;
 }
 
 export class CreatePurchaseOrderDto {
@@ -367,6 +465,53 @@ export class CreatePurchaseOrderDto {
   @IsNumber()
   @IsOptional()
   discount_amount?: number;
+
+  // ===== QUI-647: configuración de pago al crear la orden =====
+
+  /**
+   * Modo de pago acordado con el proveedor.
+   *
+   * - `immediate`: se paga completa en el acto (el `ackPay` binario de antes).
+   * - `partial`: se abona `down_payment_amount` y el resto queda como saldo.
+   * - `deferred`: no se paga ahora; una sola fecha en `payment_due_date`.
+   * - `installments`: no se paga ahora; calendario en `payment_installments`.
+   */
+  @ApiProperty({
+    description: 'QUI-647: immediate | partial | deferred | installments',
+    required: false,
+  })
+  @IsIn(['immediate', 'partial', 'deferred', 'installments'])
+  @IsOptional()
+  payment_plan?: 'immediate' | 'partial' | 'deferred' | 'installments';
+
+  @ApiProperty({
+    description: 'QUI-647: monto abonado en el acto (payment_plan=partial)',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  down_payment_amount?: number;
+
+  @ApiProperty({ description: 'QUI-647: fecha única de pago (deferred)', required: false })
+  @IsDateString()
+  @IsOptional()
+  payment_due_date?: string;
+
+  /**
+   * Calendario de cuotas. La suma DEBE igualar el saldo de la orden; el
+   * servicio lo valida y rechaza el desbalance en vez de programar un
+   * calendario que nunca podría cerrar la deuda.
+   */
+  @ApiProperty({
+    description: 'QUI-647: cuotas planeadas (payment_plan=installments)',
+    required: false,
+    type: [PurchaseOrderInstallmentDto],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderInstallmentDto)
+  @IsOptional()
+  payment_installments?: PurchaseOrderInstallmentDto[];
 
   @ApiProperty({ description: 'Notes' })
   @IsString()

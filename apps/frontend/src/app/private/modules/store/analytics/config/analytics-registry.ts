@@ -119,7 +119,7 @@ export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
 ];
 
 // ─────────────────────────────────────────────
-// Views (26 total)
+// Views (24 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_VIEWS: AnalyticsView[] = [

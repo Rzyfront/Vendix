@@ -168,36 +168,131 @@ jobs:
             sudo docker exec vendix-redis redis-cli CONFIG REWRITE || true
           fi
 
-          echo "🛑 Stopping current container..."
+          echo "🛑 Stopping current containers..."
           sudo docker stop vendix-backend || true
           sudo docker rm vendix-backend || true
+          sudo docker stop vendix-backend-worker || true
+          sudo docker rm vendix-backend-worker || true
 
-          echo "🚀 Starting new container..."
-          sudo docker run -d \\
-            --name vendix-backend \\
-            --network vendix-net \\
-            --restart unless-stopped \\
-            -p 3000:3000 \\
-            --env-file /opt/vendix/.env \\
-            -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
-            -e BASE_DOMAIN="\$BASE_DOMAIN" \\
-            -e FRONTEND_URL="\$FRONTEND_URL" \\
-            -e PORT="\$PORT" \\
-            -e NODE_ENV="\$NODE_ENV" \\
-            -e CORS_ORIGIN="\$CORS_ORIGIN" \\
-            -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          # QUI-674 — SEPARACIÓN API / WORKER
+          #
+          # La API y los 11 workers de BullMQ (más todos los @Cron) compartían un
+          # solo proceso Node, así que un job CPU-bound congelaba el event loop y
+          # nginx devolvía 504 en rutas triviales. Se despliegan como DOS
+          # contenedores desde LA MISMA imagen y con el MISMO comando: lo único
+          # que cambia es VENDIX_PROCESS_ROLE.
+          #
+          # El rol viaja SIEMPRE por -e, que gana sobre --env-file, para que un
+          # valor rancio en /opt/vendix/.env nunca decida qué hace un contenedor.
+          #
+          # 'start_api' es una función y no dos bloques copiados porque el camino
+          # de respaldo de abajo vuelve a arrancar la API con otro rol: duplicar
+          # 15 líneas de -e es la forma segura de que las dos copias se separen.
+          start_api() {
+            sudo docker run -d \\
+              --name vendix-backend \\
+              --network vendix-net \\
+              --restart unless-stopped \\
+              -p 3000:3000 \\
+              --env-file /opt/vendix/.env \\
+              -e VENDIX_PROCESS_ROLE="\$1" \\
+              -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
+              -e BASE_DOMAIN="\$BASE_DOMAIN" \\
+              -e FRONTEND_URL="\$FRONTEND_URL" \\
+              -e PORT="\$PORT" \\
+              -e NODE_ENV="\$NODE_ENV" \\
+              -e CORS_ORIGIN="\$CORS_ORIGIN" \\
+              -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
+              $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          }
+
+          echo "🚀 Starting new container (role: api)..."
+          start_api api
 
           echo "⏳ Waiting for container to start (40s)..."
           sleep 40
 
+          # OJO: el filtro 'name=' de docker es una SUBCADENA, así que
+          # "vendix-backend" también casaría con "vendix-backend-worker" y esta
+          # comprobación daría por sana una API caída mientras viviera el worker.
+          # El ancla ^/.../$ (con la barra inicial, como en el bloque de Redis)
+          # es lo que la mantiene siendo una comprobación de la API.
           echo "🔍 Checking if container is running..."
-          if sudo docker ps --filter "name=vendix-backend" --filter "status=running" -q | grep -q .; then
+          if sudo docker ps --filter "name=^/vendix-backend\$" --filter "status=running" -q | grep -q .; then
             echo "✅ Container is running"
           else
             echo "❌ Container is NOT running — checking logs:"
             sudo docker logs vendix-backend --tail 50
             exit 1
+          fi
+
+          # --- Contenedor worker: ADITIVO, nunca aborta el despliegue ---
+          #
+          # Presupuesto de memoria: la caja es una t3.medium (~4 GiB nominales)
+          # que ya reparte entre backend (~1.9 GiB), Redis (--maxmemory 1gb),
+          # nginx y el SO. El worker no sirve HTTP ni sostiene SSE, pero carga el
+          # MISMO grafo de módulos (cliente Prisma incluido), que es el grueso del
+          # heap en reposo; el set de pruebas DIAN añade apenas unos MB de XML.
+          # 768 MiB de contenedor con 640 MiB de heap V8 es el techo que cabe sin
+          # empujar la caja al OOM. Es un punto de partida MEDIBLE, no una
+          # certeza: reconfirmar con 'docker stats' y 'free -m' tras el primer
+          # despliegue y subirlo (o subir la instancia) si el worker muere con
+          # código 137.
+          #
+          # --stop-timeout 60: en el cierre ordenado BullMQ espera a que termine
+          # el job en vuelo. Sin esto docker manda SIGKILL a los 10 s y el lock
+          # queda huérfano — que con maxStalledCount:0 significa job fallido.
+          echo "⚙️  Starting worker container (role: worker)..."
+          WORKER_UP=0
+          if sudo docker run -d \\
+            --name vendix-backend-worker \\
+            --network vendix-net \\
+            --restart unless-stopped \\
+            --memory=768m \\
+            --stop-timeout 60 \\
+            --env-file /opt/vendix/.env \\
+            -e VENDIX_PROCESS_ROLE=worker \\
+            -e NODE_OPTIONS="--max-old-space-size=640" \\
+            -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
+            -e BASE_DOMAIN="\$BASE_DOMAIN" \\
+            -e FRONTEND_URL="\$FRONTEND_URL" \\
+            -e NODE_ENV="\$NODE_ENV" \\
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG; then
+            echo "⏳ Waiting for worker to start (30s)..."
+            sleep 30
+            if sudo docker ps --filter "name=^/vendix-backend-worker\$" --filter "status=running" -q | grep -q .; then
+              WORKER_UP=1
+              echo "✅ Worker container is running"
+              sudo docker logs vendix-backend-worker --tail 20 || true
+            else
+              echo "⚠️  Worker container is NOT running — logs:"
+              sudo docker logs vendix-backend-worker --tail 50 || true
+            fi
+          else
+            echo "⚠️  Could not start the worker container."
+          fi
+
+          # RESPALDO: sin worker, nadie ejecutaría cobros, recordatorios,
+          # provisiones ni reintentos — y en silencio, porque una API sana no
+          # emite ningún error por ello. Si el worker no quedó arriba, la API
+          # vuelve al rol histórico 'all' y el despliegue sigue adelante: el
+          # cambio es aditivo, así que su peor desenlace es el comportamiento de
+          # siempre, nunca un backend a medias.
+          if [ "\$WORKER_UP" = "1" ]; then
+            echo "🧵 Split API/worker activo: la API corre sin workers ni @Cron."
+          else
+            echo "⚠️  El worker no quedó arriba — devolviendo la API al rol 'all'..."
+            sudo docker rm -f vendix-backend || true
+            start_api all
+            echo "⏳ Waiting for API fallback to start (40s)..."
+            sleep 40
+            if sudo docker ps --filter "name=^/vendix-backend\$" --filter "status=running" -q | grep -q .; then
+              echo "✅ API corriendo en modo 'all' (comportamiento histórico)."
+            else
+              echo "❌ API is NOT running — checking logs:"
+              sudo docker logs vendix-backend --tail 50
+              exit 1
+            fi
           fi
 
           echo "🌱 Running production seeds in isolated container..."
