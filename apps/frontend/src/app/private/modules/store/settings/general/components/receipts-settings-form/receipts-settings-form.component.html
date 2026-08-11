@@ -1,44 +1,155 @@
 <div class="receipts-settings-form">
   <div class="space-y-6">
-    @if (isLive()) {
-      <!-- Live merchant: no internal sale receipts exist anymore, so we state it
-           plainly instead of offering toggles that do nothing. -->
-      <div class="fe-banner">
-        <app-icon name="shield-check" size="18" class="fe-banner__icon"></app-icon>
-        <div class="fe-banner__body">
-          <p class="fe-banner__title">Facturación electrónica activa</p>
-          <p class="fe-banner__text">
-            Esta tienda está habilitada ante la DIAN en <strong>producción</strong> y
-            <strong>solo emite facturas electrónicas</strong>. Cada venta genera una
-            factura con CUFE, firmada y transmitida a la DIAN; no se emiten recibos
-            internos de compra.
-          </p>
-        </div>
+    <!-- Etapa de emisión: es el dato que gobierna toda la sección, así que se
+         muestra como recorrido de tres pasos con lo que la tienda puede hacer hoy
+         y lo que le falta, en vez de un banner con un color. -->
+    <div
+      class="stage-card"
+      [class.stage-card--live]="isLive()"
+      [class.stage-card--pending]="isPending()"
+    >
+      <div class="stage-track">
+        @for (step of stageSteps(); track step.key; let i = $index) {
+          <div class="stage-step" [attr.data-state]="step.state">
+            <span class="stage-step__dot">
+              @if (step.state === 'done') {
+                <app-icon name="check" size="11"></app-icon>
+              } @else {
+                {{ i + 1 }}
+              }
+            </span>
+            <span class="stage-step__label">{{ step.label }}</span>
+          </div>
+        }
       </div>
 
+      <div class="stage-body">
+        <p class="stage-headline">
+          <app-icon [name]="stageIcon()" size="16" class="stage-headline__icon"></app-icon>
+          <span>{{ stageHeadline() }}</span>
+        </p>
+        <p class="stage-text">{{ stageText() }}</p>
+
+        <p class="stage-list__title">Qué puede hacer la tienda hoy</p>
+        <ul class="stage-list">
+          @for (capability of stageCapabilities(); track capability) {
+            <li>{{ capability }}</li>
+          }
+        </ul>
+      </div>
+
+      <!-- Prerrequisitos de producción: lista accionable, no texto corrido. Cada
+           uno trae el label del blocker y el paso que lo resuelve. -->
+      @if (isPending() && pendingBlockers().length > 0) {
+        <div class="blockers">
+          <p class="blockers__title">
+            <app-icon name="list-checks" size="14"></app-icon>
+            <span>Falta para pasar a producción</span>
+            <app-badge variant="warning" size="xsm" badgeStyle="outline">
+              {{ pendingBlockers().length }}
+              {{ pendingBlockers().length === 1 ? 'requisito' : 'requisitos' }}
+            </app-badge>
+          </p>
+          <ol class="blockers__list">
+            @for (blocker of pendingBlockers(); track blocker.label) {
+              <li class="blocker">
+                <span class="blocker__label">{{ blocker.label }}</span>
+                @if (blocker.action) {
+                  <span class="blocker__action">
+                    <app-icon name="circle-arrow-right" size="12"></app-icon>
+                    <span>{{ blocker.action }}</span>
+                  </span>
+                }
+              </li>
+            }
+          </ol>
+        </div>
+      }
+    </div>
+
+    @if (isLive()) {
       <div>
-        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-          Emisión de facturas
-        </h4>
+        <div class="block-head">
+          <h4 class="block-title">Emisión de facturas</h4>
+          <p class="block-subtitle">
+            Cuándo se emite la factura y por dónde le llega al cliente.
+          </p>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <app-setting-toggle
-            [formControl]="autoIssueInvoiceControl"
-            label="Emitir factura automáticamente"
-            description="Al cerrar la venta, sin paso manual"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
-          <app-setting-toggle
-            [formControl]="sendInvoiceEmailControl"
-            label="Enviar factura por email"
-            description="Adjunta el PDF y el XML al cliente"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
-          <app-setting-toggle
-            [formControl]="deliverPrintedControl"
-            label="Entregar factura impresa"
-            description="Segundo canal de entrega válido ante la DIAN"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="autoIssueInvoiceControl"
+              label="Emitir factura automáticamente"
+              description="Al cerrar la venta, la factura se firma y se transmite a la DIAN sin paso manual"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-badge variant="success" size="xsm" badgeStyle="outline">
+                Recomendado
+              </app-badge>
+              <app-tooltip
+                content="Apagado, cada venta queda esperando que alguien la emita a mano desde Facturación: hasta ese momento no existe el CUFE y el cliente se va sin su factura."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Por qué
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
+
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="sendInvoiceEmailControl"
+              label="Enviar factura por email"
+              description="El cliente recibe en su correo el PDF y el XML de la factura"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-badge variant="info" size="xsm" badgeStyle="outline">
+                Canal de entrega
+              </app-badge>
+              <app-tooltip
+                content="El XML es el documento válido ante la DIAN y el PDF su representación gráfica. Sin correo del adquiriente el envío no sale: conviene pedirlo al momento de la venta."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Qué se envía
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
+
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="deliverPrintedControl"
+              label="Entregar factura impresa"
+              description="La factura se entrega en papel en el mostrador"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-badge variant="info" size="xsm" badgeStyle="outline">
+                Canal de entrega
+              </app-badge>
+              <app-tooltip
+                content="La factura debe entregarse al adquiriente en forma física o electrónica. Si apagás el correo, este canal se enciende solo para que la tienda no quede sin ninguna entrega válida."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="alert-triangle" size="12"></app-icon>
+                  Regla
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
         </div>
 
         @if (deliveryFallbackApplied()) {
@@ -49,42 +160,61 @@
           </p>
         }
       </div>
-    } @else if (isPending()) {
-      <!-- Trámite in progress: NOT live yet, so the receipt controls stay. -->
-      <div class="fe-banner fe-banner--pending">
-        <app-icon name="clock" size="18" class="fe-banner__icon"></app-icon>
-        <div class="fe-banner__body">
-          <p class="fe-banner__title">Facturación electrónica en trámite</p>
-          <p class="fe-banner__text">
-            {{ pendingReason() || 'La habilitación ante la DIAN todavía no está en producción.' }}
-            Mientras termina el trámite, la tienda
-            <strong>sigue emitiendo recibos de venta</strong>.
-          </p>
-          @if (pendingBlockers().length > 0) {
-            <ul class="fe-banner__list">
-              @for (blocker of pendingBlockers(); track blocker.label) {
-                <li>
-                  <strong>{{ blocker.label }}</strong>
-                  @if (blocker.action) {
-                    <span> — {{ blocker.action }}</span>
-                  }
-                </li>
-              }
-            </ul>
-          }
-        </div>
-      </div>
     }
 
     @if (!isLive()) {
       <!-- Receipt Options -->
       <div>
-        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Entrega de Recibos</h4>
+        <div class="block-head">
+          <h4 class="block-title">Entrega de Recibos</h4>
+          <p class="block-subtitle">
+            Por dónde recibe el cliente su comprobante al cerrar la venta.
+          </p>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <app-setting-toggle [formControl]="printReceiptControl" label="Imprimir Recibo"
-            description="Automáticamente tras venta" (changed)="onFieldChange()"></app-setting-toggle>
-          <app-setting-toggle [formControl]="emailReceiptControl" label="Email al Cliente"
-            description="Enviar copia digital" (changed)="onFieldChange()"></app-setting-toggle>
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="printReceiptControl"
+              label="Imprimir Recibo"
+              description="Al cerrar la venta el recibo se manda a la impresora del punto"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-tooltip
+                content="Apagado, la venta se cierra sin papel y el recibo queda disponible para imprimirlo o reenviarlo después desde el detalle de la orden."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Si lo apago
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
+
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="emailReceiptControl"
+              label="Email al Cliente"
+              description="Se envía copia digital del recibo al correo registrado del cliente"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-tooltip
+                content="Necesita una venta con cliente y con correo cargado. En una venta anónima no hay destinatario, así que no se envía nada y el recibo solo queda impreso."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Qué necesita
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
         </div>
       </div>
     }
@@ -94,15 +224,36 @@
          section, which is the single source of truth for `receipts.printing`.
          This block only previews what that configuration produces. -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        Formato de impresión
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">Formato de impresión</h4>
+        <p class="block-subtitle">
+          Acá se <strong>ve</strong> el formato que quedó configurado y se puede
+          generar una muestra. El formato se cambia en
+          <strong>Formatos de Impresión</strong>.
+        </p>
+      </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         @if (isLive()) {
           <div class="format-with-preview">
             <div class="format-readout">
               <span class="format-readout__label">Formato de la factura</span>
               <span class="format-readout__value">{{ invoiceFormatLabel() }}</span>
+              <span class="format-readout__meta">
+                <app-badge variant="neutral" size="xsm" badgeStyle="outline">
+                  Sólo lectura
+                </app-badge>
+                <app-tooltip
+                  content="Se edita en Formatos de Impresión, donde cada uno de los 12 documentos imprimibles tiene su propia fila con formato, margen y copias. Tenerlo en dos lugares hacía que ganara el último formulario guardado."
+                  position="top"
+                  size="sm"
+                  color="default"
+                >
+                  <span class="help-chip">
+                    <app-icon name="help-circle" size="12"></app-icon>
+                    Dónde se cambia
+                  </span>
+                </app-tooltip>
+              </span>
             </div>
             <button
               type="button"
@@ -119,12 +270,32 @@
                 previewLoading() === 'invoice' ? 'Generando muestra…' : 'Previsualizar'
               }}</span>
             </button>
+            <p class="field__hint">
+              Genera una factura de muestra con datos inventados: no consume
+              numeración de la resolución DIAN.
+            </p>
           </div>
         }
         <div class="format-with-preview">
           <div class="format-readout">
             <span class="format-readout__label">Formato del tiquete POS</span>
             <span class="format-readout__value">{{ posTicketFormatLabel() }}</span>
+            <span class="format-readout__meta">
+              <app-badge variant="neutral" size="xsm" badgeStyle="outline">
+                Sólo lectura
+              </app-badge>
+              <app-tooltip
+                content="Se edita en Formatos de Impresión, fila Tiquete POS. Un rollo de 58 mm cabe unos 32 caracteres por línea y uno de 80 mm unos 48: el encabezado que escribas más abajo se corta según ese ancho."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Dónde se cambia
+                </span>
+              </app-tooltip>
+            </span>
           </div>
           <button
             type="button"
@@ -141,61 +312,147 @@
               previewLoading() === 'pos' ? 'Generando muestra…' : 'Previsualizar'
             }}</span>
           </button>
+          <p class="field__hint">
+            La muestra la arma el mismo servicio con el que imprime el POS, así que
+            se ve tal cual saldrá del rollo.
+          </p>
         </div>
-        <app-setting-toggle
-          [formControl]="posAutoPrintControl"
-          label="Imprimir el tiquete automáticamente"
-          description="Al cerrar la venta, sin confirmar"
-          (changed)="onPosAutoPrintChange($event)"
-        ></app-setting-toggle>
-        @if (isLive()) {
+        <div class="setting-cell">
           <app-setting-toggle
-            [formControl]="printPosTicketControl"
-            label="Imprimir también tiquete POS"
-            description="Copia interna para despacho o cocina"
-            (changed)="onFieldChange()"
+            [formControl]="posAutoPrintControl"
+            label="Imprimir el tiquete automáticamente"
+            description="Al cerrar una venta, la tirilla sale sola sin pedir confirmación"
+            (changed)="onPosAutoPrintChange($event)"
           ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="primary" size="xsm" badgeStyle="outline">
+              Pertenece a Punto de Venta
+            </app-badge>
+            <app-tooltip
+              content="El valor se guarda en el bloque Punto de Venta, no en Recibos: es el mismo ajuste que gobierna la impresión del POS, editado desde acá por cercanía de uso. Apagado, el cajero decide venta por venta si imprime."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Dónde se guarda
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+        @if (isLive()) {
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="printPosTicketControl"
+              label="Imprimir también tiquete POS"
+              description="Además de la factura, imprime el tiquete como copia interna para despacho o cocina"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            <div class="setting-cell__meta">
+              <app-tooltip
+                content="El tiquete no reemplaza la factura ni tiene validez fiscal: es papel de trabajo. Con la factura ya impresa, activarlo significa dos documentos por venta."
+                position="top"
+                size="sm"
+                color="default"
+              >
+                <span class="help-chip">
+                  <app-icon name="help-circle" size="12"></app-icon>
+                  Qué imprime
+                </span>
+              </app-tooltip>
+            </div>
+          </div>
         }
       </div>
       @if (previewError()) {
         <p class="preview-error">{{ previewError() }}</p>
       }
-      <p class="format-hint">
-        El formato, el margen y las copias de cada documento se configuran en
-        <strong>Formatos de Impresión</strong>, donde cada tipo de documento tiene
-        su propia fila.
+      <p class="cross-ref">
+        <app-icon name="printer" size="14"></app-icon>
+        <span>
+          El formato, el margen y las copias de cada documento se configuran en
+          <strong>Formatos de Impresión</strong>, donde cada tipo de documento tiene
+          su propia fila.
+        </span>
       </p>
-      <p class="format-hint">
-        La factura impresa siempre lleva los datos legales vigentes del emisor
-        (razón social, NIT, régimen, resolución de numeración), el CUFE y la URL de
-        verificación en la DIAN, sin importar el formato elegido.
-      </p>
+
+      @if (isLive()) {
+        <div class="mt-3">
+          <app-expandable-card [(expanded)]="legalNoticeOpen">
+            <div slot="header" class="card-head">
+              <app-icon name="file-check" size="16"></app-icon>
+              <span class="card-head__text">
+                <span class="card-head__title">
+                  Qué lleva la factura impresa por ley
+                </span>
+                <span class="card-head__sub">
+                  No hay que escribirlo: el sistema lo agrega en todos los formatos.
+                </span>
+              </span>
+            </div>
+            <div class="p-4">
+              <ul class="legal-list">
+                <li>
+                  Datos legales vigentes del emisor: razón social, NIT, régimen y
+                  resolución de numeración.
+                </li>
+                <li>
+                  CUFE del documento y la URL de verificación en la DIAN, con su
+                  código QR escaneable.
+                </li>
+                <li>
+                  Detalle de impuestos y retenciones tal como se calcularon en la
+                  venta.
+                </li>
+              </ul>
+              <p class="field__hint">
+                Cambiar el formato cambia el tamaño de la hoja o del rollo, nunca este
+                contenido obligatorio.
+              </p>
+            </div>
+          </app-expandable-card>
+        </div>
+      }
     </div>
 
     <!-- Receipt Content — applies to the printed document either way -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
-        {{ contentSectionTitle() }}
-      </h4>
+      <div class="block-head">
+        <h4 class="block-title">{{ contentSectionTitle() }}</h4>
+        <p class="block-subtitle">{{ contentSectionSubtitle() }}</p>
+      </div>
       <div class="space-y-4">
-        <app-textarea
-          label="Encabezado"
-          styleVariant="modern"
-          [formControl]="receiptHeaderControl"
-          (valueChange)="onFieldChange()"
-          [rows]="2"
-          placeholder="Nombre, dirección, NIT..."
-          customWrapperClass="!mt-0"
-        ></app-textarea>
-        <app-textarea
-          label="Pie de Página"
-          styleVariant="modern"
-          [formControl]="receiptFooterControl"
-          (valueChange)="onFieldChange()"
-          [rows]="2"
-          placeholder="Gracias por su compra, políticas..."
-          customWrapperClass="!mt-0"
-        ></app-textarea>
+        <div class="field">
+          <app-textarea
+            label="Encabezado"
+            styleVariant="modern"
+            [formControl]="receiptHeaderControl"
+            (valueChange)="onFieldChange()"
+            [rows]="2"
+            placeholder="Nombre, dirección, NIT..."
+            customWrapperClass="!mt-0"
+          ></app-textarea>
+          <p class="field__hint">
+            Se imprime arriba del detalle, en papel y en el correo. En rollo térmico
+            entran unos 32–48 caracteres por línea: lo más largo se corta.
+          </p>
+        </div>
+        <div class="field">
+          <app-textarea
+            label="Pie de Página"
+            styleVariant="modern"
+            [formControl]="receiptFooterControl"
+            (valueChange)="onFieldChange()"
+            [rows]="2"
+            placeholder="Gracias por su compra, políticas..."
+            customWrapperClass="!mt-0"
+          ></app-textarea>
+          <p class="field__hint">
+            Última línea del documento: agradecimiento, política de cambios, horarios
+            o el canal de atención.
+          </p>
+        </div>
       </div>
     </div>
   </div>

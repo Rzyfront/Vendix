@@ -22,7 +22,11 @@ import { PosTicketService } from '../../../../pos/services/pos-ticket.service';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { TextareaComponent } from '../../../../../../../shared/components';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import type { IconName } from '../../../../../../../shared/components/icon/icons.registry';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../../../../shared/components/tooltip/tooltip.component';
+import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -56,6 +60,9 @@ export type EmissionStage = 'receipts' | 'pending' | 'live';
     TextareaComponent,
     IconComponent,
     ModalComponent,
+    BadgeComponent,
+    TooltipComponent,
+    ExpandableCardComponent,
   ],
   templateUrl: './receipts-settings-form.component.html',
   styleUrls: ['./receipts-settings-form.component.scss'],
@@ -99,6 +106,106 @@ export class ReceiptsSettingsForm {
   readonly isPending = computed(() => this.emissionStage() === 'pending');
 
   /**
+   * La etapa es el dato que gobierna toda la sección: decide qué documento
+   * emite la tienda y, por lo tanto, qué controles tienen sentido. Se pinta como
+   * un recorrido de tres pasos para que el operador vea dónde está parado y qué
+   * le queda por delante, en vez de deducirlo del color de un banner.
+   */
+  private static readonly STAGE_ORDER: EmissionStage[] = [
+    'receipts',
+    'pending',
+    'live',
+  ];
+
+  private static readonly STAGE_LABELS: Record<EmissionStage, string> = {
+    receipts: 'Recibos de venta',
+    pending: 'Habilitación en trámite',
+    live: 'Factura electrónica',
+  };
+
+  readonly stageSteps = computed(() => {
+    const currentIndex = ReceiptsSettingsForm.STAGE_ORDER.indexOf(
+      this.emissionStage(),
+    );
+
+    return ReceiptsSettingsForm.STAGE_ORDER.map((key, index) => ({
+      key,
+      label: ReceiptsSettingsForm.STAGE_LABELS[key],
+      state:
+        index < currentIndex
+          ? ('done' as const)
+          : index === currentIndex
+            ? ('current' as const)
+            : ('upcoming' as const),
+    }));
+  });
+
+  // Tipado explícito: `app-icon` recibe `IconName`, y una computed que devuelve
+  // literales de string se infiere como `string` — con strictTemplates el
+  // binding no compila.
+  readonly stageIcon = computed<IconName>(() => {
+    if (this.isLive()) return 'shield-check';
+    return this.isPending() ? 'clock' : 'receipt';
+  });
+
+  readonly stageHeadline = computed(() =>
+    this.isLive()
+      ? 'Facturación electrónica activa'
+      : this.isPending()
+        ? 'Facturación electrónica en trámite'
+        : 'La tienda emite recibos de venta',
+  );
+
+  readonly stageText = computed(() => {
+    if (this.isLive()) {
+      return (
+        'Esta tienda está habilitada ante la DIAN en producción y solo emite ' +
+        'facturas electrónicas. Cada venta genera una factura con CUFE, firmada y ' +
+        'transmitida a la DIAN; no se emiten recibos internos de compra.'
+      );
+    }
+
+    if (this.isPending()) {
+      return (
+        (this.pendingReason() ||
+          'La habilitación ante la DIAN todavía no está en producción.') +
+        ' Mientras termina el trámite, la tienda sigue emitiendo recibos de venta.'
+      );
+    }
+
+    return (
+      'Cada venta entrega un recibo interno de compra, sin valor fiscal ante la ' +
+      'DIAN. Al completar la habilitación electrónica, la tienda pasa a emitir ' +
+      'factura con CUFE y estos controles se reemplazan por los de emisión.'
+    );
+  });
+
+  /** Qué puede hacer la tienda HOY, en la etapa en la que está. */
+  readonly stageCapabilities = computed<string[]>(() => {
+    if (this.isLive()) {
+      return [
+        'Cada venta emite factura electrónica con CUFE y la transmite a la DIAN.',
+        'El tiquete POS queda como copia informativa: no reemplaza la factura.',
+        'La factura debe entregarse al cliente por correo o impresa (al menos un canal).',
+      ];
+    }
+
+    if (this.isPending()) {
+      return [
+        'Se sigue cobrando y entregando recibo de venta con normalidad.',
+        'Todavía no se emiten facturas con CUFE: nada se transmite a la DIAN.',
+        'Al pasar a producción, esta sección cambia sola a los controles de factura.',
+      ];
+    }
+
+    return [
+      'Se cobra y se entrega recibo impreso o por correo.',
+      'El recibo no lleva CUFE ni resolución: no es una factura electrónica.',
+      'La habilitación ante la DIAN se hace desde el módulo de Facturación.',
+    ];
+  });
+
+  /**
    * Format and copies are deliberately absent: they are owned by the "Formatos
    * de Impresión" section. Anything this form does not declare is left
    * untouched, because the parent MERGES this payload into `receipts` instead of
@@ -126,6 +233,15 @@ export class ReceiptsSettingsForm {
   readonly contentSectionTitle = computed(() =>
     this.isLive() ? 'Contenido de la factura impresa' : 'Contenido Personalizado',
   );
+
+  readonly contentSectionSubtitle = computed(() =>
+    this.isLive()
+      ? 'Texto propio que se suma al documento. Los datos legales del emisor los pone el sistema.'
+      : 'Texto propio que encabeza y cierra el recibo, en papel y en el correo.',
+  );
+
+  /** El explicativo legal arranca colapsado: es de consulta, no de trabajo. */
+  readonly legalNoticeOpen = signal(false);
 
   /**
    * Warning shown when the merchant just turned the email off. The invoice must
