@@ -720,8 +720,25 @@ export class PaymentsService {
         // (2) un throw en este punto revierte la transacción completa, mientras
         // que validar después del commit dejaría la venta cerrada y sólo
         // corregible con nota crédito.
+        //
+        // QUI-673 — la organización SALE DE LA RELACIÓN, no de una columna.
+        // `orders` no tiene `organization_id` (schema.prisma: sólo `store_id` +
+        // la relación `stores`), así que `order.organization_id` valía SIEMPRE
+        // `undefined`. TypeScript no lo veía porque `order` está tipado `any` en
+        // las dos ramas que lo producen. Con `undefined`, la cadena
+        // `assertInvoiceNotRequired` → `FiscalGateService.isAreaEnabled` →
+        // `getFiscalScope` reventaba dentro de Prisma, el gate capturaba el
+        // error y fallaba CERRADO devolviendo `false` con un WARN: el umbral no
+        // se evaluaba en NINGUNA venta POS y el cobro respondía 201 normal.
+        //
+        // Ambas ramas que producen `order` traen `stores` en su `include`
+        // (`createOrUpdateOrderFromPos` y `applyPosPaymentToTableSession`), así
+        // que la relación resuelve la organización sin una consulta extra
+        // dentro de la transacción. El contexto de request queda sólo como red
+        // de seguridad, igual que en `calculateTaxCategoryTaxes`.
         await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
-          organization_id: order.organization_id,
+          organization_id:
+            order.stores?.organization_id ?? context?.organization_id,
           store_id: order.store_id ?? createPosPaymentDto.store_id ?? null,
           total_amount: order.grand_total ?? 0,
           has_customer: Boolean(createPosPaymentDto.customer_id),
