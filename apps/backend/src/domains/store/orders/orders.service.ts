@@ -23,6 +23,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolvePackSize } from '../products/services/packaging.util';
 import {
   normalizePriceUnitLines,
   roundMoney,
@@ -142,7 +143,19 @@ export class OrdersService {
     const priceUnits = await normalizePriceUnitLines(
       this.prisma as any,
       createOrderDto.items,
-      { hasTierAtIndex: (index) => tierSnapshots[index]?.tier_id != null },
+      {
+        // Excluir solo las PRESENTACIONES (packSize > 1), no toda línea con
+        // tarifa: una tarifa de cliente cambia el precio pero lo sigue
+        // expresando por unidad de precio, así que la escala del producto sí
+        // aplica. Excluir por "tiene tarifa" persistía 2 m de un cable a
+        // $4.500 el metro como $9.000.000 cuando el cliente mandaba la
+        // aritmética cruda.
+        isPresentationAtIndex: (index) =>
+          resolvePackSize(
+            tierSnapshots[index]?.units_per_package,
+            tierSnapshots[index]?.override_units_per_package,
+          ) > 1,
+      },
     );
     if (priceUnits.adjusted > 0) {
       if (createOrderDto.subtotal != null) {
@@ -882,7 +895,19 @@ export class OrdersService {
     const priceUnits = await normalizePriceUnitLines(
       this.prisma as any,
       dto.items,
-      { hasTierAtIndex: (index) => tierSnapshots[index]?.tier_id != null },
+      {
+        // Excluir solo las PRESENTACIONES (packSize > 1), no toda línea con
+        // tarifa: una tarifa de cliente cambia el precio pero lo sigue
+        // expresando por unidad de precio, así que la escala del producto sí
+        // aplica. Excluir por "tiene tarifa" persistía 2 m de un cable a
+        // $4.500 el metro como $9.000.000 cuando el cliente mandaba la
+        // aritmética cruda.
+        isPresentationAtIndex: (index) =>
+          resolvePackSize(
+            tierSnapshots[index]?.units_per_package,
+            tierSnapshots[index]?.override_units_per_package,
+          ) > 1,
+      },
     );
     if (priceUnits.adjusted > 0) {
       if (dto.subtotal != null) {

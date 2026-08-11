@@ -179,12 +179,100 @@ describe('price-unit.util', () => {
       const result = await normalizePriceUnitLines(
         clientWithScales({ 1: 1000 }),
         lines,
-        { hasTierAtIndex: () => true },
+        { isPresentationAtIndex: () => true },
       );
 
       expect(lines[0].total_price).toBe(190000);
       expect(result.adjusted).toBe(0);
       expect(result.priceUnitByIndex).toEqual([null]);
+    });
+
+    /**
+     * `price_tiers` cumple dos papeles y solo UNO justifica la exclusión.
+     *
+     * Una PRESENTACIÓN (`kind='sale_unit'`, Rollo 20 m) cambia la magnitud de
+     * `quantity`: `unit_price` es el precio del paquete y dividir otra vez
+     * cobraría de menos. Una TARIFA DE CLIENTE (`kind='customer_tier'`,
+     * Mayorista) solo cambia el número: lo sigue expresando por unidad de
+     * PRECIO, así que la escala del producto aplica igual que sin tarifa.
+     *
+     * El predicado se llamaba `hasTierAtIndex` y excluía las dos. Con eso, 2 m
+     * de un cable a $4.500 el metro con tarifa Mayorista se persistían tal como
+     * los mandara el cliente: `POST /store/orders` guardó **$9.000.000**
+     * (orden 730 en dev) en vez de $9.000.
+     */
+    it('NO excluye una línea con tarifa de cliente: la escala sigue aplicando', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 2000, // 2 m de un cable en mm
+          unit_price: 4500, // precio Mayorista POR METRO
+          total_price: 9_000_000, // el cliente mandó la aritmética cruda
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+        // Una tarifa de cliente no es presentación: packSize resuelve a 1.
+        { isPresentationAtIndex: () => false },
+      );
+
+      expect(lines[0].total_price).toBe(9000);
+      expect(result.adjusted).toBe(1);
+      expect(result.priceUnitByIndex).toEqual([1000]);
+    });
+
+    /**
+     * Una línea de PESO trae `quantity = 1` y el multiplicador real en `weight`,
+     * con su propia unidad en `weight_unit`. Dividir `quantity` por la escala no
+     * la corrige: la destruye. 1,35 kg de queso a $22.000 el kilo se persistía
+     * en **$22,00** (`22000 × 1 / 1000`) — un cobro mil veces menor, que es peor
+     * que no haber aplicado la escala.
+     *
+     * La línea queda fuera porque el peso YA es la magnitud de venta y el precio
+     * ya se expresa por unidad de peso; no hay una segunda escala que aplicar.
+     */
+    it('NO toca una línea de peso: el peso ya es su magnitud de venta', async () => {
+      const lines = [
+        {
+          product_id: 1,
+          quantity: 1,
+          weight: 1.35,
+          unit_price: 22000,
+          total_price: 29700,
+        },
+      ];
+      const result = await normalizePriceUnitLines(
+        clientWithScales({ 1: 1000 }),
+        lines,
+      );
+
+      expect(lines[0].total_price).toBe(29700);
+      expect(result.adjusted).toBe(0);
+      expect(result.priceUnitByIndex).toEqual([null]);
+      expect(result.subtotalDelta).toBe(0);
+    });
+
+    it('un weight en 0 o nulo no exime a la línea de la escala', async () => {
+      // Solo un peso POSITIVO identifica una línea de peso; un 0 residual no
+      // puede servir de puerta para saltarse el recálculo.
+      for (const weight of [0, null, undefined]) {
+        const lines = [
+          {
+            product_id: 1,
+            quantity: 3000,
+            weight,
+            unit_price: 5000,
+            total_price: 15_000_000,
+          },
+        ];
+        const result = await normalizePriceUnitLines(
+          clientWithScales({ 1: 1000 }),
+          lines,
+        );
+        expect(lines[0].total_price).toBe(15000);
+        expect(result.adjusted).toBe(1);
+      }
     });
   });
 });

@@ -129,6 +129,13 @@ export type PriceUnitAdjustableLine = {
   final_unit_price?: number | null;
   total_price?: number | null;
   tax_amount_item?: number | null;
+  /**
+   * Peso capturado de una línea de PESO (`products.pricing_type='weight'`). En
+   * esas líneas `quantity` vale 1 y el multiplicador real es este campo, con su
+   * propia unidad en `weight_unit`; el total lo calcula el POS como
+   * `precio × weight`. Se lee solo para RECONOCER la línea y no tocarla.
+   */
+  weight?: number | null;
 };
 
 /** Dos totales de dinero se consideran el mismo si difieren menos de medio centavo. */
@@ -210,9 +217,19 @@ export type PriceUnitNormalization = {
  * `N > 1` **y** el total recibido difiere, así que un catálogo entero en
  * escala 1 —todo lo existente— pasa por acá sin una sola corrección.
  *
- * Una línea con presentación aplicada queda excluida: ahí `unit_price` es el
+ * Una línea con PRESENTACIÓN aplicada queda excluida: ahí `unit_price` es el
  * precio del paquete completo y `quantity` cuenta paquetes, no unidades de
  * stock; dividir otra vez cobraría de menos.
+ *
+ * El criterio de exclusión es la presentación (`packSize > 1`), NO "la línea
+ * trae `applied_price_tier_id`". La diferencia importa porque `price_tiers`
+ * cumple dos papeles: una **tarifa de cliente** (`kind='customer_tier'`,
+ * Mayorista) cambia el precio pero lo sigue expresando por unidad de PRECIO, y
+ * la escala del producto sí aplica; una **presentación** (`kind='sale_unit'`,
+ * Rollo 20 m) cambia además la magnitud de `quantity`. Excluir por "tiene
+ * tarifa" dejaba pasar sin recalcular las líneas con tarifa de cliente: 2 m de
+ * un cable a $4.500 el metro se persistían en **$9.000.000** si el cliente
+ * mandaba la aritmética cruda.
  *
  * La comparación corre siempre en magnitud NETA — ver `readTotalAsNet` para el
  * porqué y para qué pasa cuando el cliente manda `total_price` con impuesto.
@@ -220,7 +237,7 @@ export type PriceUnitNormalization = {
 export async function normalizePriceUnitLines<T extends PriceUnitAdjustableLine>(
   client: PriceUnitClient,
   lines: T[],
-  options: { hasTierAtIndex?: (index: number) => boolean } = {},
+  options: { isPresentationAtIndex?: (index: number) => boolean } = {},
 ): Promise<PriceUnitNormalization> {
   const result: PriceUnitNormalization = {
     priceUnitByIndex: lines.map(() => null),
@@ -229,10 +246,19 @@ export async function normalizePriceUnitLines<T extends PriceUnitAdjustableLine>
     adjusted: 0,
   };
 
+  /**
+   * Una línea queda fuera si su multiplicador no es `quantity` en unidades de
+   * stock: una PRESENTACIÓN cuenta paquetes, y una línea de PESO trae `quantity
+   * = 1` con el peso aparte. Dividir `quantity` en una línea de peso colapsa el
+   * total: 1,35 kg de queso a $22.000 el kilo daba **$22,00** — cobraba mil
+   * veces menos, que es peor que no aplicar la escala.
+   */
+  const excluida = (line: T, index: number): boolean =>
+    options.isPresentationAtIndex?.(index) === true ||
+    Number(line.weight ?? 0) > 0;
+
   const productIds = lines
-    .map((line, index) =>
-      options.hasTierAtIndex?.(index) ? null : line.product_id,
-    )
+    .map((line, index) => (excluida(line, index) ? null : line.product_id))
     .filter((id): id is number => typeof id === 'number');
   if (productIds.length === 0) return result;
 
@@ -240,7 +266,7 @@ export async function normalizePriceUnitLines<T extends PriceUnitAdjustableLine>
   if (scales.size === 0) return result;
 
   lines.forEach((line, index) => {
-    if (options.hasTierAtIndex?.(index)) return;
+    if (excluida(line, index)) return;
     const n = line.product_id != null ? scales.get(Number(line.product_id)) : undefined;
     if (!n) return;
 
