@@ -27,6 +27,7 @@ import {
 } from '../../selector/selector.component';
 import { ToggleComponent } from '../../toggle/toggle.component';
 import { DianResolutionScannerModalComponent } from '../../dian-resolution-scanner/dian-resolution-scanner-modal.component';
+import { RESOLUTION_SCAN_FIELD_LABELS } from '../../dian-resolution-scanner/interfaces/resolution-scan-result.interface';
 import type {
   DianResolutionScanResult,
   ResolutionScannerScope,
@@ -165,6 +166,25 @@ interface ResolutionFormControls {
               <app-icon slot="icon" name="scan-line" [size]="14"></app-icon>
               Leer resolución
             </app-button>
+          </div>
+        }
+
+        <!-- Lo que la IA precargó sin poder verificar. Se muestra hasta que el
+             usuario guarde: un dígito mal leído en un rango autorizado no falla
+             aquí, falla cuando la DIAN rechaza la primera factura. -->
+        @if (unverifiedFields().length) {
+          <div
+            class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
+            role="note"
+          >
+            <p class="font-semibold mb-1">
+              Verifica estos campos precargados por IA
+            </p>
+            <ul class="list-disc pl-5 space-y-0.5">
+              @for (key of unverifiedFields(); track key) {
+                <li>{{ scanFieldLabel(key) }}</li>
+              }
+            </ul>
           </div>
         }
 
@@ -377,6 +397,14 @@ export class DianResolutionFormComponent {
   readonly capabilities = computed(() => this.dianContext.capabilities());
 
   readonly scannerVisible = signal(false);
+
+  /**
+   * Campos que el escáner IA precargó pero NO pudo verificar (o leyó con baja
+   * confianza). Se listan porque una resolución autoriza numeración legal: un
+   * dígito mal leído no se descubre en este formulario sino cuando la DIAN
+   * rechaza la primera factura, con el consecutivo ya gastado.
+   */
+  readonly unverifiedFields = signal<readonly string[]>([]);
 
   readonly form = new FormGroup<ResolutionFormControls>({
     document_type: new FormControl<FiscalDocumentType>('sales_invoice', {
@@ -724,7 +752,29 @@ export class DianResolutionFormComponent {
       this.form.controls.technical_key.setValue(scan.technical_key.value);
     }
 
+    // Lo que la IA precargó pero NO pudo verificar. Se arrastra hasta que el
+    // usuario guarde: una resolución autoriza numeración legal, y un dígito mal
+    // leído no se descubre aquí sino cuando la DIAN rechaza la primera factura
+    // —con el consecutivo ya gastado—. Sólo se listan los campos que este
+    // documento realmente usa: señalar la clave técnica de un documento soporte,
+    // donde el campo ni se renderiza, mandaría a verificar algo inexistente.
+    const shown = new Set(Object.keys(this.form.controls));
+    this.unverifiedFields.set(
+      (scan.requires_manual_confirmation ?? []).filter(
+        (key) =>
+          shown.has(key) &&
+          (key !== 'technical_key' || this.acceptsTechnicalKey()),
+      ),
+    );
+
     this.scannerVisible.set(false);
+  }
+
+  /** Rótulo legible de un campo señalado por el escáner. */
+  scanFieldLabel(key: string): string {
+    return (
+      (RESOLUTION_SCAN_FIELD_LABELS as Record<string, string>)[key] ?? key
+    );
   }
 
   submit(): void {
