@@ -11,8 +11,51 @@
   position: relative;
   max-width: 1600px;
   margin: 0 auto 0.125rem;
-  padding: 0.1875rem 0.375rem;
+  padding: 0 0.375rem 0.1875rem;
   border-bottom: 1px solid rgba(var(--color-muted-rgb), 0.12);
+}
+
+/* The rail is deliberately NOT a closed 360° box: it has no top edge and its
+   side borders dissolve upward, so it reads as rising out of the header
+   surface instead of floating as a separate chip. Background and border live
+   here rather than on the <nav> because the <nav> is the scroll container —
+   masking it would fade the tab labels along with the chrome. */
+.sticky-header-tabs-shell {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 0 0 calc(var(--radius-md) + 0.125rem)
+    calc(var(--radius-md) + 0.125rem);
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(var(--color-muted-rgb), 0.1) 70%
+  );
+
+  /* Gradient border: a 1px frame painted as a background and hollowed out
+     with an xor mask, which is the only way to fade a border and keep the
+     corner radius (border-image drops the radius). */
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      rgba(var(--color-muted-rgb), 0.26) 80%
+    );
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+  }
 }
 
 /* Segmented-control track: the pill rail the tabs live inside.
@@ -32,12 +75,9 @@
   width: fit-content;
   max-width: 100%;
   min-height: 1px; /* ISSUE-09: prevents 0-height flash on first paint */
-  padding: 0.125rem;
-  border: 1px solid rgba(var(--color-muted-rgb), 0.16);
-  /* Semi-rounded, not a pill: the rail radius is the tab radius plus its own
-     2px padding, so the inner and outer curves stay concentric. */
-  border-radius: calc(var(--radius-md) + 0.125rem);
-  background: rgba(var(--color-muted-rgb), 0.1);
+  /* Extra top padding is the room the shell's gradient needs to dissolve;
+     the tabs themselves stay clear of the fade. */
+  padding: 0.4375rem 0.125rem 0.125rem;
   overscroll-behavior-x: contain;
   scroll-padding-inline: 16px;
   scroll-behavior: smooth;
@@ -133,7 +173,11 @@
 }
 
 .sticky-header-tab--active {
-  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 14%,
+    var(--color-surface)
+  );
   border-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
   color: var(--color-text-primary);
   font-weight: 700;
@@ -163,7 +207,11 @@
    surface reads almost like the rail itself, so the selected pill leans on
    more fill and a brighter edge to stay obvious at a glance. */
 :host-context([data-theme="dark"]) .sticky-header-tab--active {
-  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface));
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 22%,
+    var(--color-surface)
+  );
   border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
 
   &:hover {
@@ -207,7 +255,7 @@
 
 @media (min-width: 768px) {
   .sticky-header-tabs-row {
-    padding: 0.1875rem 1.5rem;
+    padding: 0 1.5rem 0.1875rem;
   }
 
   .sticky-header-tabs {
