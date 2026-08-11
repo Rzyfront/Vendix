@@ -8,7 +8,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
 import {
   FormBuilder,
@@ -18,7 +18,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { map, switchMap, timer, type Subscription } from 'rxjs';
+import { map, startWith, switchMap, timer, type Subscription } from 'rxjs';
 // Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
 // Son el espejo del DTO del backend: lo que el DTO rechaza, se rechaza acá antes
 // de gastar un viaje a la DIAN.
@@ -37,6 +37,7 @@ import {
   DianProductionReadiness,
   DianTestResult,
   InvoiceResolution,
+  toDianConfigurationType,
 } from '../../interfaces/invoice.interface';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -55,12 +56,27 @@ import {
   DianTechnicalResponseComponent,
   DianTechnicalResponseData,
 } from '../../../../../../shared/components/dian-technical-response/dian-technical-response.component';
+import {
+  DIAN_CONFIGURATION_TYPES,
+  DIAN_CONFIGURATION_TYPE_LABELS,
+  defaultDocumentTypeFor,
+  requirementsFor,
+  type DianConfigurationType,
+} from '../../../../../../shared/components/dian';
 
 /**
  * Typed credentials form interface.
  * Kept strict per `vendix-angular-forms` skill.
  */
 interface CredentialsForm {
+  /**
+   * Habilitación DIAN que se está creando.
+   *
+   * Sólo se manda en el alta: el backend acepta cambiarla en un PATCH, pero
+   * mover una configuración de eje la separaría del set de pruebas y de la
+   * numeración que la DIAN le aprobó bajo ese eje.
+   */
+  configuration_type: FormControl<DianConfigurationType>;
   name: FormControl<string>;
   nit_type: FormControl<string>;
   nit: FormControl<string>;
@@ -260,6 +276,42 @@ interface PersistedTestResult {
             Ingrese los datos de su empresa y credenciales del software de facturacion electronica.
           </p>
           <form [formGroup]="credentialsForm" class="space-y-4">
+            <!--
+              QUÉ SE ESTÁ HABILITANDO. Va primero porque manda sobre todo lo
+              demás: cada habilitación es independiente ante la DIAN, con su
+              propio set de pruebas y su propio estado. Sin este campo el
+              asistente sólo sabía crear facturacion electronica de venta, y el
+              documento soporte, el documento equivalente POS y la nomina
+              electronica solo se podian activar por curl.
+            -->
+            @if (isEditingConfig()) {
+              <div
+                class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-start gap-2"
+              >
+                <app-icon name="shield" [size]="14" class="text-primary shrink-0 mt-0.5"></app-icon>
+                <div class="min-w-0">
+                  <p class="text-xs font-medium text-text-primary">
+                    {{ configurationTypeLabel() }}
+                  </p>
+                  <p class="text-[11px] text-text-secondary">
+                    La habilitacion no se cambia: mover una configuracion de eje
+                    la sacaria de la habilitacion que la DIAN aprobo, junto con
+                    su set de pruebas y su numeracion.
+                  </p>
+                </div>
+              </div>
+            } @else {
+              <app-selector
+                label="Que vas a habilitar"
+                formControlName="configuration_type"
+                [options]="configurationTypeOptions()"
+                placeholder="Elige la habilitacion DIAN"
+              ></app-selector>
+              <p class="text-[11px] text-text-secondary -mt-2">
+                {{ configurationTypeHint() }}
+              </p>
+            }
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Nombre de la configuracion"
@@ -1265,6 +1317,20 @@ export class DianConfigWizardComponent {
   readonly initialConfig = input<DianConfig | null>(null);
   readonly initialStep = input<number>(0);
 
+  /**
+   * Habilitación con la que arranca el alta. La pone el host que abrió el
+   * asistente desde la tarjeta de un eje concreto.
+   */
+  readonly configurationType = input<DianConfigurationType | null>(null);
+
+  /**
+   * Ejes que YA tienen configuración. Se ofrecen deshabilitados en vez de
+   * ocultarse: que el documento soporte aparezca «ya configurado» es
+   * información; que desaparezca de la lista es lo que hizo que nadie supiera
+   * que existía.
+   */
+  readonly takenConfigurationTypes = input<DianConfigurationType[]>([]);
+
   readonly saved = output<DianConfig>();
   readonly cancelled = output<void>();
 
@@ -1332,6 +1398,7 @@ export class DianConfigWizardComponent {
     // Son el espejo del DTO del backend (`@IsUUID`, forma del NIT). Viven en
     // `shared/utils/dian-validators` para que las cuatro puertas de entrada
     // rechacen lo mismo.
+    configuration_type: ['invoicing' as DianConfigurationType],
     name: ['', [Validators.required]],
     nit_type: ['NIT'],
     nit: ['', [Validators.required, nitFormatValidator]],
@@ -1368,6 +1435,9 @@ export class DianConfigWizardComponent {
   readonly nitDvMessage = DIAN_VALIDATION_MESSAGES['nitDv'];
 
   // ── Typed getters (per vendix-angular-forms skill) ───────
+  get configurationTypeControl(): FormControl<DianConfigurationType> {
+    return this.credentialsForm.controls.configuration_type;
+  }
   get nameControl(): FormControl<string> { return this.credentialsForm.controls.name; }
   get nitControl(): FormControl<string> { return this.credentialsForm.controls.nit; }
   get nitDvControl(): FormControl<string> { return this.credentialsForm.controls.nit_dv; }
@@ -1399,6 +1469,68 @@ export class DianConfigWizardComponent {
   readonly hasCertificate = computed(
     () => !!this.selectedConfig()?.certificate_s3_key,
   );
+
+  /**
+   * Puente del control a señal.
+   *
+   * `form.value` es una PROPIEDAD, no una señal: leerla dentro de un `computed`
+   * lo evalúa una vez con el estado inicial y no vuelve a recalcular, así que el
+   * texto de ayuda se quedaría hablando de facturación de venta después de
+   * elegir documento soporte.
+   */
+  private readonly configurationTypeValue = toSignal(
+    this.configurationTypeControl.valueChanges.pipe(
+      startWith(this.configurationTypeControl.value),
+    ),
+    { initialValue: this.configurationTypeControl.value },
+  );
+
+  readonly isEditingConfig = computed(() => this.selectedConfig() !== null);
+
+  /** El eje real: el de la configuración editada, o el elegido en el alta. */
+  readonly effectiveConfigurationType = computed<DianConfigurationType>(
+    () =>
+      toDianConfigurationType(this.selectedConfig()?.configuration_type) ??
+      this.configurationTypeValue() ??
+      'invoicing',
+  );
+
+  readonly configurationTypeLabel = computed(
+    () =>
+      DIAN_CONFIGURATION_TYPE_LABELS[this.effectiveConfigurationType()] ??
+      'Facturación electrónica',
+  );
+
+  /**
+   * Qué implica el eje elegido, dicho ANTES de pedir credenciales: cada
+   * habilitación tiene su propio set de pruebas ante la DIAN y su propia clave
+   * de documento (CUFE con ClTec sólo la factura de venta; el resto, CUDE/CUDS/
+   * CUNE con el Software-PIN).
+   */
+  readonly configurationTypeHint = computed(() => {
+    const requirements = requirementsFor(
+      defaultDocumentTypeFor(this.effectiveConfigurationType()),
+    );
+    const numbering = requirements.requires_authorized_range
+      ? 'Numera contra una Autorización de Numeración propia de la DIAN.'
+      : 'No cuelga de una Autorización de Numeración: lleva consecutivo propio.';
+    return `${requirements.label}. ${numbering} Su clave es un ${requirements.key_algorithm}. Es una habilitación independiente: tiene su propio set de pruebas y su propio estado ante la DIAN.`;
+  });
+
+  readonly configurationTypeOptions = computed<SelectorOption[]>(() => {
+    const taken = this.takenConfigurationTypes();
+    return DIAN_CONFIGURATION_TYPES.map((type) => {
+      const alreadyConfigured = taken.includes(type);
+      return {
+        value: type,
+        label: DIAN_CONFIGURATION_TYPE_LABELS[type],
+        description: alreadyConfigured
+          ? 'Ya configurada — ábrela desde su tarjeta para ajustarla'
+          : requirementsFor(defaultDocumentTypeFor(type)).label,
+        disabled: alreadyConfigured,
+      };
+    });
+  });
 
   /**
    * Tri-state verdict of the test set. `pending` is the state the old UI could
@@ -1620,6 +1752,17 @@ export class DianConfigWizardComponent {
       if (typeof step === 'number') this.activeStep.set(step);
     });
 
+    // El eje con el que abrió el host. Sólo aplica al alta: en edición manda el
+    // de la configuración, y pisarlo con el input movería la configuración de
+    // habilitación sin que nadie lo pidiera.
+    effect(() => {
+      const preset = this.configurationType();
+      if (!preset) return;
+      if (this.initialConfig()) return;
+      if (this.configurationTypeControl.value === preset) return;
+      this.configurationTypeControl.setValue(preset);
+    });
+
     // The certificate password only matters when a NEW file is being uploaded;
     // requiring it unconditionally blocked "Continuar" for tenants that already
     // have a certificate stored.
@@ -1672,6 +1815,9 @@ export class DianConfigWizardComponent {
 
   private resetForms(): void {
     this.credentialsForm.reset({
+      // El eje preseleccionado por el host sobrevive al reset: se abrió el
+      // asistente desde la tarjeta de ESA habilitación.
+      configuration_type: this.configurationType() ?? 'invoicing',
       name: '',
       nit_type: 'NIT',
       nit: '',
@@ -1700,6 +1846,7 @@ export class DianConfigWizardComponent {
 
   private patchCredentialsForm(cfg: DianConfig): void {
     this.credentialsForm.patchValue({
+      configuration_type: toDianConfigurationType(cfg.configuration_type) ?? 'invoicing',
       name: cfg.name,
       nit_type: cfg.nit_type,
       nit: cfg.nit,
@@ -1740,6 +1887,14 @@ export class DianConfigWizardComponent {
     }
 
     const cfg = this.selectedConfig();
+
+    // `configuration_type` viaja SÓLO en el alta. El backend acepta cambiarlo en
+    // un PATCH, pero mover una configuración de eje la separaría del set de
+    // pruebas y de la numeración que la DIAN le aprobó bajo el eje anterior.
+    if (!cfg) {
+      payload['configuration_type'] = v.configuration_type;
+    }
+
     const request$ = cfg
       ? this.invoicingService.updateDianConfig(cfg.id, payload)
       : this.invoicingService.createDianConfig(payload);
