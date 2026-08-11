@@ -78,7 +78,9 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
       </app-settings-section>
 
       <!-- Formatos de Impresión (QUI-641) — una fila por documento imprimible.
-           Se persiste bajo `receipts.printing`, por tienda, sin herencia. -->
+           Se persiste bajo receipts.printing, por tienda, sin herencia.
+           Sin acentos graves acá: este template es un literal de plantilla y un
+           acento grave dentro lo cierra a mitad de camino (TS1005). -->
       <app-settings-section
         anchorId="section-printing"
         icon="printer"
