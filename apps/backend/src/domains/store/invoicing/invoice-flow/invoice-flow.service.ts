@@ -557,14 +557,35 @@ export class InvoiceFlowService {
   }
 
   /**
-   * Código UN/ECE por línea, resuelto desde la unidad de stock del producto.
+   * Código UN/ECE por línea, resuelto contra la ESCALA de la cantidad que la
+   * línea declara — no contra la unidad de stock del producto.
+   *
+   * La distinción no es cosmética: la DIAN valida la coherencia entre cantidad
+   * y unidad. Un cable cuyo stock vive en milímetros vendido como "3 metros"
+   * lleva `quantity = 3`; declararlo con la unidad de stock diría "3
+   * milímetros" y describiría una venta 1.000 veces menor que la real.
+   *
+   * Tres casos, en este orden:
+   * 1. Línea vendida por presentación (`stock_units_consumed` presente): la
+   *    cantidad cuenta presentaciones. Si el factor de la presentación coincide
+   *    con una unidad del catálogo en la misma dimensión —"Metro" = 1.000 mm—
+   *    se declara esa unidad (`MTR`). Si no coincide con ninguna —"Caja x12" de
+   *    un producto contable, "Rollo 20 m"— se declara `EA`: son 3 paquetes, y
+   *    ningún código de longitud describe eso sin mentir.
+   * 2. Sin presentación: la cantidad ya está en la unidad mínima, así que la
+   *    unidad de stock es coherente (`3000` + `MMT`).
+   * 3. Sin producto o sin unidad declarada: `EA`, el comportamiento histórico.
    *
    * Dos consultas para toda la factura —productos y catálogo— en vez de una
-   * por línea. Una línea sin producto (concepto libre) o sin unidad declarada
-   * queda en `EA`, que es lo que se emitía hasta ahora.
+   * por línea.
    */
   private async resolveLineUnitCodes(
-    items: Array<{ id: number; product_id?: number | null }>,
+    items: Array<{
+      id: number;
+      product_id?: number | null;
+      quantity?: any;
+      stock_units_consumed?: number | null;
+    }>,
   ): Promise<Map<number, string>> {
     const out = new Map<number, string>();
     const productIds = Array.from(
@@ -590,25 +611,62 @@ export class InvoiceFlowService {
       );
       if (uomIds.length === 0) return out;
 
-      const units = await this.prisma.units_of_measure.findMany({
+      const stockUnits = await this.prisma.units_of_measure.findMany({
         where: { id: { in: uomIds } },
-        select: { id: true, code: true },
+        select: { id: true, code: true, dimension: true },
       });
-      const codeByUom = new Map<number, string>(
-        units.map((u: any) => [Number(u.id), String(u.code)]),
-      );
-      const codeByProduct = new Map<number, string>(
-        products.map((p: any) => [
-          p.id,
-          resolveUneceUnitCode(
-            p.stock_uom_id != null ? codeByUom.get(p.stock_uom_id) : null,
-          ),
+      const stockUnitById = new Map<number, { code: string; dimension: string }>(
+        stockUnits.map((u: any) => [
+          Number(u.id),
+          { code: String(u.code), dimension: String(u.dimension) },
         ]),
       );
+
+      // El catálogo de una dimensión son unas pocas filas; traerlo entero
+      // evita una consulta por escala distinta dentro de la misma factura.
+      const dimensions = Array.from(
+        new Set(Array.from(stockUnitById.values()).map((u) => u.dimension)),
+      );
+      const siblings = await this.prisma.units_of_measure.findMany({
+        where: { dimension: { in: dimensions as any } },
+        select: { code: true, dimension: true, factor_to_base: true },
+      });
+      /** `dimension|factor` → código del catálogo con ese factor exacto. */
+      const codeByScale = new Map<string, string>(
+        siblings.map((u: any) => [
+          `${u.dimension}|${Number(u.factor_to_base)}`,
+          String(u.code),
+        ]),
+      );
+
+      const stockUnitByProduct = new Map<
+        number,
+        { code: string; dimension: string } | null
+      >(
+        products.map((p: any) => [
+          p.id,
+          p.stock_uom_id != null
+            ? (stockUnitById.get(p.stock_uom_id) ?? null)
+            : null,
+        ]),
+      );
+
       for (const item of items) {
         if (item.product_id == null) continue;
-        const code = codeByProduct.get(item.product_id);
-        if (code) out.set(item.id, code);
+        const stockUnit = stockUnitByProduct.get(item.product_id);
+        if (!stockUnit) continue;
+
+        const quantity = Number(item.quantity ?? 0);
+        const consumed = item.stock_units_consumed;
+        if (consumed != null && quantity > 0) {
+          const scale = Number(consumed) / quantity;
+          const scaleCode = codeByScale.get(
+            `${stockUnit.dimension}|${scale}`,
+          );
+          out.set(item.id, scaleCode ? resolveUneceUnitCode(scaleCode) : 'EA');
+          continue;
+        }
+        out.set(item.id, resolveUneceUnitCode(stockUnit.code));
       }
     } catch {
       // La unidad es un detalle de presentación fiscal: si su lectura falla,

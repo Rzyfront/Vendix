@@ -43,6 +43,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
   let prisma: {
     promotions: { findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     order_promotions: { count: jest.Mock; create: jest.Mock };
+    products: { findMany: jest.Mock };
   };
 
   const REFERENCE_NOW = new Date('2026-06-01T12:00:00Z');
@@ -57,6 +58,12 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       order_promotions: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
+      },
+      // QUI-648: el motor lee la escala de venta del producto para contar
+      // presentaciones en vez de unidades mínimas. Por defecto ningún producto
+      // declara escala, así que el resto de las specs cuentan como siempre.
+      products: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -1196,6 +1203,137 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       // discount_amount the same method exposes for this tier.
       expect(entry.discount_amount).toBe(5000);
       expect(entry.badge_label).toBe('Desde 2 und: -$5.000');
+    });
+  });
+
+  // QUI-648 — "lleva 3" cuenta unidades de VENTA, no de stock. Un cable medido
+  // en milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la
+  // promoción se dispararía con 3 milímetros de cable (un recorte de $0,015) y
+  // no se dispararía nunca a partir de 3 metros porque 3000 ya pasó de largo
+  // cualquier tramo pensado en unidades.
+  describe('escala de venta (price_unit_quantity)', () => {
+    /** Copia local del constructor de tramos (el original vive anidado). */
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 100,
+        min_quantity: 2,
+        max_quantity: null as number | null,
+        value: 10,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    /** Cable a $5.000 el metro con stock en mm: 1 metro = 1.000 mm. */
+    function cableEnMilimetros() {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1000 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 301,
+          name: 'Lleva 3 metros, 10%',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 301,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+    }
+
+    it('no se dispara con 3 milímetros de cable', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3 mm: tres milésimas de metro, no tres metros.
+        items: [{ line_id: 'l1', product_id: 10, unit_price: 5000, quantity: 3 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.total_discount).toBe(0);
+      expect(result.applied_promotions).toEqual([]);
+    });
+
+    it('sí se dispara con 3 metros de cable', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3.000 mm = 3 metros: la escala del producto lo vuelve 3.
+        items: [
+          { line_id: 'l1', product_id: 10, unit_price: 5, quantity: 3000 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.total_discount).toBeGreaterThan(0);
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(301);
+    });
+
+    it('una línea vendida por presentación ya cuenta presentaciones', async () => {
+      cableEnMilimetros();
+
+      const result = await service.quoteDiscounts({
+        // 3 rollos: `stock_units_consumed` dice que el descuento de inventario
+        // es 60.000 mm, pero la promoción cuenta 3 y no 60.000.
+        items: [
+          {
+            line_id: 'l1',
+            product_id: 10,
+            unit_price: 95000,
+            quantity: 3,
+            stock_units_consumed: 60000,
+          } as any,
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(301);
+    });
+
+    it('un producto sin escala cuenta como siempre', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 10, price_unit_quantity: 1 },
+      ]);
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 302,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 302,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'l1', product_id: 10, unit_price: 100, quantity: 3 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.applied_promotions).toHaveLength(1);
     });
   });
 });

@@ -226,11 +226,16 @@ export class AnalyticsController {
       { key: 'state', header: 'Estado', type: 'text' },
     ];
 
+    // `quantity` llega en la unidad de venta del producto y `unit` la nombra.
+    // Son DOS columnas y no una celda de texto "3 m" a propósito: una cantidad
+    // escrita como texto deja de sumarse, ordenarse y graficarse en Excel, que
+    // es justamente para lo que el comerciante descarga el archivo.
     const itemColumns: ReportColumn[] = [
       { key: 'order_number', header: 'Nº Orden', type: 'text' },
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'sku', header: 'SKU', type: 'text' },
       { key: 'quantity', header: 'Cantidad', type: 'number' },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 14 },
       { key: 'unit_price', header: 'Precio Unitario', type: 'currency' },
       { key: 'line_total', header: 'Total Línea', type: 'currency' },
     ];
@@ -297,6 +302,10 @@ export class AnalyticsController {
       { key: 'cost_price', header: 'Precio Costo', type: 'currency' },
       { key: 'stock_quantity', header: 'Stock', type: 'number' },
       { key: 'units_sold', header: 'Unidades Vendidas', type: 'number' },
+      // Stock y unidades vendidas ya vienen en la unidad de venta del producto;
+      // esta columna la nombra sin convertir la cantidad en texto (un número
+      // escrito como "3 m" deja de sumarse y ordenarse en Excel).
+      { key: 'unit', header: 'Unidad', type: 'text', width: 14 },
       { key: 'revenue', header: 'Ingresos', type: 'currency' },
       // profit_margin is already a 0-100 percentage number (not a fraction), so
       // it is emitted as a plain number to avoid the ×100 double-scaling that a
@@ -359,6 +368,7 @@ export class AnalyticsController {
       { key: 'Producto', header: 'Producto', type: 'text' },
       { key: 'SKU', header: 'SKU', type: 'text' },
       { key: 'Unidades Vendidas', header: 'Unidades Vendidas', type: 'number' },
+      { key: 'Unidad', header: 'Unidad', type: 'text', width: 14 },
       { key: 'Ingresos', header: 'Ingresos', type: 'currency' },
       { key: 'Devoluciones', header: 'Devoluciones', type: 'number' },
       { key: 'Monto Devuelto', header: 'Monto Devuelto', type: 'currency' },
@@ -393,6 +403,7 @@ export class AnalyticsController {
       { key: 'SKU', header: 'SKU', type: 'text' },
       { key: 'Categoría', header: 'Categoría', type: 'text' },
       { key: 'Unidades Vendidas', header: 'Unidades Vendidas', type: 'number' },
+      { key: 'Unidad', header: 'Unidad', type: 'text', width: 14 },
       { key: 'Ingresos', header: 'Ingresos', type: 'currency' },
       {
         key: 'Costo Unitario (Receta)',
@@ -525,6 +536,7 @@ export class AnalyticsController {
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'sku', header: 'SKU', type: 'text' },
       { key: 'quantity', header: 'Cantidad', type: 'number' },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 14 },
       { key: 'from_location', header: 'Origen', type: 'text' },
       { key: 'to_location', header: 'Destino', type: 'text' },
       { key: 'user_name', header: 'Usuario', type: 'text' },
@@ -555,6 +567,10 @@ export class AnalyticsController {
       { key: 'quantity_reserved', header: 'Reservado', type: 'number' },
       { key: 'quantity_available', header: 'Disponible', type: 'number' },
       { key: 'reorder_point', header: 'Punto Reorden', type: 'number' },
+      // Las cuatro cantidades anteriores y el costo unitario están en la unidad
+      // que nombra esta columna: `Valor Total` sigue siendo `Existencias` ×
+      // `Costo Unitario` sea cual sea la escala del producto.
+      { key: 'unit', header: 'Unidad', type: 'text', width: 14 },
       { key: 'cost_per_unit', header: 'Costo Unitario', type: 'currency' },
       { key: 'total_value', header: 'Valor Total', type: 'currency' },
       { key: 'status', header: 'Estado', type: 'text' },

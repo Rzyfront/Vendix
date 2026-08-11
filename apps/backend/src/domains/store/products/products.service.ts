@@ -2031,7 +2031,7 @@ export class ProductsService {
           id: true,
           name: true,
           units_per_package: true,
-          product_price_tier_overrides: {
+          product_overrides: {
             where: { product_id: product.id, variant_id: null },
             select: {
               override_price: true,
@@ -2042,7 +2042,7 @@ export class ProductsService {
       });
       presentations = tiers
         .map((tier) => {
-          const override = tier.product_price_tier_overrides?.[0];
+          const override = tier.product_overrides?.[0];
           return {
             name: tier.name,
             packSize: resolvePackSize(

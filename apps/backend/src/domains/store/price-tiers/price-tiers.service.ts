@@ -259,20 +259,30 @@ export class PriceTiersService {
       }),
       this.prisma.product_price_tier_assignments.findMany({
         where: { product_id: productId },
-        select: { price_tier_id: true, is_default: true },
+        select: { price_tier_id: true, is_default: true, barcode: true },
       }),
     ]);
 
-    // `is_default` vive en el assignment (es del par producto+presentación, no
-    // del override, que además puede ser por variante). Se proyecta acá para
-    // que el editor lea una sola forma por fila.
-    const defaultByTierId = new Map(
-      assignments.map((a) => [a.price_tier_id, a.is_default]),
+    // `is_default` y `barcode` viven en el assignment (son del par
+    // producto+presentación, no del override, que además puede ser por
+    // variante). Se proyectan acá para que el editor lea una sola forma por
+    // fila: sin esto el campo de código de barras arranca vacío al reabrir un
+    // producto que sí lo tiene guardado.
+    const assignmentByTierId = new Map<
+      number,
+      { is_default: boolean; barcode: string | null }
+    >(
+      (assignments as any[]).map((a) => [
+        Number(a.price_tier_id),
+        { is_default: Boolean(a.is_default), barcode: a.barcode ?? null },
+      ]),
     );
 
     return overrides.map((override) => ({
       ...override,
-      is_default: defaultByTierId.get(override.price_tier_id) ?? false,
+      is_default:
+        assignmentByTierId.get(override.price_tier_id)?.is_default ?? false,
+      barcode: assignmentByTierId.get(override.price_tier_id)?.barcode ?? null,
     }));
   }
 
