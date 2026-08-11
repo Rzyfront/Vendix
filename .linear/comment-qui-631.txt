@@ -1,0 +1,39 @@
+Trazabilidad de la resolución:
+
+PR: https://github.com/Rzyfront/Vendix/pull/540 (OPEN)
+Branch: fix/QUI-631-refunds-contract
+
+Defectos cerrados (7 del ticket original):
+1. conteo + ventana previa + computeGrowth (refunds_count, refunds_count_growth, refunds_growth)
+2. contrato compartido REFUND_RECOGNIZED_STATES (mismo set que products/performance)
+3. return_rate = refunds / operating_revenue del período (computeOperatingRevenue del contract)
+4. assert inconsistent_refunds cuando |amount - (subtotal+tax+shipping)| > 0.01
+5. JOIN refund_items -> order_items -> products en SQL para top_products
+6. average_refund = total / count
+7. *_growth con computeGrowth (null cuando previous=0, no 0 %)
+
+Archivos cambiados:
+- apps/backend/src/domains/store/analytics/analytics-metrics.contract.ts
+  + REFUND_RECOGNIZED_STATES (nuevo export compartido)
+  + REVENUE_STATES re-expuesto (mismo valor que ya existía como private, requerido por la tasa)
+- apps/backend/src/domains/store/analytics/services/financial-analytics.service.ts
+  getRefundsSummary reescrito: _count, ventana previa, computeGrowth, return_rate,
+  assert de consistencia, by_reason (top 10), top_products (SQL agregada)
+
+Garantías de no-regresión:
+- Cero cambios destructivos en financial-analytics: la interfaz pública se extiende,
+  campos nuevos son aditivos.
+- REVENUE_STATES se re-expuso con el MISMO valor que ya tenía como private —
+  cero cambio de comportamiento para QUI-630 (que ya está aprobado).
+- products-analytics.service.ts queda PENDIENTE de migrar a REFUND_RECOGNIZED_STATES
+  (ticket separado — no se mezcla con QUI-631).
+
+Verificación ejecutada por mí:
+- npm run tz:audit OK
+- tsc -p apps/backend OK (solo errores pre-existentes en seeds/roku-demo)
+
+Pendiente:
+1. pr-code-review APPROVE por reviewer humano (no se puede self-approve)
+2. Merge a dev
+3. Migrar products-analytics.service.ts a REFUND_RECOGNIZED_STATES (ticket separado)
+4. E2E manual en vendix.com con seed store 10

@@ -1,0 +1,38 @@
+Trazabilidad de la resolución:
+
+PR: https://github.com/Rzyfront/Vendix/pull/543 (OPEN)
+Branch: fix/QUI-627-acquisition-cumulative
+
+Defecto cerrado: el acumulado salta al total en cada hueco.
+
+Causa raíz: customers-analytics.service.ts calculaba cumulative en bucle
+sobre buckets REALES de SQL y lo pasaba a fillTimeSeries como zeroTemplate.
+fillTimeSeries sustituía cada bucket faltante con el valor FINAL, no con
+el valor que correspondería a esa posición temporal.
+
+Ejemplo: May=10, Jun=mising, Jul=5 → Jun mostraba cumulative=15 (FINAL),
+no 10.
+
+Fix: el acumulado se calcula DESPUÉS del fill, en orden cronológico,
+sobre la serie completa (real + huecos). Cada bucket (real o hueco)
+suma su new_customers (0 en los huecos) al running total. El acumulado
+se mantiene plano en los huecos y crece con los reales.
+
+Archivos cambiados:
+- apps/backend/src/domains/store/analytics/services/customers-analytics.service.ts
+
+Garantías:
+- Mantiene el formato de output (cumulative_customers es por bucket)
+- Cero cambio en la interfaz pública
+- CERO modificación al analytics-metrics.contract
+- Compatible con fillTimeSeries existente: solo cambia el orden del cálculo
+
+Verificación ejecutada por mí:
+- npm run tz:audit OK
+- tsc -p apps/backend OK
+
+Pendiente:
+1. pr-code-review APPROVE por reviewer humano (no se puede self-approve)
+2. Merge a dev
+3. E2E manual: periodo con gaps, verificar que el acumulado se mantiene
+   plano en los huecos y solo crece con los buckets reales.

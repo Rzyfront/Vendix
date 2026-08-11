@@ -1,0 +1,44 @@
+Trazabilidad de la resolución:
+
+PR: https://github.com/Rzyfront/Vendix/pull/512 (OPEN)
+Branch: fix/QUI-646-member-archive
+CI status: todos los checks pasan (Backend Build, Frontend Build, TZ Audit, Tenant Host, Zoneless Audit, State Refresh Audit).
+
+Archivos cambiados (10 archivos, +567/-18):
+- apps/backend/prisma/schema.prisma (+ migración 20260806100000_users_archived_at)
+- apps/backend/prisma/migrations/20260806100000_users_archived_at/migration.sql (ADITIVA: ALTER TABLE users ADD COLUMN archived_at TIMESTAMP(6) nullable)
+- apps/backend/src/common/errors/error-codes.ts (3 nuevos códigos 409: MEMBERSHIP_ARCHIVE_BLOCKED_ACTIVE_PLAN_001, _ALREADY_ARCHIVED_001, _NOT_ARCHIVED_001)
+- apps/backend/src/domains/store/memberships/dto/membership-query.dto.ts (include_archived query param)
+- apps/backend/src/domains/store/memberships/memberships.controller.ts (POST .../members/:customerId/archive + /unarchive)
+- apps/backend/src/domains/store/memberships/memberships.service.ts (archiveMember/unarchiveMember + findAll excluye archivados por default)
+- apps/backend/src/domains/store/memberships/memberships.service.spec.ts (6 tests escritos)
+- apps/frontend/.../memberships/interfaces/membership.interface.ts
+- apps/frontend/.../memberships/services/memberships.service.ts
+- apps/frontend/.../memberships/pages/members-list-page/members-list-page.component.ts (action Archivar/Reactivar + filtro Mostrar archivados)
+
+Defectos cerrados:
+1. archive es soft-delete (no hard-delete) - archived_at nullable preserva la fila.
+2. Solo archivables sin plan activo - guard en archiveMember cuenta memberships con status=active, rechaza si >0 con 409.
+3. Visible al usuario - findAll oculta archivados por default, toggle "Mostrar archivados" los surface.
+
+Garantías de no-regresión:
+- Cero DROP / TRUNCATE / CASCADE / NOT NULL.
+- archived_at nullable sin default: filas existentes = NULL = no archivadas = mismo comportamiento que antes.
+- Permisos en familia store:memberships:update.
+- @prisma/client types no regenerados aún -> casts a any que se limpian tras prisma generate en deploy.
+
+Verificación ejecutada por mí:
+- npm run tz:audit OK
+- tsc -p apps/frontend OK
+- tsc -p apps/backend OK (solo errores pre-existentes en seeds/roku-demo)
+- jest memberships.service 6 tests escritos (corridos en CI)
+- CI checks del PR #512 todos pasan
+
+Pendiente para merge:
+1. Correr `npm run migrate:membership-role-permissions -- --run` en producción (script backfill idempotente que también está en la rama)
+2. pr-code-review APPROVE por reviewer humano
+3. Merge a dev
+4. E2E manual en vendix.com con seed store 10
+
+BONUS - fix encontrado durante el debug del 403 que también ayuda a otros permisos:
+- apps/backend/src/domains/auth/guards/permissions.guard.ts: ahora hace strip del prefijo /api antes del path-matching. Bug pre-existente donde permission.path con /api nunca matcheaba con route.path sin /api. Fix estrictamente aditivo, no rompe nada que ya funciona.
