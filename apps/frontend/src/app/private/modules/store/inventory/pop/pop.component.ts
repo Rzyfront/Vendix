@@ -43,8 +43,8 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
 import {
   PopProductConfigModalComponent,
 } from './components/pop-product-config-modal.component';
-import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
-import { PricingOverridesMap } from './components/pop-order-confirmation-modal.component';
+import { PopCheckoutShellComponent } from './components/pop-checkout-shell/pop-checkout-shell.component';
+import { PopPricingOverridesMap } from './components/pop-checkout-shell/steps/pop-receive-step.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -81,7 +81,7 @@ import {
     PopMobileFooterComponent,
     PopCartModalComponent,
     PopProductConfigModalComponent,
-    PopOrderConfirmationModalComponent,
+    PopCheckoutShellComponent,
     InvoiceScannerModalComponent,
   ],
   template: `
@@ -193,7 +193,7 @@ import {
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
 
-    <app-pop-order-confirmation-modal
+    <app-pop-checkout-shell
       [isOpen]="showOrderConfirmModal()"
       (isOpenChange)="showOrderConfirmModal.set($event)"
       [cartState]="cartState()"
@@ -201,15 +201,16 @@ import {
       [locationName]="currentLocationName"
       [actionType]="confirmOrderAction"
       [costPreview]="costPreview()"
-      [loadingPreview]="loadingCostPreview()"
+      [loadingCostPreview]="loadingCostPreview()"
+      [isProcessing]="isProcessingOrder()"
+      [retryOrderRef]="retryOrderRef()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
-      (ackPayChange)="ackPay.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
-    ></app-pop-order-confirmation-modal>
+    ></app-pop-checkout-shell>
 
     <app-pop-product-config-modal
       [isOpen]="showConfigModal()"
@@ -252,13 +253,12 @@ export class PopComponent implements OnInit, OnDestroy {
     null,
   );
   /**
-   * PASO 2/3 — Acuses individuales del modal de confirmación (create-receive).
-   * `ackReceive` (ON por defecto) genera la remisión de entrada; `ackPay`
-   * (OFF por defecto) registra el pago total. Se sincronizan desde los outputs
-   * del modal y el modal los resetea a (true,false) cada vez que se abre.
+   * PASO 2/3 — Acuse de recepción del wizard (create-receive). ON por defecto:
+   * genera la remisión de entrada. Lo sincroniza el shell (paso Recepción) y
+   * el shell lo resetea a true en cada apertura. El "pago total" ya no es un
+   * acuse independiente: lo deriva el plan de pago (ver `onOrderConfirmed`).
    */
   readonly ackReceive = signal(true);
-  readonly ackPay = signal(false);
   showInvoiceScanner = signal(false);
   /**
    * Fase 4: derive the AI scan profile from the current cart. If any
@@ -365,6 +365,17 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   readonly pendingReceptionOrder = signal<any>(null);
 
+  /**
+   * QUI-647 — ref legible de la OC pendiente de recepción para el banner de
+   * reintento del wizard ("La orden #X ya fue creada..."). Null cuando no hay
+   * reintento → el wizard muestra el flujo normal.
+   */
+  readonly retryOrderRef = computed<string | null>(() => {
+    const pending = this.pendingReceptionOrder();
+    if (!pending) return null;
+    return pending.order_number || `#${pending.id}`;
+  });
+
   costPreview = signal<CostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
   /**
@@ -376,7 +387,7 @@ export class PopComponent implements OnInit, OnDestroy {
    * `new_base_price`/`new_profit_margin` opcionales y los propaga a `receive()`;
    * ver `_buildReceptionViaDispatch$`.
    */
-  pricingOverrides = signal<PricingOverridesMap>(new Map());
+  pricingOverrides = signal<PopPricingOverridesMap>(new Map());
 
   /**
    * QUI-647 — configuración de pago elegida en el modal. Viaja al backend en
@@ -1433,10 +1444,11 @@ export class PopComponent implements OnInit, OnDestroy {
     this.pendingAction.set(null);
     this.showCartModal.set(false);
     this.confirmOrderAction = 'create-receive';
-    // Cada apertura de create-receive arranca con acuses por defecto
-    // (recibir ON, pagar OFF) y overrides limpios.
+    // Cada apertura arranca con acuses por defecto (recibir ON) y overrides
+    // limpios. El plan de pago se resetea: pertenece a la instancia del
+    // carrito y no debe sobrevivir entre aperturas (bug de prod QUI-647).
     this.ackReceive.set(true);
-    this.ackPay.set(false);
+    this.paymentPlan.set(null);
     this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
@@ -1536,6 +1548,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.pendingAction.set(null);
     this.confirmOrderAction = 'create';
+    this.paymentPlan.set(null);
     this.showOrderConfirmModal.set(true);
   }
 
@@ -1559,10 +1572,11 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.pendingAction.set(null);
     this.confirmOrderAction = 'create-receive';
-    // Cada apertura de create-receive arranca con acuses por defecto
-    // (recibir ON, pagar OFF) y overrides limpios anclados al cost preview.
+    // Cada apertura arranca con acuses por defecto (recibir ON) y overrides
+    // limpios anclados al cost preview. El plan de pago se resetea: pertenece
+    // a la instancia del carrito (bug de prod QUI-647).
     this.ackReceive.set(true);
-    this.ackPay.set(false);
+    this.paymentPlan.set(null);
     this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
@@ -1573,91 +1587,37 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   /**
-   * PASO 3/4 — Cierra el modal, pide confirmación con un diálogo dinámico
-   * (según acción + acuses) y, si el usuario acepta, orquesta los efectos.
-   * `create` → solo crea; `create-receive` → crea y encadena recepción por
-   * remisión y/o pago como efectos individuales.
+   * PASO 3/4 — Cierra el shell y orquesta los efectos. El "diálogo intermedio"
+   * ya no existe: la confirmación es el paso terminal del wizard.
+   *
+   * Matriz anti-doble-registro de pagos (derivada del plan de pago):
+   *  - `create` + immediate → `_executeSubmitOrder` crea y el backend registra
+   *    el pago al crear (sin down_payment_amount en el payload).
+   *  - `create-receive` + immediate → doPay=true: el pago se registra DESPUÉS
+   *    de la recepción (el backend resuelve `is_advance=false` por conteo de
+   *    recepciones). El request de creación NO lleva down_payment_amount.
+   *  - `partial` → el abono viaja como anticipo en el payload de creación
+   *    (attachPaymentPlan); aquí NO se registra pago (doPay=false).
+   *  - `deferred` / `installments` → ningún pago hoy (doPay=false).
+   *  - Reintento de recepción (`pendingReceptionOrder`) → nunca se registra
+   *    pago: la OC ya existe y solo falta que entre la mercancía.
    */
-  async onOrderConfirmed(): Promise<void> {
+  onOrderConfirmed(): void {
     this.showOrderConfirmModal.set(false);
 
     const action = this.confirmOrderAction;
     const doReceive = this.ackReceive();
-    const doPay = this.ackPay();
-
-    const ok = await this.dialogService.confirm(
-      this._buildConfirmDialog(action, doReceive, doPay),
-    );
-    if (!ok) return;
 
     if (action === 'create') {
+      // `_executeSubmitOrder` ya enruta a la recepción si hay un reintento.
       this._executeSubmitOrder();
       return;
     }
-    this._executeCreateReceivePay(doReceive, doPay);
-  }
 
-  /**
-   * PASO 4 — Construye el contenido dinámico del diálogo de confirmación.
-   */
-  private _buildConfirmDialog(
-    action: 'create' | 'create-receive',
-    doReceive: boolean,
-    doPay: boolean,
-  ): { title: string; message: string; confirmText: string; cancelText: string } {
-    const cancelText = 'Cancelar';
-    // Reintento en contexto: la OC ya existe, solo falta que entre la mercancía.
-    const pending = this.pendingReceptionOrder();
-    if (pending) {
-      const ref = pending.order_number || `#${pending.id}`;
-      return {
-        title: 'Reintentar recepción',
-        message: `La orden ${ref} ya fue creada y su recepción falló. ¿Reintentamos la recepción sobre esa misma orden? No se creará una orden nueva.`,
-        confirmText: 'Reintentar recepción',
-        cancelText,
-      };
-    }
-    if (action === 'create') {
-      return {
-        title: 'Crear orden de compra',
-        message: '¿Seguro que quieres crear esta orden de compra?',
-        confirmText: 'Crear orden',
-        cancelText,
-      };
-    }
-    if (doReceive && doPay) {
-      return {
-        title: 'Crear, pagar y recibir',
-        message:
-          '¿Seguro que quieres crear la orden, marcarla como pagada y recibir la mercancía (se generará una remisión de entrada)?',
-        confirmText: 'Crear, pagar y recibir',
-        cancelText,
-      };
-    }
-    if (doReceive) {
-      return {
-        title: 'Crear y recibir',
-        message:
-          '¿Seguro que quieres crear y recibir esta orden? Se generará una remisión de entrada.',
-        confirmText: 'Crear y recibir',
-        cancelText,
-      };
-    }
-    if (doPay) {
-      return {
-        title: 'Crear y pagar (anticipo)',
-        message:
-          '¿Seguro que quieres crear y pagar esta orden sin recibir la mercancía? (anticipo a proveedor)',
-        confirmText: 'Crear y pagar',
-        cancelText,
-      };
-    }
-    return {
-      title: 'Crear orden de compra',
-      message: '¿Seguro que quieres crear esta orden de compra?',
-      confirmText: 'Crear orden',
-      cancelText,
-    };
+    const plan = this.paymentPlan();
+    const doPay =
+      !this.pendingReceptionOrder() && plan?.payment_plan === 'immediate';
+    this._executeCreateReceivePay(doReceive, doPay);
   }
 
   onNavigateToSettings(): void {
@@ -1671,7 +1631,7 @@ export class PopComponent implements OnInit, OnDestroy {
    * stores; downstream consumers must treat it as read-only. Se aplican al
    * recibir por remisión (ver `_buildReceptionViaDispatch$`).
    */
-  onPricingOverridesChange(overrides: PricingOverridesMap): void {
+  onPricingOverridesChange(overrides: PopPricingOverridesMap): void {
     this.pricingOverrides.set(overrides);
   }
 
@@ -1797,15 +1757,21 @@ export class PopComponent implements OnInit, OnDestroy {
   /**
    * QUI-647 — adjunta el plan de pago al payload de creación.
    *
-   * Solo viaja cuando el operador eligió algo distinto de `immediate`: así una
-   * orden creada sin tocar el paso de pago produce exactamente el mismo payload
-   * que antes del ticket.
+   * Matriz anti-doble-registro de pagos (la contraparte de `onOrderConfirmed`):
+   *  - `immediate` (create Y create-receive): NO viaja `down_payment_amount`.
+   *    El pago se registra al crear (create) o después de la recepción con
+   *    `is_advance=false` (create-receive, lo resuelve el backend por conteo de
+   *    recepciones). Mandar un abono aquí duplicaría el pago.
+   *  - `partial`: SIEMPRE viaja `down_payment_amount` como anticipo (el backend
+   *    lo registra al crear, source 'po_advance', DR 133005/CR 1110).
+   *  - `deferred` / `installments`: ningún pago hoy; solo fecha/cuotas.
    */
   private attachPaymentPlan(request: any): void {
     const plan = this.paymentPlan();
-    if (!plan || plan.payment_plan === 'immediate') return;
+    if (!plan) return;
+    if (plan.payment_plan === 'immediate') return;
     request.payment_plan = plan.payment_plan;
-    if (plan.down_payment_amount > 0) {
+    if (plan.payment_plan === 'partial' && plan.down_payment_amount > 0) {
       request.down_payment_amount = plan.down_payment_amount;
     }
     if (plan.payment_due_date) {
@@ -1879,9 +1845,11 @@ export class PopComponent implements OnInit, OnDestroy {
    * SIEMPRE crea la OC (aprobada); luego, opcionalmente y en este orden:
    *   1. recibir → remisión de entrada (createPurchaseReceipt→confirm→receive)
    *   2. pagar   → registerPurchaseOrderPayment (total, hoy, método 'cash')
-   * Cada efecto es individual: ackReceive=false + ackPay=true crea + paga sin
+   * Cada efecto es individual: doReceive=false + doPay=true crea + paga sin
    * recibir (anticipo — la contabilidad correcta la maneja el backend); ambos
-   * false equivale a crear. Encadenado con switchMap; errores por etapa con
+   * false equivale a crear. `doPay` lo deriva `onOrderConfirmed` del plan de
+   * pago (solo `immediate` registra aquí; `partial` viaja como anticipo en el
+   * payload de creación). Encadenado con switchMap; errores por etapa con
    * toasts claros. Si la OC ya existe, limpia carrito y navega igual.
    */
   private _executeCreateReceivePay(doReceive: boolean, doPay: boolean): void {

@@ -1,0 +1,193 @@
+<div class="payment-step">
+  <!-- Modo de pago -->
+  <section class="pay-section">
+    <div class="section-header">
+      <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
+      <h2 class="section-title">¿Cómo se paga esta orden?</h2>
+    </div>
+    <app-input-buttons
+      [formControl]="form.controls.mode"
+      [options]="modeOptions"
+      [customWrapperClass]="'pay-modes'"
+      (valueChange)="onModeChange($event)"
+    ></app-input-buttons>
+  </section>
+
+  <!-- Abono parcial -->
+  @if (form.controls.mode.value === 'partial') {
+    <section class="pay-section pay-section--field">
+      <div class="section-header">
+        <app-icon name="banknote" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Abono a proveedor</h2>
+        <span class="pay-hint">El resto queda debiendo</span>
+      </div>
+      <div class="pay-field">
+        <app-input
+          [formControl]="form.controls.downPayment"
+          [control]="form.controls.downPayment"
+          [currency]="true"
+          [currencyDecimals]="2"
+          [required]="true"
+          [min]="0.01"
+          [max]="orderTotal()"
+          [label]="'Monto abonado hoy'"
+          [placeholder]="'0.00'"
+          [customInputClass]="'text-right text-base font-semibold'"
+        ></app-input>
+        <p class="pay-field-note">
+          Total de la orden:
+          <span class="font-semibold text-[var(--color-text-primary)]">{{
+            orderTotal() | currency
+          }}</span>
+          · Queda debiendo:
+          <span class="font-semibold text-[var(--color-text-primary)]">{{
+            pendingBalance() | currency
+          }}</span>
+        </p>
+      </div>
+    </section>
+  }
+
+  <!-- Pago diferido -->
+  @if (form.controls.mode.value === 'deferred') {
+    <section class="pay-section pay-section--field">
+      <div class="section-header">
+        <app-icon name="calendar-clock" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Pago diferido</h2>
+        <span class="pay-hint">No se paga ahora; vence en una sola fecha</span>
+      </div>
+      <div class="pay-field">
+        <app-input
+          [formControl]="form.controls.dueDate"
+          [control]="form.controls.dueDate"
+          type="date"
+          [required]="true"
+          [min]="todayISO()"
+          [label]="'Fecha de vencimiento'"
+        ></app-input>
+        <p class="pay-field-note">
+          La fecha de vencimiento no puede ser anterior a hoy
+          ({{ todayISO() }}).
+        </p>
+      </div>
+    </section>
+  }
+
+  <!-- Crédito con cuotas -->
+  @if (form.controls.mode.value === 'installments') {
+    <section class="pay-section pay-section--field">
+      <div class="section-header">
+        <app-icon name="calendar" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Crédito con cuotas</h2>
+        <span class="pay-hint">No se paga ahora; calendario que cierra la deuda</span>
+      </div>
+
+      <!-- Generador de plantilla -->
+      <div class="installment-generator">
+        <label class="gen-field">
+          <span class="gen-label">Cuotas</span>
+          <input
+            type="number"
+            class="gen-input"
+            [value]="installmentCount()"
+            min="1"
+            (input)="onCountInput($event)"
+          />
+        </label>
+        <label class="gen-field">
+          <span class="gen-label">Cada (días)</span>
+          <input
+            type="number"
+            class="gen-input"
+            [value]="installmentEveryDays()"
+            min="1"
+            (input)="onEveryDaysInput($event)"
+          />
+        </label>
+        <button type="button" class="gen-btn" (click)="generateInstallments()">
+          <app-icon name="calendar-plus" [size]="14"></app-icon>
+          Generar
+        </button>
+      </div>
+
+      <!-- Rows editables -->
+      @if (installmentGroups().length > 0) {
+        <div class="installment-rows">
+          @for (group of installmentGroups(); track $index; let i = $index) {
+            <div class="installment-row">
+              <div class="installment-row-field">
+                <app-input
+                  [formControl]="installmentDateControl(group)"
+                  [control]="installmentDateControl(group)"
+                  type="date"
+                  [required]="true"
+                  [min]="todayISO()"
+                  [customWrapperClass]="'installment-date'"
+                  [customInputClass]="'text-sm'"
+                ></app-input>
+              </div>
+              <div class="installment-row-field">
+                <app-input
+                  [formControl]="installmentAmountControl(group)"
+                  [control]="installmentAmountControl(group)"
+                  [currency]="true"
+                  [currencyDecimals]="2"
+                  [required]="true"
+                  [min]="0.01"
+                  [customWrapperClass]="'installment-amount'"
+                  [customInputClass]="'text-sm text-right'"
+                ></app-input>
+              </div>
+              <button
+                type="button"
+                class="row-remove"
+                (click)="removeInstallment(i)"
+                [attr.aria-label]="'Quitar cuota ' + (i + 1)"
+              >
+                <app-icon name="x-circle" [size]="16"></app-icon>
+              </button>
+            </div>
+          }
+
+          <!-- Indicador de cuadre en vivo -->
+          <p class="balance-indicator" [class.balanced]="installmentsBalanced()">
+            <app-icon
+              [name]="installmentsBalanced() ? 'check-circle' : 'alert-triangle'"
+              [size]="14"
+            ></app-icon>
+            Cuotas: {{ installmentsTotal() | currency }} · Saldo:
+            {{ pendingBalance() | currency }}
+            @if (installmentsBalanced()) {
+              <span>· cuadra</span>
+            } @else {
+              <span>(la suma de cuotas debe igualar el saldo)</span>
+            }
+          </p>
+        </div>
+      }
+
+      <button type="button" class="add-row-btn" (click)="addInstallmentRow()">
+        <app-icon name="plus" [size]="14"></app-icon>
+        Agregar cuota
+      </button>
+    </section>
+  }
+
+  <!-- Legado informativo del modo elegido -->
+  <p class="pay-legend">
+    @switch (form.controls.mode.value) {
+      @case ('immediate') {
+        Se registra el pago completo al crear la orden.
+      }
+      @case ('partial') {
+        El abono se registra como anticipo (cuenta 133005) al crear la orden.
+      }
+      @case ('deferred') {
+        La orden se crea sin pago; queda una CxP con vencimiento en la fecha elegida.
+      }
+      @case ('installments') {
+        La orden se crea sin pago; las cuotas programan la CxP hasta cubrir la deuda.
+      }
+    }
+  </p>
+</div>
