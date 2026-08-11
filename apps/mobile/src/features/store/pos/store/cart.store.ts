@@ -24,6 +24,17 @@ interface CustomItemData {
   taxRate?: number;
 }
 
+/**
+ * Unidad de captura de una línea (QUI-648 fase 2). La resuelve
+ * `resolveSaleUnitConfig` a partir de `stock_uom_id` × `price_unit_quantity`;
+ * acá solo se persiste para que el carrito y el tiquete muestren la cantidad en
+ * la misma escala en la que se capturó.
+ */
+export interface CapturedSaleUnit {
+  code: string;
+  unitsPerCapture: number;
+}
+
 interface CartActions {
   /**
    * Agrega una línea al carrito.
@@ -34,11 +45,18 @@ interface CartActions {
    *   inventario descontará `quantity × packSize`. Sin ella el comportamiento
    *   es exactamente el histórico.
    */
+  /**
+   * @param saleUnit Unidad en la que el CAJERO capturó `quantity` (QUI-648
+   *   fase 2). `quantity` llega SIEMPRE ya convertida a unidades mínimas: esto
+   *   solo anota en qué escala volver a leerla para mostrarla ("3 m" en vez de
+   *   "3000"). Omitirla deja la línea exactamente como antes de esta fase.
+   */
   addItem: (
     product: Product,
     variant?: ProductVariant | null,
     quantity?: number,
     presentation?: SaleUnitPresentation | null,
+    saleUnit?: CapturedSaleUnit | null,
   ) => void;
   addCustomItem: (custom: CustomItemData) => void;
   removeItem: (itemId: string) => void;
@@ -220,11 +238,33 @@ function buildPresentationFields(
   };
 }
 
+/**
+ * Escala de captura de una línea. Solo se anota cuando hay conversión REAL
+ * (metros sobre milímetros): si la unidad de venta ya es la mínima, la línea se
+ * lee como siempre y ninguna superficie cambia.
+ *
+ * Con presentación aplicada los campos quedan apagados a propósito: ahí
+ * `quantity` cuenta PAQUETES, así que la escala de la unidad mínima no aplica —
+ * la misma exclusión que hace el web al aplicar una tarifa.
+ */
+function buildSaleUnitFields(
+  saleUnit?: CapturedSaleUnit | null,
+  presentation?: SaleUnitPresentation | null,
+): Pick<CartItem, 'saleUnitCode' | 'stockUnitsPerSaleUnit'> {
+  const captured =
+    !presentation && !!saleUnit && Number(saleUnit.unitsPerCapture) > 1;
+  return {
+    saleUnitCode: captured ? saleUnit!.code : null,
+    stockUnitsPerSaleUnit: captured ? Number(saleUnit!.unitsPerCapture) : null,
+  };
+}
+
 function buildCartItem(
   product: Product,
   variant?: ProductVariant | null,
   quantity: number = 1,
   presentation?: SaleUnitPresentation | null,
+  saleUnit?: CapturedSaleUnit | null,
 ): CartItem {
   // Con presentación el precio de la línea es el del PAQUETE completo, ya
   // resuelto por `resolveSaleUnitPresentations` (override explícito o regla de
@@ -257,6 +297,7 @@ function buildCartItem(
     variant_display_name,
     priceUnitQuantity: resolvePriceUnitQuantity(product.price_unit_quantity),
     ...buildPresentationFields(quantity, presentation),
+    ...buildSaleUnitFields(saleUnit, presentation),
   };
 }
 
@@ -301,7 +342,7 @@ function computeSummary(items: CartItem[], discounts: CartDiscount[]): CartSumma
 export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   ...initialState,
 
-  addItem: (product, variant, quantity = 1, presentation = null) => {
+  addItem: (product, variant, quantity = 1, presentation = null, saleUnit = null) => {
     const { items } = get();
     // La presentación participa de la IDENTIDAD de la línea: 2 bultos y 3 kilos
     // del mismo producto son DOS líneas, no una de 5. Fusionarlas perdería el
@@ -321,7 +362,7 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
       const summary = computeSummary(updated, get().discounts);
       set({ items: updated, summary });
     } else {
-      const newItem = buildCartItem(product, variant, quantity, presentation);
+      const newItem = buildCartItem(product, variant, quantity, presentation, saleUnit);
       const updated = [...items, newItem];
       const summary = computeSummary(updated, get().discounts);
       set({ items: updated, summary });
@@ -336,10 +377,35 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
     const unitPrice = presentation
       ? presentation.unitPrice
       : getSellableUnitPrice(target.product, target.variant);
+
+    // Una línea capturada en unidad de venta guarda milímetros o gramos, no
+    // paquetes: al ponerle una presentación hay que CONVERTIR la magnitud, o
+    // "3 m" se volverían "3 rollos". Espejo de `pos-cart.service.ts` del web.
+    // La conversión se limita a esas líneas — ninguna línea por pieza cambia.
+    const capturedInSaleUnit = Number(target.stockUnitsPerSaleUnit ?? 1) > 1;
+    const nextPackSize = presentation ? presentation.packSize : 1;
+    const quantity =
+      capturedInSaleUnit && nextPackSize > 1
+        ? Math.max(1, Math.round(target.quantity / nextPackSize))
+        : target.quantity;
+
     const next = recalcItem({
       ...target,
+      quantity,
       unitPrice,
-      ...buildPresentationFields(target.quantity, presentation),
+      ...buildPresentationFields(quantity, presentation),
+      // Con presentación la escala de captura deja de aplicar; al quitarla la
+      // línea vuelve a unidades mínimas pero sin unidad de captura anotada:
+      // recuperarla exigiría el catálogo de unidades, que este store no ve.
+      ...buildSaleUnitFields(
+        capturedInSaleUnit
+          ? {
+              code: target.saleUnitCode ?? '',
+              unitsPerCapture: Number(target.stockUnitsPerSaleUnit),
+            }
+          : null,
+        presentation,
+      ),
     });
     const updated = items.map((i) => (i.id === itemId ? next : i));
     set({ items: updated, summary: computeSummary(updated, discounts) });

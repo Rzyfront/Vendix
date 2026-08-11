@@ -13,6 +13,7 @@ import { useCartStore, getLineSubtotal } from '@/features/store/pos/store/cart.s
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
+import { formatSaleQuantity } from '@/features/store/pricing';
 import type { PaymentMethod, PosCustomer } from '@/features/store/types';
 import type { CreatePosPaymentDto } from '@/features/store/types';
 import { CheckoutStepIndicator } from './checkout-step-indicator';
@@ -402,7 +403,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                         <Text style={styles.productVariant}>{item.variant_display_name}</Text>
                       )}
                     </View>
-                    <Text style={styles.productQty}>x{item.quantity}</Text>
+                    {/* QUI-648 — la misma escala que muestra el carrito: si
+                        el cajero capturó "3 m", el resumen de cobro no puede
+                        decir "x3000". */}
+                    <Text style={styles.productQty}>x{formatSaleQuantity(item)}</Text>
                     <Text style={styles.productPrice}>{formatCurrency(item.totalPrice)}</Text>
                   </View>
                 ))}

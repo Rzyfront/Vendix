@@ -12,6 +12,7 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { useCartStore, getLineSubtotal } from '@/features/store/pos/store/cart.store';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { formatSaleQuantity } from '@/features/store/pricing';
 import type { CreatePosPaymentDto, PaymentMethod, PosCustomer } from '@/features/store/types';
 import { CheckoutStepIndicator } from './checkout-step-indicator';
 
@@ -440,7 +441,8 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
               {items.map((item) => (
                 <View key={item.id} style={styles.productRow}>
                   <Text style={styles.productName} numberOfLines={1}>{item.product.name}</Text>
-                  <Text style={styles.productQty}>x{item.quantity}</Text>
+                  {/* QUI-648 — misma escala que el carrito ("3 m"). */}
+                  <Text style={styles.productQty}>x{formatSaleQuantity(item)}</Text>
                   <Text style={styles.productTotal}>{formatCurrency(item.totalPrice)}</Text>
                 </View>
               ))}

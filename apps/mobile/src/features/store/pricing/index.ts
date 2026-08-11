@@ -37,3 +37,21 @@ export type {
   SaleUnitProductLike,
   ProductTierOverrideLike,
 } from './sale-unit.util';
+
+export {
+  PIECE_SALE_UNIT,
+  resolveSaleUnitConfig,
+  requiresSaleQuantityCapture,
+  resolveStockUnitsFromCapture,
+  resolveSaleQuantity,
+  isSaleUnitLine,
+  formatSaleQuantity,
+  resolveQuantityStep,
+} from './sale-capture.util';
+
+export type {
+  SaleUnitConfig,
+  SaleUnitCaptureProductLike,
+  SaleLineUnitsLike,
+  UnitOfMeasureLike,
+} from './sale-capture.util';

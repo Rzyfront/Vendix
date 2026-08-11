@@ -17,7 +17,15 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore, getLineSubtotal } from '@/features/store/pos/store/cart.store';
-import type { SaleUnitPresentation } from '@/features/store/pricing';
+import {
+  requiresSaleQuantityCapture,
+  resolveQuantityStep,
+  resolveSaleUnitConfig,
+  resolveStockUnitsFromCapture,
+  type SaleUnitConfig,
+  type SaleUnitPresentation,
+} from '@/features/store/pricing';
+import { getUomCatalog } from '@/features/store/services/uom.service';
 import { CashRegisterService } from '@/features/pos/services/cash-register.service';
 import { PosTicketService, type PosTicketData } from '@/features/pos/services/pos-ticket.service';
 import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
@@ -44,6 +52,7 @@ import {
   PosOrderCreateModal,
   PosLayawayConfigModal,
   PosPresentationModal,
+  PosSaleQuantityModal,
   PosCashOpenModal,
   PosCashCloseModal,
   PosCashMovementModal,
@@ -992,6 +1001,10 @@ function buildPosTicketData(order: { orderNumber: string } & PosReceiptData): Po
       appliedPriceTierName: item.appliedPriceTierName ?? null,
       isPackageUnit: item.isPackageUnit === true,
       unitsPerPackage: item.unitsPerPackage ?? null,
+      // QUI-648 fase 2 — la escala en la que el cajero capturó. Sin esto el
+      // papel imprime "3000" donde el cliente pidió "3 m".
+      saleUnitCode: item.saleUnitCode ?? null,
+      stockUnitsPerSaleUnit: item.stockUnitsPerSaleUnit ?? null,
     })),
     subtotal: Number(order.summary?.subtotal) || 0,
     tax: Number(order.summary?.taxAmount) || 0,
@@ -2292,6 +2305,9 @@ const PosScreen = () => {
   // QUI-648 — selector de presentación de venta (bulto, caja, rollo).
   const [showPresentations, setShowPresentations] = useState(false);
   const [presentationProduct, setPresentationProduct] = useState<Product | null>(null);
+  // QUI-648 fase 2 — captura de cantidad en la unidad de venta ("3 metros").
+  const [saleQuantityProduct, setSaleQuantityProduct] = useState<Product | null>(null);
+  const [saleQuantityConfig, setSaleQuantityConfig] = useState<SaleUnitConfig | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [showCartModal, setShowCartModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -2531,6 +2547,33 @@ const PosScreen = () => {
     enabled: !!presentationProduct && showPresentations,
   });
 
+  /**
+   * QUI-648 fase 2 — catálogo global de `units_of_measure`. Es de solo lectura
+   * y cambia únicamente cuando el seed agrega una unidad, así que se pide una
+   * vez por sesión. Sin él la resolución cae a "por pieza" y el POS vende
+   * exactamente como antes: nunca se inventa una conversión.
+   */
+  const { data: uomCatalog = [] } = useQuery({
+    queryKey: ['uom-catalog'],
+    queryFn: () => getUomCatalog(),
+    staleTime: 30 * 60 * 1000,
+  });
+
+  /**
+   * Abre la captura en unidad de venta si el producto se mide; devuelve `false`
+   * cuando el producto va por pieza y el caller debe seguir su camino normal.
+   */
+  const openSaleQuantityCapture = useCallback(
+    (product: Product): boolean => {
+      const config = resolveSaleUnitConfig(product, uomCatalog);
+      if (!requiresSaleQuantityCapture(config)) return false;
+      setSaleQuantityProduct(product);
+      setSaleQuantityConfig(config);
+      return true;
+    },
+    [uomCatalog],
+  );
+
   const handleProductPress = useCallback(
     (product: Product) => {
       const hasVariants = (product.product_variants?.length ?? 0) > 0;
@@ -2561,10 +2604,16 @@ const PosScreen = () => {
         return;
       }
 
+      // QUI-648 fase 2 — un producto MEDIDO se captura en su unidad de venta:
+      // el cajero pide "3 metros" y el carrito guarda 3000 mm. Solo entra acá
+      // el que declara unidad de stock CON una unidad de captura distinta; el
+      // resto —todo el catálogo por pieza— se sigue agregando de un toque.
+      if (openSaleQuantityCapture(product)) return;
+
       addItem(product, null, 1);
       toastSuccess(`${product.name} agregado`);
     },
-    [addItem],
+    [addItem, openSaleQuantityCapture],
   );
 
   const handlePresentationSelect = useCallback(
@@ -2573,6 +2622,12 @@ const PosScreen = () => {
       setShowPresentations(false);
       setPresentationProduct(null);
       if (!product) return;
+
+      // "Suelto" sobre un producto medido significa vender en su unidad de
+      // venta ("3 metros"), no una unidad mínima suelta (1 mm). Con
+      // presentación elegida `quantity` cuenta paquetes y no hay conversión.
+      if (!presentation && openSaleQuantityCapture(product)) return;
+
       addItem(product, null, 1, presentation);
       toastSuccess(
         presentation
@@ -2580,8 +2635,45 @@ const PosScreen = () => {
           : `${product.name} agregado`,
       );
     },
-    [presentationProduct, addItem],
+    [presentationProduct, addItem, openSaleQuantityCapture],
   );
+
+  /**
+   * Cierra la captura agregando la línea. `amount` viene en unidades de
+   * CAPTURA (3 = "3 metros") y se convierte acá a la unidad mínima, que es la
+   * que viaja en `order_items.quantity`. La unidad de captura se anota en la
+   * línea solo para poder volver a mostrarla en esa escala.
+   */
+  const handleSaleQuantityConfirm = useCallback(
+    (amount: number) => {
+      const product = saleQuantityProduct;
+      const config = saleQuantityConfig;
+      setSaleQuantityProduct(null);
+      setSaleQuantityConfig(null);
+      if (!product || !config) return;
+
+      const quantity = resolveStockUnitsFromCapture(amount, config.unitsPerCapture);
+      const unitCode = config.captureUnit?.code ?? config.stockUnit?.code ?? '';
+      if (quantity <= 0) {
+        // Redondear a cero sería vender aire. El modal ya bloquea el botón;
+        // esto cubre el caso de que la configuración cambie entre medio.
+        toastWarning(`La cantidad mínima es 1 ${config.stockUnit?.code ?? 'unidad'}`);
+        return;
+      }
+
+      addItem(product, null, quantity, null, {
+        code: unitCode,
+        unitsPerCapture: config.unitsPerCapture,
+      });
+      toastSuccess(`${product.name} · ${amount} ${unitCode} agregado`);
+    },
+    [saleQuantityProduct, saleQuantityConfig, addItem],
+  );
+
+  const handleSaleQuantityClose = useCallback(() => {
+    setSaleQuantityProduct(null);
+    setSaleQuantityConfig(null);
+  }, []);
 
   const handleVariantSelect = useCallback(
     (variant: ProductVariant) => {
@@ -2872,12 +2964,25 @@ const PosScreen = () => {
         taxAmount={summary.taxAmount}
         total={summary.total}
         onIncreaseQuantity={(id) => {
+          // QUI-648 fase 2 — el stepper se mueve de a UNA unidad de venta: una
+          // línea capturada en metros sube 1 m (1000 mm) por toque, no 1 mm.
+          // `resolveQuantityStep` devuelve 1 para toda línea sin unidad de
+          // captura, así que el catálogo por pieza se comporta igual que hoy.
           const item = useCartStore.getState().items.find((i) => i.id === id);
-          if (item) useCartStore.getState().updateQuantity(id, item.quantity + 1);
+          if (item)
+            useCartStore
+              .getState()
+              .updateQuantity(id, item.quantity + resolveQuantityStep(item));
         }}
         onDecreaseQuantity={(id) => {
           const item = useCartStore.getState().items.find((i) => i.id === id);
-          if (item && item.quantity > 1) useCartStore.getState().updateQuantity(id, item.quantity - 1);
+          if (!item) return;
+          // El piso es UNA unidad de venta: bajar de "1 m" a "0,999 m" no es
+          // una cantidad que un cajero quiera, y llegar a 0 borraría la línea
+          // desde un botón que no es el de borrar.
+          const step = resolveQuantityStep(item);
+          const next = item.quantity - step;
+          if (next >= step) useCartStore.getState().updateQuantity(id, next);
         }}
         onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
         onClearCart={() => useCartStore.getState().clearCart()}
@@ -2942,6 +3047,15 @@ const PosScreen = () => {
           setShowPresentations(false);
           setPresentationProduct(null);
         }}
+      />
+
+      {/* QUI-648 fase 2 — captura en la unidad de venta ("3 metros"). */}
+      <PosSaleQuantityModal
+        visible={!!saleQuantityProduct && !!saleQuantityConfig}
+        product={saleQuantityProduct}
+        config={saleQuantityConfig}
+        onConfirm={handleSaleQuantityConfirm}
+        onClose={handleSaleQuantityClose}
       />
 
       {/* Cart Panel (legacy) */}

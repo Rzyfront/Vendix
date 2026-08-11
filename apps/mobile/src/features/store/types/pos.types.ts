@@ -62,6 +62,21 @@ export interface CartItem {
    * canónico desde `applied_price_tier_id`.
    */
   stockUnitsConsumed?: number | null;
+  /**
+   * Unidad en la que el CAJERO capturó la línea ("m", "kg"). `null` = se
+   * capturó en la unidad mínima, que es el caso de todo el catálogo por pieza.
+   *
+   * No cambia el significado de `quantity` —que sigue en unidades mínimas—:
+   * solo dice en qué escala volver a leerla para mostrarla. Equivale a
+   * `sale_unit_code` del modelo web.
+   */
+  saleUnitCode?: string | null;
+  /**
+   * Unidades mínimas que consume UNA unidad de captura (1000 mm por metro).
+   * `null` o 1 ⇒ la línea se muestra tal cual, sin conversión. Equivale a
+   * `stock_units_per_sale_unit` del modelo web.
+   */
+  stockUnitsPerSaleUnit?: number | null;
 }
 
 export interface CartDiscount {

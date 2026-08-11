@@ -20,6 +20,7 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { OrderService } from '@/features/store/services';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
+import { formatSaleQuantity } from '@/features/store/pricing';
 import type { CreatePosPaymentDto, PosCustomer } from '@/features/store/types';
 import { PosCustomerModal } from './pos-customer-modal';
 
@@ -243,7 +244,8 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                           ) : null}
                         </Text>
                       </View>
-                      <Text style={styles.productQty}>x{item.quantity}</Text>
+                      {/* QUI-648 — misma escala que el carrito ("3 m"). */}
+                      <Text style={styles.productQty}>x{formatSaleQuantity(item)}</Text>
                       <Text style={styles.productPrice}>
                         {formatCurrency(item.totalPrice)}
                       </Text>

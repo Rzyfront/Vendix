@@ -14,6 +14,7 @@ import { colors, colorScales, spacing, typography, borderRadius } from '@/shared
 import { Icon } from '@/shared/components/icon/icon';
 import { formatCurrency } from '@/shared/utils/currency';
 import type { CartItem as StoreCartItem } from '@/features/store/types';
+import { formatSaleQuantity, isSaleUnitLine } from '@/features/store/pricing';
 import { CheckoutStepIndicator } from './checkout-step-indicator';
 
 type CartItem = StoreCartItem;
@@ -210,11 +211,17 @@ export function PosCartModal({
                   // La etiqueta dice cuál de los tres casos es.
                   const stockUnit = item.product.stock_uom?.code || 'unid';
                   const scale = Number(item.priceUnitQuantity ?? 1);
+                  // Con unidad de captura la etiqueta habla en ESA unidad
+                  // ("por m"), no en la escala cruda ("por 1000 mm"): el
+                  // cajero nunca ve la unidad mínima.
+                  const capturedInSaleUnit = isSaleUnitLine(item);
                   const unitLabel = item.appliedPriceTierName
                     ? `por ${item.appliedPriceTierName}`
-                    : scale > 1
-                      ? `por ${scale} ${stockUnit}`
-                      : 'c/u';
+                    : capturedInSaleUnit
+                      ? `por ${item.saleUnitCode}`
+                      : scale > 1
+                        ? `por ${scale} ${stockUnit}`
+                        : 'c/u';
                   return (
                     <View style={styles.cartItem}>
                       {/* Row 1: Image + Info + Remove */}
@@ -295,7 +302,12 @@ export function PosCartModal({
                           >
                             <Icon name="minus" size={14} color={colorScales.gray[600]} />
                           </Pressable>
-                          <Text style={styles.qtyLabel}>{item.quantity}</Text>
+                          {/* QUI-648 — "3 m", nunca "3000". La cantidad se
+                              muestra en la unidad en la que se capturó; la
+                              conversión a la unidad mínima es interna. */}
+                          <Text style={styles.qtyLabel}>
+                            {formatSaleQuantity(item)}
+                          </Text>
                           <Pressable
                             onPress={() => onIncreaseQuantity(item.id)}
                             hitSlop={6}

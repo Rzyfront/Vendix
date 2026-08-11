@@ -12,6 +12,7 @@ export { PosPaymentModal } from './pos-payment-modal';
 export { PosOrderCreateModal } from './pos-order-create-modal';
 export { PosLayawayConfigModal } from './pos-layaway-config-modal';
 export { PosPresentationModal } from './pos-presentation-modal';
+export { PosSaleQuantityModal } from './pos-sale-quantity-modal';
 // Modales de caja registradora — implementación pendiente; aceptan las props
 // que el consumidor (`pos/index.tsx`) ya pasa hoy para permitir la integración
 // con el servicio de cash-register cuando esté listo.

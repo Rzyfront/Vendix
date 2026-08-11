@@ -19,6 +19,16 @@ import {
   resolvePresentationPrice,
   resolveSaleUnitPresentations,
 } from './sale-unit.util';
+import {
+  PIECE_SALE_UNIT,
+  resolveSaleUnitConfig,
+  requiresSaleQuantityCapture,
+  resolveStockUnitsFromCapture,
+  resolveSaleQuantity,
+  isSaleUnitLine,
+  formatSaleQuantity,
+  resolveQuantityStep,
+} from './sale-capture.util';
 
 describe('resolveLineTotal — cero regresión con escala 1', () => {
   it('colapsa a unitPrice × quantity cuando la escala está ausente', () => {
@@ -195,5 +205,238 @@ describe('presentaciones de venta', () => {
     );
     expect(out[0].packSize).toBe(50);
     expect(out[0].unitPrice).toBe(50000);
+  });
+});
+
+/* ==========================================================================
+ * QUI-648 fase 2 — la CAPTURA.
+ *
+ * Gemelo conceptual de `pos-sale-unit.service.ts` (`configFor`) y de
+ * `pos/utils/line-units.util.ts` del web. Lo que se prueba acá es que el cajero
+ * teclea 3 y el carrito guarda 3000, y —sobre todo— que el producto por pieza
+ * no se entera de que nada de esto existe.
+ * ========================================================================== */
+
+/** Catálogo `units_of_measure` reducido a lo que la conversión necesita. */
+const CATALOG = [
+  { id: 1, code: 'mm', name: 'Milímetro', dimension: 'length', factor_to_base: 1 },
+  { id: 2, code: 'cm', name: 'Centímetro', dimension: 'length', factor_to_base: 10 },
+  { id: 3, code: 'm', name: 'Metro', dimension: 'length', factor_to_base: 1000 },
+  { id: 4, code: 'g', name: 'Gramo', dimension: 'mass', factor_to_base: 1 },
+  { id: 5, code: 'kg', name: 'Kilogramo', dimension: 'mass', factor_to_base: 1000 },
+];
+
+describe('resolveSaleUnitConfig — NO REGRESIÓN del producto por pieza', () => {
+  // Este bloque es el criterio de aceptación más importante de la fase: un
+  // producto sin `stock_uom_id` y sin escala tiene que comportarse EXACTAMENTE
+  // como antes — se agrega de un toque, stepper en unidades, sin sufijo.
+  it('un producto sin unidad de stock ni escala resuelve por pieza', () => {
+    expect(resolveSaleUnitConfig({}, CATALOG)).toEqual(PIECE_SALE_UNIT);
+    expect(resolveSaleUnitConfig({ price_unit_quantity: 1 }, CATALOG)).toEqual(
+      PIECE_SALE_UNIT,
+    );
+    expect(
+      resolveSaleUnitConfig({ stock_uom_id: null, price_unit_quantity: null }, CATALOG),
+    ).toEqual(PIECE_SALE_UNIT);
+  });
+
+  it('un producto por pieza NUNCA pide captura de cantidad', () => {
+    expect(requiresSaleQuantityCapture(resolveSaleUnitConfig({}, CATALOG))).toBe(false);
+    expect(requiresSaleQuantityCapture(PIECE_SALE_UNIT)).toBe(false);
+    expect(requiresSaleQuantityCapture(resolveSaleUnitConfig(null, CATALOG))).toBe(false);
+  });
+
+  it('con escala pero sin unidad de stock conserva la escala y sigue por pieza', () => {
+    // El precio se publica por N unidades, pero no hay unidad física que
+    // convertir: la aritmética de cobro ya lo maneja, la captura no cambia.
+    const config = resolveSaleUnitConfig({ price_unit_quantity: 1000 }, CATALOG);
+    expect(config.priceUnitQuantity).toBe(1000);
+    expect(config.stockUnit).toBeNull();
+    expect(requiresSaleQuantityCapture(config)).toBe(false);
+  });
+});
+
+describe('resolveSaleUnitConfig — la unidad de captura derivada', () => {
+  // Cable con stock en milímetros y precio por metro.
+  const cable = { stock_uom_id: 1, price_unit_quantity: 1000 };
+
+  it('deriva metro sobre milímetro (factor_to_base × price_unit_quantity)', () => {
+    const config = resolveSaleUnitConfig(cable, CATALOG);
+    expect(config.stockUnit?.code).toBe('mm');
+    expect(config.captureUnit?.code).toBe('m');
+    expect(config.unitsPerCapture).toBe(1000);
+    expect(config.priceUnitQuantity).toBe(1000);
+    expect(requiresSaleQuantityCapture(config)).toBe(true);
+  });
+
+  it('deriva kilo sobre gramo con la misma regla', () => {
+    const config = resolveSaleUnitConfig(
+      { stock_uom_id: 4, price_unit_quantity: 1000 },
+      CATALOG,
+    );
+    expect(config.captureUnit?.code).toBe('kg');
+    expect(config.unitsPerCapture).toBe(1000);
+  });
+
+  it('deriva centímetro cuando la escala es 10, no salta a metro', () => {
+    const config = resolveSaleUnitConfig(
+      { stock_uom_id: 1, price_unit_quantity: 10 },
+      CATALOG,
+    );
+    expect(config.captureUnit?.code).toBe('cm');
+    expect(config.unitsPerCapture).toBe(10);
+  });
+
+  it('lee la unidad de stock desde el objeto anidado cuando falta el id plano', () => {
+    const config = resolveSaleUnitConfig(
+      { stock_uom: { id: 1 }, price_unit_quantity: 1000 },
+      CATALOG,
+    );
+    expect(config.captureUnit?.code).toBe('m');
+  });
+
+  it('NO cruza dimensiones: gramos con escala 1000 no capturan en metros', () => {
+    // 'm' y 'kg' comparten factor_to_base = 1000. Sin el filtro de dimensión
+    // el cajero terminaría pesando cable en metros.
+    const config = resolveSaleUnitConfig(
+      { stock_uom_id: 4, price_unit_quantity: 1000 },
+      CATALOG,
+    );
+    expect(config.captureUnit?.code).toBe('kg');
+    expect(config.stockUnit?.dimension).toBe('mass');
+  });
+});
+
+describe('resolveSaleUnitConfig — cuando no se puede convertir, no se inventa', () => {
+  it('sin catálogo cargado cae a por pieza en vez de adivinar la conversión', () => {
+    const config = resolveSaleUnitConfig({ stock_uom_id: 1, price_unit_quantity: 1000 }, []);
+    expect(config.stockUnit).toBeNull();
+    expect(config.priceUnitQuantity).toBe(1000);
+    expect(requiresSaleQuantityCapture(config)).toBe(false);
+  });
+
+  it('con una unidad de stock que el catálogo no tiene, cae a por pieza', () => {
+    const config = resolveSaleUnitConfig(
+      { stock_uom_id: 999, price_unit_quantity: 1000 },
+      CATALOG,
+    );
+    expect(config.stockUnit).toBeNull();
+    expect(requiresSaleQuantityCapture(config)).toBe(false);
+  });
+
+  it('sin unidad equivalente a la escala, captura en la unidad de stock', () => {
+    // Escala 100 sobre mm: el catálogo no tiene un decímetro, así que se
+    // captura en mm. Nunca se redondea una equivalencia que no existe.
+    const config = resolveSaleUnitConfig(
+      { stock_uom_id: 1, price_unit_quantity: 100 },
+      CATALOG,
+    );
+    expect(config.captureUnit?.code).toBe('mm');
+    expect(config.unitsPerCapture).toBe(1);
+    expect(requiresSaleQuantityCapture(config)).toBe(false);
+  });
+
+  it('con escala 1 la unidad de captura ES la de stock (sin conversión)', () => {
+    const config = resolveSaleUnitConfig({ stock_uom_id: 3 }, CATALOG);
+    expect(config.captureUnit?.code).toBe('m');
+    expect(config.unitsPerCapture).toBe(1);
+    // Preguntar la cantidad acá sería una regresión: se agrega de un toque.
+    expect(requiresSaleQuantityCapture(config)).toBe(false);
+  });
+});
+
+describe('resolveStockUnitsFromCapture — el cajero teclea 3, se guardan 3000', () => {
+  it('convierte la unidad de venta a la unidad mínima', () => {
+    expect(resolveStockUnitsFromCapture(3, 1000)).toBe(3000);
+    expect(resolveStockUnitsFromCapture(2.5, 1000)).toBe(2500);
+    expect(resolveStockUnitsFromCapture(0.35, 1000)).toBe(350);
+  });
+
+  it('sin factor devuelve la cantidad tal cual (producto por pieza)', () => {
+    expect(resolveStockUnitsFromCapture(3, 1)).toBe(3);
+    expect(resolveStockUnitsFromCapture(7, 0)).toBe(7);
+  });
+
+  it('redondea al entero porque el inventario es Int', () => {
+    expect(resolveStockUnitsFromCapture(1.0004, 1000)).toBe(1000);
+    expect(resolveStockUnitsFromCapture(1.0006, 1000)).toBe(1001);
+  });
+
+  it('devuelve 0 cuando la captura no alcanza ni una unidad mínima', () => {
+    // Vender aire no es una venta: el caller avisa cuál es el mínimo real.
+    expect(resolveStockUnitsFromCapture(0.0004, 1000)).toBe(0);
+    expect(resolveStockUnitsFromCapture(0, 1000)).toBe(0);
+    expect(resolveStockUnitsFromCapture(-3, 1000)).toBe(0);
+    expect(resolveStockUnitsFromCapture(Number.NaN, 1000)).toBe(0);
+  });
+});
+
+describe('líneas del carrito — NO REGRESIÓN del producto por pieza', () => {
+  // Una línea sin unidad de captura es indistinguible de una línea anterior a
+  // esta fase: misma cantidad, mismo texto, mismo paso del stepper.
+  const pieza = { quantity: 4 };
+
+  it('muestra la cantidad cruda, sin sufijo', () => {
+    expect(resolveSaleQuantity(pieza)).toBe(4);
+    expect(formatSaleQuantity(pieza)).toBe('4');
+  });
+
+  it('no es una línea capturada en unidad de venta', () => {
+    expect(isSaleUnitLine(pieza)).toBe(false);
+    expect(isSaleUnitLine({ quantity: 4, saleUnitCode: null })).toBe(false);
+    expect(
+      isSaleUnitLine({ quantity: 4, saleUnitCode: 'm', stockUnitsPerSaleUnit: 1 }),
+    ).toBe(false);
+    // Factor sin código tampoco: los dos campos se escriben juntos.
+    expect(isSaleUnitLine({ quantity: 4, stockUnitsPerSaleUnit: 1000 })).toBe(false);
+  });
+
+  it('el stepper se sigue moviendo de a 1', () => {
+    expect(resolveQuantityStep(pieza)).toBe(1);
+    expect(resolveQuantityStep({ quantity: 4, saleUnitCode: 'm' })).toBe(1);
+    expect(
+      resolveQuantityStep({ quantity: 4, saleUnitCode: 'm', stockUnitsPerSaleUnit: 1 }),
+    ).toBe(1);
+  });
+});
+
+describe('líneas del carrito — capturadas en unidad de venta', () => {
+  // 3 metros de cable: el carrito guarda 3000 mm, el cajero lee "3 m".
+  const tresMetros = {
+    quantity: 3000,
+    saleUnitCode: 'm',
+    stockUnitsPerSaleUnit: 1000,
+  };
+
+  it('se lee en la unidad capturada, nunca en la mínima', () => {
+    expect(resolveSaleQuantity(tresMetros)).toBe(3);
+    expect(isSaleUnitLine(tresMetros)).toBe(true);
+    expect(formatSaleQuantity(tresMetros)).toBe('3 m');
+  });
+
+  it('formatea decimales con coma y hasta 3 dígitos, sin ceros de relleno', () => {
+    expect(formatSaleQuantity({ ...tresMetros, quantity: 2500 })).toBe('2,5 m');
+    expect(formatSaleQuantity({ ...tresMetros, quantity: 350 })).toBe('0,35 m');
+    expect(formatSaleQuantity({ ...tresMetros, quantity: 1 })).toBe('0,001 m');
+    expect(
+      formatSaleQuantity({ quantity: 2350, saleUnitCode: 'kg', stockUnitsPerSaleUnit: 1000 }),
+    ).toBe('2,35 kg');
+  });
+
+  it('el stepper se mueve de a UNA unidad de venta', () => {
+    // Con paso 1 llegar a 3 metros costaba 3000 toques.
+    expect(resolveQuantityStep(tresMetros)).toBe(1000);
+    expect(resolveSaleQuantity({ ...tresMetros, quantity: 3000 + 1000 })).toBe(4);
+  });
+
+  it('el cobro NO cambia por capturar en otra unidad', () => {
+    // 3 m de cable a $5.000/m son $15.000, se hayan tecleado como 3 o 3000.
+    const quantity = resolveStockUnitsFromCapture(3, 1000);
+    expect(quantity).toBe(3000);
+    expect(resolveLineTotal(5000, quantity, 1000)).toBe(15000);
+    // Y la línea se sigue mostrando en metros.
+    expect(
+      formatSaleQuantity({ quantity, saleUnitCode: 'm', stockUnitsPerSaleUnit: 1000 }),
+    ).toBe('3 m');
   });
 });

@@ -11,6 +11,7 @@ import {
   type StoreCurrency,
 } from '@/shared/utils/store-currency';
 import type { ReceiptsSettings } from '@/features/store/types/settings.types';
+import { formatSaleQuantity } from '@/features/store/pricing';
 
 /**
  * POS ticket renderer for the mobile app.
@@ -81,6 +82,14 @@ export interface PosTicketItem {
   appliedPriceTierName?: string | null;
   isPackageUnit?: boolean;
   unitsPerPackage?: number | null;
+  /**
+   * QUI-648 — unidad en la que se capturó la línea ("m", "kg"). El papel
+   * imprime "3 m", no "3000": el cliente audita lo que pidió, no la unidad
+   * mínima del inventario. `null`/ausente ⇒ se imprime la cantidad tal cual.
+   */
+  saleUnitCode?: string | null;
+  /** Unidades mínimas por unidad de captura (1000 mm por metro). */
+  stockUnitsPerSaleUnit?: number | null;
   serials?: string[];
   /** Line is packed to go, even inside a table order (QUI-653). */
   isTakeaway?: boolean;
@@ -404,9 +413,12 @@ export function renderPosTicketBody(
 
   for (const item of ticket.items) {
     const isWeightItem = !!item.weight && item.weight > 0;
+    // QUI-648 — la cantidad se imprime en la unidad en la que el cajero la
+    // capturó. `formatSaleQuantity` devuelve la cantidad cruda cuando la línea
+    // no trae unidad de captura, que es todo el catálogo por pieza.
     const qtyDisplay = isWeightItem
       ? `${item.weight} ${item.weight_unit || 'kg'}`
-      : `${item.quantity}`;
+      : formatSaleQuantity(item);
     const tierLine = item.appliedPriceTierName
       ? `<br><span style="font-size: 10px; color: #92400e;">Tarifa: ${esc(item.appliedPriceTierName)}</span>`
       : '';
@@ -426,7 +438,7 @@ export function renderPosTicketBody(
         <tr>
           <td style="padding: 2px; vertical-align: top;">${esc(item.name)}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
           <td style="text-align: center; padding: 2px;">${esc(qtyDisplay)}</td>
-          <td style="text-align: right; padding: 2px;">${money(item.unitPrice)}${isWeightItem ? '/' + esc(item.weight_unit || 'kg') : ''}</td>
+          <td style="text-align: right; padding: 2px;">${money(item.unitPrice)}${isWeightItem ? '/' + esc(item.weight_unit || 'kg') : item.saleUnitCode ? '/' + esc(item.saleUnitCode) : ''}</td>
           <td style="text-align: right; padding: 2px;">${money(item.totalPrice)}</td>
         </tr>`;
   }

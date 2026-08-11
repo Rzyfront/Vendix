@@ -1,6 +1,12 @@
 import { apiClient, Endpoints } from '@/core/api';
 
-export type UomDimension = 'mass' | 'volume' | 'count';
+/**
+ * Espejo de `uom_dimension_enum` (`schema.prisma`). `length` entró con QUI-648
+ * —base en milímetros: cable, manguera, tubo, cinta— para que una ferretería
+ * pueda vender por metro; sin él el catálogo real llega con una dimensión que
+ * este tipo dice que no existe.
+ */
+export type UomDimension = 'mass' | 'volume' | 'length' | 'count';
 
 export interface UnitOfMeasure {
   id: number;
