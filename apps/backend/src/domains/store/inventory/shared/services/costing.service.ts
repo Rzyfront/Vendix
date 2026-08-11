@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 export interface ScopedLocationFilter {
   organization_id: number;
@@ -70,6 +71,15 @@ export class CostingService {
    * for ORGANIZATION-scope orgs (the general-inventory cost was ignored).
    *
    * Returns the scoped on-hand quantity and its weighted-average unit cost.
+   *
+   * Cuando llega `tx`, la lectura va POR el cliente transaccional: no por
+   * scoping —`$transaction` delega en el `baseClient` y por eso ya viene sin
+   * extensiones, que es justo lo que este agregado necesita— sino porque
+   * `globalPrisma` es otro `PrismaClient` con otro pool y NO ve lo escrito
+   * dentro de la transacción abierta. Con dos líneas del mismo producto en una
+   * recepción, el CPP por ubicación (que sí lee por `tx`) daba 150 y este
+   * agregado 200: `products.cost_price` quedaba en 200 y de ahí salía el precio
+   * publicado.
    */
   async getScopedStockAggregate(
     params: { product_id: number; variant_id?: number; location_id: number },
@@ -81,7 +91,8 @@ export class CostingService {
       params.location_id,
       tx,
     );
-    const rows = await this.globalPrisma.stock_levels.findMany({
+    const client = tx ?? this.globalPrisma;
+    const rows = await client.stock_levels.findMany({
       where: {
         product_id: params.product_id,
         product_variant_id: params.variant_id || null,
@@ -93,11 +104,11 @@ export class CostingService {
         product_variants: { select: { cost_price: true } },
       },
     });
-    const quantity = rows.reduce(
-      (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
+    const quantity = (rows as any[]).reduce(
+      (sum: number, sl: any) => sum + (sl.quantity_on_hand ?? 0),
       0,
     );
-    const value = rows.reduce((sum, sl) => {
+    const value = (rows as any[]).reduce((sum: number, sl: any) => {
       // Fix colapso CPP: `stock_levels.cost_per_unit` nace NULL en todo camino
       // de escritura que no sea recepción de compra (crear/editar producto,
       // variantes, importación, ajustes, seeds). Sin fallback, ese stock aporta
@@ -142,7 +153,10 @@ export class CostingService {
     });
 
     if (!location || location.organization_id !== organizationId) {
-      throw new Error(
+      // Tipado: un `Error` crudo sale como 500 y el cliente no puede
+      // distinguirlo de una caída real. Es un 403 de aislamiento de tenant.
+      throw new VendixHttpException(
+        ErrorCodes.INV_LOCATION_NOT_IN_ORG,
         `Location ${locationId} does not belong to organization ${organizationId}`,
       );
     }
@@ -519,7 +533,10 @@ export class CostingService {
   private getOrganizationId(): number {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
-      throw new Error('Organization context required for costing operations');
+      throw new VendixHttpException(
+        ErrorCodes.INV_CONTEXT_001,
+        'Organization context required for costing operations',
+      );
     }
     return context.organization_id;
   }

@@ -11,6 +11,7 @@ import {
 } from './sellable-stock-allocator.service';
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
+import { resolveLineStockUnits } from '../../../products/services/packaging.util';
 
 /**
  * Options that drive a single delivery-commit run. The same contract is shared
@@ -289,7 +290,19 @@ export class OrderStockCommitService {
       const line: CommitLine = {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id ?? undefined,
-        quantity: item.dispatched_quantity,
+        // `dispatched_quantity` viaja en la unidad COMERCIAL del documento (los
+        // mismos bultos que `order_items.quantity`), no en unidades de stock:
+        // `dispatch_note_items` no tiene snapshot de empaque propio. Sin esta
+        // conversión, despachar 1 bulto de 50 saca 50 unidades del andén y
+        // descuenta 1 — y el claim de `inventory_committed` impide que
+        // `commitOrderDelivery` lo corrija después. Se deriva de la línea de
+        // orden emparejada, en proporción para despachos parciales, con la misma
+        // función que usa la devolución.
+        quantity: resolveLineStockUnits(
+          item.dispatched_quantity,
+          matched?.quantity,
+          matched?.stock_units_consumed,
+        ),
         track_inventory: !!product?.track_inventory,
         product_type: product?.product_type ?? null,
         order_item_id: matched?.id ?? null,

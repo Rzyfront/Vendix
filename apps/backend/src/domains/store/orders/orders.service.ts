@@ -954,27 +954,21 @@ export class OrdersService {
       });
 
       if (!isDraft) {
-        for (const item of existingOrder?.order_items || []) {
-          if (!item.products?.track_inventory) continue;
-          try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            await this.stockLevelManager.releaseReservation(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              'order',
-              id,
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Failed to release reservation for product ${item.product_id}: ${error.message}`,
-            );
-          }
-        }
+        // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
+        // Antes se resolvía `getDefaultLocationForProduct` —la bodega con más
+        // disponible HOY— y se liberaba ahí; pero el POS reserva repartido en
+        // varias bodegas (slices del asignador), así que la porción de la otra
+        // bodega quedaba huérfana: 14 unidades bloqueadas para una orden de 10,
+        // sin nada que las liberara. `releaseReservationsByReference` lee las
+        // filas reales de `stock_reservations`, cubre todas las bodegas y corre
+        // DENTRO de la transacción, así que un fallo revierte el update completo
+        // en vez de dejarlo a medias con un warn.
+        await this.stockLevelManager.releaseReservationsByReference(
+          'order',
+          id,
+          'cancelled',
+          tx,
+        );
       }
 
       // Delete existing items

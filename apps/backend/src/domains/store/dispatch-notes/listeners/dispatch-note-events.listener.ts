@@ -16,6 +16,7 @@ import { InventorySerialNumbersService } from '../../inventory/serial-numbers/in
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { resolveLineStockUnits } from '../../products/services/packaging.util';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -1214,12 +1215,55 @@ export class DispatchNoteEventsListener {
           dispatch_note.dispatch_location_id ??
           null;
 
+    // Desdoblamiento paquete↔unidad, simétrico al del commit.
+    //
+    // `dispatched_quantity` viaja en la unidad COMERCIAL del documento, así que
+    // reponerla cruda repondría 1 donde salieron 50. La reversa tiene que mover
+    // exactamente lo que movió el commit (`OrderStockCommitService`, que deriva
+    // las unidades de la línea de orden emparejada): si aquí no se convierte,
+    // anular una remisión de venta empacada pierde la diferencia para siempre.
+    // Sin orden ligada —remisión standalone— no hay presentación posible y la
+    // cantidad ya está en unidades de stock.
+    const orderLinesByKey = new Map<
+      string,
+      { quantity: number; stock_units_consumed: number | null }
+    >();
+    if (dispatch_note.order_id) {
+      const orderLines = await this.prisma
+        .withoutScope()
+        .order_items.findMany({
+          where: { order_id: dispatch_note.order_id },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity: true,
+            stock_units_consumed: true,
+          },
+        });
+      for (const ol of orderLines) {
+        orderLinesByKey.set(
+          `${ol.product_id}-${ol.product_variant_id ?? 'null'}`,
+          {
+            quantity: ol.quantity,
+            stock_units_consumed: ol.stock_units_consumed,
+          },
+        );
+      }
+    }
+
     let reversedLines = 0;
     let reversedCost = 0;
     for (const item of dispatch_note.dispatch_note_items) {
       const location_id = resolveLoc(item);
       if (!location_id) continue;
-      const qty = item.dispatched_quantity;
+      const orderLine = orderLinesByKey.get(
+        `${item.product_id}-${item.product_variant_id ?? 'null'}`,
+      );
+      const qty = resolveLineStockUnits(
+        item.dispatched_quantity,
+        orderLine?.quantity,
+        orderLine?.stock_units_consumed,
+      );
       if (!qty || qty <= 0) continue;
 
       // Construir el movimiento de reversa por caso.

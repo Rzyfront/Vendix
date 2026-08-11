@@ -9,6 +9,10 @@ import {
   CostingMethodResolverService,
   ResolvedCostingMethod,
 } from '../../../store/inventory/shared/services/costing-method-resolver.service';
+import {
+  CostCoverage,
+  buildCostCoverage,
+} from '../../../store/analytics/analytics-metrics.contract';
 
 /**
  * Reportes de inventario consolidados para ORG_ADMIN.
@@ -290,19 +294,25 @@ export class OrgInventoryReportsService {
       const fifoResult = await this.computeFifoValuation({
         organization_id,
         store_id_filter: params.store_id ?? null,
+        location_where,
       });
 
       if (fifoResult.has_layers) {
+        // Tolerancia de 1 unidad para no marcar parcial por un redondeo suelto.
+        const fullyCovered = fifoResult.coverage.units_without_cost <= 1;
         return {
           method: 'fifo' as ResolvedCostingMethod,
           requested_method: 'fifo' as ResolvedCostingMethod,
-          partial_data: false,
-          is_authoritative: true,
+          partial_data: !fullyCovered,
+          is_authoritative: fullyCovered,
           source: 'inventory_cost_layers' as const,
           total_value: fifoResult.total_value,
           by_store: fifoResult.by_store,
           items_count: fifoResult.items_count,
-          note: 'Valuación FIFO autoritativa sobre inventory_cost_layers (quantity_remaining * unit_cost).',
+          cost_coverage: fifoResult.coverage,
+          note: fullyCovered
+            ? 'Valuación FIFO autoritativa sobre inventory_cost_layers (quantity_remaining * unit_cost).'
+            : `Valuación FIFO PARCIAL: las capas de costo vivas cubren ${Math.round(fifoResult.coverage.coverage_ratio * 100)}% del stock físico (${fifoResult.coverage.units_without_cost} de ${fifoResult.coverage.units_total} unidades sin capa). El valor está SUBESTIMADO.`,
         };
       }
 
@@ -321,23 +331,57 @@ export class OrgInventoryReportsService {
         total_value: waResult.total_value,
         by_store: waResult.by_store,
         items_count: waResult.items_count,
+        // Sin capas vivas la cobertura FIFO es 0; el contrato la lleva siempre
+        // para que el frontend no tenga que inferirla del `source`.
+        cost_coverage: buildCostCoverage(0, 0),
         note: 'FIFO solicitado pero no hay cost layers con stock — usando weighted_average como aproximación (no autoritativa).',
       };
     }
 
-    // Weighted average path: autoritativa bajo método CPP configurado.
+    // Weighted average path: autoritativa SÓLO si todo el físico tiene costo.
+    // `computeWeightedAverageValuation` filtra `cost_per_unit: { not: null }`, así
+    // que el stock sin costo desaparece del total en silencio en vez de aportar
+    // $0 visible.
     const waResult = await this.computeWeightedAverageValuation(location_where);
+    const waCoverage = await this.computeCostCoverage(
+      location_where,
+      waResult.covered_units,
+    );
+    const waFullyCovered = waCoverage.units_without_cost <= 1;
     return {
       method: 'weighted_average' as ResolvedCostingMethod,
       requested_method: 'weighted_average' as ResolvedCostingMethod,
-      partial_data: false,
-      is_authoritative: true,
+      partial_data: !waFullyCovered,
+      is_authoritative: waFullyCovered,
       source: 'stock_levels.cost_per_unit' as const,
       total_value: waResult.total_value,
       by_store: waResult.by_store,
       items_count: waResult.items_count,
-      note: 'Valuación CPP autoritativa sobre stock_levels.cost_per_unit * quantity_on_hand.',
+      cost_coverage: waCoverage,
+      note: waFullyCovered
+        ? 'Valuación CPP autoritativa sobre stock_levels.cost_per_unit * quantity_on_hand.'
+        : `Valuación CPP PARCIAL: ${waCoverage.units_without_cost} de ${waCoverage.units_total} unidades no tienen costo unitario registrado y aportan $0. El valor está SUBESTIMADO.`,
     };
+  }
+
+  /**
+   * Cobertura de una valuación: cuánto del stock FÍSICO en alcance quedó
+   * efectivamente valorado. Es el dato que evita firmar como autoritativa una
+   * cifra construida con una fracción del inventario.
+   */
+  private async computeCostCoverage(
+    location_where: Prisma.inventory_locationsWhereInput,
+    coveredUnits: number,
+  ): Promise<CostCoverage> {
+    const aggregate = await this.prisma.stock_levels.aggregate({
+      where: { inventory_locations: location_where },
+      _sum: { quantity_on_hand: true },
+    });
+    const onHandUnits = Number(aggregate._sum.quantity_on_hand ?? 0);
+    return buildCostCoverage(
+      onHandUnits,
+      Math.max(0, onHandUnits - coveredUnits),
+    );
   }
 
   /**
@@ -363,12 +407,14 @@ export class OrgInventoryReportsService {
     const totalsByStore = new Map<number | 'org', Prisma.Decimal>();
     let total = new Prisma.Decimal(0);
     let itemsCount = 0;
+    let coveredUnits = 0;
 
     for (const row of rows) {
       const cost = row.cost_per_unit ?? new Prisma.Decimal(0);
       const value = cost.mul(row.quantity_on_hand);
       total = total.add(value);
       itemsCount += 1;
+      coveredUnits += Number(row.quantity_on_hand ?? 0);
       const key: number | 'org' = row.inventory_locations?.store_id ?? 'org';
       totalsByStore.set(
         key,
@@ -379,6 +425,8 @@ export class OrgInventoryReportsService {
     return {
       total_value: Number(total.toFixed(2)),
       items_count: itemsCount,
+      /** Unidades que SÍ entraron al total (las que tienen costo). */
+      covered_units: coveredUnits,
       by_store: [...totalsByStore.entries()].map(([key, value]) => ({
         store_id: key === 'org' ? null : key,
         total_value: Number(value.toFixed(2)),
@@ -405,6 +453,8 @@ export class OrgInventoryReportsService {
      */
     organization_id: number;
     store_id_filter: number | null;
+    /** Mismo predicado de ubicaciones del resto del reporte, para la cobertura. */
+    location_where: Prisma.inventory_locationsWhereInput;
   }) {
     const { store_id_filter } = args;
     void args.organization_id; // documentación: filtro implícito por auto-scope
@@ -434,21 +484,34 @@ export class OrgInventoryReportsService {
         total_value: 0,
         items_count: 0,
         by_store: [] as Array<{ store_id: number | null; total_value: number }>,
+        coverage: buildCostCoverage(0, 0),
       };
     }
 
     const totalsByStore = new Map<number | 'org', Prisma.Decimal>();
     let total = new Prisma.Decimal(0);
+    let coveredUnits = 0;
 
     for (const layer of layers) {
       const value = layer.unit_cost.mul(layer.quantity_remaining);
       total = total.add(value);
+      coveredUnits += Number(layer.quantity_remaining ?? 0);
       const key: number | 'org' = layer.inventory_locations?.store_id ?? 'org';
       totalsByStore.set(
         key,
         (totalsByStore.get(key) ?? new Prisma.Decimal(0)).add(value),
       );
     }
+
+    // Cobertura real de la valuación. `layers.length === 0` era el ÚNICO gate:
+    // una organización con $120M en `stock_levels` que había recibido una sola
+    // compra de $40.000 obtenía `total_value: 40000` firmado
+    // `is_authoritative: true, partial_data: false`, sin badge. La cifra sólo es
+    // autoritativa si las capas vivas cubren el físico.
+    const coverage = await this.computeCostCoverage(
+      args.location_where,
+      coveredUnits,
+    );
 
     return {
       has_layers: true as const,
@@ -458,6 +521,7 @@ export class OrgInventoryReportsService {
         store_id: key === 'org' ? null : key,
         total_value: Number(value.toFixed(2)),
       })),
+      coverage,
     };
   }
 }

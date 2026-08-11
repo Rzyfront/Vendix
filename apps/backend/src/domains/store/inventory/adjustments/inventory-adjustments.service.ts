@@ -18,6 +18,26 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 
+/** Una línea de un ajuste por lote (conteo, carga masiva, reconteo por IA). */
+export interface BatchAdjustmentInput {
+  product_id: number;
+  product_variant_id?: number;
+  batch_id?: number;
+  type: string;
+  quantity_after: number;
+  reason_code?: string;
+  description?: string;
+}
+
+/**
+ * Resultado POR ÍTEM de un lote. El lote no es atómico, así que el llamador
+ * necesita saber exactamente qué se aplicó para no reportar como fallida una
+ * fila cuyo stock ya se movió.
+ */
+export type BatchAdjustmentOutcome =
+  | { index: number; ok: true; adjustment: InventoryAdjustment }
+  | { index: number; ok: false; error: any };
+
 // Common include object for adjustment queries
 const ADJUSTMENT_INCLUDE = {
   products: {
@@ -87,9 +107,15 @@ export class InventoryAdjustmentsService {
   /**
    * Crea un ajuste de inventario
    * Soporta ajuste a nivel de bodega o a nivel de lote específico
+   *
+   * `options.approvedByUserId` sólo lo usan los flujos internos que crean y
+   * aprueban en un paso (conteo por lote). No viaja en el DTO: que el cliente
+   * declarara el aprobador era el defecto, y `organization_id` /
+   * `created_by_user_id` se resuelven del contexto.
    */
   async createAdjustment(
     data: CreateAdjustmentDto,
+    options: { approvedByUserId?: number } = {},
   ): Promise<InventoryAdjustment> {
     const orgIdRaw = RequestContextService.getOrganizationId();
     const userIdRaw = RequestContextService.getUserId();
@@ -203,10 +229,8 @@ export class InventoryAdjustmentsService {
           reason_code: data.reason_code || null,
           description: data.description || null,
           created_by_user_id: userId ?? null,
-          approved_by_user_id: data.approved_by_user_id
-            ? Number(data.approved_by_user_id)
-            : null,
-          approved_at: data.approved_by_user_id ? new Date() : null,
+          approved_by_user_id: options.approvedByUserId ?? null,
+          approved_at: options.approvedByUserId ? new Date() : null,
           created_at: new Date(),
         },
         include: ADJUSTMENT_INCLUDE,
@@ -288,21 +312,11 @@ export class InventoryAdjustmentsService {
    */
   async batchCreateAdjustments(
     locationId: number,
-    items: {
-      product_id: number;
-      product_variant_id?: number;
-      batch_id?: number;
-      type: string;
-      quantity_after: number;
-      reason_code?: string;
-      description?: string;
-    }[],
+    items: BatchAdjustmentInput[],
   ): Promise<InventoryAdjustment[]> {
     const results: InventoryAdjustment[] = [];
     for (const item of items) {
       const adjustment = await this.createAdjustment({
-        organization_id: 0, // Resolved from context inside createAdjustment
-        created_by_user_id: 0, // Resolved from context inside createAdjustment
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
         location_id: locationId,
@@ -318,49 +332,101 @@ export class InventoryAdjustmentsService {
   }
 
   /**
-   * Crea múltiples ajustes y los aprueba inmediatamente
+   * Crea múltiples ajustes y los aprueba inmediatamente.
+   *
+   * Cada ítem abre su propia transacción (`createAdjustment`), así que este
+   * lote NO es atómico: si el ítem N falla, los N−1 anteriores YA están
+   * commiteados y su stock movido. Lanzar en el primer fallo conserva el
+   * contrato histórico del endpoint, pero quien necesite saber qué se aplicó y
+   * qué no debe usar `batchCreateAndCompleteSettled`.
    */
   async batchCreateAndComplete(
     locationId: number,
-    items: {
-      product_id: number;
-      product_variant_id?: number;
-      batch_id?: number;
-      type: string;
-      quantity_after: number;
-      reason_code?: string;
-      description?: string;
-    }[],
+    items: BatchAdjustmentInput[],
   ): Promise<InventoryAdjustment[]> {
-    const results: InventoryAdjustment[] = [];
+    const settled = await this.batchCreateAndCompleteSettled(locationId, items);
+    const firstFailure = settled.find((entry) => !entry.ok);
+    if (firstFailure && !firstFailure.ok) {
+      throw firstFailure.error;
+    }
+    return settled
+      .filter(
+        (entry): entry is { index: number; ok: true; adjustment: InventoryAdjustment } =>
+          entry.ok,
+      )
+      .map((entry) => entry.adjustment);
+  }
+
+  /**
+   * Igual que `batchCreateAndComplete`, pero devuelve el resultado POR ÍTEM en
+   * vez de abortar en el primero que falle.
+   *
+   * Existe porque la carga masiva por archivo tenía que marcar como fallidas
+   * filas que en realidad ya se habían aplicado: al no saber dónde se rompió el
+   * lote, su `catch` reescribía TODAS las filas exitosas a error y reportaba
+   * "0 exitosos, 1000 con errores" con el stock ya movido.
+   */
+  async batchCreateAndCompleteSettled(
+    locationId: number,
+    items: BatchAdjustmentInput[],
+  ): Promise<BatchAdjustmentOutcome[]> {
     const userIdRaw = RequestContextService.getUserId();
     const userId = userIdRaw ? Number(userIdRaw) : null;
+    const outcomes: BatchAdjustmentOutcome[] = [];
 
-    for (const item of items) {
-      const adjustment = await this.createAdjustment({
-        organization_id: 0, // Resolved from context inside createAdjustment
-        created_by_user_id: 0, // Resolved from context inside createAdjustment
-        product_id: item.product_id,
-        product_variant_id: item.product_variant_id,
-        location_id: locationId,
-        batch_id: item.batch_id,
-        type: item.type as AdjustmentType,
-        quantity_after: item.quantity_after,
-        reason_code: item.reason_code,
-        description: item.description,
-        approved_by_user_id: userId ?? undefined,
-      });
-      results.push(adjustment);
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      try {
+        const adjustment = await this.createAdjustment(
+          {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id,
+            location_id: locationId,
+            batch_id: item.batch_id,
+            type: item.type as AdjustmentType,
+            quantity_after: item.quantity_after,
+            reason_code: item.reason_code,
+            description: item.description,
+          },
+          { approvedByUserId: userId ?? undefined },
+        );
+        outcomes.push({ index, ok: true, adjustment });
+      } catch (error) {
+        this.logger.error(
+          `Ajuste masivo: falló el ítem ${index} (producto ${item.product_id}): ${error?.message}`,
+        );
+        outcomes.push({ index, ok: false, error });
+      }
     }
-    return results;
+
+    return outcomes;
   }
 
   /**
    * Aprueba un ajuste de inventario
    */
+  /**
+   * Visa un ajuste dejando constancia de QUIÉN lo aprobó.
+   *
+   * El aprobador se resuelve del contexto de la petición, no del body. Antes
+   * llegaba por `@Body('approvedByUserId')` mientras el frontend enviaba
+   * `approved_by_user_id` (y con el valor `0` literal): el nombre no coincidía,
+   * Prisma omitía el campo `undefined` y la columna quedaba en NULL con
+   * `approved_at` sellado. Tres daños encadenados: se perdía la traza de
+   * auditoría de una merma —el dato que busca un contador—, el guard de
+   * doble-aprobación de más abajo nunca disparaba (se podía re-estampar
+   * `approved_at` indefinidamente por API), y el filtro `status` clasifica por
+   * esta columna, así que TODO ajuste aprobado seguía contando como pendiente.
+   * Quién aprueba es identidad, no un parámetro que el cliente pueda declarar.
+   */
+  /**
+   * `approverUserId` sólo lo llenan llamadores internos que ya resolvieron el
+   * usuario del lado del servidor (p. ej. el flujo de organización). Nunca
+   * viene del body: que el cliente declare quién aprueba era el defecto.
+   */
   async approveAdjustment(
     adjustmentId: number,
-    approvedByUserId: number,
+    approverUserId?: number,
   ): Promise<InventoryAdjustment> {
     const adjustment = await this.prisma.inventory_adjustments.findUnique({
       where: { id: adjustmentId },
@@ -370,9 +436,16 @@ export class InventoryAdjustmentsService {
       throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
     }
 
-    if (adjustment.approved_by_user_id) {
+    // Se mira también `approved_at` porque es la señal que la UI ya usa para
+    // pintar el badge "Aprobado", y las filas históricas la tienen sellada con
+    // el aprobador en NULL.
+    if (adjustment.approved_by_user_id || adjustment.approved_at) {
       throw new ConflictException('Adjustment already approved');
     }
+
+    const userIdRaw = RequestContextService.getUserId();
+    const approvedByUserId =
+      approverUserId ?? (userIdRaw ? Number(userIdRaw) : null);
 
     const updated = await this.prisma.inventory_adjustments.update({
       where: { id: adjustmentId },
@@ -390,46 +463,94 @@ export class InventoryAdjustmentsService {
    * Obtiene ajustes con filtros
    */
   async getAdjustments(query: AdjustmentQueryDto): Promise<AdjustmentResponse> {
-    const where = {
-      ...(query.organizationId && { organization_id: query.organizationId }),
-      ...(query.productId && { product_id: query.productId }),
-      ...(query.variantId && { product_variant_id: query.variantId }),
-      ...(query.locationId && { location_id: query.locationId }),
-      ...(query.batchId && { batch_id: query.batchId }),
+    // El frontend manda snake_case; los alias camelCase quedan por
+    // compatibilidad. Leer sólo una de las dos formas era el motivo de que
+    // TODOS los filtros se cayeran en silencio.
+    const organizationId = query.organization_id ?? query.organizationId;
+    const productId = query.product_id ?? query.productId;
+    const variantId = query.variant_id ?? query.variantId;
+    const locationId = query.location_id ?? query.locationId;
+    const batchId = query.batch_id ?? query.batchId;
+    const createdByUserId = query.created_by_user_id ?? query.createdByUserId;
+    const startDate = query.start_date ?? query.startDate;
+    const endDate = query.end_date ?? query.endDate;
+    const search = query.search?.trim();
+
+    // El rango de fechas va en UN solo objeto: dos spreads sobre la misma clave
+    // `created_at` hacían que el segundo borrara al primero, así que pedir
+    // desde+hasta filtraba sólo por "hasta".
+    const createdAtRange: { gte?: Date; lte?: Date } = {};
+    if (startDate) createdAtRange.gte = new Date(startDate);
+    if (endDate) createdAtRange.lte = new Date(endDate);
+
+    const where: any = {
+      ...(organizationId && { organization_id: organizationId }),
+      ...(productId && { product_id: productId }),
+      ...(variantId && { product_variant_id: variantId }),
+      ...(locationId && { location_id: locationId }),
+      ...(batchId && { batch_id: batchId }),
       ...(query.type && { adjustment_type: query.type }),
+      // El estado se deriva de `approved_at`, no de `approved_by_user_id`: es la
+      // señal que la UI ya usa para el badge "Aprobado", y las filas aprobadas
+      // antes del fix del aprobador tienen la fecha sellada con el usuario en
+      // NULL — con el predicado viejo seguían apareciendo como pendientes.
       ...(query.status && {
-        approved_by_user_id: query.status === 'approved' ? { not: null } : null,
+        approved_at: query.status === 'approved' ? { not: null } : null,
       }),
-      ...(query.createdByUserId && {
-        created_by_user_id: query.createdByUserId,
+      ...(createdByUserId && {
+        created_by_user_id: createdByUserId,
       }),
-      ...(query.startDate && {
-        created_at: {
-          gte: query.startDate,
-        },
+      ...(Object.keys(createdAtRange).length > 0 && {
+        created_at: createdAtRange,
       }),
-      ...(query.endDate && {
-        created_at: {
-          lte: query.endDate,
-        },
+      // La búsqueda vivía sólo en el cliente y por eso miraba nada más las 10
+      // filas de la página visible.
+      ...(search && {
+        OR: [
+          { description: { contains: search, mode: 'insensitive' } },
+          { reason_code: { contains: search, mode: 'insensitive' } },
+          { products: { name: { contains: search, mode: 'insensitive' } } },
+          { products: { sku: { contains: search, mode: 'insensitive' } } },
+        ],
       }),
     };
 
-    const [adjustments, total] = await Promise.all([
+    const offset = Number(query.offset) || 0;
+
+    const [adjustments, total, byType] = await Promise.all([
       this.prisma.inventory_adjustments.findMany({
         where,
         include: ADJUSTMENT_INCLUDE,
         orderBy: { created_at: 'desc' },
-        skip: Number(query.offset) || 0,
+        skip: offset,
         take: Number(query.limit) || 50,
       }),
       this.prisma.inventory_adjustments.count({ where }),
+      // Conteo por tipo sobre el filtro COMPLETO, no sobre la página: las
+      // tarjetas de arriba contaban las 10 filas visibles.
+      this.prisma.inventory_adjustments.groupBy({
+        by: ['adjustment_type'],
+        where,
+        _count: { _all: true },
+      }),
     ]);
+
+    const countOf = (type: AdjustmentType): number =>
+      Number(
+        (byType as any[]).find((row) => row.adjustment_type === type)?._count
+          ?._all ?? 0,
+      );
 
     return {
       adjustments: adjustments.map((a) => this.mapAdjustmentResponse(a)),
       total,
-      hasMore: (Number(query.offset) || 0) + adjustments.length < total,
+      hasMore: offset + adjustments.length < total,
+      stats: {
+        total,
+        losses: countOf('loss'),
+        damages: countOf('damage'),
+        corrections: countOf('manual_correction'),
+      },
     };
   }
 
@@ -556,6 +677,15 @@ export class InventoryAdjustmentsService {
   /**
    * Elimina un ajuste (solo si no está aprobado)
    */
+  /**
+   * Borra un ajuste REVIRTIENDO su efecto sobre el stock.
+   *
+   * `createAdjustment` aplica el stock siempre (la aprobación es sólo el sello
+   * de auditoría), así que borrar la fila sin revertir dejaba el saldo movido y
+   * SIN documento que lo explicara: un ajuste de 100 → 80 borrado dejaba −20
+   * huérfanos para siempre. La reversión pasa por `updateStock` para que quede
+   * su propio movimiento en el rastro, en vez de deshacer el histórico.
+   */
   async deleteAdjustment(id: number): Promise<void> {
     const adjustment = await this.prisma.inventory_adjustments.findUnique({
       where: { id },
@@ -565,12 +695,54 @@ export class InventoryAdjustmentsService {
       throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
     }
 
-    if (adjustment.approved_by_user_id) {
+    // Se mira también `approved_at`: las filas aprobadas antes del fix del
+    // aprobador tienen la fecha sellada con el usuario en NULL.
+    if (adjustment.approved_by_user_id || adjustment.approved_at) {
       throw new ConflictException('Cannot delete approved adjustment');
     }
 
-    await this.prisma.inventory_adjustments.delete({
-      where: { id },
+    const quantityChange = Number(adjustment.quantity_change ?? 0);
+
+    await this.prisma.$transaction(async (tx) => {
+      if (Number.isFinite(quantityChange) && quantityChange !== 0) {
+        // Un ajuste de lote tocó `inventory_batches.quantity` además del saldo
+        // de la bodega, así que hay que revertir las dos patas.
+        if (adjustment.batch_id) {
+          const batch = await tx.inventory_batches.findUnique({
+            where: { id: adjustment.batch_id },
+          });
+          if (batch) {
+            const restored = batch.quantity - quantityChange;
+            if (restored < batch.quantity_used) {
+              throw new ConflictException(
+                `No se puede revertir el ajuste #${adjustment.id}: el lote ya consumió ${batch.quantity_used} unidad(es)`,
+              );
+            }
+            await tx.inventory_batches.update({
+              where: { id: batch.id },
+              data: { quantity: restored, updated_at: new Date() },
+            });
+          }
+        }
+
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: adjustment.product_id,
+            variant_id: adjustment.product_variant_id ?? undefined,
+            location_id: adjustment.location_id,
+            quantity_change: -quantityChange,
+            movement_type: 'adjustment',
+            reason: `Reversión del ajuste #${adjustment.id}`,
+            source_module: 'inventory_adjustment_delete',
+            create_movement: true,
+          },
+          tx,
+        );
+      }
+
+      await tx.inventory_adjustments.delete({
+        where: { id },
+      });
     });
   }
 }

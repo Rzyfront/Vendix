@@ -48,24 +48,30 @@ export function resolveStockUnitsConsumed(
 }
 
 /**
- * Unidades de stock que hay que mover al devolver parte de una línea.
+ * Unidades de stock que mueve una PORCIÓN de una línea ya vendida.
  *
- * Devolver 1 bulto de 50 repone 50 unidades, no 1: la línea guardó cuántas
- * consumió al venderse (`stock_units_consumed`) y la devolución mueve la parte
- * proporcional de ese número. Sin ese snapshot —líneas anteriores a la feature
- * o ventas sin presentación— la cantidad devuelta ya está en unidades de stock
- * y se devuelve tal cual, que es el comportamiento histórico.
+ * Mover 1 bulto de 50 mueve 50 unidades, no 1: la línea de venta guardó cuántas
+ * consumió (`stock_units_consumed`) y cualquier operación posterior sobre parte
+ * de esa línea mueve la porción proporcional de ese número. Sin ese snapshot
+ * —líneas anteriores a la feature, o ventas sin presentación— la cantidad ya
+ * está expresada en unidades de stock y se devuelve tal cual, que es el
+ * comportamiento histórico.
  *
- * El redondeo es al entero más cercano porque el inventario es `Int`; una
- * devolución parcial de un paquete indivisible es una decisión del operador,
- * no un error de este cálculo.
+ * El redondeo es al entero más cercano porque el inventario es `Int`; partir un
+ * paquete indivisible es una decisión del operador, no un error de este cálculo.
+ *
+ * Dos consumidores hoy, y deliberadamente **uno solo** el cálculo: la devolución
+ * (`refund_items`) y la entrega por remisión (`dispatch_note_items`, que no
+ * persiste su propio snapshot y lo deriva de la línea de orden emparejada).
+ * Duplicar esta proporción es cómo se desincronizan las dos puntas del
+ * desdoblamiento paquete↔unidad.
  */
-export function resolveRefundStockUnits(
-  refundedQuantity: number,
+export function resolveLineStockUnits(
+  lineQuantity: number,
   soldQuantity?: number | null,
   soldStockUnitsConsumed?: number | null,
 ): number {
-  const refunded = Number(refundedQuantity);
+  const moved = Number(lineQuantity);
   const sold = Number(soldQuantity);
   const consumed = Number(soldStockUnitsConsumed);
 
@@ -76,9 +82,26 @@ export function resolveRefundStockUnits(
     !Number.isFinite(sold) ||
     sold <= 0
   ) {
-    return refunded;
+    return moved;
   }
 
-  if (refunded >= sold) return consumed;
-  return Math.round((consumed * refunded) / sold);
+  if (moved >= sold) return consumed;
+  return Math.round((consumed * moved) / sold);
+}
+
+/**
+ * Alias histórico de `resolveLineStockUnits` para el flujo de devolución.
+ * Mismo cálculo; se conserva el nombre porque nombra la intención en su
+ * call site.
+ */
+export function resolveRefundStockUnits(
+  refundedQuantity: number,
+  soldQuantity?: number | null,
+  soldStockUnitsConsumed?: number | null,
+): number {
+  return resolveLineStockUnits(
+    refundedQuantity,
+    soldQuantity,
+    soldStockUnitsConsumed,
+  );
 }

@@ -246,6 +246,7 @@ export class OrgAdjustmentsService {
       () =>
         this.storeAdjustments.createAdjustment(
           this.toStoreCreateDto(dto, organization_id, user_id),
+          this.approvalOptions(dto, user_id),
         ),
     );
 
@@ -292,6 +293,7 @@ export class OrgAdjustmentsService {
               organization_id,
               user_id,
             ),
+            this.approvalOptions({ auto_approve: dto.auto_approve }, user_id),
           );
           created.push(row);
         }
@@ -442,9 +444,11 @@ export class OrgAdjustmentsService {
     organization_id: number,
     user_id: number,
   ): CreateAdjustmentDto {
+    // `organization_id` y `created_by_user_id` ya no viajan en el DTO: el
+    // servicio de tienda los resuelve del contexto, y esta ruta corre dentro de
+    // `runWithLocationContext`, así que el contexto es el correcto. El aprobador
+    // del auto-approve se pasa por `options`, no por el cuerpo.
     return {
-      organization_id,
-      created_by_user_id: user_id,
       product_id: src.product_id,
       product_variant_id: src.product_variant_id,
       location_id: src.location_id,
@@ -453,8 +457,15 @@ export class OrgAdjustmentsService {
       quantity_after: src.quantity_after,
       reason_code: src.reason_code,
       description: src.description,
-      approved_by_user_id: src.auto_approve ? user_id : undefined,
     };
+  }
+
+  /** Aprobador para el auto-approve del flujo de organización. */
+  private approvalOptions(
+    src: { auto_approve?: boolean },
+    user_id: number,
+  ): { approvedByUserId?: number } {
+    return src.auto_approve ? { approvedByUserId: user_id } : {};
   }
 
   /**

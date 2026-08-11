@@ -1106,6 +1106,22 @@ export class CheckoutService {
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertCheckoutVatAllowed(itemsWithTaxes);
 
+    // Restaurant fire-to-kitchen deferral: prepared items with an active
+    // recipe are excluded from reservation (computed once for the whole cart).
+    // Se resuelve ACÁ, antes de crear la orden, porque la validación de stock
+    // por presentación tiene que usar el mismo predicado que la reserva.
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
+    // Falta de stock medida en unidades de stock: si sobra, hay que fallar
+    // ANTES de crear la orden y el pago.
+    await this.assertPackagedStockAvailability(
+      cart_items,
+      stockUnitsByLine,
+      lineKey,
+      deferredPreparedProductIds,
+    );
+
     // Recompute promotional + coupon discounts on the backend. Frontend
     // only sends the coupon code (if any); totals here are authoritative.
     const discountResult = await this.resolveCheckoutDiscounts({
@@ -1250,11 +1266,6 @@ export class CheckoutService {
       },
     });
 
-    // Restaurant fire-to-kitchen deferral: prepared items with an active
-    // recipe are excluded from reservation (computed once for the whole cart).
-    const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
-
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
@@ -1281,6 +1292,18 @@ export class CheckoutService {
           false, // Already validated stock above
         );
       } catch (error) {
+        // QUI-557/559: mismo criterio que el POS. Un error de stock es una
+        // respuesta de negocio, no un incidente. Tragarlo dejaba la orden creada
+        // con HTTP 200 y CERO reserva: las mismas unidades quedaban vendibles
+        // para el siguiente checkout, o sea sobreventa silenciosa sin necesidad
+        // de carrera. Y el guard que se comía era justamente el piso duro de
+        // `reserveStock`, que el docblock de QUI-557 nombra al checkout como
+        // caso de "debe fallar fuerte en vez de corromper la fila". Los fallos
+        // genuinos de infraestructura conservan la tolerancia previa.
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+
         this.logger.warn(
           `Stock reservation failed for product ${item.product_id}: ${error.message}`,
         );
@@ -1718,6 +1741,18 @@ export class CheckoutService {
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertCheckoutVatAllowed(itemsWithTaxes);
 
+    // Mismo par que el checkout normal: predicado de diferimiento primero, y
+    // validación de stock en unidades de stock antes de crear la orden.
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
+    await this.assertPackagedStockAvailability(
+      cart_items,
+      stockUnitsByLine,
+      lineKey,
+      deferredPreparedProductIds,
+    );
+
     // Resolve promotional + coupon discounts on the backend (same source of
     // truth used by the normal checkout). Frontend never sends totals.
     const discountResult = await this.resolveCheckoutDiscounts({
@@ -1866,11 +1901,6 @@ export class CheckoutService {
       currency: order.currency,
     });
 
-    // Restaurant fire-to-kitchen deferral: prepared items with an active
-    // recipe are excluded from reservation (computed once for the whole cart).
-    const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
-
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
@@ -1897,6 +1927,11 @@ export class CheckoutService {
           false, // Already validated stock above
         );
       } catch (error) {
+        // Mismo criterio que el checkout principal: el error de stock sube.
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+
         this.logger.warn(
           `Stock reservation failed for product ${item.product_id}: ${error.message}`,
         );
@@ -2494,6 +2529,54 @@ export class CheckoutService {
     const base = (name ?? '').split(/[\\/]/).pop() ?? '';
     const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
     return sanitized.length > 0 ? sanitized : 'receipt';
+  }
+
+  /**
+   * Segunda validación de stock, esta vez en UNIDADES DE STOCK.
+   *
+   * La validación temprana del carrito mide `item.quantity` (líneas lógicas),
+   * pero la reserva descuenta `stock_units_consumed`: vender 1 bulto de 50 kg
+   * validaba contra 1 y reservaba 50. Con 10 kg en bodega el carrito pasaba y
+   * `reserveStock` reventaba DESPUÉS de crear la orden y el pago, dejando una
+   * orden huérfana con HTTP de error.
+   *
+   * Sólo revisa las líneas con presentación (packSize > 1); las demás ya
+   * quedaron validadas correctamente arriba. Usa el MISMO predicado que el
+   * bucle de reserva para que no puedan discrepar.
+   */
+  private async assertPackagedStockAvailability(
+    cart_items: any[],
+    stockUnitsByLine: Map<string, number>,
+    lineKey: (productId: number, variantId?: number | null) => string,
+    deferredPreparedProductIds: Set<number>,
+  ): Promise<void> {
+    if (stockUnitsByLine.size === 0) return;
+
+    for (const item of cart_items) {
+      const stockUnits = stockUnitsByLine.get(
+        lineKey(item.product_id, item.product_variant_id),
+      );
+      if (!stockUnits || stockUnits <= item.quantity) continue;
+      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+
+      const availability =
+        await this.stockValidatorService.validateAvailability(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          stockUnits,
+        );
+
+      if (!availability.isAvailable) {
+        const productName = item.product?.name ?? `#${item.product_id}`;
+        const variantInfo = item.product_variant?.name
+          ? ` (${item.product_variant.name})`
+          : '';
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_CART_003,
+          `Insufficient stock for ${productName}${variantInfo}: requested ${stockUnits}, available ${availability.available}`,
+        );
+      }
+    }
   }
 
   private shouldReserveStock(

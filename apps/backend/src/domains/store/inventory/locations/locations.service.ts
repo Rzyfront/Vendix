@@ -309,7 +309,11 @@ export class LocationsService {
     }
 
     if (!location) {
-      throw new Error(`No default location found for store ${storeId}`);
+      throw new VendixHttpException(
+        ErrorCodes.INV_NO_DEFAULT_LOCATION,
+        undefined,
+        { store_id: storeId },
+      );
     }
 
     return location;

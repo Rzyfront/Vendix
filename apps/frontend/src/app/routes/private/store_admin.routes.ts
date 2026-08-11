@@ -208,6 +208,21 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.MovementsComponent,
               ),
           },
+          // Stock por bodega de un producto. Es una pantalla de deep-link (sin
+          // entrada de sidebar ni clave `panel_ui` propia): la notificación de
+          // stock bajo navega a `/admin/inventory/stock/:product_id`. La ruta
+          // existía sólo en el `inventory.routes.ts` del módulo, que ningún
+          // archivo importa, así que el destino caía en el `'**'` global y la
+          // alerta terminaba en el home con un toast de "página no encontrada".
+          // `breadcrumb.service.ts` ya la registra — se perdió al migrar a este
+          // archivo de rutas.
+          {
+            path: 'stock/:productId',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/stock/stock-detail.component').then(
+                (c) => c.StockDetailComponent,
+              ),
+          },
         ],
       },
       // Serial Numbers (Números de Serie) — self-contained module, sibling of

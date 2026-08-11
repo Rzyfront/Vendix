@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   inject,
   input,
   output,
@@ -220,7 +221,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             Cerrar
           </app-button>
 
-          @if (transfer()?.status === 'draft') {
+          @if (canApprove()) {
             <app-button variant="primary" (clicked)="approveTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold">
               <app-icon name="check" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Aprobar
@@ -257,7 +258,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             </app-button>
           }
 
-          @if (transfer()?.status === 'draft' || transfer()?.status === 'in_transit') {
+          @if (canCancel()) {
             @if (!isCompleting) {
               <app-button variant="outline" (clicked)="cancelTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5">
                 <app-icon name="x-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
@@ -282,6 +283,28 @@ export class TransferDetailModalComponent {
   readonly completeTransfer = output<CompleteTransferItem[]>();
 
   private toastService = inject(ToastService);
+
+  /**
+   * El backend crea las transferencias en `pending`; el botón sólo miraba
+   * `draft`, así que en una transferencia nueva no aparecía "Aprobar" y el
+   * flujo quedaba sin salida. Se aceptan los dos porque `draft` es el valor
+   * legado que todavía tienen las filas viejas.
+   */
+  readonly canApprove = computed(() => {
+    const status = this.transfer()?.status;
+    return status === 'pending' || status === 'draft';
+  });
+
+  /** Cancelable mientras el stock no se haya acreditado en destino. */
+  readonly canCancel = computed(() => {
+    const status = this.transfer()?.status;
+    return (
+      status === 'pending' ||
+      status === 'draft' ||
+      status === 'approved' ||
+      status === 'in_transit'
+    );
+  });
 
   isCompleting = false;
   confirmingReception = false;
@@ -342,8 +365,11 @@ export class TransferDetailModalComponent {
   getStatusLabel(status?: TransferStatus): string {
     if (!status) return '';
     const labels: Record<TransferStatus, string> = {
+      pending: 'Pendiente',
       draft: 'Borrador',
+      approved: 'Aprobada',
       in_transit: 'En Tránsito',
+      received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
     };
@@ -352,8 +378,11 @@ export class TransferDetailModalComponent {
 
   getStatusClasses(status: TransferStatus): string {
     const map: Record<TransferStatus, string> = {
+      pending: 'bg-gray-100 text-gray-700',
       draft: 'bg-gray-100 text-gray-700',
+      approved: 'bg-violet-100 text-violet-700',
       in_transit: 'bg-blue-100 text-blue-700',
+      received: 'bg-emerald-100 text-emerald-700',
       completed: 'bg-emerald-100 text-emerald-700',
       cancelled: 'bg-gray-100 text-gray-500',
     };
@@ -362,8 +391,11 @@ export class TransferDetailModalComponent {
 
   getStatusIcon(status: TransferStatus): string {
     const map: Record<TransferStatus, string> = {
+      pending: 'file-text',
       draft: 'file-text',
+      approved: 'check',
       in_transit: 'truck',
+      received: 'check-circle',
       completed: 'check-circle',
       cancelled: 'x-circle',
     };

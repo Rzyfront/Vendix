@@ -1794,7 +1794,10 @@ export class PurchaseOrdersService {
               ((newBasePrice - costInPriceScale) / costInPriceScale) * 10000,
             ) / 100
           : 0;
-      return { basePrice: newBasePrice, profitMargin: margin };
+      return {
+        basePrice: newBasePrice,
+        profitMargin: PurchaseOrdersService.clampProfitMargin(margin),
+      };
     }
 
     if (newProfitMargin !== undefined && newProfitMargin !== null) {
@@ -1802,7 +1805,7 @@ export class PurchaseOrdersService {
       const basePrice = costInPriceScale * (1 + newProfitMargin / 100);
       return {
         basePrice: Math.round(basePrice * 100) / 100,
-        profitMargin: newProfitMargin,
+        profitMargin: PurchaseOrdersService.clampProfitMargin(newProfitMargin),
       };
     }
 
@@ -1813,7 +1816,36 @@ export class PurchaseOrdersService {
             ((existingBasePrice - costInPriceScale) / costInPriceScale) * 10000,
           ) / 100
         : 0;
-    return { basePrice: existingBasePrice, profitMargin: margin };
+    return {
+      basePrice: existingBasePrice,
+      profitMargin: PurchaseOrdersService.clampProfitMargin(margin),
+    };
+  }
+
+  /**
+   * Techo y piso del margen publicable, por el ancho real de la columna.
+   *
+   * `products.profit_margin` y `product_variants.profit_margin` son
+   * `Decimal(5,2)`: el rango representable es ±999.99. Un markup mayor —normal
+   * cuando el costo por unidad mínima es de centavos frente a un precio de
+   * presentación, y también en cualquier producto vendido a más de ~11× su
+   * costo— desbordaba la columna con `numeric field overflow` (Postgres 22003)
+   * y **revertía la transacción completa de `receive()`**: sin stock, sin capa
+   * de costo, sin CxP, sin asiento, y el operador leyendo "Internal server
+   * error" en cada reintento. La recepción física no se puede bloquear por el
+   * ancho de una columna de presentación, así que el margen se satura y el
+   * precio —que es el dato de negocio— se persiste intacto.
+   *
+   * El spec `purchase-orders.service.spec.ts` documenta el caso que motivó la
+   * escala de QUI-648 con un margen de 142.757,14%; esto es la red por debajo,
+   * para cuando la escala no alcance a normalizarlo.
+   */
+  private static clampProfitMargin(margin: number): number {
+    const MAX_DECIMAL_5_2 = 999.99;
+    if (!Number.isFinite(margin)) return 0;
+    if (margin > MAX_DECIMAL_5_2) return MAX_DECIMAL_5_2;
+    if (margin < -MAX_DECIMAL_5_2) return -MAX_DECIMAL_5_2;
+    return margin;
   }
 
   /**
@@ -2237,6 +2269,13 @@ export class PurchaseOrdersService {
           product_variant_id: number | null;
         }
       >(poLines.map((l) => [l.id, l]));
+      // El pendiente se descuenta A MEDIDA que se recorre el payload: el mapa se
+      // construye una sola vez, así que dos entradas con el MISMO `id` medían
+      // ambas contra el pendiente original y burlaban el tope
+      // (`[{id:5,qty:10},{id:5,qty:10}]` sobre 10 pendientes recibía 20). El
+      // bucle de escritura de más abajo sí usa `{ increment }` por ítem, o sea
+      // que la sobre-recepción se persistía completa.
+      const claimedByLine = new Map<number, number>();
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
         const poLine = poLineById.get(item.id);
@@ -2245,12 +2284,15 @@ export class PurchaseOrdersService {
             `La línea ${item.id} no pertenece a esta orden de compra`,
           );
         }
-        const pending = poLine.quantity_ordered - poLine.quantity_received;
+        const alreadyClaimed = claimedByLine.get(item.id) ?? 0;
+        const pending =
+          poLine.quantity_ordered - poLine.quantity_received - alreadyClaimed;
         if (item.quantity_received > pending) {
           throw new BadRequestException(
-            `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${pending} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
+            `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${Math.max(0, pending)} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
           );
         }
+        claimedByLine.set(item.id, alreadyClaimed + item.quantity_received);
       }
 
       // QUI-486 — red de seguridad para las OCs legacy que ya se crearon con
@@ -2385,6 +2427,23 @@ export class PurchaseOrdersService {
               ? { deductible_tax_amount: newSealed }
               : { capitalized_tax_amount: newSealed },
           });
+
+          // F2 — sellar la config de UoM del producto ANTES de convertir.
+          //
+          // `resolveUoMConversion` lee `purchase_to_stock_factor` del PRODUCTO,
+          // no de la línea. Cuando esta función corría después, la primera
+          // recepción convertía con el factor viejo (1 si el producto aún no lo
+          // tenía) y la segunda ya con el factor real: 10 L de aceite en dos
+          // recepciones parciales entraban como 5 ml + 5.000 ml, con dos capas
+          // FIFO a costos que difieren en tres órdenes de magnitud. Y el hueco
+          // era alcanzable porque `persistIngredientConfigToProduct` tiene reja
+          // de industria (`storeIndustriesSupportIngredients`) que esta función
+          // no tiene: una tienda no-restaurante con `order_type='ingredient'`
+          // no recibía config al crear y sí al recibir.
+          //
+          // Es idempotente y nunca sobrescribe con null/vacío, así que adelantarla
+          // no cambia nada en el caso donde el producto ya traía su config.
+          await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
 
           // ===== UoM conversion (purchase unit → minimum stock unit) =====
           // The frontend sends `item.quantity_received` in the purchase unit
@@ -2537,14 +2596,26 @@ export class PurchaseOrdersService {
             if (productVariantId) {
               const existingVariant = await tx.product_variants.findUnique({
                 where: { id: productVariantId },
-                select: { price_override: true, profit_margin: true },
+                select: {
+                  price_override: true,
+                  profit_margin: true,
+                  products: { select: { base_price: true } },
+                },
               });
+              // Acá el operador pinneó precio o margen, así que escribir
+              // `price_override` es correcto: es un precio propio deliberado.
+              // La referencia sigue siendo el precio EFECTIVO (heredado si la
+              // variante no tenía override) y no 0 — con ambos overrides
+              // ausentes esta rama caería al cost-anchor y un 0 daría un margen
+              // de -100%, el mismo defecto de la rama sin override.
+              const referencePrice =
+                existingVariant?.price_override == null
+                  ? Number(existingVariant?.products?.base_price ?? 0)
+                  : Number(existingVariant.price_override);
               const resolved = PurchaseOrdersService.resolvePricingAfterReceipt(
                 {
                   costPrice: Number(costForPricing),
-                  existingBasePrice: Number(
-                    existingVariant?.price_override ?? 0,
-                  ),
+                  existingBasePrice: referencePrice,
                   newBasePrice: dtoItem.new_base_price,
                   newProfitMargin: dtoItem.new_profit_margin,
                   priceUnitQuantity,
@@ -2596,20 +2667,39 @@ export class PurchaseOrdersService {
               if (productVariantId) {
                 const existingVariant = await tx.product_variants.findUnique({
                   where: { id: productVariantId },
-                  select: { price_override: true, profit_margin: true },
+                  select: {
+                    price_override: true,
+                    profit_margin: true,
+                    products: { select: { base_price: true } },
+                  },
                 });
+                // `price_override = null` significa HEREDA del producto, y esa
+                // semántica no se puede aplastar con `?? 0`: el 0 resultante se
+                // persistía como precio propio de la variante y dejaba
+                // `profit_margin = -100`. Peor, `referencePrice = override ??
+                // base_price` en `ProductVariantService` volvía imposible todo
+                // PATCH posterior sobre una variante en oferta —`sale_price >= 0`
+                // siempre— con `PROD_VAR_SALE_PRICE_001` permanente. Y el propio
+                // invariante del dominio (`PROD_VAR_PRICE_001`) rechaza un
+                // `price_override <= 0`: la recepción era el único escritor que
+                // se lo saltaba. Referencia correcta = el precio efectivo hoy;
+                // el override solo se escribe si la variante ya tenía uno.
+                const inheritsPrice = existingVariant?.price_override == null;
+                const referencePrice = inheritsPrice
+                  ? Number(existingVariant?.products?.base_price ?? 0)
+                  : Number(existingVariant?.price_override);
                 const resolved =
                   PurchaseOrdersService.resolvePricingAfterReceipt({
                     costPrice: Number(costForPricing),
-                    existingBasePrice: Number(
-                      existingVariant?.price_override ?? 0,
-                    ),
+                    existingBasePrice: referencePrice,
                     priceUnitQuantity,
                   });
                 await tx.product_variants.update({
                   where: { id: productVariantId },
                   data: {
-                    price_override: resolved.basePrice,
+                    ...(inheritsPrice
+                      ? {}
+                      : { price_override: resolved.basePrice }),
                     profit_margin: resolved.profitMargin,
                   },
                 });
@@ -2635,10 +2725,8 @@ export class PurchaseOrdersService {
             }
           }
 
-          // F2 — persist the ingredient UoM config captured on the PO line
-          // onto the product at receipt time (idempotent; never clobbers with
-          // null/empty). New products already inherit the config at create (F1).
-          await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
+          // (F2 se movió al inicio del cuerpo del ítem: la conversión de UoM lee
+          // el factor del producto y necesitaba que ya estuviera sellado.)
         }
       }
 
@@ -3880,12 +3968,19 @@ export class PurchaseOrdersService {
       // y la paridad preview↔persist de F3 depende de que siga en unidad mínima.
       const costInPriceScale =
         newCostPerUnit * resolvePricedUnits(null, product?.price_unit_quantity);
-      const resultingMargin =
+      // Mismo techo/piso que la persistencia: el modal no debe ofrecer como
+      // margen por defecto un número que la columna `Decimal(5,2)` rechazaría —
+      // el operador lo aceptaba y la recepción moría con un 500 opaco.
+      const rawResultingMargin =
         costInPriceScale > 0
           ? Math.round(
               ((currentBasePrice - costInPriceScale) / costInPriceScale) * 10000,
             ) / 100
           : null;
+      const resultingMargin =
+        rawResultingMargin === null
+          ? null
+          : PurchaseOrdersService.clampProfitMargin(rawResultingMargin);
 
       items.push({
         product_id: item.product_id,

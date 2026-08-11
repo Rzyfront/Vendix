@@ -298,22 +298,29 @@ export class InventoryAdjustmentsBulkService {
 
     // 3. Ejecutar ajustes batch usando el servicio existente
     if (valid_items.length > 0) {
-      try {
-        await this.adjustmentsService.batchCreateAndComplete(
+      // Se pide el resultado POR ÍTEM. Antes se llamaba al lote que aborta en el
+      // primer fallo y el `catch` marcaba como error TODAS las filas válidas:
+      // el lote no es atómico, así que las anteriores ya estaban aplicadas y el
+      // reporte decía "0 exitosos, 1000 con errores" con el stock movido. El
+      // operador no tenía forma de saber qué quedó hecho.
+      const outcomes =
+        await this.adjustmentsService.batchCreateAndCompleteSettled(
           upload_dto.location_id,
           valid_items,
         );
-      } catch (error) {
-        this.logger.error(`Error en batch de ajustes: ${error.message}`);
-        // Marcar todos los items válidos como error
-        for (const result of results) {
-          if (result.status === 'success' && result.quantity_change !== 0) {
-            result.status = 'error';
-            result.message = `Error al aplicar ajuste: ${error.message}`;
-            successful--;
-            failed++;
-          }
-        }
+
+      // `valid_items[i]` y la fila de `results` con status success van en el
+      // mismo orden, así que el índice del lote mapea a la fila del archivo.
+      const successRows = results.filter((r) => r.status === 'success');
+
+      for (const outcome of outcomes) {
+        if (outcome.ok) continue;
+        const row = successRows[outcome.index];
+        if (!row) continue;
+        row.status = 'error';
+        row.message = `Error al aplicar ajuste: ${outcome.error?.message ?? 'desconocido'}`;
+        successful--;
+        failed++;
       }
     }
 

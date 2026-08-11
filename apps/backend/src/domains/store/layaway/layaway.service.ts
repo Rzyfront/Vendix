@@ -548,13 +548,8 @@ export class LayawayService {
       });
 
       if (is_completed) {
-        // Liberar reservas como consumidas (productos entregados)
-        await this.stockLevelManager.releaseReservationsByReference(
-          'layaway',
-          plan_id,
-          'consumed',
-          tx,
-        );
+        // Entrega de los productos: baja stock con movimiento y cierra reserva.
+        await this.consumeReservedStock(plan, tx);
 
         // Marcar todas las cuotas pendientes como pagadas
         await tx.layaway_installments.updateMany({
@@ -577,6 +572,66 @@ export class LayawayService {
 
       return payment;
     });
+  }
+
+  /**
+   * Entrega física del separado: baja el stock DEJANDO RASTRO.
+   *
+   * Antes se llamaba `releaseReservationsByReference(..., 'consumed')` a secas,
+   * que baja `quantity_on_hand` escribiendo directo en `stock_levels`: la
+   * mercancía salía de la bodega sin una sola fila en movimientos, así que
+   * Movimientos, la valorización y el costo de venta nunca veían la entrega.
+   *
+   * El patrón correcto es el de `order-stock-commit`: primero `updateStock` por
+   * línea reservada (ahí nace el movimiento y se consume la capa de costo) y
+   * después se cierra la reserva con `decrementOnHand: false` para no descontar
+   * dos veces.
+   */
+  private async consumeReservedStock(
+    plan: { id: number; plan_number?: string | null },
+    tx: any,
+  ): Promise<void> {
+    // Las reservas son la única fuente de qué salió y de qué ubicación salió.
+    const reservations = await tx.stock_reservations.findMany({
+      where: {
+        reserved_for_type: 'layaway',
+        reserved_for_id: plan.id,
+        status: 'active',
+      },
+    });
+
+    const userIdRaw = RequestContextService.getUserId();
+    const userId = userIdRaw ? Number(userIdRaw) : undefined;
+
+    for (const reservation of reservations) {
+      if (!reservation.quantity || reservation.quantity <= 0) continue;
+
+      await this.stockLevelManager.updateStock(
+        {
+          product_id: reservation.product_id,
+          variant_id: reservation.product_variant_id ?? undefined,
+          location_id: reservation.location_id,
+          quantity_change: -reservation.quantity,
+          movement_type: 'sale',
+          reason: `Entrega de plan de separado ${plan.plan_number ?? `#${plan.id}`}`,
+          source_module: 'layaway',
+          user_id: userId,
+          create_movement: true,
+          // La disponibilidad ya se reclamó al reservar; volver a validarla acá
+          // rechazaría la entrega justamente porque está reservada.
+          validate_availability: false,
+        },
+        tx,
+      );
+    }
+
+    await this.stockLevelManager.releaseReservationsByReference(
+      'layaway',
+      plan.id,
+      'consumed',
+      tx,
+      { decrementOnHand: false },
+    );
   }
 
   // ===== MODIFY INSTALLMENTS =====
@@ -772,13 +827,8 @@ export class LayawayService {
         data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
       });
 
-      // Liberar reservas como consumidas
-      await this.stockLevelManager.releaseReservationsByReference(
-        'layaway',
-        plan_id,
-        'consumed',
-        tx,
-      );
+      // Entrega de los productos: baja stock con movimiento y cierra reserva.
+      await this.consumeReservedStock(plan, tx);
 
       this.eventEmitter.emit('layaway.completed', {
         store_id: plan.store_id,

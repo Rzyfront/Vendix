@@ -3,6 +3,7 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
+import { syncDenormalizedProductStock } from '../helpers/sync-product-stock.helper';
 
 @Injectable()
 export class InventoryIntegrationService {
@@ -658,6 +659,15 @@ export class InventoryIntegrationService {
               last_updated: now,
             },
           });
+
+          // El denormalizado tiene que seguir a `stock_levels`: sin esto,
+          // `products.stock_quantity` quedaba deprimido por una reserva que ya
+          // se liberó y el catálogo mostraba AGOTADO un producto con stock.
+          await syncDenormalizedProductStock(
+            tx,
+            reservation.product_id,
+            reservation.product_variant_id ?? null,
+          );
         }
       }
     });

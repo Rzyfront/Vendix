@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { ValidateConsolidatedStockDto } from '../dto/validate-consolidated-stock.dto';
 import { ValidateMultipleConsolidatedStockDto } from '../dto/validate-multiple-consolidated-stock.dto';
+import { deriveUoMSplit } from '../shared/helpers/uom-display.helper';
 
 @Injectable()
 export class InventoryValidationService {
@@ -146,6 +147,20 @@ export class InventoryValidationService {
             type: true,
           },
         },
+        // La pantalla de Stock por Bodega pinta el nombre/SKU del producto y la
+        // presentación por unidad de medida ("9 sellados + 1 abierto"). Sin
+        // estos campos la cabecera salía vacía y la vista UoM nunca aparecía.
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            is_ingredient: true,
+            stock_unit: true,
+            purchase_unit: true,
+            purchase_to_stock_factor: true,
+          },
+        },
       },
     });
 
@@ -162,20 +177,42 @@ export class InventoryValidationService {
       0,
     );
 
+    const product = (stockLevels[0] as any)?.products ?? null;
+
     return {
       product_id: productId,
+      product: product
+        ? {
+            name: product.name,
+            sku: product.sku ?? undefined,
+            stock_unit: product.stock_unit ?? null,
+            purchase_unit: product.purchase_unit ?? null,
+            purchase_to_stock_factor: product.purchase_to_stock_factor ?? null,
+          }
+        : undefined,
       totalAvailable,
       totalReserved,
       totalOnHand,
-      stockByLocation: stockLevels.map((level) => ({
-        locationId: level.inventory_locations.id,
-        locationName: level.inventory_locations.name,
-        available: level.quantity_available || 0,
-        reserved: level.quantity_reserved || 0,
-        onHand: level.quantity_on_hand || 0,
-        type: level.inventory_locations.type,
-        lastUpdated: level.last_updated,
-      })),
+      stockByLocation: stockLevels.map((level) => {
+        // Mismo helper que usa la lista de stock; tres cálculos distintos de lo
+        // mismo es exactamente cómo se desincronizan.
+        const uom = deriveUoMSplit(level as any);
+        return {
+          locationId: level.inventory_locations.id,
+          locationName: level.inventory_locations.name,
+          available: level.quantity_available || 0,
+          reserved: level.quantity_reserved || 0,
+          onHand: level.quantity_on_hand || 0,
+          type: level.inventory_locations.type,
+          lastUpdated: level.last_updated,
+          sealed_units: uom.sealed_units,
+          open_remaining: uom.open_remaining,
+          stock_unit: (level as any).products?.stock_unit ?? null,
+          purchase_unit: (level as any).products?.purchase_unit ?? null,
+          purchase_to_stock_factor:
+            (level as any).products?.purchase_to_stock_factor ?? null,
+        };
+      }),
     };
   }
 

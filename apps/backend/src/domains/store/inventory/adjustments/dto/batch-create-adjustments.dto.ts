@@ -8,6 +8,8 @@ import {
   IsIn,
   Min,
   ArrayMinSize,
+  ArrayMaxSize,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -41,7 +43,9 @@ export class AdjustmentItemDto {
   @IsIn(VALID_ADJUSTMENT_TYPES)
   type: string;
 
-  @IsNumber()
+  // Entero: el inventario se lleva en `Int` de la unidad mínima, así que un
+  // decimal se truncaba silenciosamente al llegar a Prisma.
+  @IsInt()
   @Min(0)
   @Type(() => Number)
   quantity_after: number;
@@ -61,8 +65,13 @@ export class BatchCreateAdjustmentsDto {
   @Type(() => Number)
   location_id: number;
 
+  // Sin tope, un lote de 5.000 líneas abría 5.000 transacciones seguidas y
+  // dejaba el pool en el suelo. El mismo límite que el resto de las operaciones
+  // masivas del repo (@ArrayMaxSize(100)); para archivos grandes existe la carga
+  // por Excel, que sí procesa por partes.
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => AdjustmentItemDto)
   items: AdjustmentItemDto[];

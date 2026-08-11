@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { CreateMovementDto } from './dto/create-movement.dto';
 import { MovementQueryDto } from './dto/movement-query.dto';
 
@@ -149,8 +150,8 @@ export class MovementsService {
     });
   }
 
-  findOne(id: number) {
-    return this.prisma.inventory_movements.findUnique({
+  async findOne(id: number) {
+    const movement = await this.prisma.inventory_movements.findUnique({
       where: { id },
       include: {
         products: true,
@@ -160,6 +161,14 @@ export class MovementsService {
         users: true,
       },
     });
+
+    // Sin este throw el handler contestaba 200 con `data: null` y la pantalla
+    // de detalle quedaba en blanco sin decir por qué.
+    if (!movement) {
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+    }
+
+    return movement;
   }
 
   private async updateStockLevels(tx: any, movement: any) {

@@ -329,10 +329,22 @@ export class ProductionOrdersService {
           consumedQty = Math.round(baseQty * multiplier);
         }
 
+        // El insumo se consume de SU propia bodega, no de la del producto
+        // terminado. Con una sola ubicación para todo, un insumo que vive en la
+        // bodega central se descontaba de la bodega del terminado: ahí no hay
+        // existencias, `getOrCreateStockLevel` creaba la fila en 0 y el
+        // `Math.max(0, …)` de `updateStock` se comía el descuento — el insumo
+        // nunca bajaba y el terminado sí se acreditaba. Inventario inflado en
+        // silencio, sin una fila que lo explicara.
+        const componentLocationId =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.component_product_id,
+          );
+
         const result = await this.stockLevelManager.updateStock(
           {
             product_id: item.component_product_id,
-            location_id,
+            location_id: componentLocationId,
             quantity_change: -Math.abs(consumedQty),
             movement_type: 'consumption',
             reason: `Producción #${order.id} – ${order.product.name}`,

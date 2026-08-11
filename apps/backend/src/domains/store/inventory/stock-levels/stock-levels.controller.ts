@@ -8,6 +8,13 @@ import { SourcingSuggestionQueryDto } from './dto/sourcing-suggestion-query.dto'
 import { ResponseService } from '@common/responses/response.service';
 import { InventoryBatchesService } from '../batches/inventory-batches.service';
 
+/**
+ * Sin try/catch por handler a propósito: `responseService.error()` RETORNA el
+ * sobre en lugar de lanzarlo, así que un fallo salía con HTTP 200 y
+ * `success: false`. En una lista eso es peor que un error: el frontend entraba
+ * por el `next` con `data` vacío y pintaba "sin resultados" en vez de avisar.
+ * La excepción tiene que llegar a `AllExceptionsFilter`.
+ */
 @Controller('store/inventory/stock-levels')
 @UseGuards(PermissionsGuard)
 export class StockLevelsController {
@@ -20,28 +27,20 @@ export class StockLevelsController {
   @Get()
   @Permissions('store:inventory:stock_levels:read')
   async findAll(@Query() query: StockLevelQueryDto) {
-    try {
-      const result = await this.stockLevelsService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Niveles de stock obtenidos exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
+    const result = await this.stockLevelsService.findAll(query);
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
         'Niveles de stock obtenidos exitosamente',
       );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los niveles de stock',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
     }
+    return this.responseService.success(
+      result,
+      'Niveles de stock obtenidos exitosamente',
+    );
   }
 
   @Get('product/:productId')
@@ -50,22 +49,14 @@ export class StockLevelsController {
     @Param('productId') productId: string,
     @Query() query: StockLevelQueryDto,
   ) {
-    try {
-      const result = await this.stockLevelsService.findByProduct(
-        +productId,
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Niveles de stock del producto obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los niveles de stock del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.stockLevelsService.findByProduct(
+      +productId,
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Niveles de stock del producto obtenidos exitosamente',
+    );
   }
 
   @Get('product/:productId/batches')
@@ -74,22 +65,14 @@ export class StockLevelsController {
     @Param('productId') productId: string,
     @Query('location_id') locationId?: string,
   ) {
-    try {
-      const result = await this.batchesService.getBatches({
-        productId: +productId,
-        locationId: locationId ? +locationId : undefined,
-      });
-      return this.responseService.success(
-        result.batches || [],
-        'Lotes del producto obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los lotes del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.batchesService.getBatches({
+      productId: +productId,
+      locationId: locationId ? +locationId : undefined,
+    });
+    return this.responseService.success(
+      result.batches || [],
+      'Lotes del producto obtenidos exitosamente',
+    );
   }
 
   @Get('location/:locationId')
@@ -98,77 +81,43 @@ export class StockLevelsController {
     @Param('locationId') locationId: string,
     @Query() query: StockLevelQueryDto,
   ) {
-    try {
-      const result = await this.stockLevelsService.findByLocation(
-        +locationId,
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Niveles de stock de la ubicación obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message ||
-          'Error al obtener los niveles de stock de la ubicación',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.stockLevelsService.findByLocation(
+      +locationId,
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Niveles de stock de la ubicación obtenidos exitosamente',
+    );
   }
 
   @Get('alerts')
   @Permissions('store:inventory:stock_levels:read')
   async getStockAlerts(@Query() query: StockLevelQueryDto) {
-    try {
-      const result = await this.stockLevelsService.getStockAlerts(query);
-      return this.responseService.success(
-        result,
-        'Alertas de stock obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las alertas de stock',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.stockLevelsService.getStockAlerts(query);
+    return this.responseService.success(
+      result,
+      'Alertas de stock obtenidas exitosamente',
+    );
   }
 
   @Get('sourcing-suggestion')
   @Permissions('store:inventory:stock_levels:read')
   async getSourcingSuggestion(@Query() query: SourcingSuggestionQueryDto) {
-    try {
-      const result =
-        await this.stockLevelsService.getSourcingSuggestion(query);
-      return this.responseService.success(
-        result,
-        'Sugerencia de sourcing obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la sugerencia de sourcing',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.stockLevelsService.getSourcingSuggestion(query);
+    return this.responseService.success(
+      result,
+      'Sugerencia de sourcing obtenida exitosamente',
+    );
   }
 
   @Get(':id')
   @Permissions('store:inventory:stock_levels:read')
   async findOne(@Param('id') id: string) {
-    try {
-      const result = await this.stockLevelsService.findOne(+id);
-      return this.responseService.success(
-        result,
-        'Nivel de stock obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el nivel de stock',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.stockLevelsService.findOne(+id);
+    return this.responseService.success(
+      result,
+      'Nivel de stock obtenido exitosamente',
+    );
   }
 }

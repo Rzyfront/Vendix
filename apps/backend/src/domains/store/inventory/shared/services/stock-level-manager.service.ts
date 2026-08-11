@@ -15,6 +15,7 @@ import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/defau
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
 import { sellableLocationsWhere } from '../helpers/pos-stock-scope.helper';
+import { syncDenormalizedProductStock } from '../helpers/sync-product-stock.helper';
 import { CostingService } from './costing.service';
 import {
   CostingMethodResolverService,
@@ -1307,13 +1308,25 @@ export class StockLevelManager {
     const movementType =
       params.movement_type === 'initial' ? 'stock_in' : params.movement_type;
 
+    // `quantity` es una MAGNITUD; la dirección la llevan las dos patas de
+    // ubicación. Antes se rellenaba `to_location_id` incluso en las salidas y
+    // `from_location_id` quedaba null en ambos sentidos, así que la fila no
+    // permitía saber si el stock entró o salió: un ajuste que subía de 100 a 120
+    // se pintaba "−20" porque la UI tenía que adivinar por el tipo. Un traslado
+    // pasa las dos patas explícitas y no cambia de comportamiento.
+    const isOutbound = Number(params.quantity_change) < 0;
+    const fromLocationId =
+      params.from_location_id ?? (isOutbound ? params.location_id : null);
+    const toLocationId =
+      params.to_location_id ?? (isOutbound ? null : params.location_id);
+
     await prisma.inventory_movements.create({
       data: {
         organization_id: organization_id,
         product_id: params.product_id,
         product_variant_id: params.variant_id,
-        from_location_id: params.from_location_id,
-        to_location_id: params.to_location_id || params.location_id,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
         quantity: Math.abs(params.quantity_change),
         movement_type: movementType,
         source_module: params.source_module,
@@ -1418,53 +1431,10 @@ export class StockLevelManager {
     product_id: number,
     variant_id?: number,
   ): Promise<void> {
-    // 1. Si hay variant_id, sincronizar esa variante específica
-    if (variant_id) {
-      const variant_stock = await prisma.stock_levels.aggregate({
-        where: {
-          product_id: product_id,
-          product_variant_id: variant_id,
-        },
-        _sum: {
-          quantity_available: true,
-        },
-      });
-
-      await prisma.product_variants.update({
-        where: { id: variant_id },
-        data: {
-          stock_quantity: variant_stock._sum.quantity_available || 0,
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    // 2. Check if product has variants
-    const variantCount = await prisma.product_variants.count({
-      where: { product_id: product_id },
-    });
-
-    // 3. Build the aggregate filter: exclude base stock when variants exist
-    const stockFilter: any = { product_id: product_id };
-    if (variantCount > 0) {
-      stockFilter.product_variant_id = { not: null };
-    }
-
-    const total_stock = await prisma.stock_levels.aggregate({
-      where: stockFilter,
-      _sum: {
-        quantity_available: true,
-      },
-    });
-
-    // Actualizar products.stock_quantity
-    await prisma.products.update({
-      where: { id: product_id },
-      data: {
-        stock_quantity: total_stock._sum.quantity_available || 0,
-        updated_at: new Date(),
-      },
-    });
+    // La lógica vive en un helper suelto para que los jobs de cron —que mutan
+    // `stock_levels` con el cliente global y no pueden inyectar este servicio
+    // scoped— usen EXACTAMENTE la misma fórmula.
+    await syncDenormalizedProductStock(prisma, product_id, variant_id);
   }
 
   /**

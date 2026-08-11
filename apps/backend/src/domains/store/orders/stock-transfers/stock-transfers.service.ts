@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -8,6 +12,20 @@ import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
 import { transfer_status_enum } from '@prisma/client';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+
+/**
+ * Estados que representan "creada, todavía sin aprobar".
+ *
+ * `pending` es el canónico —el que escribe `create()` y el `@default` de la
+ * columna— y `draft` es su alias legacy, que el enum conserva marcado para
+ * borrado diferido. Los guards aceptan ambos para que las filas históricas
+ * sigan siendo operables; el espejo de organización hace lo mismo con
+ * `normalizeStatusFilter`.
+ */
+const PENDING_LIKE_STATUSES: transfer_status_enum[] = [
+  transfer_status_enum.pending,
+  transfer_status_enum.draft,
+];
 
 @Injectable()
 export class StockTransfersService {
@@ -80,18 +98,44 @@ export class StockTransfersService {
     return totalCost;
   }
 
+  /**
+   * Conteos por estado para las tarjetas de la pantalla.
+   *
+   * Los buckets agrupan el estado canónico con su alias legacy porque el enum
+   * conserva `draft` y `completed` marcados para borrado diferido: contarlos por
+   * separado hacía que las cuatro tarjetas sumaran distinto del total (todas las
+   * filas nuevas caían en `pending`/`received`, que no tenían bucket, y
+   * `draft`/`completed` mostraban 0).
+   */
   async getStats() {
-    const [total, draft, in_transit, completed, cancelled] = await Promise.all([
-      this.prisma.stock_transfers.count(),
-      this.prisma.stock_transfers.count({ where: { status: 'draft' } }),
-      this.prisma.stock_transfers.count({ where: { status: 'in_transit' } }),
-      this.prisma.stock_transfers.count({ where: { status: 'completed' } }),
-      this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
-    ]);
+    const [total, pending, approved, in_transit, received, cancelled] =
+      await Promise.all([
+        this.prisma.stock_transfers.count(),
+        this.prisma.stock_transfers.count({
+          where: { status: { in: ['pending', 'draft'] } },
+        }),
+        this.prisma.stock_transfers.count({ where: { status: 'approved' } }),
+        this.prisma.stock_transfers.count({ where: { status: 'in_transit' } }),
+        this.prisma.stock_transfers.count({
+          where: { status: { in: ['received', 'completed'] } },
+        }),
+        this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
+      ]);
 
     return {
       success: true,
-      data: { total, draft, in_transit, completed, cancelled },
+      data: {
+        total,
+        pending,
+        approved,
+        in_transit,
+        received,
+        cancelled,
+        // Alias de compatibilidad para consumidores que aún leen los nombres
+        // legacy (frontend web y móvil, hasta que se alineen a los canónicos).
+        draft: pending,
+        completed: received,
+      },
     };
   }
 
@@ -143,6 +187,14 @@ export class StockTransfersService {
           to_location_id: createTransferDto.to_location_id,
           notes: createTransferDto.notes,
           transfer_number: transferNumber,
+          // Explícito y canónico. Antes se omitía y la fila tomaba el
+          // `@default(pending)` del schema, mientras `approve()` y `update()`
+          // exigían `draft` — un valor que el propio enum marca como legacy
+          // ("deferred drop per Plan §13#2") y que NINGÚN camino de escritura
+          // produce. Resultado: toda transferencia creada quedaba inaprobable e
+          // ineditable con un 400 permanente, y el único camino vivo era
+          // `complete`, justamente el que no validaba nada.
+          status: transfer_status_enum.pending,
           transfer_date: new Date(),
           expected_date: createTransferDto.expected_date,
           created_by_user_id: context.user_id,
@@ -335,11 +387,21 @@ export class StockTransfersService {
     }
 
     if (query.search) {
+      // `reference_number` y `reason` NO son columnas de `stock_transfers`
+      // (las reales son `notes` y `cancellation_reason`): Prisma lanzaba
+      // `Unknown argument` y CUALQUIER búsqueda respondía 500, dejando la lista
+      // inutilizable en modo búsqueda. `mode: 'insensitive'` porque los números
+      // se muestran en mayúsculas (`TRF-0001`) y se teclean en minúsculas — el
+      // mismo archivo ya lo usa en `searchTransferableProducts`.
       where.OR = [
-        { transfer_number: { contains: query.search } },
-        { reference_number: { contains: query.search } },
-        { reason: { contains: query.search } },
-        { notes: { contains: query.search } },
+        { transfer_number: { contains: query.search, mode: 'insensitive' } },
+        { notes: { contains: query.search, mode: 'insensitive' } },
+        {
+          cancellation_reason: {
+            contains: query.search,
+            mode: 'insensitive',
+          },
+        },
       ];
     }
 
@@ -411,13 +473,41 @@ export class StockTransfersService {
       where: { id },
     });
 
-    if (existingTransfer.status !== transfer_status_enum.draft) {
-      throw new BadRequestException('Only draft transfers can be updated');
+    // `findUnique` devuelve null con un id inexistente: sin esta guarda, la
+    // línea siguiente reventaba con un TypeError como 500 en vez de 404.
+    if (!existingTransfer) {
+      throw new NotFoundException(`Transferencia #${id} no encontrada`);
+    }
+
+    if (!PENDING_LIKE_STATUSES.includes(existingTransfer.status)) {
+      throw new BadRequestException(
+        'Solo una transferencia pendiente puede editarse',
+      );
+    }
+
+    // `UpdateTransferDto` extiende `PartialType(CreateTransferDto)`, así que
+    // hereda `items[]` — y volcarlo crudo en `prisma.update` reventaba con
+    // `Unknown argument 'items'`. Las líneas se editan por su propio camino;
+    // acá solo se aceptan campos de cabecera.
+    const { items: _items, ...headerData } = updateTransferDto as any;
+
+    if (
+      headerData.from_location_id !== undefined ||
+      headerData.to_location_id !== undefined
+    ) {
+      // Cambiar el par de bodegas re-valida el alcance: sin esto se podía mover
+      // el origen a una bodega de otra tienda esquivando el bloqueo de `create`.
+      await this.validateTransferScope(
+        existingTransfer.organization_id,
+        headerData.from_location_id ?? existingTransfer.from_location_id,
+        headerData.to_location_id ?? existingTransfer.to_location_id,
+        this.prisma,
+      );
     }
 
     return this.prisma.stock_transfers.update({
       where: { id },
-      data: updateTransferDto,
+      data: headerData,
       include: {
         from_location: true,
         to_location: true,
@@ -445,8 +535,10 @@ export class StockTransfersService {
         tx,
       );
 
-      if (stockTransfer.status !== transfer_status_enum.draft) {
-        throw new BadRequestException('Only draft transfers can be approved');
+      if (!PENDING_LIKE_STATUSES.includes(stockTransfer.status)) {
+        throw new BadRequestException(
+          'Solo una transferencia pendiente puede aprobarse',
+        );
       }
 
       const context = RequestContextService.getContext();
@@ -490,19 +582,59 @@ export class StockTransfersService {
     items: Array<{ id: number; quantity_received: number }>,
   ) {
     const result = await this.prisma.$transaction(async (tx) => {
+      // Se lee la transferencia ANTES de escribir nada. El orden anterior
+      // actualizaba `quantity_received` por `item.id` crudo como primera
+      // sentencia —sin comprobar estado, sin comprobar pertenencia y sin tope—
+      // así que un id de OTRA transferencia era escribible, y un
+      // `quantity_received` arbitrario acreditaba esa cantidad REAL en destino,
+      // repetible sobre una transferencia ya cerrada. Era la única vía viva del
+      // módulo y la única sin validación.
+      const stockTransfer = await tx.stock_transfers.findUnique({
+        where: { id },
+        include: { stock_transfer_items: true },
+      });
+
+      if (!stockTransfer) {
+        throw new NotFoundException(`Transferencia #${id} no encontrada`);
+      }
+
+      // Solo una transferencia despachada puede recibirse: es la que reservó el
+      // stock en origen. Cerrar una `pending` movía existencias que nadie había
+      // comprometido.
+      if (stockTransfer.status !== transfer_status_enum.in_transit) {
+        throw new BadRequestException(
+          'Solo una transferencia en tránsito puede recibirse',
+        );
+      }
+
+      // `tx` es `any`, así que las líneas llegan sin tipo: se anota el Map para
+      // que el acceso a `quantity` / `quantity_received` compile.
+      const lineById = new Map<number, any>(
+        stockTransfer.stock_transfer_items.map((l: any) => [l.id, l]),
+      );
+
       for (const item of items) {
+        const line = lineById.get(item.id);
+        if (!line) {
+          throw new BadRequestException(
+            `La línea #${item.id} no pertenece a la transferencia #${id}`,
+          );
+        }
+        if (item.quantity_received > line.quantity) {
+          throw new BadRequestException(
+            `No se puede recibir ${item.quantity_received} de la línea #${item.id}: se despacharon ${line.quantity}`,
+          );
+        }
         await tx.stock_transfer_items.update({
           where: { id: item.id },
           data: {
             quantity_received: item.quantity_received,
           },
         });
+        // Mantener el mapa en línea con lo escrito, porque el bucle de stock de
+        // más abajo recorre `stockTransfer.stock_transfer_items`.
+        line.quantity_received = item.quantity_received;
       }
-
-      const stockTransfer = await tx.stock_transfers.findUnique({
-        where: { id },
-        include: { stock_transfer_items: true },
-      });
 
       const transferScope = await this.validateTransferScope(
         stockTransfer.organization_id,
@@ -629,9 +761,36 @@ export class StockTransfersService {
         include: { stock_transfer_items: true },
       });
 
-      if (stockTransfer.status === transfer_status_enum.completed) {
+      if (!stockTransfer) {
+        throw new NotFoundException(`Transferencia #${id} no encontrada`);
+      }
+
+      // Cancelar libera reservas en la bodega de ORIGEN, así que es un
+      // movimiento real de stock y necesita la misma guarda de alcance que
+      // `create`/`approve`/`complete`. Sin ella, una tienda podía cancelar la
+      // transferencia de otra y liberarle el stock comprometido.
+      await this.validateTransferScope(
+        stockTransfer.organization_id,
+        stockTransfer.from_location_id,
+        stockTransfer.to_location_id,
+        tx,
+      );
+
+      // `received` también es terminal: es el estado que escribe el flujo de
+      // organización sobre esta MISMA tabla. Mirar sólo `completed` dejaba
+      // cancelable una transferencia cuyo stock ya se acreditó en destino, y la
+      // cancelación no revierte nada porque la reserva ya no existe.
+      if (
+        stockTransfer.status === transfer_status_enum.completed ||
+        stockTransfer.status === transfer_status_enum.received
+      ) {
         throw new BadRequestException(
-          'Completed transfers cannot be cancelled',
+          'Una transferencia ya recibida no se puede cancelar',
+        );
+      }
+      if (stockTransfer.status === transfer_status_enum.cancelled) {
+        throw new BadRequestException(
+          'La transferencia ya está cancelada',
         );
       }
 
@@ -734,7 +893,48 @@ export class StockTransfersService {
     });
   }
 
-  remove(id: number) {
+  /**
+   * Borrado duro, y por eso restringido a una transferencia que NUNCA movió
+   * stock.
+   *
+   * Antes borraba cualquier fila sin una sola comprobación: sobre una
+   * `in_transit` dejaba las reservas de origen colgadas para siempre (el stock
+   * quedaba invisible y no vendible, sin fila que explicara por qué), y sobre
+   * una recibida destruía el documento origen del asiento contable que ya se
+   * había emitido. Para lo que ya se despachó existe `cancel`, que sí libera.
+   */
+  async remove(id: number) {
+    const stockTransfer = await this.prisma.stock_transfers.findUnique({
+      where: { id },
+      select: { id: true, status: true, transfer_number: true },
+    });
+
+    if (!stockTransfer) {
+      throw new NotFoundException(`Transferencia #${id} no encontrada`);
+    }
+
+    if (!PENDING_LIKE_STATUSES.includes(stockTransfer.status)) {
+      throw new BadRequestException(
+        `La transferencia ${stockTransfer.transfer_number} está en estado "${stockTransfer.status}" y no se puede eliminar. Use cancelar para revertirla.`,
+      );
+    }
+
+    // Cinturón y tirantes: si por cualquier vía quedó una reserva viva, no se
+    // borra el documento que la explica.
+    const activeReservations = await this.prisma.stock_reservations.count({
+      where: {
+        reserved_for_type: 'transfer',
+        reserved_for_id: id,
+        status: 'active',
+      },
+    });
+
+    if (activeReservations > 0) {
+      throw new BadRequestException(
+        `La transferencia ${stockTransfer.transfer_number} tiene ${activeReservations} reserva(s) de stock activa(s). Cancélela para liberarlas.`,
+      );
+    }
+
     return this.prisma.stock_transfers.delete({
       where: { id },
     });

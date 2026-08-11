@@ -390,27 +390,34 @@ export class StockDetailComponent implements OnInit {
     if (Array.isArray(data)) {
       if (data.length > 0) {
         const first = data[0];
-        this.productName.set(first.product?.name || '');
-        this.productSku.set(first.product?.sku || '');
+        // `products`/`inventory_locations` son los nombres que responde el
+        // backend; los alias en singular quedan sólo como respaldo.
+        const firstProduct = first.products ?? first.product;
+        this.productName.set(firstProduct?.name || '');
+        this.productSku.set(firstProduct?.sku || '');
       }
-      const mapped: LocationStock[] = data.map((level) => ({
-        locationId: level.location_id,
-        locationName: level.location?.name || `Ubicación ${level.location_id}`,
-        available: level.quantity_available,
-        reserved: level.quantity_reserved,
-        onHand: level.quantity_on_hand,
-        type: (level.location as any)?.type || 'warehouse',
-        lastUpdated: level.updated_at || '',
-        // UoM split (Fase UoM) — see stock-levels.service.ts:
-        // sealed_units = floor(quantity_on_hand / factor), open_remaining
-        // = quantity_on_hand % factor. Null for non-ingredients.
-        sealed_units: (level as any).sealed_units ?? null,
-        open_remaining: (level as any).open_remaining ?? null,
-        stock_unit: (level.product as any)?.stock_unit ?? null,
-        purchase_unit: (level.product as any)?.purchase_unit ?? null,
-        purchase_to_stock_factor:
-          (level.product as any)?.purchase_to_stock_factor ?? null,
-      }));
+      const mapped: LocationStock[] = data.map((level) => {
+        const product = level.products ?? level.product;
+        const location = level.inventory_locations ?? level.location;
+        return {
+          locationId: level.location_id,
+          locationName: location?.name || `Ubicación ${level.location_id}`,
+          available: level.quantity_available,
+          reserved: level.quantity_reserved,
+          onHand: level.quantity_on_hand,
+          type: (location as any)?.type || 'warehouse',
+          lastUpdated: level.updated_at || '',
+          // UoM split (Fase UoM) — see stock-levels.service.ts:
+          // sealed_units = floor(quantity_on_hand / factor), open_remaining
+          // = quantity_on_hand % factor. Null for non-ingredients.
+          sealed_units: level.sealed_units ?? null,
+          open_remaining: level.open_remaining ?? null,
+          stock_unit: (product as any)?.stock_unit ?? null,
+          purchase_unit: (product as any)?.purchase_unit ?? null,
+          purchase_to_stock_factor:
+            (product as any)?.purchase_to_stock_factor ?? null,
+        };
+      });
       this.locations.set(mapped);
       this.totalAvailable.set(mapped.reduce((sum, l) => sum + l.available, 0));
       this.totalReserved.set(mapped.reduce((sum, l) => sum + l.reserved, 0));

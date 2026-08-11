@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -100,6 +101,8 @@ interface OnlinePurchaseData {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly inventoryService: InventoryIntegrationService,
@@ -908,8 +911,27 @@ export class ProductsService {
             });
           }
 
+          // Un producto CON variantes no tiene stock propio: el saldo vive en
+          // cada variante y `syncProductStock` suma esas filas. Escribir además
+          // una fila base (`product_variant_id: null`) con el total dejaba
+          // existencias fantasma: invisibles en catálogo y POS —porque toda
+          // lectura filtra por variante—, pero editables por el ajuste masivo y
+          // destruidas en la siguiente edición del producto. El frontend manda
+          // `stock_quantity = suma de las variantes` (`product-create-page`), así
+          // que sin esta guarda el total se duplicaba en una fila huérfana.
+          const hasVariants = !!(variants && variants.length > 0);
+
           // Inicializar stock levels para múltiples ubicaciones
-          if (stock_by_location && stock_by_location.length > 0) {
+          if (hasVariants) {
+            if (
+              (stock_by_location && stock_by_location.length > 0) ||
+              (stock_quantity && stock_quantity > 0)
+            ) {
+              this.logger.warn(
+                `Producto ${product.id} se creó con ${variants!.length} variante(s): se ignora el stock base recibido (stock_quantity=${stock_quantity ?? 0}, ubicaciones=${stock_by_location?.length ?? 0}). El saldo lo llevan las variantes.`,
+              );
+            }
+          } else if (stock_by_location && stock_by_location.length > 0) {
             // Usar las ubicaciones especificadas en el DTO
             for (const stockLocation of stock_by_location) {
               await this.stockLevelManager.updateStock(

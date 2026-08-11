@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { SourcingSuggestionQueryDto } from './dto/sourcing-suggestion-query.dto';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
@@ -129,9 +130,9 @@ export class StockLevelsService {
     });
   }
 
-  findOne(id: number) {
+  async findOne(id: number) {
     // Changed to findFirst to allow scoping injections
-    return this.prisma.stock_levels.findFirst({
+    const stockLevel = await this.prisma.stock_levels.findFirst({
       where: { id },
       include: {
         products: true,
@@ -139,6 +140,15 @@ export class StockLevelsService {
         inventory_locations: true,
       },
     });
+
+    // Devolver null dejaba la respuesta en 200 con `data: null`: el frontend no
+    // distinguía "no existe" de "existe y está vacío", y en otro tenant el
+    // scoping hace que sea justamente lo primero.
+    if (!stockLevel) {
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+    }
+
+    return stockLevel;
   }
 
   /**
