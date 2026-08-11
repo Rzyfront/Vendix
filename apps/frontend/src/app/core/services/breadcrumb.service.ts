@@ -1390,6 +1390,48 @@ export class BreadcrumbService {
       parent: 'Configuración',
       icon: 'sliders',
     },
+    // Las seis pestañas de Configuración General. `findRouteMatch` prueba
+    // coincidencia exacta y después patrones con `:param`, así que una ruta de 4
+    // segmentos NO cae en la entrada de 3 de arriba: sin estas entradas el
+    // breadcrumb de las seis pestañas caía al valor por defecto
+    // ("Panel Principal / Dashboard"). Los ids, los títulos y los iconos son los
+    // mismos de `SETTINGS_TABS` en `general-settings.routes.ts`.
+    {
+      path: '/admin/settings/general/negocio',
+      title: 'Negocio',
+      parent: 'General',
+      icon: 'store',
+    },
+    {
+      path: '/admin/settings/general/venta',
+      title: 'Venta',
+      parent: 'General',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/settings/general/logistica',
+      title: 'Logística',
+      parent: 'General',
+      icon: 'truck',
+    },
+    {
+      path: '/admin/settings/general/reservas',
+      title: 'Reservas',
+      parent: 'General',
+      icon: 'calendar-clock',
+    },
+    {
+      path: '/admin/settings/general/mesas',
+      title: 'Mesas',
+      parent: 'General',
+      icon: 'utensils',
+    },
+    {
+      path: '/admin/settings/general/notificaciones',
+      title: 'Notificaciones',
+      parent: 'General',
+      icon: 'bell',
+    },
     {
       path: '/admin/settings/users',
       title: 'Usuarios',
