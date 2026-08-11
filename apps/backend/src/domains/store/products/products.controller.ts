@@ -389,18 +389,17 @@ export class ProductsController {
   @Delete('variants/:variantId')
   @Permissions('store:products:delete')
   async removeVariant(@Param('variantId', ParseIntPipe) variantId: number) {
-    try {
-      await this.productVariantService.removeVariant(variantId);
-      return this.responseService.deleted(
-        'Variante de producto eliminada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la variante del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch a propósito. `responseService.error()` RETORNA el sobre en
+    // vez de lanzarlo, así que atrapar acá convertía el bloqueo por existencias
+    // en un HTTP 200 con `success:false`: el frontend —que sólo mira el status—
+    // mostraba "variante eliminada" mientras el backend la había protegido.
+    // Verificado en runtime: la guarda respondía 200 con el mensaje de bloqueo.
+    // La excepción sube al AllExceptionsFilter, que traduce
+    // PROD_VARIANT_HAS_STOCK_001 a su 409 con el código tipado.
+    await this.productVariantService.removeVariant(variantId);
+    return this.responseService.deleted(
+      'Variante de producto eliminada exitosamente',
+    );
   }
 
   // Product Images endpoints

@@ -516,6 +516,20 @@ export class ProductVariantService {
       where: { product_variant_id: variantId },
       data: { product_variant_id: null },
     });
+    // `inventory_valuation_snapshots` faltaba en esta lista, así que borrar una
+    // variante que apareciera en cualquier snapshot de valuación reventaba con
+    // `inventory_valuation_snapshots_product_variant_id_fkey`. El try/catch del
+    // controlador lo devolvía como un error genérico, así que el borrado de
+    // variantes estaba roto sin que se notara: basta un ajuste de stock —que
+    // genera snapshot— para inhabilitarlo.
+    //
+    // Se pone a NULL, no se borra: el snapshot es histórico de valuación y
+    // eliminarlo alteraría cifras ya emitidas. La columna es nullable
+    // precisamente para esto, y es el mismo patrón de las 8 tablas de arriba.
+    await prisma.inventory_valuation_snapshots.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
     await prisma.stock_levels.deleteMany({
       where: { product_variant_id: variantId },
     });
@@ -539,6 +553,30 @@ export class ProductVariantService {
       throw new VendixHttpException(
         ErrorCodes.PROD_HAS_RESERVATIONS_001,
         'Operación bloqueada: existen reservas de stock activas',
+      );
+    }
+
+    // BLOCK: tampoco se borra una variante que TIENE EXISTENCIAS.
+    //
+    // `cleanupVariantForeignKeys` reasigna el histórico al producto base y
+    // elimina las filas de `stock_levels` de la variante. Con saldo vivo eso
+    // destruye inventario sin dejar ajuste ni movimiento que lo explique: el
+    // stock simplemente desaparece del sistema.
+    //
+    // La guarda de reservas de arriba NO cubre este caso: las reservas son un
+    // subconjunto del saldo, así que una variante con 40 unidades y cero
+    // reservas pasaba sin fricción. Se suma `quantity_on_hand` —no
+    // `quantity_available`— porque lo que se destruiría es el físico, y el
+    // disponible puede ser 0 mientras hay existencias comprometidas.
+    const stockAggregate = await this.prisma.stock_levels.aggregate({
+      where: { product_variant_id: variantId },
+      _sum: { quantity_on_hand: true },
+    });
+    const onHandUnits = Number(stockAggregate._sum.quantity_on_hand ?? 0);
+    if (onHandUnits > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+        `Operación bloqueada: la variante #${variantId} tiene ${onHandUnits} unidad(es) en existencia. Ajusta el stock a 0 antes de eliminarla.`,
       );
     }
 

@@ -722,6 +722,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Operación bloqueada: existen reservas de stock activas',
   },
+  /**
+   * Borrar una variante reasigna su histórico al producto base y elimina sus
+   * filas de `stock_levels`. Con existencias vivas eso DESTRUYE inventario sin
+   * dejar ni ajuste ni movimiento que lo explique. La guarda previa sólo miraba
+   * reservas activas —que son un subconjunto—, así que una variante con 40
+   * unidades y ninguna reserva se borraba sin fricción.
+   */
+  PROD_VARIANT_HAS_STOCK_001: {
+    code: 'PROD_VARIANT_HAS_STOCK_001',
+    httpStatus: 409,
+    devMessage:
+      'Operación bloqueada: la variante tiene existencias. Ajusta el stock a 0 antes de eliminarla.',
+  },
   PROD_SKU_COLLISION_001: {
     code: 'PROD_SKU_COLLISION_001',
     httpStatus: 409,
