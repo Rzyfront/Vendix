@@ -329,6 +329,9 @@ export class SalesAnalyticsService {
         const product = productMap.get(r.product_id as number);
         const revenue = Number(r._sum.total_price || 0);
         const units = Number(r._sum.quantity || 0);
+        // QUI-648: margen ya consistente — ver la nota de la rama no paginada.
+        // `avgPrice` sale de dividir por unidades de STOCK, la misma escala en
+        // la que vive `cost_price`; no se multiplica por `price_unit_quantity`.
         const costPrice = product ? Number(product.cost_price || 0) : 0;
         const avgPrice = units > 0 ? revenue / units : 0;
         const profitMargin =
@@ -413,6 +416,12 @@ export class SalesAnalyticsService {
       const product = productMap.get(r.product_id as number);
       const revenue = Number(r._sum.total_price || 0);
       const units = Number(r._sum.quantity || 0);
+      // QUI-648: este margen NO necesita corrección de escala. `avgPrice` es
+      // `revenue / units` con `units` en unidades de STOCK, así que ya es
+      // dinero por unidad mínima, la misma vara en la que `products.cost_price`
+      // guarda el promedio ponderado. El defecto de escala solo aparece cuando
+      // el costo se enfrenta a `base_price`, que cubre `price_unit_quantity`
+      // unidades (ver `ProductsAnalyticsService.costInPriceScale`).
       const costPrice = product ? Number(product.cost_price || 0) : 0;
       const avgPrice = units > 0 ? revenue / units : 0;
       const profitMargin =
