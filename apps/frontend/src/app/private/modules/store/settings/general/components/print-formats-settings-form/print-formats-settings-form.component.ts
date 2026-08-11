@@ -202,7 +202,16 @@ export class PrintFormatsSettingsForm {
    * in the margin box at that moment.
    */
   private hydrate(receipts: ReceiptsSettings | undefined): void {
-    const formats = { ...this.formatByDocument() };
+    // Built from scratch, NEVER seeded from `formatByDocument()`. This method
+    // runs inside an `effect` and writes that same signal at the end, so reading
+    // it here would make the effect depend on its own output: `set` receives a
+    // fresh object literal every time, reference equality always fails, the
+    // signal always notifies, and the effect re-runs forever — an infinite loop
+    // that freezes the settings screen with an out-of-memory error.
+    //
+    // The loop below assigns every entry of `PRINT_DOCUMENTS`, so no part of the
+    // previous value was ever needed.
+    const formats = {} as Record<PrintDocument, PrintFormat>;
 
     for (const doc of PRINT_DOCUMENTS) {
       const resolved = this.resolveConfig(receipts, doc);
