@@ -24,6 +24,10 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import {
+  normalizePriceUnitLines,
+  roundMoney,
+} from '../products/services/price-unit.util';
+import {
   assertCanChargeVat,
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
@@ -131,6 +135,34 @@ export class OrdersService {
       createOrderDto.items,
       context,
     );
+
+    // Precio por N unidades de stock: el producto publica "$5.000 por metro" y
+    // la línea llega en milímetros. El total lo recalcula el servidor porque la
+    // escala es del producto y el cliente puede traer la aritmética vieja.
+    const priceUnits = await normalizePriceUnitLines(
+      this.prisma as any,
+      createOrderDto.items,
+      { hasTierAtIndex: (index) => tierSnapshots[index]?.tier_id != null },
+    );
+    if (priceUnits.adjusted > 0) {
+      if (createOrderDto.subtotal != null) {
+        createOrderDto.subtotal = roundMoney(
+          Number(createOrderDto.subtotal) + priceUnits.subtotalDelta,
+        );
+      }
+      if (createOrderDto.tax_amount != null) {
+        createOrderDto.tax_amount = roundMoney(
+          Number(createOrderDto.tax_amount) + priceUnits.taxDelta,
+        );
+      }
+      if (createOrderDto.total_amount != null) {
+        createOrderDto.total_amount = roundMoney(
+          Number(createOrderDto.total_amount) +
+            priceUnits.subtotalDelta +
+            priceUnits.taxDelta,
+        );
+      }
+    }
 
     // Validar horario de atención antes de crear la orden
     if (!createOrderDto.skip_schedule_validation) {
@@ -256,6 +288,11 @@ export class OrdersService {
                       tierSnap?.tier_name ?? null,
                     stock_units_consumed:
                       tierSnap?.stock_units_consumed ?? null,
+                    // Escala del precio al momento de vender: sin este
+                    // snapshot el total deja de ser reproducible en cuanto el
+                    // producto cambie de "por metro" a "por rollo".
+                    price_unit_quantity:
+                      priceUnits.priceUnitByIndex[index] ?? null,
                     updated_at: new Date(),
                   };
                 }),
@@ -840,6 +877,33 @@ export class OrdersService {
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertSaleVatAllowed(dto.items);
 
+    // Precio por N unidades: misma corrección que en el create, antes de que
+    // los totales de abajo lean `item.total_price`.
+    const priceUnits = await normalizePriceUnitLines(
+      this.prisma as any,
+      dto.items,
+      { hasTierAtIndex: (index) => tierSnapshots[index]?.tier_id != null },
+    );
+    if (priceUnits.adjusted > 0) {
+      if (dto.subtotal != null) {
+        dto.subtotal = roundMoney(
+          Number(dto.subtotal) + priceUnits.subtotalDelta,
+        );
+      }
+      if (dto.tax_amount != null) {
+        dto.tax_amount = roundMoney(
+          Number(dto.tax_amount) + priceUnits.taxDelta,
+        );
+      }
+      if (dto.total_amount != null) {
+        dto.total_amount = roundMoney(
+          Number(dto.total_amount) +
+            priceUnits.subtotalDelta +
+            priceUnits.taxDelta,
+        );
+      }
+    }
+
     // Calculate totals from items
     const subtotal =
       dto.subtotal ??
@@ -949,6 +1013,7 @@ export class OrdersService {
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
             stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+            price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
             updated_at: new Date(),
           };
         }),

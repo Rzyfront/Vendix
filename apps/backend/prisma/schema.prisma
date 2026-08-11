@@ -9224,6 +9224,9 @@ enum kitchen_ticket_item_state_enum {
 enum uom_dimension_enum {
   mass
   volume
+  /// Longitud, con base en milímetros: cable, manguera, tubo, cinta. Entró con
+  /// QUI-648 para que una ferretería pueda vender por metro y por rollo.
+  length
   count
 }
 

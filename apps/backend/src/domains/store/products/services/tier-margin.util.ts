@@ -17,6 +17,26 @@
  * `packaging.util`.
  */
 
+/**
+ * Unidades de stock que cubre un precio.
+ *
+ * Una presentación manda con su `packSize` —el rollo son 20.000 mm y su precio
+ * es el del rollo entero—. Cuando no hay presentación, el precio es el base y
+ * cubre `price_unit_quantity` unidades: un producto que publica "$5.000 por
+ * metro" tiene su precio anclado a 1.000 mm, y medir su margen contra el costo
+ * de UN milímetro daría un 499.900%.
+ */
+export function resolvePricedUnits(
+  packSize?: number | null,
+  priceUnitQuantity?: number | null,
+): number {
+  const pack = Number(packSize);
+  if (Number.isFinite(pack) && pack > 1) return pack;
+  const scale = Number(priceUnitQuantity);
+  if (Number.isFinite(scale) && scale > 1) return scale;
+  return 1;
+}
+
 /** Costo del paquete completo. `packSize <= 1` colapsa al costo unitario. */
 export function resolvePackageCost(unitCost: number, packSize: number): number {
   const cost = Number(unitCost);
@@ -61,6 +81,11 @@ export type TierPricingInput = {
   unitCost: number;
   /** Cascada ya resuelta: override ?? tier ?? 1. */
   packSize: number;
+  /**
+   * `products.price_unit_quantity`. Solo pesa cuando la tarifa no tiene
+   * paquete propio (una tarifa de cliente sobre un producto vendido por metro).
+   */
+  priceUnitQuantity?: number | null;
   /** Precio explícito del paquete, si el usuario lo escribió. */
   overridePrice?: number | null;
   /** Margen explícito, si el usuario lo escribió. */
@@ -82,7 +107,8 @@ export function resolveTierPricingCostAnchor(input: TierPricingInput): {
   override_price: number | null;
   override_profit_margin: number | null;
 } {
-  const { unitCost, packSize } = input;
+  const { unitCost } = input;
+  const packSize = resolvePricedUnits(input.packSize, input.priceUnitQuantity);
   const hasPrice =
     input.overridePrice != null && Number(input.overridePrice) > 0;
   const hasMargin =

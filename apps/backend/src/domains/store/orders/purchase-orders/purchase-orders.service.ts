@@ -1831,6 +1831,7 @@ export class PurchaseOrdersService {
         id: true,
         store_id: true,
         cost_price: true,
+        price_unit_quantity: true,
         is_ingredient: true,
         is_sellable: true,
       },
@@ -1916,6 +1917,7 @@ export class PurchaseOrdersService {
       resolveTierPricingCostAnchor({
         unitCost: Number(product.cost_price ?? 0),
         packSize,
+        priceUnitQuantity: product.price_unit_quantity,
         overridePrice: item.sale_unit_price,
         overrideMargin: item.sale_unit_profit_margin,
       });

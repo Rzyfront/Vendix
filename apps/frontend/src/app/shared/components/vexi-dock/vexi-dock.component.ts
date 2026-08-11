@@ -14,7 +14,7 @@ import { isPlatformBrowser } from '@angular/common';
 import { VexiAvatarComponent, VexiExpression } from './vexi-avatar.component';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
 import { VexiPanelComponent } from './vexi-panel.component';
-import { VexiDockPositionService, DOCK_SIZE } from './vexi-dock-position.service';
+import { VexiDockPositionService } from './vexi-dock-position.service';
 import { VexiPresenceService } from './vexi-presence.service';
 import { VexiRealtimeService } from '../../../core/services/vexi-realtime.service';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
@@ -97,6 +97,10 @@ const FAREWELL_MAX_MS = 15_000;
   host: {
     '(window:resize)': 'onViewportChange()',
     '(window:orientationchange)': 'onViewportChange()',
+    // Publicada en el host y no en el ancla para que herede hasta la avatar: su
+    // flotación se mide contra el diámetro, y un span suelto dentro del ancla no
+    // la alcanzaría sin repetir la variable.
+    '[style.--vexi-dock-size]': 'dockSizeVar()',
   },
   template: `
     <!-- The anchor owns the transform so the panel travels with the dock while
@@ -199,8 +203,13 @@ const FAREWELL_MAX_MS = 15_000;
       }
 
       /* Carries the position. Sized like the dock so the hint (bottom: 100%)
-         and the panel (inset: 0) keep resolving against the same box. The
-         fallback must track DOCK_SIZE in vexi-dock-position.service.ts. */
+         and the panel (inset: 0) keep resolving against the same box.
+
+         La variable la publica el host desde dockSizeVar(), que es el mismo
+         número con el que el servicio recorta e imanta la posición: el recorte
+         por tamaño de pantalla no puede vivir en una media query de aquí, o el
+         dock se imantaría reservando 94px para un círculo de 56. El fallback
+         solo cubre el frame previo a la hidratación. */
       .vexi-dock__anchor {
         position: absolute;
         top: 0;
@@ -620,7 +629,7 @@ export class VexiDockComponent {
     // ancla congelada este computed deja de recalcularse durante el gesto.
     if (frozen) return frozen.left;
     if (!this.isBrowser) return false;
-    return this.position().x + DOCK_SIZE / 2 < window.innerWidth / 2;
+    return this.position().x + this.positionService.size() / 2 < window.innerWidth / 2;
   });
 
   /**
@@ -632,7 +641,7 @@ export class VexiDockComponent {
     const frozen = this.anchorFrozen();
     if (frozen) return frozen.top;
     if (!this.isBrowser) return false;
-    return this.position().y + DOCK_SIZE / 2 < window.innerHeight / 2;
+    return this.position().y + this.positionService.size() / 2 < window.innerHeight / 2;
   });
 
   protected readonly ariaLabel = computed(() =>
@@ -1083,5 +1092,6 @@ export class VexiDockComponent {
     this.holdTimer = null;
   }
 
-  protected readonly dockSize = DOCK_SIZE;
+  /** Diámetro vigente como valor CSS, para la custom property del host. */
+  protected readonly dockSizeVar = computed(() => `${this.positionService.size()}px`);
 }

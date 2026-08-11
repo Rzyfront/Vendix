@@ -217,6 +217,41 @@ export class ProductsService {
     );
   }
 
+  /**
+   * La unidad de STOCK debe ser exacta.
+   *
+   * El inventario es `Int` en la unidad base (`stock_levels.quantity_on_hand`),
+   * así que una unidad cuyo `factor_to_base` no es entero —pulgada = 25,4 mm,
+   * galón = 3785,411784 ml— no puede representarse sin perder mercancía en cada
+   * conversión. El catálogo marca esas unidades con `is_stock_eligible=false`;
+   * siguen sirviendo como unidad de COMPRA (solo convierten al recibir) o como
+   * presentación de venta.
+   */
+  private async assertStockUomEligible(
+    stock_uom_id: number | null | undefined,
+  ): Promise<void> {
+    if (stock_uom_id === undefined || stock_uom_id === null) return;
+
+    const uom = await this.prisma.units_of_measure.findFirst({
+      where: { id: stock_uom_id },
+      select: { code: true, name: true, is_stock_eligible: true, is_active: true },
+    });
+    if (!uom || !uom.is_active) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Unidad de medida no encontrada en el catálogo',
+        { stock_uom_id },
+      );
+    }
+    if (!uom.is_stock_eligible) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_UOM_NOT_STOCK_ELIGIBLE,
+        `${uom.name} (${uom.code}) no puede ser la unidad de stock porque su factor de conversión no es entero. Úsala como unidad de compra o define el stock en una unidad exacta.`,
+        { stock_uom_id, code: uom.code },
+      );
+    }
+  }
+
   async generateDescription(dto: GenerateProductDescriptionDto) {
     const productData: Record<string, any> = { nombre: dto.name };
 
@@ -649,6 +684,10 @@ export class ProductsService {
         store_id,
         slug,
       );
+
+      // La unidad de stock debe ser exacta antes de derivar nada: el factor se
+      // calcula contra ella y el inventario se lleva en enteros de la base.
+      await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
 
       // Derivar purchase_to_stock_factor desde el catálogo de UoM (fuente de
       // verdad de costeo). Sobrescribe lo que mande el cliente cuando vienen
@@ -2174,6 +2213,9 @@ export class ProductsService {
       const uomFkTouched =
         sanitizedDto.stock_uom_id !== undefined ||
         sanitizedDto.purchase_uom_id !== undefined;
+      if (sanitizedDto.stock_uom_id !== undefined) {
+        await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
+      }
       const derivedFactor = uomFkTouched
         ? await this.derivePurchaseToStockFactor(
             effectiveStockUomId,

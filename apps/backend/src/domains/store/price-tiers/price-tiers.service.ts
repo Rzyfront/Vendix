@@ -301,7 +301,7 @@ export class PriceTiersService {
 
     const product = await this.prisma.products.findFirst({
       where: { id: productId },
-      select: { id: true, cost_price: true },
+      select: { id: true, cost_price: true, price_unit_quantity: true },
     });
     if (!product) {
       throw new VendixHttpException(
@@ -363,6 +363,7 @@ export class PriceTiersService {
       resolveTierPricingCostAnchor({
         unitCost,
         packSize,
+        priceUnitQuantity: product.price_unit_quantity,
         overridePrice: dto.override_price,
         overrideMargin: dto.override_profit_margin,
       });

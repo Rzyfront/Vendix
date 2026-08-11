@@ -3257,6 +3257,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PROD_UOM_NOT_STOCK_ELIGIBLE: {
+    code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',
+    httpStatus: 400,
+    devMessage:
+      'Esta unidad no puede ser la unidad de stock: su factor de conversión no es entero y el inventario se lleva en enteros de la unidad base. Úsala como unidad de compra o de presentación.',
+  },
   PRODUCT_TIERS_VARIANTS_EXCLUSIVE: {
     code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
     httpStatus: 409,
