@@ -1336,9 +1336,15 @@ export class PurchaseOrdersService {
       // QUI-647: `payment_installments` es un campo del DTO, no una columna.
       // Se saca del spread o Prisma lo rechaza como argumento desconocido; las
       // cuotas se escriben más abajo por la relación `payment_schedules`.
+      // `down_payment_amount` también se saca: la reconducción de la matriz
+      // anti-doble-registro (partial con abono==total → immediate SIN abono)
+      // convierte `downPayment` en 0, y si el valor crudo del DTO quedara en
+      // el spread, el conditional `...(downPayment > 0 ? ...)` vacío no lo
+      // sobreescribiría y la orden immediate quedaría con un abono fantasma.
       const {
         expected_date: rawExpectedDate,
         payment_installments: _installmentsInput,
+        down_payment_amount: _downPaymentInput,
         ...orderDataRest
       } = orderData;
 
