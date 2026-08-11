@@ -9,6 +9,7 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { PwaCacheService } from '@common/services/pwa-cache.service';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import {
   OrganizationSettings,
@@ -34,6 +35,7 @@ export class SettingsService {
     private auditService: AuditService,
     private s3Service: S3Service,
     private fiscalScope: FiscalScopeService,
+    private pwaCache: PwaCacheService,
   ) {}
 
   async findOne() {
@@ -73,10 +75,45 @@ export class SettingsService {
       });
     }
 
+    // The installable app icon and the manifest are derived from this branding
+    // and cached in S3 + Redis. Without this drop the ORG_LANDING / ORG_ADMIN
+    // PWA keeps the previous logo indefinitely (see PwaCacheService).
+    if (
+      this.brandingAffectsPwa(
+        existing?.settings as Record<string, any> | undefined,
+        settingsForStorage,
+      )
+    ) {
+      await this.pwaCache.invalidateOrganization(result.organization_id);
+    }
+
     return {
       ...result,
       settings: await this.signSettingsAssets(result.settings),
     };
+  }
+
+  /**
+   * Whether the branding fields the manifest and the app icon are built from
+   * actually changed. Compared field by field instead of invalidating on every
+   * settings write: this endpoint also carries inventory, fiscal and panel_ui
+   * sections, and each needless invalidation costs a re-derivation of four PNGs
+   * for the tenant's next visitor.
+   */
+  private brandingAffectsPwa(
+    before: Record<string, any> | undefined,
+    after: Record<string, any>,
+  ): boolean {
+    const read = (settings: Record<string, any> | undefined) => {
+      const branding = settings?.['branding'] ?? {};
+      return [
+        branding['logo_url'],
+        branding['favicon_url'],
+        branding['primary_color'],
+      ].join('|');
+    };
+
+    return read(before) !== read(after);
   }
 
   /**

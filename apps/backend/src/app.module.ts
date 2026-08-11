@@ -41,6 +41,7 @@ import { AwsModule } from './common/services/aws/aws.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QueueModule } from './common/queue/queue.module';
 import { VendixCacheModule } from './common/cache/cache.module';
+import { PwaCacheModule } from './common/services/pwa-cache.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { UploadModule } from './upload/upload.module';
 import { DnsModule } from './common/services/dns/dns.module';
@@ -134,6 +135,7 @@ export function isKnownVendixProcessRole(
     RedisModule,
     QueueModule,
     VendixCacheModule,
+    PwaCacheModule,
     AIEngineModule,
     EncryptionModule,
     AwsModule,

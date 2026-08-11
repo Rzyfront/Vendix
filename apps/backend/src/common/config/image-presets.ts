@@ -145,6 +145,18 @@ export interface PwaIconSpec {
  *                          so it survives the 20%-per-side safe-zone crop.
  * - `apple-touch-icon-180` iOS/iPadOS/macOS Safari home-screen icon.
  */
+/**
+ * Shortest side, in pixels, a tenant asset must have to be worth deriving an
+ * app icon from.
+ *
+ * The install icon is rendered at up to 512px. Upscaling a 16x16 favicon into
+ * that canvas produces an unreadable smear that reads as a broken brand, so a
+ * source below this floor is rejected and the tenant installs with the Vendix
+ * mark instead — a deliberate trade: a correct foreign logo beats an illegible
+ * own one.
+ */
+export const MIN_PWA_SOURCE_PX = 64;
+
 export const PWA_ICON_SPECS: Record<PwaIconVariant, PwaIconSpec> = {
   'icon-192': { size: 192, inscribeRatio: 1 },
   'icon-512': { size: 512, inscribeRatio: 1 },
