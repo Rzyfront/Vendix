@@ -39,6 +39,15 @@ export interface FiscalReadinessResolution {
    * que sin este campo dos filas del mismo eje serían indistinguibles.
    */
   document_type: FiscalDocumentType;
+  /**
+   * El número que la DIAN autorizó, y su fecha. Viajan porque el formulario de
+   * edición los exige: sin ellos el host pediría `GET resolutions` sólo para
+   * rellenarlos, o el comerciante retecleaería a mano un número autorizado —que
+   * es justo la clase de dato que un dedo cambia sin notarlo. No son secretos:
+   * el único campo que nunca sale de aquí es la clave técnica.
+   */
+  resolution_number: string;
+  resolution_date: Date;
   prefix: string | null;
   range_from: number;
   range_to: number;

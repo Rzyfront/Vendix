@@ -975,6 +975,12 @@ export class DianConfigService {
         select: {
           id: true,
           document_type: true,
+          // Ambos viajan porque el formulario de edición los EXIGE: sin ellos
+          // el host tendría que pedir `GET resolutions` sólo para rellenarlos, o
+          // —peor— el comerciante reteclearía a mano el número que la DIAN
+          // autorizó. Ninguno es secreto; el único que no sale es la ClTec.
+          resolution_number: true,
+          resolution_date: true,
           prefix: true,
           range_from: true,
           range_to: true,
