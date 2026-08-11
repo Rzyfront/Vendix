@@ -66,9 +66,10 @@ interface SubscriptionMeta {
 }
 
 /**
- * Los seis tipos que este formulario expone. El backend inicializa más
- * (los de separados/layaway) con `in_app: true` y sin interruptor propio:
- * esos llegan siempre a la campana.
+ * Los tipos que este formulario expone. El backend inicializa más (los de
+ * separados/layaway) con `in_app: true` y sin interruptor propio: esos llegan
+ * siempre a la campana. Los de vencimientos CxP sí tienen interruptor: el
+ * operador decide si quiere campana/web push para cada uno.
  */
 const SUBSCRIPTION_META: Readonly<Record<string, SubscriptionMeta>> = {
   new_order: {
@@ -102,6 +103,18 @@ const SUBSCRIPTION_META: Readonly<Record<string, SubscriptionMeta>> = {
     label: 'Nuevas reseñas',
     trigger: 'Cuando un cliente califica un producto o la tienda.',
     icon: 'star',
+  },
+  ap_installment_due_soon: {
+    label: 'Pago a proveedor por vencer',
+    trigger:
+      'Cuando una cuota de Cuentas por Pagar entra en la ventana de anticipación que definiste en los ajustes de la tienda.',
+    icon: 'calendar-clock',
+  },
+  ap_installment_overdue: {
+    label: 'Pago a proveedor vencido',
+    trigger:
+      'Cuando una cuota de Cuentas por Pagar pasó su fecha de vencimiento sin pagarse.',
+    icon: 'alert-triangle',
   },
 };
 
@@ -182,6 +195,8 @@ export class NotificationsSettingsForm implements OnInit {
     new_customer: true,
     payment_received: true,
     new_review: true,
+    ap_installment_due_soon: true,
+    ap_installment_overdue: true,
   });
 
   readonly subscriptionMeta = SUBSCRIPTION_META;
