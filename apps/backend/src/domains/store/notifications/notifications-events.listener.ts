@@ -511,11 +511,17 @@ export class NotificationsEventsListener {
     amount: number;
     scheduled_date: Date;
   }) {
+    // QUI-647 — el payload ya traía `document_number` y el listener lo
+    // descartaba; el operador necesita saber QUÉ documento vence, no solo
+    // cuánto y a quién.
+    const docLabel = event.document_number
+      ? ` del documento ${event.document_number}`
+      : '';
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'ap_installment_due_soon',
       'Pago a proveedor por vencer',
-      `Cuota de $${event.amount} a ${event.supplier_name} vence pronto`,
+      `Cuota de $${event.amount}${docLabel} a ${event.supplier_name} vence pronto`,
       {
         accounts_payable_id: event.accounts_payable_id,
         schedule_id: event.schedule_id,
@@ -541,11 +547,15 @@ export class NotificationsEventsListener {
     amount: number;
     scheduled_date: Date;
   }) {
+    // QUI-647 — `document_number` en el texto (ver handleApInstallmentDueSoon).
+    const docLabel = event.document_number
+      ? ` del documento ${event.document_number}`
+      : '';
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'ap_installment_overdue',
       'Pago a proveedor vencido',
-      `Cuota de $${event.amount} a ${event.supplier_name} está vencida`,
+      `Cuota de $${event.amount}${docLabel} a ${event.supplier_name} está vencida`,
       {
         accounts_payable_id: event.accounts_payable_id,
         schedule_id: event.schedule_id,
