@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolvePackSize } from '../products/services/packaging.util';
 import {
   resolveLineTotal,
   resolvePriceUnitScale,
@@ -67,6 +68,13 @@ export class LayawayService {
        *    stock a reservar sale de la cascada de empaque
        *    (`stock_units_consumed`), no de `quantity`.
        *
+       * El criterio de exclusión es la PRESENTACIÓN (`packSize > 1`), no "la
+       * línea trae tarifa". Una tarifa de cliente (Mayorista) cambia el precio
+       * pero lo sigue expresando por unidad de PRECIO, así que la escala sí
+       * aplica: excluirla dejaba el plan en $9.000.000 por 2 metros de un cable
+       * a $4.500 el metro (plan 36 en dev), y como las cuotas se validan contra
+       * ese total, el comerciante recibía un plan de nueve millones.
+       *
        * Con escala 1 y sin tarifa —todo lo que existe hoy— la fórmula colapsa
        * a la histórica y ningún plan cambia de total.
        */
@@ -76,6 +84,13 @@ export class LayawayService {
         context,
       );
 
+      /** Una línea vendida por presentación: `unit_price` ya es el paquete. */
+      const esPresentacion = (index: number): boolean =>
+        resolvePackSize(
+          tierSnapshots[index]?.units_per_package,
+          tierSnapshots[index]?.override_units_per_package,
+        ) > 1;
+
       // La escala solo interesa en las líneas SIN presentación. `tx` sale del
       // baseClient (sin la extensión de scoping), así que el filtro de tienda
       // va explícito: la escala es del catálogo de ESTA tienda.
@@ -83,7 +98,7 @@ export class LayawayService {
         new Set(
           dto.items
             .map((item, index) =>
-              tierSnapshots[index]?.tier_id != null ? null : item.product_id,
+              esPresentacion(index) ? null : item.product_id,
             )
             .filter((id): id is number => typeof id === 'number'),
         ),
@@ -106,7 +121,7 @@ export class LayawayService {
         const tierSnap = tierSnapshots[index];
         const discount = new Prisma.Decimal(item.discount_amount || 0);
         const tax = new Prisma.Decimal(item.tax_amount || 0);
-        const price_unit_quantity = tierSnap
+        const price_unit_quantity = esPresentacion(index)
           ? 1
           : (scaleByProductId.get(Number(item.product_id)) ?? 1);
         const line_total = resolveLineTotal(

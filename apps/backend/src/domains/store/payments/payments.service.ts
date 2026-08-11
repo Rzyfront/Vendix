@@ -38,6 +38,7 @@ import {
   resolvePriceUnitScale,
   resolvePriceUnits,
 } from '../products/services/price-unit.util';
+import { resolvePackSize } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -2262,16 +2263,28 @@ export class PaymentsService {
      *
      * Dos exclusiones, espejo exacto de `resolveLineUnits` en el frontend:
      *  - Línea de PESO legado: el peso capturado ya ES el multiplicador.
-     *  - Línea con PRESENTACIÓN aplicada (`tierSnap`): `unit_price` es el
+     *  - Línea con PRESENTACIÓN aplicada (`packSize > 1`): `unit_price` es el
      *    precio del paquete y `quantity` cuenta paquetes; dividir cobraría de
      *    menos. Las unidades de stock que consume viajan aparte en
      *    `stock_units_consumed`.
      *
+     * La exclusión es la PRESENTACIÓN, no "la línea trae tarifa". Una tarifa de
+     * cliente (Mayorista) cambia el precio y lo sigue expresando por unidad de
+     * PRECIO, así que la escala aplica igual. Excluyéndola, `priceUnits` quedaba
+     * en milímetros, `resolveRequestedFinalUnitPrice` derivaba $4,50 contra un
+     * catálogo de $4.500 y el guard de override **rechazaba el cobro**: el POS
+     * no podía vender con tarifa de cliente ningún producto con escala.
+     *
      * Con la escala por defecto (1) `priceUnits === lineUnits` y no cambia un
      * solo número de todo el catálogo existente.
      */
+    const esPresentacion =
+      resolvePackSize(
+        tierSnap?.units_per_package,
+        tierSnap?.override_units_per_package,
+      ) > 1;
     const priceUnitQuantity =
-      tierSnap || Number(item.weight || 0) > 0
+      esPresentacion || Number(item.weight || 0) > 0
         ? 1
         : resolvePriceUnitScale(product.price_unit_quantity);
     const priceUnits = resolvePriceUnits(lineUnits, priceUnitQuantity);
