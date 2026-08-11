@@ -39,7 +39,10 @@ import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { resolvePackSize } from '../../products/services/packaging.util';
-import { resolveTierPricingCostAnchor } from '../../products/services/tier-margin.util';
+import {
+  resolvePricedUnits,
+  resolveTierPricingCostAnchor,
+} from '../../products/services/tier-margin.util';
 import { assertTiersAllowed } from '../../products/services/tiers-variants-exclusive.util';
 
 /**
@@ -788,8 +791,23 @@ export class PurchaseOrdersService {
           // raise it later. So the price is derived whenever a base price was
           // not pinned, including `margin === 0`, instead of leaving
           // `base_price = 0` (which read as "free" in the catalog).
+          //
+          // QUI-648 — el costo se lleva a la ESCALA en la que el producto
+          // publica su precio antes de derivar `base_price`, porque el destino
+          // de este número es `products.base_price` (líneas de abajo) y esa
+          // columna vale por `price_unit_quantity` unidades de stock. Sobre un
+          // producto existente vendido por metro, derivar desde el costo crudo
+          // le reescribía el precio del metro con el del milímetro. Un producto
+          // NUEVO nace siempre en escala 1 —el DTO de la orden de compra no
+          // tiene `price_unit_quantity`—, así que ahí `resolvePricedUnits`
+          // devuelve 1 y el resultado es el histórico.
+          const basePriceScale = resolvePricedUnits(
+            null,
+            (existingProduct as { price_unit_quantity?: number | null } | null)
+              ?.price_unit_quantity,
+          );
           if (cost > 0 && (!item.base_price || item.base_price === 0)) {
-            basePrice = cost * (1 + margin / 100);
+            basePrice = cost * basePriceScale * (1 + margin / 100);
           }
 
           // Resolve Brand: derive a deterministic slug (mirrors the categories
@@ -1733,29 +1751,55 @@ export class PurchaseOrdersService {
    *
    * `costPrice` must already be the *stock* unit cost (post UoM conversion
    * when applicable); margin math is always against the minimum stock unit.
+   *
+   * QUI-648 — ESCALAS. `costPrice` viene en unidad MÍNIMA de stock (lo escribe
+   * `CostingService` como valor / quantity_on_hand) mientras que `base_price` /
+   * `price_override` cubren `products.price_unit_quantity` de esas unidades. Un
+   * cable con el stock en milímetros guarda $3 el milímetro y $5.000 el metro:
+   * restarlos tal cual publicaba un margen del 166.566% y —peor— con un margen
+   * pinneado derivaba `base_price = costo_del_milímetro × (1+m)`, o sea que
+   * RECIBIR MERCANCÍA dejaba el cable a $3,60 el metro. Por eso el costo se sube
+   * a la escala del precio con `resolvePricedUnits`, el mismo resolutor que usan
+   * el editor de producto (`tier-margin.util`) y la analítica: las tres puntas
+   * miden el margen contra el mismo costo de referencia.
+   *
+   * `packSize` va en `null` a propósito: una PRESENTACIÓN
+   * (`price_tiers.kind = 'sale_unit'`) tiene su propio precio y su propio margen
+   * en `product_price_tier_overrides`, y no se deriva desde acá.
+   *
+   * Con `priceUnitQuantity` ausente, nulo, 0, 1 o no numérico —el catálogo
+   * histórico entero— `resolvePricedUnits` devuelve 1, el costo sale intacto
+   * (×1 es exacto en IEEE-754) y la aritmética es byte a byte la de siempre.
    */
   static resolvePricingAfterReceipt(args: {
     costPrice: number;
     existingBasePrice: number;
     newBasePrice?: number;
     newProfitMargin?: number;
+    /** `products.price_unit_quantity` del producto de la línea. */
+    priceUnitQuantity?: number | null;
   }): { basePrice: number; profitMargin: number } {
     const { costPrice, existingBasePrice } = args;
     const { newBasePrice, newProfitMargin } = args;
 
+    // Costo llevado a la escala en la que se publica el precio.
+    const costInPriceScale =
+      costPrice * resolvePricedUnits(null, args.priceUnitQuantity);
+
     if (newBasePrice !== undefined && newBasePrice !== null) {
       // Operator pinned the listing price → margin derived from new cost.
       const margin =
-        costPrice > 0
-          ? Math.round(((newBasePrice - costPrice) / costPrice) * 10000) /
-            100
+        costInPriceScale > 0
+          ? Math.round(
+              ((newBasePrice - costInPriceScale) / costInPriceScale) * 10000,
+            ) / 100
           : 0;
       return { basePrice: newBasePrice, profitMargin: margin };
     }
 
     if (newProfitMargin !== undefined && newProfitMargin !== null) {
       // Operator pinned the margin → listing price derived from new cost.
-      const basePrice = costPrice * (1 + newProfitMargin / 100);
+      const basePrice = costInPriceScale * (1 + newProfitMargin / 100);
       return {
         basePrice: Math.round(basePrice * 100) / 100,
         profitMargin: newProfitMargin,
@@ -1764,9 +1808,9 @@ export class PurchaseOrdersService {
 
     // Cost-anchor default: keep the existing base_price, recompute margin.
     const margin =
-      costPrice > 0
+      costInPriceScale > 0
         ? Math.round(
-            ((existingBasePrice - costPrice) / costPrice) * 10000,
+            ((existingBasePrice - costInPriceScale) / costInPriceScale) * 10000,
           ) / 100
         : 0;
     return { basePrice: existingBasePrice, profitMargin: margin };
@@ -2461,6 +2505,21 @@ export class PurchaseOrdersService {
           // the existing base_price against the *new* cost_price so the
           // stored margin reflects reality — this is the cost-anchor rule
           // and matches what the modal displays in `resulting_margin`.
+          // QUI-648 — escala de publicación del precio del producto. Se lee UNA
+          // vez y alimenta los cuatro call-sites de
+          // `resolvePricingAfterReceipt` (producto/variante × con/sin override):
+          // el costo que entra ahí está en unidad MÍNIMA de stock y
+          // `base_price`/`price_override` cubren `price_unit_quantity` de esas
+          // unidades. Sin esto, recibir un cable vendido por metro reescribía su
+          // precio con el costo del milímetro. La variante hereda la escala del
+          // producto: `price_unit_quantity` no existe en `product_variants`.
+          const pricingScaleProduct = await tx.products.findUnique({
+            where: { id: productId },
+            select: { price_unit_quantity: true },
+          });
+          const priceUnitQuantity =
+            pricingScaleProduct?.price_unit_quantity ?? null;
+
           if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
             const dtoItem = item;
             // QUI-425: recompute margin against the SCOPED cost (the value
@@ -2488,6 +2547,7 @@ export class PurchaseOrdersService {
                   ),
                   newBasePrice: dtoItem.new_base_price,
                   newProfitMargin: dtoItem.new_profit_margin,
+                  priceUnitQuantity,
                 },
               );
               await tx.product_variants.update({
@@ -2508,6 +2568,7 @@ export class PurchaseOrdersService {
                   existingBasePrice: Number(existingProduct?.base_price ?? 0),
                   newBasePrice: dtoItem.new_base_price,
                   newProfitMargin: dtoItem.new_profit_margin,
+                  priceUnitQuantity,
                 },
               );
               await tx.products.update({
@@ -2543,6 +2604,7 @@ export class PurchaseOrdersService {
                     existingBasePrice: Number(
                       existingVariant?.price_override ?? 0,
                     ),
+                    priceUnitQuantity,
                   });
                 await tx.product_variants.update({
                   where: { id: productVariantId },
@@ -2560,6 +2622,7 @@ export class PurchaseOrdersService {
                   PurchaseOrdersService.resolvePricingAfterReceipt({
                     costPrice: Number(costForPricing),
                     existingBasePrice: Number(existingProduct?.base_price ?? 0),
+                    priceUnitQuantity,
                   });
                 await tx.products.update({
                   where: { id: productId },
@@ -3642,6 +3705,14 @@ export class PurchaseOrdersService {
       current_base_price: number;
       current_profit_margin: number;
       resulting_margin: number | null;
+      /**
+       * QUI-648 — a cuántas unidades de stock corresponde `current_base_price`.
+       * `resulting_margin` ya viene medido en esta escala; el campo viaja para
+       * que el modal pueda re-derivar el margen con el mismo cociente cuando el
+       * operador escribe un precio a mano (hoy lo hace contra
+       * `new_cost_per_unit`, que está en unidad mínima). 1 = sin escala.
+       */
+      price_unit_quantity: number;
     }> = [];
 
     for (const item of dto.items) {
@@ -3748,7 +3819,15 @@ export class PurchaseOrdersService {
       // overrides, and let them know what they're about to overwrite.
       const product = await this.prisma.products.findUnique({
         where: { id: item.product_id },
-        select: { name: true, base_price: true, profit_margin: true },
+        select: {
+          name: true,
+          base_price: true,
+          profit_margin: true,
+          // QUI-648 — escala de publicación del precio: sin ella el margen que
+          // muestra el modal mezcla el costo del milímetro con el precio del
+          // metro (ver `resolvePricingAfterReceipt`).
+          price_unit_quantity: true,
+        },
       });
 
       let variantName: string | undefined;
@@ -3786,10 +3865,25 @@ export class PurchaseOrdersService {
       // accepts the new cost without changing the base price. Null when the
       // new cost is 0 (e.g. reactivation of a previously-orphaned stock) to
       // avoid a divide-by-zero display.
+      //
+      // QUI-648 — se mide contra el costo llevado a la ESCALA DEL PRECIO, igual
+      // que `resolvePricingAfterReceipt`: `new_cost_per_unit` es el costo de la
+      // unidad mínima de stock y `current_base_price` cubre
+      // `price_unit_quantity` de esas unidades. Este es el número que el modal
+      // propone como margen por defecto, así que la vista previa y lo que la
+      // recepción persiste tienen que salir del mismo cociente. Con escala 1
+      // —todo el catálogo histórico— `costInPriceScale === newCostPerUnit` y el
+      // resultado es idéntico al de antes.
+      //
+      // `new_cost_per_unit` NO se re-escala a propósito: es el costo que la
+      // recepción sella en `stock_levels.cost_per_unit` / `products.cost_price`
+      // y la paridad preview↔persist de F3 depende de que siga en unidad mínima.
+      const costInPriceScale =
+        newCostPerUnit * resolvePricedUnits(null, product?.price_unit_quantity);
       const resultingMargin =
-        newCostPerUnit > 0
+        costInPriceScale > 0
           ? Math.round(
-              ((currentBasePrice - newCostPerUnit) / newCostPerUnit) * 10000,
+              ((currentBasePrice - costInPriceScale) / costInPriceScale) * 10000,
             ) / 100
           : null;
 
@@ -3820,6 +3914,10 @@ export class PurchaseOrdersService {
         current_base_price: currentBasePrice,
         current_profit_margin: currentProfitMargin,
         resulting_margin: resultingMargin,
+        price_unit_quantity: resolvePricedUnits(
+          null,
+          product?.price_unit_quantity,
+        ),
       });
     }
 

@@ -693,6 +693,15 @@ export interface CostPreviewItem {
   // the UI can avoid a divide-by-zero display.
   resulting_margin: number | null;
   /**
+   * QUI-648 — a cuántas unidades de stock corresponde `current_base_price`.
+   * `new_cost_per_unit` viene por unidad MÍNIMA y el precio por unidad de
+   * PRECIO, así que restar uno del otro sin esta escala inventa el margen: un
+   * cable a $5.000 el metro con stock en milímetros mostraría el precio del
+   * metro contra el costo del milímetro. El backend ya lo emite saneado (≥ 1);
+   * es opcional porque las filas de producto nuevo se sintetizan en el cliente.
+   */
+  price_unit_quantity?: number;
+  /**
    * QUI-645 — row synthesized on the CLIENT for a product that does not exist
    * yet (prebulk). The backend never emits it: a new product has no stock, no
    * previous cost and no catalog price to look up. It carries `product_id` as

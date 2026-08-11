@@ -3,6 +3,7 @@ import { ProductsService } from '../../../domains/store/products/products.servic
 import { PriceResolverService } from '../../../domains/store/products/services/price-resolver.service';
 import { SettingsService } from '../../../domains/store/settings/settings.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { resolvePricedUnits } from '../../../domains/store/products/services/tier-margin.util';
 
 export interface ProductToolDeps {
   productsService: ProductsService;
@@ -880,6 +881,9 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             base_price: true,
             cost_price: true,
             profit_margin: true,
+            // QUI-648 — a cuántas unidades de stock corresponde `base_price`.
+            // Sin ella el margen que se le reporta a Vexi mezcla escalas.
+            price_unit_quantity: true,
             is_on_sale: true,
             sale_price: true,
             track_inventory: true,
@@ -954,6 +958,32 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           track_inventory_override: variant.track_inventory_override ?? null,
         });
 
+        /**
+         * QUI-648 — ESCALAS. `products.cost_price` (y `product_variants.
+         * cost_price`) viven en la unidad MÍNIMA de stock: los escribe
+         * `CostingService` como valor / quantity_on_hand. `resolved.unitPrice`
+         * sale de `base_price`, que cubre `price_unit_quantity` de esas
+         * unidades. Un cable con el stock en milímetros guarda $3 el milímetro
+         * y $5.000 el metro: restarlos tal cual le hacía reportar a Vexi un
+         * margen del 166.566% sobre un negocio que gana 40%, y el comerciante
+         * recibía ese número por chat como si fuera un dato.
+         *
+         * Se sube el COSTO a la escala del precio —el mismo criterio y el mismo
+         * resolutor (`resolvePricedUnits`) que usan el editor de producto y la
+         * analítica—, así `cost_price`, `margin_amount` y `net_price` quedan
+         * los tres expresados en la unidad en la que se publica el precio.
+         *
+         * `packSize` va en `null`: las presentaciones tienen su propio precio
+         * en `price_tiers` y este bloque no reporta su margen.
+         *
+         * Con `price_unit_quantity` ausente, nulo o 1 devuelve 1 y el costo sale
+         * intacto: cero cambio para el catálogo histórico.
+         */
+        const pricedUnits = resolvePricedUnits(
+          null,
+          product.price_unit_quantity,
+        );
+
         const describe = (
           resolved: {
             unitPrice: number;
@@ -963,25 +993,40 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             source: string;
             reason: string;
           },
-          cost: number | null,
-        ) => ({
-          net_price: round2(resolved.unitPrice),
-          unit_price: round2(resolved.unitPriceWithTax),
-          compare_at_price:
-            resolved.compareAtPrice != null
-              ? round2(resolved.compareAtPrice)
-              : null,
-          is_on_sale: resolved.isOnSale,
-          price_source: resolved.source,
-          reason: resolved.reason,
-          cost_price: cost,
-          margin_amount:
-            cost != null ? round2(resolved.unitPrice - cost) : null,
-          margin_pct:
-            cost != null && cost > 0
-              ? round2(((resolved.unitPrice - cost) / cost) * 100)
-              : null,
-        });
+          unitCost: number | null,
+        ) => {
+          // Con escala 1 el costo sale por identidad (sin redondear), que es
+          // exactamente lo que devolvía antes; solo el camino escalado redondea
+          // para no arrastrar ruido de coma flotante al multiplicar por N.
+          const cost =
+            unitCost == null
+              ? null
+              : pricedUnits > 1
+                ? round2(unitCost * pricedUnits)
+                : unitCost;
+          return {
+            net_price: round2(resolved.unitPrice),
+            unit_price: round2(resolved.unitPriceWithTax),
+            compare_at_price:
+              resolved.compareAtPrice != null
+                ? round2(resolved.compareAtPrice)
+                : null,
+            is_on_sale: resolved.isOnSale,
+            price_source: resolved.source,
+            reason: resolved.reason,
+            cost_price: cost,
+            // Solo viaja cuando hay escala, para no ensuciar la respuesta del
+            // 99% del catálogo. Le dice al modelo en qué unidad está leyendo el
+            // precio y el costo, que si no los narra como si fueran por unidad.
+            price_unit_quantity: pricedUnits > 1 ? pricedUnits : undefined,
+            margin_amount:
+              cost != null ? round2(resolved.unitPrice - cost) : null,
+            margin_pct:
+              cost != null && cost > 0
+                ? round2(((resolved.unitPrice - cost) / cost) * 100)
+                : null,
+          };
+        };
 
         // ── Price tiers (multi-tarifa / venta por empaque) ────────────
         let tiers: any[] | undefined;

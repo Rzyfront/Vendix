@@ -741,14 +741,30 @@ export class PopOrderConfirmationModalComponent {
    * the margin from the override; otherwise we fall back to the backend's
    * `resulting_margin` (cost-anchor default).
    */
+  /**
+   * QUI-648 — el costo llevado a la escala del PRECIO.
+   *
+   * `new_cost_per_unit` es el costo de la unidad mínima de stock y
+   * `new_base_price` cubre `price_unit_quantity` de esas unidades. Restar uno
+   * del otro sin convertir da un margen inventado: para un cable a $5.000 el
+   * metro con stock en milímetros compararía el precio del metro contra el
+   * costo del milímetro. Es el mismo cociente que el backend usa para
+   * `resulting_margin` y para lo que la recepción persiste, así que la vista
+   * previa y el dato guardado no pueden divergir. Con escala 1 —todo el
+   * catálogo histórico— devuelve el costo intacto.
+   */
+  private costInPriceScale(item: CostPreviewItem): number {
+    const scale = Number(item.price_unit_quantity ?? 1);
+    const safeScale = Number.isFinite(scale) && scale > 1 ? scale : 1;
+    return Number(item.new_cost_per_unit) * safeScale;
+  }
+
   previewMargin(item: CostPreviewItem): number | null {
     const o = this.pricingOverrides().get(this.previewKey(item));
     if (o?.new_profit_margin !== undefined) return o.new_profit_margin;
-    if (o?.new_base_price !== undefined && item.new_cost_per_unit > 0) {
-      return Math.round(
-        ((o.new_base_price - item.new_cost_per_unit) / item.new_cost_per_unit) *
-          10000,
-      ) / 100;
+    const cost = this.costInPriceScale(item);
+    if (o?.new_base_price !== undefined && cost > 0) {
+      return Math.round(((o.new_base_price - cost) / cost) * 10000) / 100;
     }
     return item.resulting_margin;
   }
@@ -785,7 +801,7 @@ export class PopOrderConfirmationModalComponent {
       return;
     }
     const key = this.previewKey(item);
-    const cost = Number(item.new_cost_per_unit);
+    const cost = this.costInPriceScale(item);
     const base = Math.round(cost * (1 + value / 100) * 100) / 100;
     const next = new Map(this.pricingOverrides());
     next.set(key, { new_profit_margin: value, new_base_price: base });
@@ -808,7 +824,7 @@ export class PopOrderConfirmationModalComponent {
       return;
     }
     const key = this.previewKey(item);
-    const cost = Number(item.new_cost_per_unit);
+    const cost = this.costInPriceScale(item);
     const margin =
       cost > 0
         ? Math.round(((value - cost) / cost) * 100 * 100) / 100
