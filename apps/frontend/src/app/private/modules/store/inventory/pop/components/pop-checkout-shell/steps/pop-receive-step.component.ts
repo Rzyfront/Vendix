@@ -10,7 +10,6 @@ import { DecimalPipe } from '@angular/common';
 import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency/currency.pipe';
 import { InputComponent } from '../../../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
-import { PopCartState } from '../../../interfaces/pop-cart.interface';
 import { CostPreviewItem, CostPreviewResponse } from '../../../../interfaces';
 
 /**
@@ -53,7 +52,6 @@ export type PopPricingOverridesMap = Map<string, PopPricingOverride>;
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PopReceiveStepComponent {
-  readonly cartState = input<PopCartState | null>(null);
   readonly costPreview = input<CostPreviewResponse | null>(null);
   readonly loadingCostPreview = input(false);
 

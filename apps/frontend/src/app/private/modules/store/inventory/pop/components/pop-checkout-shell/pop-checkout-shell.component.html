@@ -42,7 +42,6 @@
           [class.step-hidden]="currentStepKey() !== 'recepcion'"
         >
           <app-pop-receive-step
-            [cartState]="cartState()"
             [costPreview]="costPreview()"
             [loadingCostPreview]="loadingCostPreview()"
             (navigateToSettings)="onNavigateToSettings()"
