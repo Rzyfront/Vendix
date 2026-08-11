@@ -69,13 +69,17 @@ export class OperationsSettingsForm {
     () => `${String(this.closingHour()).padStart(2, '0')}:00`,
   );
 
-  /** Concrete before/after example for the preparation time. */
+  /**
+   * Concrete example. The ETA is anchored on the payment instant, not on the
+   * creation instant: `OrderEtaService.computeEta` does
+   * `readyAt = paidAt + prepMinutes`.
+   */
   readonly prepExample = computed(() => {
     const minutes = this.prepMinutes();
     if (minutes === 0) {
-      return 'Con 0 minutos el ticket nace sin holgura: el tablero lo trata como vencido desde el primer segundo.';
+      return 'Con 0 minutos, un pedido pagado a las 10:00 se promete listo a las 10:00 mismo: el pedido nace sin holgura de preparación.';
     }
-    return `Con ${minutes} min, un ticket creado a las 10:00 tiene las ${this.clockAfter(minutes)} como hora de referencia: hasta ahí se considera a tiempo, y después el tablero lo escala a alerta.`;
+    return `Con ${minutes} min, un pedido pagado a las 10:00 se promete listo a las ${this.clockAfter(minutes)}. La hora estimada de entrega suma después el tiempo de tránsito del método de envío.`;
   });
 
   /** True when the closing hour lands in the middle of a typical service. */
