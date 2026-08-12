@@ -4335,11 +4335,16 @@ export class PurchaseOrdersService {
    *    OC. Devuelve 409 en ese caso.
    *  - Aplica la matriz anti-doble-registro reusando registerAdvancePaymentInTx
    *    para abonos y materializando schedules para cuotas/fechas del saldo.
-   *  - Recalcula payment_status al final.
+   *  - Un abono acá es un ANTICIPO con asiento: emite `purchase_order.payment`
+   *    después del commit, igual que create() y registerPayment. Sin eso el
+   *    abono quedaba registrado contra la OC sin contrapartida contable.
+   *  - payment_status queda persistido en los dos caminos (lo escribe el
+   *    helper cuando hay abono; el recálculo del final cuando no lo hay).
    */
   async configurePaymentPlan(
     id: number,
     dto: import('./dto/configure-payment-plan.dto').ConfigurePaymentPlanDto,
+    userId?: number,
   ): Promise<unknown> {
     const order = await this.prisma.purchase_orders.findUnique({
       where: { id },
@@ -4349,6 +4354,11 @@ export class PurchaseOrdersService {
         total_amount: true,
         organization_id: true,
         payment_plan: true,
+        // El EMISOR de `purchase_order.payment` resuelve la entidad fiscal por
+        // store y el snapshot del proveedor; el handler contable nunca los
+        // consulta, así que tienen que viajar en este mismo read.
+        location: { select: { store_id: true } },
+        suppliers: { select: { id: true, name: true, tax_id: true } },
       },
     });
     if (!order) {
@@ -4429,7 +4439,9 @@ export class PurchaseOrdersService {
     }
 
     const orderId = order.id;
-    await this.prisma.$transaction(async (tx) => {
+    const advanceRegistered = await this.prisma.$transaction(async (tx) => {
+      let advance: { paymentId: number; amount: number } | null = null;
+
       await tx.purchase_order_payment_schedules.deleteMany({
         where: { purchase_order_id: orderId, status: 'planned' },
       });
@@ -4448,15 +4460,18 @@ export class PurchaseOrdersService {
       });
 
       if (plan === 'partial' && down > 0) {
-        await tx.purchase_order_payments.create({
-          data: {
-            purchase_order_id: orderId,
-            amount: down,
-            payment_date: new Date(),
-            payment_method: PO_ADVANCE_PAYMENT_METHOD,
-            source: PO_ADVANCE_SOURCE,
-          },
-        });
+        // El abono configurado acá es un PAGO REAL, igual que el declarado al
+        // crear la OC: se delega en el mismo helper para que la fila lleve
+        // created_by_user_id y para que payment_status quede PERSISTIDO. El
+        // asiento DR 133005 / CR 1110 lo dispara el evento que se emite
+        // después del commit (ver más abajo).
+        const registered = await this.registerAdvancePaymentInTx(
+          tx,
+          orderId,
+          down,
+          userId,
+        );
+        advance = { paymentId: registered.id, amount: down };
         if (dueDate) {
           await tx.purchase_order_payment_schedules.create({
             data: {
@@ -4482,8 +4497,34 @@ export class PurchaseOrdersService {
         }
       }
 
-      await this.recalculatePaymentStatus(orderId, tx);
+      // registerAdvancePaymentInTx ya recalculó Y escribió payment_status en el
+      // camino con abono; repetirlo acá sería recalcular dos veces sobre las
+      // mismas filas. Los planes sin pago (immediate/deferred/installments) no
+      // pasan por el helper, y ahí el recálculo solo servía si además se
+      // persiste — antes se descartaba el retorno y el estado nunca bajaba.
+      if (!advance) {
+        const status = await this.recalculatePaymentStatus(orderId, tx);
+        await tx.purchase_orders.update({
+          where: { id: orderId },
+          data: { payment_status: status as any },
+        });
+      }
+
+      return advance;
     });
+
+    // El evento contable se emite DESPUÉS del commit: el handler de
+    // `purchase_order.payment` corre async y debe leer la fila de pago ya
+    // persistida (misma convención que create() y registerPayment).
+    if (advanceRegistered) {
+      await this.emitPurchaseOrderPaymentEvent({
+        purchaseOrder: order,
+        paymentId: advanceRegistered.paymentId,
+        amount: advanceRegistered.amount,
+        paymentMethod: PO_ADVANCE_PAYMENT_METHOD,
+        userId,
+      });
+    }
 
     return await this.findOne(orderId);
   }

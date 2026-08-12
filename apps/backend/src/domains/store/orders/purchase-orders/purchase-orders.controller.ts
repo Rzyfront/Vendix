@@ -763,10 +763,11 @@ export class PurchaseOrdersController {
     const order = await this.purchaseOrdersService.configurePaymentPlan(
       Number(id),
       dto,
+      RequestContextService.getUserId(),
     );
     return this.responseService.created({
       data: order,
-      message: 'Plan de pago actualizado exitosado',
+      message: 'Plan de pago actualizado exitosamente',
     });
   }
 }
