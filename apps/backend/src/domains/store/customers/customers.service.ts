@@ -212,6 +212,10 @@ export class CustomersService {
           email: { equals: normalizedEmail, mode: 'insensitive' },
           store_users: { some: { store_id: storeId } },
           user_roles: { some: { roles: { name: 'customer' } } },
+          // Treat archived customers as "no longer exists" so a guest with
+          // the same email/phone can be created fresh instead of attaching
+          // to an archived row.
+          state: { not: user_state_enum.archived },
         },
         select: { id: true },
       });
@@ -223,6 +227,7 @@ export class CustomersService {
           phone: normalizedPhone,
           store_users: { some: { store_id: storeId } },
           user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
         },
         select: { id: true },
       });
@@ -408,6 +413,9 @@ export class CustomersService {
           email: { equals: normalizedEmail, mode: 'insensitive' },
           store_users: { some: { store_id } },
           user_roles: { some: { roles: { name: 'customer' } } },
+          // Skip archived rows so a new guest is created instead of attaching
+          // to an archived customer with the same email/phone.
+          state: { not: user_state_enum.archived },
         },
         select: { id: true, first_name: true, last_name: true },
       });
@@ -419,6 +427,7 @@ export class CustomersService {
           phone: normalizedPhone,
           store_users: { some: { store_id } },
           user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
         },
         select: { id: true, first_name: true, last_name: true },
       });
@@ -528,6 +537,11 @@ export class CustomersService {
         where: {
           email: effectiveEmail,
           organization_id: store.organization_id,
+          // Archived customers are not "in use" — allow re-creating a new
+          // customer that re-uses the same email after the old row was
+          // archived (mirrors the document dedup filter in
+          // findByDocumentInOrganization).
+          state: { not: user_state_enum.archived },
         },
       });
 
@@ -758,6 +772,8 @@ export class CustomersService {
     // Misma forma PosCustomer que `findAll`: rol customer + store link +
     // direcciones shipping ordenadas por is_primary. `users` no está scoped
     // por StorePrismaService (getter baseClient), de ahí el filtro manual.
+    // Hide archived customers from POS lookup so they don't appear in the
+    // top customers list (matches the `findAll` behavior).
     const users = await this.prisma.users.findMany({
       where: {
         id: { in: customerIds },
@@ -773,6 +789,7 @@ export class CustomersService {
             },
           },
         },
+        state: { not: user_state_enum.archived },
       },
       include: {
         addresses: {
@@ -900,16 +917,26 @@ export class CustomersService {
   }
 
   async remove(storeId: number, id: number) {
+    // Soft archive: `users` is referenced by 30+ tables (orders, sales_orders,
+    // invoices, refunds, store_users, user_roles, addresses, etc.) and a hard
+    // delete explodes with FK violations as soon as the customer has any
+    // history. Archiving keeps the row for audit, accounting and order
+    // history, and the existing `state: { not: archived }` filter in `findAll`
+    // hides archived customers from admin list views. `findOne` still returns
+    // archived rows so admins can view, edit or restore them. This mirrors the
+    // pattern in `org-suppliers.service.ts:343` and `org-users.service.ts:432`.
     const user = await this.findOne(storeId, id);
 
-    // Check if user has orders or other dependencies that prevent deletion?
-    // For now, standard delete might fail if foreign keys exist.
-    // Prisma `users` delete might be too aggressive if cascade is not set up or set up to cascade.
-    // Safe delete often means soft delete or check dependencies.
-    // Given "CRUD Basico", I will attempt delete.
+    if (user.state === user_state_enum.archived) {
+      return user;
+    }
 
-    return this.prisma.users.delete({
+    return this.prisma.users.update({
       where: { id: user.id },
+      data: {
+        state: user_state_enum.archived,
+        updated_at: new Date(),
+      },
     });
   }
 
@@ -933,6 +960,9 @@ export class CustomersService {
     const where: any = {
       organization_id: organizationId,
       document_number: { equals: normalized.number, mode: 'insensitive' },
+      // Treat archived customers as "no longer exists" for create-time dedup
+      // so an admin can re-create a customer that was previously archived.
+      state: { not: user_state_enum.archived },
       user_roles: {
         some: {
           roles: {
@@ -1003,7 +1033,14 @@ export class CustomersService {
     });
 
     let activated = false;
-    if (user && (user.state !== 'active' || !user.email_verified)) {
+    // Do NOT re-activate an archived customer. An archived customer is gone
+    // for purposes of "this store"; restoring them must be an explicit admin
+    // action, not a side effect of the password-reset claim flow.
+    if (
+      user &&
+      user.state !== user_state_enum.archived &&
+      (user.state !== 'active' || !user.email_verified)
+    ) {
       await this.prisma.users.update({
         where: { id: userId },
         data: {
@@ -1037,6 +1074,9 @@ export class CustomersService {
             },
           },
         },
+        // Mirror findAll: archived customers do not count toward totals,
+        // "this month" or "active" stats.
+        state: { not: user_state_enum.archived },
       };
 
       const [totalCustomers, newCustomersThisMonth] = await Promise.all([
