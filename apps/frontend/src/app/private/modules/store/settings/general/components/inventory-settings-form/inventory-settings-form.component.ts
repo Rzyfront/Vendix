@@ -88,6 +88,11 @@ export class InventorySettingsForm {
   form: FormGroup = new FormGroup({
     low_stock_threshold: new FormControl(10),
     out_of_stock_action: new FormControl('hide'),
+    // Estos dos NO se dibujan en la plantilla a propósito: el backend los
+    // persiste pero ningún servicio los lee, así que un interruptor visible
+    // prometería un control que no existe. El texto explicativo del bloque
+    // de existencias ya declara el comportamiento como política fija.
+    // No atarlos a un input sin implementarlos primero en el backend.
     track_inventory: new FormControl(true),
     allow_negative_stock: new FormControl(false),
     costing_method: new FormControl('cpp'),

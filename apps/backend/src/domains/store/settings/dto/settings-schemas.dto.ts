@@ -107,12 +107,42 @@ export class InventorySettingsDto {
   @IsEnum(['hide', 'show', 'disable', 'allow_backorder'])
   out_of_stock_action?: 'hide' | 'show' | 'disable' | 'allow_backorder';
 
-  @ApiProperty({ example: true, required: false })
+  /**
+   * SIN LECTOR — se acepta y se persiste, pero ningún servicio la consulta.
+   * El descuento de inventario ocurre siempre; no hay forma de apagarlo por
+   * configuración. Se conserva el campo para no romper a quien ya lo manda,
+   * pero guardarlo no cambia nada. Ver `allow_negative_stock` abajo.
+   */
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'INACTIVA: se persiste pero ningún proceso la lee. El inventario siempre se descuenta.',
+  })
   @IsOptional()
   @IsBoolean()
   track_inventory?: boolean;
 
-  @ApiProperty({ example: false, required: false })
+  /**
+   * SIN LECTOR — se acepta y se persiste, pero ningún servicio la consulta.
+   *
+   * El saldo negativo no existe hoy por decisión de negocio, no por omisión:
+   * los tres motores de escritura recortan a cero (`Math.max(0, …)`) cuando la
+   * resta quedaría por debajo. Consecuencia deliberada y conocida: una entrega
+   * mayor al saldo se absorbe en silencio y el faltante no queda registrado.
+   *
+   * NO "arreglar" ese recorte sin decisión de producto: volverlo configurable
+   * hace visible en stock, reportes y valuación el descuadre que hoy se tapa.
+   * Sitios del recorte: stock-level-manager.service.ts (~223 y ~992),
+   * movements.service.ts (~371 y ~382), inventory-integration.service.ts (~228),
+   * sellable-stock-allocator.service.ts (~108-130).
+   */
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'INACTIVA: se persiste pero ningún proceso la lee. El saldo se recorta a cero siempre.',
+  })
   @IsOptional()
   @IsBoolean()
   allow_negative_stock?: boolean;

@@ -219,6 +219,20 @@ export class StockLevelManager {
       throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
+    // RECORTE A CERO — deliberado, no es un descuido. Si la resta dejaría el
+    // saldo por debajo de cero se escribe cero, así que una entrega mayor a lo
+    // disponible se absorbe en silencio y el faltante NO queda registrado: el
+    // cero de sobreventa se ve idéntico al cero de "se agotó normal".
+    //
+    // Es la regla de negocio "el inventario nunca se muestra en negativo".
+    // Existe `store_settings.inventory.allow_negative_stock`, pero NADIE la
+    // lee — ver el comentario en settings-schemas.dto.ts. Volver esto
+    // configurable NO es refactor: haría visible en stock, reportes y
+    // valuación el descuadre que hoy se tapa. Requiere decisión de producto.
+    //
+    // Mismo recorte, mismo motivo, en: movements.service.ts (~371, ~382),
+    // inventory-integration.service.ts (~228) y
+    // sellable-stock-allocator.service.ts (~108-130).
     const stockUpdateData: any = {
       quantity_on_hand: Math.max(0, new_quantity_on_hand),
       quantity_available: Math.max(0, new_quantity_available),
