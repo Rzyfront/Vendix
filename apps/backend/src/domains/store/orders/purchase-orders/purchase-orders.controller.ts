@@ -771,9 +771,11 @@ export class PurchaseOrdersController {
       });
     } catch (error) {
       if (error instanceof VendixHttpException) throw error;
-      throw this.responseService.error(
-        error as Error,
+      if (error instanceof HttpException) throw error;
+      return this.responseService.error(
         'Error al configurar el plan de pago',
+        error.message,
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }

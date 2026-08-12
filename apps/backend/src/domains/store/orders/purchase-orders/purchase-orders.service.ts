@@ -4341,7 +4341,22 @@ export class PurchaseOrdersService {
     id: number,
     dto: import('./dto/configure-payment-plan.dto').ConfigurePaymentPlanDto,
   ): Promise<unknown> {
-    const order = await this.loadOrderOrFail(id);
+    const order = await this.prisma.purchase_orders.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        total_amount: true,
+        store_id: true,
+        payment_plan: true,
+      },
+    });
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.PURCHASE_ORDER_NOT_FOUND,
+        'Orden de compra no encontrada',
+      );
+    }
 
     const blockedStatuses = ['received', 'cancelled', 'closed'];
     if (blockedStatuses.includes(order.status)) {
@@ -4413,9 +4428,10 @@ export class PurchaseOrdersService {
       }
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const orderId = order.id;
+    await this.prisma.$transaction(async (tx) => {
       await tx.purchase_order_payment_schedules.deleteMany({
-        where: { purchase_order_id: id, status: 'planned' },
+        where: { purchase_order_id: orderId, status: 'planned' },
       });
 
       const newDown = plan === 'partial' ? down : null;
@@ -4423,7 +4439,7 @@ export class PurchaseOrdersService {
         plan === 'deferred' || (plan === 'partial' && dueDate) ? dueDate : null;
 
       await tx.purchase_orders.update({
-        where: { id },
+        where: { id: orderId },
         data: {
           payment_plan: plan,
           down_payment_amount: newDown,
@@ -4432,25 +4448,32 @@ export class PurchaseOrdersService {
       });
 
       if (plan === 'partial' && down > 0) {
-        const advance = await this.registerAdvancePaymentInTx(tx, order, down);
+        await tx.purchase_order_payments.create({
+          data: {
+            purchase_order_id: orderId,
+            amount: down,
+            payment_date: new Date(),
+            payment_method: PO_ADVANCE_PAYMENT_METHOD,
+            source: PO_ADVANCE_SOURCE,
+          },
+        });
         if (dueDate) {
           await tx.purchase_order_payment_schedules.create({
             data: {
-              purchase_order_id: id,
+              purchase_order_id: orderId,
               scheduled_date: new Date(dueDate),
               amount: new Prisma.Decimal(totalAmount).minus(down),
               status: 'planned',
             },
           });
         }
-        return { order, advance };
       }
 
       if (plan === 'installments') {
         for (const inst of installments) {
           await tx.purchase_order_payment_schedules.create({
             data: {
-              purchase_order_id: id,
+              purchase_order_id: orderId,
               scheduled_date: new Date(inst.scheduled_date),
               amount: new Prisma.Decimal(inst.amount),
               status: 'planned',
@@ -4459,11 +4482,9 @@ export class PurchaseOrdersService {
         }
       }
 
-      return { order };
+      await this.recalculatePaymentStatus(orderId, tx);
     });
 
-    await this.recalculatePaymentStatus(id);
-
-    return await this.findOne(id);
+    return await this.findOne(orderId);
   }
 }
