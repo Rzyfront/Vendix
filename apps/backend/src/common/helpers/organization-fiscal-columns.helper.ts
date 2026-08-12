@@ -87,8 +87,12 @@ export interface StoreFiscalColumns {
   nit_type?: dian_nit_type_enum | null;
   municipality_code?: string | null;
   ciiu_code?: string | null;
-  fiscal_responsibilities?: string[];
-  tax_regime?: string | null;
+  // `fiscal_responsibilities` y `tax_regime` viven SOLO en `fiscal_data` (JSON
+  // dentro de `store_settings.settings`). NO son columnas de la tabla `stores`
+  // — sólo existen en `organizations`/`users`/`suppliers`. Antes este tipo las
+  // listaba y la función los emitía, y `tx.stores.update({ data })` reventaba
+  // con "Unknown argument `fiscal_responsibilities`" / `tax_regime`, que el
+  // AllExceptionsFilter traducía en 500 SYS_INTERNAL_001 (ver QUI-681).
 }
 
 /** Lee una clave del patch solo si viene presente y es string; si no, undefined. */
@@ -252,18 +256,13 @@ export function buildStoreFiscalColumns(
     }
   }
 
-  if ('tax_responsibilities' in patch) {
-    const responsibilities = Array.isArray(patch.tax_responsibilities)
-      ? (patch.tax_responsibilities as unknown[]).filter(
-          (code): code is string => typeof code === 'string',
-        )
-      : [];
-    columns.fiscal_responsibilities = responsibilities;
-  }
-
-  if ('tax_responsibilities' in patch || 'tax_regime' in patch) {
-    columns.tax_regime = isVatResponsible(merged) ? '48' : '49';
-  }
+  // `tax_responsibilities` y `tax_regime` NO se proyectan a columnas porque la
+  // tabla `stores` no las tiene (viven sólo en `organizations`/`users`/
+  // `suppliers`). La rama que las emitía fue la causa del 500 de QUI-681 al
+  // hacer `tx.stores.update({ data })` con `fiscal_responsibilities`/`tax_regime`
+  // — Prisma 7 rechaza argumentos desconocidos y el AllExceptionsFilter lo
+  // convertía en 500 SYS_INTERNAL_001. Los datos siguen llegando a
+  // `fiscal_data` por la vía del upsert de `store_settings.settings`.
 
   return columns;
 }
