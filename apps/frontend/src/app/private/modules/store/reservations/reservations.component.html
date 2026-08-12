@@ -116,6 +116,29 @@
             <span class="hidden sm:inline">Nueva Reserva</span>
           </button>
         </app-tooltip>
+
+        <!-- Resumen diario de comisiones (QUI-XXX). Botón secundario al lado de
+             "Nueva Reserva" para descubrimiento natural desde el dashboard de
+             reservas. -->
+        <app-tooltip
+          content="Ver cierre del día: tu comisión vs lo que se le debe a cada mecánico"
+          position="bottom"
+          size="sm"
+        >
+          <button
+            type="button"
+            (click)="goToDailySummary()"
+            class="flex items-center gap-1.5 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px]"
+            style="
+              background: white;
+              color: var(--color-primary);
+              border: 1px solid var(--color-primary);
+            "
+          >
+            <app-icon name="banknote" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Resumen diario</span>
+          </button>
+        </app-tooltip>
       </div>
     </div>
   </div>

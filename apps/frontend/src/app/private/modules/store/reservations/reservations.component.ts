@@ -313,6 +313,14 @@ export class ReservationsComponent {
     this.isFormModalOpen.set(true);
   }
 
+  /**
+   * Navega a la pantalla de resumen diario de comisiones.
+   * QUÍ-XXX: feature de split dueño/mecánico.
+   */
+  goToDailySummary(): void {
+    this.router.navigate(['/admin/reservations/commissions/daily-summary']);
+  }
+
   onConfirm(booking: Booking): void {
     this.reservationsService
       .confirmReservation(booking.id)

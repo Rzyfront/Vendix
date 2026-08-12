@@ -613,6 +613,35 @@ export class ReservationsService {
     return this.http.delete<any>(`${this.apiUrl}/providers/${providerId}/services/${productId}`);
   }
 
+  /**
+   * Resumen diario del split dueño/mecánico. Lo consume el Equipo de
+   * Servicio para mostrar lo que se le debe a cada mecánico en la fila
+   * de la tabla. Devuelve solo el día de hoy por defecto.
+   */
+  getDailyCommissionSummary(date?: string): Observable<{
+    date: string;
+    totals: {
+      total_revenue: number;
+      total_owner_commission: number;
+      total_provider_payable: number;
+      bookings_count: number;
+    };
+    by_mechanic: Array<{
+      employee_id: number | null;
+      display_name: string;
+      bookings_count: number;
+      total_revenue: number;
+      owner_commission: number;
+      provider_payable: number;
+    }>;
+    by_service: Array<unknown>;
+  }> {
+    const params = date ? `?date=${date}` : '';
+    return this.http
+      .get<any>(`${this.apiUrl}/commissions/daily-summary${params}`)
+      .pipe(map((response) => response.data || response));
+  }
+
   getProviderSchedule(providerId: number): Observable<ProviderSchedule[]> {
     return this.http.get<any>(`${this.apiUrl}/providers/${providerId}/schedules`).pipe(
       map((response) => response.data || response),

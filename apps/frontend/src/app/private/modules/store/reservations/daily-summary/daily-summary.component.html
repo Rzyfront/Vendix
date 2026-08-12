@@ -1,0 +1,211 @@
+<div class="daily-summary-page">
+  <!-- Sticky header con actions -->
+  <app-sticky-header
+    title="Resumen diario de comisiones"
+    subtitle="Lo que te pertenece vs lo que les debes a tus mecánicos"
+    icon="banknote"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <!-- Date selector (debajo del sticky header) -->
+  <div class="date-bar">
+    <button class="btn-icon" (click)="previousDay()" aria-label="Día anterior">
+      <app-icon name="chevron-left" [size]="20"></app-icon>
+    </button>
+
+    <input
+      type="date"
+      class="date-input"
+      [ngModel]="selectedDate()"
+      (ngModelChange)="onDateChange($event)"
+    />
+
+    <button class="btn-icon" (click)="nextDay()" aria-label="Día siguiente">
+      <app-icon name="chevron-right" [size]="20"></app-icon>
+    </button>
+
+    <button class="btn-secondary" (click)="today()">Hoy</button>
+
+    <p class="date-label">{{ dateLabel() }}</p>
+  </div>
+
+  <div class="page-content">
+    <!-- KPI Cards (zeros mientras loading o empty) -->
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Total facturado"
+        [value]="formatAmount(summary()?.totals?.total_revenue)"
+        [smallText]="(summary()?.totals?.bookings_count ?? 0) + ' reservas'"
+        iconName="banknote"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-500"
+      />
+      <app-stats
+        title="Tu comisión"
+        [value]="formatAmount(summary()?.totals?.total_owner_commission)"
+        [smallText]="ownerPctLabel(summary())"
+        iconName="user"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-500"
+      />
+      <app-stats
+        title="Por pagar a mecánicos"
+        [value]="formatAmount(summary()?.totals?.total_provider_payable)"
+        smallText="Total a tus mecánicos"
+        iconName="users"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-500"
+      />
+      <app-stats
+        title="Servicios"
+        [value]="summary()?.by_service?.length ?? 0"
+        smallText="distintos facturados"
+        iconName="scissors"
+        iconBgColor="bg-gray-100"
+        iconColor="text-gray-500"
+      />
+    </div>
+
+    <!-- Loading skeleton -->
+    @if (loading()) {
+      <div class="loading-overlay">
+        <div class="spinner"></div>
+        <span>Cargando resumen…</span>
+      </div>
+    }
+
+    <!-- Empty state con CTA contextual -->
+    @if (!loading() && !hasData()) {
+      <app-card class="empty-card">
+        <div class="empty-content">
+          <div class="empty-icon-wrap">
+            <app-icon name="banknote" [size]="48"></app-icon>
+          </div>
+          <h3 class="empty-title">Sin comisiones este día</h3>
+          <p class="empty-description">
+            No hay reservas con comisión registradas en esta fecha. Las comisiones se calculan automáticamente cuando se completa el pago de una reserva de servicio.
+          </p>
+
+          <div class="empty-steps">
+            <p class="empty-steps-title">Para verlo funcionar necesitás:</p>
+            <ol>
+              <li>
+                <app-icon name="check-circle-2" [size]="16"></app-icon>
+                <span>Crear un <strong>servicio</strong> (requiere reserva)</span>
+              </li>
+              <li>
+                <app-icon name="user-plus" [size]="16"></app-icon>
+                <span>Asignar el servicio a un <strong>mecánico</strong></span>
+              </li>
+              <li>
+                <app-icon name="percent" [size]="16"></app-icon>
+                <span>Configurar el <strong>% del dueño</strong> en el producto</span>
+              </li>
+              <li>
+                <app-icon name="credit-card" [size]="16"></app-icon>
+                <span>Cobrar una <strong>reserva</strong> → el split aparece acá</span>
+              </li>
+            </ol>
+          </div>
+
+          <div class="empty-actions">
+            <a routerLink="/admin/products/new" class="btn-primary">
+              <app-icon name="plus" [size]="16"></app-icon>
+              Crear servicio
+            </a>
+            <a routerLink="/admin/reservations/schedules" class="btn-secondary">
+              <app-icon name="users" [size]="16"></app-icon>
+              Equipo de Servicio
+            </a>
+          </div>
+        </div>
+      </app-card>
+    }
+
+    <!-- Tablas con datos -->
+    @if (!loading() && hasData() && summary(); as s) {
+      <!-- Por mecánico -->
+      <section class="table-section">
+        <header class="section-header">
+          <h2>Por mecánico</h2>
+          <span class="section-hint">Lo que se le debe a cada uno hoy</span>
+        </header>
+        <app-card class="data-card">
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Mecánico</th>
+                  <th class="num">Reservas</th>
+                  <th class="num">Total facturado</th>
+                  <th class="num">Tu comisión</th>
+                  <th class="num">Le debes</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of s.by_mechanic; track m.employee_id) {
+                  <tr>
+                    <td>
+                      <div class="mechanic-cell">
+                        <div class="avatar">{{ m.display_name.charAt(0) }}</div>
+                        <span>{{ m.display_name }}</span>
+                      </div>
+                    </td>
+                    <td class="num">{{ m.bookings_count }}</td>
+                    <td class="num">${{ formatAmount(m.total_revenue) }}</td>
+                    <td class="num owner">${{ formatAmount(m.owner_commission) }}</td>
+                    <td class="num provider">${{ formatAmount(m.provider_payable) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </app-card>
+      </section>
+
+      <!-- Por servicio -->
+      <section class="table-section">
+        <header class="section-header">
+          <h2>Por servicio</h2>
+          <span class="section-hint">Cuánto se facturó de cada servicio hoy</span>
+        </header>
+        <app-card class="data-card">
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Servicio</th>
+                  <th class="num">Reservas</th>
+                  <th class="num">Total facturado</th>
+                  <th class="num">Tu comisión</th>
+                  <th class="num">A pagar</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (svc of s.by_service; track svc.product_id) {
+                  <tr>
+                    <td>{{ svc.product_name }}</td>
+                    <td class="num">{{ svc.bookings_count }}</td>
+                    <td class="num">${{ formatAmount(svc.total_revenue) }}</td>
+                    <td class="num owner">${{ formatAmount(svc.owner_commission) }}</td>
+                    <td class="num provider">${{ formatAmount(svc.provider_payable) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </app-card>
+      </section>
+
+      <!-- Footer info -->
+      <div class="footer-info">
+        <app-icon name="info" [size]="14"></app-icon>
+        <span>
+          Las comisiones se calculan automáticamente cuando se completa el pago de una reserva de servicio.
+          Si ves un valor en 0, el servicio no tiene configurado el % del dueño.
+        </span>
+      </div>
+    }
+  </div>
+</div>

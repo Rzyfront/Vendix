@@ -1609,6 +1609,134 @@ export class AccountingEventsListener {
     }
   }
 
+  // ===== USER COMMISSIONS (QUI-678) =====
+
+  @OnEvent('commission.accrued')
+  async handleProviderCommissionAccrued(event: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    booking_id: number | null;
+    amount: number;
+    reopened_by?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
+      await this.auto_entry_service.onProviderCommissionAccrued({
+        accrual_id: event.accrual_id,
+        store_id: event.store_id,
+        organization_id: event.organization_id,
+        employee_id: event.employee_id,
+        booking_id: event.booking_id,
+        amount: Number(event.amount),
+        declined_by_user_id: event.reopened_by,
+      });
+      this.logger.log(
+        `Auto-entry created for commission.accrued #${event.accrual_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for commission.accrued #${event.accrual_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('commission.paid')
+  async handleProviderCommissionPaid(event: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    payment_reference: string | null;
+    paid_by_user_id: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
+      await this.auto_entry_service.onProviderCommissionPaid({
+        accrual_id: event.accrual_id,
+        store_id: event.store_id,
+        organization_id: event.organization_id,
+        employee_id: event.employee_id,
+        amount: Number(event.amount),
+        payment_reference: event.payment_reference,
+        paid_by_user_id: event.paid_by_user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for commission.paid #${event.accrual_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for commission.paid #${event.accrual_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('commission.declined')
+  async handleProviderCommissionDeclined(event: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    reason: string;
+    declined_by_user_id: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
+      await this.auto_entry_service.onProviderCommissionDeclined({
+        accrual_id: event.accrual_id,
+        store_id: event.store_id,
+        organization_id: event.organization_id,
+        employee_id: event.employee_id,
+        amount: Number(event.amount),
+        reason: event.reason,
+        declined_by_user_id: event.declined_by_user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for commission.declined #${event.accrual_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for commission.declined #${event.accrual_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('commission.reversed')
+  async handleProviderCommissionReversed(event: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    reason: string;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
+      await this.auto_entry_service.onProviderCommissionReversed({
+        accrual_id: event.accrual_id,
+        store_id: event.store_id,
+        organization_id: event.organization_id,
+        employee_id: event.employee_id,
+        amount: Number(event.amount),
+        reason: event.reason,
+      });
+      this.logger.log(
+        `Auto-entry created for commission.reversed #${event.accrual_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for commission.reversed #${event.accrual_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== WALLET =====
 
   @OnEvent('wallet.credited')

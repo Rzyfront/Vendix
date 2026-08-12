@@ -4471,6 +4471,194 @@ export class AutoEntryService {
     });
   }
 
+  // ===== USER COMMISSIONS (QUI-678) =====
+  //
+  // State machine: pending → accrued → paid | declined | reversed
+  // Cada transition genera un auto-entry:
+  //   accrued  → DR Gasto / CR CxP (crea la CxP)
+  //   paid     → DR CxP / CR Caja (paga al mecánico)
+  //   declined → DR CxP / CR Gasto (revierte la CxP, no se paga)
+  //   reversed → DR CxP / CR Gasto (revierte, mismo patrón que declined)
+
+  /**
+   * commission.accrued: DR Gasto por Comisiones — Mecánicos / CR Comisiones por Pagar
+   * Crea la CxP cuando se cobra la reserva.
+   */
+  async onProviderCommissionAccrued(data: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    booking_id: number | null;
+    amount: number;
+    declined_by_user_id?: number;  // presente si fue un reopen
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.accrued.expense',
+        'Gasto por Comisiones — Mecánicos',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.accrued.payable',
+        'Comisiones por Pagar — Mecánicos',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'provider_commission_accrual',
+      source_id: data.accrual_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description:
+        data.declined_by_user_id
+          ? `Re-abrir comisión del mecánico #${data.employee_id} (accrual #${data.accrual_id})`
+          : `Comisión accrued del mecánico #${data.employee_id} (accrual #${data.accrual_id})`,
+      lines,
+    });
+  }
+
+  /**
+   * commission.paid: DR Comisiones por Pagar / CR Caja-Banco
+   * Cierra la CxP cuando el dueño marca como pagado.
+   */
+  async onProviderCommissionPaid(data: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    payment_reference: string | null;
+    paid_by_user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.paid.payable',
+        'Comisiones por Pagar — Mecánicos',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.paid.cash_bank',
+        'Caja/Banco',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'provider_commission_payment',
+      source_id: data.accrual_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description:
+        `Pago a mecánico #${data.employee_id} (accrual #${data.accrual_id}` +
+        (data.payment_reference ? `, ref ${data.payment_reference}` : '') +
+        ')',
+      lines,
+      user_id: data.paid_by_user_id,
+    });
+  }
+
+  /**
+   * commission.declined: DR Comisiones por Pagar / CR Gasto por Comisiones
+   * Reversa la CxP cuando el dueño declina con motivo. NO se paga al mecánico.
+   */
+  async onProviderCommissionDeclined(data: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    reason: string;
+    declined_by_user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.declined.payable',
+        'Comisiones por Pagar — Mecánicos',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.declined.expense',
+        'Gasto por Comisiones — Mecánicos',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'provider_commission_decline',
+      source_id: data.accrual_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description:
+        `Declinar comisión del mecánico #${data.employee_id} (accrual #${data.accrual_id}, ` +
+        `motivo: ${data.reason})`,
+      lines,
+      user_id: data.declined_by_user_id,
+    });
+  }
+
+  /**
+   * commission.reversed: DR Comisiones por Pagar / CR Gasto por Comisiones
+   * Reversa la CxP cuando se cancela o no-show la reserva post-pago.
+   */
+  async onProviderCommissionReversed(data: {
+    accrual_id: number;
+    store_id: number;
+    organization_id: number;
+    employee_id: number;
+    amount: number;
+    reason: string;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.reversed.payable',
+        'Comisiones por Pagar — Mecánicos',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'provider.commission.reversed.expense',
+        'Gasto por Comisiones — Mecánicos',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'provider_commission_reversal',
+      source_id: data.accrual_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description:
+        `Reversar comisión del mecánico #${data.employee_id} (accrual #${data.accrual_id}, ` +
+        `motivo: ${data.reason})`,
+      lines,
+    });
+  }
+
   // ===== WALLET =====
 
   async onWalletCredited(data: {

@@ -664,6 +664,39 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2335',
     description: 'Costos y Gastos por Pagar - Comisiones',
   },
+  // QUI-678 — Comisiones dueño/mecánico (perfil del empleado, CxP automática)
+  'provider.commission.accrued.expense': {
+    code: '5295',
+    description: 'Gastos Diversos - Comisiones a Mecánicos',
+  },
+  'provider.commission.accrued.payable': {
+    code: '2335',
+    description: 'CxP - Comisiones a Mecánicos',
+  },
+  'provider.commission.paid.payable': {
+    code: '2335',
+    description: 'CxP - Comisiones a Mecánicos (pago)',
+  },
+  'provider.commission.paid.cash_bank': {
+    code: '1105',
+    description: 'Caja / Bancos (pago comisiones mecánicos)',
+  },
+  'provider.commission.declined.payable': {
+    code: '2335',
+    description: 'CxP - Comisiones a Mecánicos (declinada)',
+  },
+  'provider.commission.declined.expense': {
+    code: '5295',
+    description: 'Gastos Diversos - Comisiones a Mecánicos (reverso)',
+  },
+  'provider.commission.reversed.payable': {
+    code: '2335',
+    description: 'CxP - Comisiones a Mecánicos (reverso)',
+  },
+  'provider.commission.reversed.expense': {
+    code: '5295',
+    description: 'Gastos Diversos - Comisiones a Mecánicos (reverso)',
+  },
   // Nómina individual — gastos de nómina (débitos)
   'payroll.approved.transport_subsidy': {
     code: '5105',

@@ -72,6 +72,13 @@ export class StorePrismaService extends BasePrismaService {
     'wallets',
     'commission_rules',
     'commission_calculations',
+    /// Tiene columna `store_id` propia. Mismo patrón que `commission_calculations`:
+    /// un accrual por reserva debe ser legible solo por la tienda dueña.
+    'booking_commission_accruals',
+    /// QUI-678 — Comisiones en el perfil del mecánico. Store-scoped porque
+    /// cada tienda tiene sus propios mecánicos y cada mecánico ve solo sus
+    /// propias comisiones (filtradas por employee_id).
+    'user_commissions',
     'payment_links',
     'entity_metadata_fields',
     'entity_metadata_values',
@@ -1541,6 +1548,15 @@ export class StorePrismaService extends BasePrismaService {
 
   get commission_calculations() {
     return this.scoped_client.commission_calculations;
+  }
+
+  // QUI-678 — Comisiones en el perfil del mecánico
+  get user_commissions() {
+    return this.scoped_client.user_commissions;
+  }
+
+  get booking_commission_accruals() {
+    return this.scoped_client.booking_commission_accruals;
   }
 
   // Customer Queue (manually scoped by store_id in service layer)

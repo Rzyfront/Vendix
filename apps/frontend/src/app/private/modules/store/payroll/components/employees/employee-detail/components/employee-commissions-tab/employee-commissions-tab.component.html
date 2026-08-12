@@ -1,0 +1,221 @@
+<div class="commissions-tab">
+  <!-- Header con título y acciones -->
+  <header class="tab-header">
+    <div>
+      <h2 class="tab-title">Comisiones</h2>
+      <p class="tab-subtitle">Historial de comisiones del mecánico. Pagos a través del sistema.</p>
+    </div>
+    <button class="btn-secondary" (click)="refresh()" [disabled]="loading()">
+      <app-icon name="refresh" [size]="16"></app-icon>
+      Actualizar
+    </button>
+  </header>
+
+  <!-- KPIs del mecánico -->
+  @if (summary(); as s) {
+    <div class="kpi-grid">
+      <app-card class="kpi-card kpi-accrued">
+        <span class="kpi-label">Por pagar</span>
+        <span class="kpi-value">${{ formatMoney(s.accrued_amount) }}</span>
+        <span class="kpi-hint">{{ s.accrued_count }} reservas</span>
+      </app-card>
+      <app-card class="kpi-card kpi-paid">
+        <span class="kpi-label">Pagado</span>
+        <span class="kpi-value">${{ formatMoney(s.paid_amount) }}</span>
+        <span class="kpi-hint">{{ s.paid_count }} reservas</span>
+      </app-card>
+      <app-card class="kpi-card kpi-declined">
+        <span class="kpi-label">Declinado</span>
+        <span class="kpi-value">${{ formatMoney(s.declined_amount) }}</span>
+        <span class="kpi-hint">{{ s.declined_count }} reservas</span>
+      </app-card>
+      <app-card class="kpi-card">
+        <span class="kpi-label">Pendiente</span>
+        <span class="kpi-value">${{ formatMoney(s.pending_amount) }}</span>
+        <span class="kpi-hint">{{ s.pending_count }} reservas</span>
+      </app-card>
+    </div>
+  }
+
+  <!-- Filtros -->
+  <div class="filters">
+    <div class="filter-chips">
+      @for (f of statusFilters; track f.value) {
+        <button
+          class="chip"
+          [class.chip-active]="statusFilter() === f.value"
+          (click)="setStatus(f.value)"
+        >
+          {{ f.label }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <!-- Loading state -->
+  @if (loading()) {
+    <div class="loading">Cargando comisiones…</div>
+  }
+
+  <!-- Empty -->
+  @if (!loading() && items().length === 0) {
+    <app-empty-state
+      icon="banknote"
+      title="Sin comisiones"
+      description="Este mecánico aún no tiene comisiones registradas. Las comisiones se crean automáticamente cuando se completa el pago de una reserva de servicio."
+    ></app-empty-state>
+  }
+
+  <!-- Tabla -->
+  @if (!loading() && items().length > 0) {
+    <app-card class="data-card">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Reserva</th>
+              <th>Servicio</th>
+              <th class="num">Base</th>
+              <th class="num">%</th>
+              <th class="num">Comisión</th>
+              <th>Estado</th>
+              <th class="actions">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (c of items(); track c.id) {
+              <tr>
+                <td>{{ c.created_at | date: 'short' }}</td>
+                <td>
+                  @if (c.booking) {
+                    <span class="booking-ref">#{{ c.booking.booking_number }}</span>
+                    <span class="booking-date">{{ c.booking.date | date: 'mediumDate' }}</span>
+                  } @else {
+                    —
+                  }
+                </td>
+                <td>{{ c.product?.name || '—' }}</td>
+                <td class="num">${{ formatMoney(c.base_amount) }}</td>
+                <td class="num">{{ c.commission_pct }}%</td>
+                <td class="num owner">${{ formatMoney(c.commission_amount) }}</td>
+                <td>
+                  <span class="status-badge" [style]="{ background: statusBadge(c.status).color }">
+                    {{ statusBadge(c.status).label }}
+                  </span>
+                  @if (c.declined_reason) {
+                    <p class="reason-line">Motivo: {{ c.declined_reason }}</p>
+                  }
+                  @if (c.payment_reference) {
+                    <p class="reason-line">Ref: {{ c.payment_reference }}</p>
+                  }
+                </td>
+                <td class="actions">
+                  @if (c.status === 'accrued') {
+                    <button class="btn-icon-sm" title="Marcar pagado" (click)="openPayModal(c)">
+                      <app-icon name="check" [size]="14"></app-icon>
+                    </button>
+                    <button class="btn-icon-sm danger" title="Declinar" (click)="openDeclineModal(c)">
+                      <app-icon name="x" [size]="14"></app-icon>
+                    </button>
+                  }
+                  @if (c.status === 'declined') {
+                    <button class="btn-icon-sm" title="Reabrir" (click)="reopen(c)" [disabled]="actionLoading()">
+                      <app-icon name="rotate-ccw" [size]="14"></app-icon>
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Paginación -->
+      @if (totalPages() > 1) {
+        <div class="pagination">
+          <button class="btn-secondary" (click)="setPage(page() - 1)" [disabled]="page() === 1">‹ Anterior</button>
+          <span class="page-info">Página {{ page() }} de {{ totalPages() }} ({{ total() }} resultados)</span>
+          <button class="btn-secondary" (click)="setPage(page() + 1)" [disabled]="page() === totalPages()">Siguiente ›</button>
+        </div>
+      }
+    </app-card>
+  }
+</div>
+
+<!-- Modal: Decline -->
+@if (declineModalOpen().open && declineModalOpen().accrual; as acc) {
+  <div class="modal-overlay" (click)="closeDeclineModal()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <header class="modal-header">
+        <h3>Declinar comisión</h3>
+        <button class="btn-icon-sm" (click)="closeDeclineModal()">
+          <app-icon name="x" [size]="16"></app-icon>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-text">
+          Vas a declinar la comisión de <strong>${{ formatMoney(acc.commission_amount) }}</strong>
+          del servicio <strong>{{ acc.product?.name }}</strong>.
+          Esto <strong>NO se le pagará al mecánico</strong> y se generará un asiento contable inverso.
+        </p>
+        <label class="modal-label">Motivo (obligatorio, mínimo 3 caracteres)</label>
+        <textarea
+          class="modal-textarea"
+          rows="3"
+          [ngModel]="declineReason()"
+          (ngModelChange)="declineReason.set($event)"
+          placeholder="Ej: Cliente canceló sin pagar / Queja del cliente / Servicio no prestado"
+        ></textarea>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn-secondary" (click)="closeDeclineModal()" [disabled]="actionLoading()">Cancelar</button>
+        <button class="btn-danger" (click)="confirmDecline()" [disabled]="actionLoading()">
+          @if (actionLoading()) { <span>Declinando...</span> } @else { <span>Declinar</span> }
+        </button>
+      </footer>
+    </div>
+  </div>
+}
+
+<!-- Modal: MarkPaid -->
+@if (payModalOpen().open && payModalOpen().accrual; as acc) {
+  <div class="modal-overlay" (click)="closePayModal()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <header class="modal-header">
+        <h3>Marcar como pagada</h3>
+        <button class="btn-icon-sm" (click)="closePayModal()">
+          <app-icon name="x" [size]="16"></app-icon>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-text">
+          Vas a marcar como pagada la comisión de <strong>${{ formatMoney(acc.commission_amount) }}</strong>
+          del servicio <strong>{{ acc.product?.name }}</strong>.
+          Se generará el asiento contable de pago (DR CxP / CR Caja).
+        </p>
+        <label class="modal-label">Referencia del pago (opcional)</label>
+        <input
+          type="text"
+          class="modal-input"
+          [ngModel]="payReference()"
+          (ngModelChange)="payReference.set($event)"
+          placeholder="Ej: TRF-12345, CHQ-9876"
+        />
+        <label class="modal-label">Notas (opcional)</label>
+        <textarea
+          class="modal-textarea"
+          rows="2"
+          [ngModel]="payNotes()"
+          (ngModelChange)="payNotes.set($event)"
+        ></textarea>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn-secondary" (click)="closePayModal()" [disabled]="actionLoading()">Cancelar</button>
+        <button class="btn-primary" (click)="confirmMarkPaid()" [disabled]="actionLoading()">
+          @if (actionLoading()) { <span>Procesando...</span> } @else { <span>Marcar pagada</span> }
+        </button>
+      </footer>
+    </div>
+  </div>
+}

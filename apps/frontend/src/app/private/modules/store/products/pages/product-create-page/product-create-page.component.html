@@ -227,6 +227,21 @@
               customWrapperClass="!mt-0"
             ></app-input>
 
+            <!-- QUI-XXX: solo aplica a servicios (requires_booking=true). El dueño
+                 define qué % se queda cuando un mecánico ejecuta este servicio
+                 en su local. El resto va al mecánico. -->
+            <app-input
+              *ngIf="productForm.get('requires_booking')?.value"
+              label="Comisión del dueño (%)"
+              type="number"
+              formControlName="owner_commission_pct"
+              [error]="getErrorMessage('owner_commission_pct')"
+              suffix="%"
+              placeholder="0.00"
+              tooltipText="Porcentaje que te quedas cuando este servicio lo realiza un mecánico en tu local. El resto va al mecánico."
+              customWrapperClass="!mt-0"
+            ></app-input>
+
             <app-input
               [label]="
                 productForm.get('pricing_type')?.value === 'weight'

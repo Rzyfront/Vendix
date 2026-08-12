@@ -589,6 +589,15 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.commission_calculations;
   }
 
+  // QUI-678 — Comisiones en el perfil del mecánico
+  get user_commissions() {
+    return this.baseClient.user_commissions;
+  }
+
+  get booking_commission_accruals() {
+    return this.baseClient.booking_commission_accruals;
+  }
+
   // Payroll system defaults (global - no scoping)
   get payroll_system_defaults() {
     return this.baseClient.payroll_system_defaults;

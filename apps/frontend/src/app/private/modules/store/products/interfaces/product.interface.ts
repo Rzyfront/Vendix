@@ -332,6 +332,8 @@ export interface CreateProductDto {
   base_price: number;
   cost_price?: number;
   profit_margin?: number;
+  /** % que se queda el dueño cuando este servicio lo ejecuta un mecánico. */
+  owner_commission_pct?: number | null;
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;

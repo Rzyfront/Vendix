@@ -401,7 +401,37 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/reservations/components/reschedule-requests-page/reschedule-requests-page.component'
               ).then((c) => c.RescheduleRequestsPageComponent),
           },
+          {
+            // QUI-XXX — resumen diario del split dueño/mecánico.
+            // Pantalla al cierre del día: cuánto facturó, tu comisión,
+            // lo que se le debe a cada mecánico.
+            path: 'commissions/daily-summary',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/daily-summary/daily-summary.component'
+              ).then((c) => c.DailyCommissionSummaryComponent),
+          },
         ],
+      },
+
+      // QUI-678 — Reporte de comisiones por pagar (lista agrupada por mecánico)
+      {
+        path: 'commissions/payable',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/commissions/pages/commissions-payable/commissions-payable.component'
+          ).then((c) => c.CommissionsPayableComponent),
+        canActivate: [permissionsGuard(['store:commissions:read'])],
+      },
+
+      // QUI-678 — Tab de comisiones del perfil del empleado (ruta standalone)
+      {
+        path: 'payroll/employees/:id/commissions',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/payroll/components/employees/employee-detail/components/employee-commissions-tab/employee-commissions-tab.component'
+          ).then((c) => c.EmployeeCommissionsTabComponent),
+        canActivate: [permissionsGuard(['store:commissions:read'])],
       },
       // Consultations Routes
       {

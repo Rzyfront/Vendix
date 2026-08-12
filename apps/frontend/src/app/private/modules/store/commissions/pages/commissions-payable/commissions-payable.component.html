@@ -1,0 +1,99 @@
+<div class="commissions-payable-page">
+  <app-sticky-header
+    title="Comisiones por pagar"
+    subtitle="Lo que se le debe a cada mecánico por servicios ya cobrados"
+    icon="banknote"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="date-bar">
+    <input
+      type="date"
+      class="date-input"
+      [ngModel]="date()"
+      (ngModelChange)="setDate($event)"
+    />
+    <span class="date-label">Cierre del día</span>
+  </div>
+
+  <div class="page-content">
+    @if (loading()) {
+      <div class="loading">Cargando reporte…</div>
+    }
+
+    @if (!loading() && summary(); as s) {
+      <!-- KPIs -->
+      <div class="stats-container">
+        <app-stats
+          title="Total por pagar"
+          [value]="formatMoney(s.totals.total_payable)"
+          [smallText]="s.totals.commissions_count + ' reservas'"
+          iconName="banknote"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+        />
+        <app-stats
+          title="Mecánicos"
+          [value]="s.totals.employees_count"
+          smallText="pendientes de pago"
+          iconName="users"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+        />
+      </div>
+
+      <!-- Empty -->
+      @if (s.by_employee.length === 0) {
+        <app-empty-state
+          icon="check-circle-2"
+          title="Sin comisiones por pagar"
+          description="No hay comisiones en estado 'por pagar' para esta fecha. Cuando se cobren reservas con servicios que tienen % de comisión del dueño, aparecerán aquí."
+        ></app-empty-state>
+      }
+
+      <!-- Lista de mecánicos con comisiones -->
+      @if (s.by_employee.length > 0) {
+        <section class="section">
+          <header class="section-header">
+            <h2>Por mecánico</h2>
+            <span class="section-hint">Click en un mecánico para ver el detalle y pagar</span>
+          </header>
+          <app-card class="data-card">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Mecánico</th>
+                    <th class="num">Reservas</th>
+                    <th class="num">A pagar</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (m of s.by_employee; track m.employee_id) {
+                    <tr>
+                      <td>
+                        <div class="employee-cell">
+                          <div class="avatar">{{ m.display_name.charAt(0) }}</div>
+                          <span>{{ m.display_name }}</span>
+                        </div>
+                      </td>
+                      <td class="num">{{ m.commission_count }}</td>
+                      <td class="num amount">${{ formatMoney(m.total_amount) }}</td>
+                      <td>
+                        <a class="btn-link" [routerLink]="['/admin/payroll/employees', m.employee_id]">
+                          Ver perfil →
+                        </a>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </app-card>
+        </section>
+      }
+    }
+  </div>
+</div>

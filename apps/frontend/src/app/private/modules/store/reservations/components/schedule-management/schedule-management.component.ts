@@ -9,7 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { finalize, forkJoin } from 'rxjs';
+import { catchError, finalize, forkJoin, of } from 'rxjs';
 import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
 import {
@@ -48,6 +48,20 @@ interface BookableService {
   name: string;
   base_price?: number;
   service_duration_minutes?: number;
+}
+
+/**
+ * Resumen de comisión de UN mecánico para la pantalla del Equipo de Servicio.
+ * Misma shape que la entrada `by_mechanic[]` del endpoint
+ * `/store/reservations/commissions/daily-summary`.
+ */
+interface MechanicDaySummary {
+  employee_id: number | null;
+  display_name: string;
+  bookings_count: number;
+  total_revenue: number;
+  owner_commission: number;
+  provider_payable: number;
 }
 
 @Component({
@@ -89,6 +103,16 @@ export class ScheduleManagementComponent {
   selectedProvider = signal<ServiceProvider | null>(null);
   allServices = signal<BookableService[]>([]);
   loading = signal(true);
+
+  /**
+   * Resumen diario de comisión por mecánico (mapeado por employee_id).
+   * Permite mostrar # reservas + tu comisión + lo que le debes a cada
+   * mecánico en la tabla de Equipo de Servicio. Se carga junto con la lista
+   * de providers para evitar un round-trip extra al renderizar.
+   */
+  dailyCommissionsByProvider = signal<Map<number | null, MechanicDaySummary>>(
+    new Map(),
+  );
 
   // Search
   searchQuery = signal('');
@@ -228,6 +252,21 @@ export class ScheduleManagementComponent {
         return `${val.length} servicios`;
       },
     },
+    // QUI-XXX: split dueño/mecánico del día. El valor viene pre-calculado
+    // en cada provider como `_commission_summary` por loadProviders().
+    {
+      key: '_commission_summary',
+      label: 'Hoy',
+      priority: 1,
+      transform: (val: MechanicDaySummary | undefined) => {
+        if (!val || val.bookings_count === 0) {
+          return '—';
+        }
+        const bookings = `${val.bookings_count} reserva${val.bookings_count === 1 ? '' : 's'}`;
+        const owe = `Le debes $${Math.round(val.provider_payable).toLocaleString('es-CO')}`;
+        return `${bookings} · ${owe}`;
+      },
+    },
   ];
 
   // Provider card config (mobile)
@@ -313,17 +352,46 @@ export class ScheduleManagementComponent {
 
   loadProviders(): void {
     this.loading.set(true);
-    forkJoin([
-      this.reservationsService.getProviders(),
-      this.reservationsService.getBookableServices(),
-    ])
+    forkJoin({
+      providers: this.reservationsService.getProviders(),
+      services: this.reservationsService.getBookableServices(),
+      // El resumen de comisiones puede no estar listo (migration no aplicada,
+      // endpoint nuevo, sin datos del día, etc.). Si falla, NO debe abortar
+      // el load de la lista de mecánicos — la columna "Hoy" simplemente
+      // muestra "—" para todos.
+      dailySummary: this.reservationsService.getDailyCommissionSummary().pipe(
+        catchError(() =>
+          of({
+            date: new Date().toISOString().split('T')[0],
+            totals: { total_revenue: 0, total_owner_commission: 0, total_provider_payable: 0, bookings_count: 0 },
+            by_mechanic: [] as MechanicDaySummary[],
+            by_service: [],
+          }),
+        ),
+      ),
+    })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
-        next: ([providers, services]) => {
-          this.providers.set(providers);
+        next: ({ providers, services, dailySummary }) => {
+          // Map employee_id → commission summary para lookup O(1) en la tabla.
+          const map = new Map<number | null, MechanicDaySummary>();
+          for (const m of dailySummary?.by_mechanic ?? []) {
+            map.set(m.employee_id, m);
+          }
+          this.dailyCommissionsByProvider.set(map);
+
+          // Adjuntar el summary a cada provider como campo no-enumerable
+          // para que la columna "Hoy" pueda leerlo sin necesidad de lookup
+          // adicional en el transform.
+          const enriched = providers.map((p) =>
+            Object.assign({}, p, {
+              _commission_summary: map.get(p.employee_id ?? null) ?? null,
+            }),
+          );
+          this.providers.set(enriched);
           this.allServices.set(services || []);
         },
         error: () => this.toastService.error('Error al cargar proveedores'),

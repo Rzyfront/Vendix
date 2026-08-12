@@ -166,6 +166,17 @@ export class CreateProductDto {
   @IsInt()
   store_id?: number;
 
+  /// Porcentaje que se queda el dueño cuando este servicio lo ejecuta un
+  /// mecánico (service_providers) en su local. NULL = sin split. Solo
+  /// significativo cuando requires_booking=true. Rango 0-100, 2 decimales.
+  /// El snapshot se congela al calcular el accrual en booking_commission_accruals.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  @Min(0, { message: 'La comisión del dueño no puede ser negativa' })
+  @Max(100, { message: 'La comisión del dueño no puede superar el 100%' })
+  owner_commission_pct?: number;
+
   @IsOptional()
   @IsInt()
   brand_id?: number;
@@ -512,6 +523,14 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  /// Ver CreateProductDto.owner_commission_pct para semántica.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  @Min(0, { message: 'La comisión del dueño no puede ser negativa' })
+  @Max(100, { message: 'La comisión del dueño no puede superar el 100%' })
+  owner_commission_pct?: number;
+
   @IsOptional()
   @IsInt()
   brand_id?: number;

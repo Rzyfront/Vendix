@@ -1,0 +1,124 @@
+.commissions-payable-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--color-bg, #fafafa);
+}
+
+.date-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: white;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+
+  .date-input {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-family: inherit;
+  }
+  .date-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #6b7280);
+  }
+}
+
+.page-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0.25rem;
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    margin: 0;
+  }
+  .section-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #9ca3af);
+  }
+}
+
+.data-card { padding: 0; overflow: hidden; }
+.table-scroll { overflow-x: auto; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  min-width: 500px;
+
+  thead {
+    background: var(--bg-table-header, #f9fafb);
+    th {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-secondary, #6b7280);
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+    }
+  }
+  tbody tr { border-top: 1px solid var(--color-border, #f3f4f6); &:hover { background: var(--bg-hover, #f9fafb); } }
+  td { padding: 0.875rem 1rem; color: var(--text-primary, #111827); vertical-align: middle; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .amount { font-weight: 600; color: #f59e0b; }
+}
+
+.employee-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+    flex-shrink: 0;
+  }
+}
+
+.btn-link {
+  color: var(--color-primary, #10b981);
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 0.875rem;
+  &:hover { text-decoration: underline; }
+}

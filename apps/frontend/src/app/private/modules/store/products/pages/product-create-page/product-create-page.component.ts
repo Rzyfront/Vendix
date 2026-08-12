@@ -1790,6 +1790,12 @@ export class ProductCreatePageComponent {
         service_pricing_type: [null],
         requires_booking: [false],
         booking_mode: [null],
+        // QUI-XXX — porcentaje que se queda el dueño cuando el servicio lo
+        // ejecuta un mecánico (service_providers) en su local. Se renderiza
+        // en la sección Precios y Rentabilidad SOLO cuando
+        // requires_booking=true (servicio). El snapshot en
+        // booking_commission_accruals.owner_pct_snapshot congela el histórico.
+        owner_commission_pct: [null as number | null, [Validators.min(0), Validators.max(100)]],
         is_recurring: [false],
         service_instructions: [''],
         is_consultation: [false],
@@ -2010,6 +2016,7 @@ export class ProductCreatePageComponent {
       description: product.description,
       cost_price: product.cost_price || 0,
       profit_margin: product.profit_margin || 0,
+      owner_commission_pct: (product as any).owner_commission_pct ?? null,
       base_price: product.base_price,
       is_on_sale: product.is_on_sale || false,
       sale_price: product.sale_price || 0,
@@ -3754,6 +3761,13 @@ export class ProductCreatePageComponent {
       description: formValue.description || undefined,
       cost_price: Number(formValue.cost_price),
       profit_margin: Number(formValue.profit_margin),
+      // null cuando el producto no es un servicio. Number(null) === 0, así que
+      // hacemos la conversión explícita para no mandar "0" al backend por
+      // accidente (que sería interpretado como "dueño se queda todo").
+      owner_commission_pct:
+        formValue.owner_commission_pct === null || formValue.owner_commission_pct === ''
+          ? null
+          : Number(formValue.owner_commission_pct),
       base_price: Number(neutral(formValue.base_price, 0)),
       is_on_sale: !!neutral(formValue.is_on_sale, false),
       sale_price: Number(neutral(formValue.sale_price, 0)),
