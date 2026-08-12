@@ -410,10 +410,12 @@ export class FinancialAnalyticsService {
     // Tenant + period scoped key: store_id isolates the tenant; the date-range
     // inputs (preset/from/to) capture the period. Relative presets like "today"
     // keep a stable key and rely on the short TTL for freshness.
-    // `v2` = payload shape that carries operating_revenue / cost_coverage /
-    // comparison. Bumped with the shape so a rolling deploy cannot serve a
-    // v1-shaped object to a frontend that reads the new fields.
-    const cacheKey = `analytics:financial:profit-loss:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v3` = payload shape that carries revenue.total_invoiced, bottom_line.balance
+    // and comparison.balance / balance_growth, and that nets refundSubtotal /
+    // refundShipping into operating_revenue. Bumped with the shape so a rolling
+    // deploy cannot serve a v2-shaped object to a frontend that reads the new
+    // fields.
+    const cacheKey = `analytics:financial:profit-loss:v3:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -516,6 +518,7 @@ export class FinancialAnalyticsService {
       previousOrderAggregates,
       previousCogsResult,
       previousExpenseAggregates,
+      previousRefundAggregates,
     ] = await Promise.all([
       this.aggregateRevenueOrders(startDate, endDate),
       this.aggregateCogs(storeId, startDate, endDate),
@@ -538,6 +541,22 @@ export class FinancialAnalyticsService {
         previousExpenseRange.previousStartDate,
         previousExpenseRange.previousEndDate,
       ),
+      // Previous-period refund aggregate mirrors the current one — needed to
+      // derive `previousBalance` (and `balance_growth`) on the same definition
+      // as the current `balance` (total_invoiced − refunds − operating_expenses),
+      // and to make `revenue_growth` comparable across periods (the previous
+      // period's `operating_revenue` must be net of its own refunds too).
+      this.prisma.refunds.aggregate({
+        where: {
+          state: { in: ['completed', 'approved'] },
+          created_at: { gte: previousStartDate, lte: previousEndDate },
+        },
+        _sum: {
+          amount: true,
+          subtotal_refund: true,
+          shipping_refund: true,
+        },
+      }),
     ]);
 
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
@@ -559,17 +578,40 @@ export class FinancialAnalyticsService {
     });
 
     const totalCOGS = cogsResult.cogs;
-    const grossProfit = operatingRevenue - totalCOGS;
-    const grossMargin =
-      operatingRevenue > 0 ? (grossProfit / operatingRevenue) * 100 : 0;
     const refundAmount = Number(refundAggregates._sum.amount || 0);
     const refundSubtotal = Number(refundAggregates._sum.subtotal_refund || 0);
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
     const refundShipping = Number(refundAggregates._sum.shipping_refund || 0);
+    // REFUND REFLECTION (QUI-662): an order delivered + refunded inside the
+    // same period must net to zero, not to the original subtotal. We subtract
+    // `refundSubtotal` and add back `refundShipping` so the operating_revenue
+    // base and the refund base line up — `computeOperatingRevenue` already
+    // excludes tax, so `tax_refund` is intentionally NOT subtracted here.
+    const operatingRevenueNetRefunds =
+      operatingRevenue - refundSubtotal + refundShipping;
+    const grossProfit = operatingRevenueNetRefunds - totalCOGS;
+    const grossMargin =
+      operatingRevenueNetRefunds > 0
+        ? (grossProfit / operatingRevenueNetRefunds) * 100
+        : 0;
     const operatingExpenses = expenseAggregates;
-    const netProfit = grossProfit - refundSubtotal - operatingExpenses;
+    // Net profit now flows from the refund-netted gross profit; we no longer
+    // subtract `refundSubtotal` a second time here (it is already reflected
+    // inside `operatingRevenueNetRefunds`).
+    const netProfit = grossProfit - operatingExpenses;
     const netMargin =
-      operatingRevenue > 0 ? (netProfit / operatingRevenue) * 100 : 0;
+      operatingRevenueNetRefunds > 0
+        ? (netProfit / operatingRevenueNetRefunds) * 100
+        : 0;
+    // TOTAL INVOICED (QUI-662): the gross figure the merchant actually sees as
+    // "lo que pagó el cliente" — `SUM(orders.grand_total)` over REVENUE_STATES.
+    // Lives inside `_sum` already, so no extra query.
+    const totalInvoiced = Number(orderAggregates._sum.grand_total || 0);
+    // BALANCE (QUI-662): operational cash position = what was invoiced − what
+    // went back as refunds − operating expenses. COGS is intentionally
+    // excluded because it is an asset-consumption charge, not a cash outflow
+    // ("salidas de dinero que no signifiquen ingreso de un activo").
+    const balance = totalInvoiced - refundAmount - operatingExpenses;
 
     // Previous period, on the SAME definitions, so the panel's growth badge is
     // not computed off a different metric than the value it sits under.
@@ -584,6 +626,29 @@ export class FinancialAnalyticsService {
       previousCogsResult.cogs -
       previousExpenseAggregates;
     const previousOrderCount = previousOrderAggregates._count.id || 0;
+    // Previous-period balance mirrors the current one (total_invoiced −
+    // refunds − operating_expenses) so balance_growth uses identical bases.
+    const previousTotalInvoiced = Number(
+      previousOrderAggregates._sum.grand_total || 0,
+    );
+    const previousRefundAmount = Number(
+      previousRefundAggregates._sum.amount || 0,
+    );
+    const previousBalance =
+      previousTotalInvoiced - previousRefundAmount - previousExpenseAggregates;
+    // Same refund-netting on the previous period so revenue_growth is on
+    // identical bases (current `operatingRevenueNetRefunds` vs previous
+    // `previousOperatingRevenueNetRefunds`).
+    const previousRefundSubtotal = Number(
+      previousRefundAggregates._sum.subtotal_refund || 0,
+    );
+    const previousRefundShipping = Number(
+      previousRefundAggregates._sum.shipping_refund || 0,
+    );
+    const previousOperatingRevenueNetRefunds =
+      previousOperatingRevenue -
+      previousRefundSubtotal +
+      previousRefundShipping;
 
     // DATA-CELL-1: apply the SINGLE rounding policy (`round2`) to every emitted
     // number. Internal math above stays RAW so derived figures (margins,
@@ -600,8 +665,15 @@ export class FinancialAnalyticsService {
         discounts: this.round2(discounts),
         net_revenue: this.round2(netRevenue),
         shipping_revenue: this.round2(shippingRevenue),
-        /** Contract revenue: subtotal − discounts + freight, VAT excluded. */
-        operating_revenue: this.round2(operatingRevenue),
+        /**
+         * Contract revenue: subtotal − discounts + freight, VAT excluded, with
+         * the period's `refundSubtotal` / `refundShipping` netted in. A delivered
+         * + refunded order in the same period closes to zero, not to its
+         * original subtotal.
+         */
+        operating_revenue: this.round2(operatingRevenueNetRefunds),
+        /** `SUM(orders.grand_total)` over REVENUE_STATES — what the customer paid. */
+        total_invoiced: this.round2(totalInvoiced),
         tax_collected: this.round2(taxCollected),
       },
       costs: {
@@ -621,6 +693,12 @@ export class FinancialAnalyticsService {
       bottom_line: {
         net_profit: this.round2(netProfit),
         net_margin: this.round2(netMargin),
+        /**
+         * Operational cash position (QUI-662): total_invoiced − refunds −
+         * operating_expenses. COGS is excluded because it is an
+         * asset-consumption charge, not a cash outflow.
+         */
+        balance: this.round2(balance),
         order_count: orderAggregates._count.id || 0,
       },
       /**
@@ -633,7 +711,12 @@ export class FinancialAnalyticsService {
         net_profit: this.round2(previousNetProfit),
         operating_expenses: this.round2(previousExpenseAggregates),
         order_count: previousOrderCount,
-        revenue_growth: computeGrowth(operatingRevenue, previousOperatingRevenue),
+        /** Previous-period balance on the same definition as the current `balance`. */
+        balance: this.round2(previousBalance),
+        revenue_growth: computeGrowth(
+          operatingRevenueNetRefunds,
+          previousOperatingRevenueNetRefunds,
+        ),
         net_profit_growth: computeGrowth(netProfit, previousNetProfit),
         expenses_growth: computeGrowth(
           operatingExpenses,
@@ -643,6 +726,7 @@ export class FinancialAnalyticsService {
           orderAggregates._count.id || 0,
           previousOrderCount,
         ),
+        balance_growth: computeGrowth(balance, previousBalance),
       },
     };
   }

@@ -92,7 +92,7 @@ describe('FinancialAnalyticsService', () => {
   });
 
   describe('getProfitLossSummary', () => {
-    it('nets delivered + refunded in the same period to zero net_profit', async () => {
+    it('nets delivered + refunded in the same period to zero net_profit and zero operating_revenue (QUI-662)', async () => {
       prisma.orders.aggregate.mockResolvedValue({
         _sum: {
           subtotal_amount: 2500,
@@ -115,8 +115,85 @@ describe('FinancialAnalyticsService', () => {
 
       const result = await service.getProfitLossSummary(QUERY as any);
 
+      // QUI-662: the refund must also drop operating_revenue, not only net_profit
+      // (operatingRevenue = 2500, refundSubtotal = 2500, refundShipping = 0).
+      expect(result.revenue.operating_revenue).toBe(0);
       expect(result.bottom_line.net_profit).toBe(0);
       expect(result.bottom_line.order_count).toBe(2);
+    });
+
+    it('QUI-662: cross-period refund makes operating_revenue negative (no base, refund in current period)', async () => {
+      // Orders aggregate is called twice (current + previous). With the same
+      // mock both calls return 0; the previous-period result has the same
+      // operating_revenue = 0. Refund in BOTH periods = 2500 subtotal_refund
+      // with 0 shipping_refund, so:
+      //   current:  operatingRevenue = 0 - 2500 + 0 = -2500
+      //   previous: previousOperatingRevenue = 0 (no orders)
+      // We assert the current-period value to lock in the contract that a
+      // cross-period refund moves operating_revenue negative (same asymmetry
+      // as net_profit — the "real" cost of the refund is recognized here even
+      // though the sale was elsewhere).
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          grand_total: 0,
+        },
+        _count: { id: 0 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 2500,
+          subtotal_refund: 2500,
+          tax_refund: 0,
+          shipping_refund: 0,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.operating_revenue).toBe(-2500);
+    });
+
+    it('QUI-662: emits total_invoiced (grand_total sum) and balance (invoiced - refunds - operating_expenses)', async () => {
+      // 1 order, $25k base + $4.75k tax = $29.75k grand_total.
+      // No refunds, $2k operating expenses. COGS is intentionally not in the
+      // balance formula (asset-consumption charge, not a cash outflow).
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 25000,
+          discount_amount: 0,
+          tax_amount: 4750,
+          shipping_cost: 0,
+          grand_total: 29750,
+        },
+        _count: { id: 1 },
+      });
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: jest.fn().mockResolvedValue([{ cogs: 0 }]),
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 0,
+          subtotal_refund: 0,
+          tax_refund: 0,
+          shipping_refund: 0,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 2000 } });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.total_invoiced).toBe(29750);
+      // balance = total_invoiced - refundAmount - operating_expenses
+      //        = 29750 - 0 - 2000 = 27750
+      expect(result.bottom_line.balance).toBe(27750);
+      // Previous period inherits the same mock (no separate `Once` for it),
+      // so previousBalance == currentBalance == 27750 and growth is 0.
+      expect(result.comparison.balance_growth).toBe(0);
     });
 
     it('regression: refunded-only period yields net_profit 0 (not -2500)', async () => {
@@ -244,11 +321,14 @@ describe('FinancialAnalyticsService', () => {
       expect(result.bottom_line.net_profit).toBe(999.88);
 
       // Generic invariant: no emitted number carries >2 decimals / float noise.
+      // QUI-662: include the new fields in the same invariant.
       const numbers = [
         result.revenue.gross_revenue,
         result.revenue.discounts,
         result.revenue.net_revenue,
         result.revenue.shipping_revenue,
+        result.revenue.operating_revenue,
+        result.revenue.total_invoiced,
         result.revenue.tax_collected,
         result.costs.cost_of_goods_sold,
         result.costs.gross_profit,
@@ -260,6 +340,7 @@ describe('FinancialAnalyticsService', () => {
         result.operating_expenses,
         result.bottom_line.net_profit,
         result.bottom_line.net_margin,
+        result.bottom_line.balance,
       ];
       for (const n of numbers) {
         expect(n).toBe(round2(n));
