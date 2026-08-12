@@ -194,7 +194,11 @@ export class ProductsAnalyticsService {
       .filter(Boolean) as number[];
     if (productIds.length > 0) {
       const contextStoreId = RequestContextService.getContext()?.store_id ?? 0;
-      const coverageRows = await (this.prisma as any).$queryRaw<
+      // QUI-622 review: StorePrismaService no expone $queryRaw — el `as any`
+      // silencia al compilador pero en runtime es undefined. Mismo patrón que
+      // aggregateCogs (~L554): usar withoutScope() y filtrar explícito por
+      // store_id en el WHERE.
+      const coverageRows = await (this.prisma.withoutScope() as any).$queryRaw<
         Array<{ product_id: number; units_without_cost: bigint }>
       >`
         SELECT oi.product_id AS product_id,
