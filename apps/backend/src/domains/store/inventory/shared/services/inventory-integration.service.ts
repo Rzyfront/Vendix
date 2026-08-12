@@ -166,6 +166,17 @@ export class InventoryIntegrationService {
 
   /**
    * Update stock levels and create movement
+   *
+   * @deprecated SIN LLAMADORES — no lo uses. Es una tercera implementación
+   * paralela de la escritura de stock, y como las otras no aplica costeo, no
+   * registra `inventory_transactions`, no valida disponible (recorta a cero) y
+   * NO refresca `products.stock_quantity` / `product_variants.stock_quantity`.
+   * Cablearlo a un flujo nuevo hereda las cuatro fallas de golpe y ninguna
+   * avisa: el saldo queda escrito y la vitrina, las analíticas y el validador
+   * de stock siguen leyendo el número anterior.
+   *
+   * Para mover stock: `StockLevelManager`. Se conserva sin borrar por si algún
+   * consumidor externo lo alcanza por reflexión o inyección.
    */
   async updateStockAndCreateMovement(
     organizationId: number,

@@ -8,6 +8,7 @@ import {
   OUTBOUND_MOVEMENT_TYPES,
   TRANSFER_MOVEMENT_TYPE,
 } from '../../analytics/analytics-metrics.contract';
+import { syncDenormalizedProductStock } from '../shared/helpers/sync-product-stock.helper';
 
 @Injectable()
 export class MovementsService {
@@ -32,6 +33,20 @@ export class MovementsService {
 
       // Update stock levels based on movement type
       await this.updateStockLevels(tx, movement);
+
+      // El espejo denormalizado NO se actualiza solo. `updateStockLevel` escribe
+      // `stock_levels` a mano y sin él `products.stock_quantity` /
+      // `product_variants.stock_quantity` quedaban con el saldo anterior: el
+      // catálogo público, las analíticas y el validador de stock leen ESA
+      // columna, así que un movimiento por este endpoint movía la bodega y
+      // dejaba mintiendo a la vitrina. Sin error en ningún lado.
+      if (movement.product_id) {
+        await syncDenormalizedProductStock(
+          tx,
+          movement.product_id,
+          movement.product_variant_id ?? undefined,
+        );
+      }
 
       return movement;
     });
@@ -337,6 +352,24 @@ export class MovementsService {
     }
   }
 
+  /**
+   * IMPLEMENTACIÓN PARALELA a `StockLevelManager`. Escribe `stock_levels` a
+   * mano, y por eso NO hace nada de lo que el manager sí hace:
+   *
+   *   - no aplica costeo (no toca `inventory_cost_layers` ni el CPP), así que
+   *     una entrada por aquí suma unidades sin costo y diluye la valuación;
+   *   - no registra `inventory_transactions`, así que el movimiento no aparece
+   *     en la trazabilidad contable;
+   *   - no valida reservas ni disponible: recorta a cero (abajo) en vez de
+   *     fallar con `INV_STOCK_001` como hace `reserveStock`.
+   *
+   * El espejo denormalizado sí se repara, pero desde `create` y a posteriori
+   * (ver el `syncDenormalizedProductStock` de arriba), no desde aquí.
+   *
+   * NO ampliar este camino. Si un flujo nuevo necesita mover stock, va por
+   * `StockLevelManager`; lo correcto para este endpoint es migrarlo, y eso es
+   * un cambio con alcance propio, no un retoque.
+   */
   private async updateStockLevel(
     tx: any,
     productId: number,
