@@ -332,6 +332,68 @@ export class ReservationsService {
           },
           include: this.BOOKING_INCLUDE,
         });
+
+        // Atomicidad (QUI-649): reserva y orden auto-vinculada nacen juntas
+        // o no nacen. Si la creación de la orden falla, la reserva también se
+        // revierte al hacer rollback de la transacción.
+        if (!dto.order_id && !dto.skip_order_creation) {
+          const priceResult = this.priceResolverService.resolvePrice({
+            product: {
+              base_price: Number(product.base_price),
+              is_on_sale: product.is_on_sale,
+              sale_price:
+                product.sale_price != null
+                  ? Number(product.sale_price)
+                  : null,
+              track_inventory: product.track_inventory,
+            },
+            variant: selectedVariant
+              ? {
+                  price_override:
+                    selectedVariant.price_override != null
+                      ? Number(selectedVariant.price_override)
+                      : null,
+                  is_on_sale: selectedVariant.is_on_sale,
+                  sale_price:
+                    selectedVariant.sale_price != null
+                      ? Number(selectedVariant.sale_price)
+                      : null,
+                  track_inventory_override:
+                    selectedVariant.track_inventory_override,
+                }
+              : undefined,
+          });
+          const price = priceResult.unitPrice;
+          const order = await this.ordersService.create(
+            {
+              customer_id: dto.customer_id,
+              items: [
+                {
+                  product_id: dto.product_id,
+                  product_variant_id: dto.product_variant_id,
+                  product_name: created.product?.name || 'Servicio',
+                  quantity: 1,
+                  unit_price: price,
+                  total_price: price,
+                },
+              ],
+              subtotal: price,
+              total_amount: price,
+              internal_notes: `Generada desde reserva ${created.booking_number}`,
+              channel: dto.channel || 'pos',
+              skip_schedule_validation: true,
+            } as any,
+            context?.user_id,
+          );
+
+          const updated = await tx.bookings.update({
+            where: { id: created.id },
+            data: { order_id: order.id, updated_at: new Date() },
+            include: this.BOOKING_INCLUDE,
+          });
+          return await this.mapBooking(updated);
+        }
+
         return await this.mapBooking(created);
       },
       { isolationLevel: 'Serializable' },
@@ -349,69 +411,7 @@ export class ReservationsService {
       }
     }
 
-    // 8. Auto-crear orden de venta vinculada
-    if (!dto.order_id && !dto.skip_order_creation) {
-      try {
-        const priceResult = this.priceResolverService.resolvePrice({
-          product: {
-            base_price: Number(product.base_price),
-            is_on_sale: product.is_on_sale,
-            sale_price:
-              product.sale_price != null ? Number(product.sale_price) : null,
-            track_inventory: product.track_inventory,
-          },
-          variant: selectedVariant
-            ? {
-                price_override:
-                  selectedVariant.price_override != null
-                    ? Number(selectedVariant.price_override)
-                    : null,
-                is_on_sale: selectedVariant.is_on_sale,
-                sale_price:
-                  selectedVariant.sale_price != null
-                    ? Number(selectedVariant.sale_price)
-                    : null,
-                track_inventory_override:
-                  selectedVariant.track_inventory_override,
-              }
-            : undefined,
-        });
-        const price = priceResult.unitPrice;
-        const order = await this.ordersService.create(
-          {
-            customer_id: dto.customer_id,
-            items: [
-              {
-                product_id: dto.product_id,
-                product_variant_id: dto.product_variant_id,
-                product_name: booking.product?.name || 'Servicio',
-                quantity: 1,
-                unit_price: price,
-                total_price: price,
-              },
-            ],
-            subtotal: price,
-            total_amount: price,
-            internal_notes: `Generada desde reserva ${booking.booking_number}`,
-            channel: dto.channel || 'pos',
-            skip_schedule_validation: true,
-          } as any,
-          context?.user_id,
-        );
-
-        await this.prisma.bookings.update({
-          where: { id: booking.id },
-          data: { order_id: order.id, updated_at: new Date() },
-        });
-        booking.order = { id: order.id, order_number: order.order_number };
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo crear orden para reserva ${booking.booking_number}: ${error.message}`,
-        );
-      }
-    }
-
-    // 8. Emitir evento
+    // 7. Emitir evento
     this.eventEmitter.emit('booking.created', {
       store_id,
       booking_id: booking.id,
