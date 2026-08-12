@@ -69,14 +69,15 @@ function todayISO(): string {
     CurrencyPipe,
   ],
   template: `
+    @if (isOpen()) {
     <div class="cp-overlay" (click)="onCancel()">
       <div class="cp-modal" (click)="$event.stopPropagation()">
         <header class="cp-header">
           <div>
             <h3 class="cp-title">Configurar plan de pago</h3>
             <p class="cp-subtitle">
-              Total de la orden: {{ money(order().total_amount) }} ·
-              Estado actual: {{ order().payment_plan ?? 'sin plan' }}
+              Total de la orden: {{ money(order()?.total_amount) }} ·
+              Estado actual: {{ order()?.payment_plan ?? 'sin plan' }}
             </p>
           </div>
           <button type="button" class="cp-close" (click)="onCancel()" aria-label="Cerrar">
@@ -116,7 +117,7 @@ function todayISO(): string {
                 [control]="form.controls.dueDate"
               ></app-input>
               <p class="cp-balance">
-                Total: {{ money(order().total_amount) }} ·
+                Total: {{ money(order()?.total_amount) }} ·
                 Queda debiendo: {{ money(pendingBalance()) }}
               </p>
             </div>
@@ -211,6 +212,7 @@ function todayISO(): string {
         </footer>
       </div>
     </div>
+    }
   `,
   styles: [
     `
