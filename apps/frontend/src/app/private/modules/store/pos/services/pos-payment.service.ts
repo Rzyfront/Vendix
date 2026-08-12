@@ -15,6 +15,7 @@ import {
   Transaction,
 } from '../models/payment.model';
 import { PosShippingAddress } from '../models/shipping.model';
+import { PosApiService } from './pos-api.service';
 
 // Re-export types for component usage
 export type {
@@ -68,6 +69,7 @@ export class PosPaymentService {
     private storeContextService: StoreContextService,
     private cashRegisterService: PosCashRegisterService,
     private paymentMethodsCatalog: PaymentMethodsCatalogService,
+    private posApi: PosApiService,
   ) {}
 
   /**
@@ -266,6 +268,16 @@ export class PosPaymentService {
 
   /**
    * Process sale with payment (cash sale)
+   *
+   * QUI-649 — bifurcación por modo:
+   *   - Si el carrito está ADOPTADO (`linkedOrderId` presente), el POS cobra
+   *     sobre la orden ya creada por el backend. Vamos a
+   *     `POST /store/payments` (endpoint "Process payment for existing
+   *     order") en vez de `POST /store/payments/pos` (que crea una orden
+   *     nueva además de cobrar). Esto cierra el invariante "una sola orden
+   *     por sesión de POS con reserva".
+   *   - Si el carrito es local, mantenemos el flujo legacy contra
+   *     `/store/payments/pos`.
    */
   processSaleWithPayment(
     cartState: CartState,
@@ -283,6 +295,16 @@ export class PosPaymentService {
     }
 
     const register_id = this.getRegisterId();
+
+    // QUI-649 — short-circuit: charge the adopted order directly.
+    if (cartState.linkedOrderId != null) {
+      return this.chargeAdoptedOrder(
+        cartState,
+        paymentRequest,
+        user_id,
+        register_id,
+      );
+    }
 
     // Check if anonymous sale is allowed
     const isAnonymousSale = paymentRequest.isAnonymousSale === true;
@@ -538,8 +560,27 @@ export class PosPaymentService {
 
   /**
    * Process credit sale (no immediate payment)
+   *
+   * QUI-649 — bifurcación: si la orden está adoptada, no creamos una nueva
+   * ni cobramos; la orden auto-creada por el backend ya está en estado
+   * `created`. Retornamos la forma normalizada para que la UI no se rompa.
    */
   processCreditSale(cartState: CartState, createdBy: string): Observable<any> {
+    // QUI-649 — short-circuit: adopted order is already in `created` state.
+    if (cartState.linkedOrderId != null) {
+      return of({
+        success: true,
+        order: {
+          id: cartState.linkedOrderId,
+          order_number: cartState.linkedOrderNumber,
+          status: 'created',
+        },
+        payment: null,
+        message:
+          'Orden adoptada en estado creado (sin cobro inmediato — cobrar después)',
+      });
+    }
+
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
@@ -835,6 +876,86 @@ export class PosPaymentService {
       transactionId,
       message: 'Transferencia procesada correctamente',
     };
+  }
+
+  /**
+   * QUI-649 — Charge an adopted order directly. The order already exists in
+   * the backend (auto-created by `POST /store/reservations`); we never call
+   * `/store/payments/pos` because that endpoint creates a new order on top
+   * of the existing one. Instead we hit `POST /store/payments` which is the
+   * "Process payment for existing order" endpoint.
+   *
+   * Response shape is normalized to match the legacy `/store/payments/pos`
+   * envelope (`{ success, order, payment, message, change, nextAction }`) so
+   * the POS UI doesn't need to know which branch ran.
+   */
+  private chargeAdoptedOrder(
+    cartState: CartState,
+    paymentRequest: PaymentRequest,
+    user_id: string,
+    register_id: string | null,
+  ): Observable<any> {
+    const orderId = cartState.linkedOrderId as number;
+    const orderNumber = cartState.linkedOrderNumber;
+
+    const amount = Number(cartState.summary.total.toFixed(2));
+    const currency = 'COP';
+
+    const paymentPayload = {
+      orderId,
+      amount,
+      currency,
+      storePaymentMethodId: parseInt(paymentRequest.paymentMethod.id, 10),
+      storeId: parseInt(this.storeContextService.getStoreId() ?? '0', 10),
+      customerId: cartState.customer?.id
+        ? Number(cartState.customer.id)
+        : undefined,
+      metadata: {
+        is_pos_payment: true,
+        is_adopted_order: true,
+        register_id,
+        seller_user_id: user_id,
+        wompi_payment_method:
+          (paymentRequest.paymentMethod?.original as any)?.system_payment_method
+            ?.type === 'wompi'
+            ? paymentRequest.metadata?.wompiPaymentMethod
+            : undefined,
+        wallet_id: paymentRequest.metadata?.walletId,
+        cash_received: paymentRequest.cashReceived,
+      },
+      returnUrl: window.location.origin + '/pos/payment-callback',
+    };
+
+    return this.posApi.processPaymentForExistingOrder(paymentPayload).pipe(
+      map((response: any) => {
+        const data = response?.data ?? response;
+        const payment = data?.payment ?? data;
+        return {
+          success: true,
+          order: {
+            id: orderId,
+            order_number: orderNumber,
+            // State on the wire: the backend transitioned the order off
+            // `created` once the payment succeeded, but the exact new state
+            // depends on the order flow (paid, processing, etc.). The UI
+            // re-fetches via `getOrderById` when it needs the authoritative
+            // value.
+            status: data?.order?.state,
+          },
+          payment: payment
+            ? {
+                ...payment,
+                paymentMethod: paymentRequest.paymentMethod,
+                transactionId: payment.transaction_id ?? payment.transactionId,
+              }
+            : undefined,
+          message: data?.message ?? 'Pago aplicado a la orden adoptada',
+          change: payment?.change,
+          nextAction: payment?.nextAction ?? data?.nextAction,
+        };
+      }),
+      catchError((error) => throwError(() => error)),
+    );
   }
 
   private processDigitalWalletPayment(
