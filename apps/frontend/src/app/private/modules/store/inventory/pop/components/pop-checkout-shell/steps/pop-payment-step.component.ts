@@ -347,7 +347,7 @@ export class PopPaymentStepComponent {
 
   /** Marca todo como tocado y devuelve si el paso es válido (gate del shell). */
   validate(): boolean {
-    this.form.markAllTouched();
+    this.form.markAllAsTouched();
     return this.isValid();
   }
 }
