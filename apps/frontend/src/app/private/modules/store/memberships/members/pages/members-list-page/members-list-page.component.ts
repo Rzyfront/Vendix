@@ -208,10 +208,13 @@ export class MembershipMembersListPageComponent implements OnInit {
           archived(item) ? 'rotate-ccw' : 'archive',
         variant: (item: GymMembership) =>
           archived(item) ? 'success' : 'outline',
+        // QUI-646 review: el contrato de la accion es `(item) => void`. El
+        // codigo original usaba `.bind(this, item)` que devuelve una funcion
+        // y la descarta — el clic no ejecutaba nada. Llamar directo.
         action: (item: GymMembership) =>
           archived(item)
-            ? this.confirmUnarchive.bind(this, item)
-            : this.confirmArchive.bind(this, item),
+            ? this.confirmUnarchive(item)
+            : this.confirmArchive(item),
       },
     ];
   });
