@@ -51,7 +51,10 @@ services:
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
-      NODE_OPTIONS: "--max-old-space-size=1536"
+      # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
+      # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
+      # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
+      NODE_OPTIONS: "--max-old-space-size=2048"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
