@@ -1,0 +1,157 @@
+<div class="receive-step">
+  <!-- Acuse de recepción -->
+  <section class="recv-section">
+    <label class="recv-ack">
+      <input
+        type="checkbox"
+        class="recv-checkbox"
+        [checked]="ackReceive()"
+        (change)="onAckToggle($event)"
+      />
+      <span class="recv-ack-body">
+        <span class="recv-ack-title">
+          He recibido esta orden y verificado las cantidades recibidas
+        </span>
+        <span class="recv-ack-hint">
+          Marca la orden como recibida y genera una remisión de entrada. Si lo
+          desmarcas, la orden se crea sin recibir la mercancía.
+        </span>
+      </span>
+    </label>
+  </section>
+
+  <!-- Valoración de inventario: preview de costeo + márgenes/precios (QUI-425) -->
+  @if (loadingCostPreview() || (costPreview()?.items?.length ?? 0) > 0) {
+    <section class="recv-section">
+      <div class="section-header">
+        <div class="section-title-wrap">
+          <p class="section-title">Valoración de Inventario</p>
+          @if (costPreview()?.costing_method) {
+            <span
+              class="costing-badge"
+              [class.costing-badge--cpp]="costPreview()!.costing_method === 'cpp'"
+              [class.costing-badge--fifo]="costPreview()!.costing_method === 'fifo'"
+            >
+              {{ costPreview()!.costing_method === 'cpp' ? 'CPP' : 'FIFO' }}
+            </span>
+          }
+        </div>
+        <button
+          type="button"
+          class="settings-link"
+          (click)="navigateToSettings.emit()"
+        >
+          Cambiar estrategia →
+        </button>
+      </div>
+
+      @if (loadingCostPreview()) {
+        <div class="preview-loading">
+          <div class="skeleton-line"></div>
+          <div class="skeleton-line skeleton-line--short"></div>
+        </div>
+      } @else {
+        <div class="preview-list">
+          @for (item of costPreview()?.items; track previewKey(item); let idx = $index) {
+            <div class="preview-row" [class.preview-row--alt]="idx % 2 === 1">
+              <div class="preview-head">
+                <span class="preview-name">
+                  {{ item.product_name }}
+                  @if (item.variant_name) {
+                    <span class="preview-variant"> · {{ item.variant_name }}</span>
+                  }
+                  @if (item.is_new_product) {
+                    <span class="new-badge">Nuevo</span>
+                  }
+                </span>
+                @if (item.is_reactivation) {
+                  <span class="reactivation-tag">
+                    <app-icon name="rotate-ccw" [size]="11"></app-icon>
+                    Reactivación — {{ item.incoming_quantity }} uds @
+                    {{ item.incoming_cost | currency }}
+                  </span>
+                }
+              </div>
+
+              @if (item.is_reactivation) {
+                <div class="preview-metrics">
+                  <span>Costo nuevo:
+                    <strong>{{ item.new_cost_per_unit | currency }}</strong>
+                  </span>
+                </div>
+              } @else if (costPreview()?.costing_method === 'cpp') {
+                <div class="preview-metrics">
+                  <span>Stock: {{ item.global_stock }} →
+                    <strong>{{ item.new_stock }}</strong></span>
+                  <span class="preview-sep">|</span>
+                  <span>Costo: {{ item.global_cost_per_unit | currency }} →
+                    <strong>{{ item.new_cost_per_unit | currency }}</strong></span>
+                </div>
+              } @else {
+                <div class="preview-metrics">
+                  <span>Nueva capa: {{ item.incoming_quantity }} uds @
+                    {{ item.incoming_cost | currency }}</span>
+                </div>
+              }
+
+              <!-- Edición de margen/precio (QUI-425) -->
+              <div class="preview-editor">
+                <div class="editor-field">
+                  <span class="editor-label">Costo nuevo</span>
+                  <span class="editor-value">{{ item.new_cost_per_unit | currency }}</span>
+                </div>
+                <div class="editor-field">
+                  <span class="editor-label">Margen resultante</span>
+                  <span class="editor-value">
+                    @if (previewMargin(item) !== null) {
+                      {{ previewMargin(item) | number: '1.0-1' }}%
+                    } @else {
+                      —
+                    }
+                  </span>
+                </div>
+                <div class="editor-field">
+                  <span class="editor-label">Precio base actual</span>
+                  <span class="editor-value">{{ item.current_base_price | currency }}</span>
+                </div>
+
+                <div class="editor-input">
+                  <app-input
+                    type="number"
+                    [label]="'Nuevo margen (%)'"
+                    [customInputClass]="'text-sm'"
+                    [formControl]="marginControl(item)"
+                    [control]="marginControl(item)"
+                    (inputChange)="onMarginDraftChange(item, $event)"
+                  ></app-input>
+                </div>
+                <div class="editor-input">
+                  <app-input
+                    [currency]="true"
+                    [currencyDecimals]="2"
+                    [label]="'Nuevo precio base'"
+                    [customInputClass]="'text-sm'"
+                    [formControl]="priceControl(item)"
+                    [control]="priceControl(item)"
+                    (inputChange)="onPriceDraftChange(item, $event)"
+                  ></app-input>
+                </div>
+                <div class="editor-reset">
+                  @if (hasOverride(item)) {
+                    <button
+                      type="button"
+                      class="reset-link"
+                      (click)="clearOverride(item)"
+                    >
+                      Restablecer (anclar a costo)
+                    </button>
+                  }
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </section>
+  }
+</div>

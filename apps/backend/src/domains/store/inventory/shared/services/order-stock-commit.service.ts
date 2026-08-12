@@ -4,13 +4,17 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
-import { StockLevelManager } from './stock-level-manager.service';
+import {
+  StockLevelManager,
+  type ReservationRefType,
+} from './stock-level-manager.service';
 import {
   SellableStockAllocator,
   StockAllocationSlice,
 } from './sellable-stock-allocator.service';
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
+import { resolveLineStockUnits } from '../../../products/services/packaging.util';
 
 /**
  * Options that drive a single delivery-commit run. The same contract is shared
@@ -102,9 +106,16 @@ interface CommitLine {
  *   7. updateStock per slice (movement_type per opts) → the net deduction
  *   8. mark order_items.inventory_committed
  *
- * Then a defensive `releaseReservationsByReference('order', refId, 'consumed',
+ * Then a defensive `releaseReservationsByReference(refType, refId, 'consumed',
  * {decrementOnHand:false})` sweep clears any residual `active` reservations so
  * they cannot re-block product editing later.
+ *
+ * La referencia de reserva es un PAR `(refType, refId)`, no un id suelto:
+ * `refId` es un id de otra tabla y sin el tipo no identifica nada. Una remisión
+ * standalone llavea por `dispatch_notes.id` con tipo `dispatch_note`; una orden
+ * o un sales_order llavean por su propio id con tipo `order`. Pasar el id de una
+ * remisión con tipo `order` hace que este servicio consuma y barra las reservas
+ * de la ORDEN del mismo número. Ver `ReservationRefType`.
  */
 @Injectable()
 export class OrderStockCommitService {
@@ -176,6 +187,7 @@ export class OrderStockCommitService {
       const res = await this.processLine(
         line,
         opts,
+        'order',
         orderId,
         isRestaurant,
         (order as any).store_id,
@@ -200,10 +212,14 @@ export class OrderStockCommitService {
 
   /**
    * Commit stock for a dispatch note being delivered. Maps
-   * `dispatch_note_items` → lines. Reservations are keyed by
-   * `sales_order_id ?? order_id ?? dispatch_note.id`. When the remisión links
-   * to an order (`order_id`), the matching `order_items` are flagged
-   * `inventory_committed` (same product/variant claim-once matching as POS).
+   * `dispatch_note_items` → lines. Reservations are keyed by the PAR
+   * `(refType, refId)`: `('order', sales_order_id ?? order_id)` cuando la
+   * remisión cuelga de un documento de venta, y `('dispatch_note', note.id)`
+   * cuando es standalone — porque en ese caso el id que llevamos es de
+   * `dispatch_notes` y bajo el tipo `order` apuntaba a la orden del mismo
+   * número. When the remisión links to an order (`order_id`), the matching
+   * `order_items` are flagged `inventory_committed` (same product/variant
+   * claim-once matching as POS).
    */
   async commitDispatchDelivery(
     dispatchNote: any,
@@ -221,10 +237,11 @@ export class OrderStockCommitService {
       items = loaded?.dispatch_note_items ?? [];
     }
 
-    const reservationRefId: number =
-      dispatchNote.sales_order_id ??
-      dispatchNote.order_id ??
-      dispatchNote.id;
+    const salesDocumentRefId: number | null =
+      dispatchNote.sales_order_id ?? dispatchNote.order_id ?? null;
+    const reservationRefType: ReservationRefType =
+      salesDocumentRefId != null ? 'order' : 'dispatch_note';
+    const reservationRefId: number = salesDocumentRefId ?? dispatchNote.id;
 
     // Store industries (for the restaurant prepared-item skip).
     let isRestaurant = false;
@@ -289,7 +306,19 @@ export class OrderStockCommitService {
       const line: CommitLine = {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id ?? undefined,
-        quantity: item.dispatched_quantity,
+        // `dispatched_quantity` viaja en la unidad COMERCIAL del documento (los
+        // mismos bultos que `order_items.quantity`), no en unidades de stock:
+        // `dispatch_note_items` no tiene snapshot de empaque propio. Sin esta
+        // conversión, despachar 1 bulto de 50 saca 50 unidades del andén y
+        // descuenta 1 — y el claim de `inventory_committed` impide que
+        // `commitOrderDelivery` lo corrija después. Se deriva de la línea de
+        // orden emparejada, en proporción para despachos parciales, con la misma
+        // función que usa la devolución.
+        quantity: resolveLineStockUnits(
+          item.dispatched_quantity,
+          matched?.quantity,
+          matched?.stock_units_consumed,
+        ),
         track_inventory: !!product?.track_inventory,
         product_type: product?.product_type ?? null,
         order_item_id: matched?.id ?? null,
@@ -303,6 +332,7 @@ export class OrderStockCommitService {
       const res = await this.processLine(
         line,
         opts,
+        reservationRefType,
         reservationRefId,
         isRestaurant,
         dispatchNote.store_id,
@@ -312,9 +342,11 @@ export class OrderStockCommitService {
       if (res.committed) committedItemCount++;
     }
 
-    // Defensive sweep of any residual active reservations for the order/SO ref.
+    // Defensive sweep of any residual active reservations for the order/SO ref
+    // — o para la propia remisión cuando es standalone. Con el tipo fijo en
+    // 'order' este barrido consumía reservas de la orden del mismo número.
     await this.stockLevelManager.releaseReservationsByReference(
-      'order',
+      reservationRefType,
       reservationRefId,
       'consumed',
       tx,
@@ -329,6 +361,7 @@ export class OrderStockCommitService {
   private async processLine(
     line: CommitLine,
     opts: CommitOpts,
+    reservationRefType: ReservationRefType,
     reservationRefId: number,
     isRestaurant: boolean,
     storeId: number,
@@ -398,7 +431,7 @@ export class OrderStockCommitService {
       where: {
         product_id: line.product_id,
         product_variant_id: variant ?? null,
-        reserved_for_type: 'order',
+        reserved_for_type: reservationRefType,
         reserved_for_id: reservationRefId,
         status: 'active',
       },
@@ -416,7 +449,7 @@ export class OrderStockCommitService {
         line.product_id,
         variant,
         locId,
-        'order',
+        reservationRefType,
         reservationRefId,
         tx,
       );

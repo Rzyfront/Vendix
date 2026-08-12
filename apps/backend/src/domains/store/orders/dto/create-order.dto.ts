@@ -9,6 +9,7 @@ import {
   IsIn,
   ValidateNested,
   IsEnum,
+  Max,
   Min,
   MaxLength,
   IsDateString,
@@ -61,9 +62,19 @@ export class CreateOrderItemDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   total_price: number;
 
+  /**
+   * Tasa del impuesto de la línea como FRACCIÓN: `0.19` es 19%. La columna es
+   * `Decimal(6,5)`, así que mandar `19` desbordaba el numérico de Postgres y
+   * salía un `500 SYS_INTERNAL_001` en lugar de un 400 accionable.
+   */
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 5 })
+  @Min(0)
+  @Max(1, {
+    message:
+      'tax_rate se expresa como fracción: usa 0.19 para 19% (máximo 1 = 100%)',
+  })
   tax_rate?: number;
 
   @IsOptional()

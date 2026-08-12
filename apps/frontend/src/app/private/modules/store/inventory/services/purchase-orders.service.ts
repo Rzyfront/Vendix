@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, timer, map, switchMap, filter, takeWhile, take, timeout } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
     PurchaseOrder,
     CreatePurchaseOrderDto,
@@ -95,6 +96,28 @@ export class PurchaseOrdersService {
         if (notes) body.notes = notes;
         return this.http
             .patch<ApiResponse<PurchaseOrder>>(`${this.api_url}/${id}/receive`, body)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Payment Plan Configuration (QUI-647)
+    // ============================================================
+
+    /**
+     * Configura el plan de pago de una OC ya creada (PATCH payment-plan).
+     * Permite elegir el modo (inmediato/abono/diferido/cuotas) y los
+     * montos/fechas desde el detalle de la orden. El backend aplica la
+     * matriz anti-doble-registro y recalcula payment_status.
+     */
+    configurePaymentPlan(
+        id: number,
+        dto: ConfigurePaymentPlanDto,
+    ): Observable<ApiResponse<PurchaseOrder>> {
+        return this.http
+            .patch<ApiResponse<PurchaseOrder>>(
+                `${this.api_url}/${id}/payment-plan`,
+                dto,
+            )
             .pipe(catchError(this.handleError));
     }
 
@@ -275,25 +298,14 @@ export class PurchaseOrdersService {
         return params;
     }
 
+    // Un solo traductor de errores para toda la app: `extractApiErrorMessage`
+    // resuelve el `error_code` tipado contra ERROR_MESSAGES y sólo cae a los
+    // genéricos por status si no hay código. La versión previa mostraba el
+    // `message` del backend —el mensaje de DESARROLLO, en inglés— directo al
+    // usuario, que es justo lo que parse-api-error prohíbe.
     private handleError(error: any): Observable<never> {
         console.error('PurchaseOrdersService Error:', error);
-        let error_message = 'An error occurred';
-
-        if (error.error?.message) {
-            error_message = error.error.message;
-        } else if (error.status === 400) {
-            error_message = 'Invalid data provided';
-        } else if (error.status === 401) {
-            error_message = 'Unauthorized access';
-        } else if (error.status === 403) {
-            error_message = 'Insufficient permissions';
-        } else if (error.status === 404) {
-            error_message = 'Purchase order not found';
-        } else if (error.status >= 500) {
-            error_message = 'Server error. Please try again later';
-        }
-
-        return throwError(() => error_message);
+        return throwError(() => extractApiErrorMessage(error));
     }
 }
 
@@ -325,4 +337,26 @@ export interface PaymentScanJobStatus {
     status: PaymentScanStatus;
     result?: PaymentScanResult;
     error?: string;
+}
+
+// ============================================================
+// Payment Plan Configuration DTO (QUI-647)
+// ============================================================
+
+export type ConfigurePaymentPlanMode =
+    | 'immediate'
+    | 'partial'
+    | 'deferred'
+    | 'installments';
+
+export interface ConfigurePaymentPlanInstallmentDto {
+    scheduled_date: string;
+    amount: number;
+}
+
+export interface ConfigurePaymentPlanDto {
+    payment_plan: ConfigurePaymentPlanMode;
+    down_payment_amount?: number;
+    payment_due_date?: string;
+    payment_installments?: ConfigurePaymentPlanInstallmentDto[];
 }

@@ -45,6 +45,11 @@ import {
 } from './test-set-wait.util';
 import {
   aggregateZipVerdicts,
+  describeRejectedDocuments,
+  indexDocumentsByZipKey,
+  rejectionMessages,
+  MAX_RAW_RESPONSE_CHARS,
+  TestSetDocumentRef,
   TestSetZipAggregate,
   TestSetZipCounts,
   TestSetZipVerdict,
@@ -92,6 +97,19 @@ export interface TestSetPollAttempt {
    * multi-lote no lo traen.
    */
   zip_key?: string;
+  /**
+   * Reglas que la DIAN reportó EN ESTE intento.
+   *
+   * EL DEFECTO QUE CIERRA: los dos push de este arreglo copiaban
+   * `status_code`/`status_message`/`success` y descartaban `status.error_messages`,
+   * teniéndolos delante. `poll_history` es lo que un operador lee cuando quiere
+   * saber qué contestó la DIAN en cada consulta, y contestaba sin el motivo.
+   *
+   * Opcional: los intentos escritos antes de este campo no lo traen, y un sondeo
+   * sin reglas (el caso normal, «en proceso») no debe inventar un arreglo vacío
+   * en cada fila del historial.
+   */
+  error_messages?: string[];
 }
 
 // `TestSetZipVerdict` y `TestSetZipCounts` viven en `test-set-zip-aggregate.util`
@@ -116,6 +134,34 @@ export class DianTestService {
     // servicio, no una copia por dominio.
     @InjectQueue('dian-test-set') private readonly testSetQueue: Queue,
   ) {}
+
+  /**
+   * Devuelve el event loop al resto del proceso durante UN turno de macrotarea.
+   *
+   * ## Por qué hace falta un `setImmediate` y no basta con `await` (QUI-674)
+   *
+   * Los bucles que arman el set son CPU pura: construir el UBL, calcular el
+   * CUFE/CUDE (SHA-384) y firmar (canonicalización C14N + `crypto.createSign()`,
+   * que es la API SÍNCRONA y no baja al threadpool). Entre el `update` de
+   * `enablement_status` y el primer `SendTestSetAsync` NO hay una sola operación
+   * de E/S real: los `await` de `sign()` resuelven promesas YA cumplidas, así que
+   * son MICROTAREAS. La cola de microtareas se drena entera antes de volver al
+   * event loop, de modo que los 50 documentos corrían en un ÚNICO macrotask
+   * ininterrumpido.
+   *
+   * Consecuencias medidas en producción: nginx devolvía 504 en rutas triviales
+   * (`/api/store/notifications?limit=15`) porque el proceso —el MISMO que sirve
+   * la API— no llegaba a atender el socket, y BullMQ registraba
+   * `could not renew lock for job` porque su temporizador de renovación (a la
+   * mitad de `lockDuration`) tampoco podía correr.
+   *
+   * `setImmediate` encola en la fase *check*, que corre DESPUÉS de la fase de
+   * timers: ceder aquí es exactamente lo que le da su turno al renovador del lock
+   * y a los sockets HTTP pendientes. Es la cesión mínima: un turno por documento.
+   */
+  private yieldEventLoop(): Promise<void> {
+    return new Promise<void>((resolve) => setImmediate(resolve));
+  }
 
   private async getConfigById(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
@@ -1095,6 +1141,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 6a-bis. Cuando el lote NO emite facturas propias —el humo de una nota— la
@@ -1249,6 +1298,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 6c. Generate the credit notes, each referencing an invoice of this same set
@@ -1376,6 +1428,9 @@ export class DianTestService {
         issue_date: today,
         issue_time: time_now,
       });
+
+      // Un turno del event loop por documento: ver `yieldEventLoop`.
+      await this.yieldEventLoop();
     }
 
     // 7-8. Enviar UN DOCUMENTO POR ZIP, un `SendTestSetAsync` por documento.
@@ -1432,6 +1487,14 @@ export class DianTestService {
       /** Reglas de validación que la DIAN reportó para ESTE documento. */
       error_messages?: string[];
       /**
+       * Las mismas reglas DECODIFICADAS del `ApplicationResponse` que viaja en
+       * base64 dentro de `<b:XmlBase64Bytes>`. No es redundante con
+       * `error_messages`: la DIAN puede devolver `<b:ErrorMessage i:nil="true"/>`
+       * y poner el motivo únicamente ahí dentro, que es el caso que dejaba un
+       * rechazo sin explicación.
+       */
+      rejection_rules?: TestSetZipVerdict['rejection_rules'];
+      /**
        * Fase del envío: 1 = facturas, 2 = notas. Persistir la fase es lo que
        * permite leer después «las facturas salieron y las notas no» sin
        * deducirlo del nombre del archivo.
@@ -1466,6 +1529,17 @@ export class DianTestService {
                 environment,
                 ws_credentials,
               );
+          // UN RECHAZO DE ENVÍO, no un acuse. `SendTestSetAsync` devuelve
+          // `success: false` SIEMPRE —su respuesta es un ZipKey, no un
+          // veredicto—, así que condicionar por `!success` a secas escribiría 50
+          // filas de «rechazo» en cada envío sano. La ausencia de ZipKey es lo
+          // que separa las dos cosas: la vía sincrónica (`SendBillSync`), el
+          // SOAP Fault y el error HTTP no traen ninguno.
+          const is_submit_rejection = !response.success && !response.zip_key;
+          const decoded = this.decodeRejection(
+            is_submit_rejection ? response.raw_response : undefined,
+          );
+
           submissions.push({
             file_name: file.name,
             zip_file_name: file_zip_name,
@@ -1479,8 +1553,41 @@ export class DianTestService {
             ...(response.error_messages?.length
               ? { error_messages: response.error_messages }
               : {}),
+            // Las reglas DECODIFICADAS del `ApplicationResponse`. La DIAN puede
+            // devolver `ErrorMessage` vacío y poner el motivo solo ahí dentro.
+            ...(decoded.rejection_rules?.length
+              ? { rejection_rules: decoded.rejection_rules }
+              : {}),
             phase,
           });
+
+          if (is_submit_rejection) {
+            const doc = documents.find((d) => d.file_name === file.name);
+            const rules = [
+              ...(decoded.rejection_rules ?? []).map((r) =>
+                r.code && r.code !== 'DIAN_VALIDATION'
+                  ? `${r.code}: ${r.message}`
+                  : r.message,
+              ),
+              ...(response.error_messages ?? []),
+            ];
+            await this.createAuditLog(config.id, {
+              action: options.validate_only
+                ? 'validate_document_rejected'
+                : 'test_set_document_rejected',
+              status: 'error',
+              document_type: doc?.kind ?? file.kind,
+              document_number: doc?.number ?? null,
+              cufe: doc?.cufe ?? decoded.document_key ?? null,
+              // El XML FIRMADO que se transmitió. Es la única copia fuera del
+              // JSON del lote, y el JSON se reescribe con el envío siguiente.
+              request_xml: file.content,
+              response_xml: decoded.raw_response ?? response.raw_response ?? null,
+              error_message: `${response.status_code}: ${
+                rules.length ? rules.join(' | ') : response.status_message
+              }`,
+            });
+          }
         } catch (error) {
           // No se aborta: los documentos ya enviados gastaron consecutivos y su
           // ZipKey es la única forma de preguntar por ellos después. Perder ese
@@ -1593,11 +1700,23 @@ export class DianTestService {
         composition,
       });
 
+      // ZipKey → documento de ESTE lote, con lo que ya está en memoria y con la
+      // misma regla de cruce que aplica sobre lo persistido: `submissions` trae
+      // `file_name` + `zip_key`, `documents` trae `file_name` + número + CUFE.
+      const documents_by_zip_key = indexDocumentsByZipKey({
+        submissions,
+        documents,
+      });
+
       const wait = await this.waitForInvoicesRegistered(
         invoice_zip_keys,
         environment,
         ws_credentials,
         poll_history,
+        {
+          dian_configuration_id: config.id,
+          documents_by_zip_key,
+        },
       );
 
       phase_one_verdicts = wait.verdicts;
@@ -2016,17 +2135,34 @@ export class DianTestService {
         poll_history,
       );
     } else {
+      // El cruce ZipKey→documento sale del propio registro del lote, así que el
+      // log y la evidencia por documento pueden nombrar lo que se rechazó.
+      const documents_by_zip_key = indexDocumentsByZipKey(previous);
       const batch = await this.pollBatchZipKeys(
         batch_keys,
         environment,
         ws_credentials,
         poll_history,
         (previous.zip_verdicts ?? {}) as Record<string, TestSetZipVerdict>,
+        documents_by_zip_key,
       );
       verdict = batch.primary;
       zip_verdicts = batch.verdicts;
       zip_aggregate = batch.aggregate;
       zip_counts = batch.aggregate.counts;
+
+      // Una fila por documento rechazado, ANTES de tocar `last_test_result`.
+      //
+      // El orden importa: el JSON se reescribe entero y puede perder la carrera
+      // contra otro envío (ver la concurrencia optimista de abajo, que DESCARTA
+      // el resultado). La fila de auditoría no participa de esa carrera, así que
+      // el motivo del rechazo sobrevive incluso cuando el veredicto se descarta.
+      await this.persistRejectionEvidence(
+        config.id,
+        batch.verdicts,
+        batch.resolved_now,
+        documents_by_zip_key,
+      );
     }
 
     // Con N lotes el estado sale del agregado (`aggregateZipVerdicts`), no de un
@@ -2377,6 +2513,334 @@ export class DianTestService {
   }
 
   /**
+   * Nombre del ZIP contenedor de una nota diferida.
+   *
+   * Se DERIVA del nombre del XML, no se recalcula: el anexo define
+   * `<tag><nnnnnnnnnn><ppp><aa><dddddddd>.xml` para el XML y el MISMO cuerpo con
+   * prefijo `z` para el ZIP, así que copiar el cuerpo garantiza que el
+   * contenedor y su contenido declaren el mismo NIT, el mismo `ppp`, el mismo
+   * año y el mismo consecutivo. Recalcularlo con el reloj de hoy le cambiaría el
+   * `aa` a una nota firmada en diciembre y transmitida en enero, y el worker de
+   * la DIAN parsea ese nombre por posiciones fijas.
+   *
+   * `slice(-23)` toma el cuerpo sin depender del largo del tag (2 para `nc`/`nd`,
+   * 3 para `nas`/`ncs`). Si el nombre persistido no tiene la forma esperada se
+   * recompone con el helper compartido, que es lo que lo generó.
+   */
+  private zipNameForDeferredNote(
+    xml_file_name: string,
+    fallback: {
+      nit: string;
+      consecutive: number;
+      software_code: string;
+      year?: string;
+    },
+  ): string {
+    const body = String(xml_file_name ?? '')
+      .replace(/\.xml$/i, '')
+      .slice(-23);
+    if (/^\d{15}[0-9a-f]{8}$/i.test(body)) return `z${body}.zip`;
+    return buildDianZipFileName(fallback);
+  }
+
+  /**
+   * Transmite las notas que quedaron GENERADAS, FIRMADAS Y SIN ENVIAR.
+   *
+   * POR QUÉ EXISTE — el defecto que cierra:
+   *
+   * `decideNotePhase` difiere la fase 2 cuando la DIAN no registró las facturas
+   * que las notas referencian, y `note_phase.deferred[]` las guarda ENTERAS, con
+   * su XML firmado, precisamente para que reenviarlas no exija regenerarlas.
+   * Ningún endpoint las consumía: HIDRO quedó con 20 notas firmadas y los
+   * consecutivos 990000230-990000249 reservados, sin vía de recuperación. El
+   * dato estaba persistido y era inalcanzable.
+   *
+   * NO REGENERA Y NO RENUMERA. El consecutivo entra en el `SoftwareSecurityCode`
+   * y en el CUDE, así que renumerar exigiría volver a firmar y produciría OTRO
+   * CUDE — es decir, otro documento, y el consecutivo original quedaría gastado
+   * igual. El XML sale del JSON byte a byte y se transmite tal cual por la misma
+   * `SendTestSetAsync` que usa la fase 2 del envío normal.
+   *
+   * REANUDABLE a propósito: cada nota transmitida SALE de `deferred` y ENTRA en
+   * `transmitted` (con su XML, que nunca se borra). Una llamada interrumpida
+   * —por un 504 de nginx, por ejemplo— se retoma invocando de nuevo, y solo
+   * viajan las que faltan. `limit` permite partirlo a mano si hiciera falta.
+   */
+  async transmitDeferredNotes(config_id: number, limit?: number) {
+    const started_at = Date.now();
+    const config = await this.getConfigById(config_id);
+    const environment = config.environment as 'test' | 'production';
+
+    if (!config.test_set_id) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'No test set ID configured',
+      );
+    }
+
+    // Misma guarda que `enqueueTestSet` y `executeTestSet`, por la misma razón:
+    // la DIAN no acepta documentos contra un set que ya aprobó y contesta «Set de
+    // prueba … se encuentra Aceptado» a cada uno. Aquí los consecutivos ya están
+    // gastados, así que lo que se evita no es quemarlos: es que el operador crea
+    // que recuperó 20 notas cuando lo que cosechó fueron 20 veces esa frase.
+    if (isTestSetClosedByDian(config.enablement_status)) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La DIAN ya cerró el set de pruebas de esta configuración, así que no admitirá las notas retenidas: ' +
+          'responde «Set de prueba … se encuentra Aceptado» a cada documento. ' +
+          'Las notas siguen guardadas con su XML firmado y su consecutivo.',
+        {
+          dian_configuration_id: config_id,
+          enablement_status: config.enablement_status,
+        },
+      );
+    }
+
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    const note_phase = (previous.note_phase ?? {}) as Record<string, any>;
+    const deferred: { name: string; consecutive: number; content: string }[] =
+      Array.isArray(note_phase.deferred) ? note_phase.deferred : [];
+
+    // Solo las que traen su XML. Un checkpoint de fase 1 guarda `{name,
+    // consecutive}` SIN `content` (ver `persistNotePhaseCheckpoint`), y sin el
+    // XML firmado no hay nada que transmitir: regenerarlo daría otro CUDE.
+    const transmittable = deferred.filter(
+      (note) => typeof note?.content === 'string' && note.content.length > 0,
+    );
+    if (!transmittable.length) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_004,
+        deferred.length
+          ? `Las ${deferred.length} notas retenidas de esta configuración se registraron sin su XML firmado ` +
+              '(checkpoint de fase 1), así que no pueden transmitirse: regenerarlas cambiaría el CUDE.'
+          : 'Esta configuración no tiene notas retenidas por transmitir.',
+        { dian_configuration_id: config_id, deferred_count: deferred.length },
+      );
+    }
+
+    const batch =
+      typeof limit === 'number' && limit > 0
+        ? transmittable.slice(0, limit)
+        : transmittable;
+
+    const ws_credentials = await this.loadWsCredentials(config);
+    const software_code = softwareCodeForOperationMode(config.operation_mode);
+    const documents: any[] = Array.isArray(previous.documents)
+      ? previous.documents
+      : [];
+
+    const sent: {
+      file_name: string;
+      zip_file_name: string;
+      zip_key: string | null;
+      success: boolean;
+      status_code?: string;
+      status_message?: string;
+      raw_response?: string;
+      error?: string;
+      error_messages?: string[];
+      phase: 2;
+    }[] = [];
+    const transmitted: typeof batch = [];
+
+    for (const note of batch) {
+      const doc = documents.find((d) => d?.file_name === note.name);
+      const zip_file_name = this.zipNameForDeferredNote(note.name, {
+        nit: config.nit,
+        consecutive: note.consecutive,
+        software_code,
+        // La fecha de EMISIÓN de la nota, no la de hoy: el `aa` del nombre tiene
+        // que ser el mismo con el que se firmó.
+        year: previous.issue_date ?? undefined,
+      });
+
+      try {
+        const response = await this.soap_client.sendTestSetAsync(
+          // El XML sale del JSON tal cual. Ni se reconstruye ni se re-firma.
+          this.buildMultiFileZip([{ name: note.name, content: note.content }]),
+          zip_file_name,
+          config.test_set_id,
+          environment,
+          ws_credentials,
+        );
+
+        sent.push({
+          file_name: note.name,
+          zip_file_name,
+          zip_key: response.zip_key ?? null,
+          success: response.success,
+          status_code: response.status_code,
+          status_message: response.status_message,
+          raw_response: response.raw_response?.slice(0, 4000),
+          ...(response.error_messages?.length
+            ? { error_messages: response.error_messages }
+            : {}),
+          phase: 2,
+        });
+
+        // Sale de `deferred` solo si la DIAN acusó recibo con un ZipKey. Sin él
+        // no hay nada que sondear después, y moverla igual perdería la única
+        // vía de reintento que tiene un consecutivo ya reservado.
+        if (response.zip_key) transmitted.push(note);
+
+        // La fila de auditoría se escribe DENTRO del bucle, no al final: el
+        // ZipKey es la única forma de volver a preguntar por un consecutivo ya
+        // gastado, y si este proceso muere en la nota 12 los 11 anteriores no
+        // pueden irse con él.
+        await this.createAuditLog(config.id, {
+          action: 'transmit_deferred_note',
+          status: response.zip_key ? 'pending' : 'error',
+          document_type: doc?.kind ?? null,
+          document_number: doc?.number ?? String(note.consecutive),
+          cufe: doc?.cufe ?? null,
+          request_xml: note.content,
+          response_xml: response.raw_response ?? null,
+          error_message: response.zip_key
+            ? `ZipKey ${response.zip_key} — pendiente de veredicto.`
+            : response.error_messages?.join(' | ') || response.status_message,
+          duration_ms: response.duration_ms,
+        });
+      } catch (error) {
+        // No aborta el lote: cada nota es independiente y las que ya salieron
+        // tienen su ZipKey registrado. Ver el mismo criterio en `transmit`.
+        const message = error instanceof Error ? error.message : String(error);
+        sent.push({
+          file_name: note.name,
+          zip_file_name,
+          zip_key: null,
+          success: false,
+          error: message,
+          phase: 2,
+        });
+        await this.createAuditLog(config.id, {
+          action: 'transmit_deferred_note',
+          status: 'error',
+          document_type: doc?.kind ?? null,
+          document_number: doc?.number ?? String(note.consecutive),
+          cufe: doc?.cufe ?? null,
+          request_xml: note.content,
+          error_message: message,
+        });
+      }
+    }
+
+    const new_zip_keys = sent
+      .map((s) => s.zip_key)
+      .filter((k): k is string => !!k);
+    const remaining = deferred.filter(
+      (note) => !transmitted.some((t) => t.name === note.name),
+    );
+
+    // RELECTURA ANTES DE ESCRIBIR. Transmitir 20 notas tarda decenas de
+    // segundos y `last_test_result` se reescribe entero, así que un envío que
+    // haya empezado mientras tanto perdería su ZipKey con este UPDATE. Es
+    // exactamente la carrera que ya costó un bloque de 50 consecutivos en la
+    // config 12 (ver `checkTestSetStatus`).
+    const current = await this.getConfigById(config_id);
+    const current_result = (current.last_test_result ?? {}) as Record<
+      string,
+      any
+    >;
+    const batch_replaced = current_result.zip_key !== previous.zip_key;
+
+    if (!batch_replaced) {
+      await this.prisma.dian_configurations.update({
+        where: { id: config_id },
+        data: {
+          last_test_result: {
+            ...current_result,
+            submissions: [
+              ...(Array.isArray(current_result.submissions)
+                ? current_result.submissions
+                : []),
+              ...sent,
+            ],
+            zip_keys: [
+              ...(Array.isArray(current_result.zip_keys)
+                ? current_result.zip_keys
+                : []),
+              ...new_zip_keys,
+            ],
+            transmitted_documents:
+              (Number(current_result.transmitted_documents) || 0) +
+              transmitted.length,
+            note_phase: {
+              ...note_phase,
+              // `sent` solo cuando ya no queda ninguna retenida: mientras
+              // `deferred` tenga contenido, la fase NO está enviada, y la vista
+              // que lee la UI deriva `deferred_count` de ese mismo arreglo.
+              sent: remaining.length === 0,
+              reason: remaining.length
+                ? `${transmitted.length} de ${deferred.length} notas retenidas se transmitieron desde su XML firmado; quedan ${remaining.length}.`
+                : `Las ${transmitted.length} notas retenidas se transmitieron desde su XML firmado, sin regenerar consecutivos.`,
+              // Las transmitidas NO se borran: se mueven, con su XML. Es la
+              // única copia de un documento cuyo consecutivo ya está gastado.
+              deferred: remaining,
+              transmitted: [
+                ...(Array.isArray(note_phase.transmitted)
+                  ? note_phase.transmitted
+                  : []),
+                ...transmitted.map((note) => ({
+                  ...note,
+                  zip_key:
+                    sent.find((s) => s.file_name === note.name)?.zip_key ?? null,
+                  transmitted_at: new Date().toISOString(),
+                })),
+              ],
+              transmitted_at: new Date().toISOString(),
+            },
+            // Hay ZipKeys nuevos sin veredicto: el cron de re-sondeo tiene que
+            // adoptarlos, y `pending` es la bandera con la que decide.
+            ...(new_zip_keys.length ? { pending: true } : {}),
+          } as any,
+        },
+      });
+    } else {
+      this.logger.warn(
+        `[DIAN test-set] otro envío reemplazó el lote mientras se transmitían las notas retenidas. ` +
+          `No se reescribe last_test_result; los ZipKey ${new_zip_keys.join(', ') || '(ninguno)'} ` +
+          `quedan en dian_audit_logs.`,
+      );
+    }
+
+    await this.createAuditLog(config.id, {
+      action: 'transmit_deferred_notes',
+      status: new_zip_keys.length ? 'pending' : 'error',
+      error_message: new_zip_keys.length
+        ? `${transmitted.length} de ${batch.length} notas retenidas transmitidas desde su XML firmado. ` +
+          `ZipKeys: ${new_zip_keys.join(', ')}.` +
+          (batch_replaced
+            ? ' Otro envío reemplazó el lote: el registro JSON no se actualizó.'
+            : '')
+        : `Ninguna de las ${batch.length} notas retenidas obtuvo ZipKey.`,
+      duration_ms: Date.now() - started_at,
+    });
+
+    return {
+      transmitted: transmitted.length,
+      attempted: batch.length,
+      // Lo que sigue retenido tras esta pasada, para que el llamador sepa si
+      // tiene que volver a invocar.
+      still_deferred: remaining.length,
+      zip_keys: new_zip_keys,
+      consecutives: transmitted.map((n) => n.consecutive),
+      batch_replaced,
+      submissions: sent.map((s) => ({
+        file_name: s.file_name,
+        zip_key: s.zip_key,
+        status_code: s.status_code ?? null,
+        status_message: s.status_message ?? s.error ?? null,
+        error_messages: s.error_messages ?? [],
+      })),
+      message: new_zip_keys.length
+        ? `${transmitted.length} nota(s) retenida(s) transmitida(s) desde su XML ya firmado, sin regenerar consecutivos. ` +
+          'Consulta el estado del lote en unos minutos para conocer el veredicto.'
+        : 'Ninguna nota retenida obtuvo ZipKey de la DIAN. Siguen guardadas con su XML firmado y su consecutivo.',
+      response_time_ms: Date.now() - started_at,
+    };
+  }
+
+  /**
    * Respuesta de una consulta de estado que NO sondeó a la DIAN (lote descartado)
    * o que decidió no escribir su resultado (otro envío ganó la carrera).
    *
@@ -2532,6 +2996,20 @@ export class DianTestService {
     environment: 'test' | 'production',
     ws_credentials: WsSecurityCredentials | undefined,
     poll_history: TestSetPollAttempt[],
+    /**
+     * Con qué configuración y qué documentos se persiste la evidencia del
+     * rechazo, sondeo a sondeo.
+     *
+     * Se escribe DENTRO del bucle, no al final: la primera corrida real de esta
+     * espera vio «30 de 30 rechazadas» y el motivo se perdió porque solo vivía
+     * en el mapa local. El worker corre con `attempts: 1`, así que si muere
+     * durante la espera nadie reintenta — el mismo razonamiento que obligó al
+     * checkpoint de la fase 1.
+     */
+    evidence: {
+      dian_configuration_id: number;
+      documents_by_zip_key: Record<string, TestSetDocumentRef>;
+    },
   ): Promise<{
     ready: boolean;
     reason: string;
@@ -2574,8 +3052,15 @@ export class DianTestService {
         ws_credentials,
         poll_history,
         verdicts,
+        evidence.documents_by_zip_key,
       );
       verdicts = batch.verdicts;
+      await this.persistRejectionEvidence(
+        evidence.dian_configuration_id,
+        batch.verdicts,
+        batch.resolved_now,
+        evidence.documents_by_zip_key,
+      );
       const { accepted, rejected } = batch.aggregate.counts;
 
       const decision = decideNotePhase({
@@ -2642,11 +3127,19 @@ export class DianTestService {
         status_code: status.status_code,
         status_message: status.status_message,
         success: status.success,
+        // Las reglas del intento, que este push descartaba teniéndolas en
+        // `status`. Ver `TestSetPollAttempt.error_messages`.
+        ...(status.error_messages?.length
+          ? { error_messages: status.error_messages }
+          : {}),
       });
 
       this.logger.log(
         `[DIAN test-set] GetStatusZip ${attempt}/${max_attempts} ` +
-          `zipKey=${zip_key} status=${status.status_code} success=${status.success}`,
+          `zipKey=${zip_key} status=${status.status_code} success=${status.success}` +
+          (status.error_messages?.length
+            ? ` reglas=${status.error_messages.join(' | ')}`
+            : ''),
       );
 
       if (this.isTerminalZipStatus(status)) {
@@ -2688,13 +3181,30 @@ export class DianTestService {
     ws_credentials: WsSecurityCredentials | undefined,
     poll_history: TestSetPollAttempt[],
     known: Record<string, TestSetZipVerdict>,
+    /**
+     * ZipKey → documento, para que el log agregado pueda NOMBRAR lo que se
+     * rechazó. Opcional porque un llamador sin `last_test_result` a mano sigue
+     * pudiendo sondear; lo único que pierde es el nombre del documento.
+     */
+    documents_by_zip_key: Record<string, TestSetDocumentRef> = {},
   ): Promise<{
     primary: DianSendBillResponse;
     verdicts: Record<string, TestSetZipVerdict>;
     aggregate: TestSetZipAggregate;
+    /**
+     * ZipKeys que resolvieron EN ESTA llamada.
+     *
+     * Se devuelven para que el llamador escriba la evidencia por documento una
+     * sola vez. Sin esto, el cron de re-sondeo —que corre cada 10-15 min y
+     * recibe `verdicts` acumulados— reescribiría en `dian_audit_logs` los mismos
+     * 30 rechazos en cada pasada, y una tabla de auditoría que se repite deja de
+     * poder leerse como historia.
+     */
+    resolved_now: string[];
   }> {
     const verdicts: Record<string, TestSetZipVerdict> = { ...known };
     const pending_keys = zip_keys.filter((k) => !verdicts[k]);
+    const resolved_now: string[] = [];
 
     // Concurrencia acotada: 50 peticiones simultáneas a la DIAN es un pico que
     // el servicio de habilitación responde con timeouts, y un timeout aquí se
@@ -2718,6 +3228,9 @@ export class DianTestService {
           status_message: status.status_message,
           success: status.success,
           zip_key: key,
+          ...(status.error_messages?.length
+            ? { error_messages: status.error_messages }
+            : {}),
         });
 
         if (this.isTerminalZipStatus(status)) {
@@ -2728,7 +3241,17 @@ export class DianTestService {
             status_message: status.status_message,
             error_messages: status.error_messages ?? [],
             resolved_at: new Date().toISOString(),
+            // EL CRUDO SE CONSERVA, y solo sobre el rechazo.
+            //
+            // Un veredicto de aceptación no necesita evidencia: lo que hay que
+            // poder releer es POR QUÉ la DIAN dijo que no. Guardarlo también en
+            // los aceptados multiplicaría por 50 un JSON que ya se lee entero en
+            // cada sondeo, sin añadir un dato accionable.
+            ...(status.success
+              ? {}
+              : this.decodeRejection(status.raw_response)),
           };
+          resolved_now.push(key);
         } else {
           // Solo se guarda una muestra NO terminal, y solo para conservar la
           // redacción literal de la DIAN («Batch en proceso de validación») en el
@@ -2751,9 +3274,18 @@ export class DianTestService {
     const asResponse = (v: TestSetZipVerdict): DianSendBillResponse => ({
       success: v.success,
       status_code: v.status_code,
+      // Las reglas decodificadas primero, y el `ErrorMessage` de la DIAN
+      // después. Este objeto es el que alimenta `dian_response.error_messages`
+      // del registro y el mensaje que lee el operador: devolverlo con
+      // `error_messages` a secas volvía a dejar fuera lo que el
+      // `ApplicationResponse` sí decía.
       status_message: v.status_message,
-      error_messages: v.error_messages,
-      raw_response: '',
+      error_messages: rejectionMessages(v),
+      // El crudo del veredicto, no un vacío. `raw_response: ''` era el segundo
+      // punto donde el motivo del rechazo se tiraba: `primary` es lo que se
+      // persiste en `dian_response.raw_response`, así que el lote quedaba con
+      // una evidencia en blanco aunque el veredicto la tuviera.
+      raw_response: v.raw_response ?? '',
       has_dian_verdict: true,
       duration_ms: 0,
     });
@@ -2775,7 +3307,29 @@ export class DianTestService {
         `rechazados=${aggregate.counts.rejected} pendientes=${aggregate.counts.pending}`,
     );
 
-    return { primary, verdicts, aggregate };
+    // EL MOTIVO, NO SOLO EL RECUENTO.
+    //
+    // EL DEFECTO QUE CIERRA: este log imprimía «rechazados=30» con los 30
+    // veredictos —y sus `error_messages`— en el mismo scope. Un operador leía
+    // que la DIAN había rechazado 30 de 30 y no tenía en el log una sola pista
+    // de por qué; para averiguarlo había que volver a sondear a la DIAN por un
+    // lote que ya había contestado.
+    //
+    // `indexDocumentsByZipKey` es lo que permite decir SETP990000200 en vez de
+    // un ZipKey: el cruce ZipKey→documento existía (`resolveRegisteredInvoiceReferences`
+    // lo hace para el lado aceptado) y ningún log lo aprovechaba.
+    const rejected_lines = describeRejectedDocuments(
+      verdicts,
+      documents_by_zip_key,
+    );
+    if (rejected_lines.length) {
+      this.logger.warn(
+        `[DIAN test-set] motivos de rechazo (${rejected_lines.length} de ` +
+          `${aggregate.counts.rejected}):\n  ${rejected_lines.join('\n  ')}`,
+      );
+    }
+
+    return { primary, verdicts, aggregate, resolved_now };
   }
 
   /**
@@ -2865,6 +3419,128 @@ export class DianTestService {
     return zip.toBuffer().toString('base64');
   }
 
+  /**
+   * Decodifica el `ApplicationResponse` de un rechazo y devuelve el trozo de
+   * veredicto que lo conserva.
+   *
+   * EL ACTIVO QUE ESTABA SIN USAR: `<b:XmlBase64Bytes>` es el
+   * `ApplicationResponse` de la DIAN, donde viven las reglas de rechazo por
+   * documento (`cbc:Description`, `Regla: XXXX, Rechazo: …`, `cbc:UUID`).
+   * `DianSoapClient.parseSoapResponse` —un scrape por regex— nunca lo mira, y
+   * `DianResponseParserService.parseApplicationResponse` sí sabe leerlo desde
+   * siempre. Estaba INYECTADO en este servicio (ver el constructor) y no se
+   * invocaba ni una sola vez: solo lo usaba la emisión real
+   * (`dian-direct.provider.ts`). Esta es la invocación que faltaba.
+   *
+   * Devuelve un objeto para hacer spread sobre el veredicto, de modo que un
+   * crudo vacío no añada claves con `undefined` al JSON persistido.
+   *
+   * NUNCA LANZA: el parser ya atrapa lo suyo y devuelve `PARSE_ERROR`, pero un
+   * fallo aquí no puede tumbar un sondeo cuyo propósito es no perder el
+   * veredicto. Perder el detalle es malo; perder el veredicto entero es el
+   * defecto que este trabajo cierra.
+   */
+  private decodeRejection(raw_response: string | undefined): {
+    raw_response?: string;
+    rejection_rules?: TestSetZipVerdict['rejection_rules'];
+    document_key?: string;
+  } {
+    if (!raw_response) return {};
+
+    const evidence = { raw_response: raw_response.slice(0, MAX_RAW_RESPONSE_CHARS) };
+    try {
+      const parsed = this.response_parser.parseApplicationResponse(raw_response);
+      return {
+        ...evidence,
+        ...(parsed.errors?.length ? { rejection_rules: parsed.errors } : {}),
+        ...(parsed.document_key ? { document_key: parsed.document_key } : {}),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `[DIAN test-set] no se pudo decodificar el ApplicationResponse del rechazo: ` +
+          `${error instanceof Error ? error.message : String(error)}. Se conserva el crudo.`,
+      );
+      return evidence;
+    }
+  }
+
+  /**
+   * Escribe UNA FILA POR DOCUMENTO RECHAZADO en `dian_audit_logs`.
+   *
+   * POR QUÉ AHÍ Y NO EN UNA TABLA NUEVA: `dian_audit_logs` ya tiene
+   * `document_type`, `document_number`, `cufe`, `response_xml` y `error_message`,
+   * ya está migrada e indexada por `dian_configuration_id`, `action` y
+   * `created_at`. Lo único que faltaba era que `createAuditLog` aceptara esas
+   * columnas — las descartaba por firma, no por esquema. Cero migraciones.
+   *
+   * Por qué por documento y no un resumen: `last_test_result` es un JSON que se
+   * reescribe entero en cada envío, así que el motivo del rechazo del lote
+   * anterior desaparece con el siguiente. Una fila por documento es historia
+   * que ningún reenvío pisa, y es consultable por número y por CUFE.
+   *
+   * Solo los resueltos EN ESTA pasada (`resolved_now`): el cron re-sondea cada
+   * 10-15 min con los veredictos acumulados, y reescribir los mismos 30 rechazos
+   * en cada vuelta convertiría la auditoría en ruido.
+   */
+  private async persistRejectionEvidence(
+    dian_configuration_id: number,
+    verdicts: Record<string, TestSetZipVerdict>,
+    resolved_now: string[],
+    documents_by_zip_key: Record<string, TestSetDocumentRef>,
+  ): Promise<number> {
+    let written = 0;
+    for (const key of resolved_now) {
+      const verdict = verdicts[key];
+      if (!verdict || verdict.success) continue;
+
+      const doc = documents_by_zip_key[key];
+      const rules = rejectionMessages(verdict);
+      await this.createAuditLog(dian_configuration_id, {
+        action: 'test_set_document_rejected',
+        status: 'error',
+        document_type: doc?.kind ?? null,
+        document_number: doc?.number ?? null,
+        // El CUFE del documento que enviamos manda sobre el que nombre el
+        // ApplicationResponse: el primero es el que este sistema puede volver a
+        // consultar con `GetStatus`, el segundo puede venir vacío.
+        cufe: doc?.cufe ?? verdict.document_key ?? null,
+        response_xml: verdict.raw_response ?? null,
+        error_message:
+          `ZipKey ${key} — ${verdict.status_code}: ` +
+          (rules.length ? rules.join(' | ') : verdict.status_message),
+      });
+      written++;
+    }
+    return written;
+  }
+
+  /**
+   * `document_type` y `document_number` son `VarChar(50)` y `cufe` `VarChar(255)`.
+   *
+   * Se recortan aquí y no en cada llamador porque un valor largo no produce un
+   * campo feo: produce un `22001` de Postgres que aborta el INSERT, y este
+   * helper existe justamente para que un fallo de auditoría no tumbe la
+   * operación que audita.
+   */
+  private static clamp(
+    value: string | null | undefined,
+    max: number,
+  ): string | null {
+    if (value === null || value === undefined) return null;
+    const text = String(value);
+    return text.length > max ? text.slice(0, max) : text;
+  }
+
+  /**
+   * Fila de auditoría de una operación DIAN.
+   *
+   * Las columnas de DOCUMENTO son opcionales y se añadieron para QUI-675: la
+   * firma anterior solo aceptaba `{action, status, error_message, duration_ms}`,
+   * así que el detalle del rechazo por documento no tenía dónde ir aunque la
+   * tabla llevara `document_type`, `document_number`, `cufe`, `request_xml` y
+   * `response_xml` desde su migración. Todas son opcionales, así que los
+   * llamadores anteriores no cambian.
+   */
   private async createAuditLog(
     dian_configuration_id: number,
     data: {
@@ -2872,13 +3548,26 @@ export class DianTestService {
       status: string;
       error_message?: string | null;
       duration_ms?: number;
+      /** `invoice` | `debit_note` | `credit_note`. */
+      document_type?: string | null;
+      /** Número con prefijo de resolución, p. ej. `SETP990000230`. */
+      document_number?: string | null;
+      cufe?: string | null;
+      /** El XML FIRMADO que se transmitió. Es la única copia fuera del JSON. */
+      request_xml?: string | null;
+      /** El XML con el que la DIAN contestó, crudo. */
+      response_xml?: string | null;
     },
   ): Promise<void> {
     try {
+      const { document_type, document_number, cufe, ...rest } = data;
       await this.prisma.dian_audit_logs.create({
         data: {
           dian_configuration_id,
-          ...data,
+          ...rest,
+          document_type: DianTestService.clamp(document_type, 50),
+          document_number: DianTestService.clamp(document_number, 50),
+          cufe: DianTestService.clamp(cufe, 255),
         },
       });
     } catch (error) {

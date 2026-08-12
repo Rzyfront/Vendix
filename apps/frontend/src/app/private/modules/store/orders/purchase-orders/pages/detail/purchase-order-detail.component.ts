@@ -39,6 +39,7 @@ import {
 } from '../../../../inventory/interfaces';
 import { PurchaseOrderPrintService } from '../../services/purchase-order-print.service';
 import { PoPaymentModalComponent } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
+import { PoConfigurePlanModalComponent } from '../../components/po-configure-plan-modal/po-configure-plan-modal.component';
 import { PoTimelineComponent } from '../../../../inventory/pop/components/po-timeline/po-timeline.component';
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
@@ -63,6 +64,22 @@ const STATUS_BADGE_COLORS: Record<PurchaseOrderStatus, StickyHeaderBadgeColor> =
   received: 'green',
   cancelled: 'red',
 };
+
+/**
+ * QUI-647 — fila del calendario de pagos acordado con el proveedor.
+ * El payload del detalle (`findOne`) trae `payment_schedules` con estos
+ * campos; `status` es un String VarChar(20) con valores documentados
+ * `planned` (esperando CxP) y `materialized` (ya copiado a
+ * `ap_payment_schedules`). Se mapean también 'paid'/'partial'/'overdue'/
+ * 'canceled' defensivamente por si el motor de cobro los propaga.
+ */
+interface PoPaymentSchedule {
+  id: number;
+  scheduled_date: string;
+  amount: number | string;
+  status: string;
+  materialized_at?: string | null;
+}
 
 /** One receivable line, built when the PO loads (NOT lazily like the modal). */
 interface ReceiveLine {
@@ -105,6 +122,7 @@ interface ReceiveLine {
     SpinnerComponent,
     StickyHeaderComponent,
     PoPaymentModalComponent,
+    PoConfigurePlanModalComponent,
     PoTimelineComponent,
     SerialBulkLoadModalComponent,
   ],
@@ -403,16 +421,81 @@ interface ReceiveLine {
                 </div>
               </app-card>
 
+              <!-- QUI-647 — Plan de pagos: calendario de cuotas + saldo pendiente -->
+              <app-card>
+                <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Plan de pagos</h2>
+                @if (paymentSchedules().length === 0) {
+                  <!-- Vacío: orden immediate (contado) o un plan sin cuotas explícitas -->
+                  <div class="flex flex-col items-center py-6 text-center">
+                    <div class="w-10 h-10 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                      <app-icon name="calendar" [size]="20" />
+                    </div>
+                    <p class="text-sm font-medium text-text-secondary">{{ paymentPlanEmptyTitle() }}</p>
+                    <p class="text-xs text-text-muted mt-1 max-w-[220px]">{{ paymentPlanEmptyHint() }}</p>
+                  </div>
+                } @else {
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="text-left text-[11px] text-text-secondary uppercase tracking-wider border-b border-border">
+                          <th class="py-2 w-8">#</th>
+                          <th class="py-2">Fecha</th>
+                          <th class="py-2 text-right w-24">Monto</th>
+                          <th class="py-2 text-right w-24">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (schedule of paymentSchedules(); track schedule.id; let i = $index) {
+                          <tr class="border-b border-border/40">
+                            <td class="py-2 text-text-muted">{{ i + 1 }}</td>
+                            <td class="py-2 text-text-primary">{{ dateOnly(schedule.scheduled_date) }}</td>
+                            <td class="py-2 text-right font-medium text-text-primary">{{ money(schedule.amount) }}</td>
+                            <td class="py-2 text-right">
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                                [class]="getPaymentScheduleStatusClass(schedule.status)">
+                                {{ getPaymentScheduleStatusLabel(schedule.status) }}
+                              </span>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                      <tfoot>
+                        @if (downPayment() > 0) {
+                          <tr class="border-b border-border/40">
+                            <td [attr.colspan]="3" class="py-2 text-right text-xs text-text-muted">Abono inicial</td>
+                            <td class="py-2 text-right text-sm text-text-secondary">{{ money(downPayment()) }}</td>
+                          </tr>
+                        }
+                        <tr>
+                          <td [attr.colspan]="3" class="py-2.5 text-right font-semibold text-text-primary">Saldo pendiente</td>
+                          <td class="py-2.5 text-right font-bold" [class]="planPendingBalance() > 0 ? 'text-destructive' : 'text-success'">
+                            {{ money(planPendingBalance()) }}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                }
+              </app-card>
+
               <!-- Payment progress -->
               <app-card>
                 <div class="flex items-center justify-between mb-3">
                   <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider">Pagos</h2>
-                  @if (canRegisterPayment()) {
-                    <app-button variant="outline" size="sm" (clicked)="showPaymentModal.set(true)">
-                      <app-icon name="dollar-sign" [size]="13" slot="icon" />
-                      Registrar
-                    </app-button>
-                  }
+                  <div class="flex items-center gap-2">
+                    @if (canConfigurePaymentPlan()) {
+                      <app-button variant="outline" size="sm" (clicked)="showPlanModal.set(true)">
+                        <app-icon name="settings-2" [size]="13" slot="icon" />
+                        Configurar plan
+                      </app-button>
+                    }
+                    @if (canRegisterPayment()) {
+                      <app-button variant="outline" size="sm" (clicked)="showPaymentModal.set(true)">
+                        <app-icon name="dollar-sign" [size]="13" slot="icon" />
+                        Registrar
+                      </app-button>
+                    }
+                  </div>
                 </div>
                 <div class="h-2.5 bg-border rounded-full overflow-hidden">
                   <div class="h-full rounded-full transition-all duration-500"
@@ -512,6 +595,20 @@ interface ReceiveLine {
       (paymentRegistered)="onPaymentRegistered()"
     />
 
+    <!-- QUI-647 — Configure payment plan modal (PATCH payment-plan) -->
+    @if (po(); as currentPo) {
+      <app-po-configure-plan-modal
+        [isOpen]="showPlanModal()"
+        [order]="{
+          id: currentPo.id,
+          total_amount: num(currentPo.total_amount),
+          payment_plan: currentPo.payment_plan
+        }"
+        (closed)="showPlanModal.set(false)"
+        (configured)="onPlanConfigured()"
+      />
+    }
+
     <!-- QUI-431 serial capture modal (collect mode) -->
     <app-serial-bulk-load-modal
       [isOpen]="serialModalOpen()"
@@ -571,6 +668,7 @@ export class StorePurchaseOrderDetailComponent {
 
   // Payment modal
   readonly showPaymentModal = signal(false);
+  readonly showPlanModal = signal(false);
 
   // QUI-431 serial capture state
   readonly serialsByLine = signal<Map<number, string[]>>(new Map());
@@ -625,6 +723,69 @@ export class StorePurchaseOrderDetailComponent {
 
   readonly cappedProgress = computed(() => Math.min(this.paymentProgress(), 100));
 
+  // ============================================================
+  // QUI-647 — Plan de pagos (calendario de cuotas de la OC)
+  // Mismo patrón que po-detail-modal: el payload del `findOne` trae
+  // `payment_schedules` (fechas, montos, estados) y el saldo pendiente se
+  // deriva de los pagos reales (`payments()`), la misma fuente de `remaining()`.
+  // ============================================================
+
+  /** Cuotas del plan, ordenadas por fecha (el backend ya las ordena asc). */
+  readonly paymentSchedules = computed<PoPaymentSchedule[]>(() => {
+    const po = this.po() as (PurchaseOrder & { payment_schedules?: PoPaymentSchedule[] }) | null;
+    return po?.payment_schedules ?? [];
+  });
+
+  /** Modo de pago acordado: immediate | partial | deferred | installments | null. */
+  readonly paymentPlan = computed<string | null>(() => {
+    const po = this.po() as (PurchaseOrder & { payment_plan?: string | null }) | null;
+    return po?.payment_plan ?? null;
+  });
+
+  /** Abono inicial registrado al crear la orden (`down_payment_amount`). */
+  readonly downPayment = computed<number>(() => {
+    const po = this.po() as (PurchaseOrder & { down_payment_amount?: number | string | null }) | null;
+    return Number(po?.down_payment_amount ?? 0) || 0;
+  });
+
+  /**
+   * Saldo pendiente del plan = total de la orden − pagado real.
+   * `remaining()` suma `payments()` (que incluye el abono inicial, source
+   * 'po_advance'), así que contempla el anticipo — ídem po-detail-modal.
+   */
+  readonly planPendingBalance = computed(() => this.remaining());
+
+  /** ¿Hay un plan de pagos que mostrar? `installments` con cuotas o un modo distinto de immediate/null. */
+  readonly hasPaymentPlan = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan && plan !== 'immediate') return true;
+    return this.paymentSchedules().length > 0;
+  });
+
+  /** Título del vacío del plan según el modo de pago. */
+  readonly paymentPlanEmptyTitle = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan === 'immediate' || plan === null || !this.hasPaymentPlan()) {
+      return 'Sin plan de pagos';
+    }
+    return 'Sin cuotas programadas';
+  });
+
+  /** Hint del vacío del plan según el modo de pago. */
+  readonly paymentPlanEmptyHint = computed(() => {
+    const plan = this.paymentPlan();
+    if (plan === 'immediate' || plan === null || !this.hasPaymentPlan()) {
+      return 'La orden se pagó al contado';
+    }
+    if (plan === 'partial') {
+      return 'Se registró un abono inicial y el saldo se paga según las condiciones acordadas';
+    }
+    if (plan === 'deferred') {
+      return 'El pago se realiza en la fecha de vencimiento indicada';
+    }
+    return 'El saldo se paga según las condiciones acordadas con el proveedor';
+  });
+
   readonly receptionProgress = computed(() => {
     const items = this.orderItems();
     if (items.length === 0) return 0;
@@ -646,6 +807,18 @@ export class StorePurchaseOrderDetailComponent {
   readonly canReceive = computed(() => {
     const s = this.po()?.status;
     return s === 'approved' || s === 'partial';
+  });
+
+  /**
+   * QUI-647 — El plan de pago se puede reconfigurar mientras la OC esté
+   * draft/approved y NO tenga pagos reales registrados (el backend rechaza
+   * con PO_PAYMENT_006 si ya hay pagos). Mostrar el botón en el detalle
+   * evita ofrecer un flujo que terminaría en error.
+   */
+  readonly canConfigurePaymentPlan = computed(() => {
+    const s = this.po()?.status;
+    if (s !== 'draft' && s !== 'approved' && s !== 'partial') return false;
+    return this.payments().length === 0;
   });
 
   // `partial` y `received` quedan fuera a propósito: con mercancía ya ingresada
@@ -1001,6 +1174,12 @@ export class StorePurchaseOrderDetailComponent {
     this.reload();
   }
 
+  /** QUI-647 — tras reconfigurar el plan de pago (PATCH payment-plan). */
+  onPlanConfigured(): void {
+    this.showPlanModal.set(false);
+    this.reload();
+  }
+
   // ============ Attachments ============
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -1098,6 +1277,33 @@ export class StorePurchaseOrderDetailComponent {
   paymentMethodLabel(method: string): string {
     const labels: Record<string, string> = { cash: 'Efectivo', bank_transfer: 'Transferencia bancaria', check: 'Cheque', credit_card: 'Tarjeta de crédito' };
     return labels[method] || method || 'Sin método';
+  }
+
+  // ============================================================
+  // QUI-647 — Plan de pagos: estado de cada cuota
+  // ============================================================
+  getPaymentScheduleStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      planned: 'Programada',
+      materialized: 'En cobro',
+      paid: 'Pagada',
+      partial: 'Parcial',
+      overdue: 'Vencida',
+      canceled: 'Cancelada',
+    };
+    return labels[status] || (status || '—');
+  }
+
+  getPaymentScheduleStatusClass(status: string): string {
+    const map: Record<string, string> = {
+      planned: 'bg-blue-100 text-blue-700',
+      materialized: 'bg-primary/10 text-primary',
+      paid: 'bg-green-100 text-green-700',
+      partial: 'bg-amber-100 text-amber-700',
+      overdue: 'bg-red-100 text-red-700',
+      canceled: 'bg-muted/40 text-text-secondary',
+    };
+    return map[status] || 'bg-muted/40 text-text-secondary';
   }
   userName(user: { first_name?: string | null; last_name?: string | null; username?: string | null; user_name?: string | null } | null | undefined): string {
     if (!user) return 'Sistema';

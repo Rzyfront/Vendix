@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -8,6 +9,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -53,8 +55,17 @@ export class CreateOrgAdjustmentDto {
    * Resulting on-hand quantity after the adjustment is applied. The service
    * computes `quantity_change = quantity_after - quantity_before` and applies
    * the delta via `StockLevelManager.updateStock`.
+   *
+   * Entero y no negativo: es un conteo físico resultante en la unidad mínima de
+   * stock, que es `Int` en la base. Sin estas cotas un decimal reventaba como
+   * 500 opaco desde Prisma, y un negativo era peor — `updateStock` clampea
+   * `quantity_on_hand` a 0 pero la fila persistía `quantity_after: -N`, dejando
+   * el libro de ajustes divergiendo del stock en silencio y para siempre, con un
+   * asiento emitido sobre un movimiento que no existió. El DTO hermano de tienda
+   * (`batch-create-adjustments.dto.ts`) ya traía `@Min(0)`.
    */
-  @IsNumber()
+  @IsInt()
+  @Min(0)
   @Type(() => Number)
   quantity_after!: number;
 
@@ -105,7 +116,9 @@ export class CreateOrgAdjustmentItemDto {
   @IsEnum(ORG_ADJUSTMENT_TYPES)
   type!: OrgAdjustmentType;
 
-  @IsNumber()
+  /** Entero no negativo, por la misma razón que en `CreateOrgAdjustmentDto`. */
+  @IsInt()
+  @Min(0)
   @Type(() => Number)
   quantity_after!: number;
 
@@ -123,8 +136,13 @@ export class CreateOrgAdjustmentBulkDto {
   @Type(() => Number)
   location_id!: number;
 
+  // Tope de lote: `createBulk` recorre los items abriendo UNA transacción por
+  // fila, así que un lote grande que falla a mitad deja las anteriores
+  // commiteadas y devuelve un 500 opaco. Hasta que el endpoint reporte por fila,
+  // el tope acota el daño y alinea con `vendix-bulk-operations` (100).
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => CreateOrgAdjustmentItemDto)
   items!: CreateOrgAdjustmentItemDto[];

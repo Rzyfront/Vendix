@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { ApiResponse, InventoryCountScanResponse } from '../interfaces';
 
 @Injectable({
@@ -31,24 +32,13 @@ export class InventoryScannerService {
       .pipe(catchError(this.handleError));
   }
 
+  // Un solo traductor de errores para toda la app: `extractApiErrorMessage`
+  // resuelve el `error_code` tipado contra ERROR_MESSAGES y sólo cae a los
+  // genéricos por status si no hay código. La versión previa mostraba el
+  // `message` del backend —el mensaje de DESARROLLO, en inglés— directo al
+  // usuario, que es justo lo que parse-api-error prohíbe.
   private handleError(error: any): Observable<never> {
-    console.error('InventoryScannerService Error:', error);
-    let error_message = 'An error occurred';
-
-    if (error.error?.message) {
-      error_message = error.error.message;
-    } else if (error.status === 400) {
-      error_message = 'Invalid data provided';
-    } else if (error.status === 401) {
-      error_message = 'Unauthorized access';
-    } else if (error.status === 403) {
-      error_message = 'Insufficient permissions';
-    } else if (error.status === 404) {
-      error_message = 'Resource not found';
-    } else if (error.status >= 500) {
-      error_message = 'Server error. Please try again later';
-    }
-
-    return throwError(() => error_message);
+      console.error('InventoryScannerService Error:', error);
+      return throwError(() => extractApiErrorMessage(error));
   }
 }

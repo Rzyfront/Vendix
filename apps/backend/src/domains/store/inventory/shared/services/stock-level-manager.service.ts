@@ -15,11 +15,30 @@ import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/defau
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
 import { sellableLocationsWhere } from '../helpers/pos-stock-scope.helper';
+import { syncDenormalizedProductStock } from '../helpers/sync-product-stock.helper';
 import { CostingService } from './costing.service';
 import {
   CostingMethodResolverService,
   ResolvedCostingMethod,
 } from './costing-method-resolver.service';
+
+/**
+ * Espacio de nombres de una reserva. `stock_reservations.reserved_for_id` es un
+ * id de OTRA tabla y sólo significa algo junto a este tipo: la llave real es el
+ * par `(reserved_for_type, reserved_for_id)`, nunca el id suelto.
+ *
+ * `dispatch_note` existe porque las remisiones standalone (sin `sales_order_id`
+ * ni `order_id`) llavean por `dispatch_notes.id` y antes lo hacían bajo `order`
+ * — de modo que la remisión #42 y la orden #42 compartían llave. Cualquier
+ * lectura, liberación o conteo de reservas DEBE pasar el tipo que corresponde a
+ * la tabla de la que salió el id; mezclar los dos vuelve a abrir la colisión.
+ */
+export type ReservationRefType =
+  | 'order'
+  | 'transfer'
+  | 'adjustment'
+  | 'layaway'
+  | 'dispatch_note';
 
 export interface UpdateStockParams {
   product_id: number;
@@ -200,6 +219,27 @@ export class StockLevelManager {
       throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
+    // RECORTE A CERO — red residual, NO la política de sobreventa.
+    //
+    // La sobreventa se bloquea AGUAS ARRIBA, y con mensaje al usuario:
+    //   - venta POS  → `payments.service.ts` fija `allowOversell = false` y
+    //     lanza `POS_STOCK_INSUFFICIENT_001` nombrando requerido y disponible;
+    //   - reserva    → `reserveStock` lanza `INV_STOCK_001` antes de escribir
+    //     un disponible negativo (ver ~689 y ~771 en este mismo archivo);
+    //   - entrega    → `order-stock-commit.service.ts` lanza `INV_STOCK_002`.
+    //
+    // Este `Math.max(0, …)` sólo puede actuar en un camino que NO pasó por esas
+    // guardas (ajustes, producción, integraciones) o si una de ellas pierde una
+    // carrera. Cuando actúa, oculta el faltante: el cero de descuadre se ve
+    // idéntico al cero de "se agotó normal". Por eso no es inofensivo, pero
+    // tampoco es lo que gobierna la venta.
+    //
+    // `store_settings.inventory.allow_negative_stock` NO lo controla — nadie la
+    // lee (ver settings-schemas.dto.ts). Si algún día se quiere que el faltante
+    // quede registrado en vez de taparse, hay que tocar los cuatro sitios a la
+    // vez: aquí (~223 y ~992), movements.service.ts (~371, ~382),
+    // inventory-integration.service.ts (~228) y
+    // sellable-stock-allocator.service.ts (~108-130).
     const stockUpdateData: any = {
       quantity_on_hand: Math.max(0, new_quantity_on_hand),
       quantity_available: Math.max(0, new_quantity_available),
@@ -675,7 +715,7 @@ export class StockLevelManager {
     variant_id: number | undefined,
     location_id: number,
     quantity: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     user_id?: number,
     validate_availability = true,
@@ -791,7 +831,7 @@ export class StockLevelManager {
     product_id: number,
     variant_id: number | undefined,
     location_id: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     tx?: any,
   ): Promise<void> {
@@ -883,7 +923,7 @@ export class StockLevelManager {
    *   `decrementOnHand` se ignora en este branch.
    */
   async releaseReservationsByReference(
-    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_type: ReservationRefType,
     reserved_for_id: number,
     status: 'consumed' | 'cancelled' = 'consumed',
     tx?: any,
@@ -1307,13 +1347,25 @@ export class StockLevelManager {
     const movementType =
       params.movement_type === 'initial' ? 'stock_in' : params.movement_type;
 
+    // `quantity` es una MAGNITUD; la dirección la llevan las dos patas de
+    // ubicación. Antes se rellenaba `to_location_id` incluso en las salidas y
+    // `from_location_id` quedaba null en ambos sentidos, así que la fila no
+    // permitía saber si el stock entró o salió: un ajuste que subía de 100 a 120
+    // se pintaba "−20" porque la UI tenía que adivinar por el tipo. Un traslado
+    // pasa las dos patas explícitas y no cambia de comportamiento.
+    const isOutbound = Number(params.quantity_change) < 0;
+    const fromLocationId =
+      params.from_location_id ?? (isOutbound ? params.location_id : null);
+    const toLocationId =
+      params.to_location_id ?? (isOutbound ? null : params.location_id);
+
     await prisma.inventory_movements.create({
       data: {
         organization_id: organization_id,
         product_id: params.product_id,
         product_variant_id: params.variant_id,
-        from_location_id: params.from_location_id,
-        to_location_id: params.to_location_id || params.location_id,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
         quantity: Math.abs(params.quantity_change),
         movement_type: movementType,
         source_module: params.source_module,
@@ -1418,53 +1470,10 @@ export class StockLevelManager {
     product_id: number,
     variant_id?: number,
   ): Promise<void> {
-    // 1. Si hay variant_id, sincronizar esa variante específica
-    if (variant_id) {
-      const variant_stock = await prisma.stock_levels.aggregate({
-        where: {
-          product_id: product_id,
-          product_variant_id: variant_id,
-        },
-        _sum: {
-          quantity_available: true,
-        },
-      });
-
-      await prisma.product_variants.update({
-        where: { id: variant_id },
-        data: {
-          stock_quantity: variant_stock._sum.quantity_available || 0,
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    // 2. Check if product has variants
-    const variantCount = await prisma.product_variants.count({
-      where: { product_id: product_id },
-    });
-
-    // 3. Build the aggregate filter: exclude base stock when variants exist
-    const stockFilter: any = { product_id: product_id };
-    if (variantCount > 0) {
-      stockFilter.product_variant_id = { not: null };
-    }
-
-    const total_stock = await prisma.stock_levels.aggregate({
-      where: stockFilter,
-      _sum: {
-        quantity_available: true,
-      },
-    });
-
-    // Actualizar products.stock_quantity
-    await prisma.products.update({
-      where: { id: product_id },
-      data: {
-        stock_quantity: total_stock._sum.quantity_available || 0,
-        updated_at: new Date(),
-      },
-    });
+    // La lógica vive en un helper suelto para que los jobs de cron —que mutan
+    // `stock_levels` con el cliente global y no pueden inyectar este servicio
+    // scoped— usen EXACTAMENTE la misma fórmula.
+    await syncDenormalizedProductStock(prisma, product_id, variant_id);
   }
 
   /**
@@ -1961,5 +1970,238 @@ export class StockLevelManager {
         created_at: new Date(),
       },
     });
+  }
+
+  /**
+   * Convierte TODO lo que un producto tiene expresado en su unidad de stock a
+   * otra unidad de la misma dimensión, en una sola transacción.
+   *
+   * Cambiar la unidad no es renombrar una etiqueta: existencias, reservas,
+   * puntos de reorden, capas de costo FIFO, lotes y líneas de receta están
+   * escritos en esa unidad. Convertir solo `stock_levels` dejaría una receta
+   * pidiendo 300 milímetros de lo que antes eran 300 gramos y una valuación
+   * FIFO mintiendo por tres órdenes de magnitud.
+   *
+   * Dos reglas duras:
+   * - **El historial no se reescribe.** `inventory_adjustments` e
+   *   `inventory_movements` quedan en la unidad que tenían y la conversión se
+   *   registra como un movimiento propio. Un ajuste de ayer ocurrió en gramos;
+   *   decir lo contrario sería falsificar la auditoría.
+   * - **Si el factor no divide exacto, se rechaza entera.** Convertir 250 g a
+   *   kilos daría 0,25 y el inventario es `Int`: redondear perdería o
+   *   inventaría mercancía. Antes de tocar una fila se validan todas.
+   */
+  async convertStockUom(params: {
+    product_id: number;
+    from_uom_id: number;
+    to_uom_id: number;
+    user_id?: number | null;
+    tx?: any;
+  }): Promise<{
+    factor: number;
+    from_code: string;
+    to_code: string;
+    stock_levels: number;
+    cost_layers: number;
+    batches: number;
+    recipe_items: number;
+  }> {
+    const run = async (tx: any) => {
+      const base = tx._baseClient || tx;
+      const units = await base.units_of_measure.findMany({
+        where: { id: { in: [params.from_uom_id, params.to_uom_id] } },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          dimension: true,
+          factor_to_base: true,
+          is_stock_eligible: true,
+        },
+      });
+      const from = units.find((u: any) => u.id === params.from_uom_id);
+      const to = units.find((u: any) => u.id === params.to_uom_id);
+      if (!from || !to) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          'La unidad de origen o de destino no existe en el catálogo.',
+        );
+      }
+      if (from.dimension !== to.dimension) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          `No se puede convertir de ${from.code} a ${to.code}: son de dimensiones distintas.`,
+        );
+      }
+      if (!to.is_stock_eligible) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_UOM_NOT_STOCK_ELIGIBLE,
+          `${to.name} (${to.code}) no puede ser la unidad de stock porque su factor de conversión no es entero.`,
+        );
+      }
+
+      // qty_destino = qty_origen × factor_origen / factor_destino.
+      const factor = Number(from.factor_to_base) / Number(to.factor_to_base);
+      if (!Number.isFinite(factor) || factor <= 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          'El factor de conversión entre esas unidades no es válido.',
+        );
+      }
+
+      const [levels, layers, batches, recipeLines] = await Promise.all([
+        base.stock_levels.findMany({ where: { product_id: params.product_id } }),
+        base.inventory_cost_layers.findMany({
+          where: { product_id: params.product_id },
+        }),
+        base.inventory_batches.findMany({
+          where: { product_id: params.product_id },
+        }),
+        base.recipe_items.findMany({
+          where: { component_product_id: params.product_id },
+        }),
+      ]);
+
+      // Validación previa: ninguna cantidad entera puede quedar fraccionaria.
+      const assertExact = (value: number, label: string) => {
+        const converted = value * factor;
+        if (Math.abs(converted - Math.round(converted)) > 1e-9) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VALIDATE_001,
+            `No se puede convertir a ${to.code}: ${label} (${value} ${from.code}) quedaría en ${converted} y el inventario solo admite enteros.`,
+          );
+        }
+        return Math.round(converted);
+      };
+
+      for (const level of levels) {
+        assertExact(level.quantity_on_hand, 'una existencia');
+        assertExact(level.quantity_reserved, 'una reserva');
+        if (level.reorder_point != null) {
+          assertExact(level.reorder_point, 'un punto de reorden');
+        }
+        if (level.max_stock != null) {
+          assertExact(level.max_stock, 'un stock máximo');
+        }
+      }
+      for (const layer of layers) {
+        assertExact(layer.quantity_remaining, 'una capa de costo');
+      }
+      for (const batch of batches) {
+        assertExact(batch.quantity, 'un lote');
+        assertExact(batch.quantity_used, 'el consumo de un lote');
+      }
+
+      // A partir de acá ya no hay rechazos posibles: todo lo entero validó.
+      for (const level of levels) {
+        await base.stock_levels.update({
+          where: { id: level.id },
+          data: {
+            quantity_on_hand: Math.round(level.quantity_on_hand * factor),
+            quantity_reserved: Math.round(level.quantity_reserved * factor),
+            quantity_available: Math.round(level.quantity_available * factor),
+            reorder_point:
+              level.reorder_point != null
+                ? Math.round(level.reorder_point * factor)
+                : null,
+            max_stock:
+              level.max_stock != null
+                ? Math.round(level.max_stock * factor)
+                : null,
+            // El costo por unidad va al revés: si hay más unidades, cada una
+            // cuesta proporcionalmente menos. El valor total del inventario no
+            // cambia — convertir no compra ni vende nada.
+            cost_per_unit:
+              level.cost_per_unit != null
+                ? Number(level.cost_per_unit) / factor
+                : null,
+            updated_at: new Date(),
+          },
+        });
+      }
+
+      for (const layer of layers) {
+        await base.inventory_cost_layers.update({
+          where: { id: layer.id },
+          data: {
+            quantity_remaining: Math.round(layer.quantity_remaining * factor),
+            unit_cost: Number(layer.unit_cost) / factor,
+          },
+        });
+      }
+
+      for (const batch of batches) {
+        await base.inventory_batches.update({
+          where: { id: batch.id },
+          data: {
+            quantity: Math.round(batch.quantity * factor),
+            quantity_used: Math.round(batch.quantity_used * factor),
+            updated_at: new Date(),
+          },
+        });
+      }
+
+      // Las recetas piden cantidades decimales, así que acá no hay regla de
+      // exactitud: 2 unidades pasan a 2000 mm y 0,5 kg a 500 g sin pérdida.
+      for (const line of recipeLines) {
+        await base.recipe_items.update({
+          where: { id: line.id },
+          data: {
+            quantity: Number(line.quantity) * factor,
+            waste_absolute: Number(line.waste_absolute ?? 0) * factor,
+          },
+        });
+      }
+
+      // La conversión queda registrada como movimiento propio. El historial
+      // anterior NO se toca: cada ajuste ocurrió en la unidad de su momento.
+      const product = await base.products.findFirst({
+        where: { id: params.product_id },
+        select: { id: true, store_id: true, stores: { select: { organization_id: true } } },
+      });
+      const organizationId = product?.stores?.organization_id;
+      if (organizationId && levels.length > 0) {
+        for (const level of levels) {
+          // Una ubicación en cero no cambió de nada a nada: registrar un
+          // movimiento de 0 solo ensucia la auditoría.
+          if (level.quantity_on_hand === 0) continue;
+          await base.inventory_movements.create({
+            data: {
+              organization_id: organizationId,
+              product_id: params.product_id,
+              product_variant_id: level.product_variant_id,
+              from_location_id: level.location_id,
+              to_location_id: level.location_id,
+              quantity: Math.abs(
+                Math.round(level.quantity_on_hand * factor) -
+                  level.quantity_on_hand,
+              ),
+              movement_type: 'adjustment',
+              source_module: 'products',
+              reason: `Cambio de unidad de stock: ${from.code} → ${to.code} (×${factor})`,
+              notes: `Cambio de unidad de stock: ${from.code} → ${to.code} (×${factor})`,
+              user_id: params.user_id ?? null,
+              created_at: new Date(),
+            },
+          });
+        }
+      }
+
+      await this.syncProductStock(base, params.product_id);
+
+      return {
+        factor,
+        from_code: from.code,
+        to_code: to.code,
+        stock_levels: levels.length,
+        cost_layers: layers.length,
+        batches: batches.length,
+        recipe_items: recipeLines.length,
+      };
+    };
+
+    return params.tx
+      ? run(params.tx)
+      : this.prisma.$transaction((tx) => run(tx), { timeout: 30000 });
   }
 }

@@ -486,6 +486,7 @@ export type ScaleConnectionStatus =
 export const PRINT_FORMATS = [
   'letter',
   'half_letter',
+  'a4',
   'thermal_80',
   'thermal_58',
 ] as const;
@@ -496,8 +497,99 @@ export type PrintFormat = (typeof PRINT_FORMATS)[number];
 export const PRINT_FORMAT_LABELS: Record<PrintFormat, string> = {
   letter: 'Carta (216 × 279 mm)',
   half_letter: 'Media carta (216 × 140 mm)',
+  a4: 'A4 (210 × 297 mm)',
   thermal_80: 'Rollo térmico 80 mm',
   thermal_58: 'Rollo térmico 58 mm',
+};
+
+/**
+ * Mirror of the backend `PRINT_DOCUMENTS`. Every document the application can
+ * print, as its own configurable unit: the configurable unit is the store × the
+ * document type, not the store alone.
+ */
+export const PRINT_DOCUMENTS = [
+  'pos_ticket',
+  'invoice',
+  'dispatch_ticket',
+  'dispatch_note',
+  'dispatch_route',
+  'sales_order',
+  'purchase_order',
+  'quotation',
+  'reservation',
+  'layaway',
+  'guest_order',
+  'withholding_certificate',
+] as const;
+
+export type PrintDocument = (typeof PRINT_DOCUMENTS)[number];
+
+/** Human labels for the per-document rows of the print settings screen. */
+export const PRINT_DOCUMENT_LABELS: Record<PrintDocument, string> = {
+  pos_ticket: 'Tiquete POS',
+  invoice: 'Factura electrónica',
+  dispatch_ticket: 'Tiquete de despacho',
+  dispatch_note: 'Remisión',
+  dispatch_route: 'Planilla de ruta',
+  sales_order: 'Orden de venta',
+  purchase_order: 'Orden de compra',
+  quotation: 'Cotización',
+  reservation: 'Reserva',
+  layaway: 'Separado',
+  guest_order: 'Pedido de invitado',
+  withholding_certificate: 'Certificado de retención',
+};
+
+export interface PrintDocumentConfig {
+  format: PrintFormat;
+  /** Page margin in millimetres. Ignored on roll formats. */
+  margin_mm?: number;
+  /** Printed copies. 0 = do not print. */
+  copies?: number;
+}
+
+/**
+ * Per-store, per-document print configuration. Scope is the STORE: nothing is
+ * inherited from the organization. Absent entries fall back to
+ * `PRINT_DEFAULTS`.
+ */
+export type PrintingSettings = Partial<
+  Record<PrintDocument, PrintDocumentConfig>
+>;
+
+/**
+ * Mirror of the backend `PRINT_DEFAULTS`, taken from what the desktop build
+ * already does so a store that never opens this screen keeps printing as before.
+ */
+export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
+  pos_ticket: { format: 'thermal_80', copies: 1 },
+  invoice: { format: 'thermal_80', copies: 1 },
+  dispatch_ticket: { format: 'thermal_80', copies: 1 },
+  dispatch_note: { format: 'a4', margin_mm: 20, copies: 1 },
+  dispatch_route: { format: 'a4', margin_mm: 8, copies: 1 },
+  sales_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  purchase_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  quotation: { format: 'a4', margin_mm: 20, copies: 1 },
+  reservation: { format: 'a4', margin_mm: 20, copies: 1 },
+  layaway: { format: 'a4', margin_mm: 20, copies: 1 },
+  guest_order: { format: 'a4', margin_mm: 20, copies: 1 },
+  withholding_certificate: { format: 'a4', margin_mm: 20, copies: 1 },
+};
+
+/**
+ * Page geometry per format. `page_size` is the CSS `@page size` rule; without it
+ * the browser falls back to its own default and silently ignores the configured
+ * paper.
+ */
+export const PRINT_PAGE_GEOMETRY: Record<
+  PrintFormat,
+  { page_size: string; width_mm: number; is_roll: boolean }
+> = {
+  letter: { page_size: 'letter', width_mm: 216, is_roll: false },
+  half_letter: { page_size: '216mm 140mm', width_mm: 216, is_roll: false },
+  a4: { page_size: 'A4', width_mm: 210, is_roll: false },
+  thermal_80: { page_size: '80mm auto', width_mm: 80, is_roll: true },
+  thermal_58: { page_size: '58mm auto', width_mm: 58, is_roll: true },
 };
 
 export interface ReceiptsSettings {
@@ -527,12 +619,26 @@ export interface ReceiptsSettings {
    * form keeps at least one of `send_invoice_email` / `deliver_printed` on.
    */
   deliver_printed?: boolean;
-  /** Paper format of the invoice's graphic representation. */
+  /**
+   * @deprecated Superseded by `printing.invoice`. Still LIVE: the backend reads
+   * it in `invoice-pdf.service.ts` (`resolveInvoiceFormat`) and it defaults to
+   * `letter`, so it governs what already-invoicing stores print today. The
+   * settings screen mirrors `printing.invoice` into it while consumers migrate.
+   */
   invoice_format?: PrintFormat;
-  /** Paper format of the POS ticket, which may differ from the invoice's. */
+  /**
+   * @deprecated Superseded by `printing.pos_ticket`. Still honoured as a
+   * fallback while stores are migrated.
+   */
   pos_ticket_format?: PrintFormat;
-  /** Printed POS ticket copies. 0 = do not print. */
+  /** @deprecated Superseded by `printing.pos_ticket.copies`. */
   pos_ticket_copies?: number;
+  /**
+   * Per-document print configuration. Lives under `receipts` rather than as a
+   * new top-level section: `KNOWN_SECTIONS` drops unknown sections while still
+   * answering 200, so a new section would look saved and never persist.
+   */
+  printing?: PrintingSettings;
 }
 
 export interface BusinessHoursBlock {

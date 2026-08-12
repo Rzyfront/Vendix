@@ -5,6 +5,20 @@ import { StockLevelsService } from './stock-levels.service';
 import { ResponseService } from '@common/responses/response.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 
+/**
+ * CONTRATO DE ERROR — no revertir a `responseService.error`.
+ *
+ * `ResponseService.error()` RETORNA el sobre en vez de lanzarlo. Un controlador
+ * que atrapa la excepción y llama a ese método responde HTTP 200/201 con
+ * `success:false` en el cuerpo, y el frontend —que sólo mira el status— lo lee
+ * como éxito: el usuario ve el toast de "guardado" de una operación que falló.
+ *
+ * Por eso los handlers de este controlador NO llevan try/catch: la excepción
+ * sube al `AllExceptionsFilter`, que la traduce a status real + `error_code`
+ * tipado. Los tests de error afirman esa propagación y que `responseService.error`
+ * NO se invoca. Un test que espera un sobre con `success:false` está afirmando
+ * el defecto, no el contrato.
+ */
 describe('StockLevelsController', () => {
   let controller: StockLevelsController;
   let stockLevelsService: jest.Mocked<StockLevelsService>;
@@ -140,30 +154,17 @@ describe('StockLevelsController', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should handle errors and return error response', async () => {
+    it('propaga el error al filtro global en vez de responder 200 con success:false', async () => {
       const query: StockLevelQueryDto = {};
       const error = new Error('Database error');
 
       stockLevelsService.findAll.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock',
-        error: 'Database error',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findAll(query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
-        'Database error',
-        'Database error',
-        400,
-      );
-      expect(result.success).toBe(false);
+      await expect(controller.findAll(query)).rejects.toThrow('Database error');
+      expect(responseService.error).not.toHaveBeenCalled();
     });
 
-    it('should handle errors with custom status codes', async () => {
+    it('preserva el error original con su status en vez de aplanarlo a 400', async () => {
       const query: StockLevelQueryDto = {};
       const error = {
         message: 'Not found',
@@ -172,21 +173,12 @@ describe('StockLevelsController', () => {
       };
 
       stockLevelsService.findAll.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock',
-        error: 'Stock level not found',
-        statusCode: 404,
-        timestamp: expect.any(String),
+
+      await expect(controller.findAll(query)).rejects.toMatchObject({
+        message: 'Not found',
+        status: 404,
       });
-
-      await controller.findAll(query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
-        'Not found',
-        'Stock level not found',
-        404,
-      );
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -230,28 +222,17 @@ describe('StockLevelsController', () => {
       expect(stockLevelsService.findByProduct).toHaveBeenCalledWith(123, query);
     });
 
-    it('should handle errors when finding by product', async () => {
+    it('propaga el error al filtro global cuando el producto no existe', async () => {
       const productId = '999';
       const query: StockLevelQueryDto = {};
       const error = new Error('Product not found');
 
       stockLevelsService.findByProduct.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock del producto',
-        error: 'Product not found',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findByProduct(productId, query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
+      await expect(controller.findByProduct(productId, query)).rejects.toThrow(
         'Product not found',
-        'Product not found',
-        400,
       );
-      expect(result.success).toBe(false);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -298,28 +279,17 @@ describe('StockLevelsController', () => {
       );
     });
 
-    it('should handle errors when finding by location', async () => {
+    it('propaga el error al filtro global cuando la ubicación no existe', async () => {
       const locationId = '999';
       const query: StockLevelQueryDto = {};
       const error = new Error('Location not found');
 
       stockLevelsService.findByLocation.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock de la ubicación',
-        error: 'Location not found',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findByLocation(locationId, query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
-        'Location not found',
-        'Location not found',
-        400,
-      );
-      expect(result.success).toBe(false);
+      await expect(
+        controller.findByLocation(locationId, query),
+      ).rejects.toThrow('Location not found');
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -373,27 +343,16 @@ describe('StockLevelsController', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should handle errors when getting stock alerts', async () => {
+    it('propaga el error al filtro global cuando fallan las alertas', async () => {
       const query: StockLevelQueryDto = {};
       const error = new Error('Failed to get alerts');
 
       stockLevelsService.getStockAlerts.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener las alertas de stock',
-        error: 'Failed to get alerts',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.getStockAlerts(query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
+      await expect(controller.getStockAlerts(query)).rejects.toThrow(
         'Failed to get alerts',
-        'Failed to get alerts',
-        400,
       );
-      expect(result.success).toBe(false);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -433,27 +392,16 @@ describe('StockLevelsController', () => {
       expect(stockLevelsService.findOne).toHaveBeenCalledWith(789);
     });
 
-    it('should handle errors when finding one stock level', async () => {
+    it('propaga el error al filtro global cuando el nivel no existe', async () => {
       const id = '999';
       const error = new Error('Stock level not found');
 
       stockLevelsService.findOne.mockRejectedValue(error);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener el nivel de stock',
-        error: 'Stock level not found',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findOne(id);
-
-      expect(responseService.error).toHaveBeenCalledWith(
+      await expect(controller.findOne(id)).rejects.toThrow(
         'Stock level not found',
-        'Stock level not found',
-        400,
       );
-      expect(result.success).toBe(false);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -499,84 +447,53 @@ describe('StockLevelsController', () => {
   });
 
   describe('Edge cases and validation', () => {
-    it('should handle invalid productId format', async () => {
+    it('propaga el error de id de producto inválido', async () => {
       const productId = 'invalid';
       const query: StockLevelQueryDto = {};
 
       stockLevelsService.findByProduct.mockRejectedValue(
         new Error('Invalid ID'),
       );
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock del producto',
-        error: 'Invalid ID',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findByProduct(productId, query);
-
-      expect(result.success).toBe(false);
+      await expect(controller.findByProduct(productId, query)).rejects.toThrow(
+        'Invalid ID',
+      );
+      expect(responseService.error).not.toHaveBeenCalled();
     });
 
-    it('should handle invalid locationId format', async () => {
+    it('propaga el error de id de ubicación inválido', async () => {
       const locationId = 'invalid';
       const query: StockLevelQueryDto = {};
 
       stockLevelsService.findByLocation.mockRejectedValue(
         new Error('Invalid ID'),
       );
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock de la ubicación',
-        error: 'Invalid ID',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findByLocation(locationId, query);
-
-      expect(result.success).toBe(false);
+      await expect(
+        controller.findByLocation(locationId, query),
+      ).rejects.toThrow('Invalid ID');
+      expect(responseService.error).not.toHaveBeenCalled();
     });
 
-    it('should handle invalid id format in findOne', async () => {
+    it('propaga el error de id inválido en findOne', async () => {
       const id = 'invalid';
 
       stockLevelsService.findOne.mockRejectedValue(new Error('Invalid ID'));
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener el nivel de stock',
-        error: 'Invalid ID',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findOne(id);
-
-      expect(result.success).toBe(false);
+      await expect(controller.findOne(id)).rejects.toThrow('Invalid ID');
+      expect(responseService.error).not.toHaveBeenCalled();
     });
 
-    it('should handle service timeouts', async () => {
+    it('propaga el timeout del servicio en vez de disfrazarlo de 400', async () => {
       const query: StockLevelQueryDto = {};
       const timeoutError = new Error('Service timeout');
 
       stockLevelsService.findAll.mockRejectedValue(timeoutError);
-      responseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener los niveles de stock',
-        error: 'Service timeout',
-        statusCode: 400,
-        timestamp: expect.any(String),
-      });
 
-      const result = await controller.findAll(query);
-
-      expect(responseService.error).toHaveBeenCalledWith(
+      await expect(controller.findAll(query)).rejects.toThrow(
         'Service timeout',
-        'Service timeout',
-        400,
       );
-      expect(result.success).toBe(false);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 });

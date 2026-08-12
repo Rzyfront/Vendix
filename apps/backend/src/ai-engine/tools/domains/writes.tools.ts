@@ -617,8 +617,9 @@ export function createInventoryWriteTools(
           }
           const target = resolved.value;
 
+          // `organization_id` y `created_by_user_id` los resuelve el servicio del
+          // contexto de la petición; ya no se aceptan en el DTO.
           const dto: CreateAdjustmentDto = {
-            organization_id: organizationId,
             product_id: target.productId,
             ...(target.variantId
               ? { product_variant_id: target.variantId }
@@ -628,7 +629,6 @@ export function createInventoryWriteTools(
             quantity_after: target.quantityAfter,
             description:
               cleanString(args.reason) ?? 'Ajuste registrado desde Vexi',
-            created_by_user_id: userId,
           };
 
           const adjustment = await adjustmentsService.createAdjustment(dto);

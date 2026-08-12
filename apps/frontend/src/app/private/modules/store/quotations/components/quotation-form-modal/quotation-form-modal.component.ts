@@ -280,6 +280,12 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                   <span style="color: var(--color-text-secondary);">Subtotal</span>
                   <span class="font-mono">{{ subtotalAmount() | currency }}</span>
                 </div>
+                @if (discountAmount() > 0) {
+                  <div class="flex justify-between text-sm">
+                    <span style="color: var(--color-text-secondary);">Descuento</span>
+                    <span class="font-mono">-{{ discountAmount() | currency }}</span>
+                  </div>
+                }
                 @if (taxAmount() > 0) {
                   <div class="flex justify-between text-sm">
                     <span style="color: var(--color-text-secondary);">Impuestos</span>
@@ -397,6 +403,7 @@ export class QuotationFormModalComponent {
 
   /** Summary signals — updated manually when items change */
   readonly subtotalAmount = signal(0);
+  readonly discountAmount = signal(0);
   readonly taxAmount = signal(0);
   readonly grandTotal = signal(0);
 
@@ -496,6 +503,14 @@ export class QuotationFormModalComponent {
           units_per_package: anyItem.stock_units_consumed && item.quantity
             ? Math.round(Number(anyItem.stock_units_consumed) / Number(item.quantity))
             : null,
+          // Snapshot de la línea primero: es la escala con la que se cotizó.
+          // El producto sólo entra si la línea es vieja y no la trae.
+          price_unit_quantity:
+            Number(
+              anyItem.price_unit_quantity ??
+                anyItem.product?.price_unit_quantity ??
+                1,
+            ) || 1,
           base_price: Number(anyItem.product?.base_price ?? item.unit_price),
         }));
       });
@@ -543,8 +558,6 @@ export class QuotationFormModalComponent {
   addProductWithVariant(product: any, variant: any): void {
     const basePrice = variant?.price_override ?? product.price;
     const taxRate = this.calculateRateSum(product);
-    const taxAmountItem = basePrice * taxRate;
-    const totalPrice = basePrice;
 
     const productId = Number(product.id);
     if (Number.isFinite(productId)) {
@@ -563,20 +576,24 @@ export class QuotationFormModalComponent {
       quantity: 1,
       unit_price: basePrice,
       tax_rate: taxRate,
-      tax_amount_item: taxAmountItem,
-      total_price: totalPrice,
+      tax_amount_item: 0,
+      total_price: 0,
       has_multiple_price_tiers: product.has_multiple_price_tiers === true,
       enabled_price_tier_ids: product.enabled_price_tier_ids ?? [],
       // Sin tarifa aplicada al agregar: el packSize se resuelve en onTierChange.
       units_per_package: null,
+      price_unit_quantity: Number(product.price_unit_quantity ?? 1) || 1,
       base_price: Number(product.price ?? basePrice),
     }));
+
+    // El total y el impuesto de la línea los deriva `recalculateItem`, que es
+    // el único lugar que conoce la escala y la base gravable.
+    this.recalculateItem(this.itemsArray.length - 1);
 
     this.pendingVariantProduct.set(null);
     this.selectedVariantId.set(null);
     this.productSearchTerm.set('');
     this.productResults.set([]);
-    this.recalculateGrandTotal();
   }
 
   selectVariant(variant: any): void {
@@ -601,14 +618,36 @@ export class QuotationFormModalComponent {
     this.recalculateGrandTotal();
   }
 
+  /**
+   * Escala de precio efectiva de la línea.
+   *
+   * `price_unit_quantity` es la *price unit*: con 1000, `unit_price` es el
+   * precio de 1.000 unidades de stock ("$5.000 el metro" sobre milímetros).
+   * Una PRESENTACIÓN manda sobre ella: ahí `unit_price` ya es el precio del
+   * paquete y `quantity` cuenta paquetes, así que no se divide otra vez.
+   */
+  private effectivePriceUnit(group: FormGroup): number {
+    const packSize = Number(group.get('units_per_package')?.value ?? 0);
+    if (packSize > 1) return 1;
+    const scale = Number(group.get('price_unit_quantity')?.value ?? 1);
+    return Number.isFinite(scale) && scale > 1 ? scale : 1;
+  }
+
   recalculateItem(index: number): void {
     const group = this.itemsArray.at(index) as FormGroup;
     const qty = Number(group.get('quantity')?.value || 0);
     const price = Number(group.get('unit_price')?.value || 0);
     const discount = Number(group.get('discount_amount')?.value || 0);
     const taxRate = Number(group.get('tax_rate')?.value || 0);
-    const taxAmountItem = price * qty * taxRate;
-    const totalPrice = price * qty - discount;
+
+    // `total_price` es el BRUTO de la línea: el backend resta el descuento una
+    // sola vez en la cabecera (`subtotal - descuentos + impuestos`). Mandarlo
+    // ya neteado lo restaba dos veces y la cotización guardada quedaba por
+    // debajo de lo que mostraba esta pantalla.
+    const totalPrice = (price * qty) / this.effectivePriceUnit(group);
+    // La base gravable va después del descuento, no sobre el bruto.
+    const taxAmountItem = Math.max(totalPrice - discount, 0) * taxRate;
+
     group.patchValue({
       total_price: totalPrice,
       tax_amount_item: taxAmountItem,
@@ -618,14 +657,20 @@ export class QuotationFormModalComponent {
 
   private recalculateGrandTotal(): void {
     let subtotal = 0;
+    let discount = 0;
     let tax = 0;
     for (let i = 0; i < this.itemsArray.length; i++) {
-      subtotal += Number(this.itemsArray.at(i).get('total_price')?.value || 0);
-      tax += Number(this.itemsArray.at(i).get('tax_amount_item')?.value || 0);
+      const group = this.itemsArray.at(i);
+      subtotal += Number(group.get('total_price')?.value || 0);
+      discount += Number(group.get('discount_amount')?.value || 0);
+      tax += Number(group.get('tax_amount_item')?.value || 0);
     }
     this.subtotalAmount.set(subtotal);
+    this.discountAmount.set(discount);
     this.taxAmount.set(tax);
-    this.grandTotal.set(subtotal + tax);
+    // Misma fórmula que la cabecera del backend, para que lo que se ve acá sea
+    // exactamente lo que queda guardado.
+    this.grandTotal.set(subtotal - discount + tax);
   }
 
   private calculateRateSum(product: any): number {
@@ -702,6 +747,8 @@ export class QuotationFormModalComponent {
     has_multiple_price_tiers?: boolean;
     enabled_price_tier_ids?: number[];
     units_per_package?: number | null;
+    /** *Price unit* del producto: 1000 = `unit_price` cotiza 1.000 unidades. */
+    price_unit_quantity?: number | null;
     base_price?: number;
   }): FormGroup {
     return this.fb.group({
@@ -721,6 +768,7 @@ export class QuotationFormModalComponent {
       has_multiple_price_tiers: [item.has_multiple_price_tiers ?? false],
       enabled_price_tier_ids: [item.enabled_price_tier_ids ?? []],
       units_per_package: [item.units_per_package ?? null],
+      price_unit_quantity: [item.price_unit_quantity ?? 1],
       base_price: [item.base_price ?? item.unit_price],
     });
   }

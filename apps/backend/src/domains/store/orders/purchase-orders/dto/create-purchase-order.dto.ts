@@ -9,7 +9,13 @@ import {
   IsDateString,
   IsArray,
   IsBoolean,
+  MaxLength,
   ValidateNested,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+  registerDecorator,
+  ValidationOptions,
 } from 'class-validator';
 import { IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -256,6 +262,67 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   has_multiple_price_tiers?: any;
 
+  // ===== Unidad de venta (QUI-648) ================================================
+  // Configurar la presentación en la que se venderá el producto, sin salir del
+  // flujo de compra: compro bultos de 50 kg y acá defino que se vende por bulto
+  // y por kilo. Espeja el patrón del bloque de insumo (purchase_uom_id /
+  // stock_uom_id / purchase_to_stock_factor), que ya configura el producto desde
+  // la orden de compra.
+  //
+  // El servicio persiste las TRES filas de forma coordinada o ninguna:
+  // `price_tiers` (kind='sale_unit'), `product_price_tier_assignments` (allowlist
+  // que consulta la venta) y `product_price_tier_overrides` (factor + precio).
+
+  @ApiProperty({
+    description:
+      'Nombre libre de la presentación de venta (Bulto 50 kg, Kilo, Rollo, Metro).',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sale_unit_name?: string;
+
+  @ApiProperty({
+    description:
+      'Unidades de stock que consume una unidad de esa presentación (50 para un bulto de 50 kg). Entero >= 2.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  sale_unit_units_per_package?: number;
+
+  @ApiProperty({
+    description: 'Precio de la presentación completa. Gana sobre el margen.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_price?: number;
+
+  @ApiProperty({
+    description:
+      'Margen de la presentación (markup sobre el costo del paquete). Se ignora si llega precio explícito.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_unit_profit_margin?: number;
+
+  @ApiProperty({
+    description:
+      'Marca la presentación como la que rige por defecto en toda superficie de venta.',
+    required: false,
+  })
+  @IsOptional()
+  sale_unit_is_default?: any;
+
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()
   @IsOptional()
@@ -295,6 +362,10 @@ export class PurchaseOrderItemDto {
  * Vive contra la ORDEN, no contra la CxP: la CxP nace con la recepción, así que
  * al crear la orden todavía no hay a qué colgarla. Se materializa en
  * `ap_payment_schedules` cuando la CxP existe.
+ *
+ * El monto tiene piso monetario 0.01 y máx. 2 decimales (consistente con
+ * `ScheduleApPaymentDto` y layaway): una cuota de $0 no programa nada y una de
+ * 3 decimales no puede persistirse en una columna Decimal(12,2).
  */
 export class PurchaseOrderInstallmentDto {
   @ApiProperty({ description: 'Fecha programada de la cuota (YYYY-MM-DD)' })
@@ -302,8 +373,83 @@ export class PurchaseOrderInstallmentDto {
   scheduled_date: string;
 
   @ApiProperty({ description: 'Monto de la cuota' })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
   amount: number;
+}
+
+/**
+ * QUI-647 — validador CROSS-FIELD del plan de pago (patrón quantity-tier).
+ *
+ * `payment_plan` es el campo que gobierna al resto: cada modo exige (o prohíbe)
+ * campos hermanos. El total de la orden se deriva server-side, así que la
+ * comparación de montos contra el total NO vive aquí sino en el service.
+ *
+ *   - immediate: no admite abono ni cuotas (el pago completo viaja por el flujo
+ *     post-creación, no como anticipo).
+ *   - partial:  requiere `down_payment_amount` > 0; puede llevar
+ *     `payment_due_date` OPCIONAL que materializa el saldo con fecha (cuota
+ *     planeada del saldo). Sin fecha, el saldo queda sin fecha (CxP).
+ *   - deferred: requiere `payment_due_date`.
+ *   - installments: requiere al menos una cuota en `payment_installments`.
+ */
+@ValidatorConstraint({ name: 'IsValidPaymentPlan', async: false })
+export class IsValidPaymentPlanConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const object = args.object as CreatePurchaseOrderDto;
+    const plan = object.payment_plan;
+    const down = object.down_payment_amount;
+    const dueDate = object.payment_due_date;
+    const installments = object.payment_installments;
+
+    switch (plan) {
+      case 'immediate':
+        return down == null && (!installments || installments.length === 0);
+      case 'partial':
+        // El abono es obligatorio; `payment_due_date` del saldo es opcional
+        // (si viene, @IsDateString garantiza el formato; la comparación contra
+        // hoy la hace el service, misma regla que deferred).
+        return down != null && down > 0 && (dueDate == null || dueDate !== '');
+      case 'deferred':
+        return dueDate != null && dueDate !== '';
+      case 'installments':
+        return Array.isArray(installments) && installments.length >= 1;
+      default:
+        // Plan ausente o valor inválido: el formato lo gobierna @IsIn, y un
+        // plan ausente es una orden legacy sin configuración de pago.
+        return true;
+    }
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const plan = (args.object as CreatePurchaseOrderDto).payment_plan;
+    switch (plan) {
+      case 'immediate':
+        return 'El pago inmediato no admite abono ni cuotas programadas';
+      case 'partial':
+        return 'Un abono parcial requiere un monto abonado mayor que cero';
+      case 'deferred':
+        return 'Un pago diferido requiere una fecha de pago';
+      case 'installments':
+        return 'Un pago en cuotas requiere al menos una cuota programada';
+      default:
+        return 'El plan de pago es inválido';
+    }
+  }
+}
+
+export function IsValidPaymentPlan(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsValidPaymentPlan',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: IsValidPaymentPlanConstraint,
+    });
+  };
 }
 
 export class CreatePurchaseOrderDto {
@@ -419,18 +565,29 @@ export class CreatePurchaseOrderDto {
     required: false,
   })
   @IsIn(['immediate', 'partial', 'deferred', 'installments'])
+  @IsValidPaymentPlan()
   @IsOptional()
   payment_plan?: 'immediate' | 'partial' | 'deferred' | 'installments';
 
+  /**
+   * QUI-647: monto abonado en el acto (payment_plan=partial, o abono dentro de
+   * un plan de cuotas). Piso $0 y máx. 2 decimales; el tope contra el total lo
+   * valida el service porque el total se deriva server-side.
+   */
   @ApiProperty({
     description: 'QUI-647: monto abonado en el acto (payment_plan=partial)',
     required: false,
   })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   @IsOptional()
   down_payment_amount?: number;
 
-  @ApiProperty({ description: 'QUI-647: fecha única de pago (deferred)', required: false })
+  @ApiProperty({
+    description:
+      'QUI-647: fecha única de pago (deferred) o fecha del saldo en abono parcial (partial, opcional).',
+    required: false,
+  })
   @IsDateString()
   @IsOptional()
   payment_due_date?: string;

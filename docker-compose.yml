@@ -51,7 +51,10 @@ services:
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
-      NODE_OPTIONS: "--max-old-space-size=1536"
+      # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
+      # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
+      # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
+      NODE_OPTIONS: "--max-old-space-size=2048"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -64,6 +67,62 @@ services:
       - redis
     ports:
       - "3000:3000"
+    volumes:
+      - ./apps/backend:/app
+      - /app/node_modules
+    networks:
+      - vendix_net
+    command: sh -c "npx prisma generate && npm run start:dev"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Proceso worker: MISMA imagen, MISMO comando, distinto VENDIX_PROCESS_ROLE.
+  #
+  # QUI-674: los 11 workers de BullMQ y todos los @Cron compartían el event loop
+  # de la API, así que un job CPU-bound (firmar el set de pruebas DIAN) congelaba
+  # el backend entero. Con el rol separado, un worker bloqueado ya no puede
+  # tumbar la API porque no comparte su event loop.
+  #
+  # NO arranca por defecto: pertenece al perfil `split`, así que
+  # `docker compose up -d` sigue levantando el stack de siempre —un solo backend
+  # con todo dentro— y el desarrollo cotidiano no cambia. Para reproducir la
+  # topología de producción:
+  #
+  #   docker compose --profile split up -d backend-worker
+  #   # y en el contenedor `backend`, VENDIX_PROCESS_ROLE=api
+  #
+  # La cola vive en el contenedor `redis`, que ya es compartido, así que el
+  # productor (API) y el consumidor (worker) se encuentran sin más cableado.
+  backend-worker:
+    profiles: ["split"]
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile.dev
+    container_name: vendix_backend_worker
+    restart: unless-stopped
+    # Presupuesto menor que el de la API: no sirve HTTP ni sostiene SSE, pero
+    # carga el MISMO grafo de módulos (cliente Prisma incluido), que es el grueso
+    # del heap en reposo.
+    mem_limit: 1536m
+    memswap_limit: 2g
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
+      NODE_ENV: development
+      NODE_OPTIONS: "--max-old-space-size=1024"
+      CHOKIDAR_USEPOLLING: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VENDIX_PROCESS_ROLE: worker
+    depends_on:
+      - db
+      - redis
+    # Sin `ports`: no hay servidor HTTP que exponer. Es la comprobación más
+    # barata de que el modo worker no abrió un puerto por accidente.
     volumes:
       - ./apps/backend:/app
       - /app/node_modules

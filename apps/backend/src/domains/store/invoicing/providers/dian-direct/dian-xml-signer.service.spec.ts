@@ -437,6 +437,120 @@ describe('DianXmlSignerService (XAdES-EPES)', () => {
   });
 
   /**
+   * QUI-674 — EL WORKER DIAN BLOQUEABA EL EVENT LOOP DE TODA LA API.
+   *
+   * `pkcs12FromAsn1` es descifrado PBE en JS puro y 100% SÍNCRONO: mientras corre,
+   * el proceso entero está detenido. `sign()` abría el contenedor DOS veces por
+   * documento (llave + certificado), así que un set de 50 documentos hacía 100
+   * aperturas seguidas. En producción eso dio 504 de nginx en rutas triviales y
+   * `could not renew lock for job` en BullMQ.
+   *
+   * Estos tests miden la causa directamente —cuántas veces se ABRE el
+   * contenedor—, que es lo único que no puede degradarse en silencio: una firma
+   * de más sigue produciendo un XML válido.
+   */
+  describe('caché del material PKCS#12', () => {
+    let parseSpy: jest.SpyInstance;
+    let freshService: DianXmlSignerService;
+
+    beforeEach(() => {
+      // Servicio nuevo por test: la caché vive en la instancia, así que compartir
+      // la del `beforeAll` haría que el conteo dependiera del orden de los tests.
+      freshService = new DianXmlSignerService();
+      parseSpy = jest.spyOn(forge.pkcs12, 'pkcs12FromAsn1');
+      parseSpy.mockClear();
+    });
+
+    afterEach(() => {
+      parseSpy.mockRestore();
+    });
+
+    it('abre el contenedor UNA vez por firma, no dos', async () => {
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('no vuelve a abrirlo en las firmas siguientes del mismo lote', async () => {
+      // Tres documentos del mismo set: el coste de apertura se paga una vez.
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('comparte la apertura con las credenciales WS-Security del mismo envío', async () => {
+      // El envío SOAP firma el sobre con el MISMO certificado que el documento.
+      // Si `buildWsCredentials` no compartiera la caché, cada corrida pagaría una
+      // apertura extra.
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      const creds = freshService.buildWsCredentials(
+        material.p12Buffer,
+        password,
+      );
+      expect(creds.certificate_der_base64).toEqual(expect.any(String));
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('la contraseña forma parte de la clave: una equivocada nunca acierta la entrada buena', async () => {
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      parseSpy.mockClear();
+
+      // Si la clave de caché ignorara la contraseña, esto devolvería el material
+      // ya abierto y la firma tendría éxito con una contraseña incorrecta.
+      await expect(
+        freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, 'otra'),
+      ).rejects.toThrow(/Failed to sign XML document/);
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('un fallo no se cachea: reintentar vuelve a abrir el contenedor', async () => {
+      await expect(
+        freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, 'otra'),
+      ).rejects.toThrow(/Failed to sign XML document/);
+      await expect(
+        freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, 'otra'),
+      ).rejects.toThrow(/Failed to sign XML document/);
+      expect(parseSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('clearP12Cache() suelta el material y obliga a releer', async () => {
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      freshService.clearP12Cache();
+      await freshService.sign(UNSIGNED_INVOICE, material.p12Buffer, password);
+      expect(parseSpy).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * La caché NO puede debilitar la custodia HSM: bajo KMS el certificado es
+     * material público y se cachea, pero la llave privada no se exporta a PEM ni
+     * se retiene. Si después alguien SÍ necesita firmar en proceso, la entrada se
+     * promueve releyendo el contenedor — nunca devolviendo una llave ausente.
+     */
+    it('bajo custodia KMS cachea el certificado sin materializar la llave', () => {
+      const certOnly = freshService.buildWsCredentials(
+        material.p12Buffer,
+        password,
+        'arn:aws:kms:us-east-1:1:key/abc',
+      );
+      expect(certOnly.signer.is_exportable).toBe(false);
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+
+      // Custodia local sobre el MISMO contenedor: la entrada cacheada no traía
+      // llave, así que hay que releer en vez de fallar con "No private key".
+      const local = freshService.extractCredentials(
+        material.p12Buffer,
+        password,
+      );
+      expect(local.private_key_pem).toContain('PRIVATE KEY');
+      expect(parseSpy).toHaveBeenCalledTimes(2);
+
+      // Y ya promovida, no se relee más.
+      freshService.extractCredentials(material.p12Buffer, password);
+      expect(parseSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  /**
    * `sign` is async since the signature can be produced by a remote HSM. A PEM
    * string is still accepted and wrapped in `LocalPemSigner`, which is what keeps
    * this call site — and every other existing caller — working unchanged.

@@ -1,11 +1,131 @@
-<div class="dispatch-settings-form">
+<div class="dispatch-settings-form space-y-4">
+  <app-alert-banner variant="info" icon="truck">
+    Este ajuste no cambia <em>qu&eacute;</em> le pasa a la orden, sino <em>cu&aacute;ndo</em>: decide
+    hasta d&oacute;nde puede avanzar el estado de una orden mientras su planilla de reparto
+    sigue abierta.
+  </app-alert-banner>
+
   <div>
-    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Actualización de estado de la orden</h4>
+    <div class="flex items-center gap-2 flex-wrap mb-2">
+      <app-icon name="map-pin" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Actualizaci&oacute;n de estado de la orden
+      </h4>
+      <app-badge variant="warning" size="xs" badgeStyle="outline">Afecta a repartos en curso</app-badge>
+    </div>
+
     <app-setting-toggle
       [formControl]="liveStateUpdateControl"
-      label="Marcar la orden como entregada en vivo (al liquidar cada parada)"
-      description="Activado: la orden se marca «entregada» apenas se liquida cada parada de la ruta. Desactivado: la orden avanza sólo al cerrar/cuadrar la planilla."
+      label="Marcar la orden como Entregada en vivo (al liquidar cada parada)"
+      description="Activado: cada parada liquidada pasa su orden a Entregada en ese momento. Desactivado: las órdenes se quedan en Enviada hasta que se cierra la planilla."
       (changed)="onFieldChange()"
     ></app-setting-toggle>
   </div>
+
+  <!-- Comparación de los dos modos; el activo queda resaltado -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div
+      class="rounded-xl border p-3"
+      [class.border-border]="isLive()"
+      [class.bg-surface]="isLive()"
+      [class.border-success]="!isLive()"
+      [class.bg-success-light]="!isLive()"
+    >
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        <app-icon name="check-circle" size="14" class="text-text-secondary"></app-icon>
+        <span class="text-xs font-bold text-text-primary">Al cerrar la planilla</span>
+        <app-badge variant="neutral" size="xsm" badgeStyle="outline">Por defecto</app-badge>
+        @if (!isLive()) {
+          <app-badge variant="success" size="xsm" badgeStyle="outline">Activo</app-badge>
+        }
+      </div>
+      <p class="text-xs text-text-secondary leading-relaxed">
+        El repartidor liquida paradas todo el d&iacute;a y las &oacute;rdenes siguen mostr&aacute;ndose
+        <strong>Enviada</strong>. Al cerrar y cuadrar la planilla pasan todas juntas a
+        <strong>Entregada</strong> y, si no queda saldo pendiente, a
+        <strong>Finalizada</strong>.
+      </p>
+    </div>
+
+    <div
+      class="rounded-xl border p-3"
+      [class.border-border]="!isLive()"
+      [class.bg-surface]="!isLive()"
+      [class.border-info]="isLive()"
+      [class.bg-info-light]="isLive()"
+    >
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        <app-icon name="activity" size="14" class="text-text-secondary"></app-icon>
+        <span class="text-xs font-bold text-text-primary">En vivo, parada por parada</span>
+        @if (isLive()) {
+          <app-badge variant="info" size="xsm" badgeStyle="outline">Activo</app-badge>
+        }
+      </div>
+      <p class="text-xs text-text-secondary leading-relaxed">
+        Cada parada que se liquida como entregada pasa su orden a
+        <strong>Entregada</strong> en ese instante. Si el repartidor entrega a las 10:15,
+        la orden figura Entregada a las 10:15. La orden llega a
+        <strong>Finalizada</strong> igual al cerrar la planilla.
+      </p>
+    </div>
+  </div>
+
+  <app-expandable-card>
+    <div slot="header" class="flex items-center gap-2">
+      <app-icon name="help-circle" size="16" class="text-text-secondary"></app-icon>
+      <span class="text-xs font-semibold text-text-primary">
+        Qui&eacute;n ve la diferencia, y qu&eacute; pasa si lo cambi&aacute;s con rutas en la calle
+      </span>
+    </div>
+
+    <div class="p-4 space-y-3">
+      <div>
+        <p class="text-xs font-bold text-text-primary">Lo ve el cliente</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          El estado de la orden es el mismo que el cliente consulta en su cuenta de la
+          tienda online. En vivo, ve &laquo;Entregada&raquo; a los minutos de recibir; al
+          cerrar la planilla, sigue viendo &laquo;Enviada&raquo; hasta que el repartidor
+          regresa y se cuadra la ruta &mdash; incluso si el paquete ya est&aacute; en su casa.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">Lo ve tu equipo</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          En vivo gener&aacute;s una notificaci&oacute;n de cambio de estado por cada parada
+          liquidada; al cerrar la planilla llegan agrupadas al final de la ruta.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">Eleg&iacute; &laquo;al cerrar la planilla&raquo; si&hellip;</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Cuadr&aacute;s recaudo al regreso y no quer&eacute;s declarar una entrega antes de revisar
+          el dinero y las novedades. Da una entrega auditada; el costo es que durante la
+          jornada nadie ve el avance real.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">Eleg&iacute; &laquo;en vivo&raquo; si&hellip;</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Te preguntan &laquo;&iquest;ya lleg&oacute;?&raquo; durante el d&iacute;a y necesit&aacute;s que la orden
+          refleje la realidad al minuto. El costo es que una parada liquidada por error
+          deja la orden como Entregada antes de que alguien la revise.
+        </p>
+      </div>
+
+      <app-alert-banner variant="info" icon="shield">
+        En los dos modos el estado s&oacute;lo avanza, nunca retrocede, y el costo de la
+        mercanc&iacute;a se contabiliza cuando la orden queda Finalizada al cerrar la ruta. El
+        modo cambia el momento en que se ve la entrega, no las cifras contables.
+      </app-alert-banner>
+
+      <app-alert-banner variant="warning" icon="alert-triangle">
+        El cambio aplica en cuanto lo guard&aacute;s, tambi&eacute;n para las planillas que ya est&aacute;n
+        en la calle: esas rutas cambian de comportamiento a mitad de camino. Lo m&aacute;s
+        seguro es tocar este ajuste con todas las rutas cerradas.
+      </app-alert-banner>
+    </div>
+  </app-expandable-card>
 </div>

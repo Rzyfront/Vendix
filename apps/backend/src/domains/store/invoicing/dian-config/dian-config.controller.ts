@@ -82,6 +82,28 @@ export class DianConfigController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Estado de LAS CUATRO habilitaciones DIAN de la entidad fiscal, en una sola
+   * respuesta y con los cuatro ejes SIEMPRE presentes.
+   *
+   * `:id/production-readiness` solo sabe contestar por una configuración que ya
+   * existe, así que los ejes sin configurar —documento soporte, nómina,
+   * documento equivalente— no tenían forma de aparecer, y lo que no aparece se
+   * lee como «no aplica». Aquí el eje sin configuración se reporta como
+   * `not_started`, que es un estado, no una ausencia.
+   *
+   * Declarada ANTES de `@Get(':id')` a propósito, por el mismo motivo que
+   * `emission-status`: Nest resuelve en orden de declaración y la ruta
+   * paramétrica se tragaría este path, dejando que `ParseIntPipe` respondiera
+   * 400 sobre un texto que nunca fue un id.
+   */
+  @Get('fiscal-readiness')
+  @Permissions('invoicing:read')
+  async getFiscalReadiness() {
+    const result = await this.dian_config_service.getFiscalReadiness();
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('invoicing:read')
   async getConfigById(@Param('id', ParseIntPipe) id: number) {
@@ -288,6 +310,38 @@ export class DianConfigController {
   async getTestSetDocuments(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dian_test_service.getTestSetDocumentStatus(id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Transmite las notas que la fase 2 dejó GENERADAS, FIRMADAS Y SIN ENVIAR.
+   *
+   * Las lee de `last_test_result.note_phase.deferred[]` y las manda TAL CUAL:
+   * el consecutivo entra en el `SoftwareSecurityCode` y en el CUDE, así que
+   * renumerar exigiría volver a firmar y produciría otro documento. No reserva
+   * numeración nueva ni regenera nada.
+   *
+   * Es REANUDABLE: cada nota con ZipKey sale de `deferred`, así que una llamada
+   * cortada por el `proxy_read_timeout` de nginx se retoma invocando de nuevo y
+   * solo viajan las que faltan. `limit` permite partirla a mano si el bloque
+   * retenido es grande.
+   *
+   * `invoicing:write` y no `:read` porque envía documentos a la DIAN contra
+   * consecutivos autorizados: es la operación de escritura más costosa de este
+   * controlador, aunque no consuma numeración nueva.
+   */
+  @Post(':id/transmit-deferred-notes')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async transmitDeferredNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed = limit ? parseInt(limit, 10) : undefined;
+    const result = await this.dian_test_service.transmitDeferredNotes(
+      id,
+      Number.isFinite(parsed) && (parsed as number) > 0 ? parsed : undefined,
+    );
+    return this.response_service.success(result, result.message);
   }
 
   /**

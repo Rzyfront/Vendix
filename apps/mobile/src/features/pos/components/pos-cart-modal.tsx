@@ -14,6 +14,7 @@ import { colors, colorScales, spacing, typography, borderRadius } from '@/shared
 import { Icon } from '@/shared/components/icon/icon';
 import { formatCurrency } from '@/shared/utils/currency';
 import type { CartItem as StoreCartItem } from '@/features/store/types';
+import { formatSaleQuantity, isSaleUnitLine } from '@/features/store/pricing';
 import { CheckoutStepIndicator } from './checkout-step-indicator';
 
 type CartItem = StoreCartItem;
@@ -203,6 +204,24 @@ export function PosCartModal({
                 renderItem={({ item }) => {
                   const sku = item.variant?.sku || item.product.sku;
                   const isCustom = item.itemType === 'custom';
+                  // QUI-648 — "c/u" miente en dos casos: cuando el precio está
+                  // publicado por N unidades de stock (un cable a $5.000 "c/u"
+                  // con cantidad 2500 se lee como $12,5 millones) y cuando la
+                  // línea se vende por presentación (el precio es del paquete).
+                  // La etiqueta dice cuál de los tres casos es.
+                  const stockUnit = item.product.stock_uom?.code || 'unid';
+                  const scale = Number(item.priceUnitQuantity ?? 1);
+                  // Con unidad de captura la etiqueta habla en ESA unidad
+                  // ("por m"), no en la escala cruda ("por 1000 mm"): el
+                  // cajero nunca ve la unidad mínima.
+                  const capturedInSaleUnit = isSaleUnitLine(item);
+                  const unitLabel = item.appliedPriceTierName
+                    ? `por ${item.appliedPriceTierName}`
+                    : capturedInSaleUnit
+                      ? `por ${item.saleUnitCode}`
+                      : scale > 1
+                        ? `por ${scale} ${stockUnit}`
+                        : 'c/u';
                   return (
                     <View style={styles.cartItem}>
                       {/* Row 1: Image + Info + Remove */}
@@ -242,8 +261,13 @@ export function PosCartModal({
                           <View style={styles.itemMeta}>
                             {sku ? <Text style={styles.itemSku}>{sku}</Text> : null}
                             <Text style={styles.itemUnitPrice}>
-                              {formatCurrency(item.finalPrice)} c/u
+                              {formatCurrency(item.finalPrice)} {unitLabel}
                             </Text>
+                            {item.isPackageUnit && item.unitsPerPackage ? (
+                              <Text style={styles.itemSku}>
+                                descuenta {item.unitsPerPackage} {stockUnit}
+                              </Text>
+                            ) : null}
                             {item.taxAmount > 0 ? (
                               <View style={styles.itemTaxBadge}>
                                 <Text style={styles.itemTaxBadgeText}>
@@ -278,7 +302,12 @@ export function PosCartModal({
                           >
                             <Icon name="minus" size={14} color={colorScales.gray[600]} />
                           </Pressable>
-                          <Text style={styles.qtyLabel}>{item.quantity}</Text>
+                          {/* QUI-648 — "3 m", nunca "3000". La cantidad se
+                              muestra en la unidad en la que se capturó; la
+                              conversión a la unidad mínima es interna. */}
+                          <Text style={styles.qtyLabel}>
+                            {formatSaleQuantity(item)}
+                          </Text>
                           <Pressable
                             onPress={() => onIncreaseQuantity(item.id)}
                             hitSlop={6}

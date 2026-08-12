@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
+import { syncDenormalizedProductStock } from '../domains/store/inventory/shared/helpers/sync-product-stock.helper';
 
 @Injectable()
 export class PaymentTimeoutCleanupJob {
@@ -176,6 +177,15 @@ export class PaymentTimeoutCleanupJob {
               last_updated: new Date(),
             },
           });
+
+          // Sin esto, `products.stock_quantity` seguía deprimido por una reserva
+          // que ya no existe y el catálogo mostraba AGOTADO un producto con
+          // existencias. Es el mismo helper que usa `StockLevelManager`.
+          await syncDenormalizedProductStock(
+            tx,
+            reservation.product_id,
+            reservation.product_variant_id ?? null,
+          );
         }
       }
 
@@ -242,6 +252,14 @@ export class PaymentTimeoutCleanupJob {
             last_updated: new Date(),
           },
         });
+
+        // Igual que arriba: el denormalizado tiene que quedar en línea con
+        // `stock_levels` o el catálogo miente.
+        await syncDenormalizedProductStock(
+          tx,
+          reservation.product_id,
+          reservation.product_variant_id ?? null,
+        );
       }
     });
   }

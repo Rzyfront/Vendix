@@ -1,0 +1,159 @@
+<div class="confirm-step">
+  <!-- Banner de reintento (la OC ya existe; solo falta la recepción) -->
+  @if (isRetry()) {
+    <section class="retry-banner">
+      <app-icon name="shield-alert" [size]="18"></app-icon>
+      <div class="retry-body">
+        <p class="retry-title">Reintentar recepción</p>
+        <p class="retry-text">
+          La orden {{ retryOrderRef() }} ya fue creada y su recepción falló.
+          Confirmar reanudará la recepción sobre esa misma orden — no se creará
+          una orden nueva.
+        </p>
+      </div>
+    </section>
+  }
+
+  <!-- Proveedor + Bodega -->
+  <div class="identity-grid">
+    <div class="identity-card">
+      <p class="identity-label">Proveedor</p>
+      <div class="identity-value">
+        <app-icon name="truck" [size]="16" color="var(--color-primary)"></app-icon>
+        <span>{{ supplierName() || '—' }}</span>
+      </div>
+    </div>
+    <div class="identity-card">
+      <p class="identity-label">Bodega</p>
+      <div class="identity-value">
+        <app-icon name="warehouse" [size]="16" color="var(--color-primary)"></app-icon>
+        <span>{{ locationName() || '—' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Productos -->
+  <section class="cnf-section">
+    <p class="cnf-section-title">
+      Productos ({{ cartState()?.items?.length || 0 }})
+    </p>
+    <div class="cnf-product-list">
+      @for (item of cartState()?.items; track item.id; let idx = $index) {
+        <div class="cnf-product-row" [class.cnf-product-row--alt]="idx % 2 === 1">
+          <div class="cnf-product-name">
+            {{ item.is_prebulk ? item.prebulk_data?.name : item.product.name }}
+            @if (item.variant?.name) {
+              <span class="cnf-product-variant"> · {{ item.variant!.name }}</span>
+            }
+          </div>
+          <span class="cnf-product-qty">{{ item.quantity }} × {{ item.unit_cost | currency }}</span>
+          <span class="cnf-product-total">{{ item.total | currency }}</span>
+        </div>
+      }
+      @if (!cartState()?.items?.length) {
+        <div class="cnf-empty">El carrito está vacío</div>
+      }
+    </div>
+  </section>
+
+  <!-- Detalles -->
+  <section class="cnf-section">
+    <p class="cnf-section-title">Detalles</p>
+    <div class="cnf-details">
+      <div class="cnf-detail">
+        <app-icon name="calendar" [size]="13" color="var(--color-text-muted)"></app-icon>
+        <span class="cnf-detail-label">Orden:</span>
+        <span class="cnf-detail-value">{{ cartState()?.orderDate | date: 'dd/MM/yyyy' }}</span>
+      </div>
+      @if (cartState()?.expectedDate) {
+        <div class="cnf-detail">
+          <app-icon name="calendar-check" [size]="13" color="var(--color-text-muted)"></app-icon>
+          <span class="cnf-detail-label">Entrega:</span>
+          <span class="cnf-detail-value">{{ cartState()!.expectedDate | date: 'dd/MM/yyyy' }}</span>
+        </div>
+      }
+      @if ((cartState()?.summary?.tax_amount ?? 0) > 0) {
+        <div class="cnf-detail">
+          <app-icon name="receipt" [size]="13" color="var(--color-text-muted)"></app-icon>
+          <span class="cnf-detail-label">IVA:</span>
+          <span class="cnf-detail-value">{{ cartState()?.summary?.tax_amount | currency }}</span>
+        </div>
+      }
+      @if ((cartState()?.notes)) {
+        <div class="cnf-detail cnf-detail--notes">
+          <app-icon name="file-text" [size]="13" color="var(--color-text-muted)"></app-icon>
+          <span class="cnf-detail-label">Notas:</span>
+          <span class="cnf-detail-value">{{ cartState()!.notes }}</span>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- Totales -->
+  <section class="cnf-totals">
+    <div class="cnf-total-row">
+      <span class="cnf-total-label">Subtotal</span>
+      <span class="cnf-total-value">{{ cartState()?.summary?.subtotal | currency }}</span>
+    </div>
+    @if ((cartState()?.summary?.discount_amount ?? 0) > 0) {
+      <div class="cnf-total-row">
+        <span class="cnf-total-label">Descuento</span>
+        <span class="cnf-total-value cnf-total-value--discount">-{{ cartState()?.summary?.discount_amount | currency }}</span>
+      </div>
+    }
+    <div class="cnf-total-row cnf-total-row--grand">
+      <span class="cnf-total-label">Total</span>
+      <span class="cnf-total-grand">{{ orderTotal() | currency }}</span>
+    </div>
+  </section>
+
+  <!-- Plan de pago: cuánto hoy, cuánto queda y en qué fechas -->
+  @if (!isRetry()) {
+    <section class="cnf-section cnf-section--payment">
+      <div class="payment-head">
+        <p class="cnf-section-title">Plan de pago</p>
+        <span class="payment-mode-badge">{{ modeLabel() }}</span>
+      </div>
+      <div class="payment-rows">
+        <div class="payment-row">
+          <span class="payment-row-label">Se paga hoy</span>
+          <span class="payment-row-value">{{ formatPlanMoney(downPaymentToday()) }}</span>
+        </div>
+        <div class="payment-row">
+          <span class="payment-row-label">Queda debiendo</span>
+          <span class="payment-row-value">{{ formatPlanMoney(pendingBalance()) }}</span>
+        </div>
+      </div>
+
+      @if (schedules().length > 0) {
+        <div class="schedule-list">
+          @for (row of schedules(); track $index) {
+            <div class="schedule-row">
+              <app-icon name="calendar-clock" [size]="14" color="var(--color-text-muted)"></app-icon>
+              <span class="schedule-date">{{ row.date | date: 'dd/MM/yyyy' }}</span>
+              <span class="schedule-amount">{{ formatPlanMoney(row.amount) }}</span>
+            </div>
+          }
+        </div>
+      }
+      @if (hasUndatedBalance()) {
+        <p class="undated-hint">
+          El saldo de {{ formatPlanMoney(pendingBalance()) }} queda debiendo sin fecha
+          (se gestiona desde Cuentas por Pagar).
+        </p>
+      }
+    </section>
+  }
+
+  <!-- Acuse de recepción (create-receive) -->
+  @if (actionType() === 'create-receive' && !isRetry()) {
+    <p class="ack-hint">
+      <app-icon name="package-check" [size]="14" color="var(--color-primary)"></app-icon>
+      @if (ackReceive()) {
+        La mercancía se recibirá por remisión de entrada al confirmar.
+      } @else {
+        La orden se creará SIN recibir la mercancía.
+      }
+    </p>
+  }
+</div>

@@ -196,6 +196,43 @@ export class TenantDianConfigController {
   }
 
   /**
+   * Estado de LAS CUATRO habilitaciones DIAN del tenant, en una sola respuesta.
+   *
+   * Delega en el MISMO agregado del rail del comerciante
+   * (`DianConfigService.getFiscalReadiness`). No existía aquí, así que la consola
+   * de soporte componía los cuatro ejes desde el cliente con un N+1 —`dian-config`
+   * + un `:id/production-readiness` por configuración + `resolutions`— y esa
+   * composición es, literalmente, una segunda implementación del agregado: en
+   * cuanto una de las dos cambie, soporte y comerciante leerán checklists
+   * distintos sobre el mismo NIT y nadie sabrá cuál miente.
+   *
+   * Declarada ANTES de `dian-config/:configId` a propósito, igual que los demás
+   * literales de esta sección: Nest resuelve en orden de declaración y la ruta
+   * paramétrica se tragaría el path, dejando que `ParseIntPipe` respondiera 400
+   * sobre el literal `fiscal-readiness`.
+   */
+  @Get('dian-config/fiscal-readiness')
+  @Permissions('superadmin:tenants:dian:read')
+  @ApiOperation({
+    summary: 'Estado agregado de las cuatro habilitaciones DIAN del tenant',
+    description:
+      'Los cuatro ejes viajan SIEMPRE: el que no tiene configuración se reporta como not_started con config_id null, nunca ausente. La clave técnica no viaja: solo technical_key_set.',
+  })
+  async getFiscalReadiness(
+    @Req() req: RequestWithUser,
+    @Param('scope') scope: TenantScopeSegment,
+    @Param('tenantId', ParseIntPipe) tenantId: number,
+  ) {
+    const result = await this.runAs(req, scope, tenantId, () =>
+      this.storeDian.getFiscalReadiness(),
+    );
+    return this.response.success(
+      this.redactFiscalReadiness(result),
+      'Estado fiscal agregado del tenant obtenido',
+    );
+  }
+
+  /**
    * Estado DIAN del tenant en una sola llamada.
    *
    * Existe porque la ficha de soporte necesita las tres respuestas a la vez y
@@ -844,6 +881,65 @@ export class TenantDianConfigController {
         return { ...rest, technical_key_set: Boolean(technical_key) };
       }),
     } as T;
+  }
+
+  /**
+   * Barrido de clave técnica sobre el agregado de los cuatro ejes.
+   *
+   * `getFiscalReadiness` ya elimina la ClTec en origen y publica `technical_key_set`
+   * —así está escrito su contrato en `dto/fiscal-readiness.dto.ts`— y este método NO
+   * repara nada hoy. Existe porque en un rail cross-tenant el que mira no es el dueño
+   * del NIT: si mañana un `select` del agregado vuelve a arrastrar la columna, el
+   * panel del comerciante se la enseñaría a su propio dueño mientras que aquí se la
+   * enseñaría a un tercero. La garantía se ancla en el borde que la necesita.
+   *
+   * Es idempotente: cuando el agregado ya resolvió `technical_key_set` se respeta ese
+   * valor —incluido `false`— en vez de recalcularlo desde una columna ya ausente,
+   * que es como una redacción defensiva acaba mintiendo sobre lo que sí está cargado.
+   */
+  private redactFiscalReadiness<T>(readiness: T): T {
+    if (!readiness || typeof readiness !== 'object') return readiness;
+
+    const source = readiness as Record<string, any>;
+    if (!Array.isArray(source.axes)) return readiness;
+
+    return {
+      ...source,
+      axes: source.axes.map((axis: any) => {
+        if (!axis || typeof axis !== 'object') return axis;
+        return {
+          ...axis,
+          // El checklist del eje no lleva resoluciones hoy, pero pasa por el
+          // mismo tamiz que el de `:configId` para que la regla sea una sola.
+          readiness: this.redactReadiness(axis.readiness),
+          resolutions: Array.isArray(axis.resolutions)
+            ? axis.resolutions.map((resolution: any) =>
+                this.sinClaveTecnica(resolution),
+              )
+            : axis.resolutions,
+        };
+      }),
+    } as T;
+  }
+
+  /**
+   * Quita la ClTec de una fila de resolución y deja solo su presencia.
+   *
+   * Mismo criterio —y misma razón— que `tenant-resolutions.controller.ts::sinClaveTecnica`:
+   * la clave alimenta el CUFE, así que quien la tiene puede fabricar el identificador
+   * único de un documento a nombre del comerciante. Se ELIMINA, no se enmascara.
+   */
+  private sinClaveTecnica(resolution: any) {
+    if (!resolution || typeof resolution !== 'object') return resolution;
+
+    const { technical_key, technical_key_set, ...rest } = resolution as Record<
+      string,
+      any
+    >;
+    return {
+      ...rest,
+      technical_key_set: Boolean(technical_key_set ?? technical_key),
+    };
   }
 
   private toPositiveInt(value: string | undefined, fallback: number): number {

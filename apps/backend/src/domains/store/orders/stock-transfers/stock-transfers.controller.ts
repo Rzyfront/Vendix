@@ -15,6 +15,7 @@ import { StockTransfersService } from './stock-transfers.service';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
+import { CompleteTransferDto } from './dto/complete-transfer.dto';
 
 // Base permissions (:create, :update, :read, :delete) are enforced per-method
 // with @Permissions. The cross-store policy `store:stock-transfers:cross-store`
@@ -123,8 +124,7 @@ export class StockTransfersController {
   @Permissions('store:stock-transfers:update')
   complete(
     @Param('id') id: string,
-    @Body()
-    completeData: { items: Array<{ id: number; quantity_received: number }> },
+    @Body() completeData: CompleteTransferDto,
   ) {
     return this.stockTransfersService.complete(+id, completeData.items);
   }

@@ -16,7 +16,42 @@ import { OrdersService } from '../orders/orders.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
-import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolvePackSize } from '../products/services/packaging.util';
+import {
+  normalizePriceUnitLines,
+  resolveLineTotal,
+} from '../products/services/price-unit.util';
+
+/**
+ * Total BRUTO de cada línea, antes del descuento.
+ *
+ * La cabecera resta el descuento UNA sola vez
+ * (`grand_total = subtotal - descuentos + impuestos`), así que el subtotal
+ * tiene que ser bruto para que la cuenta cierre. El modal del panel manda
+ * `total_price` ya neteado (`precio × cantidad - descuento`) y sumarlo tal cual
+ * restaba el descuento dos veces: 3 unidades a $5.000 con $1.000 de descuento
+ * se guardaban en $13.000 mientras la UI mostraba $14.000, y la orden
+ * convertida heredaba el faltante porque `convertToOrder` copia los totales.
+ *
+ * El total lo deriva el servidor por la misma razón que la escala: la
+ * cotización es un documento que se le manda al cliente y no puede depender
+ * de la aritmética del cliente HTTP. Para una PRESENTACIÓN la escala resuelve
+ * a 1 (`priceUnitByIndex` en `null`), porque ahí `unit_price` es el precio del
+ * paquete y `quantity` cuenta paquetes.
+ */
+export function resolveGrossLineTotals(
+  items: Array<{ unit_price: number; quantity: number }>,
+  priceUnits: { priceUnitByIndex: Array<number | null> },
+): number[] {
+  return items.map((item, index) =>
+    resolveLineTotal(
+      Number(item.unit_price),
+      Number(item.quantity),
+      priceUnits.priceUnitByIndex[index],
+    ),
+  );
+}
 
 @Injectable()
 export class QuotationsService {
@@ -82,15 +117,31 @@ export class QuotationsService {
     const items = createQuotationDto.items || [];
 
     // Multi-tarifa: validar permission + resolver snapshots por línea.
-    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
       items,
       context,
     );
 
-    const subtotal = items.reduce(
-      (sum, item) => sum + Number(item.total_price),
-      0,
-    );
+
+    // Precio por N unidades de stock: la cotizacion es un documento que se le
+    // manda al cliente, asi que el total lo recalcula el servidor por la misma
+    // razon que la orden — la escala es del producto y cualquier superficie
+    // puede llegar con la aritmetica vieja. Va ANTES del reduce del subtotal
+    // para que la cabecera salga de las lineas ya corregidas.
+    // Se excluyen las PRESENTACIONES (packSize > 1): ahi `unit_price` es el
+    // precio del paquete y `quantity` cuenta paquetes.
+    const priceUnits = await normalizePriceUnitLines(this.prisma as any, items, {
+      isPresentationAtIndex: (index) =>
+        resolvePackSize(
+          tierSnapshots[index]?.units_per_package,
+          tierSnapshots[index]?.override_units_per_package,
+        ) > 1,
+    });
+
+    const grossByIndex = resolveGrossLineTotals(items, priceUnits);
+
+    const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
     const totalDiscount = items.reduce(
       (sum, item) => sum + Number(item.discount_amount || 0),
       0,
@@ -133,12 +184,13 @@ export class QuotationsService {
               discount_amount: item.discount_amount || 0,
               tax_rate: item.tax_rate,
               tax_amount_item: item.tax_amount_item,
-              total_price: item.total_price,
+              total_price: grossByIndex[index],
               notes: item.notes,
               // Multi-tarifa snapshot
               applied_price_tier_id: tierSnap?.tier_id ?? null,
               applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
               stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+              price_unit_quantity: priceUnits.priceUnitByIndex[index],
               updated_at: new Date(),
             };
           }),
@@ -234,7 +286,8 @@ export class QuotationsService {
     // If items are provided, delete and recreate
     if (updateQuotationDto.items) {
       const ctx = RequestContextService.getContext();
-      const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      const tierSnapshots = await resolveTierSnapshotsForItems(
+        this.prisma,
         updateQuotationDto.items,
         ctx,
       );
@@ -243,10 +296,19 @@ export class QuotationsService {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
 
         const items = updateQuotationDto.items!;
-        const subtotal = items.reduce(
-          (sum, item) => sum + Number(item.total_price),
-          0,
-        );
+        // Misma correccion que en create. El cliente Prisma que entra es `tx`:
+        // tomar `this.prisma` dentro de la transaccion abriria una segunda
+        // conexion del pool y perderia el scoping de tenant.
+        const priceUnits = await normalizePriceUnitLines(tx as any, items, {
+          isPresentationAtIndex: (index) =>
+            resolvePackSize(
+              tierSnapshots[index]?.units_per_package,
+              tierSnapshots[index]?.override_units_per_package,
+            ) > 1,
+        });
+        const grossByIndex = resolveGrossLineTotals(items, priceUnits);
+
+        const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
         const totalDiscount = items.reduce(
           (sum, item) => sum + Number(item.discount_amount || 0),
           0,
@@ -290,12 +352,13 @@ export class QuotationsService {
                   discount_amount: item.discount_amount || 0,
                   tax_rate: item.tax_rate,
                   tax_amount_item: item.tax_amount_item,
-                  total_price: item.total_price,
+                  total_price: grossByIndex[index],
                   notes: item.notes,
                   applied_price_tier_id: tierSnap?.tier_id ?? null,
                   applied_price_tier_name_snapshot:
                     tierSnap?.tier_name ?? null,
                   stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+                  price_unit_quantity: priceUnits.priceUnitByIndex[index],
                   updated_at: new Date(),
                 };
               }),
@@ -599,135 +662,6 @@ export class QuotationsService {
         updated_at: new Date(),
       },
       include: this.QUOTATION_INCLUDE,
-    });
-  }
-
-  /**
-   * Multi-tarifa: idéntica a OrdersService.resolveTierSnapshotsForItems.
-   * Centralizar el helper aquí evita un import cruzado entre dominios y
-   * mantiene la quotation independiente del flujo de stock.
-   */
-  private async resolveTierSnapshotsForItems(
-    items: Array<{
-      product_id?: number | null;
-      product_variant_id?: number | null;
-      quantity: number;
-      applied_price_tier_id?: number | null;
-    }>,
-    context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<
-    Array<{
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null>
-  > {
-    const tierIds = new Set<number>();
-    for (const item of items) {
-      if (
-        item.applied_price_tier_id !== undefined &&
-        item.applied_price_tier_id !== null
-      ) {
-        tierIds.add(Number(item.applied_price_tier_id));
-      }
-    }
-    if (tierIds.size === 0) {
-      return items.map(() => null);
-    }
-
-    const permissions = context?.permissions ?? [];
-    const isSuperAdmin = !!context?.is_super_admin;
-    const isOwner = !!context?.is_owner;
-    if (
-      !isSuperAdmin &&
-      !isOwner &&
-      !permissions.includes('store:products:apply_pricing_tier')
-    ) {
-      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
-    }
-
-    const tiers = await this.prisma.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIds) }, is_active: true },
-      select: { id: true, name: true, is_package_unit: true, units_per_package: true },
-    });
-    type TierRow = (typeof tiers)[number];
-    const tierById = new Map<number, TierRow>(
-      tiers.map((t): [number, TierRow] => [t.id, t]),
-    );
-
-    const productIds = Array.from(
-      new Set(
-        items
-          .map((i) => i.product_id)
-          .filter((id): id is number => typeof id === 'number'),
-      ),
-    );
-    const assignments = productIds.length
-      ? await this.prisma.product_price_tier_assignments.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIds) },
-          },
-          select: { product_id: true, price_tier_id: true },
-        })
-      : [];
-    const allowedTierKeys = new Set(
-      assignments.map((assignment) =>
-        `${assignment.product_id}:${assignment.price_tier_id}`,
-      ),
-    );
-
-    // Per-product packaging overrides (override_units_per_package wins over
-    // tier.units_per_package in the packSize cascade). Keyed by
-    // product_id:variant_id:price_tier_id (variant null → "null").
-    const overrides = productIds.length
-      ? await this.prisma.product_price_tier_overrides.findMany({
-          where: {
-            product_id: { in: productIds },
-            price_tier_id: { in: Array.from(tierIds) },
-          },
-          select: {
-            product_id: true,
-            variant_id: true,
-            price_tier_id: true,
-            override_units_per_package: true,
-          },
-        })
-      : [];
-    const overrideUnitsByKey = new Map<string, number | null>(
-      overrides.map(
-        (o): [string, number | null] => [
-          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
-          o.override_units_per_package,
-        ],
-      ),
-    );
-
-    return items.map((item) => {
-      const tid = item.applied_price_tier_id;
-      if (tid === undefined || tid === null) return null;
-      const tier = tierById.get(Number(tid));
-      if (!tier) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const productId = item.product_id;
-      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tid)}`)) {
-        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-      const variantId = item.product_variant_id ?? null;
-      const override_units_per_package = overrideUnitsByKey.get(
-        `${productId}:${variantId ?? 'null'}:${Number(tid)}`,
-      );
-      const stock_units_consumed = resolveStockUnitsConsumed(
-        Number(item.quantity),
-        tier?.units_per_package,
-        override_units_per_package,
-      );
-      return {
-        tier_id: tier.id,
-        tier_name: tier.name,
-        stock_units_consumed,
-      };
     });
   }
 

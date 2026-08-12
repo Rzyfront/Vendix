@@ -6,34 +6,13 @@ export type AdjustmentType =
   | 'count_variance'
   | 'manual_correction';
 
-export interface CreateAdjustmentDto {
-  organization_id: number;
-  product_id: number;
-  product_variant_id?: number;
-  location_id: number;
-  batch_id?: number; // Optional: adjust specific batch
-  type: AdjustmentType;
-  quantity_after: number;
-  reason_code?: string;
-  description?: string;
-  created_by_user_id: number;
-  approved_by_user_id?: number;
-}
+// La creación dejó de ser una `interface`: como DTO el ValidationPipe la
+// ignoraba entera. Vive en `../dto/create-adjustment.dto.ts`.
+export { CreateAdjustmentDto } from '../dto/create-adjustment.dto';
 
-export interface AdjustmentQueryDto {
-  organizationId?: number;
-  productId?: number;
-  variantId?: number;
-  locationId?: number;
-  batchId?: number;
-  type?: AdjustmentType;
-  status?: 'pending' | 'approved';
-  createdByUserId?: number;
-  startDate?: Date;
-  endDate?: Date;
-  offset?: number;
-  limit?: number;
-}
+// La consulta de la lista dejó de ser una `interface`: como DTO el
+// ValidationPipe la ignoraba entera. Vive en `../dto/adjustment-query.dto.ts`.
+export { AdjustmentQueryDto } from '../dto/adjustment-query.dto';
 
 export interface InventoryAdjustment {
   id: number;
@@ -98,6 +77,13 @@ export interface AdjustmentResponse {
   adjustments: InventoryAdjustment[];
   total: number;
   hasMore: boolean;
+  /** Conteos sobre el filtro completo, para las tarjetas de la cabecera. */
+  stats: {
+    total: number;
+    losses: number;
+    damages: number;
+    corrections: number;
+  };
 }
 
 export interface AdjustmentSummary {

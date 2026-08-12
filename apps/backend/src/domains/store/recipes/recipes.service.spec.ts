@@ -16,6 +16,7 @@ describe('RecipesService — cycle detection & explosion', () => {
   let recipes: any;
   let items: any;
   let products: any;
+  let variants: any;
 
   const STORE_ID = 100;
 
@@ -118,10 +119,18 @@ describe('RecipesService — cycle detection & explosion', () => {
       }),
     };
 
+    // Un insumo NO puede tener variantes: `recipe_items` sólo guarda
+    // `component_product_id`, así que el consumo iría a la fila base de stock
+    // —vacía en un producto variantizado— y descontaría de un saldo inexistente.
+    // Por defecto el componente es simple; los tests que prueban el bloqueo
+    // sobrescriben este contador.
+    variants = { count: jest.fn().mockResolvedValue(0) };
+
     return {
       recipes,
       recipe_items: items,
       products,
+      product_variants: variants,
     };
   };
 
@@ -212,6 +221,33 @@ describe('RecipesService — cycle detection & explosion', () => {
       });
       expect(items.create).toHaveBeenCalled();
       expect(result.component_product_id).toBe(42);
+    });
+
+    /**
+     * Decisión de producto (ago 2026): un insumo es un producto SIMPLE.
+     *
+     * `recipe_items` sólo tiene `component_product_id` — no hay columna de
+     * variante. Con un insumo variantizado el consumo de producción apunta a la
+     * fila BASE de `stock_levels` (`product_variant_id NULL`), que en un
+     * producto con variantes está vacía: descuenta de un saldo inexistente y el
+     * inventario real no se mueve, sin que nada falle. Se bloquea en vez de
+     * agregar la columna, porque eso último es funcionalidad nueva.
+     */
+    it('bloquea un insumo con variantes en vez de consumir contra la fila base vacía', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [] },
+      });
+
+      variants.count.mockResolvedValue(3);
+      items.create.mockClear();
+
+      await expect(
+        service.addItem(10, { component_product_id: 42, quantity: 1 }),
+      ).rejects.toThrow(VendixHttpException);
+
+      // Lo que importa: no llegó a escribirse el renglón.
+      expect(items.create).not.toHaveBeenCalled();
     });
   });
 

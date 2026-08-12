@@ -1,0 +1,195 @@
+/* QUI-647 — Paso Pago del wizard POP. */
+
+.payment-step {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pay-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pay-section--field {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-background);
+  padding: 14px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-icon {
+  color: var(--color-primary);
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.pay-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+.pay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.pay-field-note {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Generador de cuotas */
+.installment-generator {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gen-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.gen-input {
+  width: 84px;
+  height: 40px;
+  padding: 0 10px;
+  text-align: right;
+  font-size: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.gen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+}
+
+/* Rows de cuotas editables */
+.installment-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.installment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.installment-row-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.installment-date,
+.installment-amount {
+  width: 100%;
+}
+
+.row-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 40px;
+  margin-top: 20px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-destructive);
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.balance-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-destructive);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.08);
+
+  &.balanced {
+    color: #059669;
+    background: rgba(5, 150, 105, 0.08);
+  }
+}
+
+.add-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+}
+
+.pay-legend {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+}

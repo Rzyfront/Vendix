@@ -10,21 +10,21 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
+import { DocumentPrintService } from '../../../../../shared/services/print';
 
 /**
- * Physical page per configurable format. `width_mm` drives the ticket's CSS
- * width; `page_size` is the `@page size` rule, without which the browser prints
- * a roll ticket centred on whatever paper the driver defaults to.
+ * Ticket-specific CSS handed to `DocumentPrintService`. The `@page` rule is NOT
+ * here on purpose: paper geometry belongs to the print service, which resolves
+ * it from `receipts.printing.pos_ticket`. This block only styles the ticket
+ * card itself and flattens it for paper.
  */
-const TICKET_PAGE: Record<
-  PrintFormat,
-  { width_mm: number; page_size: string; type: PrinterConfig['type'] }
-> = {
-  thermal_80: { width_mm: 80, page_size: '80mm auto', type: 'thermal' },
-  thermal_58: { width_mm: 58, page_size: '58mm auto', type: 'thermal' },
-  letter: { width_mm: 216, page_size: 'letter', type: 'standard' },
-  half_letter: { width_mm: 216, page_size: '216mm 140mm', type: 'standard' },
-};
+const TICKET_PRINT_STYLES = `
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            @media print {
+              body { padding: 0; background: white; }
+              .ticket { border: none; border-radius: 0; box-shadow: none; }
+            }`;
 
 /**
  * Regime label printed on the ticket. Mirrors `TAX_REGIME_LABELS` in
@@ -45,26 +45,6 @@ const TAX_REGIME_LABELS: Record<string, string> = {
  * tickets costs one macrotask per chunk and keeps the UI alive.
  */
 const BATCH_YIELD_EVERY = 20;
-
-/**
- * Upper bound for the iframe's `load` event. `document.write` + `close()` fires
- * it, but an engine that does not must not hang the print behind it.
- */
-const DOCUMENT_READY_TIMEOUT_MS = 3_000;
-
-/**
- * Upper bound for image decoding. A logo whose request never settles would
- * otherwise leave `img.decode()` pending forever and no dialog would ever open.
- */
-const IMAGE_DECODE_TIMEOUT_MS = 15_000;
-
-/**
- * Backstop for removing the print iframe when `afterprint` never fires (it does
- * not on every engine, nor when the user dismisses the dialog with the window
- * chrome). Long on purpose: the previous 1 s could tear the document down while
- * the print dialog was still reading it.
- */
-const PRINT_CLEANUP_FALLBACK_MS = 60_000;
 
 /** Bounded wait for a currency load already in flight (see `ensureCurrencyLoaded`). */
 const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
@@ -88,6 +68,7 @@ export class PosTicketService {
   private currencyService = inject(CurrencyFormatService);
   private storeSettings = inject(StoreSettingsFacade);
   private authFacade = inject(AuthFacade);
+  private documentPrint = inject(DocumentPrintService);
 
   private defaultPrinterConfig: PrinterConfig = {
     name: 'Default Thermal Printer',
@@ -102,24 +83,27 @@ export class PosTicketService {
   };
 
   /**
-   * Printer config resolved from the store's settings, falling back to the
-   * historical 80 mm / 1 copy defaults when the store has none.
+   * Printer config for the POS ticket, projected from the paper the shared
+   * `DocumentPrintService` resolved for the `pos_ticket` document.
+   *
+   * The service owns the resolution (`receipts.printing.pos_ticket`, then the
+   * legacy `pos_ticket_format` / `pos_ticket_copies` mirrors, then
+   * `PRINT_DEFAULTS`); this method only reshapes it into the `PrinterConfig`
+   * the ticket renderer has always consumed.
    */
   private currentPrinterConfig(formatOverride?: PrintFormat): PrinterConfig {
-    const receipts = this.storeSettings.receipts();
-    const requested = formatOverride ?? receipts?.pos_ticket_format;
-    const format: PrintFormat =
-      requested && TICKET_PAGE[requested] ? requested : 'thermal_80';
-    const page = TICKET_PAGE[format];
+    const paper = this.documentPrint.resolveConfig('pos_ticket', {
+      format: formatOverride,
+    });
 
     return {
       ...this.defaultPrinterConfig,
-      type: page.type,
-      paperWidth: page.width_mm,
-      format,
+      type: paper.isRoll ? 'thermal' : 'standard',
+      paperWidth: paper.widthMm,
+      format: paper.format,
       // 0 copies means "do not print"; the callers that ask for an explicit
       // print still get one, so clamp to at least 1 here.
-      copies: Math.max(1, receipts?.pos_ticket_copies ?? 1),
+      copies: Math.max(1, paper.copies),
       // `pos.auto_print_receipt` already models this and is already editable in
       // the POS settings form; a second key under `receipts` would be a second
       // source of truth for the same fact. The Recibos section edits this one.
@@ -445,9 +429,21 @@ export class PosTicketService {
 
     ticketData.items.forEach((item: any) => {
       const isWeightItem = item.weight && item.weight > 0;
+      // QUI-648: la línea medida se imprime en su unidad de venta.
+      const saleUnitCode = item.saleUnitCode || null;
+      const saleQuantity =
+        item.saleQuantity != null ? Number(item.saleQuantity) : null;
+      const isSaleUnitItem = !isWeightItem && !!saleUnitCode && saleQuantity != null;
+      const unitSuffix = isWeightItem
+        ? '/' + (item.weight_unit || 'kg')
+        : isSaleUnitItem
+          ? '/' + saleUnitCode
+          : '';
       const qtyDisplay = isWeightItem
         ? `${item.weight} ${item.weight_unit || 'kg'}`
-        : `${item.quantity}`;
+        : isSaleUnitItem
+          ? `${saleQuantity!.toLocaleString('es-CO', { maximumFractionDigits: 3 })} ${saleUnitCode}`
+          : `${item.quantity}`;
       const tierLine = item.appliedPriceTierName
         ? `<br><span style="font-size: 10px; color: #92400e;">Tarifa: ${item.appliedPriceTierName}</span>`
         : '';
@@ -472,7 +468,7 @@ export class PosTicketService {
         <tr>
           <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
-          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
+          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${unitSuffix}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>
         </tr>
       `;
@@ -670,19 +666,15 @@ export class PosTicketService {
     // overlay from localStorage.
     const printer = this.currentPrinterConfig(options?.formatOverride);
     const overlay = this.resolveSessionStore();
-    const copies = Math.max(
-      1,
-      Math.trunc(options?.copiesOverride ?? printer.copies) || 1,
-    );
 
-    const blocks: string[] = [];
+    const bodies: string[] = [];
     let rendered = 0;
 
     for (const ticket of tickets) {
-      const body = await this.renderTicketBody(ticket, printer, overlay);
-      for (let copy = 0; copy < copies; copy++) {
-        blocks.push(this.asPageBlock(body, blocks.length === 0));
-      }
+      // One body per ticket; the copies and the page breaks between them are
+      // laid out by `DocumentPrintService`, which owns that rule for every
+      // document in the app.
+      bodies.push(await this.renderTicketBody(ticket, printer, overlay));
 
       rendered++;
       options?.onProgress?.(rendered, total);
@@ -694,187 +686,51 @@ export class PosTicketService {
       }
     }
 
-    await this.printDocument(
-      this.wrapPrintDocument(
-        blocks.join(''),
-        printer.format ?? 'thermal_80',
-        { title: total === 1 ? 'Ticket' : `Tiquetes (${total})` },
-      ),
-    );
+    const job = await this.documentPrint.print({
+      document: 'pos_ticket',
+      body: bodies,
+      title: total === 1 ? 'Ticket' : `Tiquetes (${total})`,
+      styles: TICKET_PRINT_STYLES,
+      overrides: {
+        // Already resolved above, so the render's paper width and the printed
+        // `@page` cannot disagree.
+        format: printer.format,
+        copies: options?.copiesOverride,
+      },
+    });
 
-    return { rendered, pages: rendered * copies };
+    return { rendered, pages: rendered * job.copies };
   }
 
   private async printHTML(html: string, copies?: number): Promise<void> {
-    const printer = this.currentPrinterConfig();
-    const total_copies = Math.max(1, copies ?? printer.copies);
-
-    // Browsers expose no copy count to window.print(), so extra copies are
-    // extra pages: repeat the markup and force a break between copies.
-    const body = Array.from({ length: total_copies }, (_, i) =>
-      this.asPageBlock(html, i === 0),
-    ).join('');
-
-    await this.printDocument(
-      this.wrapPrintDocument(body, printer.format ?? 'thermal_80'),
-    );
-  }
-
-  /**
-   * One page of the document. Every block but the first opens a new sheet — the
-   * same rule for extra copies of one ticket and for the next ticket of a batch.
-   */
-  private asPageBlock(html: string, isFirst: boolean): string {
-    return isFirst
-      ? html
-      : `<div style="break-before: page; page-break-before: always;">${html}</div>`;
+    await this.documentPrint.print({
+      document: 'pos_ticket',
+      body: html,
+      title: 'Ticket',
+      styles: TICKET_PRINT_STYLES,
+      overrides: { copies },
+    });
   }
 
   /**
    * The full print document around one or more ticket bodies.
    *
-   * Single source of the `@page` rule and the print stylesheet, which used to be
-   * copy-pasted in three places (`printHTML`, `buildSampleTicketHTML` and the
-   * order detail page) with the preview's copy missing the `@media print` block
-   * entirely — so the merchant reviewed a bordered card on grey and the printer
-   * received something else.
+   * Kept as a thin seam over `DocumentPrintService.buildDocumentHtml` so the
+   * settings preview reviews literally what the printer receives — `@page size`
+   * and `@media print` rules included. The rule itself is no longer written
+   * here: it comes from the shared engine, which resolves it from
+   * `receipts.printing.pos_ticket`.
    */
   private wrapPrintDocument(
     bodyHtml: string,
     format: PrintFormat,
     opts?: { title?: string },
   ): string {
-    const page_size = TICKET_PAGE[format]?.page_size ?? '80mm auto';
-
-    return `
-      <html>
-        <head>
-          <title>${opts?.title ?? 'Ticket'}</title>
-          <style>
-            /* Without an explicit @page size the driver falls back to its own
-               default paper and centres an 80 mm ticket on a letter sheet. */
-            @page { size: ${page_size}; margin: 0; }
-            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            @media print {
-              body { padding: 0; background: white; }
-              .ticket { border: none; border-radius: 0; box-shadow: none; }
-            }
-          </style>
-        </head>
-        <body>${bodyHtml}</body>
-      </html>
-    `;
-  }
-
-  /**
-   * Writes a full print document into a hidden iframe and sends it to the
-   * printer, waiting for the document and its images first.
-   */
-  private async printDocument(documentHtml: string): Promise<void> {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.style.opacity = '0';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) {
-      iframe.remove();
-      return;
-    }
-
-    doc.open();
-    doc.write(documentHtml);
-    doc.close();
-
-    await this.awaitDocumentReady(iframe, doc);
-
-    const view = iframe.contentWindow;
-    // Registered BEFORE print() because print() blocks on the dialog and
-    // `afterprint` can fire the moment it returns.
-    this.removeAfterPrint(iframe, view);
-    view?.focus();
-    view?.print();
-  }
-
-  /**
-   * Blocks until the document is parsed and every image is decoded.
-   *
-   * `print()` used to run right after `doc.close()`, which is before the logo has
-   * been fetched: the preview showed it (it kept living long enough) while the
-   * paper came out without it, and a 300-ticket batch made that the normal case.
-   * Both waits are capped — a broken or hanging image must not make the document
-   * unprintable.
-   */
-  private async awaitDocumentReady(
-    iframe: HTMLIFrameElement,
-    doc: Document,
-  ): Promise<void> {
-    if (doc.readyState !== 'complete') {
-      await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        iframe.addEventListener('load', done, { once: true });
-        setTimeout(done, DOCUMENT_READY_TIMEOUT_MS);
-      });
-    }
-
-    const images = Array.from(doc.images);
-    if (!images.length) return;
-
-    await Promise.race([
-      Promise.all(images.map((img) => this.awaitImage(img))),
-      new Promise<void>((resolve) =>
-        setTimeout(resolve, IMAGE_DECODE_TIMEOUT_MS),
-      ),
-    ]);
-  }
-
-  /**
-   * Resolves when an image is fetched AND decoded — or when it has definitively
-   * failed. Never rejects: a broken logo must degrade to a ticket without a logo,
-   * not cancel a 600-page job.
-   */
-  private awaitImage(img: HTMLImageElement): Promise<void> {
-    const fetched = img.complete
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          img.addEventListener('load', () => resolve(), { once: true });
-          img.addEventListener('error', () => resolve(), { once: true });
-        });
-
-    return fetched.then(() =>
-      typeof img.decode === 'function'
-        ? img.decode().catch(() => undefined)
-        : undefined,
+    return this.documentPrint.buildDocumentHtml(
+      this.documentPrint.resolveConfig('pos_ticket', { format }),
+      bodyHtml,
+      { title: opts?.title ?? 'Ticket', styles: TICKET_PRINT_STYLES },
     );
-  }
-
-  /**
-   * Tears the iframe down once printing is over. The old fixed 1 s timeout could
-   * remove the document while the dialog was still rendering from it, which on a
-   * long batch means a blank or truncated job.
-   */
-  private removeAfterPrint(
-    iframe: HTMLIFrameElement,
-    view: Window | null,
-  ): void {
-    let fallback: ReturnType<typeof setTimeout> | undefined;
-    let removed = false;
-
-    const remove = () => {
-      if (removed) return;
-      removed = true;
-      if (fallback !== undefined) clearTimeout(fallback);
-      iframe.remove();
-    };
-
-    // `afterprint` does not fire on every engine, so it is the fast path and the
-    // timeout is the guarantee.
-    view?.addEventListener('afterprint', remove, { once: true });
-    fallback = setTimeout(remove, PRINT_CLEANUP_FALLBACK_MS);
   }
 
   /**
@@ -959,13 +815,9 @@ export class PosTicketService {
    * prevent.
    */
   pageCountIsExact(): boolean {
-    const { format } = this.currentPrinterConfig();
-    // `format` es opcional en `PrinterConfig`, y el fallback de todo el servicio
-    // es `thermal_80` (alto `auto`), así que sin formato el conteo SÍ es exacto.
-    const page_size = format
-      ? TICKET_PAGE[format]?.page_size
-      : TICKET_PAGE.thermal_80.page_size;
-    return (page_size ?? TICKET_PAGE.thermal_80.page_size).endsWith('auto');
+    // `isRoll` es exactamente ese hecho, resuelto por el servicio de impresión:
+    // `thermal_*` usan `size: <w>mm auto`, los demás tienen alto fijo.
+    return this.documentPrint.resolveConfig('pos_ticket').isRoll;
   }
 
   /**

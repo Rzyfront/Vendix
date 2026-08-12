@@ -180,8 +180,12 @@ ngOnInit(): void {
   loadAdjustments(): void {
     this.is_loading.set(true);
     const pag = this.pagination();
+    const term = this.search_term().trim();
     const query: any = {
       ...(this.current_type !== 'all' ? { type: this.current_type } : {}),
+      // La búsqueda va al servidor: filtrarla en el cliente sólo miraba las
+      // filas de la página actual.
+      ...(term ? { search: term } : {}),
       limit: pag.limit,
       offset: (pag.page - 1) * pag.limit};
 
@@ -197,7 +201,10 @@ ngOnInit(): void {
               total: response.data.total,
               totalPages: Math.ceil(response.data.total / p.limit)}));
             this.applyFilters();
-            this.calculateStats();
+            // Los conteos llegan calculados sobre el filtro completo.
+            if (response.data.stats) {
+              this.stats.set(response.data.stats);
+            }
           }
           if (this.adjustments().length === 0 && this.pagination().page > 1) {
             this.pagination.update(p => ({ ...p, page: p.page - 1 }));
@@ -229,35 +236,10 @@ ngOnInit(): void {
         error: () => {}});
   }
 
+  // El tipo y la búsqueda ya vienen filtrados del servidor; volver a filtrar acá
+  // sólo recortaba la página y hacía que la paginación mintiera.
   applyFilters(): void {
-    let filtered = [...this.adjustments()];
-
-    if (this.current_type !== 'all') {
-      filtered = filtered.filter(
-        (a) => a.adjustment_type === this.current_type,
-      );
-    }
-
-    if (this.search_term()) {
-      const term = this.search_term().toLowerCase();
-      filtered = filtered.filter(
-        (a) =>
-          a.products?.name?.toLowerCase().includes(term) ||
-          a.product?.name?.toLowerCase().includes(term) ||
-          a.description?.toLowerCase().includes(term),
-      );
-    }
-
-    this.filtered_adjustments.set(filtered);
-  }
-
-  calculateStats(): void {
-    const adjs = this.adjustments();
-    this.stats.set({
-      total: adjs.length,
-      losses: adjs.filter((a) => a.adjustment_type === 'loss').length,
-      damages: adjs.filter((a) => a.adjustment_type === 'damage').length,
-      corrections: adjs.filter((a) => a.adjustment_type === 'manual_correction').length});
+    this.filtered_adjustments.set([...this.adjustments()]);
   }
 
   // ============================================================
@@ -266,7 +248,8 @@ ngOnInit(): void {
 
   onSearch(term: string): void {
     this.search_term.set(term);
-    this.applyFilters();
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadAdjustments();
   }
 
   onFilterChange(values: FilterValues): void {
@@ -368,7 +351,7 @@ ngOnInit(): void {
 
     this.isSubmitting.set(true);
     this.inventoryService
-      .approveAdjustment(adjustment.id, 0)
+      .approveAdjustment(adjustment.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

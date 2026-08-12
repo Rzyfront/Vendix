@@ -1,4 +1,21 @@
-export type TransferStatus = 'draft' | 'in_transit' | 'completed' | 'cancelled';
+/**
+ * Estados de `transfer_status_enum`.
+ *
+ * Los canónicos son `pending / approved / in_transit / received / cancelled`;
+ * `draft` y `completed` quedan como legado (el backend sigue escribiendo
+ * `completed` al recibir todo). La lista tiene que conocer los siete porque
+ * `stock_transfers` es UNA sola tabla: una transferencia creada desde el módulo
+ * de organización llega acá con `approved` o `received`, y con el tipo anterior
+ * salía con el badge sin etiqueta ni color.
+ */
+export type TransferStatus =
+  | 'pending'
+  | 'approved'
+  | 'in_transit'
+  | 'received'
+  | 'cancelled'
+  | 'draft'
+  | 'completed';
 
 export interface StockTransfer {
   id: number;

@@ -6,12 +6,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 
+import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
+
 import {
   PopCartService,
   PopCartSummary,
   PopCartState,
   PopCartItem,
   PopProduct,
+  ShippingMethod,
 } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
@@ -43,8 +46,8 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
 import {
   PopProductConfigModalComponent,
 } from './components/pop-product-config-modal.component';
-import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
-import { PricingOverridesMap } from './components/pop-order-confirmation-modal.component';
+import { PopCheckoutShellComponent } from './components/pop-checkout-shell/pop-checkout-shell.component';
+import { PopPricingOverridesMap } from './components/pop-checkout-shell/steps/pop-receive-step.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -61,6 +64,14 @@ import {
   VexiUiHost,
   VexiUiHostRegistry,
 } from '../../../../../core/services/vexi-ui-host.registry';
+
+/** Opciones del selector "Método Envío" del paso Configuración del wizard. */
+const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
+  { value: 'supplier_transport', label: 'Transporte Proveedor' },
+  { value: 'freight', label: 'Flete' },
+  { value: 'pickup', label: 'Recolección' },
+  { value: 'other', label: 'Otro' },
+];
 
 /**
  * POP (Point of Purchase) Main Component
@@ -81,7 +92,7 @@ import {
     PopMobileFooterComponent,
     PopCartModalComponent,
     PopProductConfigModalComponent,
-    PopOrderConfirmationModalComponent,
+    PopCheckoutShellComponent,
     InvoiceScannerModalComponent,
   ],
   template: `
@@ -193,7 +204,7 @@ import {
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
 
-    <app-pop-order-confirmation-modal
+    <app-pop-checkout-shell
       [isOpen]="showOrderConfirmModal()"
       (isOpenChange)="showOrderConfirmModal.set($event)"
       [cartState]="cartState()"
@@ -201,15 +212,23 @@ import {
       [locationName]="currentLocationName"
       [actionType]="confirmOrderAction"
       [costPreview]="costPreview()"
-      [loadingPreview]="loadingCostPreview()"
+      [loadingCostPreview]="loadingCostPreview()"
+      [isProcessing]="isProcessingOrder()"
+      [retryOrderRef]="retryOrderRef()"
+      [needsConfig]="shellNeedsConfig()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
-      (ackPayChange)="ackPay.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
-    ></app-pop-order-confirmation-modal>
+      (configComplete)="loadCostPreview()"
+      (configSupplierChange)="onShellSupplierChange($event)"
+      (configLocationChange)="onShellLocationChange($event)"
+      (configOrderDateChange)="onShellOrderDateChange($event)"
+      (configExpectedDateChange)="onShellExpectedDateChange($event)"
+      (configShippingMethodChange)="onShellShippingMethodChange($event)"
+    ></app-pop-checkout-shell>
 
     <app-pop-product-config-modal
       [isOpen]="showConfigModal()"
@@ -252,13 +271,12 @@ export class PopComponent implements OnInit, OnDestroy {
     null,
   );
   /**
-   * PASO 2/3 — Acuses individuales del modal de confirmación (create-receive).
-   * `ackReceive` (ON por defecto) genera la remisión de entrada; `ackPay`
-   * (OFF por defecto) registra el pago total. Se sincronizan desde los outputs
-   * del modal y el modal los resetea a (true,false) cada vez que se abre.
+   * PASO 2/3 — Acuse de recepción del wizard (create-receive). ON por defecto:
+   * genera la remisión de entrada. Lo sincroniza el shell (paso Recepción) y
+   * el shell lo resetea a true en cada apertura. El "pago total" ya no es un
+   * acuse independiente: lo deriva el plan de pago (ver `onOrderConfirmed`).
    */
   readonly ackReceive = signal(true);
-  readonly ackPay = signal(false);
   showInvoiceScanner = signal(false);
   /**
    * Fase 4: derive the AI scan profile from the current cart. If any
@@ -358,12 +376,49 @@ export class PopComponent implements OnInit, OnDestroy {
   confirmOrderAction: 'create' | 'create-receive' = 'create';
 
   /**
+   * QUI-647 — snapshot de "el POP no estaba configurado (sin proveedor/bodega)"
+   * al ABRIR el wizard. Mientras sea true, el shell arranca en el paso 1
+   * Configuración. Se congela en la apertura (no se recalcula en vivo), así el
+   * paso Configuración no desaparece del stepper al elegir proveedor a mitad
+   * de sesión; en la siguiente apertura se re-evalúa desde el carrito.
+   */
+  readonly shellNeedsConfig = signal(false);
+
+  /** Opciones del paso Configuración del wizard (dueño de data: pop-header). */
+  readonly shellSupplierOptions = computed<SelectorOption[]>(() =>
+    this.header?.supplierOptions() ?? [],
+  );
+  readonly shellLocationOptions = computed<SelectorOption[]>(() =>
+    this.header?.locationOptions() ?? [],
+  );
+  readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
+
+  /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
+  readonly shellOrderDate = computed<string>(() =>
+    this.toISODate(this.cartState()?.orderDate),
+  );
+  readonly shellExpectedDate = computed<string>(() =>
+    this.toISODate(this.cartState()?.expectedDate),
+  );
+
+  /**
    * OC ya creada por un intento cuya RECEPCIÓN falló. Mientras esté seteada, el
    * carrito y la ruta se conservan (una recepción fallida no puede parecer una
    * operación completada) y el siguiente "crear y recibir" reanuda la recepción
    * sobre ESTA orden en vez de crear una segunda OC para la misma compra.
    */
   readonly pendingReceptionOrder = signal<any>(null);
+
+  /**
+   * QUI-647 — ref legible de la OC pendiente de recepción para el banner de
+   * reintento del wizard ("La orden #X ya fue creada..."). Null cuando no hay
+   * reintento → el wizard muestra el flujo normal.
+   */
+  readonly retryOrderRef = computed<string | null>(() => {
+    const pending = this.pendingReceptionOrder();
+    if (!pending) return null;
+    return pending.order_number || `#${pending.id}`;
+  });
 
   costPreview = signal<CostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
@@ -376,7 +431,7 @@ export class PopComponent implements OnInit, OnDestroy {
    * `new_base_price`/`new_profit_margin` opcionales y los propaga a `receive()`;
    * ver `_buildReceptionViaDispatch$`.
    */
-  pricingOverrides = signal<PricingOverridesMap>(new Map());
+  pricingOverrides = signal<PopPricingOverridesMap>(new Map());
 
   /**
    * QUI-647 — configuración de pago elegida en el modal. Viaja al backend en
@@ -1418,28 +1473,16 @@ export class PopComponent implements OnInit, OnDestroy {
   private onCreateAndReceiveWithModal(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda la acción para reconectarla al cerrar el config modal.
-        this.pendingAction.set('create-receive');
-        this.header.openConfigModal();
-      }
+    if (state.items.length === 0) {
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
-    this.pendingAction.set(null);
-    this.showCartModal.set(false);
-    this.confirmOrderAction = 'create-receive';
-    // Cada apertura de create-receive arranca con acuses por defecto
-    // (recibir ON, pagar OFF) y overrides limpios.
-    this.ackReceive.set(true);
-    this.ackPay.set(false);
-    this.pricingOverrides.set(new Map());
-    this.loadCostPreview();
-    this.showOrderConfirmModal.set(true);
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create-receive');
   }
 
   /**
@@ -1466,6 +1509,60 @@ export class PopComponent implements OnInit, OnDestroy {
     } else {
       this.onCreateAndReceive();
     }
+  }
+
+  // ============================================================
+  // Wizard shell — paso Configuración (QUI-647)
+  // ============================================================
+
+  /**
+   * El paso Configuración emite cada cambio en vivo (igual que el modal del
+   * header): aquí se persiste en el carrito. Al avanzar a Pago el módulo ya
+   * queda "Configurado" y el header muestra proveedor/bodega.
+   */
+  onShellSupplierChange(value: number | null | string): void {
+    this.popCartService.setSupplier(value ? Number(value) : null);
+  }
+
+  onShellLocationChange(value: number | null | string): void {
+    this.popCartService.setLocation(value ? Number(value) : null);
+  }
+
+  onShellOrderDateChange(value: string): void {
+    if (!value) return;
+    const [year, month, day] = value.split('-').map(Number);
+    this.popCartService.setOrderDate(new Date(year, month - 1, day));
+  }
+
+  onShellExpectedDateChange(value: string): void {
+    if (value) {
+      const [year, month, day] = value.split('-').map(Number);
+      this.popCartService.setExpectedDate(new Date(year, month - 1, day));
+    } else {
+      this.popCartService.setExpectedDate(undefined);
+    }
+  }
+
+  onShellShippingMethodChange(value: string): void {
+    this.popCartService.setShippingMethod(value as ShippingMethod);
+  }
+
+  /**
+   * El paso Configuración quedó completo (proveedor+bodega): ya hay bodega
+   * para costear, así que recargamos el preview de costeo que el wizard
+   * necesita en el paso Recepción.
+   */
+  onShellConfigComplete(): void {
+    this.loadCostPreview();
+  }
+
+  /** `Date` → `YYYY-MM-DD` (hora local) para los inputs date del wizard. */
+  private toISODate(date: Date | undefined | null): string {
+    if (!date) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   // ============================================================
@@ -1498,6 +1595,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, draftState);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1517,51 +1616,63 @@ export class PopComponent implements OnInit, OnDestroy {
   onSubmitOrder(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+    if (state.items.length === 0) {
       if (this.isMobile()) {
         this.showCartModal.set(true);
       }
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda "crear" para reconectarla al configurar.
-        this.pendingAction.set('create');
-        this.header.openConfigModal();
-      }
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
-    this.pendingAction.set(null);
-    this.confirmOrderAction = 'create';
-    this.showOrderConfirmModal.set(true);
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create');
   }
 
   onCreateAndReceive(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+    if (state.items.length === 0) {
       if (this.isMobile()) {
         this.showCartModal.set(true);
       }
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda "crear y recibir" para reconectarla al configurar.
-        this.pendingAction.set('create-receive');
-        this.header.openConfigModal();
-      }
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create-receive');
+  }
+
+  /**
+   * QUI-647 — Abre el wizard (shell) para una acción de creación. Si el POP
+   * no tiene proveedor+bodega, el shell arranca en el PASO 1 Configuración
+   * (el wizard ya no se bloquea en el modal de configuración); si ya hay
+   * config, arranca en Pago (comportamiento previo intacto).
+   */
+  private openCheckoutShell(action: 'create' | 'create-receive'): void {
+    const state = this.popCartService.currentState;
+
     this.pendingAction.set(null);
-    this.confirmOrderAction = 'create-receive';
-    // Cada apertura de create-receive arranca con acuses por defecto
-    // (recibir ON, pagar OFF) y overrides limpios anclados al cost preview.
+    this.showCartModal.set(false);
+    this.confirmOrderAction = action;
+    // Snapshot de "necesita config" en la APERTURA (no en vivo): el paso
+    // Configuración no desaparece del stepper al elegir proveedor a mitad
+    // de sesión; la siguiente apertura re-evalúa desde el carrito.
+    this.shellNeedsConfig.set(!state.supplierId || !state.locationId);
+    // Cada apertura arranca con acuses por defecto (recibir ON) y overrides
+    // limpios. El plan de pago se resetea: pertenece a la instancia del
+    // carrito y no debe sobrevivir entre aperturas (bug de prod QUI-647).
     this.ackReceive.set(true);
-    this.ackPay.set(false);
+    this.paymentPlan.set(null);
     this.pricingOverrides.set(new Map());
+    // Sin bodega el preview de costeo no tiene dónde costear: el service lo
+    // ignora y se recarga cuando el paso Configuración queda completo.
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
   }
@@ -1571,91 +1682,37 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   /**
-   * PASO 3/4 — Cierra el modal, pide confirmación con un diálogo dinámico
-   * (según acción + acuses) y, si el usuario acepta, orquesta los efectos.
-   * `create` → solo crea; `create-receive` → crea y encadena recepción por
-   * remisión y/o pago como efectos individuales.
+   * PASO 3/4 — Cierra el shell y orquesta los efectos. El "diálogo intermedio"
+   * ya no existe: la confirmación es el paso terminal del wizard.
+   *
+   * Matriz anti-doble-registro de pagos (derivada del plan de pago):
+   *  - `create` + immediate → `_executeSubmitOrder` crea y el backend registra
+   *    el pago al crear (sin down_payment_amount en el payload).
+   *  - `create-receive` + immediate → doPay=true: el pago se registra DESPUÉS
+   *    de la recepción (el backend resuelve `is_advance=false` por conteo de
+   *    recepciones). El request de creación NO lleva down_payment_amount.
+   *  - `partial` → el abono viaja como anticipo en el payload de creación
+   *    (attachPaymentPlan); aquí NO se registra pago (doPay=false).
+   *  - `deferred` / `installments` → ningún pago hoy (doPay=false).
+   *  - Reintento de recepción (`pendingReceptionOrder`) → nunca se registra
+   *    pago: la OC ya existe y solo falta que entre la mercancía.
    */
-  async onOrderConfirmed(): Promise<void> {
+  onOrderConfirmed(): void {
     this.showOrderConfirmModal.set(false);
 
     const action = this.confirmOrderAction;
     const doReceive = this.ackReceive();
-    const doPay = this.ackPay();
-
-    const ok = await this.dialogService.confirm(
-      this._buildConfirmDialog(action, doReceive, doPay),
-    );
-    if (!ok) return;
 
     if (action === 'create') {
+      // `_executeSubmitOrder` ya enruta a la recepción si hay un reintento.
       this._executeSubmitOrder();
       return;
     }
-    this._executeCreateReceivePay(doReceive, doPay);
-  }
 
-  /**
-   * PASO 4 — Construye el contenido dinámico del diálogo de confirmación.
-   */
-  private _buildConfirmDialog(
-    action: 'create' | 'create-receive',
-    doReceive: boolean,
-    doPay: boolean,
-  ): { title: string; message: string; confirmText: string; cancelText: string } {
-    const cancelText = 'Cancelar';
-    // Reintento en contexto: la OC ya existe, solo falta que entre la mercancía.
-    const pending = this.pendingReceptionOrder();
-    if (pending) {
-      const ref = pending.order_number || `#${pending.id}`;
-      return {
-        title: 'Reintentar recepción',
-        message: `La orden ${ref} ya fue creada y su recepción falló. ¿Reintentamos la recepción sobre esa misma orden? No se creará una orden nueva.`,
-        confirmText: 'Reintentar recepción',
-        cancelText,
-      };
-    }
-    if (action === 'create') {
-      return {
-        title: 'Crear orden de compra',
-        message: '¿Seguro que quieres crear esta orden de compra?',
-        confirmText: 'Crear orden',
-        cancelText,
-      };
-    }
-    if (doReceive && doPay) {
-      return {
-        title: 'Crear, pagar y recibir',
-        message:
-          '¿Seguro que quieres crear la orden, marcarla como pagada y recibir la mercancía (se generará una remisión de entrada)?',
-        confirmText: 'Crear, pagar y recibir',
-        cancelText,
-      };
-    }
-    if (doReceive) {
-      return {
-        title: 'Crear y recibir',
-        message:
-          '¿Seguro que quieres crear y recibir esta orden? Se generará una remisión de entrada.',
-        confirmText: 'Crear y recibir',
-        cancelText,
-      };
-    }
-    if (doPay) {
-      return {
-        title: 'Crear y pagar (anticipo)',
-        message:
-          '¿Seguro que quieres crear y pagar esta orden sin recibir la mercancía? (anticipo a proveedor)',
-        confirmText: 'Crear y pagar',
-        cancelText,
-      };
-    }
-    return {
-      title: 'Crear orden de compra',
-      message: '¿Seguro que quieres crear esta orden de compra?',
-      confirmText: 'Crear orden',
-      cancelText,
-    };
+    const plan = this.paymentPlan();
+    const doPay =
+      !this.pendingReceptionOrder() && plan?.payment_plan === 'immediate';
+    this._executeCreateReceivePay(doReceive, doPay);
   }
 
   onNavigateToSettings(): void {
@@ -1669,11 +1726,12 @@ export class PopComponent implements OnInit, OnDestroy {
    * stores; downstream consumers must treat it as read-only. Se aplican al
    * recibir por remisión (ver `_buildReceptionViaDispatch$`).
    */
-  onPricingOverridesChange(overrides: PricingOverridesMap): void {
+  onPricingOverridesChange(overrides: PopPricingOverridesMap): void {
     this.pricingOverrides.set(overrides);
   }
 
-  private loadCostPreview(): void {
+  // Público: el template lo invoca desde `(configComplete)` del paso de config.
+  loadCostPreview(): void {
     const state = this.popCartService.currentState;
     if (!state.locationId || state.items.length === 0) return;
 
@@ -1795,15 +1853,21 @@ export class PopComponent implements OnInit, OnDestroy {
   /**
    * QUI-647 — adjunta el plan de pago al payload de creación.
    *
-   * Solo viaja cuando el operador eligió algo distinto de `immediate`: así una
-   * orden creada sin tocar el paso de pago produce exactamente el mismo payload
-   * que antes del ticket.
+   * Matriz anti-doble-registro de pagos (la contraparte de `onOrderConfirmed`):
+   *  - `immediate` (create Y create-receive): NO viaja `down_payment_amount`.
+   *    El pago se registra al crear (create) o después de la recepción con
+   *    `is_advance=false` (create-receive, lo resuelve el backend por conteo de
+   *    recepciones). Mandar un abono aquí duplicaría el pago.
+   *  - `partial`: SIEMPRE viaja `down_payment_amount` como anticipo (el backend
+   *    lo registra al crear, source 'po_advance', DR 133005/CR 1110).
+   *  - `deferred` / `installments`: ningún pago hoy; solo fecha/cuotas.
    */
   private attachPaymentPlan(request: any): void {
     const plan = this.paymentPlan();
-    if (!plan || plan.payment_plan === 'immediate') return;
+    if (!plan) return;
+    if (plan.payment_plan === 'immediate') return;
     request.payment_plan = plan.payment_plan;
-    if (plan.down_payment_amount > 0) {
+    if (plan.payment_plan === 'partial' && plan.down_payment_amount > 0) {
       request.down_payment_amount = plan.down_payment_amount;
     }
     if (plan.payment_due_date) {
@@ -1852,6 +1916,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1875,9 +1941,11 @@ export class PopComponent implements OnInit, OnDestroy {
    * SIEMPRE crea la OC (aprobada); luego, opcionalmente y en este orden:
    *   1. recibir → remisión de entrada (createPurchaseReceipt→confirm→receive)
    *   2. pagar   → registerPurchaseOrderPayment (total, hoy, método 'cash')
-   * Cada efecto es individual: ackReceive=false + ackPay=true crea + paga sin
+   * Cada efecto es individual: doReceive=false + doPay=true crea + paga sin
    * recibir (anticipo — la contabilidad correcta la maneja el backend); ambos
-   * false equivale a crear. Encadenado con switchMap; errores por etapa con
+   * false equivale a crear. `doPay` lo deriva `onOrderConfirmed` del plan de
+   * pago (solo `immediate` registra aquí; `partial` viaja como anticipo en el
+   * payload de creación). Encadenado con switchMap; errores por etapa con
    * toasts claros. Si la OC ya existe, limpia carrito y navega igual.
    */
   private _executeCreateReceivePay(doReceive: boolean, doPay: boolean): void {
@@ -2016,6 +2084,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
+    // QUI-648: unidad de venta configurada en el modal.
+    this.attachSaleUnitConfig(request, state);
 
     return this.purchaseOrdersService.createPurchaseOrder(request).pipe(
       switchMap((response) =>
@@ -2182,6 +2252,45 @@ export class PopComponent implements OnInit, OnDestroy {
       const content = Number(raw);
       if (Number.isFinite(content) && content >= 1) {
         (reqItem as any).purchase_to_stock_factor = Math.round(content);
+      }
+    });
+  }
+
+  /**
+   * QUI-648: mapea la unidad de venta capturada en el modal → campos
+   * `sale_unit_*` del ítem de compra. El backend usa `sale_unit_name` como
+   * interruptor: sin nombre no configura nada.
+   *
+   * Mismo patrón que `attachPurchaseToStockFactor`: el carrito copia
+   * `prebulk_data` completo, así que el dato puede venir de ahí o del ítem.
+   */
+  private attachSaleUnitConfig(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    request.items.forEach((reqItem, i) => {
+      const cartItem: any = state.items[i];
+      if (!cartItem) return;
+      const source = cartItem.prebulk_data ?? cartItem;
+      const name = String(source.sale_unit_name ?? '').trim();
+      if (!name) return;
+
+      const target = reqItem as any;
+      target.sale_unit_name = name;
+      const factor = Number(source.sale_unit_units_per_package);
+      if (Number.isFinite(factor) && factor >= 2) {
+        target.sale_unit_units_per_package = Math.round(factor);
+      }
+      const price = Number(source.sale_unit_price);
+      if (Number.isFinite(price) && price > 0) {
+        target.sale_unit_price = price;
+      }
+      const margin = Number(source.sale_unit_profit_margin);
+      if (Number.isFinite(margin)) {
+        target.sale_unit_profit_margin = margin;
+      }
+      if (source.sale_unit_is_default === true) {
+        target.sale_unit_is_default = true;
       }
     });
   }

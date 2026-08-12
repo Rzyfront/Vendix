@@ -1,0 +1,100 @@
+import { Component, inject } from '@angular/core';
+
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
+import { PrintFormatsSettingsForm } from '../components/print-formats-settings-form/print-formats-settings-form.component';
+import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
+import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
+import { GeneralSettingsStore } from '../services/general-settings.store';
+
+/**
+ * Pestaña «Venta»: cómo se cobra y qué documento sale impreso.
+ *
+ * Reúne «Punto de Venta», «Recibos y Facturación» y «Formatos de Impresión».
+ * Las tres viven juntas a propósito: `receipts` lo editan dos de ellas y
+ * `pos.auto_print_receipt` lo edita la de Recibos aunque pertenezca al bloque
+ * POS — el store se encarga de mezclar en vez de reemplazar.
+ */
+@Component({
+  selector: 'app-sales-settings-page',
+  standalone: true,
+  imports: [
+    IconComponent,
+    SettingsSectionComponent,
+    PosSettingsForm,
+    ReceiptsSettingsForm,
+    PrintFormatsSettingsForm,
+  ],
+  template: `
+    <div class="settings-page">
+      <div class="page-intro">
+        <div class="page-intro__icon">
+          <app-icon name="shopping-cart" size="16"></app-icon>
+        </div>
+        <p class="page-intro__text">
+          <span class="page-intro__lead">Gobierna el mostrador.</span>
+          Lo que configures acá lo siente el cajero en cada venta: qué puede
+          hacer el punto de venta, qué documento respalda la operación y con qué
+          formato sale por la impresora.
+        </p>
+      </div>
+
+      <!-- Punto de Venta -->
+      <app-settings-section
+        anchorId="section-pos"
+        icon="monitor"
+        iconTone="orange"
+        title="Punto de Venta (POS)"
+        hint="Aplica a todos los cajeros de esta tienda, no sólo a tu sesión.">
+        <app-pos-settings-form
+          [settings]="store.settings().pos"
+          [settingsLoaded]="store.settingsLoaded()"
+          (settingsChange)="store.onSectionChange('pos', $event)" />
+      </app-settings-section>
+
+      <!-- Recibos y Facturación — el título depende del estado real de emisión
+           (GET dian-config/emission-status), no de que el wizard fiscal esté
+           completo. -->
+      <app-settings-section
+        anchorId="section-receipts"
+        icon="file-text"
+        iconTone="indigo"
+        [title]="
+          store.electronicInvoicingActive()
+            ? 'Facturación Electrónica'
+            : 'Recibos y Facturación'
+        "
+        hint="Define qué documento respalda la venta y si se imprime solo al cobrar.">
+        <app-receipts-settings-form
+          [settings]="store.settings().receipts"
+          [emissionStage]="store.emissionStage()"
+          [pendingReason]="store.emissionReason()"
+          [pendingBlockers]="store.emissionBlockers()"
+          [posAutoPrint]="store.posAutoPrint()"
+          [posTicketPrintFormat]="store.posTicketPrintFormat()"
+          [invoicePrintFormat]="store.invoicePrintFormat()"
+          (settingsChange)="store.onReceiptsChange($event)"
+          (posAutoPrintChange)="store.onPosAutoPrintChange($event)" />
+      </app-settings-section>
+
+      <!-- Formatos de Impresión (QUI-641) — una fila por documento imprimible.
+           Se persiste bajo receipts.printing, por tienda, sin herencia.
+           Sin acentos graves acá: este template es un literal de plantilla y un
+           acento grave dentro lo cierra a mitad de camino (TS1005). -->
+      <app-settings-section
+        anchorId="section-printing"
+        icon="printer"
+        iconTone="indigo"
+        title="Formatos de Impresión"
+        hint="Tamaño y número de copias de cada documento; no se hereda de la organización.">
+        <app-print-formats-settings-form
+          [receipts]="store.receiptsSettings()"
+          (printingChange)="store.onPrintingChange($event)" />
+      </app-settings-section>
+    </div>
+  `,
+  styleUrls: ['./_settings-page.scss'],
+})
+export class SalesSettingsPage {
+  protected readonly store = inject(GeneralSettingsStore);
+}

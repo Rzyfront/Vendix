@@ -395,6 +395,24 @@
             (changed)="onMultiTierToggle($event)"
           ></app-setting-toggle>
 
+          <!-- Multi-tarifa ⊕ variantes: el costo se dice antes de cobrarlo. -->
+          @if (multiTierWouldRemoveVariants) {
+            <div
+              class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="16"
+                class="text-amber-600 shrink-0 mt-0.5"
+              ></app-icon>
+              <span>
+                Este producto tiene variantes. Multi-tarifa y variantes son
+                excluyentes: al activar multi-tarifa se eliminarán las variantes
+                y su stock volverá al stock base.
+              </span>
+            </div>
+          }
+
           @if (isMultiTierEnabled) {
             <!-- Create-mode warning: product must be saved first -->
             @if (!productId) {
@@ -483,8 +501,16 @@
                             row.tier.name
                           }}</span>
                           @if (row.tier.is_default) {
+                            <!-- Default de la TIENDA. No es la presentación por
+                                 defecto del producto (esa es el botón Por
+                                 defecto del header, sobre el assignment). -->
+                            <app-badge variant="neutral" size="sm"
+                              >Tarifa base de la tienda</app-badge
+                            >
+                          }
+                          @if (row.is_default) {
                             <app-badge variant="primary" size="sm"
-                              >Por defecto</app-badge
+                              >Presentación por defecto</app-badge
                             >
                           }
                           @if (getRowPackSize(row) > 1) {
@@ -499,20 +525,46 @@
                             >
                           }
                         </div>
-                        <button
-                          type="button"
-                          (click)="toggleTierAssignment(row.tier.id, false)"
-                          class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-rose-600 font-medium shrink-0"
-                          aria-label="Quitar tarifa"
-                        >
-                          <app-icon name="x" size="14"></app-icon>
-                          Quitar
-                        </button>
+                        <div class="flex items-center gap-3 shrink-0">
+                          <!-- Presentación por defecto: la que rige en tienda
+                               online, POS y cotizaciones. Elegir entre varias al
+                               vender es exclusivo del POS. Solo aplica a
+                               unidades de venta, no a tarifas de cliente. -->
+                          @if (canBeDefaultRow(row)) {
+                            <button
+                              type="button"
+                              (click)="toggleDefaultTierRow(row.tier.id)"
+                              [class]="
+                                row.is_default
+                                  ? 'inline-flex items-center gap-1 text-xs font-medium text-primary-600'
+                                  : 'inline-flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-primary-600'
+                              "
+                              [attr.aria-pressed]="row.is_default"
+                              [title]="
+                                row.is_default
+                                  ? 'Esta presentación se usa por defecto en tienda online, POS y cotizaciones. Pulsa para quitarla.'
+                                  : 'Usar esta presentación por defecto en tienda online, POS y cotizaciones.'
+                              "
+                            >
+                              <app-icon name="star" size="14"></app-icon>
+                              Por defecto
+                            </button>
+                          }
+                          <button
+                            type="button"
+                            (click)="toggleTierAssignment(row.tier.id, false)"
+                            class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-rose-600 font-medium shrink-0"
+                            aria-label="Quitar tarifa"
+                          >
+                            <app-icon name="x" size="14"></app-icon>
+                            Quitar
+                          </button>
+                        </div>
                       </div>
 
-                      <!-- Inputs grid: price ↔ margin (bidirectional) + units -->
+                      <!-- Inputs grid: price ↔ margin (bidirectional) + units + código -->
                       <div
-                        class="grid grid-cols-1 sm:grid-cols-3 gap-x-3 md:gap-x-4 gap-y-3"
+                        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-3 md:gap-x-4 gap-y-3"
                       >
                         <!-- Price (whole-package override). Empty => tier default -->
                         <app-input
@@ -575,7 +627,44 @@
                           tooltipText="Sobrescribe las unidades por empaque de la tarifa solo para este producto. Vacío hereda el valor de la tarifa. Mínimo 2."
                           customWrapperClass="!mt-0"
                         ></app-input>
+
+                        <!-- Código de barras de ESTA presentación (QUI-648).
+                             Identifica el par (producto, presentación): pistolear
+                             la caja no puede devolver el precio de la unidad.
+                             Solo aplica a unidades de venta: una tarifa de
+                             cliente no tiene empaque que escanear. -->
+                        @if (isSaleUnitRow(row)) {
+                          <app-input
+                            label="Código de barras"
+                            type="text"
+                            [maxlength]="64"
+                            placeholder="Escanea o escribe el código"
+                            [ngModel]="row.barcode"
+                            [ngModelOptions]="{ standalone: true }"
+                            (ngModelChange)="
+                              updateTierOverrideBarcode(row.tier.id, $event)
+                            "
+                            (focusin)="
+                              scanTarget.set({
+                                kind: 'presentation',
+                                tierId: row.tier.id
+                              })
+                            "
+                            [error]="getRowBarcodeError(row)"
+                            tooltipText="Código escaneable de esta presentación (el del empaque, no el de la unidad suelta). Único en la tienda. Vacío borra el código."
+                            customWrapperClass="!mt-0"
+                          ></app-input>
+                        }
                       </div>
+
+                      @if (getRowPackExplainer(row); as packHint) {
+                        <p
+                          class="text-[11px] text-text-muted flex items-center gap-1"
+                        >
+                          <app-icon name="package" size="11"></app-icon>
+                          <span>{{ packHint }}</span>
+                        </p>
+                      }
 
                       <!-- Footer: resultant + clear -->
                       <div
@@ -917,8 +1006,11 @@
               }
             }
 
-            <!-- ===== UoM (Fase UoM) — solo si es insumo (fuente de verdad: storeSupportsIngredients) ===== -->
-            @if (isIngredient() && storeSupportsIngredients()) {
+            <!-- ===== Unidad de medida y escala de precio (QUI-648) =====
+                 Deja de ser exclusivo del insumo: una ferretería mide su cable
+                 en milímetros y lo cobra por metro sin que el cable sea insumo
+                 de nada. El insumo conserva su embudo compra → stock. -->
+            @if (!isService) {
               <div
                 class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 space-y-3 mt-1"
               >
@@ -931,64 +1023,104 @@
                     <p
                       class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
                     >
-                      Unidad de medida del insumo
+                      @if (isIngredient() && storeSupportsIngredients()) {
+                        Unidad de medida del insumo
+                      } @else {
+                        Unidad de medida y escala de precio
+                      }
                     </p>
                   </div>
 
-                  <!-- compra → conversión → stock -->
-                  <div
-                    class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 md:gap-4 items-center"
-                  >
-                    <app-selector
-                      formControlName="purchase_uom_id"
-                      label="Compra (presentación)"
-                      description="Como la recibes del proveedor."
-                      [options]="purchaseUomOptions()"
-                      placeholder="Ej. Litro, Kilogramo..."
-                      (valueChange)="onPurchaseUomChange()"
-                    ></app-selector>
-
-                    <!-- bloque de conversión central -->
+                  @if (isIngredient() && storeSupportsIngredients()) {
+                    <!-- compra → conversión → stock -->
                     <div
-                      class="flex flex-col items-center justify-center gap-1.5 py-1"
+                      class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 md:gap-4 items-center"
                     >
-                      <app-icon
-                        name="arrow-right"
-                        size="18"
-                        class="rotate-90 md:rotate-0 text-primary-500"
-                      ></app-icon>
-                      @if (unitCapacity(); as cap) {
-                        <div
-                          class="rounded-lg bg-primary-50 border border-primary-100 px-3 py-1.5 text-center whitespace-nowrap"
-                        >
-                          <p
-                            class="text-[9px] text-primary-600 uppercase font-bold tracking-wider"
+                      <app-selector
+                        formControlName="purchase_uom_id"
+                        label="Compra (presentación)"
+                        description="Como la recibes del proveedor."
+                        [options]="purchaseUomOptions()"
+                        placeholder="Ej. Litro, Kilogramo..."
+                        (valueChange)="onPurchaseUomChange()"
+                      ></app-selector>
+
+                      <!-- bloque de conversión central -->
+                      <div
+                        class="flex flex-col items-center justify-center gap-1.5 py-1"
+                      >
+                        <app-icon
+                          name="arrow-right"
+                          size="18"
+                          class="rotate-90 md:rotate-0 text-primary-500"
+                        ></app-icon>
+                        @if (unitCapacity(); as cap) {
+                          <div
+                            class="rounded-lg bg-primary-50 border border-primary-100 px-3 py-1.5 text-center whitespace-nowrap"
                           >
-                            Equivale a
-                          </p>
-                          <p class="text-sm font-bold text-primary-700">
-                            1 {{ cap.purchaseUnit }} = {{ cap.value }}
-                            {{ cap.unit }}
-                          </p>
-                        </div>
-                      } @else {
-                        <span
-                          class="text-[11px] text-text-muted text-center leading-tight"
-                        >
-                          Elige ambas unidades
-                        </span>
+                            <p
+                              class="text-[9px] text-primary-600 uppercase font-bold tracking-wider"
+                            >
+                              Equivale a
+                            </p>
+                            <p class="text-sm font-bold text-primary-700">
+                              1 {{ cap.purchaseUnit }} = {{ cap.value }}
+                              {{ cap.unit }}
+                            </p>
+                          </div>
+                        } @else {
+                          <span
+                            class="text-[11px] text-text-muted text-center leading-tight"
+                          >
+                            Elige ambas unidades
+                          </span>
+                        }
+                      </div>
+
+                      <app-selector
+                        formControlName="stock_uom_id"
+                        label="Stock (unidad mínima)"
+                        description="En la que se descuenta el inventario."
+                        [options]="stockUomOptions()"
+                        placeholder="Elige la unidad"
+                        (valueChange)="onStockUomChange()"
+                      ></app-selector>
+                    </div>
+                  } @else {
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                      <app-selector
+                        formControlName="stock_uom_id"
+                        label="El inventario se cuenta en"
+                        helpText="La unidad más pequeña que vendés. Déjalo vacío si vendés por pieza."
+                        [options]="stockUomOptions()"
+                        placeholder="Ej. Milímetro, Gramo, Mililitro..."
+                        (valueChange)="onStockUomChange()"
+                      ></app-selector>
+
+                      @if (selectedStockUom(); as stockUom) {
+                        <app-selector
+                          formControlName="price_unit_quantity"
+                          label="El precio de venta es"
+                          [helpText]="
+                            'El precio que escribís arriba cubre esta cantidad de ' +
+                            stockUom.code + '.'
+                          "
+                          [options]="priceScaleOptions()"
+                          placeholder="Por unidad"
+                          (valueChange)="onPriceUnitQuantityChange()"
+                        ></app-selector>
                       }
                     </div>
 
-                    <app-selector
-                      formControlName="stock_uom_id"
-                      label="Stock (unidad mínima)"
-                      description="En la que se descuenta el inventario."
-                      [options]="stockUomOptions()"
-                      placeholder="Elige primero la compra"
-                      (valueChange)="onStockUomChange()"
-                    ></app-selector>
-                  </div>
+                    <!-- Explica con los números del producto qué va a pasar al
+                         venderlo, y ofrece ejemplos por industria mientras el
+                         producto todavía no declara unidad. -->
+                    <app-sale-config-hint
+                      [config]="saleConfigInput()"
+                      [showExamples]="!selectedStockUom()"
+                      (exampleSelected)="applySaleConfigExample($event)"
+                    ></app-sale-config-hint>
+                  }
 
                   @if (productForm.errors?.['uomDimensionMismatch']) {
                     <p
@@ -996,7 +1128,7 @@
                     >
                       <app-icon name="alert-triangle" size="12"></app-icon>
                       La unidad de stock y la de compra deben ser de la misma
-                      dimensión (masa, volumen o unidad).
+                      dimensión (peso, volumen, longitud o conteo).
                     </p>
                   }
                 </div>
@@ -1008,14 +1140,25 @@
                 [ngModel]="hasVariants"
                 (ngModelChange)="toggleVariants($event)"
                 [ngModelOptions]="{ standalone: true }"
+                [disabled]="variantsBlockedByMultiTier"
                 label="Este producto tiene variantes"
                 [description]="
-                  isService
-                    ? 'Agrega opciones como duración o precio'
-                    : 'Agrega opciones como tamaño, color o material'
+                  variantsBlockedByMultiTier
+                    ? 'No disponible: el producto se vende en presentaciones (multi-tarifa)'
+                    : isService
+                      ? 'Agrega opciones como duración o precio'
+                      : 'Agrega opciones como tamaño, color o material'
                 "
               >
               </app-setting-toggle>
+              @if (variantsBlockedByMultiTier) {
+                <p
+                  class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
+                >
+                  <app-icon name="alert-triangle" size="10"></app-icon>
+                  Multi-tarifa desactiva variantes — desactívala para usarlas
+                </p>
+              }
               @if (
                 !hasVariants &&
                 (!productForm.get("sku")?.value ||

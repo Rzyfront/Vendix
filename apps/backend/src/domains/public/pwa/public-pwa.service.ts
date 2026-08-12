@@ -7,6 +7,10 @@ import { DomainConfigService } from '@common/config/domain.config';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { PwaIconVariant } from '@common/config/image-presets';
+import {
+  pwaIconCacheKey,
+  pwaManifestCacheKey,
+} from '@common/config/pwa-cache-keys';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import {
   VENDIX_APPLE_TOUCH_180_BASE64,
@@ -90,6 +94,19 @@ interface CachedPwaIcon {
  *     that expires.
  *  2. `resolveIconBuffer()` NEVER fails: a tenant with no usable logo installs
  *     with the Vendix brand icon rather than with a broken image.
+ *
+ * REACHABILITY (learned the hard way): in production the viewer hits the
+ * CloudFront distribution, not this API. Both `/manifest.webmanifest` and
+ * `/pwa/*` need a cache behavior pointing at the `vendix-backend-api` origin
+ * with the `Host` header in the CACHE KEY — without it CloudFront serves one
+ * tenant's manifest to every other. Those behaviors are listed in
+ * `apps/frontend/src/index.html`. This service shipped once without them and
+ * was dead code in production: S3 answered the static manifest instead and
+ * every tenant installed with the Vendix logo.
+ *
+ * Whatever this service caches is dropped by `PwaCacheService` when a tenant
+ * changes its branding; both sides share the key builders in
+ * `@common/config/pwa-cache-keys`.
  */
 @Injectable()
 export class PublicPwaService {
@@ -116,7 +133,7 @@ export class PublicPwaService {
    */
   async buildManifest(hostname: string): Promise<Record<string, unknown>> {
     const host = this.normalizeHostname(hostname);
-    const cacheKey = `pwa:manifest:${host}`;
+    const cacheKey = pwaManifestCacheKey(host);
 
     const cached = await this.cache.get<Record<string, unknown>>(cacheKey);
     if (cached) return cached;
@@ -153,7 +170,7 @@ export class PublicPwaService {
     variant: PwaIconVariant,
   ): Promise<{ buffer: Buffer; fromTenant: boolean }> {
     const host = this.normalizeHostname(hostname);
-    const cacheKey = `pwa:icon:${host}:${variant}`;
+    const cacheKey = pwaIconCacheKey(host, variant);
 
     try {
       const cached = await this.cache.get<CachedPwaIcon>(cacheKey);
@@ -317,7 +334,7 @@ export class PublicPwaService {
       if (!logo_key) return null;
 
       return {
-        logo_key,
+        logo_key: await this.preferLargestFaviconVariant(logo_key),
         base_path: this.s3PathHelper.buildStorePath(store.organizations, {
           id: store.id,
           slug: store.slug,
@@ -345,11 +362,53 @@ export class PublicPwaService {
       ]);
       if (!logo_key) return null;
 
-      return { logo_key, base_path: this.s3PathHelper.buildOrgPath(org) };
+      return {
+        logo_key: await this.preferLargestFaviconVariant(logo_key),
+        base_path: this.s3PathHelper.buildOrgPath(org),
+      };
     }
 
     return null;
   }
+
+  /**
+   * Swaps a small favicon for the largest sibling variant that actually exists.
+   *
+   * `generateAndUploadFaviconFromLogo` writes `favicon-16/32/192.png` side by
+   * side but records only the 16px one in `branding.favicon_url`. For a tenant
+   * whose ONLY branding asset is that favicon (no logo), deriving a 512px app
+   * icon from 16px is a 32x upscale — an unreadable smear. The 192px sibling is
+   * already sitting next to it.
+   *
+   * Existence is checked rather than assumed: rows predating the multi-size
+   * generator have only the 16px file, and a key pointing at a missing object
+   * would fail the whole derivation.
+   */
+  private async preferLargestFaviconVariant(key: string): Promise<string> {
+    const match = key.match(/^(.*\/)favicon-(\d+)\.png$/i);
+    if (!match) return key;
+
+    const [, directory, sizeText] = match;
+    const currentSize = Number(sizeText);
+    if (!Number.isFinite(currentSize)) return key;
+
+    for (const candidateSize of PublicPwaService.FAVICON_SIZES_DESC) {
+      if (candidateSize <= currentSize) break;
+
+      const candidate = `${directory}favicon-${candidateSize}.png`;
+      if (
+        this.s3PathHelper.isBrandingAssetKey(candidate) &&
+        (await this.s3Service.objectExists(candidate))
+      ) {
+        return candidate;
+      }
+    }
+
+    return key;
+  }
+
+  /** Sizes emitted by `generateAndUploadFaviconFromLogo`, largest first. */
+  private static readonly FAVICON_SIZES_DESC = [192, 32] as const;
 
   /** First candidate that normalizes to a safe, branding-scoped S3 key. */
   private pickBrandingKey(candidates: unknown[]): string | null {

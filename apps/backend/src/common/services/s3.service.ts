@@ -14,7 +14,9 @@ import sharp = require('sharp');
 import {
   ImageContext,
   IMAGE_PRESETS,
+  MIN_PWA_SOURCE_PX,
   PWA_ICON_SPECS,
+  PWA_ICON_VARIANTS,
   PwaIconSpec,
   PwaIconVariant,
 } from '../config/image-presets';
@@ -333,6 +335,64 @@ export class S3Service {
   }
 
   /**
+   * Whether an object exists in the bucket. Never throws: an unreadable or
+   * missing key is simply `false`, so callers can use it to pick between
+   * candidates without wrapping every call in a try/catch.
+   */
+  async objectExists(key: string | null | undefined): Promise<boolean> {
+    if (!key || !isSafeS3Key(key)) return false;
+
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Drops every derived PWA icon cached under a tenant's base path.
+   *
+   * `getOrCreatePwaIcon` treats an existing derived object as authoritative and
+   * never re-renders it, so WITHOUT this the icon a tenant installed with is
+   * frozen forever: changing the logo or the brand color has no visible effect.
+   *
+   * Deletes run CONCURRENTLY and without a preceding HeadObject: this sits in
+   * the request path of a settings save, and four sequential head+delete pairs
+   * would add eight S3 round-trips to a user-facing PUT. `DeleteObject` is
+   * idempotent — deleting an object that was never derived is a no-op, so the
+   * existence check bought nothing but latency.
+   *
+   * Best-effort: one failed delete must not abort the rest, nor fail the write
+   * that triggered it.
+   *
+   * @returns how many deletes completed without error (an object that never
+   *          existed counts as one — S3 does not distinguish)
+   */
+  async deleteDerivedPwaIcons(basePath: string): Promise<number> {
+    const prefix = this.s3PathHelper.buildPwaIconPath(basePath);
+
+    const results = await Promise.allSettled(
+      PWA_ICON_VARIANTS.map((variant) =>
+        this.deleteFile(`${prefix}/${variant}.png`),
+      ),
+    );
+
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Could not drop a derived PWA icon under ${prefix}: ` +
+            `${this.describeError(result.reason)}`,
+        );
+      }
+    }
+
+    return results.filter((result) => result.status === 'fulfilled').length;
+  }
+
+  /**
    * Signs a URL for a given S3 key, optionally targeting a thumbnail.
    * If the URL is already an absolute HTTP(S) URL, returns it as is.
    */
@@ -484,6 +544,8 @@ export class S3Service {
       );
     }
 
+    await this.assertUsablePwaSource(logoBuffer, sourceKey, variant);
+
     let icon: Buffer;
     try {
       icon = await this.renderPwaIcon(logoBuffer, spec, background);
@@ -513,6 +575,41 @@ export class S3Service {
     }
 
     return icon;
+  }
+
+  /**
+   * Rejects a source image too small to become a legible app icon.
+   *
+   * Throws `PwaIconDerivationError`, which `resolveIconBuffer` already degrades
+   * to the Vendix brand icon, so the failure mode is a correct foreign mark
+   * rather than an unreadable own one. Unreadable metadata is treated as a
+   * rejection too: sharp could not measure it, so neither can we vouch for it.
+   */
+  private async assertUsablePwaSource(
+    logoBuffer: Buffer,
+    sourceKey: string,
+    variant: PwaIconVariant,
+  ): Promise<void> {
+    let width: number | undefined;
+    let height: number | undefined;
+
+    try {
+      ({ width, height } = await sharp(logoBuffer).metadata());
+    } catch (error) {
+      throw new PwaIconDerivationError(
+        `Source "${sourceKey}" could not be measured for PWA icon ${variant}`,
+        error,
+      );
+    }
+
+    const shortestSide = Math.min(width ?? 0, height ?? 0);
+
+    if (shortestSide < MIN_PWA_SOURCE_PX) {
+      throw new PwaIconDerivationError(
+        `Source "${sourceKey}" is ${width ?? '?'}x${height ?? '?'}, below the ` +
+          `${MIN_PWA_SOURCE_PX}px floor for PWA icon ${variant}`,
+      );
+    }
   }
 
   /**

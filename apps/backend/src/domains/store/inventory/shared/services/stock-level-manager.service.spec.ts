@@ -84,6 +84,13 @@ describe('StockLevelManager', () => {
   beforeEach(async () => {
     const mockPrismaService = {
       $transaction: jest.fn(),
+      // `syncDenormalizedProductStock` suma el stock real con `$queryRaw` a
+      // propósito: la extensión de alcance por tienda filtra `stock_levels` y
+      // dejaba fuera las bodegas de organización, así que el espejo se calculaba
+      // sobre una porción y guardar un precio emitía ajustes a la baja. El mock
+      // devuelve una lista vacía —producto sin filas de stock— porque estos
+      // tests miden el motor de escritura, no el espejo.
+      $queryRaw: jest.fn().mockResolvedValue([]),
       stock_levels: {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
@@ -218,6 +225,9 @@ describe('StockLevelManager', () => {
   describe('updateStock', () => {
     it('should update stock successfully with stock_in movement', async () => {
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -283,6 +293,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -328,6 +341,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -361,6 +377,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -398,6 +417,9 @@ describe('StockLevelManager', () => {
 
     it('should work with external transaction client', async () => {
       const externalTx = {
+        // Un cliente transaccional externo también pasa por el espejo
+        // denormalizado, así que debe ofrecer `$queryRaw`.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -437,6 +459,9 @@ describe('StockLevelManager', () => {
       });
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -471,6 +496,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -523,6 +551,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -575,6 +606,9 @@ describe('StockLevelManager', () => {
 
     it('should reserve stock successfully', async () => {
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
@@ -627,6 +661,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
@@ -664,6 +701,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
@@ -735,6 +775,9 @@ describe('StockLevelManager', () => {
       ];
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
@@ -784,6 +827,9 @@ describe('StockLevelManager', () => {
 
     it('should handle case when no reservations exist', async () => {
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
       };
@@ -1018,6 +1064,9 @@ describe('StockLevelManager', () => {
       });
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -1055,6 +1104,9 @@ describe('StockLevelManager', () => {
 
     it('should validate product scope for non-super admin', async () => {
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -1083,6 +1135,9 @@ describe('StockLevelManager', () => {
 
     it('should validate location scope for non-super admin', async () => {
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -1117,6 +1172,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
@@ -1159,6 +1217,9 @@ describe('StockLevelManager', () => {
       };
 
       const mockTx = {
+        // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
+        // de alcance por tienda; el cliente transaccional también debe ofrecerlo.
+        $queryRaw: (prismaService as any).$queryRaw,
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,

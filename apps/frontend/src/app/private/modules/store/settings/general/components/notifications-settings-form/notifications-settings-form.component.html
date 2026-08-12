@@ -1,61 +1,154 @@
 <div class="notifications-settings-form">
   <div class="space-y-6">
-    <!-- Channels -->
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Canales de Comunicación</h4>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <app-setting-toggle [formControl]="emailEnabledControl" label="Notificaciones por Email"
-          description="Alertas vía correo electrónico" (changed)="onFieldChange()"></app-setting-toggle>
-        <app-setting-toggle [formControl]="smsEnabledControl" label="Notificaciones por SMS"
-          description="Alertas vía mensaje de texto" (changed)="onFieldChange()"></app-setting-toggle>
-      </div>
-    </div>
+    <p class="section-intro">
+      Los avisos viajan por tres caminos distintos. Conviene saber cuál usas,
+      porque no todos dependen de esta pantalla: el de dispositivo lo autoriza el
+      navegador, no Vendix.
+    </p>
 
-    <!-- In-App Notification Subscriptions -->
+    <!-- Preferencias del usuario que está viendo la pantalla -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Notificaciones en la App</h4>
+      <h4 class="section-kicker">
+        <app-icon name="bell-ring" [size]="13"></app-icon>
+        <span>Notificaciones en la App</span>
+        <app-badge variant="info" size="xs" badgeStyle="outline">
+          Sólo para tu usuario
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        Estos interruptores son tuyos: cambian lo que <strong>tú</strong> recibes
+        en la campana y en este dispositivo. No afectan a tus compañeros. Se
+        guardan al instante, sin esperar el botón Guardar.
+      </p>
 
       <!-- Device push toggle -->
       @if (pushService.isSupported) {
-        <div class="mb-4">
+        <div class="channel-block">
+          <div class="channel-block__head">
+            <span class="channel-block__title">
+              <app-icon name="smartphone" [size]="14"></app-icon>
+              <span>Avisos en este dispositivo</span>
+              <app-tooltip
+                content="Usa las notificaciones del sistema operativo: siguen llegando con la pestaña cerrada. El permiso lo concede el navegador y es por dispositivo y por navegador — si lo activas en el computador, tu teléfono sigue apagado hasta que lo actives allí también. Si alguna vez pulsaste «Bloquear», ningún ajuste de esta pantalla puede revertirlo: hay que habilitarlo desde la configuración del sitio en el navegador."
+                position="top"
+              >
+                <span class="help-icon">
+                  <app-icon name="help-circle" [size]="13"></app-icon>
+                </span>
+              </app-tooltip>
+            </span>
+            <app-badge [variant]="pushStatus().variant" size="xs" badgeStyle="outline">
+              {{ pushStatus().text }}
+            </app-badge>
+          </div>
           <app-setting-toggle
-            [ngModel]="devicePushEnabled"
+            [ngModel]="devicePushEnabled()"
             [ngModelOptions]="{ standalone: true }"
             label="Notificaciones en dispositivo"
-            [description]="devicePushDescription"
+            [description]="devicePushDescription()"
             (changed)="onDevicePushToggle()"
           ></app-setting-toggle>
+          @if (pushPermission() === 'denied') {
+            <app-alert-banner variant="danger" icon="alert-triangle">
+              El navegador tiene bloqueadas las notificaciones de este sitio.
+              Ábrelo desde el candado de la barra de direcciones, permite las
+              notificaciones y vuelve a activar el interruptor.
+            </app-alert-banner>
+          }
         </div>
+      } @else {
+        <app-alert-banner variant="warning" icon="monitor">
+          Este navegador no admite avisos en el dispositivo. Seguirás viendo las
+          notificaciones en la campana mientras tengas la app abierta.
+        </app-alert-banner>
       }
 
-      <p class="text-xs text-gray-500 mb-3">Elige qué notificaciones deseas recibir en tiempo real dentro de la aplicación.</p>
+      <p class="section-hint mt-4">
+        Elige qué eventos quieres recibir en tiempo real dentro de la aplicación.
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        @for (type of subscriptionTypes; track type) {
+        @for (type of subscriptionTypes(); track type) {
           <app-setting-toggle
-            [ngModel]="subscriptions[type]"
+            [ngModel]="subscriptions()[type]"
             [ngModelOptions]="{ standalone: true }"
-            [label]="subscriptionLabels[type]"
-            description="Recibir en la app"
+            [label]="subscriptionMeta[type].label"
+            [description]="subscriptionMeta[type].trigger"
             (changed)="onSubscriptionToggle(type)"
           ></app-setting-toggle>
         }
       </div>
+
+      <app-expandable-card [(expanded)]="troubleshootOpen" class="mt-4">
+        <div slot="header" class="help-card-header">
+          <app-icon name="life-buoy" [size]="16"></app-icon>
+          <span>No me llegan las notificaciones</span>
+        </div>
+        <ul class="help-list">
+          <li>
+            <app-icon name="bell" [size]="14"></app-icon>
+            <span>
+              <strong>¿El evento está encendido arriba?</strong> Un tipo apagado
+              no genera aviso ni en la campana ni en el dispositivo.
+            </span>
+          </li>
+          <li>
+            <app-icon name="shield-check" [size]="14"></app-icon>
+            <span>
+              <strong>¿El navegador dio permiso?</strong> Si la insignia dice
+              «Bloqueado», el aviso de dispositivo no llega por más que el
+              interruptor se vea encendido.
+            </span>
+          </li>
+          <li>
+            <app-icon name="smartphone" [size]="14"></app-icon>
+            <span>
+              <strong>¿Estás en el mismo dispositivo?</strong> El permiso se
+              concede por navegador y por equipo: activarlo en el computador no
+              lo activa en el teléfono.
+            </span>
+          </li>
+          <li>
+            <app-icon name="bell-ring" [size]="14"></app-icon>
+            <span>
+              <strong>¿Silenciaste el sonido?</strong> Con los sonidos
+              silenciados la notificación sí llega, pero sin audio: revísalo más
+              abajo.
+            </span>
+          </li>
+          <li>
+            <app-icon name="users" [size]="14"></app-icon>
+            <span>
+              Estas preferencias son por usuario. Si a un compañero no le llegan,
+              tiene que revisarlas en su propia sesión.
+            </span>
+          </li>
+        </ul>
+      </app-expandable-card>
     </div>
 
     <!-- Sonido de notificaciones -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Sonido de notificaciones</h4>
-      <p class="text-xs text-gray-500 mb-3">Reproduce un sonido cuando llega una nueva notificación.</p>
+      <h4 class="section-kicker">
+        <app-icon name="zap" [size]="13"></app-icon>
+        <span>Sonido de notificaciones</span>
+        <app-badge variant="info" size="xs" badgeStyle="outline">
+          Sólo para tu usuario
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        Reproduce un sonido cuando llega una notificación mientras tienes la app
+        abierta. Útil en el mostrador; molesto en una oficina compartida.
+      </p>
 
       <div class="space-y-4">
         <app-setting-toggle
           [formControl]="soundMutedControl"
           label="Silenciar sonidos"
-          description="Desactiva la reproducción de cualquier sonido"
+          description="Las notificaciones siguen llegando a la campana, sólo deja de sonar el audio."
           (changed)="onFieldChange()"
         ></app-setting-toggle>
 
-        <div class="space-y-2" [class.opacity-50]="isSoundMuted">
+        <div class="space-y-2" [class.opacity-50]="soundMuted()">
           <div class="flex gap-2 items-end">
             <div class="flex-1">
               <app-selector
@@ -70,7 +163,7 @@
             <app-button
               variant="primary"
               size="md"
-              [disabled]="isSoundMuted || !soundIdControl.value"
+              [disabled]="soundMuted() || !soundIdControl.value"
               (clicked)="playPreview()"
               title="Escuchar previsualización"
             >
@@ -78,10 +171,15 @@
               Probar
             </app-button>
           </div>
+          <p class="field-hint">
+            Sin sonido seleccionado la notificación llega en silencio. Si al
+            pulsar «Probar» no escuchas nada, el navegador puede estar bloqueando
+            el audio hasta que interactúes con la página: vuelve a intentarlo.
+          </p>
         </div>
 
-        <div class="space-y-2" [class.opacity-50]="isSoundMuted">
-          <label class="block text-sm font-medium text-gray-700">
+        <div class="space-y-2" [class.opacity-50]="soundMuted()">
+          <label class="volume-label">
             Volumen: {{ soundVolumeControl.value }}%
           </label>
           <input
@@ -91,21 +189,63 @@
             step="1"
             [formControl]="soundVolumeControl"
             (input)="onFieldChange()"
-            [attr.disabled]="isSoundMuted ? '' : null"
+            [attr.disabled]="soundMuted() ? '' : null"
             class="w-full"
+            aria-label="Volumen del sonido de notificaciones"
           />
+          <p class="field-hint">
+            El volumen se aplica sobre el del dispositivo: al 100 % nunca supera
+            el volumen del sistema.
+          </p>
         </div>
+      </div>
+    </div>
+
+    <!-- Configuración de la tienda: canales externos + destinos -->
+    <div>
+      <h4 class="section-kicker">
+        <app-icon name="store" [size]="13"></app-icon>
+        <span>Canales de la tienda</span>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">
+          Para toda la tienda
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        A diferencia de lo anterior, esto define la política de
+        <strong>la tienda entera</strong> y se aplica al presionar
+        <strong>Guardar</strong>: qué canales externos quedan habilitados y a qué
+        dirección o número van dirigidas las alertas.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-setting-toggle [formControl]="emailEnabledControl" label="Notificaciones por Email"
+          description="Habilita el correo como canal de alertas de la tienda y muestra los campos de destino."
+          (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="smsEnabledControl" label="Notificaciones por SMS"
+          description="Habilita el mensaje de texto como canal y muestra los campos de teléfono de destino."
+          (changed)="onFieldChange()"></app-setting-toggle>
       </div>
     </div>
 
     <!-- Alert Subscriptions -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Alertas de Eventos</h4>
+      <h4 class="section-kicker">
+        <app-icon name="alert-circle" [size]="13"></app-icon>
+        <span>Alertas de Eventos</span>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">
+          Para toda la tienda
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        Define a dónde se dirigen las alertas operativas de la tienda. Los campos
+        de destino aparecen sólo cuando el canal correspondiente está habilitado
+        arriba.
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- Stock Alerts -->
         <div class="space-y-3">
           <app-setting-toggle [formControl]="lowStockAlertsControl" label="Stock Bajo"
-            description="Notificar cuando el producto se agote" (changed)="onFieldChange()"></app-setting-toggle>
+            description="Avisa cuando un producto cae por debajo del mínimo definido en Inventario."
+            (changed)="onFieldChange()"></app-setting-toggle>
           @if (lowStockAlertsControl.value) {
           <div class="space-y-3 animate-slideDown pl-3 border-l-2 border-orange-100 ml-1">
             @if (emailEnabledControl.value) {
@@ -116,13 +256,20 @@
             <app-input [formControl]="lowStockAlertsPhoneControl" type="tel" label="Teléfono de Alerta"
               placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
             }
+            @if (!emailEnabledControl.value && !smsEnabledControl.value) {
+            <p class="field-hint">
+              Habilita Email o SMS en «Canales de la tienda» para indicar a dónde
+              enviar esta alerta.
+            </p>
+            }
           </div>
           }
         </div>
         <!-- Order Alerts -->
         <div class="space-y-3">
           <app-setting-toggle [formControl]="newOrderAlertsControl" label="Nuevos Pedidos"
-            description="Notificar al recibir una nueva venta" (changed)="onFieldChange()"></app-setting-toggle>
+            description="Avisa cada vez que entra una venta nueva, del POS o de la tienda pública."
+            (changed)="onFieldChange()"></app-setting-toggle>
           @if (newOrderAlertsControl.value) {
           <div class="space-y-3 animate-slideDown pl-3 border-l-2 border-blue-100 ml-1">
             @if (emailEnabledControl.value) {
@@ -133,9 +280,47 @@
             <app-input [formControl]="newOrderAlertsPhoneControl" type="tel" label="Teléfono de Notificación"
               placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
             }
+            @if (!emailEnabledControl.value && !smsEnabledControl.value) {
+            <p class="field-hint">
+              Habilita Email o SMS en «Canales de la tienda» para indicar a dónde
+              enviar esta alerta.
+            </p>
+            }
           </div>
           }
         </div>
+      </div>
+      <p class="field-hint mt-3">
+        El teléfono admite dígitos, espacios, paréntesis, guiones y el signo
+        <strong>+</strong>. Incluye el indicativo del país (por ejemplo
+        <strong>+57</strong>) para que el número quede completo.
+      </p>
+    </div>
+
+    <!-- Vencimientos de Cuentas por Pagar -->
+    <div>
+      <h4 class="section-kicker">
+        <app-icon name="calendar-clock" [size]="13"></app-icon>
+        <span>Vencimientos de Cuentas por Pagar</span>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">
+          Para toda la tienda
+        </app-badge>
+      </h4>
+      <p class="section-hint">
+        Con cuántos días de anticipación se avisa que una cuota a un proveedor
+        está por vencer. El aviso de la cuota <strong>ya vencida</strong> se
+        sigue enviando siempre, sin importar este valor.
+      </p>
+      <div class="max-w-sm">
+        <app-input
+          [formControl]="apDueSoonDaysControl"
+          type="number"
+          label="Aviso de vencimiento CxP (días antes)"
+          [min]="0"
+          [max]="30"
+          helperText="Anticipación del aviso de pago a proveedor por vencer"
+          (inputChange)="onFieldChange()"
+        ></app-input>
       </div>
     </div>
   </div>

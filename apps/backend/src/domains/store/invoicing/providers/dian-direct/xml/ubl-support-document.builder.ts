@@ -319,7 +319,7 @@ export class UblSupportDocumentBuilder {
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
       line
         .ele(UBL_NAMESPACES.CBC, 'CreditedQuantity')
-        .att('unitCode', 'EA')
+        .att('unitCode', item.unit_code || 'EA')
         .txt(item.quantity);
       line
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
@@ -332,10 +332,13 @@ export class UblSupportDocumentBuilder {
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
         .txt(dianAmount(item.unit_price));
+      // Misma regla que la factura: si el precio se publica por N unidades de
+      // stock, `BaseQuantity` es N. El documento soporte declara compras a
+      // proveedores no obligados a facturar y comparte el contrato de línea.
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
-        .txt('1.00');
+        .att('unitCode', item.unit_code || 'EA')
+        .txt(dianAmount(UblCommonBuilder.resolveBaseQuantity(item)));
     });
   }
 

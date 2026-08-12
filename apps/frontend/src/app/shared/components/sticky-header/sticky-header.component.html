@@ -7,78 +7,81 @@
 >
   @if (visibleTabs().length) {
     <div class="sticky-header-tabs-row">
-      <nav
-        #tabsScrollContainer
-        class="sticky-header-tabs"
-        role="tablist"
-        [attr.aria-label]="tabsAriaLabel()"
-        (scroll)="onTabsScroll()"
-        (keydown)="onTabsKeydown($event)"
-      >
-        @for (tab of visibleTabs(); track tab.id) {
-          @if (tab.route) {
-            <a
-              [routerLink]="tab.route"
-              routerLinkActive
-              #rla="routerLinkActive"
-              [routerLinkActiveOptions]="{ exact: tab.exact === true }"
-              class="sticky-header-tab"
-              role="tab"
-              [attr.data-tab-id]="tab.id"
-              [class.sticky-header-tab--active]="isTabActive(tab, rla.isActive)"
-              [class.sticky-header-tab--disabled]="tab.disabled"
-              [attr.aria-selected]="isTabActive(tab, rla.isActive)"
-              [attr.aria-current]="
-                isTabActive(tab, rla.isActive) ? 'page' : null
-              "
-              [attr.aria-disabled]="tab.disabled ? 'true' : null"
-              [attr.tabindex]="
-                tab.disabled
-                  ? -1
-                  : isTabActive(tab, rla.isActive)
-                    ? 0
-                    : -1
-              "
-              (click)="onTabClick(tab, $event)"
-            >
-              @if (tab.icon) {
-                <app-icon [name]="tab.icon" size="13"></app-icon>
-              }
-              @if (tab.shortLabel) {
-                <span class="sm:hidden">{{ tab.shortLabel }}</span>
-                <span class="hidden sm:inline">{{ tab.label }}</span>
-              } @else {
-                <span>{{ tab.label }}</span>
-              }
-            </a>
-          } @else {
-            <button
-              type="button"
-              class="sticky-header-tab"
-              role="tab"
-              [attr.data-tab-id]="tab.id"
-              [disabled]="tab.disabled"
-              [class.sticky-header-tab--active]="isTabActive(tab)"
-              [class.sticky-header-tab--disabled]="tab.disabled"
-              [attr.aria-selected]="isTabActive(tab)"
-              [attr.tabindex]="
-                tab.disabled ? -1 : isTabActive(tab) ? 0 : -1
-              "
-              (click)="onTabClick(tab)"
-            >
-              @if (tab.icon) {
-                <app-icon [name]="tab.icon" size="13"></app-icon>
-              }
-              @if (tab.shortLabel) {
-                <span class="sm:hidden">{{ tab.shortLabel }}</span>
-                <span class="hidden sm:inline">{{ tab.label }}</span>
-              } @else {
-                <span>{{ tab.label }}</span>
-              }
-            </button>
+      <!-- Decorative shell: carries the rail's background and its fading
+           border so the <nav> stays a pure scroll container. Masking the nav
+           itself would dissolve the tab labels along with the border. -->
+      <div class="sticky-header-tabs-shell">
+        <nav
+          #tabsScrollContainer
+          class="sticky-header-tabs"
+          [class.sticky-header-tabs--fade-left]="showLeftArrow()"
+          [class.sticky-header-tabs--fade-right]="showRightArrow()"
+          role="tablist"
+          [attr.aria-label]="tabsAriaLabel()"
+          (scroll)="onTabsScroll()"
+          (keydown)="onTabsKeydown($event)"
+        >
+          @for (tab of visibleTabs(); track tab.id) {
+            @if (tab.route) {
+              <a
+                [routerLink]="tab.route"
+                routerLinkActive
+                #rla="routerLinkActive"
+                [routerLinkActiveOptions]="{ exact: tab.exact === true }"
+                class="sticky-header-tab"
+                role="tab"
+                [attr.data-tab-id]="tab.id"
+                [class.sticky-header-tab--active]="
+                  isTabActive(tab, rla.isActive)
+                "
+                [class.sticky-header-tab--disabled]="tab.disabled"
+                [attr.aria-selected]="isTabActive(tab, rla.isActive)"
+                [attr.aria-current]="
+                  isTabActive(tab, rla.isActive) ? 'page' : null
+                "
+                [attr.aria-disabled]="tab.disabled ? 'true' : null"
+                [attr.tabindex]="
+                  tab.disabled ? -1 : isTabActive(tab, rla.isActive) ? 0 : -1
+                "
+                (click)="onTabClick(tab, $event)"
+              >
+                @if (tab.icon) {
+                  <app-icon [name]="tab.icon" size="14"></app-icon>
+                }
+                @if (tab.shortLabel) {
+                  <span class="sm:hidden">{{ tab.shortLabel }}</span>
+                  <span class="hidden sm:inline">{{ tab.label }}</span>
+                } @else {
+                  <span>{{ tab.label }}</span>
+                }
+              </a>
+            } @else {
+              <button
+                type="button"
+                class="sticky-header-tab"
+                role="tab"
+                [attr.data-tab-id]="tab.id"
+                [disabled]="tab.disabled"
+                [class.sticky-header-tab--active]="isTabActive(tab)"
+                [class.sticky-header-tab--disabled]="tab.disabled"
+                [attr.aria-selected]="isTabActive(tab)"
+                [attr.tabindex]="tab.disabled ? -1 : isTabActive(tab) ? 0 : -1"
+                (click)="onTabClick(tab)"
+              >
+                @if (tab.icon) {
+                  <app-icon [name]="tab.icon" size="14"></app-icon>
+                }
+                @if (tab.shortLabel) {
+                  <span class="sm:hidden">{{ tab.shortLabel }}</span>
+                  <span class="hidden sm:inline">{{ tab.label }}</span>
+                } @else {
+                  <span>{{ tab.label }}</span>
+                }
+              </button>
+            }
           }
-        }
-      </nav>
+        </nav>
+      </div>
     </div>
   }
 
@@ -95,7 +98,8 @@
           customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200"
         >
           <app-icon
-            slot="icon" name="arrow-left"
+            slot="icon"
+            name="arrow-left"
             size="16"
             class="md:!w-[18px] md:!h-[18px] text-gray-500"
           ></app-icon>

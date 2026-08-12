@@ -965,7 +965,9 @@ export class UblCommonBuilder {
 
       line
         .ele(UBL_NAMESPACES.CBC, options.quantity_element)
-        .att('unitCode', 'EA') // Each (unit)
+        // Unidad realmente vendida; `EA` (each) cuando el producto no declara
+        // unidad, que es todo el catálogo por pieza.
+        .att('unitCode', item.unit_code || 'EA')
         .txt(item.quantity);
 
       // Same function the header uses, so header and lines cannot disagree.
@@ -1063,11 +1065,27 @@ export class UblCommonBuilder {
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
         .txt(dianAmount(item.unit_price));
+      // `BaseQuantity` declara a cuánta cantidad aplica `PriceAmount`. Para un
+      // producto que publica su precio por N unidades de stock es N, no 1: con
+      // `1.00` el documento afirma "$28.000 por gramo" en vez de "por kilo".
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
-        .att('unitCode', 'EA')
-        .txt('1.00');
+        .att('unitCode', item.unit_code || 'EA')
+        .txt(dianAmount(UblCommonBuilder.resolveBaseQuantity(item)));
     });
+  }
+
+  /**
+   * `cac:Price/cbc:BaseQuantity` — la cantidad a la que aplica `PriceAmount`.
+   *
+   * Saneado igual que el divisor del importe de línea (`dian-money.util.ts`):
+   * solo un valor > 1 cuenta como escala; ausente, 0, negativo o no numérico
+   * devuelve 1, que es el comportamiento histórico de todo el catálogo por
+   * pieza. Un `0.00` acá sería peor que el defecto que corrige.
+   */
+  static resolveBaseQuantity(item: { price_unit_quantity?: string }): number {
+    const n = Number(item.price_unit_quantity ?? 1);
+    return Number.isFinite(n) && n > 1 ? n : 1;
   }
 
   /**

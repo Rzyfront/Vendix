@@ -33,7 +33,8 @@ Use this skill to execute development work safely and consistently after the req
 - Keep changes minimal, scoped, and aligned with the mapped skills.
 - Do not introduce new architecture, business behavior, or compatibility layers unless the plan or the human explicitly requires it.
 - Preserve unrelated user changes in the working tree.
-- Verify the result with `buildcheck-dev` before claiming completion.
+- Verify the result with `buildcheck-dev` before claiming completion — Docker logs only, never a
+  build/typecheck command, and never as a self-initiated pre-PR gate (CI already runs the build).
 
 ## Skill-First Development
 
@@ -78,7 +79,10 @@ After code or skill changes:
 - **Runtime API/endpoint verification uses `curl`, never Bruno.** Authenticate against dev with a seed owner account (`owner@techsolutions.co` or `owner@fashionretail.com`, password `1125634q`; see `apps/backend/prisma/seeds/users.seed.ts`), or ask the user for the `slug`, `email`, and `password` of an authorized dev test account. Bruno (`.bru`) is opt-in only when a developer explicitly requests it (`vendix-bruno-test`).
 - **Frontend changes require end-to-end verification with Playwright MCP, not just a passing build** (a green build does not catch zoneless/signals behavior bugs). Drive the real vhost (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its `app_type` by hostname. Launch the Playwright MCP server with **`--ignore-https-errors`** — a **single** context-level flag that makes Chromium trust the local self-signed vhost for **both** the page and every subresource `fetch` (including the `app_type` resolve call). Playwright MCP runs headed by default and can also inspect network + console (`browser_network_requests`, `browser_console_messages`) to confirm API calls fire and catch signals errors. `agent-browser` stays as a scoped **fallback** MCP for the few things Playwright MCP cannot do (arbitrary CSS-selector wait, manual scroll, page-markdown read). See `how-to-test` § Mechanism 2.
 - Use `skill-sync` after creating or modifying skills.
-- Run production build commands only when the human explicitly requests production verification.
+- Never run a build, typecheck, or `npm run buildcheck*` command for development or as a self-
+  initiated pre-PR check — Docker logs are the only required verification, and GitHub Actions
+  already gates the build before merge/release. Only run one when the human explicitly asks to
+  test a build, or confirms your suggestion to run one while preparing a release.
 
 ## Related Skills
 

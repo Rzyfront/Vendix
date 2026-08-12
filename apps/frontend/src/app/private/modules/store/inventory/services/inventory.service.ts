@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   InventoryLocation,
   CreateLocationDto,
@@ -10,6 +11,7 @@ import {
   InventoryAdjustment,
   CreateAdjustmentDto,
   AdjustmentQueryDto,
+  AdjustmentListResponse,
   AdjustableProduct,
   BatchCreateAdjustmentsRequest,
   InventoryMovement,
@@ -88,21 +90,15 @@ export class InventoryService {
   // ADJUSTMENTS
   // ============================================================
 
+  // `hasMore` en camelCase es lo que responde el backend; el `has_more` que se
+  // declaraba acá nunca existió en el cuerpo, así que siempre llegaba undefined.
   getAdjustments(query: AdjustmentQueryDto = {}): Observable<
-    ApiResponse<{
-      adjustments: InventoryAdjustment[];
-      total: number;
-      has_more: boolean;
-    }>
+    ApiResponse<AdjustmentListResponse>
   > {
     const params = this.buildParams(query);
     return this.http
       .get<
-        ApiResponse<{
-          adjustments: InventoryAdjustment[];
-          total: number;
-          has_more: boolean;
-        }>
+        ApiResponse<AdjustmentListResponse>
       >(`${this.base_url}/adjustments`, { params })
       .pipe(catchError(this.handleError));
   }
@@ -125,14 +121,19 @@ export class InventoryService {
       .pipe(catchError(this.handleError));
   }
 
+  /**
+   * El aprobador ya no viaja en el body: el backend lo resuelve del contexto de
+   * la petición. Antes se enviaba `approved_by_user_id` (con un `0` literal) y
+   * el controlador leía `approvedByUserId`, así que el dato nunca llegaba y la
+   * columna quedaba en NULL.
+   */
   approveAdjustment(
     id: number,
-    approved_by_user_id: number,
   ): Observable<ApiResponse<InventoryAdjustment>> {
     return this.http
       .patch<
         ApiResponse<InventoryAdjustment>
-      >(`${this.base_url}/adjustments/${id}/approve`, { approved_by_user_id })
+      >(`${this.base_url}/adjustments/${id}/approve`, {})
       .pipe(catchError(this.handleError));
   }
 
@@ -208,6 +209,34 @@ export class InventoryService {
       .get<
         PaginatedApiResponse<InventoryMovement>
       >(`${this.base_url}/movements`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Conteos de TODO el conjunto filtrado, para las tarjetas. La página del
+   * listado no sirve para calcularlos: son 25 filas y la tarjeta habla del
+   * total, así que el agregado se pide al backend con el MISMO filtro.
+   */
+  getMovementStats(
+    query: MovementQueryDto = {},
+  ): Observable<
+    ApiResponse<{
+      total: number;
+      stock_in: number;
+      stock_out: number;
+      transfers: number;
+    }>
+  > {
+    const params = this.buildParams(query);
+    return this.http
+      .get<
+        ApiResponse<{
+          total: number;
+          stock_in: number;
+          stock_out: number;
+          transfers: number;
+        }>
+      >(`${this.base_url}/movements/stats`, { params })
       .pipe(catchError(this.handleError));
   }
 
@@ -399,25 +428,14 @@ export class InventoryService {
     return params;
   }
 
+  // Un solo traductor de errores para toda la app: `extractApiErrorMessage`
+  // resuelve el `error_code` tipado contra ERROR_MESSAGES y sólo cae a los
+  // genéricos por status si no hay código. La versión que vivía acá mostraba el
+  // `message` del backend —el mensaje de DESARROLLO, en inglés— directo al
+  // usuario, que es justo lo que parse-api-error prohíbe.
   private handleError(error: any): Observable<never> {
     console.error('InventoryService Error:', error);
-    let error_message = 'An error occurred';
-
-    if (error.error?.message) {
-      error_message = error.error.message;
-    } else if (error.status === 400) {
-      error_message = 'Invalid data provided';
-    } else if (error.status === 401) {
-      error_message = 'Unauthorized access';
-    } else if (error.status === 403) {
-      error_message = 'Insufficient permissions';
-    } else if (error.status === 404) {
-      error_message = 'Resource not found';
-    } else if (error.status >= 500) {
-      error_message = 'Server error. Please try again later';
-    }
-
-    return throwError(() => error_message);
+    return throwError(() => extractApiErrorMessage(error));
   }
 
   /**

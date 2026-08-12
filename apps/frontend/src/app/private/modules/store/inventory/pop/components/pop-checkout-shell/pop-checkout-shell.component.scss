@@ -1,0 +1,245 @@
+/* QUI-647 — POP Checkout Shell. Stepper + paso activo (Pago/Recepción/
+   Confirmación) + footer. Los estilos de los pasos viven en sus propios
+   componentes; acá solo el armazón del wizard. */
+
+.pop-checkout-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.pop-checkout-stepper {
+  max-width: 560px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.pop-checkout-body {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card, 16px);
+  background: var(--color-surface);
+}
+
+.step-panel {
+  padding: 16px;
+  @media (min-width: 768px) {
+    padding: 20px;
+  }
+}
+
+.step-hidden {
+  display: none;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+.pop-checkout-footer {
+  width: 100%;
+}
+
+.footer-desktop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  @media (max-width: 767px) {
+    display: none;
+  }
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.footer-total-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.footer-total-amount {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-cancel,
+.btn-prev,
+.btn-next,
+.btn-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-cancel {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-destructive);
+    color: var(--color-destructive);
+  }
+}
+
+.btn-prev {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-primary);
+  }
+}
+
+.btn-next {
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  color: var(--color-text-on-primary);
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.05);
+  }
+}
+
+.btn-confirm {
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  color: var(--color-text-on-primary);
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.05);
+  }
+
+  &.loading {
+    opacity: 0.8;
+    cursor: progress;
+  }
+}
+
+/* Flash del botón cuando no puede avanzar (shakes para decir "qué falta"). */
+.btn-next.flash,
+.btn-cta-mobile.flash {
+  animation: pop-checkout-shake 0.4s ease;
+}
+
+@keyframes pop-checkout-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+/* ── Footer móvil (Pencil: "← Atrás" + CTA ancho completo) ─────────────── */
+.footer-mobile {
+  display: none;
+
+  @media (max-width: 767px) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+}
+
+.btn-back-mobile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-cta-mobile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 8px;
+  height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.loading {
+    opacity: 0.8;
+    cursor: progress;
+  }
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: pop-checkout-spin 0.7s linear infinite;
+}
+
+@keyframes pop-checkout-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -217,6 +217,22 @@ export class ReportDataAdapterService {
       }
     }
 
+    // Los demás objetos de `meta` se conservan bajo su propia clave. Antes sólo
+    // sobrevivían los primitivos y las cuatro claves aplanadas de arriba: todo
+    // otro objeto se descartaba sin dejar rastro. Así, la cobertura de costo que
+    // el backend sí manda (`meta.cost_coverage`) no llegaba a la vista y una
+    // valuación parcial se leía como si fuera completa.
+    for (const [key, value] of Object.entries(meta)) {
+      if (
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        !nestedKeys.includes(key)
+      ) {
+        summaryData[key] = value;
+      }
+    }
+
     return Object.keys(summaryData).length > 0 ? summaryData : undefined;
   }
 

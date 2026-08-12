@@ -30,6 +30,7 @@ import { StoreSettings } from '../../store/settings/interfaces/store-settings.in
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
+import { PwaCacheService } from '@common/services/pwa-cache.service';
 
 // Aggregated store dashboards tolerate 1-2 min of staleness → short TTL (ms).
 const STORE_DASHBOARD_CACHE_TTL_MS = 120_000;
@@ -45,6 +46,7 @@ export class StoresService {
     private storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
     private readonly staffProvisioning: StaffProvisioningService,
+    private readonly pwaCache: PwaCacheService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
@@ -378,11 +380,19 @@ export class StoresService {
       storeData.operating_hours = operating_hours;
     }
 
-    return this.prisma.stores.update({
+    const updated = await this.prisma.stores.update({
       where: { id },
       data: { ...storeData, updated_at: new Date() },
       include: { organizations: true, addresses: true, store_settings: true },
     });
+
+    // `stores.logo_url` alimenta el ícono instalable y `stores.name` el nombre
+    // del manifest; ambos se cachean en S3 + Redis y no se re-derivan solos.
+    if (storeData.logo_url !== undefined || storeData.name !== undefined) {
+      await this.pwaCache.invalidateStore(id);
+    }
+
+    return updated;
   }
 
   async remove(id: number) {

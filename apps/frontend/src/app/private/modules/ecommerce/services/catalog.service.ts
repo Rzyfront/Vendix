@@ -86,6 +86,17 @@ export interface EcommerceProduct {
    */
   is_available_now?: boolean;
   next_available?: MenuNextAvailable | null;
+  /**
+   * Escala en la que se publica el precio cuando el producto se mide en una
+   * unidad fina: `label` viene listo para pintar ("por m"). `null` = precio por
+   * unidad, que es el catálogo histórico.
+   */
+  price_unit?: {
+    quantity: number;
+    stock_unit_code: string | null;
+    reference_unit_code: string | null;
+    label: string;
+  } | null;
 }
 
 export interface ProductVariantDetail {

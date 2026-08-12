@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -21,10 +22,20 @@ import { Prisma } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { LocationsService } from '../inventory/locations/locations.service';
-import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
+import {
+  assertTiersAllowed,
+  assertVariantsAllowed,
+} from './services/tiers-variants-exclusive.util';
+import { resolvePackSize } from './services/packaging.util';
+import {
+  buildSaleConfigExplanation,
+  SaleConfigExplanation,
+  SaleConfigPresentation,
+  SaleConfigUnit,
+} from './services/sale-config-explainer.util';
 import { S3Service } from '@common/services/s3.service';
 import { QrService } from '@common/services/qr.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
@@ -89,9 +100,10 @@ interface OnlinePurchaseData {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly inventoryService: InventoryIntegrationService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
@@ -211,6 +223,41 @@ export class ProductsService {
     return Math.round(
       Number(purchaseUom.factor_to_base) / Number(stockUom.factor_to_base),
     );
+  }
+
+  /**
+   * La unidad de STOCK debe ser exacta.
+   *
+   * El inventario es `Int` en la unidad base (`stock_levels.quantity_on_hand`),
+   * así que una unidad cuyo `factor_to_base` no es entero —pulgada = 25,4 mm,
+   * galón = 3785,411784 ml— no puede representarse sin perder mercancía en cada
+   * conversión. El catálogo marca esas unidades con `is_stock_eligible=false`;
+   * siguen sirviendo como unidad de COMPRA (solo convierten al recibir) o como
+   * presentación de venta.
+   */
+  private async assertStockUomEligible(
+    stock_uom_id: number | null | undefined,
+  ): Promise<void> {
+    if (stock_uom_id === undefined || stock_uom_id === null) return;
+
+    const uom = await this.prisma.units_of_measure.findFirst({
+      where: { id: stock_uom_id },
+      select: { code: true, name: true, is_stock_eligible: true, is_active: true },
+    });
+    if (!uom || !uom.is_active) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Unidad de medida no encontrada en el catálogo',
+        { stock_uom_id },
+      );
+    }
+    if (!uom.is_stock_eligible) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_UOM_NOT_STOCK_ELIGIBLE,
+        `${uom.name} (${uom.code}) no puede ser la unidad de stock porque su factor de conversión no es entero. Úsala como unidad de compra o define el stock en una unidad exacta.`,
+        { stock_uom_id, code: uom.code },
+      );
+    }
   }
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
@@ -492,6 +539,28 @@ export class ProductsService {
         { barcode: normalized, conflict_type: 'variant' },
       );
     }
+
+    // Tercera tabla del mismo espacio de nombres (QUI-648): la presentación
+    // "Caja x12" pistolea su propio código y no puede chocar con el del
+    // producto ni con el de una variante. El scoping por tienda lo aporta el
+    // cliente scopeado; el índice único parcial lo respalda en la base.
+    const presentationConflict =
+      await prisma.product_price_tier_assignments.findFirst({
+        where: {
+          barcode: { equals: normalized },
+          ...(options.excludeProductId && {
+            NOT: { product_id: options.excludeProductId },
+          }),
+        },
+        select: { product_id: true, price_tier_id: true },
+      });
+    if (presentationConflict) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_BARCODE_DUP_001,
+        'El código de barras ya está en uso por una presentación de venta en esta tienda',
+        { barcode: normalized, conflict_type: 'presentation' },
+      );
+    }
   }
 
   async create(createProductDto: CreateProductDto) {
@@ -572,6 +641,15 @@ export class ProductsService {
         }
       }
 
+      // Multi-tarifa ⊕ variantes: excluyentes. El producto todavía no existe,
+      // así que la cuenta de variantes sale del payload.
+      if (sanitizedDto.has_multiple_price_tiers === true) {
+        await assertTiersAllowed(this.prisma as any, null, {
+          incomingVariantCount: sanitizedDto.variants?.length ?? 0,
+          action: 'create_product_with_price_tiers',
+        });
+      }
+
       // Verificar que el brand_id exista y esté activo
       if (sanitizedDto.brand_id) {
         const brand = await this.prisma.brands.findFirst({
@@ -636,6 +714,10 @@ export class ProductsService {
         store_id,
         slug,
       );
+
+      // La unidad de stock debe ser exacta antes de derivar nada: el factor se
+      // calcula contra ella y el inventario se lleva en enteros de la base.
+      await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
 
       // Derivar purchase_to_stock_factor desde el catálogo de UoM (fuente de
       // verdad de costeo). Sobrescribe lo que mande el cliente cuando vienen
@@ -827,8 +909,27 @@ export class ProductsService {
             });
           }
 
+          // Un producto CON variantes no tiene stock propio: el saldo vive en
+          // cada variante y `syncProductStock` suma esas filas. Escribir además
+          // una fila base (`product_variant_id: null`) con el total dejaba
+          // existencias fantasma: invisibles en catálogo y POS —porque toda
+          // lectura filtra por variante—, pero editables por el ajuste masivo y
+          // destruidas en la siguiente edición del producto. El frontend manda
+          // `stock_quantity = suma de las variantes` (`product-create-page`), así
+          // que sin esta guarda el total se duplicaba en una fila huérfana.
+          const hasVariants = !!(variants && variants.length > 0);
+
           // Inicializar stock levels para múltiples ubicaciones
-          if (stock_by_location && stock_by_location.length > 0) {
+          if (hasVariants) {
+            if (
+              (stock_by_location && stock_by_location.length > 0) ||
+              (stock_quantity && stock_quantity > 0)
+            ) {
+              this.logger.warn(
+                `Producto ${product.id} se creó con ${variants!.length} variante(s): se ignora el stock base recibido (stock_quantity=${stock_quantity ?? 0}, ubicaciones=${stock_by_location?.length ?? 0}). El saldo lo llevan las variantes.`,
+              );
+            }
+          } else if (stock_by_location && stock_by_location.length > 0) {
             // Usar las ubicaciones especificadas en el DTO
             for (const stockLocation of stock_by_location) {
               await this.stockLevelManager.updateStock(
@@ -1062,6 +1163,14 @@ export class ProductsService {
         OR: [
           { barcode: { equals: barcode } },
           { product_variants: { some: { barcode: { equals: barcode } } } },
+          // Tercer espacio del mismo namespace (QUI-648): pistolear el código
+          // de la "Caja x12" devuelve su producto, y el POS resuelve la
+          // presentación desde el assignment que lo lleva.
+          {
+            product_price_tier_assignments: {
+              some: { barcode: { equals: barcode } },
+            },
+          },
         ],
       }),
       ...(search &&
@@ -1201,7 +1310,7 @@ export class ProductsService {
             },
           },
           product_price_tier_assignments: {
-            select: { price_tier_id: true },
+            select: { price_tier_id: true, barcode: true },
           },
           product_images: {
             where: { is_main: true },
@@ -1422,6 +1531,20 @@ export class ProductsService {
               (product as any).product_price_tier_assignments?.map(
                 (assignment: any) => assignment.price_tier_id,
               ) ?? [],
+            // QUI-648: cómo se mide y cómo se cobra el producto. Van en el
+            // LISTADO —no solo en el detalle— porque el POS decide la captura
+            // al tocar la tarjeta: sin esto tendría que pedir el detalle de
+            // cada producto medido antes de poder agregarlo al carrito.
+            // `sale_config_summary` no viaja acá a propósito: cuesta dos
+            // consultas por producto y sería un N+1 sobre la grilla.
+            stock_uom_id: (product as any).stock_uom_id ?? null,
+            price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+            ...(barcode && {
+              scanned_price_tier_id:
+                (product as any).product_price_tier_assignments?.find(
+                  (assignment: any) => assignment.barcode === barcode,
+                )?.price_tier_id ?? null,
+            }),
           };
         }),
       );
@@ -1602,6 +1725,20 @@ export class ProductsService {
             (product as any).product_price_tier_assignments?.map(
               (assignment: any) => assignment.price_tier_id,
             ) ?? [],
+          // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
+          // `pos_optimized` para el porqué de exponerlo en el listado).
+          stock_uom_id: (product as any).stock_uom_id ?? null,
+          price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+          // Pistolear el código de una presentación devuelve el producto Y
+          // cuál de sus presentaciones se escaneó. Sin esto el POS recibiría
+          // el producto y tendría que adivinar la unidad de venta, que es
+          // justo lo que el código de barras vino a resolver.
+          ...(barcode && {
+            scanned_price_tier_id:
+              (product as any).product_price_tier_assignments?.find(
+                (assignment: any) => assignment.barcode === barcode,
+              )?.price_tier_id ?? null,
+          }),
         };
       }),
     );
@@ -1790,6 +1927,15 @@ export class ProductsService {
       purchase_to_stock_factor: product.purchase_to_stock_factor,
       stock_uom_id: product.stock_uom_id,
       purchase_uom_id: product.purchase_uom_id,
+      // Escala del precio: sin exponerla, el editor recargaría un producto
+      // vendido por metro como si costara eso por milímetro.
+      price_unit_quantity: (product as any).price_unit_quantity ?? 1,
+      // Cómo se vende, en una frase. La misma que muestra el editor, para que
+      // el móvil y Vexi no tengan que reconstruirla por su cuenta.
+      sale_config_summary: await this.buildSaleConfigSummary(
+        product as any,
+        hasVariants,
+      ),
       track_inventory: product.track_inventory,
       // Flag de seriales. Se persiste vía `...productData` en update y vía el
       // bloque explícito en create, pero el form de edición lo lee de ESTE
@@ -1857,6 +2003,108 @@ export class ProductsService {
       stock_levels: product.stock_levels,
       stores: product.stores,
     };
+  }
+
+  /**
+   * Frase que describe cómo se vende el producto: unidad de stock, escala de
+   * precio y presentaciones. Se arma con el helper compartido para que el
+   * detalle de API diga exactamente lo mismo que el editor.
+   *
+   * Cuesta dos consultas y solo se pagan cuando el producto declara unidad de
+   * stock o tiene presentaciones habilitadas; el catálogo por pieza —la
+   * inmensa mayoría— sale por el camino corto sin tocar la base.
+   */
+  private async buildSaleConfigSummary(
+    product: any,
+    hasVariants: boolean,
+  ): Promise<SaleConfigExplanation | null> {
+    const tierIds: number[] = (product.product_price_tier_assignments ?? [])
+      .map((a: any) => a.price_tier_id)
+      .filter((id: any) => typeof id === 'number');
+
+    if (!product.stock_uom_id && tierIds.length === 0) return null;
+
+    let stockUnit: SaleConfigUnit | null = null;
+    let catalog: SaleConfigUnit[] = [];
+    if (product.stock_uom_id) {
+      const unit = await this.prisma.units_of_measure.findFirst({
+        where: { id: product.stock_uom_id },
+        select: {
+          code: true,
+          name: true,
+          dimension: true,
+          factor_to_base: true,
+        },
+      });
+      if (unit) {
+        stockUnit = {
+          code: unit.code,
+          name: unit.name,
+          dimension: unit.dimension,
+          factor_to_base: Number(unit.factor_to_base),
+        };
+        const siblings = await this.prisma.units_of_measure.findMany({
+          where: { dimension: unit.dimension, is_active: true },
+          select: {
+            code: true,
+            name: true,
+            dimension: true,
+            factor_to_base: true,
+          },
+        });
+        catalog = siblings.map((u) => ({
+          code: u.code,
+          name: u.name,
+          dimension: u.dimension,
+          factor_to_base: Number(u.factor_to_base),
+        }));
+      }
+    }
+
+    let presentations: SaleConfigPresentation[] = [];
+    if (tierIds.length > 0) {
+      const tiers = await this.prisma.price_tiers.findMany({
+        where: { id: { in: tierIds }, is_active: true },
+        select: {
+          id: true,
+          name: true,
+          units_per_package: true,
+          product_overrides: {
+            where: { product_id: product.id, variant_id: null },
+            select: {
+              override_price: true,
+              override_units_per_package: true,
+            },
+          },
+        },
+      });
+      presentations = tiers
+        .map((tier) => {
+          const override = tier.product_overrides?.[0];
+          return {
+            name: tier.name,
+            packSize: resolvePackSize(
+              tier.units_per_package,
+              override?.override_units_per_package,
+            ),
+            price:
+              override?.override_price != null
+                ? Number(override.override_price)
+                : null,
+          };
+        })
+        .filter((p) => p.packSize > 1);
+    }
+
+    return buildSaleConfigExplanation({
+      stockUnit,
+      catalog,
+      presentations,
+      hasVariants,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1),
+      basePrice:
+        product.base_price != null ? Number(product.base_price) : null,
+    });
   }
 
   async findBySlug(storeId: number, slug: string) {
@@ -2025,6 +2273,41 @@ export class ProductsService {
         }
       }
 
+      // BLOCK: multi-tarifa ⊕ variantes. Se bloquea la petición que CREA el
+      // conflicto, no la que lo arrastra: un producto legacy que ya tiene ambos
+      // debe poder editarse (y reducir variantes) para salir del estado
+      // inconsistente. La UI informa el conflicto en ese caso.
+      {
+        const wasTiers =
+          (existingProduct as any).has_multiple_price_tiers === true;
+        const willBeTiers =
+          sanitizedDto.has_multiple_price_tiers !== undefined
+            ? sanitizedDto.has_multiple_price_tiers === true
+            : wasTiers;
+        const effectiveVariantCount =
+          sanitizedDto.variants !== undefined
+            ? sanitizedDto.variants.length
+            : await this.prisma.product_variants.count({
+                where: { product_id: id },
+              });
+
+        if (willBeTiers && !wasTiers && effectiveVariantCount > 0) {
+          // Prender multi-tarifa sobre un producto con variantes.
+          await assertTiersAllowed(this.prisma as any, null, {
+            incomingVariantCount: effectiveVariantCount,
+            action: 'enable_price_tiers',
+          });
+        } else if (
+          willBeTiers &&
+          sanitizedDto.variants?.some((v: any) => !v.id)
+        ) {
+          // Agregar variantes nuevas a un producto que se vende por presentación.
+          await assertVariantsAllowed(this.prisma as any, id, {
+            action: 'add_variants',
+          });
+        }
+      }
+
       // Obtener contexto al inicio
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
@@ -2126,6 +2409,55 @@ export class ProductsService {
       const uomFkTouched =
         sanitizedDto.stock_uom_id !== undefined ||
         sanitizedDto.purchase_uom_id !== undefined;
+      if (sanitizedDto.stock_uom_id !== undefined) {
+        await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
+      }
+
+      // Cambiar la unidad de stock de un producto que YA opera no es renombrar
+      // una etiqueta: existencias, capas de costo, lotes y recetas están
+      // escritos en la unidad vieja. Se exige el flag explícito porque una
+      // conversión silenciosa multiplicaría el inventario por mil sin que
+      // nadie lo pidiera.
+      const stockUomChanged =
+        sanitizedDto.stock_uom_id !== undefined &&
+        existingProduct.stock_uom_id != null &&
+        Number(sanitizedDto.stock_uom_id) !==
+          Number(existingProduct.stock_uom_id);
+      let pendingUomConversion: {
+        from: number;
+        to: number;
+      } | null = null;
+      if (stockUomChanged) {
+        const [levels, layers, batches, recipeLines] = await Promise.all([
+          this.prisma.stock_levels.count({
+            where: { product_id: id, NOT: { quantity_on_hand: 0 } },
+          }),
+          this.prisma.inventory_cost_layers.count({
+            where: { product_id: id, NOT: { quantity_remaining: 0 } },
+          }),
+          this.prisma.inventory_batches.count({
+            where: { product_id: id, NOT: { quantity: 0 } },
+          }),
+          this.prisma.recipe_items.count({
+            where: { component_product_id: id },
+          }),
+        ]);
+        const hasData = levels + layers + batches + recipeLines > 0;
+        if (hasData) {
+          if (sanitizedDto.stock_uom_conversion !== 'convert') {
+            throw new VendixHttpException(
+              ErrorCodes.PROD_UOM_CONVERSION_REQUIRED,
+              `El producto tiene existencias, costos, lotes o recetas expresados en su unidad actual. Envía "stock_uom_conversion": "convert" para convertirlos, o deja la unidad como está.`,
+            );
+          }
+          pendingUomConversion = {
+            from: Number(existingProduct.stock_uom_id),
+            to: Number(sanitizedDto.stock_uom_id),
+          };
+        }
+      }
+      delete (sanitizedDto as any).stock_uom_conversion;
+      delete (productData as any).stock_uom_conversion;
       const derivedFactor = uomFkTouched
         ? await this.derivePurchaseToStockFactor(
             effectiveStockUomId,
@@ -2136,6 +2468,18 @@ export class ProductsService {
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
+          // La conversión va PRIMERO y en la misma transacción: si algo no
+          // divide exacto, el producto no llega a cambiar de unidad.
+          if (pendingUomConversion) {
+            await this.stockLevelManager.convertStockUom({
+              product_id: id,
+              from_uom_id: pendingUomConversion.from,
+              to_uom_id: pendingUomConversion.to,
+              user_id: RequestContextService.getUserId(),
+              tx: prisma,
+            });
+          }
+
           // Actualizar producto
           const product = await prisma.products.update({
             where: { id },

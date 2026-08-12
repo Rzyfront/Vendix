@@ -722,6 +722,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Operación bloqueada: existen reservas de stock activas',
   },
+  /**
+   * Borrar una variante reasigna su histórico al producto base y elimina sus
+   * filas de `stock_levels`. Con existencias vivas eso DESTRUYE inventario sin
+   * dejar ni ajuste ni movimiento que lo explique. La guarda previa sólo miraba
+   * reservas activas —que son un subconjunto—, así que una variante con 40
+   * unidades y ninguna reserva se borraba sin fricción.
+   */
+  PROD_VARIANT_HAS_STOCK_001: {
+    code: 'PROD_VARIANT_HAS_STOCK_001',
+    httpStatus: 409,
+    devMessage:
+      'Operación bloqueada: la variante tiene existencias. Ajusta el stock a 0 antes de eliminarla.',
+  },
   PROD_SKU_COLLISION_001: {
     code: 'PROD_SKU_COLLISION_001',
     httpStatus: 409,
@@ -850,6 +863,42 @@ export const ErrorCodes = {
     devMessage: 'Orden de compra no encontrada',
   },
 
+  // QUI-647 — plan de pago al crear la OC. Red final del wizard: el frontend
+  // valida inline, pero estos códigos son la cara HTTP cuando un request
+  // inválido llega por API directa. Reemplazan los BadRequestException de
+  // texto suelto que existían antes del ticket.
+  PO_PAYMENT_001: {
+    code: 'PO_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'Un abono parcial requiere un monto abonado mayor que cero',
+  },
+  PO_PAYMENT_002: {
+    code: 'PO_PAYMENT_002',
+    httpStatus: 400,
+    devMessage: 'El abono no puede superar el total de la orden',
+  },
+  PO_PAYMENT_003: {
+    code: 'PO_PAYMENT_003',
+    httpStatus: 400,
+    devMessage: 'Un pago diferido requiere una fecha de pago',
+  },
+  PO_PAYMENT_004: {
+    code: 'PO_PAYMENT_004',
+    httpStatus: 400,
+    devMessage: 'La fecha de pago no puede ser anterior a hoy',
+  },
+  PO_PAYMENT_005: {
+    code: 'PO_PAYMENT_005',
+    httpStatus: 400,
+    devMessage: 'Las cuotas programadas deben sumar el saldo de la orden',
+  },
+  PO_PAYMENT_006: {
+    code: 'PO_PAYMENT_006',
+    httpStatus: 400,
+    devMessage:
+      'El calendario de cuotas requiere al menos una cuota con monto mayor que cero',
+  },
+
   // Inventory
   INV_FIND_001: {
     code: 'INV_FIND_001',
@@ -896,6 +945,12 @@ export const ErrorCodes = {
     code: 'INV_LOC_001',
     httpStatus: 404,
     devMessage: 'Location not found',
+  },
+  INV_MOVEMENT_LOCATION_001: {
+    code: 'INV_MOVEMENT_LOCATION_001',
+    httpStatus: 400,
+    devMessage:
+      'Movement is missing the location leg its type requires (stock_in/return need to_location_id; stock_out/damage/expiration/adjustment need from_location_id; transfer needs both)',
   },
   INV_ADJ_001: {
     code: 'INV_ADJ_001',
@@ -1433,6 +1488,34 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'An active resolution with the same prefix and document type already exists for this accounting entity',
+  },
+  /**
+   * The resolution contradicts what `FISCAL_DOCUMENT_REQUIREMENTS` declares for
+   * its `document_type`: a missing DIAN authorization number, a missing ClTec on
+   * the sales invoice, or — the dangerous one — a ClTec stored on a document
+   * whose key is built with the Software-PIN. That last case is not cosmetic:
+   * `invoice-flow.service.ts` injects `resolution.technical_key` for every type
+   * and `dian-direct.provider.ts` prefers it over `config.software_pin`, so the
+   * CUDS/CUDE gets signed with the wrong 14th field, the DIAN rejects the
+   * document and the authorized consecutive it consumed is gone for good.
+   * 422 rather than 400: the payload is well-formed, the fiscal combination is not.
+   */
+  INVOICING_RESOLUTION_008: {
+    code: 'INVOICING_RESOLUTION_008',
+    httpStatus: 422,
+    devMessage:
+      'Resolution contradicts the DIAN requirements declared for its fiscal document type',
+  },
+  INVOICING_RESOLUTION_009: {
+    code: 'INVOICING_RESOLUTION_009',
+    httpStatus: 400,
+    devMessage:
+      'Authorized numbering range is incoherent (bounds below 1, inverted, or shrunk under an already consumed number)',
+  },
+  INVOICING_RESOLUTION_010: {
+    code: 'INVOICING_RESOLUTION_010',
+    httpStatus: 400,
+    devMessage: 'Resolution validity window is inverted or empty',
   },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
@@ -2037,6 +2120,11 @@ export const ErrorCodes = {
     code: 'LAY_INSTALLMENT_002',
     httpStatus: 409,
     devMessage: 'Installment already paid',
+  },
+  LAY_INSTALLMENT_003: {
+    code: 'LAY_INSTALLMENT_003',
+    httpStatus: 404,
+    devMessage: 'Installment does not belong to this layaway plan',
   },
 
   // ===== EMPLOYEE ADVANCES =====
@@ -3257,6 +3345,36 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PROD_UOM_NOT_STOCK_ELIGIBLE: {
+    code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',
+    httpStatus: 400,
+    devMessage:
+      'Esta unidad no puede ser la unidad de stock: su factor de conversión no es entero y el inventario se lleva en enteros de la unidad base. Úsala como unidad de compra o de presentación.',
+  },
+  PROD_UOM_CONVERSION_REQUIRED: {
+    code: 'PROD_UOM_CONVERSION_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El producto tiene existencias, capas de costo, lotes o recetas expresados en su unidad de stock actual. Cambiar la unidad exige el flag explícito `stock_uom_conversion: "convert"`, que convierte todo en la misma transacción.',
+  },
+  PRODUCT_TIERS_VARIANTS_EXCLUSIVE: {
+    code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
+    httpStatus: 409,
+    devMessage:
+      'Multi-tarifa y variantes son excluyentes: un producto que se vende en varias presentaciones no puede tener variantes. Elimina las variantes o desactiva multi-tarifa.',
+  },
+  PRICE_TIER_KIND_LOCKED: {
+    code: 'PRICE_TIER_KIND_LOCKED',
+    httpStatus: 409,
+    devMessage:
+      'La presentación ya tiene ventas con descuento de stock por empaque: no puede convertirse en tarifa de cliente',
+  },
+  PRICE_TIER_DEFAULT_NOT_SALE_UNIT: {
+    code: 'PRICE_TIER_DEFAULT_NOT_SALE_UNIT',
+    httpStatus: 422,
+    devMessage:
+      'Solo una unidad de venta puede marcarse como presentación por defecto del producto',
+  },
 
   // notification sounds
   NOTIFICATION_SOUND_INVALID: {
@@ -3367,6 +3485,31 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
+  },
+  /**
+   * `recipe_items` sólo tiene `component_product_id`: no hay columna de
+   * variante. Un insumo con variantes hace que el consumo vaya a la fila BASE
+   * del stock —la que en un producto con variantes está vacía—, así que la
+   * producción descontaría de un saldo que no existe y el inventario real
+   * quedaría intacto. En vez de agregar la columna (funcionalidad nueva), la
+   * decisión de producto es que un insumo NO tiene variantes.
+   */
+  RECIPE_COMPONENT_HAS_VARIANTS: {
+    code: 'RECIPE_COMPONENT_HAS_VARIANTS',
+    httpStatus: 422,
+    devMessage:
+      'Un producto con variantes no puede usarse como insumo de una receta. Crea un producto simple por cada presentación que la receta consuma.',
+  },
+  /**
+   * Cara opuesta del mismo invariante: bloquear sólo al agregar el insumo
+   * dejaría abierta la puerta de crear la variante DESPUÉS, y el resultado
+   * sería idéntico (consumo contra la fila base vacía) pero sin error visible.
+   */
+  PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT: {
+    code: 'PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT',
+    httpStatus: 422,
+    devMessage:
+      'Este producto se usa como insumo en una receta, así que no admite variantes. Quítalo de las recetas que lo consumen antes de variantizarlo.',
   },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C

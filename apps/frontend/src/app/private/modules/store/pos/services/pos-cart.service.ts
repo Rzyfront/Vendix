@@ -40,6 +40,9 @@ import {
   PriceTier,
   ProductPriceTierOverride,
 } from '../../price-tiers/interfaces';
+import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
+import { PosSaleUnitService } from './pos-sale-unit.service';
+import { resolveLineUnits } from '../utils/line-units.util';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -71,6 +74,8 @@ export class PosCartService {
   private withholdingService = inject(WithholdingTaxService);
   private currencyFormat = inject(CurrencyFormatService);
   private invoicingService = inject(InvoicingService);
+  private saleUnitService = inject(PosSaleUnitService);
+  private priceTierCache = inject(PriceTierCacheService);
 
   /**
    * Techo de 5 UVT para el documento equivalente POS (Art. 616-1 ET / Res.
@@ -225,6 +230,54 @@ export class PosCartService {
     return of(request).pipe(
       map((req) => this.processAddToCart(req)),
       tap((newState) => this.cartState.set(newState)),
+      switchMap((newState) =>
+        request.scannedPriceTierId != null
+          ? this.applyScannedPresentation(newState, request)
+          : of(newState),
+      ),
+    );
+  }
+
+  /**
+   * QUI-648 — el código pistoleado pertenece a una presentación del producto,
+   * así que la línea entra con esa presentación ya puesta. El cajero no la
+   * elige: el código de barras vino justo a resolver en qué unidad se vende.
+   *
+   * Si la tarifa no se puede resolver (catálogo caído, tarifa desactivada), la
+   * línea queda con la tarifa por defecto en vez de romper la venta: pistolear
+   * nunca puede terminar en un carrito vacío.
+   */
+  private applyScannedPresentation(
+    state: CartState,
+    request: AddToCartRequest,
+  ): Observable<CartState> {
+    const tierId = Number(request.scannedPriceTierId);
+    const productId = Number(request.product.id);
+    const target = state.items.find(
+      (item) =>
+        String(item.product.id) === String(request.product.id) &&
+        item.applied_price_tier_id == null,
+    );
+    if (!Number.isFinite(tierId) || !Number.isFinite(productId) || !target) {
+      return of(state);
+    }
+
+    return forkJoin({
+      tiers: this.priceTierCache.getActiveTiers(),
+      overrides: this.priceTierCache.getProductOverrides(productId),
+    }).pipe(
+      switchMap(({ tiers, overrides }) => {
+        const tier = tiers.find((candidate) => candidate.id === tierId) ?? null;
+        if (!tier) return of(this.cartState());
+        return this.applyTierToCartItem(
+          target.id,
+          tier,
+          (overrides ?? []).filter(
+            (override) => override.price_tier_id === tierId,
+          ),
+        );
+      }),
+      catchError(() => of(this.cartState())),
     );
   }
 
@@ -1259,15 +1312,87 @@ export class PosCartService {
       !!resolution.isPackageUnit,
       resolution.unitsPerPackage ?? null,
     );
+    // QUI-648. Con PRESENTACIÓN aplicada, `quantity` cuenta PAQUETES y el
+    // precio es el del paquete completo: la escala del producto sale de la
+    // ecuación (el backend excluye estas líneas por la misma razón). Al quitar
+    // la presentación, la línea vuelve a su escala y a su unidad de venta.
+    //
+    // Una TARIFA DE CLIENTE ("Mayorista") no es una presentación: cambia el
+    // número del precio, que sigue expresado por unidad de precio. La línea
+    // conserva su escala y su unidad de venta, igual que sin tarifa. Por eso
+    // todo lo de abajo decide por el EMPAQUE y no por `appliedTierId != null`
+    // — ver el encabezado de `line-units.util.ts`.
+    const appliedTierId = resolution.appliedPriceTierId ?? null;
+    const saleUnit = this.saleUnitService.configFor(product);
+
+    // Una línea capturada en unidad de venta guarda milímetros o gramos, no
+    // paquetes: al ponerle una presentación hay que convertir la magnitud, o
+    // "3 m" se convertirían en "3 rollos". La conversión se limita a esas
+    // líneas —las que estrena esta feature— para no cambiarle la cantidad a
+    // ninguna línea del catálogo por pieza que ya funciona así.
+    const capturedInSaleUnit = Number(item.stock_units_per_sale_unit ?? 1) > 1;
+    const nextPackSize = resolution.isPackageUnit
+      ? Number(resolution.unitsPerPackage ?? 1) || 1
+      : 1;
+    /** La tarifa que se está aplicando es una presentación (empaque > 1). */
+    const appliesPresentation = nextPackSize > 1;
+    const previousPackSize = item.is_package_unit
+      ? Number(item.units_per_package ?? 1) || 1
+      : 1;
+    let desiredQuantity = item.quantity;
+    if (capturedInSaleUnit && appliesPresentation) {
+      // Unidades mínimas → paquetes.
+      desiredQuantity = Math.max(1, Math.round(item.quantity / nextPackSize));
+    } else if (
+      !appliesPresentation &&
+      previousPackSize > 1 &&
+      saleUnit.unitsPerCapture > 1
+    ) {
+      // Paquetes → unidades mínimas, al salir de la presentación. Vale tanto al
+      // volver a la tarifa por defecto como al pasar a una tarifa de cliente:
+      // en los dos casos la línea recupera su escala, y dejar la cantidad en
+      // paquetes leería "3 rollos" como "3 mm".
+      desiredQuantity = item.quantity * previousPackSize;
+    }
+
     const quantity =
       this.doesLineTrackInventory(product, variant) && !item.is_weight_product
-        ? Math.min(item.quantity, maxQuantity)
-        : item.quantity;
+        ? Math.min(desiredQuantity, maxQuantity)
+        : desiredQuantity;
     if (!item.is_weight_product && quantity <= 0) {
       throw new Error('Stock insuficiente para aplicar esta tarifa');
     }
-    const multiplier =
-      item.is_weight_product && item.weight ? item.weight : quantity;
+    // Solo la presentación borra la escala: con tarifa de cliente el precio
+    // sigue publicado "por metro", así que la línea conserva su
+    // `price_unit_quantity` y su unidad de venta (el cajero sigue viendo "3 m",
+    // no 3.000 mm).
+    const nextPriceUnitQuantity = appliesPresentation
+      ? null
+      : saleUnit.priceUnitQuantity > 1
+        ? saleUnit.priceUnitQuantity
+        : null;
+    const restoresSaleUnit =
+      !appliesPresentation &&
+      !item.is_weight_product &&
+      saleUnit.unitsPerCapture > 1;
+    const nextSaleUnitCode = restoresSaleUnit
+      ? (saleUnit.captureUnit?.code ?? null)
+      : null;
+    const nextStockUnitsPerSaleUnit = restoresSaleUnit
+      ? saleUnit.unitsPerCapture
+      : null;
+
+    // El spread arrastra el empaque ANTERIOR de la línea; el multiplicador tiene
+    // que leer el NUEVO, o al pasar de "Rollo 20 m" a "Mayorista" seguiría
+    // creyendo que la línea cuenta paquetes.
+    const multiplier = resolveLineUnits({
+      ...item,
+      quantity,
+      applied_price_tier_id: appliedTierId,
+      is_package_unit: !!resolution.isPackageUnit,
+      units_per_package: resolution.unitsPerPackage ?? null,
+      price_unit_quantity: nextPriceUnitQuantity,
+    });
     const taxAmount = this.roundMoney(
       (finalUnitPrice - unitPrice) * multiplier,
     );
@@ -1276,6 +1401,9 @@ export class PosCartService {
     updatedItems[itemIndex] = {
       ...item,
       quantity,
+      sale_unit_code: nextSaleUnitCode,
+      stock_units_per_sale_unit: nextStockUnitsPerSaleUnit,
+      price_unit_quantity: nextPriceUnitQuantity,
       unitPrice,
       finalPrice: finalUnitPrice,
       originalFinalPrice: finalUnitPrice,
@@ -1318,9 +1446,7 @@ export class PosCartService {
     const taxRate = item.taxRate ?? this.calculateRateSum(item.product);
     const finalPrice = this.roundMoney(Number(request.finalPrice || 0));
     const unitPrice = taxRate > 0 ? finalPrice / (1 + taxRate) : finalPrice;
-    const multiplier = item.is_weight_product && item.weight
-      ? item.weight
-      : item.quantity;
+    const multiplier = resolveLineUnits(item);
     const taxAmount = (finalPrice - unitPrice) * multiplier;
 
     const updatedItems = [...currentState.items];
@@ -1372,11 +1498,15 @@ export class PosCartService {
     // QUI-431: serialized lines carry per-unit serial selections, so they must
     // NOT collapse into an existing cart line (merging would lose the mapping
     // between units and serials). A request with serials always starts a new line.
+    // QUI-648: una línea pesada en balanza tampoco se fusiona. Cada pesada es
+    // una pieza distinta (dos bandejas de 2,35 kg y 1,80 kg no son "una línea
+    // de 4,15 kg" para el cajero, que necesita poder corregir la que se
+    // equivocó volviendo a pesarla).
     const hasSerials =
       (request.serial_ids?.length ?? 0) > 0 ||
       (request.serial_numbers?.length ?? 0) > 0;
     const existingItemIndex =
-      isWeightProduct || hasSerials
+      isWeightProduct || hasSerials || request.capturedByScale === true
         ? -1 // Don't combine weight items / serialized lines
         : currentState.items.findIndex(
             (item) =>
@@ -1389,6 +1519,12 @@ export class PosCartService {
 
     // Variant-aware pricing
     const basePrice = this.resolveUnitPrice(request.product, request.variant);
+    // QUI-648: cómo se mide el producto. Sin unidad de stock declarada esto es
+    // la configuración por pieza y toda la aritmética de abajo colapsa a la
+    // histórica (`precio × cantidad`).
+    const saleUnit = this.saleUnitService.configFor(request.product);
+    const priceUnitQuantity =
+      saleUnit.priceUnitQuantity > 1 ? saleUnit.priceUnitQuantity : null;
     let updatedItems: CartItem[];
 
     if (existingItemIndex >= 0) {
@@ -1396,14 +1532,18 @@ export class PosCartService {
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
       const finalUnitPrice = this.calculateItemFinalPriceWithBase(request.product, basePrice);
+      const mergedUnits = resolveLineUnits({
+        ...existingItem,
+        quantity: newQuantity,
+      });
 
       updatedItems = [...currentState.items];
       updatedItems[existingItemIndex] = {
         ...existingItem,
         quantity: newQuantity,
-        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, newQuantity),
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, mergedUnits),
         finalPrice: finalUnitPrice,
-        totalPrice: newQuantity * finalUnitPrice,
+        totalPrice: mergedUnits * finalUnitPrice,
         notes: request.notes || existingItem.notes,
       };
     } else {
@@ -1415,12 +1555,25 @@ export class PosCartService {
       // Calculate total price for weight products
       const weight = request.weight || 1;
       const quantity = isWeightProduct ? 1 : request.quantity;
-      const itemTotalPrice = isWeightProduct
-        ? finalUnitPrice * weight
-        : request.quantity * finalUnitPrice;
+      // Multiplicador monetario único: peso capturado (legado), o cantidad
+      // dividida por la escala del precio cuando el producto publica "$X por N
+      // unidades". Con escala 1 es la cantidad, como siempre.
+      //
+      // Una línea recién agregada nunca es una presentación: el empaque solo lo
+      // resuelve `processApplyTierToCartItem`, que vuelve a correr después
+      // cuando el código pistoleado traía una (`applyScannedPresentation`).
+      const lineUnits = resolveLineUnits({
+        quantity,
+        weight,
+        is_weight_product: isWeightProduct,
+        is_package_unit: false,
+        units_per_package: null,
+        price_unit_quantity: priceUnitQuantity,
+      });
+      const itemTotalPrice = finalUnitPrice * lineUnits;
 
       // For weight products, tax is calculated on the total (price * weight), not just price * quantity
-      const taxMultiplier = isWeightProduct ? weight : quantity;
+      const taxMultiplier = lineUnits;
       const newItem: CartItem = {
         id: this.generateItemId(),
         itemType: 'product',
@@ -1447,6 +1600,20 @@ export class PosCartService {
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
         is_weight_product: isWeightProduct,
+        // QUI-648 — la escala en la que el cajero capturó y en la que se muestra
+        // la línea. `quantity` sigue viviendo en la unidad mínima. Solo se
+        // anota cuando hay conversión real: si la unidad de venta YA es la
+        // mínima, la línea se lee como siempre.
+        sale_unit_code:
+          !isWeightProduct && saleUnit.unitsPerCapture > 1
+            ? (saleUnit.captureUnit?.code ?? null)
+            : null,
+        stock_units_per_sale_unit:
+          !isWeightProduct && saleUnit.unitsPerCapture > 1
+            ? saleUnit.unitsPerCapture
+            : null,
+        price_unit_quantity: isWeightProduct ? null : priceUnitQuantity,
+        captured_by_scale: request.capturedByScale === true,
         // Restaurant Suite — Fase K Gap 1: persist the cashier's
         // "usar stock" choice on the cart item. Filtered out of the
         // kitchen-fire call by the POS component.
@@ -1523,12 +1690,10 @@ export class PosCartService {
     const updatedItems = [...currentState.items];
     const finalUnitPrice = item.finalPrice;
 
-    // For weight products, total is based on weight, not quantity
-    const isWeightItem = item.is_weight_product && item.weight;
-    const newTotalPrice = isWeightItem
-      ? item.weight! * finalUnitPrice
-      : request.quantity * finalUnitPrice;
-    const taxMultiplier = isWeightItem ? item.weight! : request.quantity;
+    // Peso legado, presentación o escala de precio: un solo multiplicador.
+    const lineUnits = resolveLineUnits({ ...item, quantity: request.quantity });
+    const newTotalPrice = lineUnits * finalUnitPrice;
+    const taxMultiplier = lineUnits;
 
     updatedItems[itemIndex] = {
       ...item,

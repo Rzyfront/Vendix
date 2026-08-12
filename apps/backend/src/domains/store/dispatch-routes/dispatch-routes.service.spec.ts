@@ -292,6 +292,10 @@ describe('DispatchRoutesService — addStops (eligibility + auto-confirm)', () =
       dispatch_routes: { findFirst: jest.fn(), update: jest.fn() },
       dispatch_notes: { findMany: jest.fn(), update: jest.fn() },
       dispatch_route_stops: { findMany: jest.fn(), createMany: jest.fn() },
+      // `addStops` saca del pool las órdenes que quedan asignadas a la ruta
+      // (dispatch_pool_at / claimed_by_carrier_user_id a NULL). Sin esta entrada
+      // el mock reventaba con "Cannot read properties of undefined".
+      orders: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     prismaMock.$transaction = jest.fn((cb: any) => cb(prismaMock));
 
@@ -302,6 +306,10 @@ describe('DispatchRoutesService — addStops (eligibility + auto-confirm)', () =
       eventEmitterMock as any,
       {} as any,
       {} as any,
+      // QUI-498 sumó `orderFlowService` al constructor y el spec dejó de
+      // compilar: el mock ya estaba declarado arriba, sólo faltaba pasarlo.
+      // La suite entera no corría desde entonces, sin que nadie lo notara.
+      orderFlowServiceMock as any,
     );
 
     service = new DispatchRoutesService(

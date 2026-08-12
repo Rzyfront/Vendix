@@ -37,6 +37,15 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *     as a public method on `RecipesService` and is consumed by Phase D/F.
  *   - The "by product" lookup is a thin convenience for Phase B's frontend
  *     (recipes form pre-loads existing items by yield product_id).
+ *
+ * CONTRATO DE ERROR: los handlers NO atrapan. Cada uno estaba envuelto en un
+ * `try/catch` que devolvía `responseService.error(...)`, y eso convertía un
+ * rechazo en una respuesta EXITOSA: el estado HTTP quedaba en `201`/`200` y el
+ * fallo viajaba enterrado en `success:false` dentro del cuerpo. Se comprobó en
+ * ejecución: bloquear un insumo con variantes respondía
+ * `HTTP=201` con `statusCode: 422` en el body. Un cliente que mira el estado
+ * HTTP —o sea, cualquier cliente— leía "creado" sobre algo que nunca se creó.
+ * Dejando propagar la excepción, el filtro global emite el estado real.
  */
 @Controller('store/recipes')
 @UseGuards(PermissionsGuard)
@@ -51,78 +60,38 @@ export class RecipesController {
   @Post()
   @Permissions('store:recipes:create')
   async create(@Body() dto: CreateRecipeDto) {
-    try {
-      const result = await this.recipesService.create(dto);
-      return this.responseService.created(
-        result,
-        'Receta creada exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al crear la receta',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.create(dto);
+    return this.responseService.created(result, 'Receta creada exitosamente');
   }
 
   @Get()
   @Permissions('store:recipes:read')
   async findAll(@Query() query: RecipeQueryDto) {
-    try {
-      const result = await this.recipesService.findAll(query);
-      return this.responseService.paginated(
-        result.data,
-        result.meta.total,
-        result.meta.page,
-        result.meta.limit,
-        'Recetas obtenidas exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las recetas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Recetas obtenidas exitosamente',
+    );
   }
 
   @Get('by-product/:productId')
   @Permissions('store:recipes:read')
-  async findByProduct(
-    @Param('productId', ParseIntPipe) productId: number,
-  ) {
-    try {
-      const result = await this.recipesService.findByProduct(productId);
-      return this.responseService.success(
-        result,
-        'Receta del producto obtenida exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la receta del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+  async findByProduct(@Param('productId', ParseIntPipe) productId: number) {
+    const result = await this.recipesService.findByProduct(productId);
+    return this.responseService.success(
+      result,
+      'Receta del producto obtenida exitosamente',
+    );
   }
 
   @Get(':id')
   @Permissions('store:recipes:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.recipesService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Receta obtenida exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la receta',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.findOne(id);
+    return this.responseService.success(result, 'Receta obtenida exitosamente');
   }
 
   @Patch(':id')
@@ -131,52 +100,28 @@ export class RecipesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRecipeDto,
   ) {
-    try {
-      const result = await this.recipesService.update(id, dto);
-      return this.responseService.updated(
-        result,
-        'Receta actualizada exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la receta',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.update(id, dto);
+    return this.responseService.updated(
+      result,
+      'Receta actualizada exitosamente',
+    );
   }
 
   @Delete(':id')
   @Permissions('store:recipes:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.recipesService.softDelete(id);
-      return this.responseService.deleted('Receta desactivada exitosamente');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al desactivar la receta',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.recipesService.softDelete(id);
+    return this.responseService.deleted('Receta desactivada exitosamente');
   }
 
   @Post(':id/restore')
   @Permissions('store:recipes:update')
   async restore(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.recipesService.restore(id);
-      return this.responseService.updated(
-        result,
-        'Receta restaurada exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al restaurar la receta',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.restore(id);
+    return this.responseService.updated(
+      result,
+      'Receta restaurada exitosamente',
+    );
   }
 
   // ----------------------------------------------------- Recipe items CRUD
@@ -187,19 +132,11 @@ export class RecipesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateRecipeItemDto,
   ) {
-    try {
-      const result = await this.recipesService.addItem(id, dto);
-      return this.responseService.created(
-        result,
-        'Componente agregado a la receta',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al agregar el componente',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.addItem(id, dto);
+    return this.responseService.created(
+      result,
+      'Componente agregado a la receta',
+    );
   }
 
   @Patch(':id/items/:itemId')
@@ -209,19 +146,11 @@ export class RecipesController {
     @Param('itemId', ParseIntPipe) itemId: number,
     @Body() dto: UpdateRecipeItemDto,
   ) {
-    try {
-      const result = await this.recipesService.updateItem(id, itemId, dto);
-      return this.responseService.updated(
-        result,
-        'Componente actualizado exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar el componente',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.updateItem(id, itemId, dto);
+    return this.responseService.updated(
+      result,
+      'Componente actualizado exitosamente',
+    );
   }
 
   @Delete(':id/items/:itemId')
@@ -230,18 +159,10 @@ export class RecipesController {
     @Param('id', ParseIntPipe) id: number,
     @Param('itemId', ParseIntPipe) itemId: number,
   ) {
-    try {
-      const result = await this.recipesService.removeItem(id, itemId);
-      return this.responseService.success(
-        result,
-        'Componente eliminado exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar el componente',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.recipesService.removeItem(id, itemId);
+    return this.responseService.success(
+      result,
+      'Componente eliminado exitosamente',
+    );
   }
 }

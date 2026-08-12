@@ -16,6 +16,7 @@ import {
   RefundCalculationResult,
 } from './refund-calculation.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
+import { resolveRefundStockUnits } from '../../../products/services/packaging.util';
 import { CreateRefundDto } from '../dto/create-refund.dto';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
@@ -127,10 +128,31 @@ export class RefundFlowService {
           },
         });
 
+        // Unidades de stock que mueve cada línea devuelta. Devolver 1 bulto de
+        // 50 repone 50 unidades: la cantidad devuelta cuenta presentaciones y
+        // el inventario vive en la unidad mínima. Se resuelve una sola vez y lo
+        // consumen tanto el `refund_item` como el movimiento de inventario, para
+        // que el documento y el stock no puedan contar cosas distintas.
+        const stockUnitsByOrderItem = new Map<number, number>();
+        for (const item of calculation.items) {
+          const soldLine = order.order_items.find(
+            (oi) => oi.id === item.order_item_id,
+          );
+          stockUnitsByOrderItem.set(
+            item.order_item_id,
+            resolveRefundStockUnits(
+              item.quantity,
+              soldLine?.quantity,
+              soldLine?.stock_units_consumed,
+            ),
+          );
+        }
+
         // 2. Create refund_items. Capture the created id per order_item so the
         // serial-return step (QUI-431) can link serials to the refund line.
         const refundItemIdByOrderItem = new Map<number, number>();
         for (const item of calculation.items) {
+          const stockUnits = stockUnitsByOrderItem.get(item.order_item_id);
           const refundItem = await tx.refund_items.create({
             data: {
               refund_id: refund.id,
@@ -142,6 +164,13 @@ export class RefundFlowService {
               inventory_action: item.inventory_action,
               location_id: item.location_id,
               reason: item.reason,
+              // Solo se persiste cuando difiere de la cantidad devuelta: un
+              // null significa "la línea no usó presentación", igual que en la
+              // venta.
+              stock_units_consumed:
+                stockUnits != null && stockUnits !== item.quantity
+                  ? stockUnits
+                  : null,
             },
           });
           refundItemIdByOrderItem.set(item.order_item_id, refundItem.id);
@@ -156,13 +185,16 @@ export class RefundFlowService {
           );
           if (!orderItem?.products) continue;
 
+          const stockUnits =
+            stockUnitsByOrderItem.get(item.order_item_id) ?? item.quantity;
+
           if (item.inventory_action === 'restock' && item.location_id) {
             await this.stockLevelManager.updateStock(
               {
                 product_id: orderItem.products.id,
                 variant_id: orderItem.product_variants?.id,
                 location_id: item.location_id,
-                quantity_change: item.quantity,
+                quantity_change: stockUnits,
                 movement_type: 'return',
                 reason: `Refund #${refund.id}: ${dto.reason}`,
                 user_id: userId,
@@ -193,7 +225,7 @@ export class RefundFlowService {
                 product_id: orderItem.products.id,
                 variant_id: orderItem.product_variants?.id,
                 location_id: item.location_id,
-                quantity_change: -item.quantity,
+                quantity_change: -stockUnits,
                 movement_type: 'damage',
                 reason: `Refund write-off #${refund.id}: ${dto.reason}`,
                 user_id: userId,

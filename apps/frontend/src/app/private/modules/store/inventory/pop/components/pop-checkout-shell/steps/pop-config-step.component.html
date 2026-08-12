@@ -1,0 +1,111 @@
+<div class="pop-config-step">
+  <!-- Proveedor -->
+  <section class="cfg-section">
+    <div class="cfg-field">
+      <label class="cfg-label" for="pop-config-supplier">
+        Proveedor <span class="cfg-required">*</span>
+      </label>
+      <div class="cfg-select-row">
+        <app-selector
+          id="pop-config-supplier"
+          class="flex-1 min-w-0"
+          size="sm"
+          [options]="supplierOptions()"
+          [formControl]="form.controls.supplier"
+          [errorText]="supplierError()"
+          placeholder="Seleccionar proveedor..."
+          (valueChange)="onSupplierChange($event)"
+        ></app-selector>
+        <app-button
+          variant="outline"
+          size="sm"
+          customClasses="!px-2 flex items-center justify-center"
+          (clicked)="openSupplierModal.emit()"
+        >
+          <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+        </app-button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bodega -->
+  <section class="cfg-section">
+    <div class="cfg-field">
+      <label class="cfg-label" for="pop-config-location">
+        Bodega <span class="cfg-required">*</span>
+      </label>
+      <div class="cfg-select-row">
+        <app-selector
+          id="pop-config-location"
+          class="flex-1 min-w-0"
+          size="sm"
+          [options]="locationOptions()"
+          [formControl]="form.controls.location"
+          [errorText]="locationError()"
+          placeholder="Seleccionar bodega..."
+          (valueChange)="onLocationChange($event)"
+        ></app-selector>
+        <app-button
+          variant="outline"
+          size="sm"
+          customClasses="!px-2 flex items-center justify-center"
+          (clicked)="openWarehouseModal.emit()"
+        >
+          <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+        </app-button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Fechas -->
+  <section class="cfg-section">
+    <div class="cfg-grid">
+      <div class="cfg-field">
+        <label class="cfg-label" for="pop-config-order-date">Fecha Orden</label>
+        <app-input
+          id="pop-config-order-date"
+          type="date"
+          size="sm"
+          [formControl]="form.controls.orderDate"
+          [control]="form.controls.orderDate"
+          customWrapperClass="!mt-0"
+          (inputChange)="onOrderDateChange($event)"
+        ></app-input>
+      </div>
+      <div class="cfg-field">
+        <label class="cfg-label" for="pop-config-expected-date">
+          Fecha Entrega
+        </label>
+        <app-input
+          id="pop-config-expected-date"
+          type="date"
+          size="sm"
+          [formControl]="form.controls.expectedDate"
+          [control]="form.controls.expectedDate"
+          [min]="minExpectedDate()"
+          customWrapperClass="!mt-0"
+          (inputChange)="onExpectedDateChange($event)"
+        ></app-input>
+      </div>
+    </div>
+    <p class="cfg-hint">
+      La fecha de entrega no puede ser anterior a la fecha de la orden.
+    </p>
+  </section>
+
+  <!-- Método de envío -->
+  <section class="cfg-section">
+    <div class="cfg-field">
+      <label class="cfg-label" for="pop-config-shipping">Método Envío</label>
+      <app-selector
+        id="pop-config-shipping"
+        class="w-full"
+        size="sm"
+        [options]="shippingMethodOptions()"
+        [formControl]="form.controls.shippingMethod"
+        placeholder="Elegir método..."
+        (valueChange)="onShippingMethodChange($event)"
+      ></app-selector>
+    </div>
+  </section>
+</div>

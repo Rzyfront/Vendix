@@ -304,8 +304,16 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     await service.complete(200, { produced_qty: 10 });
 
     const consumeCall = stockLevelManager.updateStock.mock.calls[0];
-    // 1.10 * 1.05 = 1.155 → 10 * 1.155 = 11.55
-    expect(consumeCall[0].quantity_change).toBeCloseTo(-11.55, 2);
+    // 1.10 * 1.05 = 1.155 → 10 * 1.155 = 11.55, y el servicio redondea a 12.
+    //
+    // El redondeo NO es una pérdida de precisión evitable: `stock_levels`
+    // guarda `quantity_on_hand/reserved/available` como `Int`, y también
+    // `inventory_movements.quantity`. Un consumo de 11,55 unidades no se puede
+    // ni escribir ni asentar. Este test esperaba 11,55 —un valor que el
+    // almacenamiento no admite— así que afirmaba una precisión que el sistema
+    // nunca tuvo. Lo que sí importa y queda fijado acá es que la merma es
+    // MULTIPLICATIVA (línea × receta), no aditiva: 12, no 11 (10 × 1,15).
+    expect(consumeCall[0].quantity_change).toBe(-12);
   });
 
   it('rejects a complete() with produced_qty <= 0', async () => {

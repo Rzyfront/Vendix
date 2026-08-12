@@ -109,6 +109,25 @@ export class ProductVariantService {
         );
       }
 
+      // BLOQUEO: un producto que ya es insumo de una receta no admite variantes.
+      //
+      // Cara opuesta de la guarda que vive en `recipes.service.ts#addItem`.
+      // `recipe_items` sólo guarda `component_product_id`, sin columna de
+      // variante, así que variantizar un insumo manda el consumo de producción
+      // a la fila BASE de `stock_levels` — vacía en cuanto existen variantes.
+      // La producción descontaría de un saldo inexistente y el inventario real
+      // quedaría intacto, sin error. Bloquear sólo del lado de la receta dejaba
+      // abierta esta puerta con el mismo resultado.
+      const recipeUses = await prisma.recipe_items.count({
+        where: { component_product_id: product_id },
+      });
+      if (recipeUses > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT,
+          `Este producto se usa como insumo en ${recipeUses} receta(s), así que no admite variantes. Quítalo de esas recetas antes de variantizarlo.`,
+        );
+      }
+
       // BLOCK: Check for active stock reservations
       const hasActiveReservations = await prisma.stock_reservations.findFirst({
         where: {
@@ -450,25 +469,61 @@ export class ProductVariantService {
 
     // Si cambió el stock, actualizar stock levels
     if (stock_quantity !== undefined) {
-      // Get actual current stock from stock_levels (source of truth)
-      const currentStock = await prisma.stock_levels.aggregate({
-        where: { product_variant_id: variantId },
-        _sum: { quantity_available: true },
-      });
-      const currentStockQuantity = currentStock._sum.quantity_available ?? 0;
+      // El saldo se lee con SQL crudo a propósito: `prisma` viene acotado al
+      // tenant en una petición, y `stock_levels` incluye ubicaciones de la
+      // organización (`inventory_locations.store_id IS NULL`) que ese filtro
+      // deja fuera. Comparar contra un saldo truncado producía la diferencia
+      // equivocada: una variante con 10 en la bodega de la organización y 1 en
+      // el showroom se leía como 1, y "dejarla en 0" bajaba stock real.
+      const stockRows: Array<{
+        location_id: number;
+        total: bigint | number | null;
+      }> = await prisma.$queryRaw`
+        SELECT location_id, COALESCE(SUM(quantity_available), 0)::bigint AS total
+        FROM stock_levels
+        WHERE product_variant_id = ${variantId}
+        GROUP BY location_id
+        HAVING COALESCE(SUM(quantity_available), 0) > 0
+      `;
+
+      // Una cantidad sola no puede repartir stock entre varias ubicaciones. El
+      // código aplicaba toda la diferencia en la ubicación por defecto, así que
+      // fijar el total de una variante repartida vaciaba esa ubicación y dejaba
+      // intactas las demás. Antes que adivinar el reparto, se rechaza y se
+      // manda al flujo que sí sabe hacerlo.
+      if (stockRows.length > 1) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Esta variante tiene existencias en varias ubicaciones. Ajusta el stock desde Ajustes de Stock o Transferencias, no desde el editor del producto.',
+        );
+      }
+
+      const currentStockQuantity = stockRows.reduce(
+        (sum, row) => sum + Number(row.total ?? 0),
+        0,
+      );
       const stockDifference = stock_quantity - currentStockQuantity;
 
       if (stockDifference !== 0) {
-        const defaultLocation =
-          await this.inventoryLocationsService.getDefaultLocation(
-            existingVariant.products.store_id,
-          );
+        // El ajuste cae donde vive el stock. Mandarlo siempre a la ubicación
+        // por defecto convertía una baja en un recorte contra una fila vacía:
+        // el saldo se descontaba hasta 0 ahí y las unidades reales, en otra
+        // ubicación, quedaban intactas. La ubicación por defecto sólo sirve de
+        // destino cuando la variante todavía no tiene existencias en ninguna.
+        const targetLocationId =
+          stockRows.length === 1
+            ? Number(stockRows[0].location_id)
+            : (
+                await this.inventoryLocationsService.getDefaultLocation(
+                  existingVariant.products.store_id,
+                )
+              ).id;
 
         await this.stockLevelManager.updateStock(
           {
             product_id: existingVariant.product_id,
             variant_id: variantId,
-            location_id: defaultLocation.id,
+            location_id: targetLocationId,
             quantity_change: stockDifference,
             movement_type: 'adjustment',
             reason: 'Stock quantity updated from variant edit',
@@ -516,6 +571,20 @@ export class ProductVariantService {
       where: { product_variant_id: variantId },
       data: { product_variant_id: null },
     });
+    // `inventory_valuation_snapshots` faltaba en esta lista, así que borrar una
+    // variante que apareciera en cualquier snapshot de valuación reventaba con
+    // `inventory_valuation_snapshots_product_variant_id_fkey`. El try/catch del
+    // controlador lo devolvía como un error genérico, así que el borrado de
+    // variantes estaba roto sin que se notara: basta un ajuste de stock —que
+    // genera snapshot— para inhabilitarlo.
+    //
+    // Se pone a NULL, no se borra: el snapshot es histórico de valuación y
+    // eliminarlo alteraría cifras ya emitidas. La columna es nullable
+    // precisamente para esto, y es el mismo patrón de las 8 tablas de arriba.
+    await prisma.inventory_valuation_snapshots.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
     await prisma.stock_levels.deleteMany({
       where: { product_variant_id: variantId },
     });
@@ -539,6 +608,30 @@ export class ProductVariantService {
       throw new VendixHttpException(
         ErrorCodes.PROD_HAS_RESERVATIONS_001,
         'Operación bloqueada: existen reservas de stock activas',
+      );
+    }
+
+    // BLOCK: tampoco se borra una variante que TIENE EXISTENCIAS.
+    //
+    // `cleanupVariantForeignKeys` reasigna el histórico al producto base y
+    // elimina las filas de `stock_levels` de la variante. Con saldo vivo eso
+    // destruye inventario sin dejar ajuste ni movimiento que lo explique: el
+    // stock simplemente desaparece del sistema.
+    //
+    // La guarda de reservas de arriba NO cubre este caso: las reservas son un
+    // subconjunto del saldo, así que una variante con 40 unidades y cero
+    // reservas pasaba sin fricción. Se suma `quantity_on_hand` —no
+    // `quantity_available`— porque lo que se destruiría es el físico, y el
+    // disponible puede ser 0 mientras hay existencias comprometidas.
+    const stockAggregate = await this.prisma.stock_levels.aggregate({
+      where: { product_variant_id: variantId },
+      _sum: { quantity_on_hand: true },
+    });
+    const onHandUnits = Number(stockAggregate._sum.quantity_on_hand ?? 0);
+    if (onHandUnits > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+        `Operación bloqueada: la variante #${variantId} tiene ${onHandUnits} unidad(es) en existencia. Ajusta el stock a 0 antes de eliminarla.`,
       );
     }
 

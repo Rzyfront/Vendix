@@ -157,11 +157,19 @@ export class TransferListComponent {
       key: 'status',
       label: 'Estado',
       type: 'select',
+      // El backend crea las transferencias en `pending`; filtrar por `draft`
+      // (el valor legado que estaba acá) no devolvía ninguna de las nuevas.
+      //
+      // Ya no se ofrece "Completada" aparte: el backend agrupa `received` con su
+      // alias `completed` —igual que la tarjeta que los cuenta juntos—, así que
+      // las dos opciones devolvían exactamente la misma lista y obligaban a
+      // adivinar cuál era la buena.
       options: [
         { value: '', label: 'Todos los estados' },
-        { value: 'draft', label: 'Borrador' },
+        { value: 'pending', label: 'Pendiente' },
+        { value: 'approved', label: 'Aprobada' },
         { value: 'in_transit', label: 'En Tránsito' },
-        { value: 'completed', label: 'Completada' },
+        { value: 'received', label: 'Recibida' },
         { value: 'cancelled', label: 'Cancelada' },
       ],
     },
@@ -205,8 +213,11 @@ export class TransferListComponent {
         type: 'custom',
         size: 'sm',
         colorMap: {
+          pending: '#6b7280',
           draft: '#6b7280',
+          approved: '#8b5cf6',
           in_transit: '#f59e0b',
+          received: '#22c55e',
           completed: '#22c55e',
           cancelled: '#ef4444',
         },
@@ -249,8 +260,11 @@ export class TransferListComponent {
       type: 'custom',
       size: 'sm',
       colorMap: {
+        pending: '#94a3b8',
         draft: '#94a3b8',
+        approved: '#8b5cf6',
         in_transit: '#3b82f6',
+        received: '#10b981',
         completed: '#10b981',
         cancelled: '#6b7280',
       },
@@ -306,8 +320,11 @@ export class TransferListComponent {
 
   getStatusLabel(status: TransferStatus): string {
     const labels: Record<TransferStatus, string> = {
+      pending: 'Pendiente',
       draft: 'Borrador',
+      approved: 'Aprobada',
       in_transit: 'En Tránsito',
+      received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
     };

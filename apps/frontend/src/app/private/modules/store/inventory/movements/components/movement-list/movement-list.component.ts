@@ -20,6 +20,19 @@ import {
 // Interfaces
 import { InventoryMovement, MovementType } from '../../../interfaces';
 
+/**
+ * Tipos que sólo existen como salida. Sirven para desempatar las filas
+ * históricas, que se escribieron con `to_location_id` relleno en los dos
+ * sentidos y por eso no llevan la dirección en la fila.
+ */
+const OUTBOUND_ONLY_TYPES = new Set<string>([
+  'stock_out',
+  'sale',
+  'damage',
+  'expiration',
+  'consumption',
+]);
+
 @Component({
   selector: 'app-movement-list',
   standalone: true,
@@ -103,22 +116,24 @@ export class MovementListComponent {
       align: 'right',
       priority: 1,
       transform: (value: number, item?: any) =>
-        this.formatQuantity(value, item?.movement_type),
-      cellStyle: (_value: number, item?: any) => {
-        const isInbound =
-          item?.movement_type === 'stock_in' ||
-          item?.movement_type === 'return';
-        return {
-          color: isInbound
-            ? 'var(--color-success)'
-            : 'var(--color-error, #ef4444)',
-          'font-weight': '700',
-        };
-      },
+        this.formatQuantity(value, item),
+      cellStyle: (_value: number, item?: any) => ({
+        color: this.quantityColor(item),
+        'font-weight': '700',
+      }),
     },
     {
-      key: 'to_location.name',
-      label: 'Destino',
+      // Una salida ya no lleva pata de destino, así que la columna fija a
+      // `to_location` quedaba vacía justo en los movimientos que sacan stock.
+      //
+      // Apuntar la columna a `to_location.name` con un `transform` que leía las
+      // dos patas NO alcanzaba: `app-table` sólo llama al `transform` cuando el
+      // valor crudo de `key` no está vacío, así que en una salida —donde
+      // `to_location` es null— el transform nunca corría y la celda caía al
+      // `defaultValue`. El arreglo quedaba muerto exactamente en las filas para
+      // las que se escribió. Por eso la etiqueta se calcula antes, en la fila.
+      key: 'location_label',
+      label: 'Ubicación',
       defaultValue: '-',
       priority: 2,
     },
@@ -165,7 +180,7 @@ export class MovementListComponent {
     footerLabel: 'Cantidad',
     footerStyle: 'prominent',
     footerTransform: (val: number, item?: any) =>
-      this.formatQuantity(val, item?.movement_type),
+      this.formatQuantity(val, item),
     detailKeys: [
       {
         key: 'created_at',
@@ -174,13 +189,29 @@ export class MovementListComponent {
         transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
       },
       {
-        key: 'to_location.name',
-        label: 'Destino',
+        // Misma razón que en la columna de la tabla: la etiqueta viene ya
+        // calculada en la fila, no de `to_location`, que en una salida es null.
+        key: 'location_label',
+        label: 'Ubicación',
         icon: 'map-pin',
-        transform: (val: any) => val || '-',
       },
     ],
   };
+
+  /**
+   * Filas con la etiqueta de bodega ya resuelta.
+   *
+   * `app-table` no llama al `transform` de una columna si el valor crudo de su
+   * `key` está vacío, así que una etiqueta que se deriva de OTROS campos —aquí,
+   * de las dos patas de ubicación— tiene que existir en la fila. Calcularla aquí
+   * además ordena por lo que el usuario ve, no por una pata que puede ser null.
+   */
+  readonly rows = computed(() =>
+    this.movements().map((m) => ({
+      ...m,
+      location_label: this.locationLabel(m),
+    })),
+  );
 
   // Computed
   readonly hasFilters = computed(() => {
@@ -226,9 +257,54 @@ export class MovementListComponent {
     return labels[type] || type;
   }
 
-  formatQuantity(value: number, type: MovementType): string {
-    const isInbound = type === 'stock_in' || type === 'return';
-    return isInbound ? `+${value}` : `-${value}`;
+  /**
+   * Dirección real del movimiento.
+   *
+   * La verdad está en las dos patas de ubicación: sale de donde dice
+   * `from_location_id` y entra a donde dice `to_location_id`. Un traslado lleva
+   * las dos. Adivinarla por el tipo era el bug: un `adjustment` que subía el
+   * stock de 100 a 120 se pintaba "−20", porque `adjustment` no está en la lista
+   * de entradas.
+   *
+   * Las filas históricas se escribieron siempre con `to_location_id` relleno y
+   * `from_location_id` en null, incluso en las salidas, así que para ellas no
+   * hay dirección recuperable y se conserva la heurística por tipo.
+   */
+  private isInboundMovement(item: any): boolean {
+    const from = item?.from_location_id ?? null;
+    const to = item?.to_location_id ?? null;
+
+    // 1) Sólo pata de origen → salió. Concluyente, y es la forma de TODA fila
+    //    nueva de salida.
+    if (from != null && to == null) return false;
+
+    // 2) Las dos patas → traslado; se muestra desde la pata de destino.
+    if (from != null && to != null) return true;
+
+    // 3) Sólo pata de destino: puede ser una entrada nueva o una fila histórica
+    //    (el legado rellenaba `to_location_id` en los dos sentidos). Los tipos
+    //    que sólo existen en un sentido zanjan el caso; `adjustment` es el único
+    //    ambiguo y se resuelve como entrada, porque toda salida nueva ya cayó
+    //    por la regla 1.
+    return !OUTBOUND_ONLY_TYPES.has(item?.movement_type);
+  }
+
+  formatQuantity(value: number, item?: any): string {
+    return this.isInboundMovement(item) ? `+${value}` : `-${value}`;
+  }
+
+  /** Bodega afectada: destino en las entradas, origen en las salidas. */
+  locationLabel(item?: any): string {
+    const from = item?.from_location?.name ?? null;
+    const to = item?.to_location?.name ?? null;
+    if (from && to) return `${from} → ${to}`;
+    return to || from || '-';
+  }
+
+  quantityColor(item?: any): string {
+    return this.isInboundMovement(item)
+      ? 'var(--color-success)'
+      : 'var(--color-error, #ef4444)';
   }
 
   getEmptyStateTitle(): string {

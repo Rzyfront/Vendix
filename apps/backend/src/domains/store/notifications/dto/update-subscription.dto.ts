@@ -12,6 +12,10 @@ const NOTIFICATION_TYPES = [
   'layaway_completed',
   'layaway_cancelled',
   'new_review',
+  // QUI-647 — vencimientos de CxP: el usuario puede apagar/encender la campana
+  // y el web push de cada tipo desde Configuración → Notificaciones.
+  'ap_installment_due_soon',
+  'ap_installment_overdue',
 ] as const;
 
 export class UpdateSubscriptionDto {

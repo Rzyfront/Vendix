@@ -5,6 +5,12 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
+import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolvePackSize } from '../products/services/packaging.util';
+import {
+  resolveLineTotal,
+  resolvePriceUnitScale,
+} from '../products/services/price-unit.util';
 import {
   CreateLayawayDto,
   LayawayQueryDto,
@@ -44,13 +50,86 @@ export class LayawayService {
         : 1;
       const plan_number = `LAY-${String(next_number).padStart(5, '0')}`;
 
+      /**
+       * QUI-648 — el plan separé cobra con la MISMA aritmética que la venta.
+       *
+       * Antes reconstruía el total como `unit_price × quantity − descuento +
+       * impuesto`, una fórmula que no conoce ni la escala de precio ni las
+       * presentaciones. Sobre un cable publicado por metro y medido en
+       * milímetros eso cobraba el precio del metro por cada milímetro: mil
+       * veces de más, sin que nada lo frenara.
+       *
+       * Las dos correcciones son las mismas que en orders y en el cobro POS:
+       *  - `price_unit_quantity` (escala): el precio publicado cubre N
+       *    unidades de stock, así que el multiplicador es `quantity / N`. Sale
+       *    del catálogo dentro de la transacción — nunca del cliente.
+       *  - presentación aplicada: ahí `unit_price` ya es el precio del paquete
+       *    y `quantity` cuenta paquetes, así que la escala NO aplica y el
+       *    stock a reservar sale de la cascada de empaque
+       *    (`stock_units_consumed`), no de `quantity`.
+       *
+       * El criterio de exclusión es la PRESENTACIÓN (`packSize > 1`), no "la
+       * línea trae tarifa". Una tarifa de cliente (Mayorista) cambia el precio
+       * pero lo sigue expresando por unidad de PRECIO, así que la escala sí
+       * aplica: excluirla dejaba el plan en $9.000.000 por 2 metros de un cable
+       * a $4.500 el metro (plan 36 en dev), y como las cuotas se validan contra
+       * ese total, el comerciante recibía un plan de nueve millones.
+       *
+       * Con escala 1 y sin tarifa —todo lo que existe hoy— la fórmula colapsa
+       * a la histórica y ningún plan cambia de total.
+       */
+      const tierSnapshots = await resolveTierSnapshotsForItems(
+        tx,
+        dto.items,
+        context,
+      );
+
+      /** Una línea vendida por presentación: `unit_price` ya es el paquete. */
+      const esPresentacion = (index: number): boolean =>
+        resolvePackSize(
+          tierSnapshots[index]?.units_per_package,
+          tierSnapshots[index]?.override_units_per_package,
+        ) > 1;
+
+      // La escala solo interesa en las líneas SIN presentación. `tx` sale del
+      // baseClient (sin la extensión de scoping), así que el filtro de tienda
+      // va explícito: la escala es del catálogo de ESTA tienda.
+      const scaledProductIds = Array.from(
+        new Set(
+          dto.items
+            .map((item, index) =>
+              esPresentacion(index) ? null : item.product_id,
+            )
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      );
+      const scaleByProductId = new Map<number, number>();
+      if (scaledProductIds.length > 0) {
+        const rows = await tx.products.findMany({
+          where: { id: { in: scaledProductIds }, store_id },
+          select: { id: true, price_unit_quantity: true },
+        });
+        for (const row of rows) {
+          const scale = resolvePriceUnitScale(row.price_unit_quantity);
+          if (scale > 1) scaleByProductId.set(Number(row.id), scale);
+        }
+      }
+
       // 2. Calcular totales desde items
       let total_amount = new Prisma.Decimal(0);
-      const items_data = dto.items.map((item) => {
+      const items_data = dto.items.map((item, index) => {
+        const tierSnap = tierSnapshots[index];
         const discount = new Prisma.Decimal(item.discount_amount || 0);
         const tax = new Prisma.Decimal(item.tax_amount || 0);
-        const subtotal = new Prisma.Decimal(item.unit_price)
-          .times(item.quantity)
+        const price_unit_quantity = esPresentacion(index)
+          ? 1
+          : (scaleByProductId.get(Number(item.product_id)) ?? 1);
+        const line_total = resolveLineTotal(
+          Number(item.unit_price),
+          Number(item.quantity),
+          price_unit_quantity,
+        );
+        const subtotal = new Prisma.Decimal(line_total)
           .minus(discount)
           .plus(tax);
         total_amount = total_amount.plus(subtotal);
@@ -59,6 +138,10 @@ export class LayawayService {
           discount_amount: discount,
           tax_amount: tax,
           subtotal,
+          price_unit_quantity,
+          // Unidades REALES de stock que reserva la línea. `null` = sin
+          // empaque, la cantidad ya está en unidades de stock.
+          stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
         };
       });
 
@@ -148,6 +231,11 @@ export class LayawayService {
           true,
           tx,
           null, // expires_at: null = no expira
+          false, // skip_reservation
+          // Presentación aplicada: `quantity` cuenta paquetes, así que las
+          // unidades a descontar son las del empaque. `null` deja la cantidad
+          // tal cual, que es el comportamiento histórico.
+          item.stock_units_consumed ?? undefined,
         );
       }
 
@@ -364,7 +452,18 @@ export class LayawayService {
         target_installment = plan.layaway_installments.find(
           (i) => i.id === dto.installment_id,
         );
-        if (target_installment && target_installment.state === 'paid') {
+        // Una cuota de otro plan (o inexistente) se ignoraba en silencio: el
+        // `find` devolvía undefined, el pago se guardaba con
+        // `layaway_installment_id: null` y el endpoint respondía 200. La plata
+        // entraba al plan sin quedar imputada a ninguna cuota.
+        if (!target_installment) {
+          throw new VendixHttpException(
+            ErrorCodes.LAY_INSTALLMENT_003,
+            undefined,
+            { installment_id: dto.installment_id, plan_id },
+          );
+        }
+        if (target_installment.state === 'paid') {
           throw new VendixHttpException(ErrorCodes.LAY_INSTALLMENT_002);
         }
       } else {
@@ -390,15 +489,29 @@ export class LayawayService {
         },
       });
 
-      // 6. Marcar cuota como pagada si aplica
-      if (
-        target_installment &&
-        amount.greaterThanOrEqualTo(target_installment.amount)
-      ) {
-        await tx.layaway_installments.update({
-          where: { id: target_installment.id },
-          data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
+      // 6. Marcar cuota como pagada si aplica.
+      // Se compara el ACUMULADO imputado a la cuota, no el pago suelto. Con la
+      // comparación contra `amount` a secas, dos abonos de 2.250 sobre una
+      // cuota de 4.500 la dejaban en `pending` con la plata ya cobrada, y el
+      // cliente figuraba en mora de una cuota que había pagado completa; solo
+      // el barrido de cierre del plan la corregía.
+      if (target_installment) {
+        const imputado = await tx.layaway_payments.aggregate({
+          where: {
+            layaway_installment_id: target_installment.id,
+            state: 'succeeded',
+          },
+          _sum: { amount: true },
         });
+        // El pago recién creado ya cuenta: se agrega dentro de la transacción.
+        const acumulado = new Prisma.Decimal(imputado._sum.amount ?? 0);
+
+        if (acumulado.greaterThanOrEqualTo(target_installment.amount)) {
+          await tx.layaway_installments.update({
+            where: { id: target_installment.id },
+            data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
+          });
+        }
       }
 
       // 7. Actualizar plan
@@ -435,13 +548,8 @@ export class LayawayService {
       });
 
       if (is_completed) {
-        // Liberar reservas como consumidas (productos entregados)
-        await this.stockLevelManager.releaseReservationsByReference(
-          'layaway',
-          plan_id,
-          'consumed',
-          tx,
-        );
+        // Entrega de los productos: baja stock con movimiento y cierra reserva.
+        await this.consumeReservedStock(plan, tx);
 
         // Marcar todas las cuotas pendientes como pagadas
         await tx.layaway_installments.updateMany({
@@ -464,6 +572,66 @@ export class LayawayService {
 
       return payment;
     });
+  }
+
+  /**
+   * Entrega física del separado: baja el stock DEJANDO RASTRO.
+   *
+   * Antes se llamaba `releaseReservationsByReference(..., 'consumed')` a secas,
+   * que baja `quantity_on_hand` escribiendo directo en `stock_levels`: la
+   * mercancía salía de la bodega sin una sola fila en movimientos, así que
+   * Movimientos, la valorización y el costo de venta nunca veían la entrega.
+   *
+   * El patrón correcto es el de `order-stock-commit`: primero `updateStock` por
+   * línea reservada (ahí nace el movimiento y se consume la capa de costo) y
+   * después se cierra la reserva con `decrementOnHand: false` para no descontar
+   * dos veces.
+   */
+  private async consumeReservedStock(
+    plan: { id: number; plan_number?: string | null },
+    tx: any,
+  ): Promise<void> {
+    // Las reservas son la única fuente de qué salió y de qué ubicación salió.
+    const reservations = await tx.stock_reservations.findMany({
+      where: {
+        reserved_for_type: 'layaway',
+        reserved_for_id: plan.id,
+        status: 'active',
+      },
+    });
+
+    const userIdRaw = RequestContextService.getUserId();
+    const userId = userIdRaw ? Number(userIdRaw) : undefined;
+
+    for (const reservation of reservations) {
+      if (!reservation.quantity || reservation.quantity <= 0) continue;
+
+      await this.stockLevelManager.updateStock(
+        {
+          product_id: reservation.product_id,
+          variant_id: reservation.product_variant_id ?? undefined,
+          location_id: reservation.location_id,
+          quantity_change: -reservation.quantity,
+          movement_type: 'sale',
+          reason: `Entrega de plan de separado ${plan.plan_number ?? `#${plan.id}`}`,
+          source_module: 'layaway',
+          user_id: userId,
+          create_movement: true,
+          // La disponibilidad ya se reclamó al reservar; volver a validarla acá
+          // rechazaría la entrega justamente porque está reservada.
+          validate_availability: false,
+        },
+        tx,
+      );
+    }
+
+    await this.stockLevelManager.releaseReservationsByReference(
+      'layaway',
+      plan.id,
+      'consumed',
+      tx,
+      { decrementOnHand: false },
+    );
   }
 
   // ===== MODIFY INSTALLMENTS =====
@@ -659,13 +827,8 @@ export class LayawayService {
         data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
       });
 
-      // Liberar reservas como consumidas
-      await this.stockLevelManager.releaseReservationsByReference(
-        'layaway',
-        plan_id,
-        'consumed',
-        tx,
-      );
+      // Entrega de los productos: baja stock con movimiento y cierra reserva.
+      await this.consumeReservedStock(plan, tx);
 
       this.eventEmitter.emit('layaway.completed', {
         store_id: plan.store_id,

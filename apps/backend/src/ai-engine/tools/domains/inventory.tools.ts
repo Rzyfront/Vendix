@@ -486,8 +486,9 @@ export function createInventoryTools(
           });
         }
 
+        // `organization_id` y `created_by_user_id` los resuelve el servicio del
+        // contexto de la petición; ya no se aceptan en el DTO.
         const adjustment = await services.adjustmentsService.createAdjustment({
-          organization_id: orgId,
           product_id: Number(args.product_id),
           product_variant_id: args.product_variant_id
             ? Number(args.product_variant_id)
@@ -496,7 +497,6 @@ export function createInventoryTools(
           type: args.adjustment_type,
           quantity_after: Number(args.quantity_after),
           description: args.reason || undefined,
-          created_by_user_id: userId,
         });
 
         return JSON.stringify({

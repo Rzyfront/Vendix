@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { S3Service } from '../../../../common/services/s3.service';
+import { QrService } from '../../../../common/services/qr.service';
 import { InvoicePdfBuilder, InvoicePdfData } from './invoice-pdf.builder';
 import {
   PRINT_FORMATS,
@@ -73,7 +74,33 @@ export class InvoicePdfService {
     private readonly prisma: StorePrismaService,
     private readonly s3_service: S3Service,
     private readonly event_emitter: EventEmitter2,
+    private readonly qr_service: QrService,
   ) {}
+
+  /**
+   * Renders the DIAN verification URL as a scannable PNG for the graphic
+   * representation.
+   *
+   * Returns `undefined` instead of throwing: the QR is an aid on the paper, not
+   * a condition of the invoice's validity, so a rendering failure must never
+   * abort an emission that the DIAN already accepted. The builder falls back to
+   * printing the URL as text.
+   */
+  private async renderVerificationQr(
+    qr_url?: string | null,
+  ): Promise<Buffer | undefined> {
+    if (!qr_url) return undefined;
+    try {
+      // 320 px keeps the code crisp once pdfkit scales it down to the ~84 pt a
+      // thermal roll allows; a 200 px source visibly degrades at that size.
+      return await this.qr_service.generateBuffer(qr_url, 320);
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo generar el QR de verificacion: ${(error as Error)?.message}`,
+      );
+      return undefined;
+    }
+  }
 
   /**
    * Generates a PDF for an invoice, uploads to S3, and updates the invoice record.
@@ -223,6 +250,7 @@ export class InvoicePdfService {
       // DIAN
       cufe: invoice.cufe || undefined,
       qr_code: invoice.qr_code || undefined,
+      qr_code_buffer: await this.renderVerificationQr(invoice.qr_code),
     };
 
     const pdf_buffer = await InvoicePdfBuilder.generate(pdf_data);
@@ -310,6 +338,8 @@ export class InvoicePdfService {
     }
 
     const today = this.formatDate(new Date());
+    const sample_qr_url =
+      'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=MUESTRA';
 
     return InvoicePdfBuilder.generate({
       company_name: issuer.legal_name,
@@ -376,7 +406,11 @@ export class InvoicePdfService {
       total_amount: 255850,
 
       cufe: 'MUESTRA0000000000000000000000000000000000000000000000000000000000000000000000000000',
-      qr_code: 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=MUESTRA',
+      qr_code: sample_qr_url,
+      // The preview exists so the merchant can judge their paper choice, and the
+      // QR is the block most likely to be too tight on a roll — a preview that
+      // omits it would hide exactly what needs judging.
+      qr_code_buffer: await this.renderVerificationQr(sample_qr_url),
       payment_form: 'cash',
       payment_method: 'Efectivo',
     });

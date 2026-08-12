@@ -169,14 +169,20 @@ const LABELS: Record<VexiExpression, string> = {
          knob: 15% of 2.9px is 0.4px, well under what the eye resolves on a 94px
          avatar, and a 6s cycle is slow enough to read as a static image between
          glances. Amplitude and tempo both moved. Still a float, not a bounce —
-         the dock sits over live screens and must not compete with them. */
+         the dock sits over live screens and must not compete with them.
+
+         El recorrido es una fracción del diámetro, no 4.5px fijos: el dock
+         encoge en tablet y móvil, y una amplitud absoluta pasaría de 4.8% del
+         alto a 8% al llegar a 56px — el mismo salto que la nota de arriba dice
+         que no debe leerse como rebote. 0.048 reproduce los 4.5px originales
+         sobre los 94px de escritorio. */
       @keyframes vexi-breathe {
         0%,
         100% {
           transform: translateY(0);
         }
         50% {
-          transform: translateY(-4.5px);
+          transform: translateY(calc(var(--vexi-dock-size, 94px) * -0.048));
         }
       }
 

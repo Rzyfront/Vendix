@@ -7,6 +7,7 @@ import {
   output,
   DestroyRef,
   computed,
+  signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
@@ -21,6 +22,13 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
+import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
+import {
+  BadgeComponent,
+  BadgeVariant,
+} from '../../../../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../../../../shared/components/tooltip/tooltip.component';
+import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -44,7 +52,76 @@ export interface NotificationsSettings {
   sound_id?: string | null;
   sound_volume?: number;
   sound_muted?: boolean;
+  /**
+   * Anticipación del aviso de vencimiento de cuotas de CxP, en días (0-30).
+   * La consume el cron `ApDueNotificationsJob` por tienda.
+   */
+  ap_due_soon_days?: number;
 }
+
+/**
+ * Metadatos de un tipo de suscripción en-la-app. El `trigger` describe el
+ * evento REAL que crea la notificación, no el nombre del campo: es lo que el
+ * operador necesita para decidir si la quiere encendida.
+ */
+interface SubscriptionMeta {
+  readonly label: string;
+  readonly trigger: string;
+  readonly icon: string;
+}
+
+/**
+ * Los tipos que este formulario expone. El backend inicializa más (los de
+ * separados/layaway) con `in_app: true` y sin interruptor propio: esos llegan
+ * siempre a la campana. Los de vencimientos CxP sí tienen interruptor: el
+ * operador decide si quiere campana/web push para cada uno.
+ */
+const SUBSCRIPTION_META: Readonly<Record<string, SubscriptionMeta>> = {
+  new_order: {
+    label: 'Nuevas órdenes',
+    trigger: 'Cuando entra un pedido nuevo, venga del POS o de la tienda.',
+    icon: 'shopping-bag',
+  },
+  order_status_change: {
+    label: 'Cambios de estado de orden',
+    trigger:
+      'Cuando una orden avanza o retrocede: confirmada, despachada, entregada, anulada.',
+    icon: 'arrow-left-right',
+  },
+  low_stock: {
+    label: 'Stock bajo',
+    trigger:
+      'Cuando un producto baja del mínimo que definiste en Inventario.',
+    icon: 'package',
+  },
+  new_customer: {
+    label: 'Nuevos clientes',
+    trigger: 'Cuando se registra un cliente nuevo en la tienda.',
+    icon: 'user-plus',
+  },
+  payment_received: {
+    label: 'Pagos recibidos',
+    trigger: 'Cuando se registra un pago sobre una orden o una cuenta.',
+    icon: 'banknote',
+  },
+  new_review: {
+    label: 'Nuevas reseñas',
+    trigger: 'Cuando un cliente califica un producto o la tienda.',
+    icon: 'star',
+  },
+  ap_installment_due_soon: {
+    label: 'Pago a proveedor por vencer',
+    trigger:
+      'Cuando una cuota de Cuentas por Pagar entra en la ventana de anticipación que definiste en los ajustes de la tienda.',
+    icon: 'calendar-clock',
+  },
+  ap_installment_overdue: {
+    label: 'Pago a proveedor vencido',
+    trigger:
+      'Cuando una cuota de Cuentas por Pagar pasó su fecha de vencimiento sin pagarse.',
+    icon: 'alert-triangle',
+  },
+};
 
 @Component({
   selector: 'app-notifications-settings-form',
@@ -56,6 +133,10 @@ export interface NotificationsSettings {
     SettingToggleComponent,
     IconComponent,
     ButtonComponent,
+    AlertBannerComponent,
+    BadgeComponent,
+    TooltipComponent,
+    ExpandableCardComponent,
     SelectorComponent,
   ],
   templateUrl: './notifications-settings-form.component.html',
@@ -86,31 +167,71 @@ export class NotificationsSettingsForm implements OnInit {
       if (current) {
         this.form.patchValue(current, { emitEvent: false });
         this.syncSoundIdDisabledState();
+        this.soundMuted.set(this.isSoundMuted);
       }
     });
 
     this.destroyRef.onDestroy(() => this.stopPreview());
   }
 
-  devicePushEnabled = false;
+  /**
+   * Era un campo plano. En zoneless, `initDevicePushState()` y
+   * `onDevicePushToggle()` lo escriben DESPUÉS de un `await`: fuera del turno
+   * del evento de plantilla, así que nada marcaba la vista sucia y el toggle se
+   * quedaba pintado en el estado anterior. Como señal, el repintado es propio.
+   */
+  readonly devicePushEnabled = signal(false);
 
-  subscriptions: Record<string, boolean> = {
+  /**
+   * Espejo del permiso del navegador. `pushService.permissionState` lee
+   * `Notification.permission`, que no es reactivo: se refresca a mano cada vez
+   * que el permiso pudo haber cambiado.
+   */
+  readonly pushPermission = signal<NotificationPermission>('default');
+
+  /**
+   * Mismo motivo que `devicePushEnabled`: `loadSubscriptions()` escribe este
+   * mapa desde el callback de un observable, sin evento de plantilla detrás.
+   */
+  readonly subscriptions = signal<Record<string, boolean>>({
     new_order: true,
     order_status_change: true,
     low_stock: true,
     new_customer: true,
     payment_received: true,
     new_review: true,
-  };
+    ap_installment_due_soon: true,
+    ap_installment_overdue: true,
+  });
 
-  subscriptionLabels: Record<string, string> = {
-    new_order: 'Nuevas órdenes',
-    order_status_change: 'Cambios de estado de orden',
-    low_stock: 'Stock bajo',
-    new_customer: 'Nuevos clientes',
-    payment_received: 'Pagos recibidos',
-    new_review: 'Nuevas reseñas',
-  };
+  readonly subscriptionMeta = SUBSCRIPTION_META;
+
+  /** Panel colapsable con el diagnóstico de «no me llegan las notificaciones». */
+  readonly troubleshootOpen = signal(false);
+
+  /** Espejo en señal de `sound_muted` para las partes reactivas de la plantilla. */
+  readonly soundMuted = signal(false);
+
+  /**
+   * Estado del canal de dispositivo, resumido en una insignia. Es la causa
+   * número uno de «no me llegan las notificaciones»: si el navegador bloqueó el
+   * permiso, ningún ajuste de esta pantalla lo puede reactivar.
+   */
+  readonly pushStatus = computed<{
+    text: string;
+    variant: BadgeVariant;
+  }>(() => {
+    if (!this.pushService.isSupported) {
+      return { text: 'No compatible con este navegador', variant: 'neutral' };
+    }
+    if (this.pushPermission() === 'denied') {
+      return { text: 'Bloqueado por el navegador', variant: 'error' };
+    }
+    if (this.devicePushEnabled()) {
+      return { text: 'Activo en este dispositivo', variant: 'success' };
+    }
+    return { text: 'Requiere permisos del navegador', variant: 'warning' };
+  });
 
   form: FormGroup = new FormGroup({
     email_enabled: new FormControl(true),
@@ -130,6 +251,10 @@ export class NotificationsSettingsForm implements OnInit {
     sound_volume: new FormControl<number>(70, [
       Validators.min(0),
       Validators.max(100),
+    ]),
+    ap_due_soon_days: new FormControl<number>(1, [
+      Validators.min(0),
+      Validators.max(30),
     ]),
   });
 
@@ -186,6 +311,10 @@ export class NotificationsSettingsForm implements OnInit {
     return this.form.get('sound_volume') as FormControl<number>;
   }
 
+  get apDueSoonDaysControl(): FormControl<number> {
+    return this.form.get('ap_due_soon_days') as FormControl<number>;
+  }
+
   get isSoundMuted(): boolean {
     return this.form.get('sound_muted')?.value ?? false;
   }
@@ -225,15 +354,17 @@ export class NotificationsSettingsForm implements OnInit {
 
   private async initDevicePushState() {
     if (!this.pushService.isSupported) return;
+    this.pushPermission.set(this.pushService.permissionState);
     if (this.pushService.permissionState === 'granted') {
       const reg = await navigator.serviceWorker.getRegistration('/');
       const sub = await reg?.pushManager?.getSubscription();
-      this.devicePushEnabled = !!sub;
+      this.devicePushEnabled.set(!!sub);
     }
   }
 
   onFieldChange() {
     this.syncSoundIdDisabledState();
+    this.soundMuted.set(this.isSoundMuted);
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
     }
@@ -261,9 +392,9 @@ export class NotificationsSettingsForm implements OnInit {
     return this.form.get('sms_enabled')?.value ?? false;
   }
 
-  get subscriptionTypes(): string[] {
-    return Object.keys(this.subscriptions);
-  }
+  readonly subscriptionTypes = computed(() =>
+    Object.keys(this.subscriptions()),
+  );
 
   loadSubscriptions() {
     this.notificationsApi
@@ -272,11 +403,15 @@ export class NotificationsSettingsForm implements OnInit {
       .subscribe({
         next: (response: any) => {
           const subs = response?.data || [];
-          for (const sub of subs) {
-            if (sub.type in this.subscriptions) {
-              this.subscriptions[sub.type] = sub.in_app;
+          this.subscriptions.update((current) => {
+            const next = { ...current };
+            for (const sub of subs) {
+              if (sub.type in next) {
+                next[sub.type] = sub.in_app;
+              }
             }
-          }
+            return next;
+          });
         },
         error: () => {
           // Silently fail — subscriptions will use defaults
@@ -284,32 +419,42 @@ export class NotificationsSettingsForm implements OnInit {
       });
   }
 
-  get devicePushDescription(): string {
-    if (this.pushService.permissionState === 'denied') {
-      return 'Bloqueado por el navegador — revisa los permisos del sitio';
+  readonly devicePushDescription = computed(() => {
+    if (!this.pushService.isSupported) {
+      return 'Este navegador no admite avisos en el dispositivo';
     }
-    return this.devicePushEnabled
-      ? 'Recibirás alertas aunque la app esté cerrada'
-      : 'Activa para recibir alertas en tu dispositivo';
-  }
+    if (this.pushPermission() === 'denied') {
+      return 'Bloqueado por el navegador — habilita las notificaciones del sitio en la configuración del navegador y vuelve a intentarlo';
+    }
+    return this.devicePushEnabled()
+      ? 'Recibirás alertas en este dispositivo aunque la app esté cerrada'
+      : 'Al activarlo, el navegador te pedirá permiso para enviar notificaciones';
+  });
 
   onSubscriptionToggle(type: string) {
-    this.subscriptions[type] = !this.subscriptions[type];
+    let nextValue = false;
+    this.subscriptions.update((current) => {
+      nextValue = !current[type];
+      return { ...current, [type]: nextValue };
+    });
     this.notificationsApi
-      .updateSubscription({ type, in_app: this.subscriptions[type] })
+      .updateSubscription({ type, in_app: nextValue })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe();
   }
 
   async onDevicePushToggle() {
-    if (!this.devicePushEnabled) {
+    if (!this.devicePushEnabled()) {
       // Turning ON — request permission and subscribe
       const success = await this.pushService.requestPermissionAndSubscribe();
-      this.devicePushEnabled = success;
+      this.devicePushEnabled.set(success);
     } else {
       // Turning OFF — unsubscribe
       await this.pushService.unsubscribe();
-      this.devicePushEnabled = false;
+      this.devicePushEnabled.set(false);
     }
+    // El permiso pudo cambiar dentro del diálogo del navegador (concedido o
+    // bloqueado): refrescar el espejo para que la insignia diga la verdad.
+    this.pushPermission.set(this.pushService.permissionState);
   }
 }

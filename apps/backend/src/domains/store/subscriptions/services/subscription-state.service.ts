@@ -62,6 +62,30 @@ const TRANSITIONS: Record<State, readonly State[]> = {
   // back, so pending_payment must be able to transition back to those
   // states. Without these entries the cancel call throws "Illegal transition
   // pending_payment -> suspended" and leaves the subscription stuck.
+  //
+  // QUI-676: `trial` and `draft` belong to that same set and were left out of
+  // the fix above. The rule is symmetry — every state that may LEGALLY ENTER
+  // `pending_payment` must be able to come back out of it, because the state
+  // it came from is exactly what the checkout paths write verbatim into
+  // `pending_revert_state`, and that column is the ONLY instruction the
+  // rollback paths have.
+  //   - `trial`: written by the RNC-15 anti-arrastre upgrade
+  //     (subscription-checkout.controller.ts, `pending_revert_state: 'trial'`)
+  //     and reachable a second time through the generic mid-cycle branch,
+  //     which stamps `pending_revert_state: sub.state` with no state guard —
+  //     a trial whose window already lapsed lands there too.
+  //   - `draft`: `store_subscriptions.state` is `@default(draft)` in the
+  //     schema and `SubscriptionDraftCleanupJob` (RNC-40) exists precisely
+  //     because abandoned draft rows are real. `draft -> pending_payment` is
+  //     legal (row above), and the same unguarded mid-cycle branch — in the
+  //     store AND the org checkout controller — stamps
+  //     `pending_revert_state: sub.state`, so a draft can be parked in
+  //     pending_payment with 'draft' as its documented way home.
+  // Both rollbacks used to throw SUBSCRIPTION_010 inside
+  // ReconcileStuckPendingJob.reconcilePendingChange() — the only thing that
+  // rescues a checkout whose Wompi webhook never arrived — so the cron retried
+  // and failed every 5 minutes while the store stayed parked in
+  // `pending_payment` (store 99 sat there 11 days).
   pending_payment: [
     'active',
     'blocked',
@@ -71,6 +95,8 @@ const TRANSITIONS: Record<State, readonly State[]> = {
     'grace_soft',
     'grace_hard',
     'suspended',
+    'trial',
+    'draft',
   ],
   // RNC-15 anti-arrastre: trial → pending_payment is allowed when the user
   // upgrades from a trial (free) to a paid plan via checkout. The charge runs

@@ -51,30 +51,26 @@ export class ProductsBulkController {
     @Body() bulkUploadDto: BulkProductUploadDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.productsBulkService.uploadProducts(
-        bulkUploadDto,
-        req.user,
-      );
+    // Sin try/catch a propósito: `responseService.error()` RETORNA el sobre en
+    // vez de lanzarlo y este handler no declara `@HttpCode`, así que un fallo
+    // salía con HTTP 201 CREATED y `success: false` — el frontend celebraba una
+    // carga que nunca ocurrió. La excepción tiene que llegar al filtro global.
+    const result = await this.productsBulkService.uploadProducts(
+      bulkUploadDto,
+      req.user,
+    );
 
-      if (result.failed > 0) {
-        return this.responseService.created(
-          result,
-          'Carga masiva completada con algunos errores',
-        );
-      }
-
+    if (result.failed > 0) {
       return this.responseService.created(
         result,
-        'Carga masiva completada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message,
-        error.message,
-        error.status || 400,
+        'Carga masiva completada con algunos errores',
       );
     }
+
+    return this.responseService.created(
+      result,
+      'Carga masiva completada exitosamente',
+    );
   }
 
   /**
@@ -154,59 +150,39 @@ export class ProductsBulkController {
     file: any,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      // Validar tipo de archivo
-      const allowedMimeTypes = [
-        'text/csv',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-        'application/vnd.ms-excel', // .xls
-        'application/octet-stream', // A veces CSVs vienen así
-      ];
+    // Sin try/catch, por la misma razón que `upload`: el sobre de error salía con
+    // HTTP 201 y `success: false`.
+    // La librería XLSX lee tanto .xlsx como CSV desde el buffer; el tipo de
+    // archivo ya lo acota `ParseFilePipe`.
+    const products: any[] = this.productsBulkService.parseFile(file.buffer);
 
-      // Lax mime check fallback to extension check if needed, but ParseFilePipe handles basic validation
+    const validationResult =
+      await this.productsBulkService.validateBulkProducts(products, req.user);
 
-      let products: any[] = [];
-
-      // Intentar parsear como Excel primero (ya que soporta ambos si se usa XLSX lib correctamente)
-      // La librería XLSX puede leer CSVs también si se pasa el buffer.
-      products = this.productsBulkService.parseFile(file.buffer);
-
-      // Validar productos
-      const validationResult =
-        await this.productsBulkService.validateBulkProducts(products, req.user);
-
-      if (!validationResult.isValid) {
-        return this.responseService.success(
-          validationResult,
-          'Se encontraron errores en el archivo',
-        );
-      }
-
-      // Procesar carga masiva
-      const uploadResult: BulkUploadResultDto =
-        await this.productsBulkService.uploadProducts(
-          { products: validationResult.validProducts },
-          req.user,
-        );
-
-      if (uploadResult.failed > 0) {
-        return this.responseService.created(
-          uploadResult,
-          'Archivo procesado con algunos errores',
-        );
-      }
-
-      return this.responseService.created(
-        uploadResult,
-        'Archivo procesado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message,
-        error.message,
-        error.status || 400,
+    if (!validationResult.isValid) {
+      return this.responseService.success(
+        validationResult,
+        'Se encontraron errores en el archivo',
       );
     }
+
+    const uploadResult: BulkUploadResultDto =
+      await this.productsBulkService.uploadProducts(
+        { products: validationResult.validProducts },
+        req.user,
+      );
+
+    if (uploadResult.failed > 0) {
+      return this.responseService.created(
+        uploadResult,
+        'Archivo procesado con algunos errores',
+      );
+    }
+
+    return this.responseService.created(
+      uploadResult,
+      'Archivo procesado exitosamente',
+    );
   }
 
   /**

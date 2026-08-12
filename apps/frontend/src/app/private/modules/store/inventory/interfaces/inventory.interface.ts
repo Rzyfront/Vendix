@@ -244,6 +244,10 @@ export interface PurchaseOrder {
   // Payment fields
   payment_status?: PurchaseOrderPaymentStatus;
   payment_due_date?: string;
+  // QUI-647 — modo de pago acordado: 'immediate' | 'partial' | 'deferred' |
+  // 'installments'. NULL en órdenes anteriores al ticket.
+  payment_plan?: string | null;
+  down_payment_amount?: number | string | null;
   // Populated fields
   supplier?: Supplier;
   suppliers?: Supplier;
@@ -451,8 +455,23 @@ export interface AdjustmentQueryDto {
   created_by_user_id?: number;
   start_date?: string;
   end_date?: string;
+  /** Busca por nombre/SKU del producto y por la descripción del ajuste. */
+  search?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface AdjustmentListResponse {
+  adjustments: InventoryAdjustment[];
+  total: number;
+  hasMore: boolean;
+  /** Conteos sobre el filtro completo, no sobre la página visible. */
+  stats: {
+    total: number;
+    losses: number;
+    damages: number;
+    corrections: number;
+  };
 }
 
 // ============================================================
@@ -584,13 +603,32 @@ export interface StockLevel {
   reorder_quantity?: number;
   last_counted_at?: string;
   updated_at?: string;
-  // Populated fields
+  // ===== Relaciones =====
+  // El backend responde con los nombres de Prisma (`products`,
+  // `inventory_locations`). Los alias `product`/`location` que se declaraban
+  // acá nunca venían en el cuerpo, así que la pantalla de stock leía undefined
+  // y mostraba "Ubicación 5" en vez del nombre de la bodega.
+  products?: {
+    id: number;
+    name: string;
+    sku?: string;
+    is_ingredient?: boolean;
+    stock_unit?: string | null;
+    purchase_unit?: string | null;
+    purchase_to_stock_factor?: number | null;
+  };
+  inventory_locations?: InventoryLocation;
+  /** @deprecated alias legado; usar `products`. */
   product?: {
     id: number;
     name: string;
     sku?: string;
   };
+  /** @deprecated alias legado; usar `inventory_locations`. */
   location?: InventoryLocation;
+  // Derivados de unidad de medida que calcula el backend (ingredientes).
+  sealed_units?: number | null;
+  open_remaining?: number | null;
 }
 
 // ============================================================
@@ -692,6 +730,15 @@ export interface CostPreviewItem {
   // `null` when the new cost is 0 (e.g. reactivation of orphaned stock) so
   // the UI can avoid a divide-by-zero display.
   resulting_margin: number | null;
+  /**
+   * QUI-648 — a cuántas unidades de stock corresponde `current_base_price`.
+   * `new_cost_per_unit` viene por unidad MÍNIMA y el precio por unidad de
+   * PRECIO, así que restar uno del otro sin esta escala inventa el margen: un
+   * cable a $5.000 el metro con stock en milímetros mostraría el precio del
+   * metro contra el costo del milímetro. El backend ya lo emite saneado (≥ 1);
+   * es opcional porque las filas de producto nuevo se sintetizan en el cliente.
+   */
+  price_unit_quantity?: number;
   /**
    * QUI-645 — row synthesized on the CLIENT for a product that does not exist
    * yet (prebulk). The backend never emits it: a new product has no stock, no

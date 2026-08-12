@@ -99,9 +99,18 @@ export class PosOrderItemDto {
   @MaxLength(500)
   price_override_reason?: string;
 
+  /**
+   * Tasa del impuesto de la línea como FRACCIÓN: `0.19` es 19%. La columna es
+   * `Decimal(6,5)`, así que mandar `19` desbordaba el numérico de Postgres y
+   * salía un `500 SYS_INTERNAL_001` en lugar de un 400 accionable.
+   */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 5 })
   @Min(0)
+  @Max(1, {
+    message:
+      'tax_rate se expresa como fracción: usa 0.19 para 19% (máximo 1 = 100%)',
+  })
   @Type(() => Number)
   tax_rate?: number;
 
@@ -476,6 +485,22 @@ export class CreatePosPaymentDto {
   @Type(() => Boolean)
   update_inventory?: boolean = true;
 
+  /**
+   * SIN LECTOR — se acepta y se valida, pero el servicio NO la consulta:
+   * `payments.service.ts` fija `const allowOversell = false` como constante
+   * («Oversell is intentionally not controlled by the public POS payload») y
+   * bloquea con `POS_STOCK_INSUFFICIENT_001`. Mandarla en `true` no habilita
+   * vender sin saldo.
+   *
+   * OJO — la app móvil la manda en `true` en seis sitios (pos/index.tsx,
+   * pos-payment-modal, pos-order-create-modal, shipping-modal). Cree que
+   * autorizó sobreventa; el backend la ignora y bloquea igual. Esa discrepancia
+   * es real y está pendiente de decisión de producto.
+   *
+   * NO BORRAR ESTE CAMPO. El `ValidationPipe` global corre con
+   * `forbidNonWhitelisted: true` (main.ts:199), así que quitarlo del DTO haría
+   * que TODO cobro del POS móvil respondiera 400. Se conserva a propósito.
+   */
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)

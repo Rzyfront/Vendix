@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import { DocumentPrintService } from '../../../../shared/services/print';
 
 // ============================================================================
 // VOUCHER CONTRACT — structural subset of GuestOrderSummary (guest-order-summary
@@ -68,16 +69,45 @@ export interface VoucherSummary {
   store?: VoucherStore;
 }
 
+/**
+ * Document CSS handed to `DocumentPrintService`. The `@page` rule is NOT here:
+ * paper, margin and copies belong to `receipts.printing.guest_order` and are
+ * resolved by the engine.
+ */
+const GUEST_ORDER_PRINT_STYLES = `
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }
+    .container {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    table { border-collapse: collapse; }
+`;
+
 @Injectable({ providedIn: 'root' })
 export class GuestOrderPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
+  private readonly documentPrint = inject(DocumentPrintService);
 
-  printVoucher(summary: VoucherSummary): void {
-    const html = this.generateVoucherHtml(summary);
-    this.printHtml(html);
+  async printVoucher(summary: VoucherSummary): Promise<void> {
+    await this.documentPrint.print({
+      document: 'guest_order',
+      body: this.generateVoucherBody(summary),
+      title: `Comprobante de compra #${this.esc(summary.order.order_number)}`,
+      styles: GUEST_ORDER_PRINT_STYLES,
+    });
   }
 
-  private generateVoucherHtml(summary: VoucherSummary): string {
+  private generateVoucherBody(summary: VoucherSummary): string {
     const order = summary.order;
     const store = summary.store;
     const customer = summary.customer;
@@ -207,32 +237,6 @@ export class GuestOrderPrintService {
       : '';
 
     return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Comprobante de compra #${this.esc(order.order_number)}</title>
-  <style>
-    @page { size: A4; margin: 20mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    table { border-collapse: collapse; }
-  </style>
-</head>
-<body>
   <div class="container">
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
@@ -310,9 +314,7 @@ export class GuestOrderPrintService {
         Generado por ${this.esc(storeName)} · Powered by Vendix
       </p>
     </div>
-  </div>
-</body>
-</html>`;
+  </div>`;
   }
 
   private formatDate(iso?: string | null): string {
@@ -336,26 +338,5 @@ export class GuestOrderPrintService {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
-  }
-
-  private printHtml(html: string): void {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.style.opacity = '0';
-    document.body.appendChild(iframe);
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    }
-    setTimeout(() => iframe.remove(), 1000);
   }
 }

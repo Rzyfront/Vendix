@@ -97,6 +97,16 @@ export function getFieldAndColumnForCode(code: string): {
 }
 
 /**
+ * Propiedades raíz que SÍ corresponden a una carga masiva. La detección se
+ * ancla al nombre de la raíz, no al shape.
+ *
+ * Agregar una raíz aquí es lo único que hace falta cuando aparezca un bulk
+ * nuevo (`products`, `orders`), y su DTO tiene que exponer el array con ese
+ * mismo nombre.
+ */
+const BULK_ROOT_PROPERTIES = new Set(['customers']);
+
+/**
  * Detecta si el árbol de errores de class-validator pertenece a una carga
  * masiva. El shape típico de un DTO con `@ValidateNested({ each: true })`
  * sobre `customers: ItemDto[]` produce:
@@ -104,22 +114,52 @@ export function getFieldAndColumnForCode(code: string): {
  *   - 1er nivel: `property: "0"`, `"1"`, ...
  *   - 2do nivel: `property: "email"`, `"document_type"`, ...
  *
- * Se considera bulk si en cualquier nivel aparece el nombre raíz
- * `"customers"` o un índice numérico puro.
+ * El primer nivel numérico NO alcanza para reconocer un bulk: ese shape es el
+ * de CUALQUIER DTO con un array validado. Aceptando el índice suelto, faltar
+ * `total_price` en los `items` de una cotización respondía
+ * `CUST_BULK_VALIDATION` — "Se encontraron 1 error(es) de validación en la
+ * carga masiva" — con sugerencias de clientes ("Usa uno de los códigos válidos
+ * (CC, CE, NIT...)") en endpoints de cotizaciones, órdenes, compras y ajustes
+ * de inventario, que no tienen filas ni plantilla de Excel.
  */
-export function isBulkValidationError(
-  errors: ValidationError[],
-): boolean {
-  const visit = (errs: ValidationError[]): boolean => {
+export function isBulkValidationError(errors: ValidationError[]): boolean {
+  return errors.some(
+    (e) =>
+      BULK_ROOT_PROPERTIES.has(e.property) && (e.children?.length ?? 0) > 0,
+  );
+}
+
+/**
+ * Aplana el árbol de class-validator a mensajes legibles, prefijando la ruta
+ * del campo cuando el error está anidado (`items.0.total_price: ...`).
+ *
+ * El `exceptionFactory` sólo miraba `constraints` en la raíz, y un error dentro
+ * de un array no la tiene: el DTO raíz sólo trae `children`. El operador recibía
+ * `"Valor inválido"` sin saber qué campo de qué fila corregir.
+ *
+ * Los errores planos se dejan sin prefijo para no cambiar el mensaje que hoy
+ * consume el frontend en los formularios normales.
+ */
+export function flattenValidationMessages(errors: ValidationError[]): string[] {
+  const visit = (errs: ValidationError[], parentPath: string): string[] => {
+    const messages: string[] = [];
     for (const e of errs) {
-      if (e.property === 'customers' || /^\d+$/.test(e.property)) return true;
-      if (e.children && e.children.length > 0 && visit(e.children)) {
-        return true;
+      const path = parentPath ? `${parentPath}.${e.property}` : e.property;
+      if (e.constraints) {
+        const texts = Object.values(e.constraints);
+        messages.push(
+          ...texts.map((text) => (parentPath ? `${path}: ${text}` : text)),
+        );
+      }
+      if (e.children?.length) {
+        messages.push(...visit(e.children, path));
       }
     }
-    return false;
+    return messages;
   };
-  return visit(errors);
+
+  const messages = visit(errors, '');
+  return messages.length > 0 ? messages : ['Valor inválido'];
 }
 
 /**

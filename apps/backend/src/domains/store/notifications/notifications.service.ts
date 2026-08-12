@@ -315,6 +315,11 @@ export class NotificationsService {
       'layaway_completed',
       'layaway_cancelled',
       'new_review',
+      // QUI-647 — vencimientos de Cuentas por Pagar. El cron `ApDueNotificationsJob`
+      // ya las emite; sin esta fila el web push las filtraba (sendToStore consulta
+      // `notification_subscriptions.in_app`) y el toggle no existía en la UI.
+      'ap_installment_due_soon',
+      'ap_installment_overdue',
     ];
 
     const existing = await this.subscriptionsModel.findMany({

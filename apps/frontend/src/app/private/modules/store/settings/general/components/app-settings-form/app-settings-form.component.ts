@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   input,
@@ -19,8 +20,30 @@ import { IconComponent } from '../../../../../../../shared/components/index';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { ImageSourceModalComponent } from '../../../../../../../shared/components/image-source-modal/image-source-modal.component';
+import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
+import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../../../../shared/components/tooltip/tooltip.component';
+import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
 import { dataUrlToFile } from '../../../../../../../shared/utils/data-url.util';
 import { LucideAngularModule } from 'lucide-angular';
+
+/** Formato hexadecimal de 6 dígitos — el mismo que valida el FormGroup. */
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+
+/** Paleta observable por la plantilla para pintar la vista previa. */
+interface BrandPalette {
+  readonly primary: string;
+  readonly secondary: string;
+  readonly accent: string;
+}
+
+/** Metadatos de ayuda de cada color: qué gobierna y dónde se nota. */
+interface BrandColorHelp {
+  readonly key: 'primary_color' | 'secondary_color' | 'accent_color';
+  readonly label: string;
+  readonly hint: string;
+  readonly tooltip: string;
+}
 
 @Component({
   selector: 'app-app-settings-form',
@@ -30,6 +53,10 @@ import { LucideAngularModule } from 'lucide-angular';
     IconComponent,
     ButtonComponent,
     ImageSourceModalComponent,
+    AlertBannerComponent,
+    BadgeComponent,
+    TooltipComponent,
+    ExpandableCardComponent,
     LucideAngularModule,
   ],
   templateUrl: './app-settings-form.component.html',
@@ -59,6 +86,58 @@ export class AppSettingsForm {
 
   readonly logoModalOpen = signal(false);
   readonly faviconModalOpen = signal(false);
+
+  /** Panel de ayuda «¿dónde se ve cada recurso?» — arranca colapsado. */
+  readonly assetsHelpOpen = signal(false);
+
+  /**
+   * Espejo en señal de los tres colores del formulario. Un `computed` NO puede
+   * leer `form.value` (es una propiedad plana, no una señal: se evaluaría una
+   * sola vez), así que la paleta se empuja explícitamente desde el effect de
+   * carga y desde cada handler de cambio. Es lo que alimenta la vista previa.
+   */
+  readonly brandPalette = signal<BrandPalette>({
+    primary: '#7ED7A5',
+    secondary: '#2F6F4E',
+    accent: '#FFFFFF',
+  });
+
+  /**
+   * `onFieldChange()` sólo emite cuando el FormGroup es válido, así que un hex
+   * mal escrito descarta el cambio EN SILENCIO. Este flag es lo que permite
+   * decírselo al operador en vez de dejarlo creer que ya guardó.
+   */
+  readonly hasInvalidHex = computed(() => {
+    const palette = this.brandPalette();
+    return [palette.primary, palette.secondary, palette.accent].some(
+      (value) => !HEX_COLOR.test(value ?? ''),
+    );
+  });
+
+  /** Copy de ayuda por color. Ver ThemeService: cada uno alimenta un token. */
+  readonly colorHelp: ReadonlyArray<BrandColorHelp> = [
+    {
+      key: 'primary_color',
+      label: 'Primario',
+      hint: 'Botones principales, enlaces y estados activos.',
+      tooltip:
+        'Es el color de acción de toda la app: el botón «Guardar», las pestañas activas y los enlaces. Alimenta el token --color-primary, así que un primario muy claro sobre fondo blanco deja los botones ilegibles. Ejemplo seguro: #2F6F4E.',
+    },
+    {
+      key: 'secondary_color',
+      label: 'Secundario',
+      hint: 'Acciones de apoyo y acentos de encabezados.',
+      tooltip:
+        'Se usa en los elementos que acompañan a la acción principal: botones secundarios, chips y encabezados destacados. Conviene que contraste con el primario, no que se le parezca. Ejemplo: primario #2F6F4E con secundario #7ED7A5.',
+    },
+    {
+      key: 'accent_color',
+      label: 'Acento',
+      hint: 'Detalles y realces puntuales sobre superficies.',
+      tooltip:
+        'Realces pequeños: bordes, insignias y fondos de énfasis. Al ser el color que suele ir DEBAJO de texto, un acento oscuro con texto oscuro se vuelve ilegible. Ejemplo: #FFFFFF.',
+    },
+  ];
 
   private toastService = inject(ToastService);
 
@@ -109,6 +188,24 @@ export class AppSettingsForm {
     return this.form.get('favicon_url') as FormControl<string | null>;
   }
 
+  /** Resuelve el control de un color desde el metadato de ayuda. */
+  colorControlFor(key: BrandColorHelp['key']): FormControl<string> {
+    return this.form.get(key) as FormControl<string>;
+  }
+
+  /**
+   * Empuja el valor de los tres controles de color a `brandPalette`. Se llama
+   * después de cada escritura del formulario porque los FormControl no son
+   * señales y la vista previa sí lo es.
+   */
+  private syncBrandPalette(): void {
+    this.brandPalette.set({
+      primary: this.primaryColorControl.value ?? '',
+      secondary: this.secondaryColorControl.value ?? '',
+      accent: this.accentColorControl.value ?? '',
+    });
+  }
+
   constructor() {
     // El preview sigue SIEMPRE al valor del control, que es la única fuente de
     // verdad de este formulario. Antes había un guard `!this.logoBlobUrl` para
@@ -132,6 +229,9 @@ export class AppSettingsForm {
             untracked(this.faviconPreview),
           ),
         );
+        // La paleta se lee del formulario ya parcheado, no de `currentSettings`,
+        // para que la vista previa refleje exactamente lo que se va a guardar.
+        this.syncBrandPalette();
       }
     });
   }
@@ -157,6 +257,7 @@ export class AppSettingsForm {
   }
 
   onFieldChange() {
+    this.syncBrandPalette();
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
     }

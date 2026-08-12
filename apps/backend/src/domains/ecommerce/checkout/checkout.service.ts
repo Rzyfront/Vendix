@@ -13,6 +13,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { resolveDefaultSaleUnits } from '../../store/products/services/default-sale-unit.util';
 import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
@@ -957,6 +958,20 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
+    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
+    // presentación marcada por defecto y no expone selector: elegir entre varias
+    // es capacidad exclusiva del POS. Un producto sin default conserva la
+    // cascada legacy sin cambio alguno.
+    const defaultSaleUnits = await resolveDefaultSaleUnits(
+      this.prisma,
+      cart_items.map((item) => item.product_id),
+    );
+    // Unidades reales de stock por línea, para que la RESERVA use el mismo
+    // número que el commit posterior (`stock_units_consumed ?? quantity`).
+    const stockUnitsByLine = new Map<string, number>();
+    const lineKey = (productId: number, variantId?: number | null): string =>
+      `${productId}:${variantId ?? 'null'}`;
+
     const itemsWithTaxes = await Promise.all(
       cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
@@ -1001,7 +1016,57 @@ export class CheckoutService {
             : undefined,
         });
 
-        const netPrice = priceResult.unitPrice;
+        // Con presentación por defecto el precio de la línea es el del PAQUETE
+        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
+        // default ya es una decisión explícita del comercio, así que se fuerza en
+        // true para no depender de un flag que puede quedar desincronizado.
+        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
+        const tierPriceResult = defaultSaleUnit
+          ? this.priceResolverService.resolveWithTier({
+              product: {
+                base_price: Number(productWithTaxes.base_price),
+                is_on_sale: productWithTaxes.is_on_sale,
+                sale_price:
+                  productWithTaxes.sale_price != null
+                    ? Number(productWithTaxes.sale_price)
+                    : null,
+                track_inventory: productWithTaxes.track_inventory,
+                has_multiple_price_tiers: true,
+              },
+              variant: item.product_variant
+                ? {
+                    id: item.product_variant.id,
+                    price_override:
+                      item.product_variant.price_override != null
+                        ? Number(item.product_variant.price_override)
+                        : null,
+                    is_on_sale: item.product_variant.is_on_sale,
+                    sale_price:
+                      item.product_variant.sale_price != null
+                        ? Number(item.product_variant.sale_price)
+                        : null,
+                    track_inventory_override:
+                      item.product_variant.track_inventory_override,
+                  }
+                : undefined,
+              priceTier: defaultSaleUnit.tier,
+              tierOverrides: defaultSaleUnit.overrides,
+            })
+          : null;
+
+        const netPrice = tierPriceResult
+          ? tierPriceResult.unitPrice
+          : priceResult.unitPrice;
+
+        const packSize = tierPriceResult?.unitsPerPackage ?? null;
+        const stockUnitsConsumed =
+          packSize && packSize > 1 ? item.quantity * packSize : null;
+        if (stockUnitsConsumed != null) {
+          stockUnitsByLine.set(
+            lineKey(item.product_id, item.product_variant_id),
+            stockUnitsConsumed,
+          );
+        }
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1024,6 +1089,9 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
+          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
+          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          stock_units_consumed: stockUnitsConsumed,
         };
       }),
     );
@@ -1037,6 +1105,22 @@ export class CheckoutService {
 
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertCheckoutVatAllowed(itemsWithTaxes);
+
+    // Restaurant fire-to-kitchen deferral: prepared items with an active
+    // recipe are excluded from reservation (computed once for the whole cart).
+    // Se resuelve ACÁ, antes de crear la orden, porque la validación de stock
+    // por presentación tiene que usar el mismo predicado que la reserva.
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
+    // Falta de stock medida en unidades de stock: si sobra, hay que fallar
+    // ANTES de crear la orden y el pago.
+    await this.assertPackagedStockAvailability(
+      cart_items,
+      stockUnitsByLine,
+      lineKey,
+      deferredPreparedProductIds,
+    );
 
     // Recompute promotional + coupon discounts on the backend. Frontend
     // only sends the coupon code (if any); totals here are authoritative.
@@ -1104,6 +1188,13 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+            // en null cuando no hubo empaque, para distinguir "no aplica" de
+            // "empaque de 1" igual que en el resto de los flujos de venta.
+            applied_price_tier_id: item.applied_price_tier_id,
+            applied_price_tier_name_snapshot:
+              item.applied_price_tier_name_snapshot,
+            stock_units_consumed: item.stock_units_consumed,
             order_item_taxes: {
               create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
@@ -1175,11 +1266,6 @@ export class CheckoutService {
       },
     });
 
-    // Restaurant fire-to-kitchen deferral: prepared items with an active
-    // recipe are excluded from reservation (computed once for the whole cart).
-    const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
-
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
@@ -1193,13 +1279,31 @@ export class CheckoutService {
           item.product_id,
           item.product_variant_id || undefined,
           location_id,
-          item.quantity,
+          // Reservar en la unidad MÍNIMA. Vender 1 bulto de 50 kg reserva 50, no
+          // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
+          // así que reservar `quantity` dejaría la reserva y el descuento en
+          // números distintos y el inventario se desincronizaría.
+          stockUnitsByLine.get(
+            lineKey(item.product_id, item.product_variant_id),
+          ) ?? item.quantity,
           'order',
           order.id,
           undefined,
           false, // Already validated stock above
         );
       } catch (error) {
+        // QUI-557/559: mismo criterio que el POS. Un error de stock es una
+        // respuesta de negocio, no un incidente. Tragarlo dejaba la orden creada
+        // con HTTP 200 y CERO reserva: las mismas unidades quedaban vendibles
+        // para el siguiente checkout, o sea sobreventa silenciosa sin necesidad
+        // de carrera. Y el guard que se comía era justamente el piso duro de
+        // `reserveStock`, que el docblock de QUI-557 nombra al checkout como
+        // caso de "debe fallar fuerte en vez de corromper la fila". Los fallos
+        // genuinos de infraestructura conservan la tolerancia previa.
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+
         this.logger.warn(
           `Stock reservation failed for product ${item.product_id}: ${error.message}`,
         );
@@ -1489,6 +1593,20 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
+    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
+    // presentación marcada por defecto y no expone selector: elegir entre varias
+    // es capacidad exclusiva del POS. Un producto sin default conserva la
+    // cascada legacy sin cambio alguno.
+    const defaultSaleUnits = await resolveDefaultSaleUnits(
+      this.prisma,
+      cart_items.map((item) => item.product_id),
+    );
+    // Unidades reales de stock por línea, para que la RESERVA use el mismo
+    // número que el commit posterior (`stock_units_consumed ?? quantity`).
+    const stockUnitsByLine = new Map<string, number>();
+    const lineKey = (productId: number, variantId?: number | null): string =>
+      `${productId}:${variantId ?? 'null'}`;
+
     const itemsWithTaxes = await Promise.all(
       cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
@@ -1533,7 +1651,57 @@ export class CheckoutService {
             : undefined,
         });
 
-        const netPrice = priceResult.unitPrice;
+        // Con presentación por defecto el precio de la línea es el del PAQUETE
+        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
+        // default ya es una decisión explícita del comercio, así que se fuerza en
+        // true para no depender de un flag que puede quedar desincronizado.
+        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
+        const tierPriceResult = defaultSaleUnit
+          ? this.priceResolverService.resolveWithTier({
+              product: {
+                base_price: Number(productWithTaxes.base_price),
+                is_on_sale: productWithTaxes.is_on_sale,
+                sale_price:
+                  productWithTaxes.sale_price != null
+                    ? Number(productWithTaxes.sale_price)
+                    : null,
+                track_inventory: productWithTaxes.track_inventory,
+                has_multiple_price_tiers: true,
+              },
+              variant: item.product_variant
+                ? {
+                    id: item.product_variant.id,
+                    price_override:
+                      item.product_variant.price_override != null
+                        ? Number(item.product_variant.price_override)
+                        : null,
+                    is_on_sale: item.product_variant.is_on_sale,
+                    sale_price:
+                      item.product_variant.sale_price != null
+                        ? Number(item.product_variant.sale_price)
+                        : null,
+                    track_inventory_override:
+                      item.product_variant.track_inventory_override,
+                  }
+                : undefined,
+              priceTier: defaultSaleUnit.tier,
+              tierOverrides: defaultSaleUnit.overrides,
+            })
+          : null;
+
+        const netPrice = tierPriceResult
+          ? tierPriceResult.unitPrice
+          : priceResult.unitPrice;
+
+        const packSize = tierPriceResult?.unitsPerPackage ?? null;
+        const stockUnitsConsumed =
+          packSize && packSize > 1 ? item.quantity * packSize : null;
+        if (stockUnitsConsumed != null) {
+          stockUnitsByLine.set(
+            lineKey(item.product_id, item.product_variant_id),
+            stockUnitsConsumed,
+          );
+        }
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1556,6 +1724,9 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
+          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
+          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          stock_units_consumed: stockUnitsConsumed,
         };
       }),
     );
@@ -1569,6 +1740,18 @@ export class CheckoutService {
 
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertCheckoutVatAllowed(itemsWithTaxes);
+
+    // Mismo par que el checkout normal: predicado de diferimiento primero, y
+    // validación de stock en unidades de stock antes de crear la orden.
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
+    await this.assertPackagedStockAvailability(
+      cart_items,
+      stockUnitsByLine,
+      lineKey,
+      deferredPreparedProductIds,
+    );
 
     // Resolve promotional + coupon discounts on the backend (same source of
     // truth used by the normal checkout). Frontend never sends totals.
@@ -1676,6 +1859,13 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+            // en null cuando no hubo empaque, para distinguir "no aplica" de
+            // "empaque de 1" igual que en el resto de los flujos de venta.
+            applied_price_tier_id: item.applied_price_tier_id,
+            applied_price_tier_name_snapshot:
+              item.applied_price_tier_name_snapshot,
+            stock_units_consumed: item.stock_units_consumed,
             order_item_taxes: {
               create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
@@ -1711,11 +1901,6 @@ export class CheckoutService {
       currency: order.currency,
     });
 
-    // Restaurant fire-to-kitchen deferral: prepared items with an active
-    // recipe are excluded from reservation (computed once for the whole cart).
-    const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
-
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
@@ -1729,13 +1914,24 @@ export class CheckoutService {
           item.product_id,
           item.product_variant_id || undefined,
           location_id,
-          item.quantity,
+          // Reservar en la unidad MÍNIMA. Vender 1 bulto de 50 kg reserva 50, no
+          // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
+          // así que reservar `quantity` dejaría la reserva y el descuento en
+          // números distintos y el inventario se desincronizaría.
+          stockUnitsByLine.get(
+            lineKey(item.product_id, item.product_variant_id),
+          ) ?? item.quantity,
           'order',
           order.id,
           undefined,
           false, // Already validated stock above
         );
       } catch (error) {
+        // Mismo criterio que el checkout principal: el error de stock sube.
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+
         this.logger.warn(
           `Stock reservation failed for product ${item.product_id}: ${error.message}`,
         );
@@ -2333,6 +2529,54 @@ export class CheckoutService {
     const base = (name ?? '').split(/[\\/]/).pop() ?? '';
     const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
     return sanitized.length > 0 ? sanitized : 'receipt';
+  }
+
+  /**
+   * Segunda validación de stock, esta vez en UNIDADES DE STOCK.
+   *
+   * La validación temprana del carrito mide `item.quantity` (líneas lógicas),
+   * pero la reserva descuenta `stock_units_consumed`: vender 1 bulto de 50 kg
+   * validaba contra 1 y reservaba 50. Con 10 kg en bodega el carrito pasaba y
+   * `reserveStock` reventaba DESPUÉS de crear la orden y el pago, dejando una
+   * orden huérfana con HTTP de error.
+   *
+   * Sólo revisa las líneas con presentación (packSize > 1); las demás ya
+   * quedaron validadas correctamente arriba. Usa el MISMO predicado que el
+   * bucle de reserva para que no puedan discrepar.
+   */
+  private async assertPackagedStockAvailability(
+    cart_items: any[],
+    stockUnitsByLine: Map<string, number>,
+    lineKey: (productId: number, variantId?: number | null) => string,
+    deferredPreparedProductIds: Set<number>,
+  ): Promise<void> {
+    if (stockUnitsByLine.size === 0) return;
+
+    for (const item of cart_items) {
+      const stockUnits = stockUnitsByLine.get(
+        lineKey(item.product_id, item.product_variant_id),
+      );
+      if (!stockUnits || stockUnits <= item.quantity) continue;
+      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+
+      const availability =
+        await this.stockValidatorService.validateAvailability(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          stockUnits,
+        );
+
+      if (!availability.isAvailable) {
+        const productName = item.product?.name ?? `#${item.product_id}`;
+        const variantInfo = item.product_variant?.name
+          ? ` (${item.product_variant.name})`
+          : '';
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_CART_003,
+          `Insufficient stock for ${productName}${variantInfo}: requested ${stockUnits}, available ${availability.available}`,
+        );
+      }
+    }
   }
 
   private shouldReserveStock(

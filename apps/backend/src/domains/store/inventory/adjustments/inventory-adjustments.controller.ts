@@ -128,13 +128,13 @@ export class InventoryAdjustmentsController {
   @ApiOperation({ summary: 'Approve inventory adjustment' })
   @ApiResponse({ status: 200, description: 'Adjustment approved successfully' })
   @RequirePermissions('store:inventory:adjustments:approve')
-  async approveAdjustment(
-    @Param('id') id: number,
-    @Body('approvedByUserId') approvedByUserId: number,
-  ) {
+  async approveAdjustment(@Param('id') id: number) {
+    // El aprobador NO viaja en el body: se resuelve del contexto en el servicio.
+    // Permitir que el cliente declare quién aprueba es el defecto de fondo, y el
+    // nombre camelCase que se leía acá nunca coincidió con el snake_case que
+    // manda el frontend, así que la columna quedaba en NULL.
     const result = await this.adjustmentsService.approveAdjustment(
       parseInt(id.toString()),
-      approvedByUserId,
     );
     return this.responseService.success(
       result,
