@@ -93,7 +93,10 @@ describe('fiscal identity write parity (5 paths, same columns)', () => {
       const merged = mergeFiscalData(STORE_PREV_FISCAL_DATA, PATCH_DTO);
       const cols = buildTenantFiscalColumns('store', PATCH_DTO, merged);
 
-      // Columnas únicas de tienda (con municipality_code y tax_id_dv):
+      // Columnas únicas de tienda (con municipality_code y tax_id_dv). Nótese
+      // que `fiscal_responsibilities` y `tax_regime` NO están: esas viven en
+      // `organizations` (no en `stores`); en el alcance tienda se quedan sólo
+      // en `fiscal_data` (JSON), no en columnas. Ver QUI-681.
       expect(cols).toEqual({
         legal_name: 'NUEVA RAZON SOCIAL S.A.S.',
         tax_id: '902056589',
@@ -101,8 +104,6 @@ describe('fiscal identity write parity (5 paths, same columns)', () => {
         nit_type: 'NIT',
         municipality_code: '11001',
         ciiu_code: '6201',
-        fiscal_responsibilities: ['O-48', 'O-13'],
-        tax_regime: '48',
       });
     });
 
@@ -119,14 +120,12 @@ describe('fiscal identity write parity (5 paths, same columns)', () => {
         nit_type: 'NIT',
         municipality_code: '11001',
         ciiu_code: '6201',
-        fiscal_responsibilities: ['O-48', 'O-13'],
-        tax_regime: '48',
       });
     });
   });
 
   describe('paridad: el mismo estado anterior produce las mismas columnas en cualquier escritor', () => {
-    it('rama org y rama tienda coinciden en todas las columnas que comparten', () => {
+    it('rama org y rama tienda coinciden en las columnas que comparten', () => {
       const mergedOrg = mergeFiscalData(ORG_PREV_FISCAL_DATA, PATCH_DTO);
       const mergedStore = mergeFiscalData(STORE_PREV_FISCAL_DATA, PATCH_DTO);
 
@@ -141,18 +140,20 @@ describe('fiscal identity write parity (5 paths, same columns)', () => {
         mergedStore,
       ) as Record<string, unknown>;
 
-      // Columnas que existen en ambos alcances (tax_id, legal_name,
-      // fiscal_responsibilities, tax_regime, ciiu_code) deben coincidir.
-      const sharedKeys = [
-        'tax_id',
-        'legal_name',
-        'fiscal_responsibilities',
-        'tax_regime',
-        'ciiu_code',
-      ];
+      // Columnas que existen en ambos alcances deben coincidir:
+      //   - tax_id, legal_name, ciiu_code viven en las dos tablas.
+      //   - fiscal_responsibilities y tax_regime SÓLO viven en `organizations`,
+      //     así que quedan fuera de la comparación entre alcances. Ver QUI-681.
+      const sharedKeys = ['tax_id', 'legal_name', 'ciiu_code'];
       for (const key of sharedKeys) {
         expect(orgCols[key]).toEqual(storeCols[key]);
       }
+      // Y la tienda explícitamente NO emite las columnas de org.
+      expect('fiscal_responsibilities' in storeCols).toBe(false);
+      expect('tax_regime' in storeCols).toBe(false);
+      // La org sí las emite.
+      expect('fiscal_responsibilities' in orgCols).toBe(true);
+      expect('tax_regime' in orgCols).toBe(true);
     });
   });
 
@@ -315,18 +316,28 @@ describe('fiscal identity write parity (5 paths, same columns)', () => {
       const m5 = mergeFiscalData(ORG_PREV_FISCAL_DATA, PATCH_DTO);
       const c5 = buildTenantFiscalColumns('organization', PATCH_DTO, m5) as Record<string, unknown>;
 
-      // Los 5 caminos producen los mismos campos clave de identidad:
-      const checkSharedIdentity = (cols: Record<string, unknown>, label: string) => {
+      // Los 5 caminos producen los mismos campos clave de identidad. Los
+      // campos exclusivos del alcance org (`fiscal_responsibilities`,
+      // `tax_regime`) sólo se exigen en los caminos que llaman al dispatcher
+      // con scope='organization'. Ver QUI-681.
+      const checkOrgIdentity = (cols: Record<string, unknown>, label: string) => {
         expect(cols.tax_id).toBe('902056589');
         expect(cols.legal_name).toBe('NUEVA RAZON SOCIAL S.A.S.');
         expect(cols.fiscal_responsibilities).toEqual(['O-48', 'O-13']);
         expect(cols.tax_regime).toBe('48');
       };
-      checkSharedIdentity(c1, '1-org');
-      checkSharedIdentity(c2, '2-store-via-org');
-      checkSharedIdentity(c3, '3-store');
-      checkSharedIdentity(c4, '4-wizard');
-      checkSharedIdentity(c5, '5-superadmin');
+      const checkStoreIdentity = (cols: Record<string, unknown>, label: string) => {
+        expect(cols.tax_id).toBe('902056589');
+        expect(cols.legal_name).toBe('NUEVA RAZON SOCIAL S.A.S.');
+        // Las responsabilidades y el régimen NO son columnas del alcance tienda.
+        expect('fiscal_responsibilities' in cols).toBe(false);
+        expect('tax_regime' in cols).toBe(false);
+      };
+      checkOrgIdentity(c1, '1-org');
+      checkStoreIdentity(c2, '2-store-via-org');
+      checkStoreIdentity(c3, '3-store');
+      checkOrgIdentity(c4, '4-wizard');
+      checkOrgIdentity(c5, '5-superadmin');
     });
   });
 });
