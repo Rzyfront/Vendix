@@ -760,23 +760,13 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Body() dto: ConfigurePaymentPlanDto,
   ) {
-    try {
-      const order = await this.purchaseOrdersService.configurePaymentPlan(
-        Number(id),
-        dto,
-      );
-      return this.responseService.created({
-        data: order,
-        message: 'Plan de pago actualizado exitosamente',
-      });
-    } catch (error) {
-      if (error instanceof VendixHttpException) throw error;
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        'Error al configurar el plan de pago',
-        error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    const order = await this.purchaseOrdersService.configurePaymentPlan(
+      Number(id),
+      dto,
+    );
+    return this.responseService.created({
+      data: order,
+      message: 'Plan de pago actualizado exitosado',
+    });
   }
 }

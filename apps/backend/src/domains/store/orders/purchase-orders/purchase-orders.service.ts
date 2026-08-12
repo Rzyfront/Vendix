@@ -4347,7 +4347,7 @@ export class PurchaseOrdersService {
         id: true,
         status: true,
         total_amount: true,
-        store_id: true,
+        organization_id: true,
         payment_plan: true,
       },
     });
