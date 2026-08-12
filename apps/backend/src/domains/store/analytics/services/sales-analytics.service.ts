@@ -29,10 +29,6 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
-import {
-  COMPLETED_SALE_STATES,
-  sqlStateList,
-} from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -621,20 +617,24 @@ export class SalesAnalyticsService {
     }>>(
       Prisma.sql`
       SELECT
-        spm.system_payment_method_id AS method_name,
-        MAX(spm.display_name) AS display_name,
+        sysm.name AS method_name,
+        COALESCE(MAX(spm.display_name), 'Sin método') AS display_name,
         COUNT(*)::bigint AS count,
         COALESCE(SUM(p.amount), 0)::decimal AS amount
       FROM payments p
       INNER JOIN orders o ON o.id = p.order_id
-      INNER JOIN store_payment_methods spm ON spm.id = p.store_payment_method_id
+      -- QUI-615 review: store_payment_method_id es nullable; INNER JOIN
+      -- descartaba pagos sin metodo configurado silenciosamente. LEFT JOIN
+      -- + COALESCE('Sin método') los incluye.
+      LEFT JOIN store_payment_methods spm ON spm.id = p.store_payment_method_id
+      LEFT JOIN system_payment_methods sysm ON sysm.id = spm.system_payment_method_id
       WHERE o.store_id = ${storeId ?? 0}
         AND o.state IN (${completedStates})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
         AND p.state = 'succeeded'
         ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
-      GROUP BY spm.system_payment_method_id
+      GROUP BY sysm.name
       ORDER BY amount DESC
     `);
 
