@@ -750,12 +750,16 @@ export class FinancialAnalyticsService {
             SELECT
               oi.product_id AS product_id,
               MAX(p.name) AS product_name,
-              COALESCE(SUM(ri.amount), 0)::decimal AS refund_amount
+              COALESCE(SUM(ri.refund_amount), 0)::decimal AS refund_amount
             FROM refund_items ri
             JOIN refunds r ON r.id = ri.refund_id
             JOIN order_items oi ON oi.id = ri.order_item_id
             JOIN products p ON p.id = oi.product_id
-            WHERE r.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+            -- QUI-631 review: refund_items.amount no existe (es refund_amount),
+            -- y refunds.store_id no existe; llegamos al store via el join con
+            -- orders que si tiene store_id.
+            JOIN orders o ON o.id = r.order_id
+            WHERE o.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
               AND r.state IN (${states})
               AND r.created_at >= ${startDate}
               AND r.created_at <= ${endDate}
