@@ -23,7 +23,7 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 import { InputButtonsComponent } from '../../../../../../../shared/components/input-buttons/input-buttons.component';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ToastService } from '../../../../../../../shared/services/toast/toast.service';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 import {
   ConfigurePaymentPlanDto,
@@ -546,7 +546,7 @@ export class PoConfigurePlanModalComponent {
       const due = this.form.controls.dueDate.value;
       if (due) dto.payment_due_date = due;
     } else if (mode === 'deferred') {
-      dto.payment_due_date = this.form.controls.dueDate.value;
+      dto.payment_due_date = this.form.controls.dueDate.value || undefined;
     } else if (mode === 'installments') {
       dto.payment_installments = this.installmentsArray.controls.map((g) => ({
         scheduled_date: g.controls['scheduled_date'].value,
@@ -556,12 +556,12 @@ export class PoConfigurePlanModalComponent {
 
     this.saving.set(true);
     this.service.configurePaymentPlan(o.id, dto).subscribe({
-      next: (res) => {
+      next: (res: any) => {
         this.saving.set(false);
         this.toast.success('Plan de pago actualizado');
         this.configured.emit(res?.data ?? res);
       },
-      error: (err) => {
+      error: (err: any) => {
         this.saving.set(false);
         const msg =
           err?.error?.message ??
