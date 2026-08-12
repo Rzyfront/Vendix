@@ -1730,7 +1730,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.pricingOverrides.set(overrides);
   }
 
-  private loadCostPreview(): void {
+  // Público: el template lo invoca desde `(configComplete)` del paso de config.
+  loadCostPreview(): void {
     const state = this.popCartService.currentState;
     if (!state.locationId || state.items.length === 0) return;
 

@@ -601,8 +601,8 @@ interface ReceiveLine {
         [isOpen]="showPlanModal()"
         [order]="{
           id: currentPo.id,
-          total_amount: currentPo.total_amount,
-          payment_plan: (currentPo as any).payment_plan,
+          total_amount: num(currentPo.total_amount),
+          payment_plan: currentPo.payment_plan
         }"
         (closed)="showPlanModal.set(false)"
         (configured)="onPlanConfigured()"

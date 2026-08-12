@@ -244,6 +244,10 @@ export interface PurchaseOrder {
   // Payment fields
   payment_status?: PurchaseOrderPaymentStatus;
   payment_due_date?: string;
+  // QUI-647 — modo de pago acordado: 'immediate' | 'partial' | 'deferred' |
+  // 'installments'. NULL en órdenes anteriores al ticket.
+  payment_plan?: string | null;
+  down_payment_amount?: number | string | null;
   // Populated fields
   supplier?: Supplier;
   suppliers?: Supplier;

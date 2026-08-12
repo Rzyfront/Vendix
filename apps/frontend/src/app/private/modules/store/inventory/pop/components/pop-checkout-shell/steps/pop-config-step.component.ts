@@ -157,7 +157,11 @@ export class PopConfigStepComponent {
     this.expectedDateChange.emit(value);
   }
 
-  onShippingMethodChange(value: string): void {
-    this.shippingMethodChange.emit(value);
+  /**
+   * `app-selector` emits `string | number | null`; el paso de configuración
+   * solo maneja códigos de método de envío en string, así que se normaliza.
+   */
+  onShippingMethodChange(value: string | number | null): void {
+    this.shippingMethodChange.emit(value == null ? '' : String(value));
   }
 }
