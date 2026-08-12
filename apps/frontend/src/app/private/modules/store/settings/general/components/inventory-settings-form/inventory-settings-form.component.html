@@ -234,23 +234,31 @@
 
       <div>
         <p class="text-xs font-bold text-text-primary">
-          Cu&aacute;ndo se puede vender sin existencias
+          No se puede vender sin existencias
         </p>
         <p class="text-xs text-text-secondary mt-1 leading-relaxed">
-          El POS avisa antes de cobrar si no hay existencias suficientes, pero una vez
-          confirmado el cobro <strong>la venta nunca se bloquea por stock</strong>: la
-          reserva puede dejar el disponible en n&uacute;mero negativo en lugar de frenar el
-          pago. Un disponible negativo es se&ntilde;al de sobreventa o de una entrada sin
-          registrar, y se cuadra con un ajuste de inventario.
+          El POS avisa antes de cobrar, y si aun as&iacute; se confirma el cobro
+          <strong>la venta se bloquea</strong>: el sistema responde con un error que
+          nombra el producto, cu&aacute;ntas unidades hac&iacute;an falta y cu&aacute;ntas
+          hab&iacute;a. El cobro no se registra y no queda nada a medias.
         </p>
       </div>
 
       <div>
-        <p class="text-xs font-bold text-text-primary">En el resto de los flujos s&iacute; bloquea</p>
+        <p class="text-xs font-bold text-text-primary">El resto de los flujos tambi&eacute;n bloquea</p>
         <p class="text-xs text-text-secondary mt-1 leading-relaxed">
-          Fuera del cobro (traslados, remisiones, reservas de pedidos), una operaci&oacute;n que
-          dejar&iacute;a el disponible en negativo se <strong>rechaza</strong> con un error de
-          stock insuficiente antes de escribir nada.
+          Traslados, remisiones y reservas de pedidos se comportan igual: una operaci&oacute;n
+          que dejar&iacute;a el disponible en negativo se <strong>rechaza</strong> con un error
+          de stock insuficiente antes de escribir nada.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-xs font-bold text-text-primary">Si aun as&iacute; ves un descuadre</p>
+        <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+          Significa que entr&oacute; o sali&oacute; mercanc&iacute;a sin registrarse, no que el
+          sistema haya permitido vender de m&aacute;s. Se cuadra con un ajuste de inventario,
+          que s&iacute; deja constancia del faltante.
         </p>
       </div>
     </div>

@@ -946,6 +946,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Location not found',
   },
+  INV_MOVEMENT_LOCATION_001: {
+    code: 'INV_MOVEMENT_LOCATION_001',
+    httpStatus: 400,
+    devMessage:
+      'Movement is missing the location leg its type requires (stock_in/return need to_location_id; stock_out/damage/expiration/adjustment need from_location_id; transfer needs both)',
+  },
   INV_ADJ_001: {
     code: 'INV_ADJ_001',
     httpStatus: 404,

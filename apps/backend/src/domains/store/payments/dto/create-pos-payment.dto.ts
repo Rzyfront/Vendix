@@ -485,6 +485,22 @@ export class CreatePosPaymentDto {
   @Type(() => Boolean)
   update_inventory?: boolean = true;
 
+  /**
+   * SIN LECTOR — se acepta y se valida, pero el servicio NO la consulta:
+   * `payments.service.ts` fija `const allowOversell = false` como constante
+   * («Oversell is intentionally not controlled by the public POS payload») y
+   * bloquea con `POS_STOCK_INSUFFICIENT_001`. Mandarla en `true` no habilita
+   * vender sin saldo.
+   *
+   * OJO — la app móvil la manda en `true` en seis sitios (pos/index.tsx,
+   * pos-payment-modal, pos-order-create-modal, shipping-modal). Cree que
+   * autorizó sobreventa; el backend la ignora y bloquea igual. Esa discrepancia
+   * es real y está pendiente de decisión de producto.
+   *
+   * NO BORRAR ESTE CAMPO. El `ValidationPipe` global corre con
+   * `forbidNonWhitelisted: true` (main.ts:199), así que quitarlo del DTO haría
+   * que TODO cobro del POS móvil respondiera 400. Se conserva a propósito.
+   */
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)

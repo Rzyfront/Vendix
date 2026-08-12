@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { movement_type_enum } from '@prisma/client';
 import { CreateMovementDto } from './dto/create-movement.dto';
 import { MovementQueryDto } from './dto/movement-query.dto';
 import {
@@ -8,18 +10,58 @@ import {
   OUTBOUND_MOVEMENT_TYPES,
   TRANSFER_MOVEMENT_TYPE,
 } from '../../analytics/analytics-metrics.contract';
-import { syncDenormalizedProductStock } from '../shared/helpers/sync-product-stock.helper';
+import { StockLevelManager } from '../shared/services/stock-level-manager.service';
+import { CostingService } from '../shared/services/costing.service';
+import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
 
 @Injectable()
 export class MovementsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private stockLevelManager: StockLevelManager,
+    private costingService: CostingService,
+    private costingMethodResolver: CostingMethodResolverService,
+  ) {}
 
+  /**
+   * ESTE ENDPOINT NUNCA FUNCIONÓ. `inventory_movements.organization_id` es
+   * `NOT NULL` y ni el DTO lo pedía ni el servicio lo ponía, así que todo POST
+   * moría con `PrismaClientValidationError` («Argument `organizations` is
+   * missing») convertido en 500 — antes siquiera de tocar el stock. Por eso el
+   * motor paralelo que vivía aquí jamás llegó a corromper nada: era inalcanzable.
+   *
+   * Se resuelve desde el contexto de la petición, como el resto del dominio: el
+   * tenant no es dato de entrada del cliente, y aceptarlo por el cuerpo abriría
+   * una escritura cruzada entre organizaciones.
+   *
+   * Segundo motivo por el que nunca funcionó: el DTO se volcaba entero con
+   * spread, y declara DOS campos que la tabla no tiene —`unit_cost` y
+   * `expiration_date`—. Mandar cualquiera de los dos hacía que Prisma rechazara
+   * el `create` con otro 500. `unit_cost` no es un dato del movimiento: es el
+   * costo con el que se valoriza la entrada, y su destinatario es el motor de
+   * stock. Igual `expiration_date`: su destino es la capa de costo. Por eso
+   * ahora los campos se nombran uno a uno en vez de volcarse.
+   */
   async create(createMovementDto: CreateMovementDto) {
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
+    }
+
+    const { unit_cost, expiration_date, ...movementFields } = createMovementDto;
+
+    this.assertMovementLocations(movementFields);
+
     return this.prisma.$transaction(async (tx) => {
       // Create the movement record
       const movement = await tx.inventory_movements.create({
         data: {
-          ...createMovementDto,
+          ...movementFields,
+          organization_id,
+          // `user_id` es nulable, pero dejarlo vacío deja el movimiento sin
+          // autor y la trazabilidad a medias: quién lo hizo sale del contexto.
+          user_id: context?.user_id ?? undefined,
           created_at: new Date(),
         },
         include: {
@@ -31,25 +73,65 @@ export class MovementsService {
         },
       });
 
-      // Update stock levels based on movement type
-      await this.updateStockLevels(tx, movement);
-
-      // El espejo denormalizado NO se actualiza solo. `updateStockLevel` escribe
-      // `stock_levels` a mano y sin él `products.stock_quantity` /
-      // `product_variants.stock_quantity` quedaban con el saldo anterior: el
-      // catálogo público, las analíticas y el validador de stock leen ESA
-      // columna, así que un movimiento por este endpoint movía la bodega y
-      // dejaba mintiendo a la vitrina. Sin error en ningún lado.
-      if (movement.product_id) {
-        await syncDenormalizedProductStock(
-          tx,
-          movement.product_id,
-          movement.product_variant_id ?? undefined,
-        );
-      }
+      // Aplica el movimiento al stock. El espejo denormalizado
+      // (`products.stock_quantity`) lo sincroniza `StockLevelManager` en su
+      // paso 7 — un solo dueño, que es justamente lo que faltaba: este endpoint
+      // escribía `stock_levels` por su cuenta y dejaba la vitrina, las
+      // analíticas y el validador leyendo el saldo anterior sin que nada fallara.
+      await this.updateStockLevels(
+        tx,
+        movement,
+        unit_cost,
+        organization_id,
+        expiration_date,
+      );
 
       return movement;
     });
+  }
+
+  /**
+   * Exige la pata de ubicación que el tipo necesita, ANTES de escribir nada.
+   *
+   * Sin esto el `switch` de `updateStockLevels` hace `if (to_location_id)` y, si
+   * la pata falta, no entra a ninguna rama: el movimiento queda escrito en la
+   * bitácora y el stock NO se mueve. El endpoint responde 201 y la existencia
+   * sigue igual — el peor resultado posible, porque el usuario ve el registro y
+   * cree que ajustó el inventario. Un 400 nombrando el campo que falta es
+   * ruidoso; un 201 que no mueve stock es un descuadre silencioso.
+   */
+  private assertMovementLocations(movement: {
+    movement_type: movement_type_enum;
+    from_location_id?: number;
+    to_location_id?: number;
+  }) {
+    const { movement_type, from_location_id, to_location_id } = movement;
+
+    const needsDestination =
+      movement_type === 'stock_in' ||
+      movement_type === 'return' ||
+      movement_type === TRANSFER_MOVEMENT_TYPE;
+    const needsOrigin =
+      movement_type === 'stock_out' ||
+      movement_type === 'damage' ||
+      movement_type === 'expiration' ||
+      movement_type === 'adjustment' ||
+      movement_type === TRANSFER_MOVEMENT_TYPE;
+
+    const missing: string[] = [];
+    if (needsOrigin && from_location_id == null) {
+      missing.push('from_location_id');
+    }
+    if (needsDestination && to_location_id == null) {
+      missing.push('to_location_id');
+    }
+
+    if (missing.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_MOVEMENT_LOCATION_001,
+        `Movement type '${movement_type}' requires ${missing.join(' and ')}`,
+      );
+    }
   }
 
   /**
@@ -246,7 +328,37 @@ export class MovementsService {
     return movement;
   }
 
-  private async updateStockLevels(tx: any, movement: any) {
+  /**
+   * Aplica el movimiento al stock a través de `StockLevelManager`, el motor
+   * canónico. ANTES este método escribía `stock_levels` por su cuenta con un
+   * helper privado (`updateStockLevel`), y por eso el endpoint no aplicaba
+   * costeo, no registraba `inventory_transactions` y recortaba a cero en vez de
+   * fallar: creaba existencias sin costo —diluyendo el CPP del producto— y sin
+   * traza contable, con permiso concedido a owner, admin, manager y Preventista.
+   *
+   * El manager aporta las cuatro piezas que faltaban: capas de costo, la
+   * transacción de inventario, la validación de disponible y la sincronización
+   * del espejo denormalizado. `create_movement: false` porque `create` ya
+   * insertó la fila de `inventory_movements`; dejarlo en `true` la duplicaría.
+   *
+   * CAMBIO DE COMPORTAMIENTO deliberado: las salidas (`stock_out`, `damage`,
+   * `expiration`, el tramo de origen de un `transfer`) ahora VALIDAN disponible.
+   * Antes una salida mayor al saldo se recortaba a cero en silencio y el
+   * faltante desaparecía del registro; ahora responde con error igual que
+   * el resto del sistema. Las entradas no validan: no tiene sentido.
+   */
+  private async updateStockLevels(
+    tx: any,
+    movement: any,
+    // Llega aparte porque `inventory_movements` no tiene columna de costo: el
+    // costo viaja del DTO al motor sin pasar por la fila del movimiento.
+    unit_cost?: number,
+    organization_id?: number,
+    // Va a la CAPA de costo (`inventory_cost_layers.expiration_date`), no a la
+    // fila del movimiento: la tabla de movimientos no tiene esa columna. Sin
+    // esto el vencimiento que capturaba el formulario se descartaba en silencio.
+    expiration_date?: string,
+  ) {
     const {
       product_id,
       product_variant_id,
@@ -254,170 +366,122 @@ export class MovementsService {
       to_location_id,
       quantity,
       movement_type,
+      reason,
+      user_id,
     } = movement;
+
+    const apply = async (
+      location_id: number,
+      quantity_change: number,
+      validate_availability: boolean,
+    ) => {
+      // Costeo de la ENTRADA, con el mismo orden que la recepción de compras:
+      // el promedio se calcula ANTES de mover el stock, porque necesita leer el
+      // saldo previo. `calculateCostOnReceipt` además crea la capa de costo.
+      //
+      // La distinción entre los dos parámetros importa y es fácil de invertir:
+      //   · `unit_cost`          → el NUEVO promedio a persistir en stock_levels
+      //   · `movement_unit_cost` → el costo de ESTA entrada, sólo para valorarla
+      // Pasar el costo de la entrada como `unit_cost` pisaba el promedio del
+      // producto con el precio de una sola compra (1 u. a 3.800 + 3 u. a 4.200
+      // quedaba en 4.200 en vez de 4.100).
+      let costed_unit_cost: number | undefined;
+      const movement_unit_cost =
+        unit_cost != null ? Number(unit_cost) : undefined;
+
+      if (
+        movement_unit_cost != null &&
+        quantity_change > 0 &&
+        movement_type !== 'transfer' &&
+        organization_id != null
+      ) {
+        const costing_method =
+          await this.costingMethodResolver.resolveCostingMethod(
+            organization_id,
+            RequestContextService.getStoreId() ?? undefined,
+          );
+        const costResult = await this.costingService.calculateCostOnReceipt(
+          {
+            product_id,
+            variant_id: product_variant_id ?? undefined,
+            location_id,
+            quantity_received: quantity_change,
+            unit_cost: movement_unit_cost,
+            costing_method,
+            expiration_date: expiration_date
+              ? new Date(expiration_date)
+              : undefined,
+          },
+          tx,
+        );
+        costed_unit_cost = costResult?.new_cost_per_unit ?? movement_unit_cost;
+      }
+
+      return this.stockLevelManager.updateStock(
+        {
+          product_id,
+          variant_id: product_variant_id ?? undefined,
+          location_id,
+          quantity_change,
+          movement_type,
+          reason: reason ?? undefined,
+          user_id: user_id ?? undefined,
+          from_location_id: from_location_id ?? undefined,
+          to_location_id: to_location_id ?? undefined,
+          unit_cost: costed_unit_cost,
+          movement_unit_cost,
+          source_module: 'inventory_movements',
+          // `create` ya escribió la fila del movimiento.
+          create_movement: false,
+          validate_availability,
+        },
+        tx,
+      );
+    };
 
     switch (movement_type) {
       case 'stock_in':
         if (to_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            to_location_id,
-            quantity,
-            product_variant_id,
-          );
+          await apply(to_location_id, quantity, false);
         }
         break;
 
       case 'stock_out':
         if (from_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            from_location_id,
-            -quantity,
-            product_variant_id,
-          );
+          await apply(from_location_id, -quantity, true);
         }
         break;
 
       case 'transfer':
         if (from_location_id && to_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            from_location_id,
-            -quantity,
-            product_variant_id,
-          );
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            to_location_id,
-            quantity,
-            product_variant_id,
-          );
-        }
-        break;
-
-      case 'sale':
-        if (from_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            from_location_id,
-            -quantity,
-            product_variant_id,
-          );
+          // Origen primero y validando: si no hay saldo, el destino no llega a
+          // sumar y la transacción entera se deshace.
+          await apply(from_location_id, -quantity, true);
+          await apply(to_location_id, quantity, false);
         }
         break;
 
       case 'return':
         if (to_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            to_location_id,
-            quantity,
-            product_variant_id,
-          );
+          await apply(to_location_id, quantity, false);
         }
         break;
 
       case 'damage':
       case 'expiration':
         if (from_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            from_location_id,
-            -quantity,
-            product_variant_id,
-          );
+          await apply(from_location_id, -quantity, true);
         }
         break;
 
       case 'adjustment':
-        // Adjustments can be positive or negative based on quantity
+        // Un ajuste puede ser positivo o negativo. Sólo se valida cuando resta:
+        // un ajuste a la baja mayor al saldo es un dato equivocado, no una
+        // corrección — y recortarlo a cero borraba la evidencia.
         if (from_location_id) {
-          await this.updateStockLevel(
-            tx,
-            product_id,
-            from_location_id,
-            quantity,
-            product_variant_id,
-          );
+          await apply(from_location_id, quantity, quantity < 0);
         }
         break;
-    }
-  }
-
-  /**
-   * IMPLEMENTACIÓN PARALELA a `StockLevelManager`. Escribe `stock_levels` a
-   * mano, y por eso NO hace nada de lo que el manager sí hace:
-   *
-   *   - no aplica costeo (no toca `inventory_cost_layers` ni el CPP), así que
-   *     una entrada por aquí suma unidades sin costo y diluye la valuación;
-   *   - no registra `inventory_transactions`, así que el movimiento no aparece
-   *     en la trazabilidad contable;
-   *   - no valida reservas ni disponible: recorta a cero (abajo) en vez de
-   *     fallar con `INV_STOCK_001` como hace `reserveStock`.
-   *
-   * El espejo denormalizado sí se repara, pero desde `create` y a posteriori
-   * (ver el `syncDenormalizedProductStock` de arriba), no desde aquí.
-   *
-   * NO ampliar este camino. Si un flujo nuevo necesita mover stock, va por
-   * `StockLevelManager`; lo correcto para este endpoint es migrarlo, y eso es
-   * un cambio con alcance propio, no un retoque.
-   */
-  private async updateStockLevel(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantityChange: number,
-    productVariantId?: number,
-  ) {
-    const existingStock = await tx.stock_levels.findUnique({
-      where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityOnHand = existingStock.quantity_on_hand + quantityChange;
-      const newQuantityAvailable =
-        existingStock.quantity_available + quantityChange;
-
-      return tx.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
-        },
-        data: {
-          quantity_on_hand: Math.max(0, newQuantityOnHand),
-          quantity_available: Math.max(0, newQuantityAvailable),
-          last_updated: new Date(),
-        },
-      });
-    } else {
-      return tx.stock_levels.create({
-        data: {
-          product_id: productId,
-          product_variant_id: productVariantId,
-          location_id: locationId,
-          quantity_on_hand: Math.max(0, quantityChange),
-          quantity_reserved: 0,
-          quantity_available: Math.max(0, quantityChange),
-          last_updated: new Date(),
-        },
-      });
     }
   }
 }

@@ -1,7 +1,7 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { UseGuards } from '@nestjs/common';
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { StockLevelsService } from './stock-levels.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { SourcingSuggestionQueryDto } from './dto/sourcing-suggestion-query.dto';
@@ -108,6 +108,46 @@ export class StockLevelsController {
     return this.responseService.success(
       result,
       'Sugerencia de sourcing obtenida exitosamente',
+    );
+  }
+
+  /**
+   * Deriva del espejo denormalizado. Declarado ANTES de `@Get(':id')` a
+   * propósito: Nest resuelve por orden, y detrás de la ruta paramétrica
+   * `mirror-drift` entraría como id y reventaría en el `+id` → NaN.
+   */
+  @Get('mirror-drift')
+  @Permissions('store:inventory:stock_levels:read')
+  async getMirrorDrift() {
+    const result = await this.stockLevelsService.getMirrorDrift();
+    return this.responseService.success(
+      result,
+      result.is_consistent
+        ? 'El stock denormalizado coincide con las existencias reales'
+        : `Se encontraron ${result.drifted_total} descuadre(s) entre el stock denormalizado y las existencias reales`,
+    );
+  }
+
+  /**
+   * Reparación de la deriva. `store:inventory:adjustments:approve` porque es una
+   * corrección de existencias del mismo peso que aprobar un ajuste, y ya está
+   * sembrado (owner/admin/manager/Preventista) — un permiso nuevo exigiría
+   * migrar el seed de roles para que alguien pudiera usarlo.
+   *
+   * Declarado ANTES de `@Get(':id')` igual que el detector: aunque el verbo
+   * difiere, mantenerlos juntos evita que un futuro `@Post(':id')` los sepulte.
+   */
+  @Post('mirror-drift/reconcile')
+  @Permissions('store:inventory:adjustments:approve')
+  async reconcileMirrorDrift() {
+    const result = await this.stockLevelsService.reconcileMirrorDrift();
+    return this.responseService.success(
+      result,
+      result.is_consistent
+        ? `Espejo reconciliado: ${result.repaired_products} producto(s) corregido(s), sin descuadres restantes`
+        : result.batch_truncated
+          ? `Se corrigieron ${result.repaired_products} producto(s) de esta tanda (máximo ${result.batch_limit}); quedan ${result.drifted_after} descuadre(s), vuelve a ejecutar`
+          : `Se corrigieron ${result.repaired_products} producto(s); quedan ${result.drifted_after} descuadre(s)`,
     );
   }
 

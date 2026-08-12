@@ -22,7 +22,6 @@ import { Prisma } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { LocationsService } from '../inventory/locations/locations.service';
-import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
@@ -105,7 +104,6 @@ export class ProductsService {
 
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly inventoryService: InventoryIntegrationService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,

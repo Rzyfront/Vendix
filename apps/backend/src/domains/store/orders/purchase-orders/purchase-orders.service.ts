@@ -4353,7 +4353,7 @@ export class PurchaseOrdersService {
     });
     if (!order) {
       throw new VendixHttpException(
-        ErrorCodes.PURCHASE_ORDER_NOT_FOUND,
+        ErrorCodes.PO_FIND_001,
         'Orden de compra no encontrada',
       );
     }
