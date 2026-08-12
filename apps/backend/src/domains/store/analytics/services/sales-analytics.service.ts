@@ -450,6 +450,12 @@ export class SalesAnalyticsService {
       where: {
         product_id: { in: productIds },
       },
+      // QUI-612 review: agregar ORDER BY determinista para que 'primera
+      // categoria gana' sea estable entre ejecuciones. Sin esto, Postgres no
+      // garantiza orden y la misma query puede dar resultados distintos en
+      // cargas seguidas. La eleccion sigue siendo 'first wins' (mapa abajo),
+      // solo que ahora el orden es estable.
+      orderBy: [{ category_id: 'asc' }],
       select: {
         product_id: true,
         category_id: true,
