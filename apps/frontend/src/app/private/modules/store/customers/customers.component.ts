@@ -348,6 +348,12 @@ export class CustomersComponent {
           }
           this.closeModal();
           this.loadCustomers();
+          // `getStats` has a 30s in-memory cache; invalidate it so the cards
+          // reflect the new totals (the cached observable would otherwise
+          // replay the previous count for up to 30s after the mutation).
+          this.customersService.invalidateCache(
+            parseInt(this.storeId()!, 10),
+          );
           this.loadStats(); // Refresh stats too
         },
         error: (error) => {
@@ -440,6 +446,12 @@ export class CustomersComponent {
               next: () => {
                 this.toastService.success('Cliente eliminado');
                 this.loadCustomers();
+                // `getStats` has a 30s in-memory cache; invalidate it so the
+                // cards drop by one after the delete instead of replaying the
+                // pre-delete counts from the cache.
+                this.customersService.invalidateCache(
+                  parseInt(this.storeId()!, 10),
+                );
                 this.loadStats();
               },
               error: (error) => {
@@ -459,6 +471,9 @@ export class CustomersComponent {
 
   onBulkUploadComplete() {
     this.loadCustomers();
+    // `getStats` has a 30s in-memory cache; invalidate it so the cards
+    // reflect the bulk-imported customers instead of replaying stale counts.
+    this.customersService.invalidateCache(parseInt(this.storeId()!, 10));
     this.loadStats();
   }
 }
