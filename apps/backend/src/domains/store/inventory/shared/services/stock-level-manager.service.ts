@@ -219,18 +219,25 @@ export class StockLevelManager {
       throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
-    // RECORTE A CERO — deliberado, no es un descuido. Si la resta dejaría el
-    // saldo por debajo de cero se escribe cero, así que una entrega mayor a lo
-    // disponible se absorbe en silencio y el faltante NO queda registrado: el
-    // cero de sobreventa se ve idéntico al cero de "se agotó normal".
+    // RECORTE A CERO — red residual, NO la política de sobreventa.
     //
-    // Es la regla de negocio "el inventario nunca se muestra en negativo".
-    // Existe `store_settings.inventory.allow_negative_stock`, pero NADIE la
-    // lee — ver el comentario en settings-schemas.dto.ts. Volver esto
-    // configurable NO es refactor: haría visible en stock, reportes y
-    // valuación el descuadre que hoy se tapa. Requiere decisión de producto.
+    // La sobreventa se bloquea AGUAS ARRIBA, y con mensaje al usuario:
+    //   - venta POS  → `payments.service.ts` fija `allowOversell = false` y
+    //     lanza `POS_STOCK_INSUFFICIENT_001` nombrando requerido y disponible;
+    //   - reserva    → `reserveStock` lanza `INV_STOCK_001` antes de escribir
+    //     un disponible negativo (ver ~689 y ~771 en este mismo archivo);
+    //   - entrega    → `order-stock-commit.service.ts` lanza `INV_STOCK_002`.
     //
-    // Mismo recorte, mismo motivo, en: movements.service.ts (~371, ~382),
+    // Este `Math.max(0, …)` sólo puede actuar en un camino que NO pasó por esas
+    // guardas (ajustes, producción, integraciones) o si una de ellas pierde una
+    // carrera. Cuando actúa, oculta el faltante: el cero de descuadre se ve
+    // idéntico al cero de "se agotó normal". Por eso no es inofensivo, pero
+    // tampoco es lo que gobierna la venta.
+    //
+    // `store_settings.inventory.allow_negative_stock` NO lo controla — nadie la
+    // lee (ver settings-schemas.dto.ts). Si algún día se quiere que el faltante
+    // quede registrado en vez de taparse, hay que tocar los cuatro sitios a la
+    // vez: aquí (~223 y ~992), movements.service.ts (~371, ~382),
     // inventory-integration.service.ts (~228) y
     // sellable-stock-allocator.service.ts (~108-130).
     const stockUpdateData: any = {

@@ -126,22 +126,24 @@ export class InventorySettingsDto {
   /**
    * SIN LECTOR — se acepta y se persiste, pero ningún servicio la consulta.
    *
-   * El saldo negativo no existe hoy por decisión de negocio, no por omisión:
-   * los tres motores de escritura recortan a cero (`Math.max(0, …)`) cuando la
-   * resta quedaría por debajo. Consecuencia deliberada y conocida: una entrega
-   * mayor al saldo se absorbe en silencio y el faltante no queda registrado.
+   * La sobreventa YA está bloqueada, y no por esta bandera sino en duro:
+   * `payments.service.ts` fija `allowOversell = false` y lanza
+   * `POS_STOCK_INSUFFICIENT_001`; `reserveStock` lanza `INV_STOCK_001` antes de
+   * escribir un disponible negativo; el commit de entrega lanza
+   * `INV_STOCK_002`. Poner esta bandera en `true` NO habilita vender sin saldo.
    *
-   * NO "arreglar" ese recorte sin decisión de producto: volverlo configurable
-   * hace visible en stock, reportes y valuación el descuadre que hoy se tapa.
-   * Sitios del recorte: stock-level-manager.service.ts (~223 y ~992),
-   * movements.service.ts (~371 y ~382), inventory-integration.service.ts (~228),
+   * Detrás de esas guardas queda un recorte a cero (`Math.max(0, …)`) que actúa
+   * en caminos que no pasan por ellas (ajustes, producción, integraciones) y
+   * oculta el faltante. Tampoco lo gobierna esta bandera. Sitios del recorte:
+   * stock-level-manager.service.ts (~223 y ~992), movements.service.ts (~371 y
+   * ~382), inventory-integration.service.ts (~228),
    * sellable-stock-allocator.service.ts (~108-130).
    */
   @ApiProperty({
     example: false,
     required: false,
     description:
-      'INACTIVA: se persiste pero ningún proceso la lee. El saldo se recorta a cero siempre.',
+      'INACTIVA: se persiste pero ningún proceso la lee. La sobreventa se bloquea en duro (POS_STOCK_INSUFFICIENT_001 / INV_STOCK_001); ponerla en true NO habilita vender sin saldo.',
   })
   @IsOptional()
   @IsBoolean()
