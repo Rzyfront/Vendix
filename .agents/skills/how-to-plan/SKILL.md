@@ -170,9 +170,9 @@ Every plan file must use this **exact** structure. Sections are ordered, all are
    Verification: [exact check for THIS step — command, file diff, UI assertion]  <!-- [MANDATORY] -->
 
 ## End-to-End Verification            <!-- [MANDATORY] integration-level, with concrete tools. -->
-1. [Integration check covering multiple steps + tool used: curl, UI flow, build command, etc.]
+1. [Integration check covering multiple steps + tool used: curl, UI flow, Docker logs, etc.]
 2. [User-facing or contract-level check + how it is observed]
-3. [Build / typecheck / test command — exact invocation]
+3. [Test command — exact invocation. Never a build/typecheck command unless the human explicitly asked for a release/production check — see `buildcheck-dev`]
 
 ## Knowledge Gaps                     <!-- [MANDATORY] write "None." if there are none. -->
 - [Gap]: [missing skill or skill update proposed, with rationale]
@@ -198,7 +198,7 @@ Each row defines what counts as **acceptable** vs **rejected**. If a field falls
 | Step `Why` | "Goes first because frontend in step 4 depends on these endpoints existing." | (missing entirely) |
 | Step `Output` | "GET `/organization/invoicing/invoices?store_id=?&from=&to=` returning paginated invoices scoped by `accounting_entity_id`." | "Endpoints for invoicing." |
 | Step `Verification` | "`curl -H 'Authorization: Bearer $ORG_TOKEN' /organization/invoicing/invoices` returns 200 with `data[]` non-empty; same call without org token returns 403." | "It should work." |
-| `End-to-End Verification` | "`curl -H 'Authorization: Bearer $ORG_TOKEN' /organization/invoicing/invoices` returns 200; `npm run build:prod -w apps/frontend` exits 0." | "Test everything." |
+| `End-to-End Verification` | "`curl -H 'Authorization: Bearer $ORG_TOKEN' /organization/invoicing/invoices` returns 200; `docker logs vendix_frontend` shows `Compiled successfully`, no errors." | "Test everything." |
 | `Knowledge Gaps` | "Cross-module fiscal supervision pattern not covered — propose new skill `vendix-fiscal-supervision` after impl stabilizes." | (absent — must say "None." if there are none) |
 
 ### Verification mechanisms catalog
@@ -211,7 +211,7 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 | **Playwright MCP** (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `browser_navigate({url:'https://vendix.com'})` then `browser_snapshot()` (see `how-to-test`; the Playwright MCP server must be launched with `--ignore-https-errors` — a single context-level flag that covers page + subresources on the local self-signed vhost) |
 | `agent-browser` (E2E fallback) | Only when Playwright MCP cannot: wait on a CSS selector, manual scroll, or read page markdown | `agent-browser` support MCP — see `how-to-test` § Fallback |
 | Backend unit test | Service logic | `npm run buildcheck:test -- src/domains/organization/invoicing/invoicing.service.spec.ts` — **always pass the spec path**; a bare `npm test` runs all 171 specs with a worker pool and exhausts dev-machine RAM (see `buildcheck-dev`) |
-| Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
+| Frontend health after refactor | Type/template errors surfaced at runtime | `docker logs vendix_frontend` shows `Compiled successfully`, zero errors — never a local build (see `buildcheck-dev`; CI already builds before merge) |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
 | Migration verification | DB schema change | `npx prisma migrate status` + targeted SQL `SELECT` |
 | Permission verification | RBAC change | `curl` with a token whose role lacks the permission must return 403 |

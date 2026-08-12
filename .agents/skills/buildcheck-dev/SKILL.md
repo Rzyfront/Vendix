@@ -27,7 +27,23 @@ metadata:
 
 ## Core Rule
 
-Development verification always uses Docker watch-mode logs. Do **not** run production build commands unless the human explicitly asks for a production build, deployment check, or production compilation check.
+Development verification always uses Docker watch-mode logs — nothing else. Never run `tsc`,
+`ngc`, `ng build`, `npm run build`, `npm run build:prod`, or any `npm run buildcheck*` command as
+part of normal development, and never as an automatic pre-PR/pre-push gate. These commands hold
+multiple gigabytes of RAM on a machine that is already budgeted for the Docker stack (see Memory
+Budget below) and freeze it.
+
+GitHub Actions (`.github/workflows/ci.yml`) already runs the build before merge/release, so a local
+build adds little and costs a lot. The **only** two legitimate reasons to run a build/typecheck
+command locally are:
+
+1. The human explicitly asks, verbally, to test a build (any wording — "prueba el build", "corre un
+   build", "test the production build").
+2. The human is preparing a release. Even then, **suggest** running `buildcheck`/`build:prod` and
+   wait for confirmation — do not run it unprompted. Mention that CI already gates it, so it is
+   optional insurance, not a requirement.
+
+Outside those two cases, a task is verified and complete using Docker logs alone.
 
 ## Current Dev App Status Workflow
 
@@ -92,15 +108,16 @@ Expected healthy signals include messages such as `Compiled successfully`, `Succ
 
 Blocking signals include `ERROR`, `ERROR in`, `TypeError`, `ReferenceError`, TypeScript errors, Angular template parsing errors, missing dependency errors, Prisma generation errors, database syntax errors, Redis connection failures, or repeated container restarts.
 
-## Compilation Check Without Starting Servers (REQUIRED)
+## Compilation/Build Checks — Never Automatic, Suggest-Only
 
-> **HARD RULE:** The dev machine has limited memory. Any command that starts a
-> server, a watcher, or the Angular prerender worker pool is **forbidden** for
-> verification, because an aborted run leaves orphan Node processes holding
-> gigabytes of RAM.
+> **HARD RULE:** Do not run any command below during normal development or as a self-initiated
+> pre-PR/pre-push gate. Docker logs are the only required verification. These commands exist for the
+> two exceptions in the Core Rule (explicit human request, or release prep after the human confirms
+> the suggestion) and, even then, any command that starts a server, a watcher, or the Angular
+> prerender worker pool stays **forbidden**, because an aborted run leaves orphan Node processes
+> holding gigabytes of RAM.
 
-When a compilation check is needed — because the change touches types, imports,
-templates, or DTOs — use the guarded one-shot runner. It compiles, reports
+When one of the two exceptions applies, use the guarded one-shot runner. It compiles, reports
 PASS/FAIL, and kills its whole process group on exit:
 
 | Need | Command | What it runs |
@@ -154,19 +171,19 @@ a pool of `cores - 1` is Jest's default, not Angular's (Angular caps lower).
 | Never run to verify | Why | Use instead |
 | --- | --- | --- |
 | `npm run dev`, `npm start` | starts backend + frontend on the host, colliding with Docker | `docker logs` |
-| `nest start`, `npm run start:dev -w apps/backend` | boots Nest on :3000 in watch mode, stays alive | `npm run buildcheck:be` |
+| `nest start`, `npm run start:dev -w apps/backend` | boots Nest on :3000 in watch mode, stays alive | `docker logs vendix_backend` |
 | `ng serve`, `npm start -w apps/frontend` | dev server stays alive on :4200 | `docker logs vendix_frontend` |
-| `ng build --watch` | watcher never exits | `npm run buildcheck:fe` |
-| `npm run build:prod -w apps/frontend`, root `npm run build` | production config carries `server: src/main.server.ts` + `prerender`, which bootstraps the SSR app in a worker pool — the main orphan source and the heaviest step | `npm run buildcheck:deep` |
-| `npm test -w apps/backend` to verify one new spec | it does not know what you wrote — it runs **all 171 specs** with a worker pool, holding ~1 GB per worker, and the workers outlive a killed parent | `npm run buildcheck:test -- <path/to/that.spec.ts>` |
+| `ng build --watch` | watcher never exits | `docker logs vendix_frontend` |
+| `npm run build:prod -w apps/frontend`, root `npm run build`, any `npm run buildcheck*` | not a dev-verification step at all — see Core Rule; runs only on explicit request or confirmed release prep | `docker logs` (dev) / CI already covers the rest |
+| `npm test -w apps/backend` to verify one new spec | it does not know what you wrote — it runs **all 171 specs** with a worker pool, holding ~1 GB per worker, and the workers outlive a killed parent | `npm run buildcheck:test -- <path/to/that.spec.ts>` (test execution, not a build — still scoped to avoid the worker-pool blowup) |
 | `npm run test:debug -w apps/backend` | runs `node --inspect-brk`, which halts before the first line and waits **forever** for a debugger to attach — a permanent orphan, not a slow one | `npm run buildcheck:test` |
 | `npm run test:watch -w apps/backend`, `ng test` | watchers never exit; `ng test` also launches a Karma browser | `npm run buildcheck:test` |
 
-Root `npm run build` and `build:prod` stay reserved for a deploy/release build the
-human explicitly asks for, ideally in CI rather than on the dev machine.
+`npm run build`, `build:prod`, and every `npm run buildcheck*` compile/typecheck command stay
+reserved for the two exceptions in the Core Rule — never for routine development, never as a
+self-initiated PR gate. GitHub Actions (`ci.yml`) already runs the build before merge/release.
 
-Development logs remain the primary verification source; `buildcheck` is the
-compile gate, not a replacement for checking container logs.
+Development logs are the **only** required verification source for development work.
 
 ## Docker Availability
 
@@ -210,16 +227,18 @@ After any restart or recreate, re-run the development log checks and `docker ps`
 - [ ] Dev app status requests include `docker compose ps` and lightweight HTTP checks when containers are running.
 - [ ] Zero relevant errors remain in affected logs.
 - [ ] Fixes were re-verified after changes.
-- [ ] Compilation checks used `npm run buildcheck*` — never a serve/watch/prerender command.
-- [ ] No orphan Node process survived the check (`npm run buildcheck:reap` reports none).
-- [ ] Production build (`npm run build`, `build:prod`) was not run unless explicitly requested.
+- [ ] No `tsc`, `ngc`, `ng build`, `npm run build*`, or `npm run buildcheck*` command was run — unless
+      the human explicitly asked to test a build, or confirmed a suggested release-prep build.
+- [ ] If a build/typecheck command *was* run (one of the two exceptions), no orphan Node process
+      survived it (`npm run buildcheck:reap` reports none).
 - [ ] If Docker was unavailable, the blocker was reported instead of claiming full verification.
 
 ## Golden Rule
 
-Development means Docker logs/watch mode. A compile gate means `npm run buildcheck`
-— one shot, no server, no orphans. A production build means `npm run build`, and
-only when the human explicitly asks for it.
+Development means Docker logs/watch mode — nothing else. Never run a build or compile-check
+unprompted, not even before a PR: CI (`ci.yml`) already gates the build before merge/release. A
+build or `npm run buildcheck*` runs only when the human explicitly asks, or when preparing a
+release and the human confirms your suggestion to run one.
 
 ## Related Skills
 
