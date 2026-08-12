@@ -29,7 +29,7 @@ import {
   ConfigurePaymentPlanDto,
   ConfigurePaymentPlanMode,
   PurchaseOrdersService,
-} from '../../../../../../../inventory/services/purchase-orders.service';
+} from '../../../../inventory/services/purchase-orders.service';
 
 const MODES: Array<{
   value: ConfigurePaymentPlanMode;
