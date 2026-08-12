@@ -100,6 +100,28 @@ export class PurchaseOrdersService {
     }
 
     // ============================================================
+    // Payment Plan Configuration (QUI-647)
+    // ============================================================
+
+    /**
+     * Configura el plan de pago de una OC ya creada (PATCH payment-plan).
+     * Permite elegir el modo (inmediato/abono/diferido/cuotas) y los
+     * montos/fechas desde el detalle de la orden. El backend aplica la
+     * matriz anti-doble-registro y recalcula payment_status.
+     */
+    configurePaymentPlan(
+        id: number,
+        dto: ConfigurePaymentPlanDto,
+    ): Observable<ApiResponse<PurchaseOrder>> {
+        return this.http
+            .patch<ApiResponse<PurchaseOrder>>(
+                `${this.api_url}/${id}/payment-plan`,
+                dto,
+            )
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
     // Receptions
     // ============================================================
 
@@ -315,4 +337,26 @@ export interface PaymentScanJobStatus {
     status: PaymentScanStatus;
     result?: PaymentScanResult;
     error?: string;
+}
+
+// ============================================================
+// Payment Plan Configuration DTO (QUI-647)
+// ============================================================
+
+export type ConfigurePaymentPlanMode =
+    | 'immediate'
+    | 'partial'
+    | 'deferred'
+    | 'installments';
+
+export interface ConfigurePaymentPlanInstallmentDto {
+    scheduled_date: string;
+    amount: number;
+}
+
+export interface ConfigurePaymentPlanDto {
+    payment_plan: ConfigurePaymentPlanMode;
+    down_payment_amount?: number;
+    payment_due_date?: string;
+    payment_installments?: ConfigurePaymentPlanInstallmentDto[];
 }

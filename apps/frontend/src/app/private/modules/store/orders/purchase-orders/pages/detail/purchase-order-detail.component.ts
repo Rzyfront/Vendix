@@ -39,6 +39,7 @@ import {
 } from '../../../../inventory/interfaces';
 import { PurchaseOrderPrintService } from '../../services/purchase-order-print.service';
 import { PoPaymentModalComponent } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
+import { PoConfigurePlanModalComponent } from '../../components/po-configure-plan-modal/po-configure-plan-modal.component';
 import { PoTimelineComponent } from '../../../../inventory/pop/components/po-timeline/po-timeline.component';
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
@@ -480,12 +481,20 @@ interface ReceiveLine {
               <app-card>
                 <div class="flex items-center justify-between mb-3">
                   <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider">Pagos</h2>
-                  @if (canRegisterPayment()) {
-                    <app-button variant="outline" size="sm" (clicked)="showPaymentModal.set(true)">
-                      <app-icon name="dollar-sign" [size]="13" slot="icon" />
-                      Registrar
-                    </app-button>
-                  }
+                  <div class="flex items-center gap-2">
+                    @if (canConfigurePaymentPlan()) {
+                      <app-button variant="outline" size="sm" (clicked)="showPlanModal.set(true)">
+                        <app-icon name="settings-2" [size]="13" slot="icon" />
+                        Configurar plan
+                      </app-button>
+                    }
+                    @if (canRegisterPayment()) {
+                      <app-button variant="outline" size="sm" (clicked)="showPaymentModal.set(true)">
+                        <app-icon name="dollar-sign" [size]="13" slot="icon" />
+                        Registrar
+                      </app-button>
+                    }
+                  </div>
                 </div>
                 <div class="h-2.5 bg-border rounded-full overflow-hidden">
                   <div class="h-full rounded-full transition-all duration-500"
@@ -585,6 +594,20 @@ interface ReceiveLine {
       (paymentRegistered)="onPaymentRegistered()"
     />
 
+    <!-- QUI-647 — Configure payment plan modal (PATCH payment-plan) -->
+    @if (po(); as currentPo) {
+      <app-po-configure-plan-modal
+        [isOpen]="showPlanModal()"
+        [order]="{
+          id: currentPo.id,
+          total_amount: currentPo.total_amount,
+          payment_plan: currentPo.payment_plan,
+        }"
+        (closed)="showPlanModal.set(false)"
+        (configured)="onPlanConfigured()"
+      />
+    }
+
     <!-- QUI-431 serial capture modal (collect mode) -->
     <app-serial-bulk-load-modal
       [isOpen]="serialModalOpen()"
@@ -644,6 +667,7 @@ export class StorePurchaseOrderDetailComponent {
 
   // Payment modal
   readonly showPaymentModal = signal(false);
+  readonly showPlanModal = signal(false);
 
   // QUI-431 serial capture state
   readonly serialsByLine = signal<Map<number, string[]>>(new Map());
@@ -782,6 +806,18 @@ export class StorePurchaseOrderDetailComponent {
   readonly canReceive = computed(() => {
     const s = this.po()?.status;
     return s === 'approved' || s === 'partial';
+  });
+
+  /**
+   * QUI-647 — El plan de pago se puede reconfigurar mientras la OC esté
+   * draft/approved y NO tenga pagos reales registrados (el backend rechaza
+   * con PO_PAYMENT_006 si ya hay pagos). Mostrar el botón en el detalle
+   * evita ofrecer un flujo que terminaría en error.
+   */
+  readonly canConfigurePaymentPlan = computed(() => {
+    const s = this.po()?.status;
+    if (s !== 'draft' && s !== 'approved' && s !== 'partial') return false;
+    return this.payments().length === 0;
   });
 
   // `partial` y `received` quedan fuera a propósito: con mercancía ya ingresada
@@ -1134,6 +1170,12 @@ export class StorePurchaseOrderDetailComponent {
   // ============ Payments ============
   onPaymentRegistered(): void {
     this.showPaymentModal.set(false);
+    this.reload();
+  }
+
+  /** QUI-647 — tras reconfigurar el plan de pago (PATCH payment-plan). */
+  onPlanConfigured(): void {
+    this.showPlanModal.set(false);
     this.reload();
   }
 
