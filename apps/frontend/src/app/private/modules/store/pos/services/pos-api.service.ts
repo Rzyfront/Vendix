@@ -69,6 +69,13 @@ export class PosApiService {
     return this.http.get(`${this.apiUrl}/store/orders/${id}`);
   }
 
+  // QUI-649 — POS adopts the order auto-created by the reservation backend
+  // (POST /store/reservations returns `booking.order` populated). Items added
+  // by the cashier after adoption are pushed here, not into a local cart.
+  updateOrderItems(orderId: string | number, items: any[]): Observable<any> {
+    return this.http.put(`${this.apiUrl}/store/orders/${orderId}/items`, { items });
+  }
+
   getOrderByNumber(orderNumber: string): Observable<any> {
     return this.http.get(
       `${this.apiUrl}/store/orders/by-number/${orderNumber}`,
