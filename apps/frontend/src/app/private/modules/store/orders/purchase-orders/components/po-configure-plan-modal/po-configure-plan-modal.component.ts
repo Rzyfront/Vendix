@@ -18,18 +18,18 @@ import {
 import { toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs/operators';
 
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { InputButtonsComponent } from '../../../../../../shared/components/input-buttons/input-buttons.component';
-import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ToastService } from '../../../../../../shared/services/toast/toast.service';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { InputButtonsComponent } from '../../../../../../../shared/components/input-buttons/input-buttons.component';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { ToastService } from '../../../../../../../shared/services/toast/toast.service';
 
 import {
   ConfigurePaymentPlanDto,
   ConfigurePaymentPlanMode,
   PurchaseOrdersService,
-} from '../../../inventory/services/purchase-orders.service';
+} from '../../../../../../../inventory/services/purchase-orders.service';
 
 const MODES: Array<{
   value: ConfigurePaymentPlanMode;
@@ -156,14 +156,14 @@ function todayISO(): string {
                     type="date"
                     class="cp-input"
                     [min]="todayMin"
-                    [value]="g.controls.scheduled_date.value"
+                    [value]="g.controls['scheduled_date'].value"
                     (input)="onInstallmentDateChange(i, $event)"
                   />
                   <input
                     type="number"
                     class="cp-input cp-amount"
                     placeholder="0.00"
-                    [value]="g.controls.amount.value"
+                    [value]="g.controls['amount'].value"
                     (input)="onInstallmentAmountChange(i, $event)"
                   />
                   <button
@@ -419,7 +419,7 @@ export class PoConfigurePlanModalComponent {
     this.formStatus();
     return round2(
       this.installmentsArray.controls.reduce(
-        (s, g) => s + Number(g.controls.amount.value ?? 0),
+        (s, g) => s + Number(g.controls['amount'].value ?? 0),
         0,
       ),
     );
@@ -488,15 +488,15 @@ export class PoConfigurePlanModalComponent {
   onInstallmentDateChange(index: number, event: Event): void {
     const v = (event.target as HTMLInputElement).value;
     const g = this.installmentsArray.at(index);
-    g.controls.scheduled_date.setValue(v);
-    g.controls.scheduled_date.markAsDirty();
+    g.controls['scheduled_date'].setValue(v);
+    g.controls['scheduled_date'].markAsDirty();
   }
 
   onInstallmentAmountChange(index: number, event: Event): void {
     const v = Number((event.target as HTMLInputElement).value) || 0;
     const g = this.installmentsArray.at(index);
-    g.controls.amount.setValue(v);
-    g.controls.amount.markAsDirty();
+    g.controls['amount'].setValue(v);
+    g.controls['amount'].markAsDirty();
   }
 
   addInstallment(): void {
@@ -504,7 +504,7 @@ export class PoConfigurePlanModalComponent {
       new FormGroup({
         scheduled_date: new FormControl<string>('', { nonNullable: true }),
         amount: new FormControl<number>(0, { nonNullable: true }),
-      }),
+      } as any),
     );
   }
 
@@ -549,8 +549,8 @@ export class PoConfigurePlanModalComponent {
       dto.payment_due_date = this.form.controls.dueDate.value;
     } else if (mode === 'installments') {
       dto.payment_installments = this.installmentsArray.controls.map((g) => ({
-        scheduled_date: g.controls.scheduled_date.value,
-        amount: Number(g.controls.amount.value ?? 0),
+        scheduled_date: g.controls['scheduled_date'].value,
+        amount: Number(g.controls['amount'].value ?? 0),
       }));
     }
 
