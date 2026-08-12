@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../../../shared/pipes/currency/currency.pipe';
 import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
 import { PopCartState } from '../../../interfaces/pop-cart.interface';
 import { PopPaymentPlan } from './pop-payment-step.component';
@@ -21,6 +21,8 @@ import { PopPaymentPlan } from './pop-payment-step.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PopConfirmStepComponent {
+  private readonly currencyService = inject(CurrencyFormatService);
+
   readonly cartState = input<PopCartState | null>(null);
   readonly supplierName = input('');
   readonly locationName = input('');
@@ -87,4 +89,21 @@ export class PopConfirmStepComponent {
       this.plan()?.payment_plan === 'partial' &&
       this.pendingBalance() > 0.005,
   );
+
+  /**
+   * Montos del PLAN DE PAGO (cuotas, abono, saldo): 2 decimales cuando el monto
+   * no es entero, 0 cuando es entero. El `| currency` del proyecto formatea con
+   * los decimales de la moneda (COP = 0) y redondearía 1.50 → $2; el paso Pago
+   * muestra esos montos con 2 decimales (app-input `currencyDecimals=2`), así
+   * que el resumen debe respetar la misma precisión. Los totales de la orden
+   * (subtotal/total) siguen con `| currency` — convención COP sin decimales.
+   */
+  formatPlanMoney(amount: number): string {
+    return this.currencyService.format(amount, Number.isInteger(amount) ? 0 : 2);
+  }
+
+  constructor() {
+    // La moneda debe estar cargada para formatPlanMoney (ídem paso Pago).
+    this.currencyService.loadCurrency();
+  }
 }

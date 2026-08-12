@@ -117,11 +117,11 @@
       <div class="payment-rows">
         <div class="payment-row">
           <span class="payment-row-label">Se paga hoy</span>
-          <span class="payment-row-value">{{ downPaymentToday() | currency }}</span>
+          <span class="payment-row-value">{{ formatPlanMoney(downPaymentToday()) }}</span>
         </div>
         <div class="payment-row">
           <span class="payment-row-label">Queda debiendo</span>
-          <span class="payment-row-value">{{ pendingBalance() | currency }}</span>
+          <span class="payment-row-value">{{ formatPlanMoney(pendingBalance()) }}</span>
         </div>
       </div>
 
@@ -131,14 +131,14 @@
             <div class="schedule-row">
               <app-icon name="calendar-clock" [size]="14" color="var(--color-text-muted)"></app-icon>
               <span class="schedule-date">{{ row.date | date: 'dd/MM/yyyy' }}</span>
-              <span class="schedule-amount">{{ row.amount | currency }}</span>
+              <span class="schedule-amount">{{ formatPlanMoney(row.amount) }}</span>
             </div>
           }
         </div>
       }
       @if (hasUndatedBalance()) {
         <p class="undated-hint">
-          El saldo de {{ pendingBalance() | currency }} queda debiendo sin fecha
+          El saldo de {{ formatPlanMoney(pendingBalance()) }} queda debiendo sin fecha
           (se gestiona desde Cuentas por Pagar).
         </p>
       }
