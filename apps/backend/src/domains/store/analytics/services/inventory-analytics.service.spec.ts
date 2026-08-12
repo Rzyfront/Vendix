@@ -201,18 +201,37 @@ describe('InventoryAnalyticsService', () => {
       ]);
 
       // Valuation is authoritative for value + on-hand quantity (store universe).
+      //
+      // La forma es `{ rows, coverage, totals }`, no un arreglo suelto: el total
+      // viaja junto a su cobertura de costo porque un valor calculado sobre
+      // unidades sin costo registrado está SUBESTIMADO, y sin la cobertura al
+      // lado "vale poco" y "no sabemos cuánto vale" se ven idénticos.
       const valuationSpy = jest
         .spyOn(service, 'getInventoryValuation')
-        .mockResolvedValue([
-          {
-            location_id: 1,
-            location_name: 'A',
+        .mockResolvedValue({
+          rows: [
+            {
+              location_id: 1,
+              location_name: 'A',
+              total_quantity: 200,
+              total_value: 5000,
+              average_cost: 25,
+              percentage_of_total: 100,
+            },
+          ],
+          coverage: {
+            units_total: 200,
+            units_without_cost: 0,
+            coverage_ratio: 1,
+            is_authoritative: true,
+          },
+          totals: {
             total_quantity: 200,
             total_value: 5000,
             average_cost: 25,
-            percentage_of_total: 100,
+            total_locations: 1,
           },
-        ] as any);
+        } as any);
 
       const summary = await service.getInventorySummary({} as any);
 
@@ -251,16 +270,30 @@ describe('InventoryAnalyticsService', () => {
         products: { findMany: orgProductsFindMany },
       });
 
-      jest.spyOn(service, 'getInventoryValuation').mockResolvedValue([
-        {
-          location_id: 1,
-          location_name: 'A',
+      jest.spyOn(service, 'getInventoryValuation').mockResolvedValue({
+        rows: [
+          {
+            location_id: 1,
+            location_name: 'A',
+            total_quantity: 10,
+            total_value: 100,
+            average_cost: 10,
+            percentage_of_total: 100,
+          },
+        ],
+        coverage: {
+          units_total: 10,
+          units_without_cost: 0,
+          coverage_ratio: 1,
+          is_authoritative: true,
+        },
+        totals: {
           total_quantity: 10,
           total_value: 100,
           average_cost: 10,
-          percentage_of_total: 100,
+          total_locations: 1,
         },
-      ] as any);
+      } as any);
 
       const summary = await service.getInventorySummary({} as any);
 

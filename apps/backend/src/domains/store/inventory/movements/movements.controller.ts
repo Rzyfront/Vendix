@@ -45,6 +45,21 @@ export class MovementsController {
     );
   }
 
+  /**
+   * Antes de `@Get(':id')` a propósito: Nest resuelve por orden de declaración,
+   * así que declarada después, `stats` entraría por el comodín y se leería como
+   * el id "stats".
+   */
+  @Get('stats')
+  @Permissions('store:inventory:movements:read')
+  async getStats(@Query() query: MovementQueryDto) {
+    const result = await this.movementsService.getStats(query);
+    return this.responseService.success(
+      result,
+      'Estadísticas de movimientos obtenidas exitosamente',
+    );
+  }
+
   @Get('product/:productId')
   @Permissions('store:inventory:movements:read')
   async findByProduct(

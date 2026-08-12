@@ -159,13 +159,17 @@ export class TransferListComponent {
       type: 'select',
       // El backend crea las transferencias en `pending`; filtrar por `draft`
       // (el valor legado que estaba acá) no devolvía ninguna de las nuevas.
+      //
+      // Ya no se ofrece "Completada" aparte: el backend agrupa `received` con su
+      // alias `completed` —igual que la tarjeta que los cuenta juntos—, así que
+      // las dos opciones devolvían exactamente la misma lista y obligaban a
+      // adivinar cuál era la buena.
       options: [
         { value: '', label: 'Todos los estados' },
         { value: 'pending', label: 'Pendiente' },
         { value: 'approved', label: 'Aprobada' },
         { value: 'in_transit', label: 'En Tránsito' },
         { value: 'received', label: 'Recibida' },
-        { value: 'completed', label: 'Completada' },
         { value: 'cancelled', label: 'Cancelada' },
       ],
     },

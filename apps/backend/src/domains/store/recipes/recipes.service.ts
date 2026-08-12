@@ -336,6 +336,28 @@ export class RecipesService {
       throw new VendixHttpException(ErrorCodes.RECIPE_COMPONENT_NOT_FOUND);
     }
 
+    // 2.b El insumo NO puede tener variantes.
+    //
+    // `recipe_items` sólo guarda `component_product_id` — no hay columna de
+    // variante. Con un insumo variantizado el consumo apunta a la fila BASE de
+    // `stock_levels` (product_variant_id NULL), que en un producto con
+    // variantes está vacía: la producción "descuenta" de un saldo inexistente y
+    // el inventario real no se mueve. No falla nada, y esa es la peor parte.
+    //
+    // Decisión de producto (ago 2026): en vez de agregar la columna, la
+    // restricción de unicidad, el constructor de recetas y el camino de cocina
+    // —funcionalidad nueva—, un insumo es un producto simple. Cada presentación
+    // que la receta consuma es su propio producto.
+    const componentVariantCount = await this.prisma.product_variants.count({
+      where: { product_id: dto.component_product_id },
+    });
+    if (componentVariantCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_COMPONENT_HAS_VARIANTS,
+        `El producto ${dto.component_product_id} tiene ${componentVariantCount} variante(s) y no puede usarse como insumo. Crea un producto simple por cada presentación que la receta consuma.`,
+      );
+    }
+
     // 3. Unique (recipe_id, component_product_id) — surface a friendly error
     //    instead of letting Prisma throw a raw P2002.
     const dup = await this.prisma.recipe_items.findFirst({

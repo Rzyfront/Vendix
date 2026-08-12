@@ -516,6 +516,57 @@ describe('CostingService', () => {
         data: { quantity_remaining: 7 },
       });
     });
+
+    /**
+     * El método de costeo es CONFIGURABLE (ORG → STORE, default CPP). Una tienda
+     * que operó en CPP puede tener saldo sin capas que lo respalden, porque CPP
+     * cuesta al promedio y tolera la falta. Antes, el día que alguien movía el
+     * ajuste a FIFO esas unidades costaban CERO: la venta salía con margen 100 %
+     * y el único rastro era un warn en el log del servidor.
+     */
+    it('FIFO: cobra el faltante de capas al costo canónico, no a cero', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([
+        { ...twoLayers[0] }, // sólo 10 unidades respaldadas por capa
+      ]);
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 12,
+        costing_method: 'fifo',
+      });
+
+      // 10 @ capa 10000 = 100000, + 2 sin capa @ canónico 12500 = 25000.
+      expect(cogs).toBe(125000);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledTimes(1);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 508 },
+        data: { quantity_remaining: 0 },
+      });
+    });
+
+    it('FIFO: sin capas ni costo canónico el COGS es 0, pero por dato ausente', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([]);
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue({
+        id: 7,
+        product_id: 1,
+        product_variant_id: null,
+        location_id: 100,
+        cost_per_unit: null,
+        products: { cost_price: null },
+        product_variants: null,
+      });
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 4,
+        costing_method: 'fifo',
+      });
+
+      expect(cogs).toBe(0);
+      expect(prismaService.inventory_cost_layers.update).not.toHaveBeenCalled();
+    });
   });
 
   /**

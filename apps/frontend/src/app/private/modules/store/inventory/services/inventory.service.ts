@@ -212,6 +212,34 @@ export class InventoryService {
       .pipe(catchError(this.handleError));
   }
 
+  /**
+   * Conteos de TODO el conjunto filtrado, para las tarjetas. La página del
+   * listado no sirve para calcularlos: son 25 filas y la tarjeta habla del
+   * total, así que el agregado se pide al backend con el MISMO filtro.
+   */
+  getMovementStats(
+    query: MovementQueryDto = {},
+  ): Observable<
+    ApiResponse<{
+      total: number;
+      stock_in: number;
+      stock_out: number;
+      transfers: number;
+    }>
+  > {
+    const params = this.buildParams(query);
+    return this.http
+      .get<
+        ApiResponse<{
+          total: number;
+          stock_in: number;
+          stock_out: number;
+          transfers: number;
+        }>
+      >(`${this.base_url}/movements/stats`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
   getMovementById(id: number): Observable<ApiResponse<InventoryMovement>> {
     return this.http
       .get<ApiResponse<InventoryMovement>>(`${this.base_url}/movements/${id}`)

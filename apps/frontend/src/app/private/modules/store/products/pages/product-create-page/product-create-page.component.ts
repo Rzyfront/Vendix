@@ -1118,6 +1118,44 @@ export class ProductCreatePageComponent {
   readonly originalBaseStock = signal(0);
   readonly originalHadVariants = signal(false);
 
+  /**
+   * Stock con el que llegó cada variante existente, por id.
+   *
+   * El backend lee `stock_quantity` de una variante como CANTIDAD OBJETIVO: si
+   * recibe 0 y el almacén tiene 24, escribe un ajuste de −24. Y el valor que
+   * pintaba esta pantalla venía del espejo denormalizado, que podía estar
+   * rancio. Devolverlo tal cual convertía "guardar un cambio de precio" en una
+   * baja de inventario silenciosa. Por eso el stock de una variante existente
+   * sólo viaja cuando el usuario lo tocó de verdad.
+   */
+  private readonly loadedVariantStock = new Map<number, number>();
+
+  /**
+   * Stock que viaja en el payload de una variante.
+   *
+   * `undefined` significa "no toques el inventario": el backend salta entero el
+   * bloque de ajuste. Se devuelve para toda variante existente cuyo campo el
+   * usuario no modificó, porque el valor cargado es un espejo denormalizado y
+   * reenviarlo sin querer valía un ajuste a la baja. Una variante nueva sí lo
+   * manda: ahí el número es una intención real de quien la está creando.
+   */
+  private variantStockToSend(
+    variant: any,
+    trackInventory: boolean,
+  ): number | undefined {
+    if (!trackInventory) return undefined;
+
+    const current = Number(variant?.stock ?? 0);
+    const variantId = variant?.id != null ? Number(variant.id) : null;
+
+    if (variantId == null || !this.loadedVariantStock.has(variantId)) {
+      return current;
+    }
+
+    const loaded = this.loadedVariantStock.get(variantId)!;
+    return current === loaded ? undefined : current;
+  }
+
   // ─── Multi-tarifa state (Phase 4) ───────────────────────────────────────
   /** Master rows for the "Precios por Tarifa" table. */
   readonly priceTierRows = signal<PriceTierOverrideRow[]>([]);
@@ -2097,6 +2135,12 @@ export class ProductCreatePageComponent {
     // Load variants if present
     if (product.product_variants && product.product_variants.length > 0) {
       this.hasVariants = true;
+      this.loadedVariantStock.clear();
+      for (const v of product.product_variants) {
+        if (v.id != null) {
+          this.loadedVariantStock.set(Number(v.id), Number(v.stock_quantity ?? 0));
+        }
+      }
       this.generatedVariants = product.product_variants.map((v: any) => ({
         id: v.id,
         sku: v.sku,
@@ -3900,9 +3944,7 @@ export class ProductCreatePageComponent {
           profit_margin: Number(v.profit_margin),
           is_on_sale: !!v.is_on_sale,
           sale_price: Number(v.sale_price),
-          stock_quantity: formValue.track_inventory
-            ? Number(v.stock)
-            : undefined,
+          stock_quantity: this.variantStockToSend(v, !!formValue.track_inventory),
           attributes: v.attributes,
           ...variantImagePayload,
           // null = heredar track_inventory del producto; true/false = override explícito

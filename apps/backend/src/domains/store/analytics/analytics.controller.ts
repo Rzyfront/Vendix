@@ -478,12 +478,25 @@ export class AnalyticsController {
     );
   }
 
+  /**
+   * `data` sigue siendo el arreglo de filas por bodega: quien ya lo consumía no
+   * cambia. La cobertura de costo y los totales viajan en `meta`, que es donde
+   * el informe los lee para pintar la insignia de valuación parcial. Un total
+   * subestimado sin ese aviso se lee como definitivo.
+   */
   @Get('inventory/valuation')
   @Permissions('store:analytics:read')
   async getInventoryValuation(@Query() query: InventoryAnalyticsQueryDto) {
     const result =
       await this.inventory_analytics_service.getInventoryValuation(query);
-    return this.response_service.success(result);
+    return this.response_service.success(
+      result.rows,
+      'Operation completed successfully',
+      {
+        ...result.totals,
+        cost_coverage: result.coverage,
+      },
+    );
   }
 
   @Get('inventory/aging')

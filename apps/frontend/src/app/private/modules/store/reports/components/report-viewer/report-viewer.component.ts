@@ -29,11 +29,55 @@ const TYPE_ICONS: Record<string, { icon: string; bg: string; color: string }> = 
   date: { icon: 'calendar', bg: 'bg-indigo-100', color: 'text-indigo-600' },
 };
 
+/**
+ * Formatea una celda según el TIPO que el registro ya declara para su columna.
+ *
+ * Las definiciones de reporte siempre trajeron `type: 'currency' | 'percentage'
+ * | ...`, pero la tabla sólo copiaba `key`, `label` y `align` y tiraba el tipo,
+ * así que un valor monetario salía crudo — `1798354493.8632998` donde la tarjeta
+ * de arriba, alimentada por el mismo dato, mostraba `$1.798.896.865`. Dos
+ * lecturas distintas del mismo número en la misma pantalla.
+ *
+ * Un valor no numérico se devuelve tal cual: una columna mal tipada muestra su
+ * texto, no un `0` inventado.
+ */
+function formatCellValue(value: any, type?: string): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (type === 'date') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('es-CO');
+  }
+  if (type !== 'currency' && type !== 'percentage' && type !== 'number') {
+    return String(value);
+  }
+  const num = Number(value);
+  if (isNaN(num)) return String(value);
+  if (type === 'currency') {
+    return (
+      '$' +
+      num.toLocaleString('es-CO', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      })
+    );
+  }
+  if (type === 'percentage') {
+    return (
+      num.toLocaleString('es-CO', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }) + '%'
+    );
+  }
+  return num.toLocaleString('es-CO');
+}
+
 function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   return columns.map((col) => ({
     key: col.key,
     label: col.header,
     align: col.align,
+    transform: (value: any) => formatCellValue(value, col.type),
   }));
 }
 
@@ -81,6 +125,23 @@ function formatStatValue(value: any, type: string): string | number {
               [loading]="loading()"
             />
           }
+        </div>
+      }
+
+      <!--
+        Aviso de dato parcial. El total de un informe valuado sólo es
+        autoritativo si TODAS las unidades tienen costo conocido; cuando no, el
+        número sale subestimado y sin este aviso se lee como definitivo. Quien
+        mira la pantalla no puede distinguir "vale poco" de "no sabemos cuánto
+        vale": los dos se ven igual.
+      -->
+      @if (coverageWarning(); as warning) {
+        <div
+          class="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+          role="status"
+        >
+          <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
+          <span>{{ warning }}</span>
         </div>
       }
 
@@ -178,6 +239,28 @@ export class ReportViewerComponent {
 
   readonly exportLoading = input<boolean>(false);
   readonly dateRange = input<any>(undefined);
+
+  /**
+   * Texto del aviso de valuación parcial, o `null` si el informe no trae
+   * cobertura o la cobertura es total. Se alimenta de `meta.cost_coverage`, el
+   * mismo contrato que ya usan el panel principal y el resumen de analíticas.
+   */
+  readonly coverageWarning = computed<string | null>(() => {
+    const coverage = this.summaryData()?.['cost_coverage'];
+    if (!coverage) return null;
+
+    const total = Number(coverage.units_total) || 0;
+    const without = Number(coverage.units_without_cost) || 0;
+    if (total <= 0 || without <= 0) return null;
+
+    const pct = Math.round((Number(coverage.coverage_ratio) || 0) * 100);
+    return (
+      `Valuación PARCIAL: ${without.toLocaleString('es-CO')} de ` +
+      `${total.toLocaleString('es-CO')} unidades no tienen costo registrado ` +
+      `(cobertura ${pct} %). El valor mostrado está SUBESTIMADO hasta que se ` +
+      `registre ese costo.`
+    );
+  });
 
   readonly statsCards = computed<StatCard[]>(() => {
     const report = this.report();

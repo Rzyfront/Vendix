@@ -125,11 +125,17 @@ export class MovementListComponent {
     {
       // Una salida ya no lleva pata de destino, así que la columna fija a
       // `to_location` quedaba vacía justo en los movimientos que sacan stock.
-      key: 'to_location.name',
+      //
+      // Apuntar la columna a `to_location.name` con un `transform` que leía las
+      // dos patas NO alcanzaba: `app-table` sólo llama al `transform` cuando el
+      // valor crudo de `key` no está vacío, así que en una salida —donde
+      // `to_location` es null— el transform nunca corría y la celda caía al
+      // `defaultValue`. El arreglo quedaba muerto exactamente en las filas para
+      // las que se escribió. Por eso la etiqueta se calcula antes, en la fila.
+      key: 'location_label',
       label: 'Ubicación',
       defaultValue: '-',
       priority: 2,
-      transform: (_value: any, item?: any) => this.locationLabel(item),
     },
     {
       key: 'reason',
@@ -183,13 +189,29 @@ export class MovementListComponent {
         transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
       },
       {
-        key: 'to_location.name',
+        // Misma razón que en la columna de la tabla: la etiqueta viene ya
+        // calculada en la fila, no de `to_location`, que en una salida es null.
+        key: 'location_label',
         label: 'Ubicación',
         icon: 'map-pin',
-        transform: (_val: any, item?: any) => this.locationLabel(item),
       },
     ],
   };
+
+  /**
+   * Filas con la etiqueta de bodega ya resuelta.
+   *
+   * `app-table` no llama al `transform` de una columna si el valor crudo de su
+   * `key` está vacío, así que una etiqueta que se deriva de OTROS campos —aquí,
+   * de las dos patas de ubicación— tiene que existir en la fila. Calcularla aquí
+   * además ordena por lo que el usuario ve, no por una pata que puede ser null.
+   */
+  readonly rows = computed(() =>
+    this.movements().map((m) => ({
+      ...m,
+      location_label: this.locationLabel(m),
+    })),
+  );
 
   // Computed
   readonly hasFilters = computed(() => {

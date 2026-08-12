@@ -188,7 +188,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
           : [];
         this.movements.set(list);
         this.totalItems.set(response.meta?.total ?? list.length);
-        this.calculateStats();
+        this.loadStats(query);
         this.is_loading.set(false);
       },
       error: (error) => {
@@ -199,15 +199,38 @@ export class MovementsComponent implements OnInit, OnDestroy {
     this.subscriptions.push(sub);
   }
 
-  calculateStats(): void {
-    // Stats reflect the global total of the current query, not just the
-    // current page slice. The backend exposes `total` in the pagination meta.
-    this.stats.set({
-      total: this.totalItems(),
-      stock_in: 0, // aggregated server-side would be ideal — placeholder
-      stock_out: 0,
-      transfers: 0,
-    });
+  /**
+   * Las tarjetas cuentan sobre TODO el conjunto filtrado, no sobre la página.
+   * Antes entradas, salidas y transferencias venían fijas en 0 desde aquí: con
+   * cientos de movimientos en la tabla, las tres tarjetas mostraban cero. Eso no
+   * es un dato faltante, es un dato falso — y para el que lee la pantalla no hay
+   * forma de distinguirlo. El agregado se pide al backend con el MISMO filtro
+   * que el listado.
+   */
+  private loadStats(query: Record<string, unknown>): void {
+    // El total paginado ya es autoritativo; se deja puesto para que la tarjeta
+    // no parpadee a 0 mientras llega el agregado.
+    this.stats.update((s) => ({ ...s, total: this.totalItems() }));
+
+    const sub = this.inventoryService
+      .getMovementStats(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response.data;
+          if (!data) return;
+          this.stats.set({
+            total: data.total ?? this.totalItems(),
+            stock_in: data.stock_in ?? 0,
+            stock_out: data.stock_out ?? 0,
+            transfers: data.transfers ?? 0,
+          });
+        },
+        // Un fallo del agregado no debe tumbar el listado, que ya se pintó. Se
+        // avisa en silencio y las tarjetas conservan el total real.
+        error: () => {},
+      });
+    this.subscriptions.push(sub);
   }
 
   // ============================================================

@@ -21,6 +21,13 @@ import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
 import {
+  buildCostCoverage,
+  INBOUND_MOVEMENT_TYPES,
+  OUTBOUND_MOVEMENT_TYPES,
+  TRANSFER_MOVEMENT_TYPE,
+  sqlStateList,
+} from '../analytics-metrics.contract';
+import {
   formatAggregateQuantity,
   resolveSaleUnitCodes,
   saleUnitScaleFactor,
@@ -142,14 +149,8 @@ export class InventoryAnalyticsService {
     // universe as the product counts above. Never derive value from
     // products.cost_price (see vendix-inventory-valuation).
     const valuation = await this.getInventoryValuation(query);
-    const totalStockValue = valuation.reduce(
-      (sum, item) => sum + Number(item.total_value || 0),
-      0,
-    );
-    const totalQuantity = valuation.reduce(
-      (sum, item) => sum + Number(item.total_quantity || 0),
-      0,
-    );
+    const totalStockValue = valuation.totals.total_value;
+    const totalQuantity = valuation.totals.total_quantity;
 
     return {
       total_sku_count: totalSkuCount,
@@ -689,6 +690,10 @@ export class InventoryAnalyticsService {
       { name: string; quantity: number; value: number }
     >();
     let totalValue = 0;
+    let totalQuantity = 0;
+    // Unidades cuyo valor NO salió de una capa de costo ni de un costo unitario
+    // conocido: entraron al total valuadas en cero.
+    let unitsWithoutCost = 0;
 
     for (const sl of stockLevels) {
       const locationId = sl.inventory_locations?.id || 0;
@@ -706,6 +711,10 @@ export class InventoryAnalyticsService {
         Number(sl.products?.cost_price || 0);
       const value = layerValue !== undefined ? layerValue : qty * cost;
       totalValue += value;
+      totalQuantity += qty;
+      if (layerValue === undefined && !(cost > 0) && qty > 0) {
+        unitsWithoutCost += qty;
+      }
 
       const existing = locationMap.get(locationId) || {
         name: locationName,
@@ -717,7 +726,7 @@ export class InventoryAnalyticsService {
       locationMap.set(locationId, existing);
     }
 
-    return Array.from(locationMap.entries())
+    const rows = Array.from(locationMap.entries())
       .map(([id, data]) => ({
         location_id: id,
         location_name: data.name,
@@ -728,6 +737,27 @@ export class InventoryAnalyticsService {
           totalValue > 0 ? (data.value / totalValue) * 100 : 0,
       }))
       .sort((a, b) => b.total_value - a.total_value);
+
+    return {
+      rows,
+      /**
+       * El total NO es autoritativo cuando parte del físico entró valuado en
+       * cero. Sin esta cifra el informe firma como definitivo un valor
+       * subestimado, y quien lo lee no tiene forma de distinguir "vale poco" de
+       * "no sabemos cuánto vale": los dos se ven idénticos. La cobertura viaja
+       * junto al número, nunca aparte.
+       */
+      coverage: {
+        ...buildCostCoverage(totalQuantity, unitsWithoutCost),
+        is_authoritative: unitsWithoutCost === 0,
+      },
+      totals: {
+        total_quantity: totalQuantity,
+        total_value: totalValue,
+        average_cost: totalQuantity > 0 ? totalValue / totalQuantity : 0,
+        total_locations: rows.length,
+      },
+    };
   }
 
   async getInventoryAging(query: InventoryAnalyticsQueryDto) {
@@ -919,7 +949,7 @@ export class InventoryAnalyticsService {
       locationMap.set(locationId, existing);
     }
 
-    return Array.from(locationMap.entries())
+    const rows = Array.from(locationMap.entries())
       .map(([id, data]) => ({
         location_id: id,
         location_name: data.name,
@@ -930,6 +960,26 @@ export class InventoryAnalyticsService {
           totalValue > 0 ? (data.value / totalValue) * 100 : 0,
       }))
       .sort((a, b) => b.total_value - a.total_value);
+
+    const totalQuantity = rows.reduce((sum, r) => sum + r.total_quantity, 0);
+
+    // La valuación histórica lee instantáneas ya valuadas: cada fila trae su
+    // `total_value` congelado, así que no hay unidades "sin costo" que detectar
+    // aquí. Se devuelve la misma forma que la valuación actual para que quien
+    // consume no tenga que preguntar por cuál de los dos caminos vino.
+    return {
+      rows,
+      coverage: {
+        ...buildCostCoverage(totalQuantity, 0),
+        is_authoritative: true,
+      },
+      totals: {
+        total_quantity: totalQuantity,
+        total_value: totalValue,
+        average_cost: totalQuantity > 0 ? totalValue / totalQuantity : 0,
+        total_locations: rows.length,
+      },
+    };
   }
 
   private getStockKey(
@@ -1018,10 +1068,10 @@ export class InventoryAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_in', 'return') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_in,
-        COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_out', 'sale', 'damage', 'expiration') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_out,
+        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(INBOUND_MOVEMENT_TYPES)}) THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_in,
+        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(OUTBOUND_MOVEMENT_TYPES)}) THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_out,
         COALESCE(SUM(CASE WHEN im.movement_type = 'adjustment' THEN ABS(im.quantity) ELSE 0 END), 0) AS adjustments,
-        COALESCE(SUM(CASE WHEN im.movement_type = 'transfer' THEN ABS(im.quantity) ELSE 0 END), 0) AS transfers,
+        COALESCE(SUM(CASE WHEN im.movement_type = ${TRANSFER_MOVEMENT_TYPE} THEN ABS(im.quantity) ELSE 0 END), 0) AS transfers,
         COALESCE(SUM(ABS(im.quantity)), 0) AS total
       FROM inventory_movements im
       INNER JOIN products p ON p.id = im.product_id

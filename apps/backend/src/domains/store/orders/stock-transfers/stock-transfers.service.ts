@@ -369,11 +369,31 @@ export class StockTransfersService {
     return result;
   }
 
+  /**
+   * Estados que un filtro canónico debe alcanzar, alias legacy incluido.
+   *
+   * Las tarjetas ya cuentan `pending` junto a `draft` y `received` junto a
+   * `completed` (ver `getStats`), pero el filtro comparaba por igualdad exacta:
+   * una transferencia legacy se sumaba en la tarjeta y no aparecía al filtrar
+   * por el estado que la tarjeta anuncia. El usuario veía un número que no podía
+   * abrir. Se agrupa aquí, en la lectura, sin tocar el enum ni una sola fila.
+   */
+  private static readonly STATUS_FILTER_GROUPS: Record<string, string[]> = {
+    pending: ['pending', 'draft'],
+    draft: ['pending', 'draft'],
+    received: ['received', 'completed'],
+    completed: ['received', 'completed'],
+  };
+
   findAll(query: TransferQueryDto) {
+    const statusGroup = query.status
+      ? StockTransfersService.STATUS_FILTER_GROUPS[query.status]
+      : undefined;
+
     const where: any = {
       from_location_id: query.from_location_id,
       to_location_id: query.to_location_id,
-      status: query.status,
+      status: statusGroup ? { in: statusGroup } : query.status,
     };
 
     if (query.transfer_date_from || query.transfer_date_to) {

@@ -332,23 +332,20 @@ export class ProductsController {
     @Param('id', ParseIntPipe) productId: number,
     @Body() createVariantDto: CreateProductVariantDto,
   ) {
-    try {
-      // Pass productId directly to service
-      const result = await this.productVariantService.createVariant(
-        productId,
-        createVariantDto,
-      );
-      return this.responseService.created(
-        result,
-        'Variante de producto creada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear la variante del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch, por la misma razón que `removeVariant` abajo:
+    // `responseService.error()` RETORNA el sobre en vez de lanzarlo, así que
+    // atraparlo acá convertía un rechazo en HTTP 201. Verificado en ejecución:
+    // el bloqueo por «este producto es insumo de una receta» respondía
+    // `HTTP 201` con `statusCode: 422` enterrado en el cuerpo, y el frontend
+    // —que mira el status— celebraba una variante que nunca se creó.
+    const result = await this.productVariantService.createVariant(
+      productId,
+      createVariantDto,
+    );
+    return this.responseService.created(
+      result,
+      'Variante de producto creada exitosamente',
+    );
   }
 
   /**
@@ -368,22 +365,19 @@ export class ProductsController {
     @Param('variantId', ParseIntPipe) variantId: number,
     @Body() updateVariantDto: UpdateProductVariantDto,
   ) {
-    try {
-      const result = await this.productVariantService.updateVariant(
-        variantId,
-        updateVariantDto,
-      );
-      return this.responseService.updated(
-        result,
-        'Variante de producto actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la variante del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch: mismo contrato de error que `createVariant`/`removeVariant`.
+    // Acá importa especialmente porque este handler es el que rechaza con
+    // INV_STOCK_001 cuando la variante tiene existencias en varias bodegas; con
+    // el catch, ese rechazo salía como 200 y el editor de producto daba por
+    // guardado un ajuste de stock que el backend había frenado.
+    const result = await this.productVariantService.updateVariant(
+      variantId,
+      updateVariantDto,
+    );
+    return this.responseService.updated(
+      result,
+      'Variante de producto actualizada exitosamente',
+    );
   }
 
   @Delete('variants/:variantId')

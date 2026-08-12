@@ -3480,6 +3480,31 @@ export const ErrorCodes = {
     devMessage:
       'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
   },
+  /**
+   * `recipe_items` sólo tiene `component_product_id`: no hay columna de
+   * variante. Un insumo con variantes hace que el consumo vaya a la fila BASE
+   * del stock —la que en un producto con variantes está vacía—, así que la
+   * producción descontaría de un saldo que no existe y el inventario real
+   * quedaría intacto. En vez de agregar la columna (funcionalidad nueva), la
+   * decisión de producto es que un insumo NO tiene variantes.
+   */
+  RECIPE_COMPONENT_HAS_VARIANTS: {
+    code: 'RECIPE_COMPONENT_HAS_VARIANTS',
+    httpStatus: 422,
+    devMessage:
+      'Un producto con variantes no puede usarse como insumo de una receta. Crea un producto simple por cada presentación que la receta consuma.',
+  },
+  /**
+   * Cara opuesta del mismo invariante: bloquear sólo al agregar el insumo
+   * dejaría abierta la puerta de crear la variante DESPUÉS, y el resultado
+   * sería idéntico (consumo contra la fila base vacía) pero sin error visible.
+   */
+  PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT: {
+    code: 'PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT',
+    httpStatus: 422,
+    devMessage:
+      'Este producto se usa como insumo en una receta, así que no admite variantes. Quítalo de las recetas que lo consumen antes de variantizarlo.',
+  },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C
   PRODUCTION_ORDER_NOT_FOUND: {

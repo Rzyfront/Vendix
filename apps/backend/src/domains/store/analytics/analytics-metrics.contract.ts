@@ -55,6 +55,50 @@ export const PURCHASE_COMMITTED_STATES = [
   'received',
 ] as const;
 
+/**
+ * Tipos de movimiento que SUMAN existencias.
+ *
+ * `production` entra: producir una receta crea unidades del producto terminado,
+ * y son unidades tan reales como las que llegan de un proveedor.
+ */
+export const INBOUND_MOVEMENT_TYPES = [
+  'stock_in',
+  'return',
+  'production',
+] as const;
+
+/**
+ * Tipos de movimiento que RESTAN existencias.
+ *
+ * `consumption` entra: consumir un insumo lo saca del inventario aunque nadie
+ * lo haya vendido.
+ */
+export const OUTBOUND_MOVEMENT_TYPES = [
+  'stock_out',
+  'sale',
+  'damage',
+  'expiration',
+  'consumption',
+] as const;
+
+/**
+ * Un traslado no es entrada ni salida: mueve unidades entre bodegas de la misma
+ * tienda. Se cuenta aparte para que el total de movimiento no se lea como
+ * actividad comercial que nunca ocurrió.
+ *
+ * `adjustment` tampoco aparece en las listas de arriba porque su dirección no
+ * está en el tipo sino en las dos patas de ubicación: sale de donde dice
+ * `from_location_id` y entra a donde dice `to_location_id`. Quien lo agrupe
+ * debe resolverlo por las patas, no por el tipo.
+ *
+ * Por qué viven aquí: la serie de analítica y las tarjetas del listado de
+ * movimientos definían "entrada" cada una por su cuenta —la serie dejaba
+ * `production` y `consumption` fuera de los dos cubos pero dentro del total—,
+ * así que las dos pantallas respondían distinto a la misma pregunta y ninguna
+ * fallaba.
+ */
+export const TRANSFER_MOVEMENT_TYPE = 'transfer' as const;
+
 /** Charset guard for a state literal inlined into raw SQL. */
 const SAFE_STATE_REGEX = /^[a-z_]+$/;
 

@@ -442,10 +442,42 @@ export class CostingService {
     }
 
     if (remainingToConsume > 0) {
+      // Mismo fallback canónico que la rama CPP de arriba, y por la misma razón.
+      // Sin él, las unidades sin capa costaban CERO y la venta salía con margen
+      // 100 %: un `logger.warn` en el servidor y una cifra sana en pantalla.
+      //
+      // El caso no es hipotético ni raro: el método de costeo es CONFIGURABLE
+      // (ORG → STORE, default CPP). Una tienda que venía operando en CPP no
+      // necesariamente tiene capas que respalden todo su saldo —CPP tolera que
+      // falten porque cuesta al promedio—, así que el día que alguien mueve el
+      // ajuste a FIFO el inventario existente queda sin respaldo y el COGS se
+      // desploma a 0 sin que nada falle. Cobrar las unidades faltantes al costo
+      // canónico deja FIFO exacto donde hay capas y aproximado —no nulo— donde
+      // no las hay.
+      const fallbackStockLevel = await prisma.stock_levels.findFirst({
+        where: {
+          product_id: params.product_id,
+          product_variant_id: params.variant_id || null,
+          location_id: params.location_id,
+        },
+        include: {
+          products: { select: { cost_price: true } },
+          product_variants: { select: { cost_price: true } },
+        },
+      });
+      const fallbackCostPerUnit =
+        Number(fallbackStockLevel?.cost_per_unit) ||
+        Number(fallbackStockLevel?.product_variants?.cost_price) ||
+        Number(fallbackStockLevel?.products?.cost_price) ||
+        0;
+
       this.logger.warn(
         `Insufficient cost layers for product ${params.product_id}. ` +
-          `${remainingToConsume} units consumed without layer data.`,
+          `${remainingToConsume} units consumed without layer data; ` +
+          `costed at fallback unit cost ${fallbackCostPerUnit}.`,
       );
+
+      totalCogs += remainingToConsume * fallbackCostPerUnit;
     }
 
     return totalCogs;

@@ -111,11 +111,25 @@ export class CreateVariantWithStockDto {
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
   sale_price?: number;
 
+  /**
+   * Cantidad OBJETIVO de la variante. Sin inicializador a propósito.
+   *
+   * Este DTO también viaja dentro de `UpdateProductDto.variants`, y quien lo
+   * consume trata el valor como cantidad absoluta: escribe un ajuste por la
+   * diferencia contra lo que hay. Con `= 0`, class-transformer rellenaba el
+   * campo cuando el cliente NO lo mandaba, así que "no toques el inventario"
+   * llegaba al servicio como "déjalo en cero" y guardar un cambio de precio
+   * emitía una baja de stock. `@IsOptional()` no protegía: el inicializador
+   * corre antes que la validación y el campo ya no está ausente.
+   *
+   * Quien crea una variante aplica su propio `|| 0`, así que la ausencia sigue
+   * significando cero donde cero es lo correcto.
+   */
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
-  stock_quantity?: number = 0;
+  stock_quantity?: number;
 
   @IsOptional()
   @IsArray()

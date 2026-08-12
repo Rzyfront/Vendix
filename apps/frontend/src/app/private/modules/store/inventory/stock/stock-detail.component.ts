@@ -109,29 +109,41 @@ interface ConsolidatedStock {
           </div>
         </div>
 
+        <!-- Los tres totales suman SÓLO las bodegas visibles para esta tienda.
+             El backend responde con el cliente Prisma acotado por tienda, así que
+             una bodega de organización (inventory_locations.store_id IS NULL)
+             no aparece acá aunque tenga existencias del mismo producto. Antes el
+             pie decía "Stock fisico total" sobre esa porción, y un total que se
+             presenta como total pero es parcial no se lee como un filtro: se lee
+             como inventario perdido. Los rótulos dicen "en esta tienda" en vez de
+             ampliar lo que el usuario ve, para no mover el límite entre tenants. -->
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats
-            title="Total Disponible"
+            title="Disponible en esta tienda"
             [value]="totalAvailable()"
-            smallText="Unidades disponibles"
+            smallText="Suma de las bodegas de la tienda"
             iconName="package-check"
             iconBgColor="bg-green-100"
             iconColor="text-green-600"
           ></app-stats>
 
           <app-stats
-            title="Total Reservado"
+            title="Reservado en esta tienda"
             [value]="totalReserved()"
-            smallText="Unidades reservadas"
+            smallText="Suma de las bodegas de la tienda"
             iconName="lock"
             iconBgColor="bg-amber-100"
             iconColor="text-amber-600"
           ></app-stats>
 
           <app-stats
-            title="Total en Mano"
+            title="En mano en esta tienda"
             [value]="uomHeadline() ? uomHeadline()!.sealed : totalOnHand()"
-            [smallText]="uomHeadline() ? 'Unidades selladas' : 'Stock fisico total'"
+            [smallText]="
+              uomHeadline()
+                ? 'Unidades selladas en esta tienda'
+                : 'Físico en las bodegas de la tienda'
+            "
             iconName="warehouse"
             iconBgColor="bg-blue-100"
             iconColor="text-blue-600"
