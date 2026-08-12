@@ -809,6 +809,11 @@ export class SalesAnalyticsService {
       });
       const totalCount = countGroups.length;
 
+      // QUI-614 review: cambiar orderBy de recencia (created_at desc) a ranking
+      // por ingreso operativo. Prisma groupBy no soporta expresiones en
+      // orderBy, asi que traemos los datos sin orden y ordenamos en memoria
+      // por operating_revenue (subtotal - discount + shipping) calculado
+      // despues via computeOperatingRevenue().
       const results = await this.prisma.orders.groupBy({
         by: ['customer_id'],
         where,
@@ -820,7 +825,6 @@ export class SalesAnalyticsService {
         },
         _count: { id: true },
         _max: { created_at: true },
-        orderBy: { _max: { created_at: 'desc' } },
         skip: (page - 1) * limit,
         take: limit,
       });
@@ -871,6 +875,9 @@ export class SalesAnalyticsService {
         };
       });
 
+      // Ordenar por total_spent desc (ranking por ingreso, no por recencia).
+      data.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
+
       return {
         data,
         meta: {
@@ -884,7 +891,8 @@ export class SalesAnalyticsService {
       };
     }
 
-    // Non-paginated (retrocompatible)
+    // Non-paginated (retrocompatible): traer sin orden, ordenar por revenue
+    // despues en memoria (groupBy no soporta expresiones en orderBy).
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where,
@@ -896,7 +904,6 @@ export class SalesAnalyticsService {
       },
       _count: { id: true },
       _max: { created_at: true },
-      orderBy: { _max: { created_at: 'desc' } },
       take: query.limit || 50,
     });
 
@@ -915,7 +922,10 @@ export class SalesAnalyticsService {
     });
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
-    return results.map((r) => {
+    // Ordenar en memoria por total_spent (operating revenue) desc. Asi el
+    // top del listado son los clientes que mas compran, no los que compraron
+    // ultimo (que es lo que estaba haciendo orderBy: created_at desc).
+    const mapped = results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
       // QUI-614: total_spent = operating revenue (ex-VAT). See the
       // paginated branch above for rationale.
@@ -943,6 +953,8 @@ export class SalesAnalyticsService {
         last_order_date: r._max.created_at?.toISOString() || null,
       };
     });
+    mapped.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
+    return mapped;
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
