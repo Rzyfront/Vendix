@@ -492,6 +492,11 @@ export class PosCartService {
           summary: this.calculateSummary(cartItems, []),
           createdAt: new Date(),
           updatedAt: new Date(),
+          // QUI-649 — al cargar una orden existente en el carrito (sin
+          // adopción por reserva), la entrada al carrito sigue siendo local.
+          // El step 4 setea estos campos solo cuando llega `booking.order`.
+          linkedOrderId: null,
+          linkedOrderNumber: null,
         };
 
         return newState;
@@ -2149,6 +2154,10 @@ export class PosCartService {
       },
       createdAt: new Date(),
       updatedAt: new Date(),
+      // QUI-649 — carrito no adoptado. La adopción se setea cuando llega
+      // `booking.order` en la respuesta de la reserva (ver step 4).
+      linkedOrderId: null,
+      linkedOrderNumber: null,
     };
   }
 
