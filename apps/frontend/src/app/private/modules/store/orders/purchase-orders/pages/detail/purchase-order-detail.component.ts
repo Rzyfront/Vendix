@@ -122,6 +122,7 @@ interface ReceiveLine {
     SpinnerComponent,
     StickyHeaderComponent,
     PoPaymentModalComponent,
+    PoConfigurePlanModalComponent,
     PoTimelineComponent,
     SerialBulkLoadModalComponent,
   ],
@@ -601,7 +602,7 @@ interface ReceiveLine {
         [order]="{
           id: currentPo.id,
           total_amount: currentPo.total_amount,
-          payment_plan: currentPo.payment_plan,
+          payment_plan: (currentPo as any).payment_plan,
         }"
         (closed)="showPlanModal.set(false)"
         (configured)="onPlanConfigured()"
