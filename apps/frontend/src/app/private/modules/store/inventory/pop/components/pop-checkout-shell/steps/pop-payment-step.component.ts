@@ -166,10 +166,18 @@ export class PopPaymentStepComponent {
     return Number(this.form.controls.downPayment.value ?? 0);
   });
 
-  /** Lo que queda debiendo tras el abono: lo que las cuotas deben cubrir. */
-  readonly pendingBalance = computed<number>(() =>
-    round2(this.orderTotal() - this.downPaymentAmount()),
-  );
+  /**
+   * Lo que queda debiendo tras el abono: lo que las cuotas deben cubrir.
+   * El abono solo aplica en modo `partial`; en los demás modos lo que se debe
+   * es el total (0 abonado hoy). Evita que un abono residual de un cambio de
+   * modo previo contamine el cuadre de cuotas o el plan.
+   */
+  readonly pendingBalance = computed<number>(() => {
+    this.formStatus();
+    const mode = this.form.controls.mode.value;
+    const down = mode === 'partial' ? Number(this.form.controls.downPayment.value ?? 0) : 0;
+    return round2(this.orderTotal() - down);
+  });
 
   readonly installmentsTotal = computed<number>(() => {
     this.formStatus();
@@ -191,7 +199,10 @@ export class PopPaymentStepComponent {
     const paymentMode = this.form.controls.mode.value;
     return {
       payment_plan: paymentMode,
-      down_payment_amount: this.downPaymentAmount(),
+      // El abono SOLO aplica en `partial`; en immediate/diferido/cuotas el plan
+      // no lleva pago de hoy (un abono residual de otro modo duplicaría el pago).
+      down_payment_amount:
+        paymentMode === 'partial' ? this.downPaymentAmount() : 0,
       payment_due_date: this.form.controls.dueDate.value || undefined,
       payment_installments:
         paymentMode === 'installments'
