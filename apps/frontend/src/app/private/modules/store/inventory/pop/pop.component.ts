@@ -6,12 +6,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 
+import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
+
 import {
   PopCartService,
   PopCartSummary,
   PopCartState,
   PopCartItem,
   PopProduct,
+  ShippingMethod,
 } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
@@ -61,6 +64,14 @@ import {
   VexiUiHost,
   VexiUiHostRegistry,
 } from '../../../../../core/services/vexi-ui-host.registry';
+
+/** Opciones del selector "Método Envío" del paso Configuración del wizard. */
+const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
+  { value: 'supplier_transport', label: 'Transporte Proveedor' },
+  { value: 'freight', label: 'Flete' },
+  { value: 'pickup', label: 'Recolección' },
+  { value: 'other', label: 'Otro' },
+];
 
 /**
  * POP (Point of Purchase) Main Component
@@ -204,12 +215,19 @@ import {
       [loadingCostPreview]="loadingCostPreview()"
       [isProcessing]="isProcessingOrder()"
       [retryOrderRef]="retryOrderRef()"
+      [needsConfig]="shellNeedsConfig()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
+      (configComplete)="loadCostPreview()"
+      (configSupplierChange)="onShellSupplierChange($event)"
+      (configLocationChange)="onShellLocationChange($event)"
+      (configOrderDateChange)="onShellOrderDateChange($event)"
+      (configExpectedDateChange)="onShellExpectedDateChange($event)"
+      (configShippingMethodChange)="onShellShippingMethodChange($event)"
     ></app-pop-checkout-shell>
 
     <app-pop-product-config-modal
@@ -356,6 +374,32 @@ export class PopComponent implements OnInit, OnDestroy {
 
   showOrderConfirmModal = signal(false);
   confirmOrderAction: 'create' | 'create-receive' = 'create';
+
+  /**
+   * QUI-647 — snapshot de "el POP no estaba configurado (sin proveedor/bodega)"
+   * al ABRIR el wizard. Mientras sea true, el shell arranca en el paso 1
+   * Configuración. Se congela en la apertura (no se recalcula en vivo), así el
+   * paso Configuración no desaparece del stepper al elegir proveedor a mitad
+   * de sesión; en la siguiente apertura se re-evalúa desde el carrito.
+   */
+  readonly shellNeedsConfig = signal(false);
+
+  /** Opciones del paso Configuración del wizard (dueño de data: pop-header). */
+  readonly shellSupplierOptions = computed<SelectorOption[]>(() =>
+    this.header?.supplierOptions() ?? [],
+  );
+  readonly shellLocationOptions = computed<SelectorOption[]>(() =>
+    this.header?.locationOptions() ?? [],
+  );
+  readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
+
+  /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
+  readonly shellOrderDate = computed<string>(() =>
+    this.toISODate(this.cartState()?.orderDate),
+  );
+  readonly shellExpectedDate = computed<string>(() =>
+    this.toISODate(this.cartState()?.expectedDate),
+  );
 
   /**
    * OC ya creada por un intento cuya RECEPCIÓN falló. Mientras esté seteada, el
@@ -1429,29 +1473,16 @@ export class PopComponent implements OnInit, OnDestroy {
   private onCreateAndReceiveWithModal(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda la acción para reconectarla al cerrar el config modal.
-        this.pendingAction.set('create-receive');
-        this.header.openConfigModal();
-      }
+    if (state.items.length === 0) {
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
-    this.pendingAction.set(null);
-    this.showCartModal.set(false);
-    this.confirmOrderAction = 'create-receive';
-    // Cada apertura arranca con acuses por defecto (recibir ON) y overrides
-    // limpios. El plan de pago se resetea: pertenece a la instancia del
-    // carrito y no debe sobrevivir entre aperturas (bug de prod QUI-647).
-    this.ackReceive.set(true);
-    this.paymentPlan.set(null);
-    this.pricingOverrides.set(new Map());
-    this.loadCostPreview();
-    this.showOrderConfirmModal.set(true);
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create-receive');
   }
 
   /**
@@ -1478,6 +1509,60 @@ export class PopComponent implements OnInit, OnDestroy {
     } else {
       this.onCreateAndReceive();
     }
+  }
+
+  // ============================================================
+  // Wizard shell — paso Configuración (QUI-647)
+  // ============================================================
+
+  /**
+   * El paso Configuración emite cada cambio en vivo (igual que el modal del
+   * header): aquí se persiste en el carrito. Al avanzar a Pago el módulo ya
+   * queda "Configurado" y el header muestra proveedor/bodega.
+   */
+  onShellSupplierChange(value: number | null | string): void {
+    this.popCartService.setSupplier(value ? Number(value) : null);
+  }
+
+  onShellLocationChange(value: number | null | string): void {
+    this.popCartService.setLocation(value ? Number(value) : null);
+  }
+
+  onShellOrderDateChange(value: string): void {
+    if (!value) return;
+    const [year, month, day] = value.split('-').map(Number);
+    this.popCartService.setOrderDate(new Date(year, month - 1, day));
+  }
+
+  onShellExpectedDateChange(value: string): void {
+    if (value) {
+      const [year, month, day] = value.split('-').map(Number);
+      this.popCartService.setExpectedDate(new Date(year, month - 1, day));
+    } else {
+      this.popCartService.setExpectedDate(undefined);
+    }
+  }
+
+  onShellShippingMethodChange(value: string): void {
+    this.popCartService.setShippingMethod(value as ShippingMethod);
+  }
+
+  /**
+   * El paso Configuración quedó completo (proveedor+bodega): ya hay bodega
+   * para costear, así que recargamos el preview de costeo que el wizard
+   * necesita en el paso Recepción.
+   */
+  onShellConfigComplete(): void {
+    this.loadCostPreview();
+  }
+
+  /** `Date` → `YYYY-MM-DD` (hora local) para los inputs date del wizard. */
+  private toISODate(date: Date | undefined | null): string {
+    if (!date) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   // ============================================================
@@ -1531,53 +1616,63 @@ export class PopComponent implements OnInit, OnDestroy {
   onSubmitOrder(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+    if (state.items.length === 0) {
       if (this.isMobile()) {
         this.showCartModal.set(true);
       }
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda "crear" para reconectarla al configurar.
-        this.pendingAction.set('create');
-        this.header.openConfigModal();
-      }
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
-    this.pendingAction.set(null);
-    this.confirmOrderAction = 'create';
-    this.paymentPlan.set(null);
-    this.showOrderConfirmModal.set(true);
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create');
   }
 
   onCreateAndReceive(): void {
     const state = this.popCartService.currentState;
 
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+    if (state.items.length === 0) {
       if (this.isMobile()) {
         this.showCartModal.set(true);
       }
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        // PASO 1: recuerda "crear y recibir" para reconectarla al configurar.
-        this.pendingAction.set('create-receive');
-        this.header.openConfigModal();
-      }
       this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+        'Por favor agrega al menos un producto antes de crear la orden.',
       );
       return;
     }
 
+    // QUI-647: sin proveedor/bodega el wizard arranca con Configuración como
+    // PASO 1 (antes abría el modal de configuración aparte y bloqueaba).
+    this.openCheckoutShell('create-receive');
+  }
+
+  /**
+   * QUI-647 — Abre el wizard (shell) para una acción de creación. Si el POP
+   * no tiene proveedor+bodega, el shell arranca en el PASO 1 Configuración
+   * (el wizard ya no se bloquea en el modal de configuración); si ya hay
+   * config, arranca en Pago (comportamiento previo intacto).
+   */
+  private openCheckoutShell(action: 'create' | 'create-receive'): void {
+    const state = this.popCartService.currentState;
+
     this.pendingAction.set(null);
-    this.confirmOrderAction = 'create-receive';
+    this.showCartModal.set(false);
+    this.confirmOrderAction = action;
+    // Snapshot de "necesita config" en la APERTURA (no en vivo): el paso
+    // Configuración no desaparece del stepper al elegir proveedor a mitad
+    // de sesión; la siguiente apertura re-evalúa desde el carrito.
+    this.shellNeedsConfig.set(!state.supplierId || !state.locationId);
     // Cada apertura arranca con acuses por defecto (recibir ON) y overrides
-    // limpios anclados al cost preview. El plan de pago se resetea: pertenece
-    // a la instancia del carrito (bug de prod QUI-647).
+    // limpios. El plan de pago se resetea: pertenece a la instancia del
+    // carrito y no debe sobrevivir entre aperturas (bug de prod QUI-647).
     this.ackReceive.set(true);
     this.paymentPlan.set(null);
     this.pricingOverrides.set(new Map());
+    // Sin bodega el preview de costeo no tiene dónde costear: el service lo
+    // ignora y se recarga cuando el paso Configuración queda completo.
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
   }

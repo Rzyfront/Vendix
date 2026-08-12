@@ -28,6 +28,7 @@ import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
+import { ConfigurePaymentPlanDto } from './dto/configure-payment-plan.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
@@ -743,5 +744,37 @@ export class PurchaseOrdersController {
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
     };
+  }
+
+  /**
+   * QUI-647 — Configurar el plan de pago de una OC ya creada (PATCH).
+   *
+   * Permite desde el detalle de la OC elegir el modo (inmediato / abono
+   * parcial / diferido / crédito con cuotas) y los montos/fechas asociados.
+   * El service valida que la orden admita el cambio (no recibida/cerrada
+   * y sin pagos reales que bloqueen) y aplica la matriz anti-doble-registro.
+   */
+  @Patch(':id/payment-plan')
+  @Permissions('store:orders:purchase_orders:update')
+  async configurePaymentPlan(
+    @Param('id') id: string,
+    @Body() dto: ConfigurePaymentPlanDto,
+  ) {
+    try {
+      const order = await this.purchaseOrdersService.configurePaymentPlan(
+        Number(id),
+        dto,
+      );
+      return this.responseService.created({
+        data: order,
+        message: 'Plan de pago actualizado exitosamente',
+      });
+    } catch (error) {
+      if (error instanceof VendixHttpException) throw error;
+      throw this.responseService.error(
+        error as Error,
+        'Error al configurar el plan de pago',
+      );
+    }
   }
 }

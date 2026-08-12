@@ -387,7 +387,9 @@ export class PurchaseOrderInstallmentDto {
  *
  *   - immediate: no admite abono ni cuotas (el pago completo viaja por el flujo
  *     post-creación, no como anticipo).
- *   - partial:  requiere `down_payment_amount` > 0.
+ *   - partial:  requiere `down_payment_amount` > 0; puede llevar
+ *     `payment_due_date` OPCIONAL que materializa el saldo con fecha (cuota
+ *     planeada del saldo). Sin fecha, el saldo queda sin fecha (CxP).
  *   - deferred: requiere `payment_due_date`.
  *   - installments: requiere al menos una cuota en `payment_installments`.
  */
@@ -406,7 +408,10 @@ export class IsValidPaymentPlanConstraint
       case 'immediate':
         return down == null && (!installments || installments.length === 0);
       case 'partial':
-        return down != null && down > 0;
+        // El abono es obligatorio; `payment_due_date` del saldo es opcional
+        // (si viene, @IsDateString garantiza el formato; la comparación contra
+        // hoy la hace el service, misma regla que deferred).
+        return down != null && down > 0 && (dueDate == null || dueDate !== '');
       case 'deferred':
         return dueDate != null && dueDate !== '';
       case 'installments':
@@ -578,7 +583,11 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   down_payment_amount?: number;
 
-  @ApiProperty({ description: 'QUI-647: fecha única de pago (deferred)', required: false })
+  @ApiProperty({
+    description:
+      'QUI-647: fecha única de pago (deferred) o fecha del saldo en abono parcial (partial, opcional).',
+    required: false,
+  })
   @IsDateString()
   @IsOptional()
   payment_due_date?: string;

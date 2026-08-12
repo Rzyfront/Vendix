@@ -44,6 +44,19 @@
             pendingBalance() | currency
           }}</span>
         </p>
+        <app-input
+          [formControl]="form.controls.dueDate"
+          [control]="form.controls.dueDate"
+          type="date"
+          [required]="false"
+          [min]="todayISO()"
+          [label]="'Fecha de pago del saldo (opcional)'"
+        ></app-input>
+        <p class="pay-field-note">
+          Si eliges una fecha, el saldo queda registrado con vencimiento
+          ({{ todayISO() }} en adelante). Si la dejas vacía, el saldo queda sin
+          fecha y se gestiona desde Cuentas por Pagar.
+        </p>
       </div>
     </section>
   }

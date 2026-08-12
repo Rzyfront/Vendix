@@ -25,6 +25,32 @@
 
     <!-- Cuerpo: paso activo -->
     <div class="pop-checkout-body">
+      @if (stepKeys().includes('configuracion')) {
+        <div
+          class="step-panel"
+          [class.step-hidden]="currentStepKey() !== 'configuracion'"
+        >
+          <app-pop-config-step
+            [supplierOptions]="supplierOptions()"
+            [locationOptions]="locationOptions()"
+            [shippingMethodOptions]="shippingMethodOptions()"
+            [selectedSupplierId]="selectedSupplierId()"
+            [selectedLocationId]="selectedLocationId()"
+            [orderDate]="orderDate()"
+            [expectedDate]="expectedDate()"
+            [shippingMethod]="shippingMethod()"
+            [minExpectedDate]="minExpectedDate()"
+            (supplierChange)="configSupplierChange.emit($event)"
+            (locationChange)="configLocationChange.emit($event)"
+            (orderDateChange)="configOrderDateChange.emit($event)"
+            (expectedDateChange)="configExpectedDateChange.emit($event)"
+            (shippingMethodChange)="configShippingMethodChange.emit($event)"
+            (openSupplierModal)="configOpenSupplierModal.emit()"
+            (openWarehouseModal)="configOpenWarehouseModal.emit()"
+          ></app-pop-config-step>
+        </div>
+      }
+
       @if (stepKeys().includes('pago')) {
         <div
           class="step-panel"

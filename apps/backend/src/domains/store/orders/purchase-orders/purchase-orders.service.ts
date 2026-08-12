@@ -556,7 +556,12 @@ export class PurchaseOrdersService {
     const ctxStoreId = RequestContextService.getStoreId();
     const planNeedsDateValidation =
       createPurchaseOrderDto.payment_plan === 'deferred' ||
-      createPurchaseOrderDto.payment_plan === 'installments';
+      createPurchaseOrderDto.payment_plan === 'installments' ||
+      // QUI-647 — abono parcial con fecha del saldo: `payment_due_date` es
+      // opcional, pero si viene hay que compararla contra "hoy" en la timezone
+      // de la tienda (misma regla que deferred).
+      (createPurchaseOrderDto.payment_plan === 'partial' &&
+        !!createPurchaseOrderDto.payment_due_date);
     const storeTz =
       planNeedsDateValidation && ctxStoreId
         ? await resolveStoreTimezone(this.prisma, ctxStoreId)
@@ -1218,6 +1223,15 @@ export class PurchaseOrdersService {
         if (downPayment === totalAmount) {
           paymentPlan = 'immediate';
           downPayment = 0;
+        } else if (dueDate && isPast(dueDate)) {
+          // QUI-647 — la fecha del saldo (opcional) materializa la cuota
+          // planeada del saldo; si viene debe ser hoy o futura (misma regla que
+          // deferred). Solo aplica cuando QUEDA saldo: abono == total se
+          // recondujo a immediate arriba y no hay cuota que fechar.
+          throw new VendixHttpException(
+            ErrorCodes.PO_PAYMENT_004,
+            `La fecha de pago del saldo ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
+          );
         }
       }
 
@@ -1469,6 +1483,24 @@ export class PurchaseOrdersService {
         );
         (purchaseOrder as any).payment_status = advance.paymentStatus;
         advanceToRegister = { paymentId: advance.id, amount: downPayment };
+      }
+
+      // QUI-647 — abono parcial CON fecha de pago del saldo: el saldo queda con
+      // fecha materializado como cuota planeada contra la ORDEN (mismo contrato
+      // que installments: `purchase_order_payment_schedules` con status
+      // 'planned', a la espera de CxP que nace con la recepción). Sin
+      // `payment_due_date` el saldo queda sin fecha y se gestiona desde Cuentas
+      // por Pagar — comportamiento previo. `paymentPlan === 'partial'` ya
+      // excluye la reconducción a immediate (abono == total → no hay saldo).
+      if (paymentPlan === 'partial' && dueDate && downPayment < totalAmount) {
+        await tx.purchase_order_payment_schedules.create({
+          data: {
+            purchase_order_id: purchaseOrder.id,
+            scheduled_date: new Date(dueDate),
+            amount: new Prisma.Decimal(totalAmount).minus(downPayment),
+            status: 'planned',
+          },
+        });
       }
 
       return { order: purchaseOrder, advance: advanceToRegister };
@@ -4292,5 +4324,146 @@ export class PurchaseOrdersService {
     if (totalPaid >= grossTotal - EPS) return 'paid';
     if (totalPaid > EPS) return 'partial';
     return 'unpaid';
+  }
+
+  /**
+   * QUI-647 — Configura el plan de pago de una OC ya creada (PATCH payment-plan).
+   *
+   * Reglas:
+   *  - Solo OCs en status draft/approved (NO recibidas/cerradas/anuladas).
+   *  - NO permite el cambio si ya existen pagos reales registrados contra la
+   *    OC. Devuelve 409 en ese caso.
+   *  - Aplica la matriz anti-doble-registro reusando registerAdvancePaymentInTx
+   *    para abonos y materializando schedules para cuotas/fechas del saldo.
+   *  - Recalcula payment_status al final.
+   */
+  async configurePaymentPlan(
+    id: number,
+    dto: import('./dto/configure-payment-plan.dto').ConfigurePaymentPlanDto,
+  ): Promise<unknown> {
+    const order = await this.loadOrderOrFail(id);
+
+    const blockedStatuses = ['received', 'cancelled', 'closed'];
+    if (blockedStatuses.includes(order.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_PAYMENT_006,
+        `No se puede reconfigurar el plan de pago: la orden está ${order.status}.`,
+      );
+    }
+
+    const existingPayments = await this.prisma.purchase_order_payments.findMany({
+      where: { purchase_order_id: id },
+      select: { id: true },
+    });
+    if (existingPayments.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_PAYMENT_006,
+        'La orden ya tiene pagos registrados; no se puede reconfigurar el plan.',
+      );
+    }
+
+    const totalAmount = Number(order.total_amount);
+    const plan = dto.payment_plan;
+    const down = plan === 'partial' ? Number(dto.down_payment_amount ?? 0) : 0;
+    const dueDate = dto.payment_due_date ?? null;
+    const installments = dto.payment_installments ?? [];
+
+    const todayLocal = localDateString(new Date(), 'America/Bogota');
+    const isPast = (s: string) => s < todayLocal;
+
+    if (plan === 'partial') {
+      if (!(down > 0 && down < totalAmount)) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_002,
+          `El abono ${down} debe ser mayor que 0 y menor que el total ${totalAmount}.`,
+        );
+      }
+      if (dueDate && isPast(dueDate)) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_004,
+          `La fecha de pago del saldo ${dueDate} no puede ser anterior a hoy (${todayLocal}).`,
+        );
+      }
+    } else if (plan === 'deferred') {
+      if (!dueDate || isPast(dueDate)) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_003,
+          `Pago diferido requiere fecha ≥ hoy (${todayLocal}).`,
+        );
+      }
+    } else if (plan === 'installments') {
+      if (installments.length === 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_006,
+          'Crédito con cuotas requiere al menos una cuota.',
+        );
+      }
+      const sum = installments.reduce((s, i) => s + Number(i.amount), 0);
+      if (Math.abs(sum - totalAmount) > 0.01) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_005,
+          `La suma de cuotas ${sum} no coincide con el total ${totalAmount}.`,
+        );
+      }
+      if (installments.some((i) => isPast(i.scheduled_date))) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_PAYMENT_004,
+          'Alguna cuota tiene fecha anterior a hoy.',
+        );
+      }
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.purchase_order_payment_schedules.deleteMany({
+        where: { purchase_order_id: id, status: 'planned' },
+      });
+
+      const newDown = plan === 'partial' ? down : null;
+      const newDueDate =
+        plan === 'deferred' || (plan === 'partial' && dueDate) ? dueDate : null;
+
+      await tx.purchase_orders.update({
+        where: { id },
+        data: {
+          payment_plan: plan,
+          down_payment_amount: newDown,
+          payment_due_date: newDueDate ? new Date(newDueDate) : null,
+        },
+      });
+
+      if (plan === 'partial' && down > 0) {
+        const advance = await this.registerAdvancePaymentInTx(tx, order, down);
+        if (dueDate) {
+          await tx.purchase_order_payment_schedules.create({
+            data: {
+              purchase_order_id: id,
+              scheduled_date: new Date(dueDate),
+              amount: new Prisma.Decimal(totalAmount).minus(down),
+              status: 'planned',
+            },
+          });
+        }
+        return { order, advance };
+      }
+
+      if (plan === 'installments') {
+        for (const inst of installments) {
+          await tx.purchase_order_payment_schedules.create({
+            data: {
+              purchase_order_id: id,
+              scheduled_date: new Date(inst.scheduled_date),
+              amount: new Prisma.Decimal(inst.amount),
+              status: 'planned',
+            },
+          });
+        }
+      }
+
+      return { order };
+    });
+
+    await this.recalculatePaymentStatus(id);
+
+    return await this.findOne(id);
   }
 }

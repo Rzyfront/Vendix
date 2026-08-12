@@ -15,7 +15,10 @@ import {
   IconComponent,
   StepsLineComponent,
 } from '../../../../../../../shared/components';
-import type { StepsLineItem } from '../../../../../../../shared/components';
+import type {
+  SelectorOption,
+  StepsLineItem,
+} from '../../../../../../../shared/components';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { focusFirstInvalid } from '../../../../../../../core/utils/focus-first-invalid';
 import { PopCartState } from '../../interfaces/pop-cart.interface';
@@ -29,6 +32,7 @@ import {
   PopPricingOverridesMap,
 } from './steps/pop-receive-step.component';
 import { PopConfirmStepComponent } from './steps/pop-confirm-step.component';
+import { PopConfigStepComponent } from './steps/pop-config-step.component';
 
 export type PopCheckoutAction = 'create' | 'create-receive';
 
@@ -39,11 +43,15 @@ export type PopCheckoutAction = 'create' | 'create-receive';
  * órdenes de compra (POP). Pasos:
  *  - `create`         → [Pago, Confirmación]
  *  - `create-receive` → [Pago, Recepción, Confirmación]
- * El paso Pago es SIEMPRE el primero (reactive forms: focusFirstInvalid depende
- * de `.ng-invalid`). El paso Recepción reúne el acuse (genera la remisión de
- * entrada) y la valoración de inventario con márgenes (QUI-425). El paso
- * Confirmación es el resumen final: qué se compra, cuánto se paga hoy, cuánto
- * queda debiendo y en qué fechas.
+ *  - sin configurar  → antepone [Configuración, ...] (QUI-647): proveedor,
+ *    bodega, fechas y envío como PASO 1; al avanzar al paso Pago la config ya
+ *    quedó escrita en el carrito (el padre la persiste en vivo) y el módulo
+ *    queda "Configurado". Cuando ya hay config, el wizard arranca en Pago.
+ * El paso Pago es SIEMPRE el primero salvo `needsConfig` (reactive forms:
+ * focusFirstInvalid depende de `.ng-invalid`). El paso Recepción reúne el
+ * acuse (genera la remisión de entrada) y la valoración de inventario con
+ * márgenes (QUI-425). El paso Confirmación es el resumen final: qué se compra,
+ * cuánto se paga hoy, cuánto queda debiendo y en qué fechas.
  *
  * Patrón replicado de `pos-checkout-shell`: `steps`/`stepKeys` computed +
  * `currentStep` signal, `attemptNextStep()` que valida el paso actual (errores
@@ -65,6 +73,7 @@ export type PopCheckoutAction = 'create' | 'create-receive';
     IconComponent,
     StepsLineComponent,
     CurrencyPipe,
+    PopConfigStepComponent,
     PopPaymentStepComponent,
     PopReceiveStepComponent,
     PopConfirmStepComponent,
@@ -85,6 +94,19 @@ export class PopCheckoutShellComponent {
   /** Ref (`#id` / `order_number`) de la OC pendiente de recepción (reintento). */
   readonly retryOrderRef = input<string | null>(null);
 
+  // ── Paso Configuración (solo cuando el POP no tiene proveedor/bodega) ────
+  /** Snapshot al abrir: true ⇒ el wizard arranca en Configuración (paso 1). */
+  readonly needsConfig = input(false);
+  readonly supplierOptions = input<SelectorOption[]>([]);
+  readonly locationOptions = input<SelectorOption[]>([]);
+  readonly shippingMethodOptions = input<SelectorOption[]>([]);
+  readonly selectedSupplierId = input<number | null>(null);
+  readonly selectedLocationId = input<number | null>(null);
+  readonly orderDate = input('');
+  readonly expectedDate = input('');
+  readonly shippingMethod = input('');
+  readonly minExpectedDate = input('');
+
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
@@ -95,11 +117,22 @@ export class PopCheckoutShellComponent {
   readonly pricingOverridesChange = output<PopPricingOverridesMap>();
   readonly ackReceiveChange = output<boolean>();
   readonly paymentPlanChange = output<PopPaymentPlan>();
+  /** Pasó de Configuración → Pago con el form válido (el padre recarga el cost preview). */
+  readonly configComplete = output<void>();
+  /** Cambios del paso Configuración → el padre los persiste en el carrito. */
+  readonly configSupplierChange = output<number | null | string>();
+  readonly configLocationChange = output<number | null | string>();
+  readonly configOrderDateChange = output<string>();
+  readonly configExpectedDateChange = output<string>();
+  readonly configShippingMethodChange = output<string>();
+  readonly configOpenSupplierModal = output<void>();
+  readonly configOpenWarehouseModal = output<void>();
 
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly host = inject(ElementRef<HTMLElement>);
 
   // ── Child references (pasos) ─────────────────────────────────────────────
+  protected readonly configStep = viewChild(PopConfigStepComponent);
   protected readonly paymentStep = viewChild(PopPaymentStepComponent);
   protected readonly receiveStep = viewChild(PopReceiveStepComponent);
 
@@ -107,18 +140,22 @@ export class PopCheckoutShellComponent {
   readonly currentStep = signal(0);
 
   readonly steps = computed<StepsLineItem[]>(() => {
-    if (this.actionType() === 'create-receive') {
-      return [{ label: 'Pago' }, { label: 'Recepción' }, { label: 'Confirmación' }];
-    }
-    return [{ label: 'Pago' }, { label: 'Confirmación' }];
+    const base =
+      this.actionType() === 'create-receive'
+        ? [{ label: 'Pago' }, { label: 'Recepción' }, { label: 'Confirmación' }]
+        : [{ label: 'Pago' }, { label: 'Confirmación' }];
+    return this.needsConfig()
+      ? [{ label: 'Configuración' }, ...base]
+      : base;
   });
 
   /** Espeja EXACTAMENTE {@link steps}: ambos comparten `currentStep` como índice. */
   readonly stepKeys = computed<string[]>(() => {
-    if (this.actionType() === 'create-receive') {
-      return ['pago', 'recepcion', 'confirmacion'];
-    }
-    return ['pago', 'confirmacion'];
+    const base =
+      this.actionType() === 'create-receive'
+        ? ['pago', 'recepcion', 'confirmacion']
+        : ['pago', 'confirmacion'];
+    return this.needsConfig() ? ['configuracion', ...base] : base;
   });
 
   readonly currentStepKey = computed<string>(
@@ -130,14 +167,15 @@ export class PopCheckoutShellComponent {
     () => this.currentStep() === this.stepKeys().length - 1,
   );
 
-  readonly title = computed<string>(() =>
-    this.actionType() === 'create-receive'
-      ? 'Crear y Recibir Inventario'
-      : 'Confirmar Orden de Compra',
-  );
+  readonly title = computed<string>(() => {
+    if (this.actionType() === 'create-receive') return 'Crear y Recibir Inventario';
+    return this.needsConfig() ? 'Nueva Orden de Compra' : 'Confirmar Orden de Compra';
+  });
 
   readonly subtitle = computed<string>(() => {
     switch (this.currentStepKey()) {
+      case 'configuracion':
+        return 'Configuración · Proveedor, bodega, fechas y envío';
       case 'pago':
         return 'Pago · Cómo se paga esta orden';
       case 'recepcion':
@@ -218,6 +256,19 @@ export class PopCheckoutShellComponent {
    */
   attemptNextStep(): void {
     const key = this.currentStepKey();
+    if (key === 'configuracion') {
+      const cfg = this.configStep();
+      if (!cfg || !cfg.validate()) {
+        this.flashButton();
+        focusFirstInvalid(this.host);
+        return;
+      }
+      // La config ya quedó escrita en el carrito (cambios en vivo); avisamos al
+      // padre para que recargue el cost preview ahora que hay proveedor+bodega.
+      this.configComplete.emit();
+      this.nextStep();
+      return;
+    }
     if (key === 'pago') {
       const pay = this.paymentStep();
       if (!pay || !pay.validate()) {

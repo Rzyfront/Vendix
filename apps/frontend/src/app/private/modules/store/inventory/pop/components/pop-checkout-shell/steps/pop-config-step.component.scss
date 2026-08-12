@@ -1,0 +1,65 @@
+/* QUI-647 — Paso Configuración del wizard POP (paso 1 solo sin configurar).
+ *
+ * Contraste (pedido del usuario): el body del shell es `--color-surface`; las
+ * secciones usan `--color-surface-secondary` + borde para levantar un plano
+ * distinto, y los CVA (app-input / app-selector, fill nativo
+ * `--color-background`) quedan sobre un fondo de otro tono:
+ *  - dark: section #1a2332 vs input #0b1220 → el input se lee como un hueco
+ *  - light: section #f8fafc vs input #f4f4f4 → el borde del CVA lo delimita
+ * Nada de hex sueltos: solo tokens del tema (regla vendix-frontend-theme). */
+
+.pop-config-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cfg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-secondary);
+}
+
+.cfg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cfg-select-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cfg-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding-left: 2px;
+}
+
+.cfg-required {
+  color: var(--color-destructive);
+}
+
+.cfg-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding-left: 2px;
+}

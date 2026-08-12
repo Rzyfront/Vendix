@@ -89,7 +89,8 @@ export const POP_PAYMENT_MODE_OPTIONS = POP_PAYMENT_MODES.map((m) => ({
  * depende de `.ng-invalid` que el formulario reactivo aplica a los controles.
  * Reglas por modo:
  *  - immediate: sin montos.
- *  - partial: `down_payment_amount` > 0 y ≤ total (tope en vivo).
+ *  - partial: `down_payment_amount` > 0 y ≤ total (tope en vivo); opcional
+ *    `payment_due_date` del saldo ≥ hoy (date-only, timezone tienda).
  *  - deferred: `payment_due_date` requerida y ≥ hoy (date-only, timezone tienda).
  *  - installments: ≥ 1 cuota, fecha ≥ hoy, monto ≥ 0.01 y SUMA == (total − abono)
  *    con indicador de cuadre en vivo.
@@ -264,6 +265,9 @@ export class PopPaymentStepComponent {
         Validators.min(0.01),
         maxValueValidator(() => this.orderTotal()),
       ]);
+      // QUI-647 — fecha del saldo OPCIONAL: sin `Validators.required`, pero si
+      // el operador la elige debe ser hoy o futura (date-only, timezone tienda).
+      due.setValidators([minDateValidator(() => this.todayISO())]);
     } else if (mode === 'deferred') {
       due.setValidators([Validators.required, minDateValidator(() => this.todayISO())]);
     }
