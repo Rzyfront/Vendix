@@ -142,6 +142,12 @@ export interface ProfitLossSummary {
      */
     operating_revenue: number;
     tax_collected: number;
+    /**
+     * SUM(orders.grand_total) with REVENUE_STATES — the amount the customer
+     * actually paid INCLUDING VAT. Drives the Panel "Ingresos" card so the
+     * merchant sees the same figure as Vexi and the orders list (QUI-662).
+     */
+    total_invoiced: number;
   };
   costs: {
     cost_of_goods_sold: number;
@@ -160,6 +166,12 @@ export interface ProfitLossSummary {
     net_profit: number;
     net_margin: number;
     order_count: number;
+    /**
+     * Cash position: total_invoiced − refunds.total_refunds − operating_expenses.
+     * Excludes COGS on purpose (consumo de inventario is an asset charge, not
+     * a cash outflow). Drives the Panel "Balance" card (QUI-662).
+     */
+    balance: number;
   };
   /**
    * Previous equivalent period on IDENTICAL definitions, so a growth badge is
@@ -175,6 +187,8 @@ export interface ProfitLossSummary {
     net_profit_growth: number | null;
     expenses_growth: number | null;
     orders_growth: number | null;
+    /** Same `computeGrowth` contract as the other growth fields; `null` when the previous period had no base. */
+    balance_growth: number | null;
   };
 }
 
