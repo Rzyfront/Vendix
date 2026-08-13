@@ -63,6 +63,13 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'dispatch_note.return.cogs': '6135',
   'refund.completed.revenue': '4135',
   'refund.completed.cash': '1105',
+  // REFUND OVERHAUL — per-method credit-side routing (mirror of
+  // DEFAULT_ACCOUNT_MAPPINGS in src/.../account-mapping.service.ts). These
+  // entries are the seed-time defaults; downstream orgs may override per
+  // account_mapping row without losing the default.
+  'refund.completed.original_payment': '1110',
+  'refund.completed.bank_transfer': '1110',
+  'refund.completed.store_credit': '2335',
   'purchase_order.received.inventory': '1435',
   'purchase_order.received.accounts_payable': '2205',
   'support_document.accepted.expense': '5195',

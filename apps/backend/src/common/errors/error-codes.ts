@@ -2906,6 +2906,33 @@ export const ErrorCodes = {
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 
+  // DIAN Habilitación Scanner (software + test set + test resolution)
+  HABILITATION_SCAN_AI_FAIL: {
+    code: 'HABILITATION_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI DIAN habilitation extraction failed',
+  },
+  HABILITATION_SCAN_PARSE_FAIL: {
+    code: 'HABILITATION_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI DIAN habilitation response as valid JSON',
+  },
+  HABILITATION_SCAN_NO_FILE: {
+    code: 'HABILITATION_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No DIAN habilitation file provided',
+  },
+  HABILITATION_SCAN_INVALID_FILE: {
+    code: 'HABILITATION_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+  HABILITATION_SCAN_TOO_MANY_FILES: {
+    code: 'HABILITATION_SCAN_TOO_MANY_FILES',
+    httpStatus: 400,
+    devMessage: 'Too many files — the habilitation scanner accepts up to 3',
+  },
+
   // Monitoring
   MON_CW_001: {
     code: 'MON_CW_001',

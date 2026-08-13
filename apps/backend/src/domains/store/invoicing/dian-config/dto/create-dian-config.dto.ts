@@ -103,6 +103,27 @@ export class CreateDianConfigDto {
   @IsEnum(['test', 'production'])
   environment?: 'test' | 'production';
 
+  /**
+   * QUI-657 — bifurcación del wizard fiscal.
+   *
+   * `with_cert` (default, y lo que hacía todo el mundo hasta ahora): el tenant
+   * trae su propio `.p12` y lo sube por `POST upload-certificate`. La fila nace
+   * con `certificate_provisioning_status = 'not_required'` — no hay trámite que
+   * hacer de nuestro lado.
+   *
+   * `without_cert`: el tenant NO tiene certificado de firma y pide que la
+   * plataforma se lo tramite. La fila nace en `documents_pending` y el wizard
+   * le pide los documentos de identidad. **No desbloquea nada**: la emisión
+   * sigue cerrada por `certificate_s3_key` vacío hasta que el superadmin cargue
+   * el cert expedido. Es un estado de espera, no un permiso.
+   *
+   * El default es `with_cert` y no un campo obligatorio a propósito: cualquier
+   * cliente viejo que no mande el campo sigue comportándose exactamente igual.
+   */
+  @IsOptional()
+  @IsEnum(['with_cert', 'without_cert'])
+  certificate_branch?: 'with_cert' | 'without_cert';
+
   @IsOptional()
   @TrimString()
   @IsString()

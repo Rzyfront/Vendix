@@ -93,11 +93,15 @@ describe('DianConfigService.getFiscalReadiness', () => {
         .fn()
         .mockResolvedValue(options.fiscal_scope ?? 'STORE'),
     } as any;
+    const s3 = { downloadFile: jest.fn(), uploadFile: jest.fn() } as any;
+    const events = { emit: jest.fn() } as any;
     const service = new DianConfigService(
       prisma,
       encryption,
       fiscalScope,
       readiness,
+      s3,
+      events,
     );
     return { service, client, readiness, fiscalScope };
   };

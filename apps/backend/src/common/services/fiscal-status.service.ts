@@ -530,12 +530,64 @@ export class FiscalStatusService {
         is_default: true,
         certificate_s3_key: true,
         certificate_expiry: true,
+        certificate_fingerprint: true,
         software_id: true,
         test_set_id: true,
         software_pin_encrypted: true,
+        // QUI-679 review fix #5: persisted pointer to the sibling row this
+        // config inherited its cert from. NULL means the cert was uploaded
+        // directly into THIS row. Nullable self-FK (migración
+        // `20260813140000_dian_config_inherited_from`).
+        inherited_from_dian_configuration_id: true,
       },
     });
     if (!config) return null;
+
+    // QUI-679 review fix #5: el banner "este cert viene de tu habilitación
+    // de facturación" depende de dos campos en la respuesta del prefill
+    // (`inherited_certificate` + `inherited_from`). Antes no existían: el
+    // wizard step (`loadInitial()`) reseteaba la señal a `null` y el
+    // banner desaparecía apenas el usuario re-abría el wizard.
+    //
+    // La fuente de verdad es la nueva columna `inherited_from_dian_configuration_id`.
+    // Si está poblada Y el cert sigue siendo el mismo (fingerprint match, que
+    // descarta el caso "se rotó el cert y la columna quedó en una fuente
+    // huérfana"), la fila ES heredada.
+    //
+    // Si la columna es NULL pero la fila tiene cert, el cert se subió
+    // directamente — es el caso histórico y el caso de la fila fuente.
+    let inherited_certificate = false;
+    let inherited_from: {
+      id: number;
+      configuration_type: string;
+      certificate_expiry: string | null;
+    } | null = null;
+
+    if (config.certificate_s3_key && config.inherited_from_dian_configuration_id) {
+      const source = await client.dian_configurations.findUnique({
+        where: { id: config.inherited_from_dian_configuration_id },
+        select: {
+          id: true,
+          configuration_type: true,
+          certificate_expiry: true,
+          certificate_fingerprint: true,
+        },
+      });
+      // Fingerprint match: confirma que la fila fuente sigue siendo la
+      // dueña real del cert. Una rotación deja el `inherited_from_*` viejo
+      // apuntando a una fila que ya no es la fuente (la heredera pasó a
+      // tener su propio cert) y entonces NO mostramos el banner.
+      if (source && source.certificate_fingerprint === config.certificate_fingerprint) {
+        inherited_certificate = true;
+        inherited_from = {
+          id: source.id,
+          configuration_type: String(source.configuration_type),
+          certificate_expiry: source.certificate_expiry
+            ? source.certificate_expiry.toISOString()
+            : null,
+        };
+      }
+    }
 
     return {
       id: config.id,
@@ -556,6 +608,8 @@ export class FiscalStatusService {
       software_id: config.software_id || null,
       test_set_id: config.test_set_id ?? null,
       has_software_pin: Boolean(config.software_pin_encrypted),
+      inherited_certificate,
+      inherited_from,
     };
   }
 

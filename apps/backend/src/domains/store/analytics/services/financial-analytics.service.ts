@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Prisma } from '@prisma/client';
@@ -15,12 +15,17 @@ import {
 import {
   COMPLETED_SALE_STATES,
   RECOGNIZED_EXPENSE_STATES,
+  PURCHASE_COMMITTED_STATES,
   CostCoverage,
   buildCostCoverage,
   computeGrowth,
   computeOperatingRevenue,
+  computeNetVatPosition,
+  computeEffectiveTaxRate,
   round2 as roundMoney,
   sqlStateList,
+  WITHHOLDING_TAX_TYPES,
+  WITHHOLDING_SET,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -100,6 +105,8 @@ export interface CashSessionExportRow {
 
 @Injectable()
 export class FinancialAnalyticsService {
+  private readonly logger = new Logger(FinancialAnalyticsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -157,6 +164,7 @@ export class FinancialAnalyticsService {
     // SAFE_STATE_REGEX-equivalent guard for the inlined IN list. SQLSTATE list
     // is also charset-validated by sqlStateList; this cast documents intent.
     const revenueStates = sqlStateList(COMPLETED_SALE_STATES);
+    const purchaseStates = sqlStateList(PURCHASE_COMMITTED_STATES);
 
     // QUI-630: GROUP BY on the per-tax rows in SQL — no more findMany of every
     // line into memory (defect 6). Base derived from each tax's own amount/rate
@@ -232,6 +240,73 @@ export class FinancialAnalyticsService {
         AND o.created_at <= ${endDate}
     `);
 
+    // QUI-630 defect 4: the DIAN posición needs ALL sides — ventas IVA generado,
+    // compras IVA descontable, retenciones practicadas (sales) y retenciones
+    // sufridas (purchases). The OLD endpoint only summed IVA from sales and
+    // called it `net_tax`, which is NOT the obligation with the DIAN — it's the
+    // IVA neto después de reembolsos del cliente, no la posición fiscal real.
+    //
+    // Source of truth for the formula: `analytics-metrics.contract.ts`
+    // (`computeNetVatPosition`). The service is a CONSUMER of that helper.
+    //
+    // Tenant scoping: `purchase_orders` carries `organization_id` (NOT a
+    // direct `store_id`); per `vendix-prisma-scopes` we resolve the store
+    // scope through `inventory_locations.store_id`, which `purchase_orders`
+    // already FKs to via `location_id`. This keeps the read inside the store
+    // tenant without scanning the whole org.
+    //
+    // KNOWN LIMITATION (QUI-630 review): the INNER JOIN to inventory_locations
+    // silently drops any purchase_order whose location_id was deleted (FK not
+    // ON DELETE RESTRICT). The store then sees an under-credited posición
+    // with no warning. We detect the orphan count via a parallel LEFT JOIN
+    // probe and log a warning so the discrepancy is visible in app logs;
+    // the data is still NOT counted into the aggregate (a LEFT JOIN would
+    // risk including orphaned rows that actually belong to a DIFFERENT store,
+    // which is worse than under-counting). Follow-up ticket: enforce FK
+    // ON DELETE RESTRICT and treat orphans as a data-integrity error.
+    const orphanRows = await rawClient.$queryRaw<Array<{ orphan_count: bigint | number }>>(
+      Prisma.sql`
+        SELECT COUNT(*) AS orphan_count
+        FROM purchase_orders po
+        LEFT JOIN inventory_locations il ON po.location_id = il.id
+        WHERE po.status IN (${purchaseStates})
+          AND po.created_at >= ${startDate}
+          AND po.created_at <= ${endDate}
+          AND il.id IS NULL
+      `,
+    );
+    const orphanCount = Number(orphanRows[0]?.orphan_count ?? 0);
+    if (orphanCount > 0) {
+      this.logger.warn(
+        `getTaxSummary: ${orphanCount} purchase_order(s) in store_id=${storeId} ` +
+          `period ${startDate.toISOString()}..${endDate.toISOString()} reference a ` +
+          `deleted inventory_location. Their tax rows are EXCLUDED from the ` +
+          `aggregate (inner join). The DIAN posición will be under-counted. ` +
+          `See QUI-630 follow-up for the FK enforcement fix.`,
+      );
+    }
+
+    const purchaseTaxRows = await rawClient.$queryRaw<Array<{
+      tax_type: string;
+      total_tax: string | number;
+      deductible_tax: string | number;
+    }>>(Prisma.sql`
+      SELECT
+        COALESCE(poi.tax_type::text, 'unclassified') AS tax_type,
+        SUM(poi.tax_amount)::decimal AS total_tax,
+        SUM(poi.deductible_tax_amount)::decimal AS deductible_tax
+      FROM purchase_order_items poi
+      -- purchase_orders.created_at is an INSTANTE (not a midnight business
+      -- date), so the tz-aware parseDateRange window is correct.
+      JOIN purchase_orders po ON poi.purchase_order_id = po.id -- tz-audit:ignore
+      JOIN inventory_locations il ON po.location_id = il.id
+      WHERE il.store_id = ${storeId}
+        AND po.status IN (${purchaseStates})
+        AND po.created_at >= ${startDate}
+        AND po.created_at <= ${endDate}
+      GROUP BY COALESCE(poi.tax_type::text, 'unclassified')
+    `);
+
     const taxableRevenue = Number(revenueRows[0]?.taxable_revenue ?? 0);
     const exemptRevenue = Number(revenueRows[0]?.exempt_revenue ?? 0);
 
@@ -270,18 +345,120 @@ export class FinancialAnalyticsService {
     const taxableRevenueRounded = this.round2(taxableRevenue);
     const exemptRevenueRounded = this.round2(exemptRevenue);
 
+    // Block sums: IVA generado / INC / ICA (sales) + IVA descontable +
+    // retenciones practicadas (sales) / sufridas (purchases). Defaults are 0
+    // for blocks with no rows in the period, so the contract's helper is
+    // safely called on every period.
+    const ivaGenerado = this.sumTaxByType(breakdown, 'iva');
+    const incGenerado = this.sumTaxByType(breakdown, 'inc');
+    const icaGenerado = this.sumTaxByType(breakdown, 'ica');
+    const retePracticadas = this.sumRetenciones(breakdown, WITHHOLDING_TAX_TYPES);
+    const ivaDescontable = this.round2(
+      purchaseTaxRows
+        .filter((r) => r.tax_type === 'iva')
+        .reduce((sum, r) => sum + Number(r.deductible_tax ?? 0), 0),
+    );
+    const reteSufridas = this.round2(
+      purchaseTaxRows
+        .filter((r) => WITHHOLDING_SET.has(r.tax_type))
+        .reduce((sum, r) => sum + Number(r.total_tax ?? 0), 0),
+    );
+
+    // NET VAT POSITION — la cifra que la declaración DIAN cierra. Formula
+    // belongs to the CONTRACT (`computeNetVatPosition`); this is the
+    // single point that reads the helper, so a change to the formula
+    // propagates to every consumer instead of silently diverging here.
+    const netVatPosition = this.round2(
+      computeNetVatPosition({
+        iva_generado: ivaGenerado,
+        inc_generado: incGenerado,
+        ica_generado: icaGenerado,
+        iva_descontable: ivaDescontable,
+        rete_practicadas: retePracticadas,
+        rete_sufridas: reteSufridas,
+      }),
+    );
+
+    // Effective tax rate stays null (NOT 0) when the period has no taxable
+    // revenue — matches the contract's `computeGrowth(null)` semantics and
+    // prevents a flat "0 %" badge from masking an empty period.
+    const effectiveTaxRateValue = computeEffectiveTaxRate(
+      totalTaxCollected,
+      taxableRevenueRounded,
+    );
+
     return {
+      // Sales-side collected (revenue side of the declaración).
       total_tax_collected: totalTaxCollected,
       total_tax_refunded: totalTaxRefunded,
-      net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
       total_taxable_revenue: taxableRevenueRounded,
       exempt_revenue: exemptRevenueRounded,
+      // Per-tax-type breakdown for the DIAN declaración (QUI-630 defect 4).
+      iva_generado: ivaGenerado,
+      inc_generado: incGenerado,
+      ica_generado: icaGenerado,
+      iva_descontable: ivaDescontable,
+      rete_practicadas: retePracticadas,
+      rete_sufridas: reteSufridas,
+      /**
+       * NET VAT POSITION — what the store owes the DIAN at the end of the
+       * period. Positive: saldo a cargo. Negative: saldo a favor. Formula is
+       * in `computeNetVatPosition` (analytics-metrics.contract.ts), which is
+       * the single source of truth.
+       */
+      net_vat_position: netVatPosition,
+      /**
+       * `net_tax` — net of every tax row minus customer refunds. Historical
+       * definition kept for the export's "total a pagar" column. It is NOT
+       * the DIAN posición (use `net_vat_position` for the declaración) and
+       * it is NOT the "IVA neto" — it sums every tax type (IVA + INC + ICA
+       * + retenciones) collected over the period, then subtracts the
+       * period's refunds. The label carries the legacy name to avoid
+       * breaking the export consumers.
+       */
+      net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
+      /**
+       * Effective rate as a percentage of taxable revenue. `null` (NOT `0`)
+       * when the period has no taxable revenue — matches the contract's
+       * `computeGrowth(null)` semantics.
+       */
       effective_tax_rate:
-        taxableRevenueRounded > 0
-          ? this.round2((totalTaxCollected / taxableRevenueRounded) * 100)
-          : 0,
+        effectiveTaxRateValue === null ? null : this.round2(effectiveTaxRateValue),
       breakdown,
     };
+  }
+
+  /**
+   * Sums the `total_tax` field across the rounded breakdown rows for a
+   * specific `tax_type`. Used to derive `iva_generado` / `inc_generado` /
+   * `ica_generado` from the per-tax-name detail rows without re-querying the DB.
+   */
+  private sumTaxByType(
+    breakdown: ReadonlyArray<{ tax_type: string | null; total_tax: number }>,
+    taxType: string,
+  ): number {
+    return this.round2(
+      breakdown
+        .filter((b) => b.tax_type === taxType)
+        .reduce((sum, b) => sum + b.total_tax, 0),
+    );
+  }
+
+  /**
+   * Sums the `total_tax` field across all retenciones in the breakdown. Used
+   * for `rete_practicadas` (sales side). `reteSufridas` is derived from the
+   * purchase-side aggregate instead, because purchase-side rows do not
+   * belong to the sales breakdown.
+   */
+  private sumRetenciones(
+    breakdown: ReadonlyArray<{ tax_type: string | null; total_tax: number }>,
+    taxTypes: readonly string[],
+  ): number {
+    return this.round2(
+      breakdown
+        .filter((b) => b.tax_type !== null && taxTypes.includes(b.tax_type))
+        .reduce((sum, b) => sum + b.total_tax, 0),
+    );
   }
 
   async getCashSessionsReport(query: AnalyticsQueryDto) {
@@ -410,10 +587,12 @@ export class FinancialAnalyticsService {
     // Tenant + period scoped key: store_id isolates the tenant; the date-range
     // inputs (preset/from/to) capture the period. Relative presets like "today"
     // keep a stable key and rely on the short TTL for freshness.
-    // `v2` = payload shape that carries operating_revenue / cost_coverage /
-    // comparison. Bumped with the shape so a rolling deploy cannot serve a
-    // v1-shaped object to a frontend that reads the new fields.
-    const cacheKey = `analytics:financial:profit-loss:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v3` = payload shape that carries revenue.total_invoiced, bottom_line.balance
+    // and comparison.balance / balance_growth, and that nets refundSubtotal /
+    // refundShipping into operating_revenue. Bumped with the shape so a rolling
+    // deploy cannot serve a v2-shaped object to a frontend that reads the new
+    // fields.
+    const cacheKey = `analytics:financial:profit-loss:v3:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -516,6 +695,7 @@ export class FinancialAnalyticsService {
       previousOrderAggregates,
       previousCogsResult,
       previousExpenseAggregates,
+      previousRefundAggregates,
     ] = await Promise.all([
       this.aggregateRevenueOrders(startDate, endDate),
       this.aggregateCogs(storeId, startDate, endDate),
@@ -538,6 +718,22 @@ export class FinancialAnalyticsService {
         previousExpenseRange.previousStartDate,
         previousExpenseRange.previousEndDate,
       ),
+      // Previous-period refund aggregate mirrors the current one — needed to
+      // derive `previousBalance` (and `balance_growth`) on the same definition
+      // as the current `balance` (total_invoiced − refunds − operating_expenses),
+      // and to make `revenue_growth` comparable across periods (the previous
+      // period's `operating_revenue` must be net of its own refunds too).
+      this.prisma.refunds.aggregate({
+        where: {
+          state: { in: ['completed', 'approved'] },
+          created_at: { gte: previousStartDate, lte: previousEndDate },
+        },
+        _sum: {
+          amount: true,
+          subtotal_refund: true,
+          shipping_refund: true,
+        },
+      }),
     ]);
 
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
@@ -559,17 +755,40 @@ export class FinancialAnalyticsService {
     });
 
     const totalCOGS = cogsResult.cogs;
-    const grossProfit = operatingRevenue - totalCOGS;
-    const grossMargin =
-      operatingRevenue > 0 ? (grossProfit / operatingRevenue) * 100 : 0;
     const refundAmount = Number(refundAggregates._sum.amount || 0);
     const refundSubtotal = Number(refundAggregates._sum.subtotal_refund || 0);
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
     const refundShipping = Number(refundAggregates._sum.shipping_refund || 0);
+    // REFUND REFLECTION (QUI-662): an order delivered + refunded inside the
+    // same period must net to zero, not to the original subtotal. We subtract
+    // `refundSubtotal` and add back `refundShipping` so the operating_revenue
+    // base and the refund base line up — `computeOperatingRevenue` already
+    // excludes tax, so `tax_refund` is intentionally NOT subtracted here.
+    const operatingRevenueNetRefunds =
+      operatingRevenue - refundSubtotal + refundShipping;
+    const grossProfit = operatingRevenueNetRefunds - totalCOGS;
+    const grossMargin =
+      operatingRevenueNetRefunds > 0
+        ? (grossProfit / operatingRevenueNetRefunds) * 100
+        : 0;
     const operatingExpenses = expenseAggregates;
-    const netProfit = grossProfit - refundSubtotal - operatingExpenses;
+    // Net profit now flows from the refund-netted gross profit; we no longer
+    // subtract `refundSubtotal` a second time here (it is already reflected
+    // inside `operatingRevenueNetRefunds`).
+    const netProfit = grossProfit - operatingExpenses;
     const netMargin =
-      operatingRevenue > 0 ? (netProfit / operatingRevenue) * 100 : 0;
+      operatingRevenueNetRefunds > 0
+        ? (netProfit / operatingRevenueNetRefunds) * 100
+        : 0;
+    // TOTAL INVOICED (QUI-662): the gross figure the merchant actually sees as
+    // "lo que pagó el cliente" — `SUM(orders.grand_total)` over REVENUE_STATES.
+    // Lives inside `_sum` already, so no extra query.
+    const totalInvoiced = Number(orderAggregates._sum.grand_total || 0);
+    // BALANCE (QUI-662): operational cash position = what was invoiced − what
+    // went back as refunds − operating expenses. COGS is intentionally
+    // excluded because it is an asset-consumption charge, not a cash outflow
+    // ("salidas de dinero que no signifiquen ingreso de un activo").
+    const balance = totalInvoiced - refundAmount - operatingExpenses;
 
     // Previous period, on the SAME definitions, so the panel's growth badge is
     // not computed off a different metric than the value it sits under.
@@ -584,6 +803,29 @@ export class FinancialAnalyticsService {
       previousCogsResult.cogs -
       previousExpenseAggregates;
     const previousOrderCount = previousOrderAggregates._count.id || 0;
+    // Previous-period balance mirrors the current one (total_invoiced −
+    // refunds − operating_expenses) so balance_growth uses identical bases.
+    const previousTotalInvoiced = Number(
+      previousOrderAggregates._sum.grand_total || 0,
+    );
+    const previousRefundAmount = Number(
+      previousRefundAggregates._sum.amount || 0,
+    );
+    const previousBalance =
+      previousTotalInvoiced - previousRefundAmount - previousExpenseAggregates;
+    // Same refund-netting on the previous period so revenue_growth is on
+    // identical bases (current `operatingRevenueNetRefunds` vs previous
+    // `previousOperatingRevenueNetRefunds`).
+    const previousRefundSubtotal = Number(
+      previousRefundAggregates._sum.subtotal_refund || 0,
+    );
+    const previousRefundShipping = Number(
+      previousRefundAggregates._sum.shipping_refund || 0,
+    );
+    const previousOperatingRevenueNetRefunds =
+      previousOperatingRevenue -
+      previousRefundSubtotal +
+      previousRefundShipping;
 
     // DATA-CELL-1: apply the SINGLE rounding policy (`round2`) to every emitted
     // number. Internal math above stays RAW so derived figures (margins,
@@ -600,8 +842,15 @@ export class FinancialAnalyticsService {
         discounts: this.round2(discounts),
         net_revenue: this.round2(netRevenue),
         shipping_revenue: this.round2(shippingRevenue),
-        /** Contract revenue: subtotal − discounts + freight, VAT excluded. */
-        operating_revenue: this.round2(operatingRevenue),
+        /**
+         * Contract revenue: subtotal − discounts + freight, VAT excluded, with
+         * the period's `refundSubtotal` / `refundShipping` netted in. A delivered
+         * + refunded order in the same period closes to zero, not to its
+         * original subtotal.
+         */
+        operating_revenue: this.round2(operatingRevenueNetRefunds),
+        /** `SUM(orders.grand_total)` over REVENUE_STATES — what the customer paid. */
+        total_invoiced: this.round2(totalInvoiced),
         tax_collected: this.round2(taxCollected),
       },
       costs: {
@@ -621,6 +870,12 @@ export class FinancialAnalyticsService {
       bottom_line: {
         net_profit: this.round2(netProfit),
         net_margin: this.round2(netMargin),
+        /**
+         * Operational cash position (QUI-662): total_invoiced − refunds −
+         * operating_expenses. COGS is excluded because it is an
+         * asset-consumption charge, not a cash outflow.
+         */
+        balance: this.round2(balance),
         order_count: orderAggregates._count.id || 0,
       },
       /**
@@ -633,7 +888,12 @@ export class FinancialAnalyticsService {
         net_profit: this.round2(previousNetProfit),
         operating_expenses: this.round2(previousExpenseAggregates),
         order_count: previousOrderCount,
-        revenue_growth: computeGrowth(operatingRevenue, previousOperatingRevenue),
+        /** Previous-period balance on the same definition as the current `balance`. */
+        balance: this.round2(previousBalance),
+        revenue_growth: computeGrowth(
+          operatingRevenueNetRefunds,
+          previousOperatingRevenueNetRefunds,
+        ),
         net_profit_growth: computeGrowth(netProfit, previousNetProfit),
         expenses_growth: computeGrowth(
           operatingExpenses,
@@ -643,6 +903,7 @@ export class FinancialAnalyticsService {
           orderAggregates._count.id || 0,
           previousOrderCount,
         ),
+        balance_growth: computeGrowth(balance, previousBalance),
       },
     };
   }

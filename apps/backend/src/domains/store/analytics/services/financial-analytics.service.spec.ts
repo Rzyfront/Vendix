@@ -1,4 +1,5 @@
 import { FinancialAnalyticsService } from './financial-analytics.service';
+import { Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
@@ -92,7 +93,7 @@ describe('FinancialAnalyticsService', () => {
   });
 
   describe('getProfitLossSummary', () => {
-    it('nets delivered + refunded in the same period to zero net_profit', async () => {
+    it('nets delivered + refunded in the same period to zero net_profit and zero operating_revenue (QUI-662)', async () => {
       prisma.orders.aggregate.mockResolvedValue({
         _sum: {
           subtotal_amount: 2500,
@@ -115,8 +116,85 @@ describe('FinancialAnalyticsService', () => {
 
       const result = await service.getProfitLossSummary(QUERY as any);
 
+      // QUI-662: the refund must also drop operating_revenue, not only net_profit
+      // (operatingRevenue = 2500, refundSubtotal = 2500, refundShipping = 0).
+      expect(result.revenue.operating_revenue).toBe(0);
       expect(result.bottom_line.net_profit).toBe(0);
       expect(result.bottom_line.order_count).toBe(2);
+    });
+
+    it('QUI-662: cross-period refund makes operating_revenue negative (no base, refund in current period)', async () => {
+      // Orders aggregate is called twice (current + previous). With the same
+      // mock both calls return 0; the previous-period result has the same
+      // operating_revenue = 0. Refund in BOTH periods = 2500 subtotal_refund
+      // with 0 shipping_refund, so:
+      //   current:  operatingRevenue = 0 - 2500 + 0 = -2500
+      //   previous: previousOperatingRevenue = 0 (no orders)
+      // We assert the current-period value to lock in the contract that a
+      // cross-period refund moves operating_revenue negative (same asymmetry
+      // as net_profit — the "real" cost of the refund is recognized here even
+      // though the sale was elsewhere).
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          grand_total: 0,
+        },
+        _count: { id: 0 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 2500,
+          subtotal_refund: 2500,
+          tax_refund: 0,
+          shipping_refund: 0,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.operating_revenue).toBe(-2500);
+    });
+
+    it('QUI-662: emits total_invoiced (grand_total sum) and balance (invoiced - refunds - operating_expenses)', async () => {
+      // 1 order, $25k base + $4.75k tax = $29.75k grand_total.
+      // No refunds, $2k operating expenses. COGS is intentionally not in the
+      // balance formula (asset-consumption charge, not a cash outflow).
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 25000,
+          discount_amount: 0,
+          tax_amount: 4750,
+          shipping_cost: 0,
+          grand_total: 29750,
+        },
+        _count: { id: 1 },
+      });
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: jest.fn().mockResolvedValue([{ cogs: 0 }]),
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 0,
+          subtotal_refund: 0,
+          tax_refund: 0,
+          shipping_refund: 0,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 2000 } });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.total_invoiced).toBe(29750);
+      // balance = total_invoiced - refundAmount - operating_expenses
+      //        = 29750 - 0 - 2000 = 27750
+      expect(result.bottom_line.balance).toBe(27750);
+      // Previous period inherits the same mock (no separate `Once` for it),
+      // so previousBalance == currentBalance == 27750 and growth is 0.
+      expect(result.comparison.balance_growth).toBe(0);
     });
 
     it('regression: refunded-only period yields net_profit 0 (not -2500)', async () => {
@@ -244,11 +322,14 @@ describe('FinancialAnalyticsService', () => {
       expect(result.bottom_line.net_profit).toBe(999.88);
 
       // Generic invariant: no emitted number carries >2 decimals / float noise.
+      // QUI-662: include the new fields in the same invariant.
       const numbers = [
         result.revenue.gross_revenue,
         result.revenue.discounts,
         result.revenue.net_revenue,
         result.revenue.shipping_revenue,
+        result.revenue.operating_revenue,
+        result.revenue.total_invoiced,
         result.revenue.tax_collected,
         result.costs.cost_of_goods_sold,
         result.costs.gross_profit,
@@ -260,6 +341,7 @@ describe('FinancialAnalyticsService', () => {
         result.operating_expenses,
         result.bottom_line.net_profit,
         result.bottom_line.net_margin,
+        result.bottom_line.balance,
       ];
       for (const n of numbers) {
         expect(n).toBe(round2(n));
@@ -425,6 +507,343 @@ describe('FinancialAnalyticsService', () => {
       const detailSum = result.breakdown.reduce((s, b) => s + b.total_tax, 0);
       expect(round2(detailSum)).toBe(result.total_tax_collected);
       expect(result.total_tax_collected).toBe(277.64);
+    });
+
+    it('QUI-630 defect 4: emits IVA descontable from purchase_order_items (deductible_tax_amount)', async () => {
+      // Sales side: 1 delivered order, IVA 19% of 1000 base = 190 tax.
+      // Purchase side: 1 received order, deductible_tax_amount = 95 (half the IVA).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans in this test).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // New purchase-side query (third $queryRaw call after orphan probe).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { tax_type: 'iva', total_tax: '190.000', deductible_tax: '95.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_descontable).toBe(95);
+      // Sales-side IVA stays at 190, computed from the breakdown (defect 1+2).
+      expect(result.iva_generado).toBe(190);
+    });
+
+    it('QUI-630 defect 4: emits retenciones practicadas from sales breakdown (withholding + reteiva + reteica)', async () => {
+      // One delivered order with three tax rows: IVA 19% (190), retefuente 1%
+      // (tax_type='withholding', 10), reteiva 15% (tax_type='reteiva', 15).
+      // The OLD endpoint ignored these — the new contract sums them as
+      // `rete_practicadas` (a credit against the DIAN obligación).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'withholding',
+          tax_name: 'ReteFuente 1%',
+          tax_rate: 1,
+          is_compound: false,
+          total_tax: '10.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'reteiva',
+          tax_name: 'ReteIVA 15%',
+          tax_rate: 15,
+          is_compound: false,
+          total_tax: '15.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // No purchase rows in the period.
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.rete_practicadas).toBe(25);
+    });
+
+    it('QUI-630 defect 4: emits retenciones sufridas from purchase_order_items (withholding + reteiva + reteica)', async () => {
+      // Sales side: 1 delivered order with IVA 19% of 1000 = 190 tax.
+      // Purchase side: 1 received order with tax_type='reteiva' total_tax=15.
+      // `rete_sufridas` is the credit (purchase-side withholding reduces the
+      // store's tax obligation, since the supplier already moved the money
+      // to the DIAN on the store's behalf).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.rete_sufridas).toBe(15);
+    });
+
+    it('QUI-630: net_vat_position uses computeNetVatPosition (formula = iva_generado + inc_generado + ica_generado − iva_descontable − rete_sufridas − rete_practicadas)', async () => {
+      // Sales: IVA 190 + INC 80 + ICA 50 = 320 collected.
+      // Purchases: IVA descontable 95 + reteiva sufrida 15.
+      // Retenciones practicadas on sales: retefuente 10.
+      // Formula (both retenciones are credits, both subtracted):
+      //   net_vat_position = (190 + 80 + 50) − 95 − 15 − 10 = 200
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'inc',
+          tax_name: 'INC 8%',
+          tax_rate: 8,
+          is_compound: false,
+          total_tax: '80.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'ica',
+          tax_name: 'ICA Bogotá',
+          tax_rate: 5,
+          is_compound: false,
+          total_tax: '50.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'withholding',
+          tax_name: 'ReteFuente 1%',
+          tax_rate: 1,
+          is_compound: false,
+          total_tax: '10.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { tax_type: 'iva', total_tax: '190.000', deductible_tax: '95.000' },
+        { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(190);
+      expect(result.inc_generado).toBe(80);
+      expect(result.ica_generado).toBe(50);
+      expect(result.iva_descontable).toBe(95);
+      expect(result.rete_practicadas).toBe(10);
+      expect(result.rete_sufridas).toBe(15);
+      // (190 + 80 + 50) − 95 − 15 − 10 = 200 (both retenciones are credits).
+      // Was 220 before the fix — the old `+ rete_practicadas` over-counted
+      // the sales-side credit by 2x.
+      expect(result.net_vat_position).toBe(200);
+      // `net_tax` is the historical definition (all collected − refunds) and
+      // is no longer the DIAN posición — it sums every tax row including
+      // withholding/reteiva. 190 (IVA) + 80 (INC) + 50 (ICA) + 10 (retefuente)
+      // = 330.
+      expect(result.net_tax).toBe(330);
+    });
+
+    it('QUI-630: net_vat_position can be NEGATIVE (saldo a favor) when descontable + rete_sufridas exceed generado', async () => {
+      // Sales: only IVA 50 generated. Purchases: IVA descontable 200.
+      // Net = 50 − 200 = −150 (saldo a favor).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '50.000',
+          taxable_amount: '263.1578947368',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '263.158', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { tax_type: 'iva', total_tax: '380.000', deductible_tax: '200.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(50);
+      expect(result.iva_descontable).toBe(200);
+      expect(result.net_vat_position).toBe(-150);
+    });
+
+    it('QUI-630 review: sales-side retenciones practicadas are credits (subtracted). Locks in the sign semantics for rete_practicadas', async () => {
+      // Sales: IVA 100 + retefuente 40 (practicada on sales) = 100 generated.
+      // Purchases: none. No descontable, no sufridas.
+      // OLD formula (bug): 100 − 0 − 0 + 40 = 140 (over-counted by 80)
+      // NEW formula:        100 − 0 − 0 − 40 = 60  (correct: credit subtracted)
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '100.000',
+          taxable_amount: '526.3157894737',
+        },
+        {
+          tax_type: 'withholding',
+          tax_name: 'ReteFuente 4%',
+          tax_rate: 4,
+          is_compound: false,
+          total_tax: '40.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '526.316', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // No purchase rows in the period.
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(100);
+      expect(result.rete_practicadas).toBe(40);
+      expect(result.rete_sufridas).toBe(0);
+      expect(result.iva_descontable).toBe(0);
+      // Lock in the credit semantics: a $40 sales-side retencion reduces
+      // the position by $40, not increases it.
+      expect(result.net_vat_position).toBe(60);
+    });
+
+    it('QUI-630: effective_tax_rate is null (NOT 0) when the period has no taxable revenue', async () => {
+      // Empty period: no sales, no purchases. Old code returned 0.
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '0.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      // Matches `computeGrowth(null)` semantics: null = sin base de comparación.
+      expect(result.effective_tax_rate).toBeNull();
+      expect(result.total_tax_collected).toBe(0);
+      expect(result.net_vat_position).toBe(0);
+    });
+
+    it('QUI-630 review: logs a warning when orphan purchase_orders (deleted location) are detected in the period', async () => {
+      // Sales side: 1 delivered order with IVA 19% of 1000 = 190 tax.
+      // Orphan probe: 3 purchase_orders refer to a deleted location.
+      // No purchase tax rows contribute (the orphan rows are EXCLUDED).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe: 3 orphans detected.
+      prisma.$queryRaw.mockResolvedValueOnce([{ orphan_count: 3 }]);
+      // Purchase tax rows: empty (the orphan rows are excluded).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(190);
+      expect(result.iva_descontable).toBe(0);
+      expect(result.net_vat_position).toBe(190);
+      // The orphan probe must have logged a warning with the count.
+      expect(loggerSpy).toHaveBeenCalledWith(
+        expect.stringContaining('3 purchase_order(s)'),
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it('QUI-630: blocks default to 0 when the period has no rows of that tax type (helper is safe)', async () => {
+      // Sales with only IVA. No INC, no ICA, no retenciones.
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // No purchase rows in the period.
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(190);
+      expect(result.inc_generado).toBe(0);
+      expect(result.ica_generado).toBe(0);
+      expect(result.iva_descontable).toBe(0);
+      expect(result.rete_practicadas).toBe(0);
+      expect(result.rete_sufridas).toBe(0);
+      // Position reduces to: 190 − 0 − 0 + 0 = 190
+      expect(result.net_vat_position).toBe(190);
     });
   });
 

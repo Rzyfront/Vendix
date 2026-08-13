@@ -213,3 +213,118 @@ export function round2(value: number): number {
   const sign = value < 0 ? -1 : 1;
   return (sign * Math.round((Math.abs(value) + Number.EPSILON) * 100)) / 100;
 }
+
+/**
+ * Inputs of the tax-summary aggregate, ONE block per fiscal figure the DIAN's
+ * declaración needs. The contract does NOT read the DB — every helper here is
+ * a pure function that takes the pre-aggregated sums and returns the derived
+ * figure. The service is responsible for the SQL that produces those sums.
+ *
+ * `iva_generado` + `inc_generado` + `ica_generado` are the store-side taxes
+ * collected on sales (a liability to the DIAN). `iva_descontable` is the
+ * VAT sealed as DESCONTABLE on recognized purchases (a credit against the
+ * liability). `rete_practicadas` are sales-side withholdings
+ * (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES
+ * — a credit that REDUCES the store's obligation. `rete_sufridas` are
+ * purchase-side withholdings over PURCHASE_COMMITTED_STATES — also a credit
+ * that REDUCES the store's obligation (the supplier already moved the money
+ * to the DIAN on the store's behalf, so it nets against the gross tax).
+ * Both retenciones are SUBTRACTED from `gross_generado` in the formula
+ * below — the column used to be `+ practiced` which over-stated the position
+ * by 2× the sales-side retenciones (QUI-630 review).
+ *
+ * Source schema: `tax_type_enum` = `iva | inc | ica | withholding | reteiva |
+ * reteica`. The `retefuente` value described in the ticket text does not exist
+ * as a distinct enum value — it is recorded as `tax_type = 'withholding'` and
+ * distinguished from `reteiva`/`reteica` by `tax_name`.
+ */
+export interface VatPositionParts {
+  /** Sales-side IVA collected (tax_type='iva') over COMPLETED_SALE_STATES. */
+  iva_generado: number;
+  /** Sales-side INC collected (tax_type='inc') over COMPLETED_SALE_STATES. */
+  inc_generado: number;
+  /** Sales-side ICA collected (tax_type='ica') over COMPLETED_SALE_STATES. */
+  ica_generado: number;
+  /** Purchase-side IVA sealed as DESCONTABLE (purchase_order_items.deductible_tax_amount) over PURCHASE_COMMITTED_STATES. */
+  iva_descontable: number;
+  /** Sales-side retenciones practicadas (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES — credit. */
+  rete_practicadas: number;
+  /** Purchase-side retenciones sufridas (tax_type IN ('withholding','reteiva','reteica')) over PURCHASE_COMMITTED_STATES — credit. */
+  rete_sufridas: number;
+}
+
+/**
+ * NET VAT POSITION — la cifra que la declaración DIAN cierra.
+ *
+ *   POSITION = (iva_generado + inc_generado + ica_generado)
+ *            − iva_descontable
+ *            − rete_sufridas
+ *            − rete_practicadas
+ *
+ * Convention:
+ *   - POSITIVE: the store OWES the DIAN (saldo a cargo).
+ *   - NEGATIVE: the store has a credit with the DIAN (saldo a favor).
+ *
+ * Pure function — the SOURCE OF TRUTH for the formula lives here, NOT in the
+ * service. Any other fiscal aggregate that needs the same figure must call this
+ * helper instead of re-deriving the formula.
+ *
+ * QUI-630 review: the formula was `+ rete_practicadas` which treated the
+ * credit as a debit and over-stated the position by 2× the sales-side
+ * retenciones. Corrected to `- rete_practicadas` so both retenciones are
+ * subtracted (both are credits that reduce the obligation).
+ */
+export function computeNetVatPosition(parts: VatPositionParts): number {
+  const grossGenerated =
+    Number(parts.iva_generado ?? 0) +
+    Number(parts.inc_generado ?? 0) +
+    Number(parts.ica_generado ?? 0);
+  const deductible = Number(parts.iva_descontable ?? 0);
+  const suffered = Number(parts.rete_sufridas ?? 0);
+  const practiced = Number(parts.rete_practicadas ?? 0);
+  return grossGenerated - deductible - suffered - practiced;
+}
+
+/**
+ * Effective tax rate as a percentage of the taxable revenue, or `null` when the
+ * period has no taxable base (matches the contract's `computeGrowth(null)`
+ * semantics — the UI must render "sin base", never "0 %").
+ */
+export function computeEffectiveTaxRate(
+  totalTax: number,
+  totalTaxableRevenue: number,
+): number | null {
+  if (totalTaxableRevenue <= 0) return null;
+  return (totalTax / totalTaxableRevenue) * 100;
+}
+
+/**
+ * `tax_type_enum` values that count as RETENCIONES (withholdings) for the
+ * DIAN posición. Subdivided by name (Tax name) when rendered; the enum value
+ * alone is what the analytics aggregates over.
+ *
+ *   `withholding`  — retefuente (the `retefuente` literal value described in
+ *                    the ticket text does not exist as a distinct enum value
+ *                    — see the `VatPositionParts` block comment above).
+ *   `reteiva`      — retención sobre el IVA.
+ *   `reteica`      — retención sobre el ICA.
+ *
+ * Source schema: `tax_type_enum` ∈ `iva | inc | ica | withholding | reteiva |
+ * reteica`. The const tuple is the type-level source of truth; the Set helper
+ * is provided for runtime `.has` checks on values typed as `string` from raw
+ * SQL rows.
+ */
+export const WITHHOLDING_TAX_TYPES = [
+  'withholding',
+  'reteiva',
+  'reteica',
+] as const;
+
+/**
+ * Runtime Set form of {@link WITHHOLDING_TAX_TYPES}, used for `.has` checks
+ * on values typed as `string` from raw SQL rows. The const tuple is the
+ * type-level source of truth; the Set is the runtime helper.
+ */
+export const WITHHOLDING_SET: ReadonlySet<string> = new Set(
+  WITHHOLDING_TAX_TYPES,
+);

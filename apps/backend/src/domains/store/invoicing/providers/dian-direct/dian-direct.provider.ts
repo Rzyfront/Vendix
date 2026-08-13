@@ -1282,6 +1282,44 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
     }
 
+    // QUI-679 review fix #7: tras una rotación de cert, las filas herederas
+    // (creadas con el cert de la fuente original) quedan con `certificate_*`
+    // congelados al momento de la copia. Si el firmador lee una de esas
+    // filas para una emisión, firma con un cert VIEJO. La solución completa
+    // exige un campo "active cert owner" y resolverlo en cada loadConfig;
+    // mientras tanto, registramos el caso en logs para que el equipo de
+    // plataforma pueda auditarlo y emitir el ticket de seguimiento.
+    //
+    // Comparamos el `certificate_uploaded_at` de la fila cargada con el de
+    // cualquier hermana del MISMO `accounting_entity_id` que también tenga
+    // cert: si una hermana es más reciente, el cert activo vive allí y
+    // esta fila está stale.
+    if (config.certificate_s3_key && config.certificate_uploaded_at) {
+      const newer_sibling = await this.prisma.dian_configurations.findFirst({
+        where: {
+          accounting_entity_id: config.accounting_entity_id,
+          certificate_s3_key: { not: null },
+          certificate_uploaded_at: { gt: config.certificate_uploaded_at },
+          id: { not: config.id },
+        },
+        orderBy: { certificate_uploaded_at: 'desc' },
+        select: {
+          id: true,
+          configuration_type: true,
+          certificate_uploaded_at: true,
+        },
+      });
+      if (newer_sibling) {
+        this.logger.warn(
+          `QUI-679: loadConfig() is reading a stale cert for dian_configuration_id=${config.id} ` +
+            `(${configuration_type}); sibling dian_configuration_id=${newer_sibling.id} ` +
+            `(${newer_sibling.configuration_type}) has a newer cert uploaded at ` +
+            `${newer_sibling.certificate_uploaded_at?.toISOString()}. ` +
+            `This emission may sign with outdated material; rotation tracking is on the roadmap.`,
+        );
+      }
+    }
+
     const software_pin = this.encryption.decrypt(config.software_pin_encrypted);
     const certificate_password = config.certificate_password_encrypted
       ? this.encryption.decrypt(config.certificate_password_encrypted)

@@ -23,6 +23,14 @@ import {
   DianConfigFormComponent,
   DianConfigValue,
 } from '../../forms/dian-config-form/dian-config-form.component';
+import { IconComponent } from '../../icon/icon.component';
+import { FileUploadDropzoneComponent } from '../../file-upload-dropzone/file-upload-dropzone.component';
+import { DianHabilitationScannerModalComponent } from '../../dian-habilitation-scanner/dian-habilitation-scanner-modal.component';
+import {
+  DianHabilitationScanResult,
+  HabilitationScanField,
+  HabilitationScannerScope,
+} from '../../dian-habilitation-scanner/interfaces/habilitation-scan-result.interface';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
@@ -39,28 +47,311 @@ function toDateInput(value: string | null | undefined): string {
   return value ? String(value).slice(0, 10) : '';
 }
 
+/** Tipos de documento de identidad que la entidad emisora acepta. */
+type IdentityDocumentType = 'rut' | 'id' | 'certificate_of_existence';
+
+interface IdentityDocumentFile {
+  document_type: IdentityDocumentType;
+  file: File | null;
+}
+
+/**
+ * Resultado de un `submit()` exitoso, conservado en una signal local hasta que
+ * el usuario hace clic en "Continuar" y el step llama a `commitStep()`.
+ *
+ * SIN esta signal el shell destruye el step vía `@switch` justo después del
+ * `await submit()` y el banner no llega a pintarse más que un frame. El
+ * contrato de `FiscalWizardStepHost` exige que `submit()` devuelva `{ ref }`,
+ * pero NO exige que dentro se haya llamado a `commitStep()`: el shell solo
+ * espera un resultado, no un side-effect. Por eso es seguro diferir el
+ * commit: el shell no destruye el step hasta que `currentStep` cambia, y eso
+ * lo cambia `commitStep()`.
+ */
+type SuccessInfo =
+  | {
+      kind: 'inherited';
+      ref: Record<string, unknown>;
+      inherited_from: {
+        id: number;
+        configuration_type: string;
+        certificate_expiry: string | null;
+      };
+    }
+  | {
+      kind: 'documents_submitted';
+      ref: Record<string, unknown>;
+    }
+  | {
+      kind: 'config_saved';
+      ref: Record<string, unknown>;
+    };
+
 @Component({
   selector: 'app-fiscal-dian-config-step',
   standalone: true,
-  imports: [CommonModule, DianConfigFormComponent],
+  imports: [
+    CommonModule,
+    DianConfigFormComponent,
+    IconComponent,
+    FileUploadDropzoneComponent,
+    DianHabilitationScannerModalComponent,
+  ],
   template: `
     <div class="step-body">
-      <app-dian-config-form
-        #form
-        [initialValue]="initial()"
-        [disabled]="submitting() || readOnlyForStore()"
-        [hasCertificate]="hasCertificate()"
-        [certificateExpiry]="certificateExpiry()"
-        (validityChange)="onValidity($event)"
-      ></app-dian-config-form>
+      @if (successInfo(); as success) {
+        <!--
+          Banner PERSISTENTE: vive hasta que el usuario hace clic en
+          "Continuar" (o "Aceptar"), momento en que el step llama a
+          commitStep() y el shell avanza. Sin esto, el shell destruye el
+          step un frame después del POST y el banner nunca se lee.
 
-      @if (localError()) {
-        <p class="step-error" role="alert">{{ localError() }}</p>
+          El shell's "Continuar" está deshabilitado mientras successInfo está
+          poblada (valid = false), así que el único camino de salida es el
+          botón de este banner.
+        -->
+        <div class="banner-success" role="status" aria-live="polite">
+          <div class="banner-success__icon">
+            <app-icon name="check-circle" [size]="22"></app-icon>
+          </div>
+          <div class="banner-success__body">
+            @switch (success.kind) {
+              @case ('inherited') {
+                <p class="banner-success__title">
+                  Cert reutilizado. Tu tienda ya puede operar.
+                </p>
+                <p class="banner-success__detail">
+                  El certificado configurado para
+                  <strong>{{ inheritedFromTypeLabel() }}</strong>
+                  se aplica también a esta habilitación.
+                  @if (success.inherited_from.certificate_expiry) {
+                    <span>
+                      Vigente hasta
+                      {{ success.inherited_from.certificate_expiry | date: 'longDate' }}.
+                    </span>
+                  }
+                </p>
+              }
+              @case ('documents_submitted') {
+                <p class="banner-success__title">
+                  Expediente enviado. Te avisaremos.
+                </p>
+                <p class="banner-success__detail">
+                  Recibimos tu RUT, documento de identidad
+                  @if (personType() === 'juridica') {
+                    y certificado de existencia
+                  }
+                  y los pusimos a disposición de la plataforma para tramitar
+                  tu certificado de firma. Tu tienda quedará
+                  <strong>pendiente hasta que superadmin cargue tu certificado</strong>;
+                  mientras tanto no podrá emitir documentos electrónicos.
+                </p>
+              }
+              @case ('config_saved') {
+                <p class="banner-success__title">
+                  Configuración guardada.
+                </p>
+                <p class="banner-success__detail">
+                  Registramos la configuración DIAN. Puedes continuar.
+                </p>
+              }
+            }
+            <div class="banner-success__actions">
+              <button
+                type="button"
+                class="primary-btn"
+                (click)="commitFromBanner()"
+                [disabled]="committing()"
+              >
+                @if (committing()) {
+                  Avanzando…
+                } @else {
+                  Continuar
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      } @else {
+        @if (inheritedCertificate(); as inherited) {
+          <div
+            class="banner-inherited-cert"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="banner-inherited-cert__icon">
+              <app-icon name="shield-check" [size]="22"></app-icon>
+            </div>
+            <div class="banner-inherited-cert__body">
+              <p class="banner-inherited-cert__title">
+                Ya tienes cert cargado para esta entidad fiscal
+              </p>
+              <p class="banner-inherited-cert__detail">
+                El certificado de firma configurado para
+                <strong>{{ inheritedFromTypeLabel() }}</strong>
+                se reutiliza aquí automáticamente.
+                @if (inherited.certificate_expiry) {
+                  <span> Vigente hasta {{ inherited.certificate_expiry | date: 'longDate' }}</span>.
+                }
+              </p>
+              <p class="banner-inherited-cert__hint">
+                Si necesitas rotar el certificado (vencimiento, revocación), usa el botón
+                "Rotar cert" en la sección de Certificado más abajo.
+              </p>
+            </div>
+          </div>
+        }
+
+        @if (!readOnlyForStore() && !hasCertificate()) {
+          <!--
+            Bifurcación QUI-657. Solo aparece cuando NO hay cert heredado ni
+            cert ya cargado: si el cert existe, la decisión ya está tomada y
+            el usuario no debería volver a elegir.
+          -->
+          <fieldset class="branch-selector">
+            <legend class="branch-selector__legend">
+              ¿Ya tienes el certificado de firma digital?
+            </legend>
+            <div class="branch-selector__options">
+              <label
+                class="branch-selector__option"
+                [class.branch-selector__option--active]="
+                  certificateBranch() === 'with_cert'
+                "
+              >
+                <input
+                  type="radio"
+                  name="certificate_branch"
+                  value="with_cert"
+                  [checked]="certificateBranch() === 'with_cert'"
+                  (change)="onBranchChange('with_cert')"
+                />
+                <app-icon name="key" [size]="20"></app-icon>
+                <div class="branch-selector__option-body">
+                  <p class="branch-selector__option-title">Tengo el certificado</p>
+                  <p class="branch-selector__option-hint">
+                    Voy a subir mi .p12 ahora.
+                  </p>
+                </div>
+              </label>
+              <label
+                class="branch-selector__option"
+                [class.branch-selector__option--active]="
+                  certificateBranch() === 'without_cert'
+                "
+              >
+                <input
+                  type="radio"
+                  name="certificate_branch"
+                  value="without_cert"
+                  [checked]="certificateBranch() === 'without_cert'"
+                  (change)="onBranchChange('without_cert')"
+                />
+                <app-icon name="file-text" [size]="20"></app-icon>
+                <div class="branch-selector__option-body">
+                  <p class="branch-selector__option-title">No tengo certificado</p>
+                  <p class="branch-selector__option-hint">
+                    La plataforma lo tramita con mis documentos de identidad.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </fieldset>
+        }
+
+        @if (certificateBranch() === 'without_cert' && !hasCertificate()) {
+          <!--
+            Carga de documentos de identidad. El juego depende de
+            person_type: persona natural nunca aporta certificado de existencia
+            (una persona natural no tiene representación legal). El backend
+            lo rechaza igual, pero el cliente no debe ofrecer el campo: es
+            pedirle al usuario algo que va a recibir un 400.
+          -->
+          <p class="identity-documents-banner" role="note">
+            <app-icon name="info" [size]="18"></app-icon>
+            <span>
+              Adjunta los documentos que la entidad emisora exige para
+              expedir el certificado a nombre de
+              <strong>{{ entityDisplayName() }}</strong>
+              (NIT {{ form.getValue().nit }}@if (form.getValue().nit_dv) {-{{ form.getValue().nit_dv }}}).
+              @if (personType() === 'juridica') {
+                Como persona jurídica también necesitas el certificado de
+                existencia y representación legal.
+              }
+            </span>
+          </p>
+
+          <div class="identity-documents">
+            <h3 class="identity-documents__title">Documentos de identidad</h3>
+            <section class="identity-documents__grid">
+              @for (doc of requiredDocumentTypes(); track doc) {
+                <app-file-upload-dropzone
+                  accept="application/pdf"
+                  icon="upload-cloud"
+                  [label]="documentLabel(doc)"
+                  helperText="Obligatorio · Solo PDF"
+                  (fileSelected)="onDocumentFile(doc, $event)"
+                  (fileRemoved)="removeDocumentFile(doc)"
+                ></app-file-upload-dropzone>
+              }
+            </section>
+          </div>
+        }
+
+        <!--
+          Lectura por foto del set de pruebas DIAN. Vive ARRIBA del formulario
+          porque su valor es evitar transcribir a mano dos UUID, un PIN y una
+          clave técnica de 40 caracteres: ofrecerlo después de que el usuario ya
+          tecleó no ahorra nada. Se oculta en solo-lectura (la tienda no puede
+          escribir sobre una configuración de la organización).
+        -->
+        @if (!readOnlyForStore()) {
+          <section class="scan-cta">
+            <div class="scan-cta__body">
+              <p class="scan-cta__title">
+                ¿Tienes a la mano el set de pruebas de la DIAN?
+              </p>
+              <p class="scan-cta__hint">
+                Sube una foto y la IA llena Software ID, PIN, Test Set ID y la
+                resolución de pruebas. Podrás revisar cada campo antes de
+                aplicarlo.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="scan-cta__button"
+              [disabled]="submitting()"
+              (click)="openScanner()"
+            >
+              <app-icon name="sparkles" [size]="16"></app-icon>
+              <span>Escanear con IA</span>
+            </button>
+          </section>
+
+          <app-dian-habilitation-scanner-modal
+            [isOpen]="scannerOpen()"
+            [scope]="scannerScope()"
+            (isOpenChange)="scannerOpen.set($event)"
+            (confirmed)="onScanConfirmed($event)"
+          ></app-dian-habilitation-scanner-modal>
+        }
+
+        <app-dian-config-form
+          #form
+          [initialValue]="initial()"
+          [disabled]="submitting() || readOnlyForStore()"
+          [hasCertificate]="hasCertificate()"
+          [certificateExpiry]="certificateExpiry()"
+          [hideCertificate]="certificateBranch() === 'without_cert' && !hasCertificate()"
+          (validityChange)="onValidity($event)"
+        ></app-dian-config-form>
+
+        @if (localError()) {
+          <p class="step-error" role="alert">{{ localError() }}</p>
+        }
       }
     </div>
   `,
-  styles: [
-    `
+  styles: `
       .step-body {
         display: flex;
         flex-direction: column;
@@ -71,8 +362,327 @@ function toDateInput(value: string | null | undefined): string {
         font-size: 0.85rem;
         color: var(--color-destructive, #b91c1c);
       }
+      .scan-cta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid
+          color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+        border-radius: 0.5rem;
+        background: color-mix(
+          in srgb,
+          var(--color-primary) 8%,
+          var(--color-surface, #ffffff)
+        );
+      }
+      @media (min-width: 768px) {
+        .scan-cta {
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+        }
+      }
+      .scan-cta__title {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+      }
+      .scan-cta__hint {
+        margin: 0.15rem 0 0;
+        font-size: 0.8rem;
+        line-height: 1.4;
+        color: var(--color-text-secondary, #4b5563);
+      }
+      .scan-cta__button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        flex: 0 0 auto;
+        padding: 0.55rem 1rem;
+        border: none;
+        border-radius: 0.5rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--color-primary);
+        color: var(--color-text-on-primary, #ffffff);
+      }
+      .scan-cta__button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .banner-inherited-cert {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid
+          color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+        border-radius: 0.5rem;
+        background: color-mix(
+          in srgb,
+          var(--color-primary) 8%,
+          var(--color-surface, #ffffff)
+        );
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 1.85rem;
+        height: 1.85rem;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+        color: var(--color-primary);
+      }
+      .banner-inherited-cert__body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .banner-inherited-cert__title {
+        margin: 0;
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__detail {
+        margin: 0;
+        font-size: 0.85rem;
+        line-height: 1.35;
+        color: var(--color-text-secondary, #4b5563);
+      }
+      .banner-inherited-cert__detail strong {
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__hint {
+        margin: 0;
+        font-size: 0.78rem;
+        line-height: 1.3;
+        color: var(--color-text-secondary, #6b7280);
+      }
+      .banner-success {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.85rem;
+        padding: 1rem 1.1rem;
+        border: 1px solid
+          color-mix(in srgb, var(--color-success, #16a34a) 30%, var(--color-border));
+        border-radius: 0.6rem;
+        background: color-mix(
+          in srgb,
+          var(--color-success, #16a34a) 7%,
+          var(--color-surface, #ffffff)
+        );
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-success__icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        background: color-mix(
+          in srgb,
+          var(--color-success, #16a34a) 18%,
+          transparent
+        );
+        color: var(--color-success, #16a34a);
+      }
+      .banner-success__body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .banner-success__title {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .banner-success__detail {
+        margin: 0;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        color: var(--color-text-secondary, #4b5563);
+      }
+      .banner-success__actions {
+        margin-top: 0.6rem;
+        display: flex;
+        justify-content: flex-end;
+      }
+      .banner-success__actions .primary-btn {
+        min-height: 2.2rem;
+        padding: 0.4rem 0.9rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        border-radius: 0.4rem;
+        border: 1px solid
+          var(--color-primary, #2563eb);
+        background: var(--color-primary, #2563eb);
+        color: #ffffff;
+        cursor: pointer;
+      }
+      .banner-success__actions .primary-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .branch-selector {
+        margin: 0;
+        padding: 0.85rem 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+      .branch-selector__legend {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+        padding: 0;
+      }
+      .branch-selector__options {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+      }
+      @media (min-width: 640px) {
+        .branch-selector__options {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .branch-selector__option {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.55rem;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.4rem;
+        cursor: pointer;
+        background: var(--color-surface, #ffffff);
+        color: var(--color-text-primary, #111827);
+      }
+      .branch-selector__option--active {
+        border-color: var(--color-primary, #2563eb);
+        background: color-mix(
+          in srgb,
+          var(--color-primary, #2563eb) 6%,
+          var(--color-surface, #ffffff)
+        );
+      }
+      .branch-selector__option input[type='radio'] {
+        margin-top: 0.2rem;
+      }
+      .branch-selector__option-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+      .branch-selector__option-title {
+        margin: 0;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+      .branch-selector__option-hint {
+        margin: 0;
+        font-size: 0.78rem;
+        color: var(--color-text-secondary, #6b7280);
+      }
+      /*
+       * Banner informativo azul que vive FUERA del grid de dropzones.
+       * Span completo del ancho para que la copy no quede torcida dentro
+       * de una de las 3 columnas de PC.
+       */
+      .identity-documents-banner {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.85rem 1rem;
+        margin: 0 0 0.6rem 0;
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--color-info) 35%, var(--color-border));
+        border-radius: 0.55rem;
+        background: color-mix(in srgb, var(--color-info) 8%, var(--color-surface));
+        color: var(--color-text-primary, #0f172a);
+        font-size: 0.84rem;
+        line-height: 1.45;
+        box-sizing: border-box;
+      }
+      .identity-documents-banner app-icon {
+        flex: 0 0 auto;
+        color: var(--color-info);
+        margin-top: 0.1rem;
+      }
+      .identity-documents-banner span {
+        flex: 1 1 auto;
+      }
+      .identity-documents-banner strong {
+        color: var(--color-text-primary, #0f172a);
+        font-weight: 600;
+      }
+
+      /*
+       * Contenedor de los 3 dropzones de identidad. Hacemos grid aquí
+       * para que el padre pinte las 3 fichas en fila en PC y apiladas
+       * en móvil/tablet. El __row queda como wrapper transparente.
+       */
+      .identity-documents {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.5rem;
+      }
+      .identity-documents__title {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+        width: 100%;
+      }
+      .identity-documents__grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+        width: 100%;
+      }
+      @media (min-width: 768px) {
+        .identity-documents__grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
+      }
+      .identity-documents__row-label {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .identity-documents__req {
+        font-size: 0.7rem;
+        font-weight: 500;
+        color: var(--color-text-secondary, #6b7280);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .identity-documents__filename {
+        margin: 0;
+        font-size: 0.78rem;
+        color: var(--color-text-secondary, #4b5563);
+      }
     `,
-  ],
 })
 export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
@@ -90,11 +700,153 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   /** B3: precarga del certificado existente desde el prefill. */
   readonly hasCertificate = signal(false);
   readonly certificateExpiry = signal<string | null>(null);
+  /**
+   * QUI-679: when the backend creates this config and reuses an existing cert
+   * from a sibling configuration on the same fiscal entity, the create
+   * response carries `inherited_certificate: true` + `inherited_from`. We
+   * surface it as a banner so the user understands why no upload is needed
+   * and which row currently holds the certificate.
+   */
+  readonly inheritedCertificate = signal<{
+    dian_configuration_id: number;
+    configuration_type: string;
+    certificate_expiry: string | null;
+  } | null>(null);
+
+  // ─── QUI-657 ─────────────────────────────────────────────────────────────
+  /** Rama del wizard: "tengo cert" (default) o "no tengo cert". */
+  /**
+   * Default de rama: ahora arranca en `without_cert` para reducir fricción en
+   * tiendas nuevas (el camino más común es tramitar el cert con la plataforma,
+   * no subirlo). Si la prefill ya tiene cert (`hasCertificate() === true`)
+   * la bifurcación ni se renderiza, así que este default aplica solo al
+   * primer wizard visit.
+   */
+  readonly certificateBranch = signal<'with_cert' | 'without_cert'>(
+    'without_cert',
+  );
+  /**
+   * Archivos de identidad seleccionados por el usuario en la rama
+   * `without_cert`. La clave es el `document_type` que el backend espera.
+   */
+  readonly identityDocuments = signal<Record<IdentityDocumentType, File | null>>(
+    { rut: null, id: null, certificate_of_existence: null },
+  );
+  /**
+   * Resultado de un submit exitoso. Mientras está poblada, el step muestra
+   * el banner persistente y el shell's "Continuar" está deshabilitado
+   * (`valid = false`). Se libera cuando el usuario hace clic en "Continuar"
+   * en el banner, momento en que se llama a `commitStep()` y el shell
+   * destruye este step.
+   */
+  readonly successInfo = signal<SuccessInfo | null>(null);
+  /** True mientras el banner está avanzando al siguiente step. */
+  readonly committing = signal(false);
+
+  /** person_type del prefill legal_data. */
+  readonly personType = computed<'natural' | 'juridica'>(() => {
+    const raw = this.service.prefill()?.legal_data?.person_type ?? '';
+    const v = raw.toLowerCase();
+    if (v === 'natural') return 'natural';
+    return 'juridica';
+  });
+
+  /** Documentos exigidos por la entidad emisora para este `person_type`. */
+  readonly requiredDocumentTypes = computed<IdentityDocumentType[]>(() =>
+    this.personType() === 'natural' ? ['rut', 'id'] : ['rut', 'id', 'certificate_of_existence'],
+  );
+
+  /** Nombre legible del tenant para mostrar en el hint del expediente. */
+  readonly entityDisplayName = computed(() => {
+    const ld = this.service.prefill()?.legal_data;
+    return ld?.legal_name ?? 'la entidad';
+  });
+  readonly inheritedFromTypeLabel = computed(() => {
+    const v = this.inheritedCertificate();
+    if (!v) return null;
+    const map: Record<string, string> = {
+      invoicing: 'facturación electrónica',
+      support_document: 'documento soporte',
+      equivalent_document: 'documento equivalente POS',
+      payroll: 'nómina electrónica',
+    };
+    return map[v.configuration_type] ?? v.configuration_type;
+  });
   readonly readOnlyForStore = computed(
     () =>
       this.service.userScope() === 'store' &&
       this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
   );
+
+  // ─── Escáner IA del set de pruebas DIAN ──────────────────────────────────
+  /** Visibilidad del modal de escaneo. */
+  readonly scannerOpen = signal(false);
+  /**
+   * Namespace al que pega el escáner. Es el scope del USUARIO, igual que
+   * `baseUrl()`: quien decide la ruta es el app type con el que entró, no el
+   * `fiscal_scope` de la organización (el backend resuelve la propiedad fiscal
+   * del otro lado).
+   */
+  readonly scannerScope = computed<HabilitationScannerScope>(() =>
+    this.service.userScope() === 'organization' ? 'organization' : 'store',
+  );
+
+  openScanner(): void {
+    this.scannerOpen.set(true);
+  }
+
+  /**
+   * Precarga el formulario con lo que la IA logró leer.
+   *
+   * Se aplica TODO campo con valor (`value !== null`), incluidos los marcados
+   * "confírmalo": el modal ya los mostró uno por uno con su advertencia y exigió
+   * la casilla de verificación, así que el usuario aceptó esos valores a
+   * sabiendas. Lo que NO se aplica es lo que falló su regla estructural — el
+   * backend ya lo devolvió como `null`, y precargar un UUID incompleto o un
+   * rango invertido sería peor que dejar el campo vacío.
+   *
+   * `environment` entra igual que el resto: si los documentos son de
+   * habilitación, el ambiente correcto es `test` y dejar 'production' pegado de
+   * una edición anterior sería mandar el set de pruebas al ambiente real.
+   */
+  onScanConfirmed(scan: DianHabilitationScanResult): void {
+    const patch: Partial<DianConfigValue> = {};
+
+    const take = <K extends keyof DianConfigValue>(
+      key: K,
+      field: HabilitationScanField<DianConfigValue[K] & {}>,
+    ): void => {
+      if (field.value !== null && field.value !== undefined) {
+        patch[key] = field.value;
+      }
+    };
+
+    take('name', scan.name);
+    take('nit', scan.nit);
+    take('nit_dv', scan.nit_dv);
+    take('environment', scan.environment);
+    take('software_id', scan.software_id);
+    take('software_pin', scan.software_pin);
+    take('test_set_id', scan.test_set_id);
+    take('resolution_number', scan.resolution_number);
+    take('resolution_prefix', scan.resolution_prefix);
+    take('resolution_range_from', scan.resolution_range_from);
+    take('resolution_range_to', scan.resolution_range_to);
+    take('resolution_valid_from', scan.resolution_valid_from);
+    take('resolution_valid_to', scan.resolution_valid_to);
+    take('resolution_date', scan.resolution_date);
+    take('resolution_technical_key', scan.resolution_technical_key);
+
+    // El NIT sale del RUT, no del set de pruebas: el documento imprime el del
+    // facturador, que es el mismo, pero el tipo de documento no aparece en
+    // ninguna parte y siempre es NIT en una habilitación.
+    if (patch.nit) {
+      patch.nit_type = 'NIT';
+    }
+
+    this.form().applyScan(patch);
+    this.localError.set(null);
+  }
 
   private readonly form = viewChild.required<DianConfigFormComponent>('form');
   private loadedContextKey: string | null = null;
@@ -123,7 +875,20 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     // "certificado cargado" state.
     this.hasCertificate.set(false);
     this.certificateExpiry.set(null);
+    this.inheritedCertificate.set(null);
     this.existingResolutionId.set(null);
+    // QUI-657: cada cambio de contexto fiscal debe olvidar el resultado
+    // pendiente y los archivos seleccionados — sino el banner persistente
+    // sobreviviría un cambio de tienda y mostraría "éxito" de un submit
+    // que ya no corresponde a este wizard.
+    this.successInfo.set(null);
+    this.committing.set(false);
+    this.certificateBranch.set('without_cert');
+    this.identityDocuments.set({
+      rut: null,
+      id: null,
+      certificate_of_existence: null,
+    });
 
     const prefill = this.service.prefill();
     // The resolution lives in its own table, so it prefills independently of
@@ -137,6 +902,17 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       // to re-upload it. The step stays optional either way.
       this.hasCertificate.set(dian.has_certificate ?? false);
       this.certificateExpiry.set(dian.certificate_expiry ?? null);
+      // QUI-679 review fix #5: rehidratar el banner desde el prefill para que
+      // un wizard revisit muestre por qué no se pidió el `.p12`. Sin esto, el
+      // banner solo aparecía tras un POST, y un comerciante que vuelve al step
+      // después de un F5 lo veía vacío.
+      if (dian.inherited_certificate && dian.inherited_from) {
+        this.inheritedCertificate.set({
+          dian_configuration_id: dian.inherited_from.id,
+          configuration_type: dian.inherited_from.configuration_type,
+          certificate_expiry: dian.inherited_from.certificate_expiry,
+        });
+      }
       this.initial.set({
         ...this.toDianFormValue(dian),
         ...resolutionValue,
@@ -230,6 +1006,100 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     this.valid.set(v);
   }
 
+  /**
+   * Cambia la rama y limpia los archivos seleccionados. Si el usuario vuelve
+   * a `with_cert` después de subir documentos de identidad, no debe quedar
+   * evidencia de ellos en la signal — un F5 los borra del `<input type="file">`
+   * pero la signal sobreviviría.
+   */
+  onBranchChange(branch: 'with_cert' | 'without_cert'): void {
+    this.certificateBranch.set(branch);
+    this.identityDocuments.set({
+      rut: null,
+      id: null,
+      certificate_of_existence: null,
+    });
+    // Si vamos a "no tengo cert", vaciamos también el archivo y contraseña
+    // del cert cargados en el form. Si vamos a "tengo cert", no tocamos
+    // la password — el sentinel MASKED_SECRET que el padre inyectó indica
+    // "el cert sigue cargado en backend".
+    if (branch === 'without_cert') {
+      const form = this.form();
+      if (form) {
+        form.removeFile();
+      }
+    }
+  }
+
+  /**
+   * Vinculado al `(fileRemoved)` del dropzone de identidad. El backend
+   * ya rechazó documentos previos con 400 si el expediente está `issuing`
+   * o `issued`; acá permitimos borrar mientras la prefill siga editable.
+   */
+  removeDocumentFile(type: IdentityDocumentType): void {
+    this.identityDocuments.update((state) => ({
+      ...state,
+      [type]: null,
+    }));
+  }
+
+  /**
+   * Dropzone emite `File` directo en `fileSelected`. Si el usuario cancela
+   * el picker, no se llama y el signal existente se preserva.
+   */
+  onDocumentFile(type: IdentityDocumentType, file: File): void {
+    this.identityDocuments.update((state) => ({ ...state, [type]: file }));
+  }
+
+  getDocumentFile(type: IdentityDocumentType): File | null {
+    return this.identityDocuments()[type];
+  }
+
+  documentLabel(type: IdentityDocumentType): string {
+    return {
+      rut: 'RUT',
+      id: 'Documento de identidad',
+      certificate_of_existence:
+        'Certificado de existencia y representación legal',
+    }[type];
+  }
+
+  /**
+   * Los documentos de identidad se aceptan SOLO en PDF. El backend
+   * (`DIAN_IDENTITY_DOCUMENT_MIME_TYPES`) sigue aceptando JPG/PNG/WEBP
+   * por compatibilidad con flujos legacy, pero el wizard bloquea el picker
+   * del navegador a PDF y muestra helperText "Solo PDF" en el dropzone.
+   */
+  allowedMimeAccept(): string {
+    return 'application/pdf';
+  }
+
+  formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  /**
+   * Llamado por el botón "Continuar" del banner persistente.
+   *
+   * Es el ÚNICO punto donde este step llama a `commitStep()`. `submit()` no
+   * lo hace: devuelve `{ ref }` y deja que el banner tome el control. El
+   * shell se queda esperando porque `submit()` ya retornó y el `currentStep`
+   * no cambia hasta que `commitStep()` corra. Eso mantiene el step montado
+   * y el banner visible hasta que el usuario confirma.
+   */
+  async commitFromBanner(): Promise<void> {
+    const info = this.successInfo();
+    if (!info) return;
+    this.committing.set(true);
+    try {
+      await this.service.commitStep(this.stepId, info.ref);
+    } finally {
+      this.committing.set(false);
+    }
+  }
+
   private resolutionsUrl(): string {
     return `${environment.apiUrl}/${this.service.userScope()}/invoicing/resolutions`;
   }
@@ -283,6 +1153,16 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     const form = this.form();
     form.markAllTouched();
+
+    // Si el banner persistente está mostrando un resultado, el shell's
+    // "Continuar" está deshabilitado y `submit()` solo se llama si el usuario
+    // hace clic en el botón del banner — que en su lugar llama a
+    // `commitFromBanner()`. Esta guarda es defensiva: si alguien llega hasta
+    // acá con un resultado pendiente, no hacemos doble POST.
+    if (this.successInfo()) {
+      return null;
+    }
+
     if (!this.valid()) {
       focusFirstInvalid(this.host);
       return null;
@@ -296,6 +1176,9 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
         inherited: true,
         completed_at: new Date().toISOString(),
       };
+      // readOnlyForStore es un atajo: no escribimos nada, solo informamos
+      // al shell que el step está completo. Como acá no hay banner que
+      // mostrar, podemos llamar a commitStep() directamente.
       await this.service.commitStep(this.stepId, ref);
       this.submitting.set(false);
       return { ref };
@@ -317,47 +1200,131 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     }
     try {
       const value = form.getValue();
+      const ref = await this.persistConfigAndCertificate(value);
 
-      // Body matches CreateDianConfigDto. For ORG_ADMIN + fiscal_scope=STORE
-      // spread the selected store_id so the backend pins the row to the
-      // chosen store. For fiscal_scope=ORGANIZATION do NOT send store_id —
-      // the row must be org-scoped (store_id IS NULL).
-      // The PIN is only sent when the user typed a real value. Sending the
-      // sentinel back would overwrite the stored secret with '****' and every
-      // later DIAN call would fail authentication.
-      const pinTouched =
-        Boolean(value.software_pin) && value.software_pin !== MASKED_SECRET;
-      const body = {
-        name: value.name,
-        nit: value.nit,
-        nit_dv: value.nit_dv,
-        nit_type: value.nit_type || 'NIT',
-        software_id: value.software_id,
-        ...(pinTouched ? { software_pin: value.software_pin } : {}),
-        environment: value.environment,
-        test_set_id: value.test_set_id || undefined,
-        is_default: true,
-        ...this.service.storeContext(),
-      };
+      // Diferir `commitStep()`: el banner persistente toma el control de
+      // cuándo avanza el shell. Si no diferimos, el shell destruye el step
+      // vía `@switch` antes de que el usuario pueda leer el resultado.
+      // `valid` se baja a `false` para que el botón "Continuar" del shell
+      // quede deshabilitado y el único camino de salida sea el banner.
+      this.valid.set(false);
+      this.successInfo.set(ref.successInfo);
+      return { ref: ref.commitRef };
+    } catch (e) {
+      this.localError.set(parseApiError(e).userMessage);
+      // El shell ya tenía el botón "Continuar" deshabilitado por el
+      // `valid.set(false)` previo; no lo re-habilitamos en error porque
+      // un reintento desde el shell lanzaría OTRO POST sobre el mismo
+      // estado. El usuario corrige la forma y vuelve a hacer clic.
+      return null;
+    } finally {
+      this.submitting.set(false);
+    }
+  }
 
-      let configId: number | null = this.existingConfigId();
-      if (configId) {
-        const res: any = await firstValueFrom(
-          this.http.patch(`${this.baseUrl()}/${configId}`, body),
+  /**
+   * Implementa la rama elegida por el usuario (`with_cert` o `without_cert`)
+   * y devuelve la información que el step necesita después:
+   *
+   * - `commitRef` es lo que va al shell cuando el usuario hace clic en
+   *   "Continuar" del banner.
+   * - `successInfo` es lo que muestra el banner: cert heredado, expediente
+   *   enviado, o config guardada en su rama más simple.
+   *
+   * Sacar esto de `submit()` es lo que permite que la rama `without_cert`
+   * reutilice casi todo el código de la rama `with_cert` y que los errores
+   * se mapeen igual a `parseApiError`.
+   */
+  private async persistConfigAndCertificate(
+    value: DianConfigValue,
+  ): Promise<{
+    commitRef: Record<string, unknown>;
+    successInfo: SuccessInfo;
+  }> {
+    // Pin the user-chosen branch on the DTO. Backend ignores it when the
+    // config has a cert already, so the "with cert" path is a no-op for
+    // existing configs.
+    const branch = this.certificateBranch();
+    const pinTouched =
+      Boolean(value.software_pin) && value.software_pin !== MASKED_SECRET;
+    const body: Record<string, unknown> = {
+      name: value.name,
+      nit: value.nit,
+      nit_dv: value.nit_dv,
+      nit_type: value.nit_type || 'NIT',
+      software_id: value.software_id,
+      ...(pinTouched ? { software_pin: value.software_pin } : {}),
+      environment: value.environment,
+      test_set_id: value.test_set_id || undefined,
+      is_default: true,
+      certificate_branch: branch,
+      ...this.service.storeContext(),
+    };
+
+    let configId: number | null = this.existingConfigId();
+    let inheritedFrom:
+      | { id: number; configuration_type: string; certificate_expiry: string | null }
+      | null = null;
+
+    if (configId) {
+      const res: any = await firstValueFrom(
+        this.http.patch(`${this.baseUrl()}/${configId}`, body),
+      );
+      const payload = res?.data ?? res;
+      configId =
+        typeof payload?.id === 'number' ? payload.id : (configId ?? null);
+      if (payload?.inherited_certificate && payload?.inherited_from) {
+        inheritedFrom = {
+          id: payload.inherited_from.id,
+          configuration_type: payload.inherited_from.configuration_type,
+          certificate_expiry:
+            payload.inherited_from.certificate_expiry ?? null,
+        };
+        this.inheritedCertificate.set({
+          dian_configuration_id: payload.inherited_from.id,
+          configuration_type: payload.inherited_from.configuration_type,
+          certificate_expiry: payload.inherited_from.certificate_expiry,
+        });
+        this.hasCertificate.set(true);
+        this.certificateExpiry.set(
+          payload.inherited_from?.certificate_expiry ?? null,
         );
-        const payload = res?.data ?? res;
-        configId =
-          typeof payload?.id === 'number' ? payload.id : (configId ?? null);
-      } else {
-        const res: any = await firstValueFrom(
-          this.http.post(this.baseUrl(), body),
-        );
-        const payload = res?.data ?? res;
-        configId = typeof payload?.id === 'number' ? payload.id : null;
       }
+    } else {
+      const res: any = await firstValueFrom(
+        this.http.post(this.baseUrl(), body),
+      );
+      const payload = res?.data ?? res;
+      configId = typeof payload?.id === 'number' ? payload.id : null;
+      if (payload?.inherited_certificate && payload?.inherited_from) {
+        inheritedFrom = {
+          id: payload.inherited_from.id,
+          configuration_type: payload.inherited_from.configuration_type,
+          certificate_expiry:
+            payload.inherited_from.certificate_expiry ?? null,
+        };
+        this.inheritedCertificate.set({
+          dian_configuration_id: payload.inherited_from.id,
+          configuration_type: payload.inherited_from.configuration_type,
+          certificate_expiry: payload.inherited_from.certificate_expiry,
+        });
+        this.hasCertificate.set(true);
+        this.certificateExpiry.set(
+          payload.inherited_from?.certificate_expiry ?? null,
+        );
+      }
+    }
 
-      // Upload certificate if provided. FormData payload — no body merge.
-      if (value.certificate_file && configId && value.certificate_password) {
+    if (!configId) {
+      // Sin id no podemos seguir: el backend no devolvió la fila creada y no
+      // hay a qué subarle cert ni qué expediente enviar. Lanzar hace que
+      // el catch del submit mapee el error y muestre `localError`.
+      throw new Error('No se obtuvo el identificador de la configuración.');
+    }
+
+    // ─── Rama "tengo cert": subir el .p12 ─────────────────────────────
+    if (branch === 'with_cert') {
+      if (value.certificate_file && value.certificate_password) {
         const fd = new FormData();
         fd.append('certificate', value.certificate_file);
         fd.append('password', value.certificate_password);
@@ -366,27 +1333,72 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
           this.http.post(`${this.baseUrl()}/upload-certificate`, fd),
         );
       }
-
-      // The numbering resolution is a hard prerequisite for the test set and
-      // for issuing, so it is persisted in the same commit as the DIAN config.
-      // If this write fails the step is NOT marked complete, even though the
-      // config itself was saved — otherwise the wizard would report "listo"
-      // for a tenant that still cannot emit a single document.
-      const resolutionId = await this.persistResolution(value);
-
-      const ref = {
-        dian_config_id: configId,
-        resolution_id: resolutionId,
-        environment: value.environment,
-        completed_at: new Date().toISOString(),
-      };
-      await this.service.commitStep(this.stepId, ref);
-      return { ref };
-    } catch (e) {
-      this.localError.set(parseApiError(e).userMessage);
-      return null;
-    } finally {
-      this.submitting.set(false);
+    } else {
+      // ─── Rama "no tengo cert": documentos de identidad ───────────────
+      //
+      // La resolución se persiste ANTES de enviar el expediente: la
+      // habilitación de la DIAN exige que la resolución esté registrada
+      // para poder emitir una vez que llegue el cert.
+      const docs = this.identityDocuments();
+      for (const document_type of this.requiredDocumentTypes()) {
+        const file = docs[document_type];
+        if (!file) {
+          throw new Error(
+            `Falta el documento obligatorio: ${this.documentLabel(document_type)}.`,
+          );
+        }
+        const fd = new FormData();
+        fd.append('document', file);
+        fd.append('document_type', document_type);
+        await firstValueFrom(
+          this.http.post(
+            `${this.baseUrl()}/${configId}/identity-documents`,
+            fd,
+          ),
+        );
+      }
+      // Enviar el expediente a la cola del superadmin. Falla acá si la
+      // entidad fiscal no tenía la `person_type` correcta o si la fila ya
+      // tenía cert.
+      await firstValueFrom(
+        this.http.post(
+          `${this.baseUrl()}/${configId}/identity-documents/submit`,
+          {},
+        ),
+      );
     }
+
+    // La resolución se persiste en ambas ramas porque la habilitación DIAN
+    // la exige para emitir. Si falla, el catch del submit aborta el step
+    // SIN setear `successInfo`, así que el wizard no avanza.
+    const resolutionId = await this.persistResolution(value);
+
+    const commitRef = {
+      dian_config_id: configId,
+      resolution_id: resolutionId,
+      environment: value.environment,
+      branch,
+      completed_at: new Date().toISOString(),
+    };
+
+    // Prioridad del banner: cert heredado > expediente enviado > config
+    // guardada simple. El cert heredado es el caso más fuerte (la tienda YA
+    // está lista para emitir), por lo que gana incluso si el usuario eligió
+    // `without_cert` por error — el backend habría ignorado la rama de
+    // todos modos.
+    let successInfo: SuccessInfo;
+    if (inheritedFrom) {
+      successInfo = {
+        kind: 'inherited',
+        ref: commitRef,
+        inherited_from: inheritedFrom,
+      };
+    } else if (branch === 'without_cert') {
+      successInfo = { kind: 'documents_submitted', ref: commitRef };
+    } else {
+      successInfo = { kind: 'config_saved', ref: commitRef };
+    }
+
+    return { commitRef, successInfo };
   }
 }

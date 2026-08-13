@@ -29,6 +29,13 @@ export class CreateRefundItemDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  // REFUND OVERHAUL — required when refund_method='bank_transfer'. The
+  // destination bank account is persisted on refund_items.bank_account_id for
+  // audit trail and journal entry routing. Ignored for other methods.
+  @IsOptional()
+  @IsInt()
+  bank_account_id?: number;
 }
 
 export class CreateRefundDto {

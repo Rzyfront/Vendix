@@ -592,6 +592,30 @@ export class StoreOrdersService {
     );
   }
 
+  // REFUND OVERHAUL — returns the refund methods the store can actually
+  // execute for a given order (processor configured, cash register open,
+  // bank accounts present, always store_credit). Backend drives this via
+  // RefundMethodsService; the modal renders the dropdown from this response.
+  getAvailableRefundMethods(orderId: string): Observable<{
+    methods: {
+      value: 'original_payment' | 'cash' | 'bank_transfer' | 'store_credit';
+      label: string;
+      icon: string;
+      available: boolean;
+      reason_unavailable?: string;
+    }[];
+    bank_accounts: { id: number; label: string }[];
+  }> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund/available-methods`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching available refund methods:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
   createRefund(orderId: string, dto: CreateRefundRequest): Observable<any> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund`;
     return this.http.post<any>(url, dto).pipe(

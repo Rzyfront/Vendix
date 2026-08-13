@@ -120,6 +120,20 @@ export interface FiscalWizardPrefillDianConfig {
   software_id: string | null;
   test_set_id: string | null;
   has_software_pin: boolean;
+  /**
+   * QUI-679 review fix #5: cert on this row was copied from a sibling
+   * `dian_configurations` row at create-time. `inherited_from` carries the
+   * source so the wizard step can render "este cert viene de tu habilitación
+   * de facturación, expira el …". Mirrors `WizardPrefillDianConfig` on the
+   * frontend — adding the field here without there would surface as a TS
+   * error in the FE consumer.
+   */
+  inherited_certificate?: boolean;
+  inherited_from?: {
+    id: number;
+    configuration_type: string;
+    certificate_expiry: string | null;
+  } | null;
 }
 
 /**

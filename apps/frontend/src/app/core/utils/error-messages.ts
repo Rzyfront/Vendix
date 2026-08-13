@@ -630,6 +630,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de la habilitación DIAN (software + set de pruebas + resolución
+  // de pruebas). Mismo contrato: no persiste nada, así que un fallo solo
+  // significa "no pude leerlo".
+  HABILITATION_SCAN_NO_FILE:
+    'Sube al menos una foto o PDF de la habilitación DIAN.',
+  HABILITATION_SCAN_INVALID_FILE:
+    'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  HABILITATION_SCAN_TOO_MANY_FILES:
+    'Máximo 3 documentos por escaneo. Quita alguno e inténtalo de nuevo.',
+  HABILITATION_SCAN_AI_FAIL:
+    'La IA no pudo leer los documentos de habilitación. Intenta con fotos más nítidas o escribe los datos a mano.',
+  HABILITATION_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',

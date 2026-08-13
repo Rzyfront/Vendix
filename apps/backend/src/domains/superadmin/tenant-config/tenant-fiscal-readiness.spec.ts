@@ -172,7 +172,9 @@ describe('TenantDianConfigController · fiscal-readiness', () => {
         .fn()
         .mockResolvedValue(options.fiscal_scope ?? 'STORE'),
     } as any;
-    storeDian = new DianConfigService(prisma, encryption, fiscalScope, readiness);
+    const s3 = { downloadFile: jest.fn(), uploadFile: jest.fn() } as any;
+    const events = { emit: jest.fn() } as any;
+    storeDian = new DianConfigService(prisma, encryption, fiscalScope, readiness, s3, events);
 
     /**
      * Sustituto del runner: forja el contexto del tenant igual que el real, sin

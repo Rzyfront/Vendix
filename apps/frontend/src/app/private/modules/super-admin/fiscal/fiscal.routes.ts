@@ -190,6 +190,20 @@ export const FISCAL_ROUTES: Routes = [
     ],
   },
   // -------------------------------------------------------------------
+  // QUI-657 — cola de certificados por tramitar. Fuera del shell del Centro
+  // Fiscal a propósito: no es un eje de la operación fiscal DE LA PLATAFORMA
+  // (que es lo que el shell describe), sino una bandeja de trabajo sobre los
+  // tenants. Meterla dentro del shell la haría parecer una obligación fiscal
+  // propia de Vendix.
+  // -------------------------------------------------------------------
+  {
+    path: 'certificates-pending',
+    loadComponent: () =>
+      import(
+        './certificates-pending/certificates-pending.component'
+      ).then((m) => m.CertificatesPendingComponent),
+  },
+  // -------------------------------------------------------------------
   // Páginas sueltas conservadas (dashboard KPI suelto + obligations
   // standalone) — fuera del routing del shell, pero conservadas en el
   // árbol de archivos para referencia histórica. Se mantienen

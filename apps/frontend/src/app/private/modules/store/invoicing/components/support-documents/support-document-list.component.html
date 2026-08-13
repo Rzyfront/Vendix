@@ -1,0 +1,88 @@
+<div class="space-y-3">
+  <!-- Toolbar -->
+  <div class="flex flex-wrap items-center gap-3">
+    <app-inputsearch
+      class="flex-1 min-w-[200px]"
+      placeholder="Buscar por número, proveedor o NIT"
+      (search)="onSearch($event)"
+    ></app-inputsearch>
+
+    <app-options-dropdown
+      [filters]="filterConfigs"
+      (filterChange)="onFilterChange($event)"
+      (clearAllFilters)="onClearFilters()"
+    ></app-options-dropdown>
+
+    <button
+      type="button"
+      class="px-3 py-2 text-sm rounded-lg bg-primary text-[var(--color-text-on-primary)] hover:bg-primary-dark transition-colors flex items-center gap-2"
+      (click)="onCreate()"
+    >
+      <app-icon name="plus" [size]="14"></app-icon>
+      Nuevo documento soporte
+    </button>
+  </div>
+
+  <!-- Filtros rápidos: CUDS y rango de fechas (no encajan en el dropdown estándar) -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-text-secondary">Buscar por CUDS</label>
+      <input
+        type="text"
+        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
+        placeholder="CUDS completo (96 caracteres)"
+        [value]="filters.controls.cuds.value || ''"
+        (input)="filters.controls.cuds.setValue($any($event.target).value)"
+        maxlength="255"
+      />
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-text-secondary">Desde</label>
+      <input
+        type="date"
+        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
+        [value]="filters.controls.date_from.value || ''"
+        (change)="filters.controls.date_from.setValue($any($event.target).value)"
+      />
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-text-secondary">Hasta</label>
+      <input
+        type="date"
+        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
+        [value]="filters.controls.date_to.value || ''"
+        (change)="filters.controls.date_to.setValue($any($event.target).value)"
+      />
+    </div>
+  </div>
+
+  <!-- Tabla / cards -->
+  <app-responsive-data-view
+    [data]="rows()"
+    [columns]="columns"
+    [cardConfig]="cardConfig"
+    [actions]="tableActions"
+    [loading]="loading()"
+    [emptyTitle]="getEmptyStateTitle()"
+    [emptyDescription]="getEmptyStateDescription()"
+    (rowClick)="onView($event)"
+  ></app-responsive-data-view>
+
+  <!-- Paginación -->
+  <app-pagination
+    [currentPage]="page()"
+    [totalPages]="totalPages()"
+    [total]="total()"
+    [limit]="limit()"
+    (pageChange)="onPageChange($event)"
+  ></app-pagination>
+
+  @if (error()) {
+    <div
+      class="text-sm text-error bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
+    >
+      <app-icon name="alert-circle" [size]="16"></app-icon>
+      <span>{{ error() }}</span>
+    </div>
+  }
+</div>

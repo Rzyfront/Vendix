@@ -142,6 +142,12 @@ export interface ProfitLossSummary {
      */
     operating_revenue: number;
     tax_collected: number;
+    /**
+     * SUM(orders.grand_total) with REVENUE_STATES — the amount the customer
+     * actually paid INCLUDING VAT. Drives the Panel "Ingresos" card so the
+     * merchant sees the same figure as Vexi and the orders list (QUI-662).
+     */
+    total_invoiced: number;
   };
   costs: {
     cost_of_goods_sold: number;
@@ -160,6 +166,12 @@ export interface ProfitLossSummary {
     net_profit: number;
     net_margin: number;
     order_count: number;
+    /**
+     * Cash position: total_invoiced − refunds.total_refunds − operating_expenses.
+     * Excludes COGS on purpose (consumo de inventario is an asset charge, not
+     * a cash outflow). Drives the Panel "Balance" card (QUI-662).
+     */
+    balance: number;
   };
   /**
    * Previous equivalent period on IDENTICAL definitions, so a growth badge is
@@ -175,6 +187,8 @@ export interface ProfitLossSummary {
     net_profit_growth: number | null;
     expenses_growth: number | null;
     orders_growth: number | null;
+    /** Same `computeGrowth` contract as the other growth fields; `null` when the previous period had no base. */
+    balance_growth: number | null;
   };
 }
 
@@ -189,6 +203,14 @@ export interface TaxSummary {
   period: { start_date: string; end_date: string };
   total_tax_collected: number;
   total_tax_refunded: number;
+  /**
+   * Net of every tax row (IVA + INC + ICA + retenciones) collected minus the
+   * period's refunds. Historical definition kept for the export's "total a
+   * pagar" column. It is NOT the DIAN posición (use `net_vat_position` for
+   * the declaración) and it is NOT the "IVA neto" — it sums every tax type
+   * and subtracts refunds, so the label is a legacy name preserved to avoid
+   * breaking export consumers.
+   */
   net_tax: number;
   /**
    * Base gravable EXENTA — suma de líneas en el período que NO tienen
@@ -197,9 +219,57 @@ export interface TaxSummary {
    */
   exempt_revenue: number;
   total_taxable_revenue: number;
-  effective_tax_rate: number;
+  /**
+   * Tasa efectiva sobre la base gravable. `null` (NOT 0) cuando el período
+   * no tiene base gravable — mismo contrato que `computeGrowth(null)`. La UI
+   * debe mostrar "sin base" en ese caso (never `0 %`).
+   */
+  effective_tax_rate: number | null;
+  /**
+   * DIAN posición — IVA generado en ventas. `0` cuando el período no tiene
+   * ventas gravadas.
+   */
+  iva_generado: number;
+  /**
+   * INC generado en ventas. `0` cuando el período no tiene INC.
+   */
+  inc_generado: number;
+  /**
+   * ICA generado en ventas. `0` cuando el período no tiene ICA.
+   */
+  ica_generado: number;
+  /**
+   * IVA descontable de compras (purchase_order_items.deductible_tax_amount)
+   * sobre PURCHASE_COMMITTED_STATES. Crédito contra la obligación.
+   */
+  iva_descontable: number;
+  /**
+   * Sales-side retenciones practicadas (tax_type IN
+   * ('withholding','reteiva','reteica')) sobre COMPLETED_SALE_STATES —
+   * credit that reduces the store's obligation (the store is the
+   * withholding agent on customer payments, so it has already moved the
+   * money to the DIAN on its own behalf).
+   */
+  rete_practicadas: number;
+  /**
+   * Purchase-side retenciones sufridas (tax_type IN
+   * ('withholding','reteiva','reteica')) sobre PURCHASE_COMMITTED_STATES —
+   * also a credit that reduces the store's obligation (the supplier
+   * already moved the money to the DIAN on the store's behalf).
+   */
+  rete_sufridas: number;
+  /**
+   * NET VAT POSITION — la cifra que la declaración DIAN cierra.
+   * Positivo: saldo a cargo. Negativo: saldo a favor.
+   * Fórmula: `(iva_generado + inc_generado + ica_generado) − iva_descontable
+   *          − rete_sufridas − rete_practicadas`. Ambas retenciones son
+   * créditos y se RESTAN. Definida en `analytics-metrics.contract.ts`
+   * (`computeNetVatPosition`).
+   */
+  net_vat_position: number;
   breakdown: Array<{
     tax_name: string;
+    tax_type: string | null;
     tax_rate: number;
     total_tax: number;
     taxable_amount: number;

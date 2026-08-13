@@ -439,9 +439,17 @@ export class InvoicingService {
       date_from,
       date_to,
       customer_id,
+      cuds,
+      supplier_id,
     } = query;
 
     const skip = (page - 1) * limit;
+
+    // Lookup por CUDS: el CUDS vive en `invoices.cufe` (misma columna física
+    // que carga CUFE/CUDE/CUDS). Coincidencia EXACTA — la búsqueda parcial
+    // por un substring de 5 chars gasta un índice inútil y nunca trae la fila
+    // que el usuario quiere. Un CUDS inexistente devuelve 200 con `data:[]`.
+    const trimmed_cuds = cuds?.trim();
 
     const where: Prisma.invoicesWhereInput = {
       ...(search && {
@@ -459,6 +467,8 @@ export class InvoicingService {
       ...(status && { status: status as any }),
       ...(invoice_type && { invoice_type: invoice_type as any }),
       ...(customer_id && { customer_id }),
+      ...(supplier_id && { supplier_id }),
+      ...(trimmed_cuds && { cufe: trimmed_cuds }),
       ...(date_from && {
         issue_date: {
           gte: new Date(date_from),

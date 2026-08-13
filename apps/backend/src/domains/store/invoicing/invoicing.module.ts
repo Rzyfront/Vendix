@@ -8,11 +8,13 @@ import { DianDirectModule } from './providers/dian-direct/dian-direct.module';
 import { InvoicingController } from './invoicing.controller';
 import { ResolutionsController } from './resolutions/resolutions.controller';
 import { DianConfigController } from './dian-config/dian-config.controller';
+import { SuperAdminCertificatesPendingController } from './dian-config/dian-config.controller';
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
+import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { DianConfigService } from './dian-config/dian-config.service';
 import { BullModule } from '@nestjs/bullmq';
@@ -42,6 +44,11 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
   ],
   controllers: [
     DianConfigController,
+    // QUI-657 — cola de plataforma para tramitar certificados de firma de los
+    // tenants que no tienen uno. Vive en este módulo (no en super-admin) porque
+    // reutiliza `DianConfigService` y el adaptador de validación de certificados
+    // sin reexportarlos; su prefijo de ruta y su permiso sí son de plataforma.
+    SuperAdminCertificatesPendingController,
     ResolutionsController,
     InvoicingController,
   ],
@@ -55,6 +62,7 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     CreditNotesService,
     ResolutionsService,
     ResolutionScannerService,
+    DianHabilitationScannerService,
     InvoiceNumberGenerator,
     DianConfigService,
     DianTestService,

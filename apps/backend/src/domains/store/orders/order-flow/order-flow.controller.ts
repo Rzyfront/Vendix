@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { RefundFlowService } from './services/refund-flow.service';
+import { RefundMethodsService } from './services/refund-methods.service';
 import {
   PayOrderDto,
   ShipOrderDto,
@@ -36,6 +37,7 @@ export class OrderFlowController {
   constructor(
     private readonly orderFlowService: OrderFlowService,
     private readonly refundFlowService: RefundFlowService,
+    private readonly refundMethodsService: RefundMethodsService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -227,6 +229,20 @@ export class OrderFlowController {
   ) {
     const preview = await this.refundFlowService.previewRefund(orderId, dto);
     return this.responseService.success(preview, 'Refund preview calculated');
+  }
+
+  @Get('refund/available-methods')
+  @Permissions('store:orders:order_flow:read')
+  async getAvailableRefundMethods(
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    const available = await this.refundMethodsService.getAvailableMethods(
+      orderId,
+    );
+    return this.responseService.success(
+      available,
+      'Available refund methods retrieved',
+    );
   }
 }
 

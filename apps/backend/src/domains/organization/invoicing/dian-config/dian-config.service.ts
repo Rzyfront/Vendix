@@ -8,6 +8,7 @@ import { CreateDianConfigDto } from '../../../store/invoicing/dian-config/dto/cr
 import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/update-dian-config.dto';
 import { CertificateValidationResult } from '../../../store/invoicing/dian-config/certificates/certificate-issuer.interface';
 import { certificateNitMatches } from '../../../store/invoicing/dian-config/certificates/nit-match.util';
+import { findInheritableCertificate } from '../../../store/invoicing/dian-config/certificates/inheritance.util';
 
 /**
  * Organization-level twin of the store DIAN config service.
@@ -171,6 +172,21 @@ export class OrgDianConfigService {
 
     const should_be_default = dto.is_default || existing_count === 0;
 
+    // QUI-679: MISMO helper que la versión de tienda (`DianConfigService`).
+    // El predicado es la `accounting_entity_id`, no el alcance fiscal — un
+    // tenant con `fiscal_scope=ORGANIZATION` y varios ejes (facturación,
+    // documento soporte, nómina, equivalente) cuelga TODOS de la misma
+    // entidad contable, así que la búsqueda es idéntica. Sin este espejo,
+    // los tenants org-scoped tenían que re-subir el mismo `.p12` por cada
+    // habilitación (Fix #1 del review).
+    const inheritable = await findInheritableCertificate({
+      prisma: this.prisma.withoutScope(),
+      logger: this.logger,
+      accounting_entity_id: accounting_entity.id,
+      nit: dto.nit,
+      nit_dv: dto.nit_dv,
+    });
+
     const config = await this.prisma
       .withoutScope()
       .dian_configurations.create({
@@ -190,11 +206,45 @@ export class OrgDianConfigService {
           environment: dto.environment || 'test',
           enablement_status: 'not_started',
           test_set_id: dto.test_set_id,
+          // Misma regla que el servicio de tienda (Fix #3): UN solo bloque
+          // controla los campos de cert, sin pre-spread que el spread
+          // siguiente pisaría. KMS ARN del DTO se respeta cuando no hay
+          // herencia; KMS del cert fuente se respeta cuando sí.
+          ...(inheritable
+            ? {
+                certificate_s3_key: inheritable.fields.certificate_s3_key,
+                certificate_password_encrypted:
+                  inheritable.fields.certificate_password_encrypted,
+                certificate_kms_key_id:
+                  inheritable.fields.certificate_kms_key_id,
+                certificate_expiry: inheritable.fields.certificate_expiry,
+                certificate_fingerprint:
+                  inheritable.fields.certificate_fingerprint,
+                certificate_subject: inheritable.fields.certificate_subject,
+                certificate_issuer: inheritable.fields.certificate_issuer,
+                certificate_serial_number:
+                  inheritable.fields.certificate_serial_number,
+                certificate_nit: inheritable.fields.certificate_nit,
+                certificate_uploaded_at:
+                  inheritable.fields.certificate_uploaded_at,
+                inherited_from_dian_configuration_id: inheritable.source.id,
+              }
+            : {
+                certificate_kms_key_id: dto.certificate_kms_key_id || null,
+              }),
         },
       });
 
     if (should_be_default) {
       await this.ensureSingleDefault(config.id, resolved_store_id);
+    }
+
+    if (inheritable) {
+      this.logger.log(
+        `QUI-679: org DIAN config "${dto.name}" (${configuration_type}) inherited cert from ` +
+          `sibling dian_configuration_id=${inheritable.source.id} ` +
+          `(${inheritable.source.configuration_type}); expiry=${inheritable.fields.certificate_expiry?.toISOString() ?? 'unknown'}`,
+      );
     }
 
     this.logger.log(
@@ -204,7 +254,17 @@ export class OrgDianConfigService {
           : `, store ${resolved_store_id}`),
     );
 
-    return this.maskSensitiveFields(config);
+    return {
+      ...this.maskSensitiveFields(config),
+      inherited_certificate: inheritable !== null,
+      inherited_from: inheritable
+        ? {
+            dian_configuration_id: inheritable.source.id,
+            configuration_type: inheritable.source.configuration_type,
+            certificate_expiry: inheritable.source.certificate_expiry,
+          }
+        : null,
+    };
   }
 
   async update(id: number, dto: UpdateDianConfigDto) {

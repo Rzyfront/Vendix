@@ -67,8 +67,9 @@ describe('InvoicePdfService — asimetría vista previa / emisión', () => {
 
     const s3 = { downloadImage: jest.fn() } as any;
     const events = { emit: jest.fn() } as any;
+    const qr = { renderPng: jest.fn().mockResolvedValue(Buffer.from('')) } as any;
 
-    return new InvoicePdfService(prisma, s3, events);
+    return new InvoicePdfService(prisma, s3, events, qr);
   };
 
   it('renderiza la vista previa con identidad fiscal incompleta en vez de lanzar', async () => {
@@ -166,7 +167,8 @@ describe('InvoicePdfService — asimetría vista previa / emisión', () => {
         downloadImage: jest.fn(),
         uploadBuffer: jest.fn().mockResolvedValue({ key: 'k', url: 'u' }),
       } as any;
-      return new InvoicePdfService(prisma, s3, { emit: jest.fn() } as any);
+      const qr = { renderPng: jest.fn().mockResolvedValue(Buffer.from('')) } as any;
+      return new InvoicePdfService(prisma, s3, { emit: jest.fn() } as any, qr);
     };
 
     it('recibo interno (not_applicable): NO corta por el municipio', async () => {

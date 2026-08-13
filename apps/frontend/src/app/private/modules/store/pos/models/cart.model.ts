@@ -173,6 +173,11 @@ export interface CartState {
   summary: CartSummary;
   createdAt: Date;
   updatedAt: Date;
+  // QUI-649 — cuando la reserva retorna booking.order, el POS adopta esa
+  // orden como la orden en curso. `linkedOrderId` no-null indica que el
+  // carrito es un espejo del servidor; null = carrito local clásico.
+  linkedOrderId: number | null;
+  linkedOrderNumber: string | null;
 }
 
 export interface AddToCartRequest {

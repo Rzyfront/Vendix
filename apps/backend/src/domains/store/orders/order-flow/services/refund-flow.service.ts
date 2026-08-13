@@ -106,6 +106,30 @@ export class RefundFlowService {
       include_shipping: dto.include_shipping,
     });
 
+    // REFUND OVERHAUL — resolve missing location_id for `restock` and `write_off`
+    // to the store's canonical default warehouse. Fallback chain mirrors
+    // LocationsService.getDefaultLocation: stores.default_location_id → active
+    // warehouse → active any → throw. If still null after the chain, the
+    // store has no usable location and the refund cannot write inventory.
+    const defaultLocationId = await this.resolveDefaultLocation(
+      order.store_id,
+    );
+    for (const item of calculation.items) {
+      if (
+        (item.inventory_action === 'restock' ||
+          item.inventory_action === 'write_off') &&
+        !item.location_id
+      ) {
+        if (!defaultLocationId) {
+          throw new BadRequestException(
+            `Store has no active warehouse to restock "${item.product_name}". ` +
+              `Set stores.default_location_id or pick a location manually.`,
+          );
+        }
+        item.location_id = defaultLocationId;
+      }
+    }
+
     const userId = RequestContextService.getUserId();
 
     // Execute everything in a transaction
@@ -153,6 +177,12 @@ export class RefundFlowService {
         const refundItemIdByOrderItem = new Map<number, number>();
         for (const item of calculation.items) {
           const stockUnits = stockUnitsByOrderItem.get(item.order_item_id);
+          // REFUND OVERHAUL — bank_account_id is required-by-DTO for
+          // `bank_transfer` refunds. For other methods, persist NULL so the
+          // audit trail is unambiguous.
+          const dtoItem = dto.items.find(
+            (di) => di.order_item_id === item.order_item_id,
+          );
           const refundItem = await tx.refund_items.create({
             data: {
               refund_id: refund.id,
@@ -164,6 +194,10 @@ export class RefundFlowService {
               inventory_action: item.inventory_action,
               location_id: item.location_id,
               reason: item.reason,
+              bank_account_id:
+                dto.refund_method === 'bank_transfer'
+                  ? dtoItem?.bank_account_id ?? null
+                  : null,
               // Solo se persiste cuando difiere de la cantidad devuelta: un
               // null significa "la línea no usó presentación", igual que en la
               // venta.
@@ -327,6 +361,11 @@ export class RefundFlowService {
             shipping: calculation.shipping_refund,
             is_full_refund: calculation.is_full_refund,
             user_id: userId,
+            // REFUND OVERHAUL — include refund_method so AutoEntryService
+            // can pick the correct credit-side mapping key (1105 / 1110 / 2335).
+            // Previously the event omitted this and the journal always
+            // resolved to refund.completed.cash → 1105 Caja.
+            refund_method: dto.refund_method,
           });
 
           if (calculation.is_full_refund) {
@@ -379,19 +418,21 @@ export class RefundFlowService {
 
         // Record cash register refund movement (non-blocking).
         //
-        // Sólo para métodos que realmente sacan efectivo del cajón:
-        // `recordRefundCashRegisterMovement` registra el movimiento con
-        // `payment_method: 'cash'` fijo. Con caja habilitada y sesión abierta
-        // —el flujo normal de un reembolso en tienda— un `store_credit`
-        // pagaría dos veces: crédito en la billetera del cliente (arriba) más
-        // salida de efectivo acá. `bank_transfer` tiene el mismo problema: sale
-        // por banco, no por caja.
+        // SOLO para `refund_method === 'cash'`. Antes este gate era
+        // `movesCash = refund_method !== 'store_credit' && refund_method !== 'bank_transfer'`,
+        // lo que aplicaba a `cash` Y `original_payment` — un error que producía
+        // un movimiento fantasma de caja para reembolsos con tarjeta. La
+        // consecuencia era una salida de efectivo registrada en `movements` que
+        // nunca ocurrió en la realidad.
         //
-        // `original_payment` se sigue registrando como hoy: depende del método
-        // del pago original, que este servicio no resuelve todavía.
-        const movesCash =
-          dto.refund_method !== 'store_credit' &&
-          dto.refund_method !== 'bank_transfer';
+        // `original_payment` → el processor (Wompi/cash_on_delivery/etc.)
+        // se llama a sí mismo abajo en `dispatchRefundProcessor` cuando la
+        // integración existe; mientras tanto el refund queda como
+        // `state='pending'` para intervención manual del operador.
+        // `store_credit` → ya se acreditó la wallet arriba.
+        // `bank_transfer` → el operador transfiere desde su app bancaria
+        // manualmente; no hay integración API.
+        const movesCash = dto.refund_method === 'cash';
         if (userId && movesCash) {
           this.recordRefundCashRegisterMovement(
             order.store_id,
@@ -535,5 +576,44 @@ export class RefundFlowService {
       },
       orderBy: { created_at: 'desc' },
     });
+  }
+
+  /**
+   * REFUND OVERHAUL — resolve the canonical "main warehouse" for a store.
+   * Mirrors the fallback chain in `LocationsService.getDefaultLocation`:
+   *   1. `stores.default_location_id` (operator-pinned)
+   *   2. any active warehouse for the store
+   *   3. any active location for the store
+   *   4. org-level central warehouse
+   * Returns null if no usable location exists (caller should throw a clear
+   * error rather than silently fall back to a random location).
+   */
+  private async resolveDefaultLocation(storeId: number): Promise<number | null> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { default_location_id: true, organization_id: true },
+    });
+    if (!store) return null;
+
+    if (store.default_location_id) {
+      const active = await this.prisma.inventory_locations.findFirst({
+        where: { id: store.default_location_id, is_active: true },
+        select: { id: true },
+      });
+      if (active) return active.id;
+    }
+
+    const fallback = await this.prisma.inventory_locations.findFirst({
+      where: {
+        is_active: true,
+        OR: [
+          { store_id: storeId },
+          { organization_id: store.organization_id, store_id: null },
+        ],
+      },
+      orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+      select: { id: true },
+    });
+    return fallback?.id ?? null;
   }
 }

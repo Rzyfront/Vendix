@@ -12,11 +12,17 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   ParseIntPipe,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { OrgDianConfigService } from './dian-config.service';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import {
+  DianHabilitationScannerService,
+  MAX_HABILITATION_SCAN_FILES,
+} from '../../../store/invoicing/dian-config/dian-habilitation-scanner.service';
+import { assertScannableFiles } from '../../../store/invoicing/dian-config/habilitation-scan-files.util';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -36,6 +42,7 @@ export class OrgDianConfigController {
     private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
+    private readonly habilitation_scanner_service: DianHabilitationScannerService,
   ) {}
 
   @Get()
@@ -52,6 +59,26 @@ export class OrgDianConfigController {
   async getConfigById(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dian_config_service.getConfigById(id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Gemelo de `store/invoicing/dian-config/scan-habilitation`: el asistente de
+   * activación fiscal corre bajo los dos namespaces según el `app_type` del
+   * usuario, así que el escáner tiene que existir en ambos o el paso 3 pierde
+   * la lectura por foto para toda organización.
+   */
+  @Post('scan-habilitation')
+  @Permissions('organization:invoicing:dian:write')
+  @HttpCode(HttpStatus.OK)
+  // Holgura de 1: ver el comentario equivalente en el controlador de store.
+  @UseInterceptors(FilesInterceptor('files', MAX_HABILITATION_SCAN_FILES + 1))
+  async scanHabilitation(@UploadedFiles() files: Express.Multer.File[]) {
+    const result = await this.habilitation_scanner_service
+      .scanHabilitationDocuments(assertScannableFiles(files));
+    return this.response_service.success(
+      result,
+      'Documentos de habilitación escaneados exitosamente',
+    );
   }
 
   @Post()

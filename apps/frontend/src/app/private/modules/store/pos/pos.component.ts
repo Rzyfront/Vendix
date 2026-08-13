@@ -2008,6 +2008,53 @@ export class PosComponent {
     const reservationCustomer = event?.customer || event;
     const booking = event?.booking;
 
+    // QUI-649 — when the backend returns `booking.order`, the reservation
+    // was created with an auto-linked order. The POS adopts that order as
+    // the current cart so any items the cashier adds afterward go into the
+    // same order (via `PUT /store/orders/:id/items`) and the cash-out at
+    // the end charges THAT order, not a brand-new one.
+    //
+    // We only call `adoptOrder` when an order is present. Legacy flows
+    // (admin-created bookings, fallback paths) still take the
+    // `addPendingBooking` route, which the existing payment payload merges
+    // into the freshly-created order at cash-out.
+    if (booking?.order?.id) {
+      this.cartService
+        .adoptOrder(booking.order.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.toastService.success(
+              `Reserva creada y orden #${booking.order.order_number ?? booking.order.id} adoptada`,
+            );
+            this.pendingBookingProduct.set(null);
+            this.pendingBookingVariant.set(null);
+          },
+          error: () => {
+            // Adoption failed (network blip, order disappeared, etc.) —
+            // fall back to the legacy add-to-cart + pending-booking flow so
+            // the cashier can still operate. The reservation itself is
+            // safe in the backend.
+            this.fallbackAddBookingToCart(event, booking, reservationCustomer);
+          },
+        });
+      return;
+    }
+
+    this.fallbackAddBookingToCart(event, booking, reservationCustomer);
+  }
+
+  /**
+   * Legacy flow used when the reservation response does NOT include
+   * `booking.order` (admin-created bookings, fallback after a failed
+   * adoption). Kept as a private helper so `onBookingCreated` stays
+   * readable.
+   */
+  private fallbackAddBookingToCart(
+    event: any,
+    booking: any,
+    reservationCustomer: any,
+  ): void {
     if (reservationCustomer && !this.selectedCustomer()) {
       const posCustomer: PosCustomer = {
         id: reservationCustomer.id,

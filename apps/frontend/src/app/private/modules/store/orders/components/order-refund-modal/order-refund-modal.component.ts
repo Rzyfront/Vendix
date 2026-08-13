@@ -135,7 +135,14 @@ interface RefundItemState {
 
                   <!-- Quantity + Price -->
                   <div class="text-right flex-shrink-0">
-                    <p class="text-sm font-bold text-gray-900">{{ item.orderItem.unit_price | currency }}</p>
+                    <!-- REFUND OVERHAUL — show EFFECTIVE per-unit price
+                         (total_price / quantity), not the LIST price
+                         field which for presentations is per-package
+                         (e.g. $18,000 per presentation of 12 eggs
+                         looks like $18,000 per egg otherwise). -->
+                    <p class="text-sm font-bold text-gray-900">
+                      {{ effectiveUnitPrice(item) | currency }}
+                    </p>
                     <p class="text-[10px] text-gray-500">x{{ item.orderItem.quantity }} original</p>
                   </div>
                 </div>
@@ -262,6 +269,24 @@ interface RefundItemState {
             <div class="flex justify-center items-center py-8">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
+          } @else if (previewError()) {
+            @let errorMsg = previewError() ?? '';
+            <div
+              class="p-4 rounded-xl border border-red-200 bg-red-50 flex items-start gap-3"
+              role="alert"
+            >
+              <app-icon name="alert-circle" size="18" class="text-red-600 mt-0.5 flex-shrink-0"></app-icon>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-red-900">No se pudo calcular el resumen</p>
+                <p class="text-xs text-red-700 mt-1 break-words">{{ errorMsg }}</p>
+              </div>
+            </div>
+            <button
+              (click)="loadPreview()"
+              class="w-full p-2.5 rounded-lg border border-border text-sm font-medium text-primary hover:bg-primary/5 transition-colors"
+            >
+              Reintentar
+            </button>
           } @else if (preview()) {
             <h4 class="text-sm font-bold text-gray-900">Resumen del reembolso</h4>
 
@@ -431,8 +456,31 @@ export class OrderRefundModalComponent {
   refundMethod = signal<RefundMethod>('original_payment');
   preview = signal<RefundCalculationResult | null>(null);
   isLoadingPreview = signal(false);
+  // REFUND OVERHAUL — previewError replaces the silent swallow that
+  // left step 3 empty when the POST /flow/refund/preview failed. The
+  // error message from the backend is shown verbatim with a Reintentar
+  // button so the operator can recover without leaving the modal.
+  previewError = signal<string | null>(null);
   isProcessing = signal(false);
-  locations = signal<{ id: number; name: string; code: string }[]>([]);
+  locations = signal<
+    { id: number; name: string; code: string; is_default?: boolean }[]
+  >([]);
+  // REFUND OVERHAUL — methods + bank_accounts populated from the new
+  // /store/orders/:id/flow/refund/available-methods endpoint. Replaces
+  // the hardcoded `refundMethods` array; the dropdown reflects what the
+  // store can ACTUALLY execute (no more options that 400 at submit).
+  availableMethods = signal<
+    {
+      value: RefundMethod;
+      label: string;
+      icon: string;
+      available: boolean;
+      reason_unavailable?: string;
+    }[]
+  >([]);
+  bankAccounts = signal<{ id: number; label: string }[]>([]);
+  // Bank account selected per item (bank_transfer only).
+  readonly bankAccountByOrderItem = signal<Map<number, number>>(new Map());
 
   steps: StepsLineItem[] = [
     { label: 'Items' },
@@ -440,12 +488,12 @@ export class OrderRefundModalComponent {
     { label: 'Confirmar' },
   ];
 
-  refundMethods = [
-    { value: 'original_payment' as RefundMethod, label: 'Pago original', icon: 'rotate-ccw' },
-    { value: 'cash' as RefundMethod, label: 'Efectivo', icon: 'banknote' },
-    { value: 'bank_transfer' as RefundMethod, label: 'Transferencia', icon: 'landmark' },
-    { value: 'store_credit' as RefundMethod, label: 'Billetera', icon: 'wallet' },
-  ];
+  // REFUND OVERHAUL — `refundMethods` is now a getter that returns from
+  // the `availableMethods` signal (populated by the new endpoint). Old
+  // hardcoded array is gone — see `loadAvailableMethods`.
+  get refundMethods() {
+    return this.availableMethods();
+  }
 
   constructor() {
     effect(() => {
@@ -453,6 +501,7 @@ export class OrderRefundModalComponent {
         this.resetState();
         this.loadLocations();
         this.loadRefundedQuantities();
+        this.loadAvailableMethods();
       }
     });
   }
@@ -525,6 +574,13 @@ export class OrderRefundModalComponent {
     const order = this.order();
     if (!order?.order_items) return;
 
+    // REFUND OVERHAUL — pre-fill the destination warehouse with the
+    // store's canonical default (the location flagged is_default, or
+    // the first active warehouse). The backend ALSO has a fallback
+    // (RefundFlowService.resolveDefaultLocation) so this is a UX
+    // pre-selection; the source of truth is the backend.
+    const defaultLocationId = this.resolveDefaultLocationFromState();
+
     const items: RefundItemState[] = order.order_items
       .map((oi) => {
         const alreadyRefunded = refundedMap.get(oi.id) || 0;
@@ -536,12 +592,36 @@ export class OrderRefundModalComponent {
           maxQuantity,
           alreadyRefunded,
           inventoryAction: 'restock' as InventoryAction,
-          locationId: null,
+          locationId: defaultLocationId,
         };
       })
       .filter((item) => item.maxQuantity > 0);
 
     this.refundItems.set(items);
+  }
+
+  // REFUND OVERHAUL — picks the canonical default location from the
+  // already-loaded `locations` signal. prefers `is_default=true`; falls
+  // back to the first entry. Returns null until loadLocations() resolves.
+  private resolveDefaultLocationFromState(): number | null {
+    const all = this.locations();
+    if (all.length === 0) return null;
+    const flagged = all.find((l) => l.is_default);
+    if (flagged) return flagged.id;
+    return all[0].id;
+  }
+
+  // REFUND OVERHAUL — EFFECTIVE per-unit price the customer paid
+  // (total_price / quantity). For a presentation SKU with unit_price=5000
+  // but total_price=5 and quantity=1, this returns 5 (the actual per-unit
+  // amount), not 5000 (the per-presentation list price). Used in the
+  // step 1 list display so the merchant sees what they actually paid
+  // per unit, not the misleading list price.
+  effectiveUnitPrice(item: RefundItemState): number {
+    const total = Number(item.orderItem.total_price || 0);
+    const qty = Number(item.orderItem.quantity || 1);
+    if (qty <= 0) return Number(item.orderItem.unit_price || 0);
+    return total / qty;
   }
 
   private loadLocations(): void {
@@ -551,13 +631,78 @@ export class OrderRefundModalComponent {
       .subscribe({
         next: (res) => {
           const data = res.data || res;
+          // Map preserves `is_default` from the backend so the
+          // default-warehouse picker in initializeItems can find it.
           this.locations.set(
             (Array.isArray(data) ? data : []).map((l: any) => ({
               id: l.id,
               name: l.name,
               code: l.code,
+              is_default: !!l.is_default,
             })),
           );
+          // REFUND OVERHAUL — loadLocations() and loadRefundedQuantities()
+          // fire in parallel; if items were seeded before the default
+          // location was known, backfill the locationId now. No-op if
+          // the items already carry a non-null locationId.
+          this.backfillDefaultLocationOnItems();
+        },
+      });
+  }
+
+  // REFUND OVERHAUL — if the items already exist but carry locationId=null
+  // (because initializeItems() ran before loadLocations() resolved), patch
+  // them with the default. Keeps the modal consistent with the backend's
+  // own fallback (RefundFlowService.resolveDefaultLocation).
+  private backfillDefaultLocationOnItems(): void {
+    const defaultId = this.resolveDefaultLocationFromState();
+    if (!defaultId) return;
+    const items = this.refundItems();
+    if (items.length === 0) return;
+    if (items.every((i) => i.locationId !== null)) return;
+    this.refundItems.set(
+      items.map((i) =>
+        i.locationId === null ? { ...i, locationId: defaultId } : i,
+      ),
+    );
+  }
+
+  // REFUND OVERHAUL — fetch the methods + bank_accounts the store can
+  // actually execute. Replaces the hardcoded `refundMethods` array so
+  // the dropdown never offers options that the backend would reject.
+  private loadAvailableMethods(): void {
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.ordersService
+      .getAvailableRefundMethods(orderId.toString())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.availableMethods.set(data?.methods ?? []);
+          this.bankAccounts.set(data?.bank_accounts ?? []);
+          // If the previously selected method is now unavailable, fall back
+          // to the first available one so the modal never shows a stuck
+          // selection.
+          const stillOk = this.availableMethods().some(
+            (m) => m.value === this.refundMethod() && m.available,
+          );
+          if (!stillOk) {
+            const firstAvailable = this.availableMethods().find(
+              (m) => m.available,
+            );
+            if (firstAvailable) this.refundMethod.set(firstAvailable.value);
+          }
+        },
+        error: (err) => {
+          // Soft-fail: keep the hardcoded fallback in the dropdown so the
+          // operator can still attempt the modal. The submit will surface
+          // the real backend error.
+          this.availableMethods.set([
+            { value: 'original_payment', label: 'Pago original', icon: 'rotate-ccw', available: true },
+            { value: 'cash', label: 'Efectivo', icon: 'banknote', available: true },
+            { value: 'bank_transfer', label: 'Transferencia', icon: 'landmark', available: true },
+            { value: 'store_credit', label: 'Billetera', icon: 'wallet', available: true },
+          ]);
         },
       });
   }
@@ -649,11 +794,14 @@ export class OrderRefundModalComponent {
     };
   }
 
-  private loadPreview(): void {
+  loadPreview(): void {
     const orderId = this.order()?.id;
     if (!orderId) return;
 
     this.isLoadingPreview.set(true);
+    // REFUND OVERHAUL — clear any prior error before retrying so the
+    // Reintentar button shows a fresh attempt instead of stale text.
+    this.previewError.set(null);
     this.ordersService
       .previewRefund(orderId.toString(), this.buildDto())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -662,7 +810,15 @@ export class OrderRefundModalComponent {
           this.preview.set(result);
           this.isLoadingPreview.set(false);
         },
-        error: () => {
+        error: (err) => {
+          // REFUND OVERHAUL — capture the backend error so step 3 can
+          // render it instead of a blank body. Previously the error was
+          // swallowed silently and the operator saw an empty modal.
+          this.previewError.set(
+            err?.error?.message ||
+              err?.message ||
+              'No se pudo calcular el resumen del reembolso. Intenta de nuevo.',
+          );
           this.isLoadingPreview.set(false);
         },
       });
@@ -702,8 +858,12 @@ export class OrderRefundModalComponent {
     this.includeShipping.set(false);
     this.refundMethod.set('original_payment');
     this.preview.set(null);
+    this.previewError.set(null);
     this.isLoadingPreview.set(false);
     this.isProcessing.set(false);
+    this.availableMethods.set([]);
+    this.bankAccounts.set([]);
+    this.bankAccountByOrderItem.set(new Map());
   }
 
 }

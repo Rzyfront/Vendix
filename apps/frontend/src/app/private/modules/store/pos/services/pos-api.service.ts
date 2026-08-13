@@ -69,6 +69,13 @@ export class PosApiService {
     return this.http.get(`${this.apiUrl}/store/orders/${id}`);
   }
 
+  // QUI-649 — POS adopts the order auto-created by the reservation backend
+  // (POST /store/reservations returns `booking.order` populated). Items added
+  // by the cashier after adoption are pushed here, not into a local cart.
+  updateOrderItems(orderId: string | number, items: any[]): Observable<any> {
+    return this.http.put(`${this.apiUrl}/store/orders/${orderId}/items`, { items });
+  }
+
   getOrderByNumber(orderNumber: string): Observable<any> {
     return this.http.get(
       `${this.apiUrl}/store/orders/by-number/${orderNumber}`,
@@ -101,6 +108,25 @@ export class PosApiService {
       `${this.apiUrl}/store/payments/with-order`,
       paymentData,
     );
+  }
+
+  // QUI-649 — when the POS has adopted an existing order (linkedOrderId is
+  // set after a reservation flow), the cashier charges THAT order via the
+  // "Process payment for existing order" endpoint. We do NOT call
+  // `createOrder` because that would create a second order; the server
+  // already has the auto-created one.
+  processPaymentForExistingOrder(paymentData: {
+    orderId: number;
+    amount: number;
+    currency: string;
+    storePaymentMethodId: number;
+    storeId: number;
+    customerId?: number;
+    metadata?: Record<string, any>;
+    returnUrl?: string;
+    cancelUrl?: string;
+  }): Observable<any> {
+    return this.http.post(`${this.apiUrl}/store/payments`, paymentData);
   }
 
   getPaymentMethods(): Observable<any> {

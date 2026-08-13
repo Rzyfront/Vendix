@@ -42,6 +42,7 @@ import {
 } from '../../price-tiers/interfaces';
 import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
 import { PosSaleUnitService } from './pos-sale-unit.service';
+import { PosApiService } from './pos-api.service';
 import { resolveLineUnits } from '../utils/line-units.util';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
@@ -105,6 +106,7 @@ export class PosCartService {
   constructor(
     private productService: PosProductService,
     private priceResolver: PriceResolverService,
+    private posApi: PosApiService,
   ) {
     this.initWithholdingPreview();
     this.loadUvtThreshold();
@@ -217,8 +219,23 @@ export class PosCartService {
 
   /**
    * Add product to cart
+   *
+   * QUI-649 — bifurcación por modo:
+   *   - Si el carrito está ADOPTADO (`linkedOrderId` presente), los items se
+   *     persisten inmediatamente vía `PUT /store/orders/:id/items` y el
+   *     state local se re-sincroniza desde la respuesta del backend. El
+   *     carrito deja de ser un espejo cliente: el servidor es la fuente de
+   *     verdad.
+   *   - Si el carrito es local (`linkedOrderId` null), mantiene el flujo
+   *     legacy: mutación in-memory + `applyScannedPresentation` si la línea
+   *     vino de un escaneo con tarifa.
    */
   addToCart(request: AddToCartRequest): Observable<CartState> {
+    const adoptedId = this.cartState().linkedOrderId;
+    if (adoptedId != null) {
+      return this.addItemToAdoptedOrder(request, adoptedId);
+    }
+
     // Validate request
     const validationErrors = this.validateAddToCartRequest(request);
     if (validationErrors.length > 0) {
@@ -343,11 +360,27 @@ export class PosCartService {
 
   /**
    * Clear entire cart
+   *
+   * QUI-649 — si el carrito está adoptado, primero intentamos liberar la
+   * orden del backend (releaseAdoptedOrder); luego reseteamos el state local
+   * al estado inicial. Si está libre, el comportamiento es idéntico al
+   * legacy.
    */
   clearCart(): Observable<CartState> {
-    return of(null).pipe(
+    const adoptedId = this.cartState().linkedOrderId;
+    const adoptedNumber = this.cartState().linkedOrderNumber;
+
+    const reset$ = of(null).pipe(
       map(() => this.getInitialState()),
       tap((newState) => this.cartState.set(newState)),
+    );
+
+    if (adoptedId == null) {
+      return reset$;
+    }
+
+    return this.releaseAdoptedOrder(adoptedId, adoptedNumber).pipe(
+      switchMap(() => reset$),
     );
   }
 
@@ -492,12 +525,140 @@ export class PosCartService {
           summary: this.calculateSummary(cartItems, []),
           createdAt: new Date(),
           updatedAt: new Date(),
+          // QUI-649 — al cargar una orden existente en el carrito (sin
+          // adopción por reserva), la entrada al carrito sigue siendo local.
+          // El step 4 setea estos campos solo cuando llega `booking.order`.
+          linkedOrderId: null,
+          linkedOrderNumber: null,
         };
 
         return newState;
       }),
       tap((newState) => this.cartState.set(newState)),
     );
+  }
+
+  /**
+   * QUI-649 — Adopt a server-side order as the cart's "current order".
+   *
+   * Called from `onBookingCreated` when the reservation response includes
+   * `booking.order`. The POS replaces its local cart with the server's view
+   * of that order: items, summary, customer. From this moment on, mutations
+   * to the cart go through `addItemToAdoptedOrder` and eventually
+   * `processSaleWithPayment` charges THIS order, not a new one.
+   *
+   * The cart UI should display the `linkedOrderNumber` so the operator sees
+   * they are working against an existing order, not a draft cart.
+   */
+  adoptOrder(orderId: number): Observable<CartState> {
+    this.loading.set(true);
+    return this.posApi.getOrderById(orderId.toString()).pipe(
+      switchMap((response: any) => {
+        const order = response?.data ?? response;
+        if (!order) {
+          return throwError(() => new Error(`Orden ${orderId} no encontrada`));
+        }
+        // Reuse loadFromOrder for the heavy lifting (product hydration, summary).
+        return this.loadFromOrder(order).pipe(
+          // loadFromOrder wipes linkedOrderId/Number — restore them so the
+          // cart is in "adopted" mode after adoption completes.
+          map((state) => ({
+            ...state,
+            linkedOrderId: order.id ?? orderId,
+            linkedOrderNumber: order.order_number ?? null,
+            updatedAt: new Date(),
+          })),
+        );
+      }),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.loading.set(false);
+      }),
+      catchError((err) => {
+        this.loading.set(false);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  /**
+   * QUI-649 — Push a new item into an adopted order via
+   * `PUT /store/orders/:id/items`, then re-sync the local cart from the
+   * server's response. The server is the source of truth once an order is
+   * adopted; we never mutate the local view optimistically.
+   */
+  private addItemToAdoptedOrder(
+    request: AddToCartRequest,
+    orderId: number,
+  ): Observable<CartState> {
+    this.loading.set(true);
+    // Build the merged item list (existing items + new line) and push it to
+    // the backend. We use a minimal payload here because processAddToCart
+    // already produced the in-memory merged state; we just need its `items`
+    // serialized in the shape the backend expects.
+    const mergedItems = this.processAddToCart(request).items;
+    const payloadItems = mergedItems.map((it) => ({
+      item_type: it.itemType === 'custom' ? 'custom' : 'product',
+      product_id:
+        it.itemType === 'custom' || !it.product?.id
+          ? null
+          : Number(it.product.id),
+      product_name: it.product?.name ?? '',
+      quantity: it.quantity,
+      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
+      final_unit_price: Number((it.finalPrice ?? it.unitPrice ?? 0).toFixed(2)),
+      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
+      product_variant_id: it.variant_id ?? null,
+      variant_sku: it.variant_sku ?? null,
+      variant_attributes: it.variant_attributes ?? null,
+      description: it.description ?? it.notes ?? null,
+      skip_kds: it.skipKds === true,
+    }));
+
+    return this.posApi.updateOrderItems(orderId, payloadItems).pipe(
+      switchMap((response: any) => {
+        const order = response?.data ?? response;
+        if (!order) {
+          return throwError(
+            () => new Error('Respuesta vacía al actualizar la orden adoptada'),
+          );
+        }
+        return this.loadFromOrder(order).pipe(
+          map((state) => ({
+            ...state,
+            linkedOrderId: order.id ?? orderId,
+            linkedOrderNumber: order.order_number ?? null,
+            updatedAt: new Date(),
+          })),
+        );
+      }),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.loading.set(false);
+      }),
+      catchError((err) => {
+        this.loading.set(false);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  /**
+   * QUI-649 — Release an adopted order that the cashier abandoned (no
+   * payment, no further edits). Today this is a no-op on the backend: we
+   * leave the order in `state: 'created'` so another operator (or the same
+   * one) can pick it up, edit it, or cancel it from the orders module.
+   *
+   * Follow-up (out of scope for QUI-649): wire this to a `PATCH` on the
+   * order that sets `state: 'cancelled'` when the cashier explicitly chooses
+   * "abandon order" from the UI. For now, silent no-op keeps the bug-fix
+   * scope tight and the order recoverable from the orders module.
+   */
+  private releaseAdoptedOrder(
+    _orderId: number,
+    _orderNumber: string | null,
+  ): Observable<void> {
+    return of(undefined);
   }
 
   /**
@@ -2149,6 +2310,10 @@ export class PosCartService {
       },
       createdAt: new Date(),
       updatedAt: new Date(),
+      // QUI-649 — carrito no adoptado. La adopción se setea cuando llega
+      // `booking.order` en la respuesta de la reserva (ver step 4).
+      linkedOrderId: null,
+      linkedOrderNumber: null,
     };
   }
 

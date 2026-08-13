@@ -56,6 +56,20 @@ export interface WizardPrefillDianConfig {
   software_id: string | null;
   test_set_id: string | null;
   has_software_pin: boolean;
+  /**
+   * QUI-679 review fix #5: true when the cert on this row was copied from a
+   * sibling `dian_configurations` row of the same `accounting_entity_id` at
+   * create-time (the cert-reuse feature). `inherited_from` is the source row
+   * the banner shows ("este cert viene de tu habilitación de facturación,
+   * expira el …"). Optional so older prefill payloads that didn't expose the
+   * fields still type-check — the wizard step treats missing as `false`.
+   */
+  inherited_certificate?: boolean;
+  inherited_from?: {
+    id: number;
+    configuration_type: string;
+    certificate_expiry: string | null;
+  } | null;
 }
 
 /** Active numbering resolution already registered for the fiscal entity. */

@@ -63,35 +63,28 @@ const QUICK_LINKS: QuickLink[] = [
   template: `
     <div class="w-full space-y-4 pb-6">
       <!-- 4 Stats Cards — ALL from the Profit & Loss endpoint, on purpose.
-           They used to mix two sources: "Ingresos" came from sales/summary
-           (grand_total, VAT included) while the margin under "Ganancias" divided
-           by the P&L net revenue. Same screen, two bases, no way to reconcile. -->
+           QUI-662: Ingresos now shows total_invoiced (the customer-facing
+           number, VAT included) with the contract revenue without VAT as a
+           sub-label. Balance replaces the old Ganancias card and reflects
+           the cash position (no COGS). Reembolsos replaces Órdenes — the
+           order count still lives under /admin/orders/sales. -->
       <div class="stats-container">
         <app-stats
           title="Ingresos"
-          [value]="formatCurrency(profitLoss()?.revenue?.operating_revenue || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.revenue_growth)"
+          [value]="formatCurrency(profitLoss()?.revenue?.total_invoiced || 0)"
+          [smallText]="ingresosSubText()"
           iconName="dollar-sign"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
           [loading]="loading()"
         />
         <app-stats
-          title="Ganancias"
-          [value]="formatCurrency(profitLoss()?.bottom_line?.net_profit || 0)"
-          [smallText]="getMarginText(profitLoss()?.bottom_line?.net_margin)"
+          title="Balance"
+          [value]="formatCurrency(profitLoss()?.bottom_line?.balance || 0)"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.balance_growth)"
           iconName="trending-up"
           iconBgColor="bg-success/10"
           iconColor="text-success"
-          [loading]="loading()"
-        />
-        <app-stats
-          title="Órdenes"
-          [value]="profitLoss()?.bottom_line?.order_count || 0"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.orders_growth)"
-          iconName="shopping-cart"
-          iconBgColor="bg-secondary/10"
-          iconColor="text-secondary"
           [loading]="loading()"
         />
         <app-stats
@@ -101,6 +94,15 @@ const QUICK_LINKS: QuickLink[] = [
           iconName="trending-down"
           iconBgColor="bg-error/10"
           iconColor="text-error"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Reembolsos"
+          [value]="formatCurrency(profitLoss()?.refunds?.total_refunds || 0)"
+          smallText="Reembolsos del periodo"
+          iconName="rotate-ccw"
+          iconBgColor="bg-accent/10"
+          iconColor="text-accent"
           [loading]="loading()"
         />
       </div>
@@ -711,6 +713,24 @@ export class DashboardComponent {
     if (margin === undefined || margin === null) return '';
     return `${margin.toFixed(1)}% margen`;
   }
+
+  /**
+   * Sub-label for the "Ingresos" card.
+   * Primary number on that card is `total_invoiced` (VAT included, what the
+   * customer paid). The sub-label shows the CONTRACT `operating_revenue`
+   * (subtotal − discounts + freight, VAT excluded) so the merchant can
+   * reconcile against the analytics-metrics contract, and appends the
+   * period's refunds when there are any (QUI-662).
+   */
+  readonly ingresosSubText = computed(() => {
+    const data = this.profitLoss();
+    const sinIva = `Sin IVA: ${this.formatCurrency(data?.revenue?.operating_revenue || 0)}`;
+    const refunds = data?.refunds?.total_refunds || 0;
+    if (refunds > 0) {
+      return `${sinIva}\nReembolsos: ${this.formatCurrency(refunds)}`;
+    }
+    return sinIva;
+  });
 
   /** True when some sold units have no cost snapshot, so profit is overstated. */
   readonly hasIncompleteCost = computed(() => {
