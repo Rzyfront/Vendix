@@ -15,10 +15,13 @@ import {
 import {
   COMPLETED_SALE_STATES,
   RECOGNIZED_EXPENSE_STATES,
+  PURCHASE_COMMITTED_STATES,
   CostCoverage,
   buildCostCoverage,
   computeGrowth,
   computeOperatingRevenue,
+  computeNetVatPosition,
+  computeEffectiveTaxRate,
   round2 as roundMoney,
   sqlStateList,
 } from '../analytics-metrics.contract';

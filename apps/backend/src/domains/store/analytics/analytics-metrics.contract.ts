@@ -213,3 +213,77 @@ export function round2(value: number): number {
   const sign = value < 0 ? -1 : 1;
   return (sign * Math.round((Math.abs(value) + Number.EPSILON) * 100)) / 100;
 }
+
+/**
+ * Inputs of the tax-summary aggregate, ONE block per fiscal figure the DIAN's
+ * declaración needs. The contract does NOT read the DB — every helper here is
+ * a pure function that takes the pre-aggregated sums and returns the derived
+ * figure. The service is responsible for the SQL that produces those sums.
+ *
+ * `iva_generado` + `inc_generado` + `ica_generado` are the store-side taxes
+ * collected on sales (a liability to the DIAN). `iva_descontable` is the
+ * VAT sealed as DESCONTABLE on recognized purchases (a credit against the
+ * liability). `rete_practicadas` are withholdings the store PRACTICES on
+ * customer payments (a credit — money the store keeps on behalf of the DIAN
+ * rather than sending). `rete_sufridas` are withholdings the store SUFFERS on
+ * supplier payments (a debit — money the store sends to the DIAN).
+ *
+ * Source schema: `tax_type_enum` = `iva | inc | ica | withholding | reteiva |
+ * reteica`. The `retefuente` value described in the ticket text does not exist
+ * as a distinct enum value — it is recorded as `tax_type = 'withholding'` and
+ * distinguished from `reteiva`/`reteica` by `tax_name`.
+ */
+export interface VatPositionParts {
+  /** Sales-side IVA collected (tax_type='iva') over COMPLETED_SALE_STATES. */
+  iva_generado: number;
+  /** Sales-side INC collected (tax_type='inc') over COMPLETED_SALE_STATES. */
+  inc_generado: number;
+  /** Sales-side ICA collected (tax_type='ica') over COMPLETED_SALE_STATES. */
+  ica_generado: number;
+  /** Purchase-side IVA sealed as DESCONTABLE (purchase_order_items.deductible_tax_amount) over PURCHASE_COMMITTED_STATES. */
+  iva_descontable: number;
+  /** Purchase-side retainciones practicadas (tax_type IN ('withholding','reteiva','reteica')) over PURCHASE_COMMITTED_STATES. */
+  rete_practicadas: number;
+  /** Sales-side retenciones sufridas (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES. */
+  rete_sufridas: number;
+}
+
+/**
+ * NET VAT POSITION — la cifra que la declaración DIAN cierra.
+ *
+ *   POSITION = (iva_generado + inc_generado + ica_generado)
+ *            − iva_descontable
+ *            − rete_sufridas
+ *            + rete_practicadas
+ *
+ * Convention:
+ *   - POSITIVE: the store OWES the DIAN (saldo a cargo).
+ *   - NEGATIVE: the store has a credit with the DIAN (saldo a favor).
+ *
+ * Pure function — the SOURCE OF TRUTH for the formula lives here, NOT in the
+ * service. Any other fiscal aggregate that needs the same figure must call this
+ * helper instead of re-deriving the formula.
+ */
+export function computeNetVatPosition(parts: VatPositionParts): number {
+  const grossGenerated =
+    Number(parts.iva_generado ?? 0) +
+    Number(parts.inc_generado ?? 0) +
+    Number(parts.ica_generado ?? 0);
+  const deductible = Number(parts.iva_descontable ?? 0);
+  const suffered = Number(parts.rete_sufridas ?? 0);
+  const practiced = Number(parts.rete_practicadas ?? 0);
+  return grossGenerated - deductible - suffered + practiced;
+}
+
+/**
+ * Effective tax rate as a percentage of the taxable revenue, or `null` when the
+ * period has no taxable base (matches the contract's `computeGrowth(null)`
+ * semantics — the UI must render "sin base", never "0 %").
+ */
+export function computeEffectiveTaxRate(
+  totalTax: number,
+  totalTaxableRevenue: number,
+): number | null {
+  if (totalTaxableRevenue <= 0) return null;
+  return (totalTax / totalTaxableRevenue) * 100;
+}
