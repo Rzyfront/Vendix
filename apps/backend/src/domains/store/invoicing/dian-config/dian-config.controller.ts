@@ -24,6 +24,8 @@ import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
 import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.util';
+import { DIAN_IDENTITY_DOCUMENT_MAX_BYTES } from './certificates/identity-documents.contract';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 
 @Controller('store/invoicing/dian-config')
 export class DianConfigController {
@@ -377,6 +379,247 @@ export class DianConfigController {
     return this.response_service.success(
       result,
       'Configuración DIAN promovida a producción',
+    );
+  }
+
+  // =====================================================================
+  // QUI-657 — rama "no tengo certificado": documentos de identidad.
+  //
+  // El gate de emisión NO se relaja por ninguno de estos endpoints. Mientras
+  // `certificate_s3_key` esté vacío, `fiscal-production-readiness` sigue
+  // bloqueando, que es exactamente lo que debe pasar: un expediente entregado
+  // no es un certificado.
+  // =====================================================================
+
+  /**
+   * Sube un documento de identidad (RUT, cédula, certificado de existencia).
+   *
+   * `limits.fileSize` en el interceptor y no solo en el servicio: sin él,
+   * Multer bufferiza el archivo entero en memoria ANTES de que el servicio
+   * pueda opinar, así que un envío de 100 MB se paga en RAM aunque se rechace
+   * después. El servicio revalida igual — el interceptor es la primera puerta,
+   * no la única.
+   */
+  @Post(':id/identity-documents')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('document', {
+      limits: { fileSize: DIAN_IDENTITY_DOCUMENT_MAX_BYTES },
+    }),
+  )
+  async uploadIdentityDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('document_type') document_type: string,
+  ) {
+    const context = RequestContextService.getContext();
+    const result = await this.dian_config_service.uploadIdentityDocument({
+      config_id: id,
+      document_type,
+      file,
+      uploaded_by_user_id: context?.user_id ?? null,
+    });
+    return this.response_service.success(result, 'Documento cargado');
+  }
+
+  /**
+   * Estado del expediente: qué se subió, qué falta, si ya se puede enviar.
+   *
+   * Las URLs firmadas se piden con `?include_urls=true` y no vienen por
+   * defecto: firmar crea un enlace que abre un documento de identidad a
+   * cualquiera que lo tenga, y eso no debe ser el efecto colateral de un
+   * listado que solo quería contar archivos.
+   */
+  @Get(':id/identity-documents')
+  @Permissions('invoicing:read')
+  async getIdentityDocuments(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('include_urls') include_urls?: string,
+  ) {
+    const result = await this.dian_config_service.getIdentityDocumentStatus(
+      id,
+      { include_urls: include_urls === 'true' || include_urls === '1' },
+    );
+    return this.response_service.success(result);
+  }
+
+  @Delete(':id/identity-documents/:documentId')
+  @Permissions('invoicing:write')
+  async deleteIdentityDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('documentId', ParseIntPipe) document_id: number,
+  ) {
+    const result = await this.dian_config_service.deleteIdentityDocument(
+      id,
+      document_id,
+    );
+    return this.response_service.success(result, 'Documento eliminado');
+  }
+
+  /** El tenant da por entregado el expediente: entra a la cola de plataforma. */
+  @Post(':id/identity-documents/submit')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async submitIdentityDocuments(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.submitIdentityDocuments(id);
+    return this.response_service.success(
+      result,
+      'Documentos enviados. Te avisaremos cuando el certificado esté listo.',
+    );
+  }
+}
+
+/**
+ * QUI-657 — cola de plataforma para tramitar certificados de firma.
+ *
+ * Controlador aparte y no más rutas en el de arriba porque el prefijo, la
+ * audiencia y el permiso son otros: acá se cruza el límite de tenant a
+ * propósito (es una cola de operación de plataforma).
+ *
+ * PERMISO: se reutiliza `superadmin:*` en lugar de crear
+ * `superadmin:fiscal:read-identity-docs` (decisión de producto, 2026-08-13).
+ * CONTRADICE la dirección de QUI-603 —permisos granulares, hoy en In Review— y
+ * se acepta a sabiendas: partirlo después es una migración de seed, no un
+ * cambio de forma de estos endpoints.
+ */
+@Controller('super-admin/fiscal/certificates-pending')
+export class SuperAdminCertificatesPendingController {
+  constructor(
+    private readonly dian_config_service: DianConfigService,
+    private readonly certificate_adapter: ManualCertificateIssuerAdapter,
+    private readonly response_service: ResponseService,
+    private readonly s3_service: S3Service,
+  ) {}
+
+  /** Expedientes esperando trámite, el más antiguo primero. */
+  @Get()
+  @Permissions('superadmin:read')
+  async listPending(@Query('status') status?: string) {
+    const result = await this.dian_config_service.listPendingCertificateRequests(
+      { statuses: status ? status.split(',').map((s) => s.trim()) : undefined },
+    );
+    return this.response_service.success(result);
+  }
+
+  /** URL firmada de vida corta (5 min) para abrir UN documento. */
+  @Get(':id/documents/:documentId')
+  @Permissions('superadmin:read')
+  async getDocumentUrl(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('documentId', ParseIntPipe) document_id: number,
+  ) {
+    const result =
+      await this.dian_config_service.getIdentityDocumentDownloadUrl(
+        id,
+        document_id,
+      );
+    return this.response_service.success(result);
+  }
+
+  /** Marca el expediente como en trámite ante la entidad emisora. */
+  @Post(':id/mark-issuing')
+  @Permissions('superadmin:write')
+  @HttpCode(HttpStatus.OK)
+  async markIssuing(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.markCertificateIssuing(id);
+    return this.response_service.success(result, 'Expediente en trámite');
+  }
+
+  /** Devuelve el expediente al tenant con un motivo. */
+  @Post(':id/reject')
+  @Permissions('superadmin:write')
+  @HttpCode(HttpStatus.OK)
+  async reject(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('reason') reason: string,
+  ) {
+    const result = await this.dian_config_service.rejectCertificateRequest(
+      id,
+      reason,
+    );
+    return this.response_service.success(result, 'Expediente devuelto');
+  }
+
+  /**
+   * Carga el `.p12` que la entidad emisora expidió.
+   *
+   * Se valida contra el NIT de la configuración igual que cualquier otro cert:
+   * cargar un cert ajeno acá sería peor que en el flujo del tenant, porque lo
+   * hace un operador que no es el dueño de la identidad fiscal.
+   */
+  @Post(':id/upload-certificate')
+  @Permissions('superadmin:write')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('certificate'))
+  async uploadIssuedCertificate(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('password') password: string,
+  ) {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_001);
+    }
+    if (!password?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_002,
+        'La contraseña del certificado es obligatoria.',
+      );
+    }
+
+    const pending = await this.dian_config_service.listPendingCertificateRequests(
+      { statuses: ['documents_submitted', 'issuing', 'documents_pending'] },
+    );
+    const target = pending.find((row) => row.id === id);
+    if (!target) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'La configuración no está en la cola de certificados por tramitar.',
+      );
+    }
+
+    const validation = await this.certificate_adapter.validateCertificate({
+      p12_buffer: file.buffer,
+      password,
+      expected_tax_id: target.nit,
+      expected_dv: target.nit_dv,
+    });
+
+    if (!validation.valid) {
+      if (validation.error?.includes('tax identifier')) {
+        throw new VendixHttpException(ErrorCodes.DIAN_CERT_004);
+      }
+      if (validation.error?.includes('expired')) {
+        throw new VendixHttpException(ErrorCodes.DIAN_CERT_003);
+      }
+      if (validation.error?.includes('password')) {
+        throw new VendixHttpException(ErrorCodes.DIAN_CERT_002);
+      }
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
+    }
+
+    const s3_key = buildDianCertificateS3Key({
+      organization_id: target.organization_id,
+      store_id: target.store_id,
+      dian_configuration_id: id,
+    });
+    await this.s3_service.uploadFile(
+      file.buffer,
+      s3_key,
+      'application/x-pkcs12',
+    );
+
+    const result = await this.dian_config_service.uploadIssuedCertificate({
+      config_id: id,
+      s3_key,
+      password,
+      expiry: validation.expires || null,
+      certificate_info: validation,
+    });
+
+    return this.response_service.success(
+      result,
+      'Certificado cargado. La tienda ya puede emitir.',
     );
   }
 }

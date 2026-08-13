@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { S3Service } from '../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
@@ -8,6 +10,19 @@ import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CertificateValidationResult } from './certificates/certificate-issuer.interface';
 import { certificateNitMatches } from './certificates/nit-match.util';
+import { buildDianIdentityDocumentS3Key } from './certificates/certificate-s3-key.util';
+import {
+  DIAN_IDENTITY_DOCUMENT_LABELS,
+  DIAN_IDENTITY_DOCUMENT_MAX_BYTES,
+  DIAN_IDENTITY_DOCUMENT_MIME_TYPES,
+  DIAN_IDENTITY_DOCUMENT_TYPES,
+  DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS,
+  allowedIdentityDocuments,
+  missingIdentityDocuments,
+  normalizePersonType,
+  requiredIdentityDocuments,
+  type DianIdentityDocumentType,
+} from './certificates/identity-documents.contract';
 import {
   FiscalProductionReadinessService,
   ProductionReadinessCheck,
@@ -69,6 +84,8 @@ export class DianConfigService {
     private readonly encryption: EncryptionService,
     private readonly fiscalScope: FiscalScopeService,
     private readonly readiness: FiscalProductionReadinessService,
+    private readonly s3: S3Service,
+    private readonly events: EventEmitter2,
   ) {}
 
   private getContext() {
@@ -380,6 +397,17 @@ export class DianConfigService {
         software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
         environment: dto.environment || 'test',
         enablement_status: 'not_started',
+        // QUI-657. `without_cert` NO desbloquea nada: la fila queda esperando
+        // documentos y `certificate_s3_key` sigue vacío, que es lo que el gate
+        // de emisión mira. Es un estado de espera, no un permiso.
+        //
+        // Si heredó cert de una fila hermana (QUI-679) el trámite sobra: ya
+        // tenemos el `.p12` de esa entidad fiscal, así que la rama pedida se
+        // ignora y la fila nace en `not_required`.
+        certificate_provisioning_status:
+          dto.certificate_branch === 'without_cert' && !inheritable
+            ? 'documents_pending'
+            : 'not_required',
         test_set_id: dto.test_set_id,
         certificate_kms_key_id: dto.certificate_kms_key_id || null,
         ...(inheritable
@@ -1386,5 +1414,617 @@ export class DianConfigService {
       },
       data: { is_default: false },
     });
+  }
+
+  // =====================================================================
+  // QUI-657 — Activación fiscal SIN certificado de firma.
+  //
+  // Un tenant que no tiene `.p12` entrega documentos de identidad; la
+  // plataforma tramita el certificado ante la entidad emisora y lo carga por
+  // él. Nada de esto relaja el gate de emisión: `fiscal-production-readiness`
+  // exige `certificate_s3_key`, y esa columna solo se puebla cuando el cert
+  // expedido llega. Hasta entonces la tienda NO factura, por diseño y por ley.
+  //
+  // BILLING_HOOK: hoy el trámite es GRATIS (decisión de producto, 2026-08-13).
+  // Cuando se cobre, el cargo va aquí —en `submitIdentityDocuments`, que es el
+  // punto donde el tenant acepta el trámite— vía `vendix-saas-billing`, y el
+  // paso a `documents_submitted` debe quedar condicionado al cobro exitoso.
+  // =====================================================================
+
+  /**
+   * Carga la config y su `person_type` en una sola lectura.
+   *
+   * El `person_type` sale de `organizations` y NO de `users`: el certificado se
+   * expide a nombre de la ENTIDAD FISCAL titular del NIT, no de la persona que
+   * está sentada frente al wizard. Un empleado persona-natural tramitando el
+   * cert de la sociedad que lo emplea es el caso normal, no la excepción.
+   *
+   * `withoutScope()` porque este método sirve tanto al tenant (que ya pasó por
+   * el guard de permisos y por el scope de su store) como al superadmin, que
+   * lee la cola de TODOS los tenants por definición. La autorización la ponen
+   * los `@Permissions` del controlador, no este SELECT.
+   */
+  private async loadConfigForIdentityDocuments(config_id: number) {
+    const config = await this.prisma
+      .withoutScope()
+      .dian_configurations.findUnique({
+        where: { id: config_id },
+        select: {
+          id: true,
+          organization_id: true,
+          store_id: true,
+          nit: true,
+          nit_dv: true,
+          name: true,
+          configuration_type: true,
+          certificate_s3_key: true,
+          certificate_provisioning_status: true,
+          organization: { select: { person_type: true, name: true } },
+          store: { select: { name: true } },
+        },
+      });
+
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+    return config;
+  }
+
+  /**
+   * Sube un documento de identidad y lo registra.
+   *
+   * Se guarda la CLAVE S3, nunca una URL firmada (`vendix-s3-storage`): una URL
+   * persistida caduca y deja la fila apuntando a un enlace muerto, además de
+   * ser un secreto de acceso guardado en texto plano.
+   */
+  async uploadIdentityDocument(params: {
+    config_id: number;
+    document_type: string;
+    file: Express.Multer.File;
+    uploaded_by_user_id?: number | null;
+  }) {
+    const { config_id, file } = params;
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+
+    if (!file || !file.buffer?.length) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_001,
+        'No se recibió ningún archivo. Verifica que el formulario sea multipart/form-data y que el campo se llame "document".',
+      );
+    }
+
+    const document_type = String(params.document_type ?? '')
+      .trim()
+      .toLowerCase() as DianIdentityDocumentType;
+
+    if (!DIAN_IDENTITY_DOCUMENT_TYPES.includes(document_type)) {
+      throw new BadRequestException(
+        `document_type inválido. Valores admitidos: ${DIAN_IDENTITY_DOCUMENT_TYPES.join(', ')}.`,
+      );
+    }
+
+    // Una persona natural no tiene certificado de existencia y representación
+    // legal — no es que sea opcional, es que no existe. Rechazarlo acá con 400
+    // evita que el expediente llegue a la entidad emisora con un documento que
+    // va a rechazar, y que el tenant se entere semanas después.
+    const person_type = config.organization?.person_type ?? null;
+    const allowed = allowedIdentityDocuments(person_type);
+    if (!allowed.includes(document_type)) {
+      throw new BadRequestException(
+        `"${DIAN_IDENTITY_DOCUMENT_LABELS[document_type]}" no aplica para una persona ${normalizePersonType(person_type)}. ` +
+          `Documentos admitidos: ${allowed.map((t) => DIAN_IDENTITY_DOCUMENT_LABELS[t]).join(', ')}.`,
+      );
+    }
+
+    if (file.size > DIAN_IDENTITY_DOCUMENT_MAX_BYTES) {
+      throw new BadRequestException(
+        `El archivo pesa ${(file.size / 1024 / 1024).toFixed(1)} MB y el máximo es ${DIAN_IDENTITY_DOCUMENT_MAX_BYTES / 1024 / 1024} MB.`,
+      );
+    }
+
+    if (
+      !(DIAN_IDENTITY_DOCUMENT_MIME_TYPES as readonly string[]).includes(
+        file.mimetype,
+      )
+    ) {
+      throw new BadRequestException(
+        `Tipo de archivo no admitido (${file.mimetype}). Admitidos: PDF, JPG, PNG o WEBP.`,
+      );
+    }
+
+    // Un mismo `document_type` no puede estar dos veces: el expediente tendría
+    // dos RUT y nadie sabría cuál es el bueno. Resubir REEMPLAZA la fila; el
+    // objeto S3 anterior NO se borra (retención indefinida, y la clave lleva
+    // timestamp para que no se pisen), así que una auditoría puede reconstruir
+    // qué se entregó y cuándo.
+    const extension = (file.originalname?.split('.').pop() ?? '')
+      .toLowerCase()
+      .slice(0, 10);
+
+    const s3_key = buildDianIdentityDocumentS3Key({
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      dian_configuration_id: config.id,
+      document_type,
+      extension,
+    });
+
+    await this.s3.uploadFile(file.buffer, s3_key, file.mimetype);
+
+    const client = this.prisma.withoutScope();
+    await client.dian_configuration_documents.deleteMany({
+      where: { dian_configuration_id: config.id, document_type },
+    });
+
+    const row = await client.dian_configuration_documents.create({
+      data: {
+        dian_configuration_id: config.id,
+        document_type,
+        s3_key,
+        uploaded_by_user_id: params.uploaded_by_user_id ?? null,
+        original_filename: file.originalname?.slice(0, 255) ?? null,
+        size_bytes: BigInt(file.size),
+        mime_type: file.mimetype,
+      },
+    });
+
+    // Subir un documento sobre una fila `not_required` significa que el tenant
+    // se pasó a la rama "no tengo cert" sin volver a crear la configuración.
+    // Se refleja el hecho en vez de dejar el estado mintiendo.
+    if (config.certificate_provisioning_status === 'not_required') {
+      await client.dian_configurations.update({
+        where: { id: config.id },
+        data: { certificate_provisioning_status: 'documents_pending' },
+      });
+    }
+
+    return this.serializeIdentityDocument(row);
+  }
+
+  /**
+   * `size_bytes` es `BigInt` en Prisma y `JSON.stringify` no sabe serializarlo:
+   * devolverlo crudo revienta la respuesta con un `TypeError` que el filtro
+   * global traduce a un 500 opaco. Se convierte a `number` acá, en el borde.
+   */
+  private serializeIdentityDocument(row: {
+    id: number;
+    document_type: string;
+    s3_key: string;
+    uploaded_at: Date;
+    original_filename: string | null;
+    size_bytes: bigint | null;
+    mime_type: string | null;
+    uploaded_by_user_id: number | null;
+  }) {
+    return {
+      id: row.id,
+      document_type: row.document_type,
+      label:
+        DIAN_IDENTITY_DOCUMENT_LABELS[
+          row.document_type as DianIdentityDocumentType
+        ] ?? row.document_type,
+      uploaded_at: row.uploaded_at,
+      original_filename: row.original_filename,
+      size_bytes: row.size_bytes === null ? null : Number(row.size_bytes),
+      mime_type: row.mime_type,
+      uploaded_by_user_id: row.uploaded_by_user_id,
+    };
+  }
+
+  /**
+   * Estado del trámite: qué se subió, qué falta y si ya se puede enviar.
+   *
+   * `include_urls` firma una URL por documento con vida corta
+   * (`DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS`). Se pide explícitamente y no
+   * viene por defecto: firmar es un efecto —crea un enlace que abre un
+   * documento de identidad a cualquiera que lo tenga— y no debe ocurrir en un
+   * listado que solo quería contar cuántos archivos hay.
+   */
+  async getIdentityDocumentStatus(
+    config_id: number,
+    options: { include_urls?: boolean } = {},
+  ) {
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+    const person_type = config.organization?.person_type ?? null;
+
+    const rows = await this.prisma
+      .withoutScope()
+      .dian_configuration_documents.findMany({
+        where: { dian_configuration_id: config.id },
+        orderBy: { uploaded_at: 'asc' },
+      });
+
+    const documents = await Promise.all(
+      rows.map(async (row) => {
+        const base = this.serializeIdentityDocument(row);
+        if (!options.include_urls) return base;
+        return {
+          ...base,
+          download_url: await this.s3.getPresignedUrl(
+            row.s3_key,
+            DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS,
+          ),
+          download_url_expires_in_seconds:
+            DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS,
+        };
+      }),
+    );
+
+    const missing = missingIdentityDocuments(
+      person_type,
+      rows.map((r) => r.document_type),
+    );
+
+    return {
+      dian_configuration_id: config.id,
+      certificate_provisioning_status: config.certificate_provisioning_status,
+      person_type: normalizePersonType(person_type),
+      required_documents: requiredIdentityDocuments(person_type),
+      missing_documents: missing,
+      can_submit: missing.length === 0,
+      documents,
+    };
+  }
+
+  /**
+   * Borra un documento ya subido. Solo mientras el expediente esté en manos del
+   * tenant (`documents_pending` / `documents_submitted`): una vez que el
+   * superadmin empezó a tramitar (`issuing`) o el cert ya fue expedido
+   * (`issued`), el expediente es la evidencia de con qué identidad se expidió y
+   * deja de ser editable.
+   *
+   * Borra la FILA, no el objeto S3 (retención indefinida).
+   */
+  async deleteIdentityDocument(config_id: number, document_id: number) {
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+
+    if (
+      config.certificate_provisioning_status !== 'documents_pending' &&
+      config.certificate_provisioning_status !== 'documents_submitted'
+    ) {
+      throw new BadRequestException(
+        `No se pueden modificar los documentos: el trámite está en estado "${config.certificate_provisioning_status}".`,
+      );
+    }
+
+    const client = this.prisma.withoutScope();
+    const row = await client.dian_configuration_documents.findFirst({
+      where: { id: document_id, dian_configuration_id: config.id },
+      select: { id: true },
+    });
+    if (!row) {
+      throw new BadRequestException('El documento no existe en este trámite.');
+    }
+
+    await client.dian_configuration_documents.delete({
+      where: { id: row.id },
+    });
+
+    return this.getIdentityDocumentStatus(config.id);
+  }
+
+  /**
+   * El tenant da por entregado el expediente: pasa a la cola del superadmin.
+   *
+   * Valida el juego completo ANTES de mover el estado. Un expediente
+   * incompleto en la cola le hace perder el viaje a un humano y devuelve al
+   * tenant a la casilla de salida días después.
+   */
+  async submitIdentityDocuments(config_id: number) {
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+    const person_type = config.organization?.person_type ?? null;
+
+    if (config.certificate_s3_key) {
+      throw new BadRequestException(
+        'Esta configuración ya tiene un certificado de firma cargado. No hay trámite que enviar.',
+      );
+    }
+
+    const rows = await this.prisma
+      .withoutScope()
+      .dian_configuration_documents.findMany({
+        where: { dian_configuration_id: config.id },
+        select: { document_type: true },
+      });
+
+    const missing = missingIdentityDocuments(
+      person_type,
+      rows.map((r) => r.document_type),
+    );
+
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Faltan documentos obligatorios: ${missing
+          .map((t) => DIAN_IDENTITY_DOCUMENT_LABELS[t])
+          .join(', ')}.`,
+      );
+    }
+
+    // BILLING_HOOK: si el trámite pasa a ser cobrado, el cargo va exactamente
+    // aquí —antes del cambio de estado— y `documents_submitted` solo se escribe
+    // cuando el cobro liquida. Hoy es gratis por decisión de producto.
+
+    await this.prisma.withoutScope().dian_configurations.update({
+      where: { id: config.id },
+      data: { certificate_provisioning_status: 'documents_submitted' },
+    });
+
+    // Aviso a plataforma. Se emite como evento y no se escribe la notificación
+    // acá porque el destinatario es el equipo de plataforma, no la tienda:
+    // `NotificationsService.createAndBroadcast` es store-scoped y mandaría el
+    // aviso justo a quien ya sabe que lo envió. La cola del superadmin
+    // (`GET /super-admin/fiscal/certificates-pending`) es la vía de visibilidad
+    // garantizada; el evento permite engancharle correo o Slack sin tocar esto.
+    this.events.emit('dian.certificate.documents_submitted', {
+      dian_configuration_id: config.id,
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      nit: config.nit,
+      nit_dv: config.nit_dv,
+      person_type: normalizePersonType(person_type),
+      configuration_type: config.configuration_type,
+      submitted_at: new Date().toISOString(),
+    });
+
+    this.logger.log(
+      `QUI-657: expediente de certificado enviado para dian_configuration_id=${config.id} ` +
+        `(NIT ${config.nit}, ${normalizePersonType(person_type)}); a la espera de superadmin.`,
+    );
+
+    return this.getIdentityDocumentStatus(config.id);
+  }
+
+  // ---------------------------------------------------------------------
+  // Superadmin — cola de certificados por tramitar.
+  //
+  // PERMISO: se reutiliza `superadmin:*` en vez de crear
+  // `superadmin:fiscal:read-identity-docs` (decisión de producto, 2026-08-13).
+  // Esto CONTRADICE la dirección de QUI-603, que empuja hacia permisos
+  // granulares y está en In Review. Se acepta a sabiendas: partir el permiso
+  // después es una migración de seed, no un cambio de forma de estos
+  // endpoints. Cuando QUI-603 aterrice, este es el sitio a revisar.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Expedientes esperando que la plataforma tramite el certificado.
+   *
+   * Cruza tenants a propósito —es una cola de operación de plataforma— y por
+   * eso va detrás de `superadmin:*`. `certificate_s3_key: null` en el predicado
+   * es un cinturón sobre el estado: una fila que ya recibió cert no tiene por
+   * qué seguir en la cola aunque su estado se haya quedado atrás.
+   */
+  async listPendingCertificateRequests(params: { statuses?: string[] } = {}) {
+    const statuses = params.statuses?.length
+      ? params.statuses
+      : ['documents_submitted', 'issuing'];
+
+    const rows = await this.prisma
+      .withoutScope()
+      .dian_configurations.findMany({
+        where: {
+          certificate_provisioning_status: { in: statuses as any },
+          certificate_s3_key: null,
+        },
+        orderBy: { updated_at: 'asc' },
+        select: {
+          id: true,
+          organization_id: true,
+          store_id: true,
+          name: true,
+          nit: true,
+          nit_dv: true,
+          configuration_type: true,
+          certificate_provisioning_status: true,
+          updated_at: true,
+          created_at: true,
+          organization: { select: { name: true, person_type: true } },
+          store: { select: { name: true } },
+          identity_documents: {
+            select: {
+              id: true,
+              document_type: true,
+              original_filename: true,
+              mime_type: true,
+              size_bytes: true,
+              uploaded_at: true,
+              uploaded_by_user_id: true,
+            },
+            orderBy: { uploaded_at: 'asc' },
+          },
+        },
+      });
+
+    return rows.map((row) => ({
+      id: row.id,
+      organization_id: row.organization_id,
+      organization_name: row.organization?.name ?? null,
+      store_id: row.store_id,
+      store_name: row.store?.name ?? null,
+      name: row.name,
+      nit: row.nit,
+      nit_dv: row.nit_dv,
+      configuration_type: row.configuration_type,
+      certificate_provisioning_status: row.certificate_provisioning_status,
+      person_type: normalizePersonType(row.organization?.person_type),
+      requested_at: row.updated_at ?? row.created_at,
+      documents: row.identity_documents.map((d) =>
+        this.serializeIdentityDocument({ ...d, s3_key: '' }),
+      ),
+    }));
+  }
+
+  /**
+   * URL firmada de vida corta para que el superadmin abra UN documento.
+   *
+   * Se firma de a uno y bajo petición explícita: cada URL emitida es una copia
+   * del documento de identidad circulando fuera de la sesión, así que se emiten
+   * las mínimas y caducan en 5 minutos.
+   */
+  async getIdentityDocumentDownloadUrl(config_id: number, document_id: number) {
+    const row = await this.prisma
+      .withoutScope()
+      .dian_configuration_documents.findFirst({
+        where: { id: document_id, dian_configuration_id: config_id },
+      });
+
+    if (!row) {
+      throw new BadRequestException('El documento no existe en este trámite.');
+    }
+
+    return {
+      ...this.serializeIdentityDocument(row),
+      download_url: await this.s3.getPresignedUrl(
+        row.s3_key,
+        DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS,
+      ),
+      expires_in_seconds: DIAN_IDENTITY_DOCUMENT_URL_TTL_SECONDS,
+    };
+  }
+
+  /** Marca el expediente como en trámite ante la entidad emisora. */
+  async markCertificateIssuing(config_id: number) {
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+
+    if (config.certificate_provisioning_status !== 'documents_submitted') {
+      throw new BadRequestException(
+        `Solo un expediente en "documents_submitted" puede pasar a trámite (está en "${config.certificate_provisioning_status}").`,
+      );
+    }
+
+    await this.prisma.withoutScope().dian_configurations.update({
+      where: { id: config.id },
+      data: { certificate_provisioning_status: 'issuing' },
+    });
+
+    return this.getIdentityDocumentStatus(config.id);
+  }
+
+  /**
+   * Rechaza el expediente y lo devuelve al tenant.
+   *
+   * Vuelve a `documents_pending` y NO a `rejected` como estado terminal: el
+   * tenant tiene que poder corregir y reenviar, y desde `rejected` los
+   * endpoints de carga estarían cerrados. `rejected` queda para un rechazo
+   * definitivo de la entidad emisora, que hoy no tiene flujo.
+   */
+  async rejectCertificateRequest(config_id: number, reason: string) {
+    const config = await this.loadConfigForIdentityDocuments(config_id);
+
+    if (!reason?.trim()) {
+      throw new BadRequestException(
+        'Se requiere un motivo de rechazo: el tenant tiene que saber qué corregir.',
+      );
+    }
+
+    await this.prisma.withoutScope().dian_configurations.update({
+      where: { id: config.id },
+      data: { certificate_provisioning_status: 'documents_pending' },
+    });
+
+    this.events.emit('dian.certificate.documents_rejected', {
+      dian_configuration_id: config.id,
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      reason: reason.trim(),
+    });
+
+    this.logger.warn(
+      `QUI-657: expediente rechazado para dian_configuration_id=${config.id}: ${reason.trim()}`,
+    );
+
+    return this.getIdentityDocumentStatus(config.id);
+  }
+
+  /**
+   * El superadmin carga el certificado que la entidad emisora expidió.
+   *
+   * NO reutiliza `updateCertificate` a propósito, por dos razones que lo hacen
+   * inaplicable acá: (1) lee y escribe por el cliente Prisma SCOPEADO, que en
+   * una sesión de superadmin no resuelve al tenant dueño de la fila; y (2)
+   * rechaza `store_id === null`, que es justo el caso de una organización de
+   * alcance-organización, la más probable de delegar el trámite. La validación
+   * de NIT sí se comparte —`certificateNitMatches`—, que es la parte que
+   * protege de publicar un cert ajeno.
+   *
+   * `certificate_source = 'issuer_adapter'` distingue este cert del que sube el
+   * propio tenant: no lo validó el comerciante, lo tramitamos nosotros, y esa
+   * diferencia importa en una auditoría de custodia. El valor ya existía en el
+   * enum; no se agregó nada.
+   *
+   * Recién con `certificate_s3_key` poblado el gate de
+   * `fiscal-production-readiness` deja pasar la emisión. El gate no se tocó.
+   */
+  async uploadIssuedCertificate(params: {
+    config_id: number;
+    s3_key: string;
+    password: string;
+    expiry: Date | null;
+    certificate_info?: CertificateValidationResult;
+  }) {
+    const { config_id, s3_key, password, expiry, certificate_info } = params;
+    const client = this.prisma.withoutScope();
+
+    const config = await client.dian_configurations.findUnique({
+      where: { id: config_id },
+      select: { id: true, nit: true, nit_dv: true, name: true },
+    });
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    if (!password?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_002,
+        'La contraseña del certificado es obligatoria.',
+      );
+    }
+
+    const config_nit = this.onlyDigits(config.nit);
+    const certificate_nit = this.onlyDigits(certificate_info?.tax_id);
+    if (
+      config_nit &&
+      (!certificate_nit ||
+        !certificateNitMatches({
+          certificateTaxId: certificate_info?.tax_id,
+          nit: config.nit,
+          dv: config.nit_dv,
+        }))
+    ) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: config_id,
+        expected_nit: config_nit,
+        certificate_nit: certificate_nit || null,
+      });
+    }
+
+    const updated = await client.dian_configurations.update({
+      where: { id: config_id },
+      data: {
+        certificate_s3_key: s3_key,
+        certificate_password_encrypted: this.encryption.encrypt(password),
+        certificate_expiry: expiry,
+        certificate_fingerprint: certificate_info?.fingerprint,
+        certificate_subject: certificate_info?.subject,
+        certificate_issuer: certificate_info?.issuer,
+        certificate_serial_number: certificate_info?.serial_number,
+        certificate_nit: certificate_info?.tax_id,
+        certificate_source: 'issuer_adapter',
+        certificate_uploaded_at: new Date(),
+        certificate_provisioning_status: 'issued',
+      },
+    });
+
+    this.events.emit('dian.certificate.issued', {
+      dian_configuration_id: config_id,
+      organization_id: updated.organization_id,
+      store_id: updated.store_id,
+    });
+
+    this.logger.log(
+      `QUI-657: certificado expedido cargado por plataforma para dian_configuration_id=${config_id} ` +
+        `("${config.name}", NIT ${config.nit}); certificate_source=issuer_adapter.`,
+    );
+
+    return this.maskSensitiveFields(updated);
   }
 }
