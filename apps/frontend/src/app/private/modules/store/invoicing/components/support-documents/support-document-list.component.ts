@@ -141,12 +141,14 @@ export class SupportDocumentListComponent {
   }
 
   onFilterChange(values: Record<string, unknown>): void {
+    // Sólo `status` e `invoice_type` están declarados en `filterConfigs` (los
+    // que renderiza el `app-options-dropdown`). `cuds` y `supplier_id` tienen
+    // inputs dedicados en el HTML — parcharlos aquí leía `undefined` y pisaba
+    // valores válidos.
     this.filters.patchValue({
       status: (values['status'] as string) || '',
       invoice_type:
         ((values['invoice_type'] as string) || 'support_document'),
-      cuds: ((values['cuds'] as string) || ''),
-      supplier_id: (values['supplier_id'] as number) || null,
     });
   }
 
