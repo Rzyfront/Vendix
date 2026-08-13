@@ -135,7 +135,14 @@ interface RefundItemState {
 
                   <!-- Quantity + Price -->
                   <div class="text-right flex-shrink-0">
-                    <p class="text-sm font-bold text-gray-900">{{ item.orderItem.unit_price | currency }}</p>
+                    <!-- REFUND OVERHAUL — show EFFECTIVE per-unit price
+                         (total_price / quantity), not the LIST price
+                         field which for presentations is per-package
+                         (e.g. $18,000 per presentation of 12 eggs
+                         looks like $18,000 per egg otherwise). -->
+                    <p class="text-sm font-bold text-gray-900">
+                      {{ effectiveUnitPrice(item) | currency }}
+                    </p>
                     <p class="text-[10px] text-gray-500">x{{ item.orderItem.quantity }} original</p>
                   </div>
                 </div>
@@ -602,6 +609,19 @@ export class OrderRefundModalComponent {
     const flagged = all.find((l) => l.is_default);
     if (flagged) return flagged.id;
     return all[0].id;
+  }
+
+  // REFUND OVERHAUL — EFFECTIVE per-unit price the customer paid
+  // (total_price / quantity). For a presentation SKU with unit_price=5000
+  // but total_price=5 and quantity=1, this returns 5 (the actual per-unit
+  // amount), not 5000 (the per-presentation list price). Used in the
+  // step 1 list display so the merchant sees what they actually paid
+  // per unit, not the misleading list price.
+  effectiveUnitPrice(item: RefundItemState): number {
+    const total = Number(item.orderItem.total_price || 0);
+    const qty = Number(item.orderItem.quantity || 1);
+    if (qty <= 0) return Number(item.orderItem.unit_price || 0);
+    return total / qty;
   }
 
   private loadLocations(): void {
