@@ -280,13 +280,10 @@ type SuccessInfo =
             </span>
           </p>
 
-          <section class="identity-documents">
-            <h3 class="identity-documents__title">
-              Documentos de identidad
-            </h3>
-
-            @for (doc of requiredDocumentTypes(); track doc) {
-              <div class="identity-documents__row">
+          <div class="identity-documents">
+            <h3 class="identity-documents__title">Documentos de identidad</h3>
+            <section class="identity-documents__grid">
+              @for (doc of requiredDocumentTypes(); track doc) {
                 <app-file-upload-dropzone
                   accept="application/pdf"
                   icon="upload-cloud"
@@ -295,9 +292,9 @@ type SuccessInfo =
                   (fileSelected)="onDocumentFile(doc, $event)"
                   (fileRemoved)="removeDocumentFile(doc)"
                 ></app-file-upload-dropzone>
-              </div>
-            }
-          </section>
+              }
+            </section>
+          </div>
         }
 
         <!--
@@ -639,28 +636,31 @@ type SuccessInfo =
        * en móvil/tablet. El __row queda como wrapper transparente.
        */
       .identity-documents {
-        display: grid;
-        grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
         gap: 0.6rem;
         padding: 0.85rem 1rem;
         border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-      }
-      @media (min-width: 768px) {
-        .identity-documents {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 0.75rem;
-        }
       }
       .identity-documents__title {
         margin: 0;
         font-size: 0.9rem;
         font-weight: 600;
         color: var(--color-text-primary, #111827);
+        width: 100%;
       }
-      /* El wrapper __row queda como passthrough: el grid vive en el padre. */
-      .identity-documents__row {
-        display: contents;
+      .identity-documents__grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+        width: 100%;
+      }
+      @media (min-width: 768px) {
+        .identity-documents__grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
       }
       .identity-documents__row-label {
         font-size: 0.82rem;
