@@ -335,6 +335,35 @@ export class DianConfigService {
       store_id,
     );
 
+    // QUI-679: Reutilizar cert de firma entre configs DIAN.
+    //
+    // Las cuatro habilitaciones (facturación, documento soporte, nómina,
+    // documento equivalente) cuelgan de la misma `accounting_entity_id` y
+    // comparten UN UNICO certificado de firma expedido por la DIAN. Subir el
+    // mismo `.p12` tres veces —una por habilitación— era fricción sin valor:
+    // las firmas son indistinguibles para la DIAN, y rotar el cert exige
+    // acordarlo en todas las filas a la vez.
+    //
+    // Decisión: COPIAR, NO REFERENCIAR. Tres razones:
+    //   1. `enablement_status` es POR FILA (la DIAN autoriza cada habilitación
+    //      por separado; un cert puede servir una y no servir otra).
+    //   2. La rotación manual debe AISLARSE: si QUIERE rotar el cert SOLO de
+    //      soporte, las otras filas no se tocan.
+    //   3. `certificate_password_encrypted` va cifrado — compartir el mismo
+    //      ciphertext entre filas es señal de un bug latente (mismo blob,
+    //      misma contraseña, mismo riesgo de fuga).
+    //
+    // El origen del cert queda registrado en `inherited_from` (id/tipo/expiry
+    // de la fila fuente) y en el log estructurado de abajo. `certificate_source`
+    // sigue siendo `manual_upload_validated` (default del enum): el cert SÍ
+    // fue subido y validado por el usuario, solo que en una fila hermana; la
+    // pista de la herencia viaja por la API, no por la columna.
+    const inheritable = await this.findInheritableCertificate({
+      accounting_entity_id,
+      nit: dto.nit,
+      nit_dv: dto.nit_dv,
+    });
+
     const config = await this.prisma.dian_configurations.create({
       data: {
         organization_id,
@@ -353,6 +382,28 @@ export class DianConfigService {
         enablement_status: 'not_started',
         test_set_id: dto.test_set_id,
         certificate_kms_key_id: dto.certificate_kms_key_id || null,
+        ...(inheritable
+          ? {
+              certificate_s3_key: inheritable.fields.certificate_s3_key,
+              certificate_password_encrypted:
+                inheritable.fields.certificate_password_encrypted,
+              certificate_kms_key_id:
+                inheritable.fields.certificate_kms_key_id,
+              certificate_expiry: inheritable.fields.certificate_expiry,
+              certificate_fingerprint:
+                inheritable.fields.certificate_fingerprint,
+              certificate_subject: inheritable.fields.certificate_subject,
+              certificate_issuer: inheritable.fields.certificate_issuer,
+              certificate_serial_number:
+                inheritable.fields.certificate_serial_number,
+              certificate_nit: inheritable.fields.certificate_nit,
+              // `certificate_source` se queda en su default `manual_upload_validated`:
+              // el cert SÍ fue subido y validado por el usuario, solo que en la
+              // fila fuente. La pista de la herencia sale por `inherited_from`.
+              certificate_uploaded_at:
+                inheritable.fields.certificate_uploaded_at,
+            }
+          : {}),
       },
     });
 
@@ -360,11 +411,146 @@ export class DianConfigService {
       await this.ensureSingleDefault(config.id);
     }
 
+    if (inheritable) {
+      this.logger.log(
+        `DIAN config "${dto.name}" (${configuration_type}) inherited cert from ` +
+          `sibling dian_configuration_id=${inheritable.source.id} ` +
+          `(${inheritable.source.configuration_type}); expiry=${inheritable.fields.certificate_expiry?.toISOString() ?? 'unknown'}`,
+      );
+    }
+
     this.logger.log(
       `DIAN config "${dto.name}" created for store ${store_id}`,
     );
 
-    return this.maskSensitiveFields(config);
+    return {
+      ...this.maskSensitiveFields(config),
+      inherited_certificate: inheritable !== null,
+      inherited_from: inheritable
+        ? {
+            dian_configuration_id: inheritable.source.id,
+            configuration_type: inheritable.source.configuration_type,
+            certificate_expiry: inheritable.source.certificate_expiry,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Busca una fila hermana de `dian_configurations` que ya tenga cert de firma
+   * asociado, para el mismo `accounting_entity_id`. Devuelve `null` si no hay
+   * cert heredable (caso normal al crear la primera config) — `create()`
+   * sigue su camino y deja que el usuario suba el cert después.
+   *
+   * `withoutScope()` se usa a propósito: la búsqueda cruza varias filas de
+   * `configuration_type` (invoicing + support_document + payroll +
+   * equivalent_document pueden coexistir) y el predicado natural acá es
+   * `accounting_entity_id`, que **es** la frontera del scope fiscal
+   * (`vendix-fiscal-scope` / `vendix-prisma-scopes`). Filtrar por
+   * `organization_id` o `store_id` extra excluiría filas válidas del otro eje
+   * y daría falsos negativos.
+   *
+   * `created_at ASC` hace Determinista la elección cuando hay varias filas
+   * con cert: la más antigua gana. En la práctica es la fila `invoicing` —
+   * casi siempre la primera que se crea.
+   *
+   * QUI-679: COPY, NOT REFERENCE. Ver bloque explicativo en `create()`.
+   */
+  private async findInheritableCertificate(params: {
+    accounting_entity_id: number;
+    nit?: string | null;
+    nit_dv?: string | null;
+  }): Promise<{
+    source: {
+      id: number;
+      configuration_type: DianConfigurationType;
+      certificate_expiry: Date | null;
+    };
+    fields: {
+      certificate_s3_key: string;
+      certificate_password_encrypted: string;
+      certificate_kms_key_id: string | null;
+      certificate_expiry: Date | null;
+      certificate_fingerprint: string | null;
+      certificate_subject: string | null;
+      certificate_issuer: string | null;
+      certificate_serial_number: string | null;
+      certificate_nit: string | null;
+      certificate_source: string;
+      certificate_uploaded_at: Date | null;
+    };
+  } | null> {
+    const { accounting_entity_id, nit: dto_nit, nit_dv: dto_nit_dv } = params;
+    const source = await this.prisma
+      .withoutScope()
+      .dian_configurations.findFirst({
+        where: {
+          accounting_entity_id,
+          certificate_s3_key: { not: null },
+        },
+        orderBy: { created_at: 'asc' },
+        select: {
+          id: true,
+          configuration_type: true,
+          certificate_expiry: true,
+          certificate_s3_key: true,
+          certificate_password_encrypted: true,
+          certificate_kms_key_id: true,
+          certificate_fingerprint: true,
+          certificate_subject: true,
+          certificate_issuer: true,
+          certificate_serial_number: true,
+          certificate_nit: true,
+          certificate_source: true,
+          certificate_uploaded_at: true,
+        },
+      });
+
+    if (!source || !source.certificate_s3_key || !source.certificate_password_encrypted) {
+      return null;
+    }
+
+    // Guardia de NIT: si el cert hermano fue expedido con un NIT distinto al
+    // que el usuario está registrando en esta config, NO se hereda. La fila
+    // creada queda sin cert y el usuario tendrá que subir el correcto. Se
+    // hace warn + return null (no throw) para no romper una migración limpia:
+    // un cert heredado expedido ANTES de corregir el NIT/DV en la entidad
+    // fiscal no debe impedir crear la config — solo deja el cert sin poblar.
+    if (
+      !certificateNitMatches({
+        certificateTaxId: source.certificate_nit,
+        nit: dto_nit,
+        dv: dto_nit_dv,
+      })
+    ) {
+      this.logger.warn(
+        `QUI-679: cert inheritance skipped for accounting_entity_id=${accounting_entity_id}: ` +
+          `sibling config ${source.id} (${source.configuration_type}) has cert_nit=${source.certificate_nit ?? 'null'} ` +
+          `which does not match the new config's NIT. Inheriting would publish a wrong-NIT cert.`,
+      );
+      return null;
+    }
+
+    return {
+      source: {
+        id: source.id,
+        configuration_type: source.configuration_type,
+        certificate_expiry: source.certificate_expiry,
+      },
+      fields: {
+        certificate_s3_key: source.certificate_s3_key,
+        certificate_password_encrypted: source.certificate_password_encrypted,
+        certificate_kms_key_id: source.certificate_kms_key_id,
+        certificate_expiry: source.certificate_expiry,
+        certificate_fingerprint: source.certificate_fingerprint,
+        certificate_subject: source.certificate_subject,
+        certificate_issuer: source.certificate_issuer,
+        certificate_serial_number: source.certificate_serial_number,
+        certificate_nit: source.certificate_nit,
+        certificate_source: source.certificate_source,
+        certificate_uploaded_at: source.certificate_uploaded_at,
+      },
+    };
   }
 
   /**

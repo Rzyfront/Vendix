@@ -23,6 +23,7 @@ import {
   DianConfigFormComponent,
   DianConfigValue,
 } from '../../forms/dian-config-form/dian-config-form.component';
+import { IconComponent } from '../../icon/icon.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
@@ -42,9 +43,38 @@ function toDateInput(value: string | null | undefined): string {
 @Component({
   selector: 'app-fiscal-dian-config-step',
   standalone: true,
-  imports: [CommonModule, DianConfigFormComponent],
+  imports: [CommonModule, DianConfigFormComponent, IconComponent],
   template: `
     <div class="step-body">
+      @if (inheritedCertificate(); as inherited) {
+        <div
+          class="banner-inherited-cert"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="banner-inherited-cert__icon">
+            <app-icon name="shield-check" [size]="22"></app-icon>
+          </div>
+          <div class="banner-inherited-cert__body">
+            <p class="banner-inherited-cert__title">
+              Ya tienes cert cargado para esta entidad fiscal
+            </p>
+            <p class="banner-inherited-cert__detail">
+              El certificado de firma configurado para
+              <strong>{{ inheritedFromTypeLabel() }}</strong>
+              se reutiliza aquí automáticamente.
+              @if (inherited.certificate_expiry) {
+                <span> Vigente hasta {{ inherited.certificate_expiry | date: 'longDate' }}</span>.
+              }
+            </p>
+            <p class="banner-inherited-cert__hint">
+              Si necesitas rotar el certificado (vencimiento, revocación), usa el botón
+              "Rotar cert" en la sección de Certificado más abajo.
+            </p>
+          </div>
+        </div>
+      }
+
       <app-dian-config-form
         #form
         [initialValue]="initial()"
@@ -71,6 +101,59 @@ function toDateInput(value: string | null | undefined): string {
         font-size: 0.85rem;
         color: var(--color-destructive, #b91c1c);
       }
+      .banner-inherited-cert {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid
+          color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+        border-radius: 0.5rem;
+        background: color-mix(
+          in srgb,
+          var(--color-primary) 8%,
+          var(--color-surface, #ffffff)
+        );
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 1.85rem;
+        height: 1.85rem;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+        color: var(--color-primary);
+      }
+      .banner-inherited-cert__body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .banner-inherited-cert__title {
+        margin: 0;
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__detail {
+        margin: 0;
+        font-size: 0.85rem;
+        line-height: 1.35;
+        color: var(--color-text-secondary, #4b5563);
+      }
+      .banner-inherited-cert__detail strong {
+        color: var(--color-text-primary, #111827);
+      }
+      .banner-inherited-cert__hint {
+        margin: 0;
+        font-size: 0.78rem;
+        line-height: 1.3;
+        color: var(--color-text-secondary, #6b7280);
+      }
     `,
   ],
 })
@@ -90,6 +173,29 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   /** B3: precarga del certificado existente desde el prefill. */
   readonly hasCertificate = signal(false);
   readonly certificateExpiry = signal<string | null>(null);
+  /**
+   * QUI-679: when the backend creates this config and reuses an existing cert
+   * from a sibling configuration on the same fiscal entity, the create
+   * response carries `inherited_certificate: true` + `inherited_from`. We
+   * surface it as a banner so the user understands why no upload is needed
+   * and which row currently holds the certificate.
+   */
+  readonly inheritedCertificate = signal<{
+    dian_configuration_id: number;
+    configuration_type: string;
+    certificate_expiry: string | null;
+  } | null>(null);
+  readonly inheritedFromTypeLabel = computed(() => {
+    const v = this.inheritedCertificate();
+    if (!v) return null;
+    const map: Record<string, string> = {
+      invoicing: 'facturación electrónica',
+      support_document: 'documento soporte',
+      equivalent_document: 'documento equivalente POS',
+      payroll: 'nómina electrónica',
+    };
+    return map[v.configuration_type] ?? v.configuration_type;
+  });
   readonly readOnlyForStore = computed(
     () =>
       this.service.userScope() === 'store' &&
@@ -123,6 +229,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     // "certificado cargado" state.
     this.hasCertificate.set(false);
     this.certificateExpiry.set(null);
+    this.inheritedCertificate.set(null);
     this.existingResolutionId.set(null);
 
     const prefill = this.service.prefill();
@@ -348,12 +455,33 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
         const payload = res?.data ?? res;
         configId =
           typeof payload?.id === 'number' ? payload.id : (configId ?? null);
+        // Defensive: PATCH responses should not carry the inherited flag, but
+        // if the backend ever starts reporting it here we surface it the same
+        // way so the user always sees a consistent "cert ya cargado" state.
+        if (payload?.inherited_certificate && payload?.inherited_from) {
+          this.inheritedCertificate.set(payload.inherited_from);
+          this.hasCertificate.set(true);
+          this.certificateExpiry.set(
+            payload.inherited_from?.certificate_expiry ?? null,
+          );
+        }
       } else {
         const res: any = await firstValueFrom(
           this.http.post(this.baseUrl(), body),
         );
         const payload = res?.data ?? res;
         configId = typeof payload?.id === 'number' ? payload.id : null;
+        // QUI-679: the backend may have linked an existing certificate from a
+        // sibling configuration on the same fiscal entity. Reflect that in
+        // the wizard so the form shows "Certificado cargado" and the user
+        // knows they don't need to upload anything.
+        if (payload?.inherited_certificate && payload?.inherited_from) {
+          this.inheritedCertificate.set(payload.inherited_from);
+          this.hasCertificate.set(true);
+          this.certificateExpiry.set(
+            payload.inherited_from?.certificate_expiry ?? null,
+          );
+        }
       }
 
       // Upload certificate if provided. FormData payload — no body merge.
