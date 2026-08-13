@@ -14,6 +14,7 @@ import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
+import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { DianConfigService } from './dian-config/dian-config.service';
 import { BullModule } from '@nestjs/bullmq';
@@ -61,6 +62,7 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     CreditNotesService,
     ResolutionsService,
     ResolutionScannerService,
+    DianHabilitationScannerService,
     InvoiceNumberGenerator,
     DianConfigService,
     DianTestService,

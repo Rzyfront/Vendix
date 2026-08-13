@@ -15,6 +15,18 @@ export type {
   ScannedResolutionDocumentType,
   ScannedResolutionEnvironment,
 } from './dian-resolution-scanner/interfaces/resolution-scan-result.interface';
+export { DianHabilitationScannerModalComponent } from './dian-habilitation-scanner/dian-habilitation-scanner-modal.component';
+export {
+  HABILITATION_SCAN_FIELD_LABELS,
+  HABILITATION_SCAN_FIELD_KEYS,
+} from './dian-habilitation-scanner/interfaces/habilitation-scan-result.interface';
+export type {
+  DianHabilitationScanResult,
+  HabilitationScanField,
+  HabilitationScanFieldKey,
+  HabilitationScannerScope,
+  ScannedHabilitationEnvironment,
+} from './dian-habilitation-scanner/interfaces/habilitation-scan-result.interface';
 export { PromptModalComponent } from './prompt-modal/prompt-modal.component';
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';

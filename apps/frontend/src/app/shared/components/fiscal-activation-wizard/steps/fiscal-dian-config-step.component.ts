@@ -24,6 +24,13 @@ import {
   DianConfigValue,
 } from '../../forms/dian-config-form/dian-config-form.component';
 import { IconComponent } from '../../icon/icon.component';
+import { FileUploadDropzoneComponent } from '../../file-upload-dropzone/file-upload-dropzone.component';
+import { DianHabilitationScannerModalComponent } from '../../dian-habilitation-scanner/dian-habilitation-scanner-modal.component';
+import {
+  DianHabilitationScanResult,
+  HabilitationScanField,
+  HabilitationScannerScope,
+} from '../../dian-habilitation-scanner/interfaces/habilitation-scan-result.interface';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
@@ -82,7 +89,13 @@ type SuccessInfo =
 @Component({
   selector: 'app-fiscal-dian-config-step',
   standalone: true,
-  imports: [CommonModule, DianConfigFormComponent, IconComponent],
+  imports: [
+    CommonModule,
+    DianConfigFormComponent,
+    IconComponent,
+    FileUploadDropzoneComponent,
+    DianHabilitationScannerModalComponent,
+  ],
   template: `
     <div class="step-body">
       @if (successInfo(); as success) {
@@ -253,11 +266,9 @@ type SuccessInfo =
             lo rechaza igual, pero el cliente no debe ofrecer el campo: es
             pedirle al usuario algo que va a recibir un 400.
           -->
-          <section class="identity-documents">
-            <h3 class="identity-documents__title">
-              Documentos de identidad
-            </h3>
-            <p class="identity-documents__hint">
+          <p class="identity-documents-banner" role="note">
+            <app-icon name="info" [size]="18"></app-icon>
+            <span>
               Adjunta los documentos que la entidad emisora exige para
               expedir el certificado a nombre de
               <strong>{{ entityDisplayName() }}</strong>
@@ -266,28 +277,65 @@ type SuccessInfo =
                 Como persona jurídica también necesitas el certificado de
                 existencia y representación legal.
               }
-            </p>
+            </span>
+          </p>
+
+          <section class="identity-documents">
+            <h3 class="identity-documents__title">
+              Documentos de identidad
+            </h3>
 
             @for (doc of requiredDocumentTypes(); track doc) {
               <div class="identity-documents__row">
-                <label class="identity-documents__row-label">
-                  {{ documentLabel(doc) }}
-                  <span class="identity-documents__req">obligatorio</span>
-                </label>
-                <input
-                  type="file"
-                  [accept]="allowedMimeAccept()"
-                  (change)="onDocumentFile(doc, $event)"
-                />
-                @if (getDocumentFile(doc); as picked) {
-                  <p class="identity-documents__filename">
-                    {{ picked.name ?? 'archivo seleccionado' }}
-                    · {{ formatBytes(picked.size) }}
-                  </p>
-                }
+                <app-file-upload-dropzone
+                  accept="application/pdf"
+                  icon="upload-cloud"
+                  [label]="documentLabel(doc)"
+                  helperText="Obligatorio · Solo PDF"
+                  (fileSelected)="onDocumentFile(doc, $event)"
+                  (fileRemoved)="removeDocumentFile(doc)"
+                ></app-file-upload-dropzone>
               </div>
             }
           </section>
+        }
+
+        <!--
+          Lectura por foto del set de pruebas DIAN. Vive ARRIBA del formulario
+          porque su valor es evitar transcribir a mano dos UUID, un PIN y una
+          clave técnica de 40 caracteres: ofrecerlo después de que el usuario ya
+          tecleó no ahorra nada. Se oculta en solo-lectura (la tienda no puede
+          escribir sobre una configuración de la organización).
+        -->
+        @if (!readOnlyForStore()) {
+          <section class="scan-cta">
+            <div class="scan-cta__body">
+              <p class="scan-cta__title">
+                ¿Tienes a la mano el set de pruebas de la DIAN?
+              </p>
+              <p class="scan-cta__hint">
+                Sube una foto y la IA llena Software ID, PIN, Test Set ID y la
+                resolución de pruebas. Podrás revisar cada campo antes de
+                aplicarlo.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="scan-cta__button"
+              [disabled]="submitting()"
+              (click)="openScanner()"
+            >
+              <app-icon name="sparkles" [size]="16"></app-icon>
+              <span>Escanear con IA</span>
+            </button>
+          </section>
+
+          <app-dian-habilitation-scanner-modal
+            [isOpen]="scannerOpen()"
+            [scope]="scannerScope()"
+            (isOpenChange)="scannerOpen.set($event)"
+            (confirmed)="onScanConfirmed($event)"
+          ></app-dian-habilitation-scanner-modal>
         }
 
         <app-dian-config-form
@@ -296,6 +344,7 @@ type SuccessInfo =
           [disabled]="submitting() || readOnlyForStore()"
           [hasCertificate]="hasCertificate()"
           [certificateExpiry]="certificateExpiry()"
+          [hideCertificate]="certificateBranch() === 'without_cert' && !hasCertificate()"
           (validityChange)="onValidity($event)"
         ></app-dian-config-form>
 
@@ -305,8 +354,7 @@ type SuccessInfo =
       }
     </div>
   `,
-  styles: [
-    `
+  styles: `
       .step-body {
         display: flex;
         flex-direction: column;
@@ -316,6 +364,58 @@ type SuccessInfo =
         margin: 0;
         font-size: 0.85rem;
         color: var(--color-destructive, #b91c1c);
+      }
+      .scan-cta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid
+          color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+        border-radius: 0.5rem;
+        background: color-mix(
+          in srgb,
+          var(--color-primary) 8%,
+          var(--color-surface, #ffffff)
+        );
+      }
+      @media (min-width: 768px) {
+        .scan-cta {
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+        }
+      }
+      .scan-cta__title {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--color-text-primary, #111827);
+      }
+      .scan-cta__hint {
+        margin: 0.15rem 0 0;
+        font-size: 0.8rem;
+        line-height: 1.4;
+        color: var(--color-text-secondary, #4b5563);
+      }
+      .scan-cta__button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        flex: 0 0 auto;
+        padding: 0.55rem 1rem;
+        border: none;
+        border-radius: 0.5rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--color-primary);
+        color: var(--color-text-on-primary, #ffffff);
+      }
+      .scan-cta__button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
       .banner-inherited-cert {
         display: flex;
@@ -500,13 +600,57 @@ type SuccessInfo =
         font-size: 0.78rem;
         color: var(--color-text-secondary, #6b7280);
       }
-      .identity-documents {
+      /*
+       * Banner informativo azul que vive FUERA del grid de dropzones.
+       * Span completo del ancho para que la copy no quede torcida dentro
+       * de una de las 3 columnas de PC.
+       */
+      .identity-documents-banner {
         display: flex;
-        flex-direction: column;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.85rem 1rem;
+        margin: 0 0 0.6rem 0;
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--color-info) 35%, var(--color-border));
+        border-radius: 0.55rem;
+        background: color-mix(in srgb, var(--color-info) 8%, var(--color-surface));
+        color: var(--color-text-primary, #0f172a);
+        font-size: 0.84rem;
+        line-height: 1.45;
+        box-sizing: border-box;
+      }
+      .identity-documents-banner app-icon {
+        flex: 0 0 auto;
+        color: var(--color-info);
+        margin-top: 0.1rem;
+      }
+      .identity-documents-banner span {
+        flex: 1 1 auto;
+      }
+      .identity-documents-banner strong {
+        color: var(--color-text-primary, #0f172a);
+        font-weight: 600;
+      }
+
+      /*
+       * Contenedor de los 3 dropzones de identidad. Hacemos grid aquí
+       * para que el padre pinte las 3 fichas en fila en PC y apiladas
+       * en móvil/tablet. El __row queda como wrapper transparente.
+       */
+      .identity-documents {
+        display: grid;
+        grid-template-columns: 1fr;
         gap: 0.6rem;
         padding: 0.85rem 1rem;
         border: 1px solid var(--color-border);
         border-radius: 0.5rem;
+      }
+      @media (min-width: 768px) {
+        .identity-documents {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
       }
       .identity-documents__title {
         margin: 0;
@@ -514,19 +658,9 @@ type SuccessInfo =
         font-weight: 600;
         color: var(--color-text-primary, #111827);
       }
-      .identity-documents__hint {
-        margin: 0;
-        font-size: 0.82rem;
-        line-height: 1.4;
-        color: var(--color-text-secondary, #4b5563);
-      }
+      /* El wrapper __row queda como passthrough: el grid vive en el padre. */
       .identity-documents__row {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        padding: 0.55rem 0.7rem;
-        border: 1px dashed var(--color-border);
-        border-radius: 0.4rem;
+        display: contents;
       }
       .identity-documents__row-label {
         font-size: 0.82rem;
@@ -549,7 +683,6 @@ type SuccessInfo =
         color: var(--color-text-secondary, #4b5563);
       }
     `,
-  ],
 })
 export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
@@ -582,8 +715,15 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
 
   // ─── QUI-657 ─────────────────────────────────────────────────────────────
   /** Rama del wizard: "tengo cert" (default) o "no tengo cert". */
+  /**
+   * Default de rama: ahora arranca en `without_cert` para reducir fricción en
+   * tiendas nuevas (el camino más común es tramitar el cert con la plataforma,
+   * no subirlo). Si la prefill ya tiene cert (`hasCertificate() === true`)
+   * la bifurcación ni se renderiza, así que este default aplica solo al
+   * primer wizard visit.
+   */
   readonly certificateBranch = signal<'with_cert' | 'without_cert'>(
-    'with_cert',
+    'without_cert',
   );
   /**
    * Archivos de identidad seleccionados por el usuario en la rama
@@ -638,6 +778,76 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
   );
 
+  // ─── Escáner IA del set de pruebas DIAN ──────────────────────────────────
+  /** Visibilidad del modal de escaneo. */
+  readonly scannerOpen = signal(false);
+  /**
+   * Namespace al que pega el escáner. Es el scope del USUARIO, igual que
+   * `baseUrl()`: quien decide la ruta es el app type con el que entró, no el
+   * `fiscal_scope` de la organización (el backend resuelve la propiedad fiscal
+   * del otro lado).
+   */
+  readonly scannerScope = computed<HabilitationScannerScope>(() =>
+    this.service.userScope() === 'organization' ? 'organization' : 'store',
+  );
+
+  openScanner(): void {
+    this.scannerOpen.set(true);
+  }
+
+  /**
+   * Precarga el formulario con lo que la IA logró leer.
+   *
+   * Se aplica TODO campo con valor (`value !== null`), incluidos los marcados
+   * "confírmalo": el modal ya los mostró uno por uno con su advertencia y exigió
+   * la casilla de verificación, así que el usuario aceptó esos valores a
+   * sabiendas. Lo que NO se aplica es lo que falló su regla estructural — el
+   * backend ya lo devolvió como `null`, y precargar un UUID incompleto o un
+   * rango invertido sería peor que dejar el campo vacío.
+   *
+   * `environment` entra igual que el resto: si los documentos son de
+   * habilitación, el ambiente correcto es `test` y dejar 'production' pegado de
+   * una edición anterior sería mandar el set de pruebas al ambiente real.
+   */
+  onScanConfirmed(scan: DianHabilitationScanResult): void {
+    const patch: Partial<DianConfigValue> = {};
+
+    const take = <K extends keyof DianConfigValue>(
+      key: K,
+      field: HabilitationScanField<DianConfigValue[K] & {}>,
+    ): void => {
+      if (field.value !== null && field.value !== undefined) {
+        patch[key] = field.value;
+      }
+    };
+
+    take('name', scan.name);
+    take('nit', scan.nit);
+    take('nit_dv', scan.nit_dv);
+    take('environment', scan.environment);
+    take('software_id', scan.software_id);
+    take('software_pin', scan.software_pin);
+    take('test_set_id', scan.test_set_id);
+    take('resolution_number', scan.resolution_number);
+    take('resolution_prefix', scan.resolution_prefix);
+    take('resolution_range_from', scan.resolution_range_from);
+    take('resolution_range_to', scan.resolution_range_to);
+    take('resolution_valid_from', scan.resolution_valid_from);
+    take('resolution_valid_to', scan.resolution_valid_to);
+    take('resolution_date', scan.resolution_date);
+    take('resolution_technical_key', scan.resolution_technical_key);
+
+    // El NIT sale del RUT, no del set de pruebas: el documento imprime el del
+    // facturador, que es el mismo, pero el tipo de documento no aparece en
+    // ninguna parte y siempre es NIT en una habilitación.
+    if (patch.nit) {
+      patch.nit_type = 'NIT';
+    }
+
+    this.form().applyScan(patch);
+    this.localError.set(null);
+  }
+
   private readonly form = viewChild.required<DianConfigFormComponent>('form');
   private loadedContextKey: string | null = null;
 
@@ -673,7 +883,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     // que ya no corresponde a este wizard.
     this.successInfo.set(null);
     this.committing.set(false);
-    this.certificateBranch.set('with_cert');
+    this.certificateBranch.set('without_cert');
     this.identityDocuments.set({
       rut: null,
       id: null,
@@ -809,14 +1019,35 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       id: null,
       certificate_of_existence: null,
     });
+    // Si vamos a "no tengo cert", vaciamos también el archivo y contraseña
+    // del cert cargados en el form. Si vamos a "tengo cert", no tocamos
+    // la password — el sentinel MASKED_SECRET que el padre inyectó indica
+    // "el cert sigue cargado en backend".
+    if (branch === 'without_cert') {
+      const form = this.form();
+      if (form) {
+        form.removeFile();
+      }
+    }
   }
 
-  onDocumentFile(
-    type: IdentityDocumentType,
-    event: Event,
-  ): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
+  /**
+   * Vinculado al `(fileRemoved)` del dropzone de identidad. El backend
+   * ya rechazó documentos previos con 400 si el expediente está `issuing`
+   * o `issued`; acá permitimos borrar mientras la prefill siga editable.
+   */
+  removeDocumentFile(type: IdentityDocumentType): void {
+    this.identityDocuments.update((state) => ({
+      ...state,
+      [type]: null,
+    }));
+  }
+
+  /**
+   * Dropzone emite `File` directo en `fileSelected`. Si el usuario cancela
+   * el picker, no se llama y el signal existente se preserva.
+   */
+  onDocumentFile(type: IdentityDocumentType, file: File): void {
     this.identityDocuments.update((state) => ({ ...state, [type]: file }));
   }
 
@@ -833,9 +1064,14 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     }[type];
   }
 
+  /**
+   * Los documentos de identidad se aceptan SOLO en PDF. El backend
+   * (`DIAN_IDENTITY_DOCUMENT_MIME_TYPES`) sigue aceptando JPG/PNG/WEBP
+   * por compatibilidad con flujos legacy, pero el wizard bloquea el picker
+   * del navegador a PDF y muestra helperText "Solo PDF" en el dropzone.
+   */
   allowedMimeAccept(): string {
-    // Lista blanca en espejo del backend: PDF, JPG, PNG, WEBP.
-    return 'application/pdf,image/jpeg,image/png,image/webp';
+    return 'application/pdf';
   }
 
   formatBytes(bytes: number): string {

@@ -25,6 +25,7 @@ import {
   SelectorOption,
 } from '../../selector/selector.component';
 import { IconComponent } from '../../icon/icon.component';
+import { FileUploadDropzoneComponent } from '../../file-upload-dropzone/file-upload-dropzone.component';
 import { formatDateOnlyUTC } from '../../../utils/date.util';
 // Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
 import {
@@ -143,6 +144,7 @@ interface DianConfigControls {
     InputComponent,
     SelectorComponent,
     IconComponent,
+    FileUploadDropzoneComponent,
   ],
   template: `
     <form [formGroup]="form" class="space-y-5">
@@ -306,38 +308,29 @@ interface DianConfigControls {
           </div>
         }
 
-        <div
-          class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary/50 transition-colors"
-          (click)="fileInput.click()"
-          (dragover)="onDragOver($event)"
-          (drop)="onDrop($event)"
-        >
-          <app-icon name="upload-cloud" [size]="28" class="text-gray-400 mx-auto mb-2"></app-icon>
-          <p class="text-sm text-text-secondary">
-            {{
-              selectedFileName() ||
-                (hasCertificate()
-                  ? 'Haga clic o arrastre para reemplazar el certificado'
-                  : 'Haga clic o arrastre su archivo .p12 aquí')
-            }}
-          </p>
-          @if (!selectedFileName()) {
-            <p class="text-xs text-gray-400 mt-1">Solo archivos .p12 o .pfx</p>
-          }
-        </div>
-        <input
-          #fileInput
-          type="file"
-          accept=".p12,.pfx"
-          (change)="onFileSelected($event)"
-          class="hidden"
-        />
-        <app-input
-          label="Contraseña del certificado"
-          type="password"
-          formControlName="certificate_password"
-          placeholder="Contraseña del archivo .p12"
-        ></app-input>
+        @if (!hideCertificate()) {
+          <!--
+            Bloque de cert. Envuelto en @if para que la rama "no tengo cert"
+            del wizard (QUI-657) lo oculte. El FormControl certificate_password
+            sigue existiendo con el sentinel MASKED_SECRET; el backend solo
+            recibe el pin si el usuario lo tipeó de verdad.
+          -->
+          <app-file-upload-dropzone
+            accept=".p12,.pfx"
+            icon="upload-cloud"
+            [label]="hasCertificate() ? 'Haga clic para reemplazar el certificado' : 'Subir certificado .p12'"
+            [helperText]="selectedFileName() ? selectedFileName() : 'Obligatorio · Solo .p12 o .pfx con contraseña'"
+            (fileSelected)="onFileSelected($event)"
+            (fileRemoved)="removeFile()"
+          ></app-file-upload-dropzone>
+          <app-input
+            label="Contraseña del certificado"
+            type="password"
+            formControlName="certificate_password"
+            placeholder="Contraseña del archivo .p12"
+            helperText="Solo se pide cuando subes un archivo nuevo."
+          ></app-input>
+        }
       </section>
     </form>
   `,
@@ -353,6 +346,17 @@ export class DianConfigFormComponent {
    */
   readonly hasCertificate = input<boolean>(false);
   readonly certificateExpiry = input<string | null>(null);
+
+  /**
+   * QUI-657 bifurcation step wiring. Cuando el usuario eligió la rama
+   * "no tengo certificado" en el wizard, el step pasa `hideCertificate=true`
+   * y este form esconde tanto el dropzone del `.p12` como el input de la
+   * contraseña. El FormControl `certificate_password` sigue existiendo
+   * (sentinel MASKED_SECRET) para no invalidar validaciones de la prefill;
+   * `persistConfigAndCertificate` ya solo envía el cert si el file + pin
+   * están presentes.
+   */
+  readonly hideCertificate = input<boolean>(false);
 
   readonly valueChange = output<DianConfigValue>();
   readonly validityChange = output<boolean>();
@@ -506,15 +510,51 @@ export class DianConfigFormComponent {
     return this.toValue();
   }
 
+  /**
+   * Precarga los campos que un escáner IA leyó, sobrescribiendo lo que hubiera.
+   *
+   * POR QUÉ NO SE REUSA `initialValue`: ese input es el snapshot de la prefill
+   * y su `effect` vuelve a correr cada vez que el padre lo recalcula. Si el
+   * escaneo entrara por ahí, una recarga de la prefill repondría los datos
+   * viejos encima de lo que el usuario acaba de aceptar. Acá el patch es un
+   * evento puntual, y `emitCurrent()` deja al padre con el valor nuevo sin
+   * esperar al `valueChanges` (el patch va con `emitEvent: false` para no
+   * disparar dos emisiones por un solo cambio).
+   *
+   * `markAsDirty` importa: sin él, el formulario recién precargado se ve
+   * intacto y el usuario puede salir del paso creyendo que no hay nada por
+   * guardar.
+   */
+  applyScan(patch: Partial<DianConfigValue>): void {
+    if (Object.keys(patch).length === 0) return;
+    this.form.patchValue(patch, { emitEvent: false });
+    this.form.markAsDirty();
+    this.syncResolutionErrors();
+    this.emitCurrent();
+  }
+
   markAllTouched(): void {
     this.form.markAllAsTouched();
   }
 
   // ── File handling ─────────────────────────────────────────
-  onFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
+  /**
+   * Vinculado al `(fileSelected)` del `<app-file-upload-dropzone>`,
+   * que emite `File` directamente (no el `Event` nativo). El dropzone
+   * ya valida extensión + tamaño interno.
+   */
+  onFileSelected(file: File): void {
     this.setFile(file);
+  }
+
+  /**
+   * Vinculado al `(fileRemoved)` del `<app-file-upload-dropzone>`.
+   * El form-control `certificate_password` NO se limpia — el sentinel
+   * `MASKED_SECRET` que el padre inyectó indica "el cert sigue cargado
+   * en backend, no reescribas este campo a vacío".
+   */
+  removeFile(): void {
+    this.setFile(null);
   }
 
   onDragOver(event: DragEvent): void {

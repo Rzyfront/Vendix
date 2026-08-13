@@ -11,14 +11,24 @@ import {
   HttpStatus,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { DianConfigService } from './dian-config.service';
 import { DianTestService } from './dian-test.service';
+import {
+  DianHabilitationScannerService,
+  MAX_HABILITATION_SCAN_FILES,
+} from './dian-habilitation-scanner.service';
+import { assertScannableFiles } from './habilitation-scan-files.util';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -35,6 +45,7 @@ export class DianConfigController {
     private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
+    private readonly habilitation_scanner_service: DianHabilitationScannerService,
   ) {}
 
   @Get('dashboard')
@@ -111,6 +122,32 @@ export class DianConfigController {
   async getConfigById(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dian_config_service.getConfigById(id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Lee 1-3 documentos de la habilitación DIAN (pantalla del set de pruebas y,
+   * opcionalmente, la resolución de pruebas) y devuelve los campos del
+   * formulario anotados con si son confiables.
+   *
+   * No escribe nada: guardar sigue siendo el `POST`/`PATCH` que el usuario
+   * dispara después de revisar, así que una lectura equivocada nunca aterriza
+   * sola en la configuración fiscal.
+   */
+  @Post('scan-habilitation')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  // Holgura de 1 a propósito: si multer corta en el tope exacto responde
+  // "Unexpected field - files" sin error_code, y el frontend no puede
+  // traducirlo. Dejándolo pasar, `assertScannableFiles` devuelve
+  // HABILITATION_SCAN_TOO_MANY_FILES con su mensaje en español.
+  @UseInterceptors(FilesInterceptor('files', MAX_HABILITATION_SCAN_FILES + 1))
+  async scanHabilitation(@UploadedFiles() files: Express.Multer.File[]) {
+    const result = await this.habilitation_scanner_service
+      .scanHabilitationDocuments(assertScannableFiles(files));
+    return this.response_service.success(
+      result,
+      'Documentos de habilitación escaneados exitosamente',
+    );
   }
 
   @Post()
@@ -484,6 +521,8 @@ export class DianConfigController {
  * cambio de forma de estos endpoints.
  */
 @Controller('super-admin/fiscal/certificates-pending')
+@UseGuards(RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class SuperAdminCertificatesPendingController {
   constructor(
     private readonly dian_config_service: DianConfigService,

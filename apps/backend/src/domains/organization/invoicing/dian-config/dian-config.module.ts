@@ -10,6 +10,7 @@ import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { BullModule } from '@nestjs/bullmq';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import { DianHabilitationScannerService } from '../../../store/invoicing/dian-config/dian-habilitation-scanner.service';
 
 @Module({
   imports: [
@@ -29,6 +30,9 @@ import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.
     FiscalScopeService,
     ManualCertificateIssuerAdapter,
     DianTestService,
+    // Mismo servicio que la tienda: `AIEngineModule` es @Global, así que basta
+    // declararlo como provider en cada módulo que lo inyecta.
+    DianHabilitationScannerService,
   ],
   exports: [OrgDianConfigService],
 })

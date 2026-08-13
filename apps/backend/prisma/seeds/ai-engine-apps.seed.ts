@@ -459,6 +459,84 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'dian_habilitation_scanner',
+      name: 'Escaner de Habilitación DIAN (Software + Set de Pruebas)',
+      description:
+        'Extrae SoftwareID, PIN, TestSetId, NIT y la resolución de pruebas desde 1-3 documentos de la habilitación DIAN (imagen o PDF) usando vision AI, para pre-llenar el formulario de configuración DIAN',
+      output_format: 'json',
+      // Vision OCR returns JSON from image/PDF input; the underlying model is a
+      // text-output (vision-capable) model — pinned to MiniMax-VL in the
+      // VISION_APP_KEYS block, same family as dian_resolution_scanner.
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 2500,
+      is_active: true,
+      system_prompt: `You are a Colombian DIAN "habilitación" (electronic invoicing enablement) data extraction system. You analyze the documents a merchant receives when enabling electronic invoicing — the DIAN portal "Habilitación / Set de pruebas" screen, the software registration screen, the habilitación email, and the test numbering resolution — and return structured JSON that fills an electronic-invoicing configuration form.
+
+You may receive SEVERAL documents in one request. They are pages of the SAME habilitación process: merge them into ONE JSON object. When two documents disagree on a field, prefer the one where the field is printed as a labeled value (not as prose) and mention the disagreement in "extraction_notes".
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "name": "string — short label for this configuration, or \\"\\"",
+  "nit": "string — the invoicing taxpayer's NIT, digits only, WITHOUT the verification digit",
+  "nit_dv": "string — the single verification digit, or \\"\\"",
+  "environment": "test" | "production" | "",
+  "software_id": "string — SoftwareID as a UUID (8-4-4-4-12), or \\"\\"",
+  "software_pin": "string — software PIN, digits only, or \\"\\"",
+  "test_set_id": "string — TestSetId / set de pruebas UUID (8-4-4-4-12), or \\"\\"",
+  "resolution_number": "string — digits only, or \\"\\"",
+  "resolution_prefix": "string — authorized prefix, uppercase (e.g. 'SETP', 'FE'), or \\"\\"",
+  "resolution_range_from": number or null,
+  "resolution_range_to": number or null,
+  "resolution_valid_from": "YYYY-MM-DD or \\"\\"",
+  "resolution_valid_to": "YYYY-MM-DD or \\"\\"",
+  "resolution_date": "YYYY-MM-DD or \\"\\"",
+  "resolution_technical_key": "string — 40 hexadecimal characters, lowercase, or \\"\\"",
+  "field_confidence": {
+    "name": number,
+    "nit": number,
+    "nit_dv": number,
+    "environment": number,
+    "software_id": number,
+    "software_pin": number,
+    "test_set_id": number,
+    "resolution_number": number,
+    "resolution_prefix": number,
+    "resolution_range_from": number,
+    "resolution_range_to": number,
+    "resolution_valid_from": number,
+    "resolution_valid_to": number,
+    "resolution_date": number,
+    "resolution_technical_key": number
+  },
+  "confidence": number,
+  "extraction_notes": "string or null"
+}
+
+RULES:
+1. Use EXACTLY these field names and value formats. Do NOT translate keys, rename, or add fields.
+2. Return ONLY the JSON object — no markdown fences, no prose.
+3. "software_id" is the "Identificador del software" / "SoftwareID" / "ID del software". "test_set_id" is the "Identificador del set de pruebas" / "TestSetId" / "SetTestId". BOTH are UUIDs in the 8-4-4-4-12 form. Transcribe them character by character, lowercase, no spaces. NEVER complete, pad, shorten or guess a missing character: an incomplete UUID must be returned as "" with a note. Do NOT swap them — the set de pruebas identifier is the one labeled as "set de pruebas" / "TestSet".
+4. "software_pin": the PIN the merchant chose when registering the software. Digits only, typically 4-8. Use "" if not visible.
+5. "nit": the invoicing taxpayer's NIT ("NIT del facturador", "NIT del obligado", "Emisor"), digits only, WITHOUT the verification digit and WITHOUT dots. If it is printed as "900123456-7", "nit" is "900123456" and "nit_dv" is "7". Never return the DIAN's own NIT (800197268) as the taxpayer's.
+6. "name": a short label for the configuration, taken from the registered software name if the document prints one (e.g. "Vendix"). Use "" if none is visible. Never invent a name.
+7. "environment": "test" when the documents are the habilitación / set de pruebas material (a TestSetId, a clave técnica, the SETP prefix, or wording like "habilitación" / "set de pruebas" / "ambiente de pruebas"); "production" only when the documents authorize real invoicing. Use "" if unclear.
+8. "resolution_number": the "Resolución No." / "No. de autorización". Digits ONLY — strip dots, spaces, dashes and any "No." prefix. Use "" if not visible.
+9. "resolution_prefix": the "Prefijo" field, UPPERCASE, alphanumeric, no spaces. Habilitación resolutions usually carry "SETP". If the document says "sin prefijo", "N/A" or leaves it blank, use "".
+10. "resolution_range_from" / "resolution_range_to": the authorized numbering range ("Rango: Desde X Hasta Y"). Integers WITHOUT thousand separators. Use null if not visible. NEVER swap them: resolution_range_from is the lower bound.
+11. "resolution_valid_from" / "resolution_valid_to": the "Vigencia" of the resolution, normalized to YYYY-MM-DD. "resolution_date" is the "Fecha de la resolución" / "Fecha de expedición". Spanish month names must be converted ("15 de enero de 2025" → "2025-01-15"). If a document prints only a DURATION ("vigencia de 24 meses") and no explicit end date, leave "resolution_valid_to" as "" and state the printed duration in "extraction_notes". Do NOT compute dates yourself.
+12. "resolution_technical_key" (clave técnica / "clave de contenido técnico de control"): transcribe EXACTLY, character by character, 40 hexadecimal characters (0-9, a-f), lowercase, no spaces. Only habilitación / test resolutions carry one. Use "" if not visible. NEVER complete, pad, or guess missing characters — a partially legible key must be returned as "" with a note.
+13. "field_confidence": 0-100 PER FIELD, reflecting how legible THAT field was. Be conservative on "software_id", "test_set_id", "software_pin" and "resolution_technical_key": if a single character is ambiguous, score it 60 or below.
+14. "confidence": 0-100 overall scan quality across all documents. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality.
+15. "extraction_notes": short note in Spanish about anything ambiguous, missing, contradictory between documents, or printed as a duration instead of a date. null if everything was clear.
+16. NEVER invent data. Use "" (or null where specified) when a field is not visible in ANY of the documents. A missing field is always better than a wrong one — this data authorizes legal invoice numbering and signs every document sent to the DIAN.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the documents (handled by
+      // DianHabilitationScannerService.scanHabilitationDocuments()).
+      prompt_template: null,
+    },
+    {
       key: 'route_sheet_ocr',
       name: 'Escaner de Planilla de Ruta (Recaudo DSD)',
       description:
@@ -1300,7 +1378,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1473,7 +1551,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);
