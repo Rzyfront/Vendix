@@ -8,6 +8,7 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { RefundCalculationService } from './services/refund-calculation.service';
 import { RefundFlowService } from './services/refund-flow.service';
+import { RefundMethodsService } from './services/refund-methods.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
 import { CashRegistersModule } from '../../cash-registers/cash-registers.module';
@@ -36,6 +37,7 @@ import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
     OrderFlowService,
     RefundCalculationService,
     RefundFlowService,
+    RefundMethodsService,
     StockLevelManager,
     InventoryTransactionsService,
     OrderEtaService,
