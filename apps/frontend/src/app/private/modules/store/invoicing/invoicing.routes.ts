@@ -23,6 +23,12 @@ export const invoicingRoutes: Routes = [
                     route: '/admin/invoicing/invoices',
                 },
                 {
+                    id: 'support-documents',
+                    label: 'Documentos soporte',
+                    icon: 'file-text',
+                    route: '/admin/invoicing/support-documents',
+                },
+                {
                     id: 'resolutions',
                     label: 'Resoluciones',
                     icon: 'file-check',
@@ -51,6 +57,18 @@ export const invoicingRoutes: Routes = [
                 path: 'invoices',
                 loadComponent: () =>
                     import('./invoicing.component').then((c) => c.InvoicingComponent),
+            },
+            {
+                // QUI-682: pestaña dedicada a documentos soporte. Lazy
+                // standalone: no se monta con el shell ni con el componente
+                // padre de facturas de venta, así que añadir `cufe`/`cuds` al
+                // query o crear un item en esta pestaña no rompe el árbol de
+                // NgRx ni las guards de InvoicingComponent.
+                path: 'support-documents',
+                loadComponent: () =>
+                    import('./components/support-documents/support-documents-page.component').then(
+                        (m) => m.SupportDocumentsPageComponent,
+                    ),
             },
             {
                 path: 'resolutions',
