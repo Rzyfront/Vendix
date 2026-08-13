@@ -13,8 +13,6 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { SupportDocumentService } from '../../services/support-document.service';
 import type { SupportDocumentRow } from '../../interfaces/support-document.interface';
 import type {
-  CardComponent,
-  EmptyStateComponent,
   IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
@@ -23,7 +21,6 @@ import type {
   ResponsiveDataViewComponent,
   TableAction,
   TableColumn,
-  TooltipComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -44,9 +41,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
-    EmptyStateComponent,
     IconComponent,
-    TooltipComponent,
   ],
   templateUrl: './support-document-list.component.html',
 })
@@ -190,12 +185,12 @@ export class SupportDocumentListComponent {
       transform: (val: unknown) => this.getTypeLabel(String(val)),
     },
     {
-      key: 'supplier_name',
+      key: 'customer_name',
       label: 'Proveedor',
       sortable: true,
       priority: 1,
-      transform: (_val: unknown, row: SupportDocumentRow) =>
-        row?.customer_name || 'Sin proveedor',
+      transform: (val: unknown, row: SupportDocumentRow) =>
+        (val as string) || row?.customer_name || 'Sin proveedor',
     },
     {
       key: 'cufe',

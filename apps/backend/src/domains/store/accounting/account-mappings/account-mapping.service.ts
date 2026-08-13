@@ -182,6 +182,23 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Ingresos (reversa)',
   },
   'refund.completed.cash': { code: '1105', description: 'Caja/Banco' },
+  // REFUND OVERHAUL — per-method credit-side routing (plan docs/plans/refund-modal-overhaul.md
+  // step 5 / 8). Each refund_method credits a different PUC account based on where the
+  // money actually moves: original_payment + bank_transfer → 1110 Bancos (processor /
+  // bank); store_credit → 2335 Wallet Pasivo (customer credit liability, not cash).
+  // 'refund.completed.cash' remains the fallback for cash refunds (1105).
+  'refund.completed.original_payment': {
+    code: '1110',
+    description: 'Bancos (reversa processor)',
+  },
+  'refund.completed.bank_transfer': {
+    code: '1110',
+    description: 'Bancos (bank transfer)',
+  },
+  'refund.completed.store_credit': {
+    code: '2335',
+    description: 'Wallet Pasivo (customer credit)',
+  },
   'purchase_order.received.inventory': {
     code: '1435',
     description: 'Inventario',
