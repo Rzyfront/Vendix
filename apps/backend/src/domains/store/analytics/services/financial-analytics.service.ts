@@ -30,6 +30,31 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 // Aggregated P&L tolerates 1-2 min of staleness → short TTL (ms).
 const PROFIT_LOSS_CACHE_TTL_MS = 120_000;
 
+/**
+ * Retenciones (withholdings) — values the store either keeps on behalf of the
+ * DIAN (`practicadas`, on customer payments) or sends to the DIAN on supplier
+ * payments (`sufridas`). Lives here next to the contract's `tax_type_enum`
+ * because the analytic block that consumes these is per-line, not per-entity.
+ *
+ *   retefuente      — `tax_type = 'withholding'`, distinguished by `tax_name`
+ *                     (the `retefuente` literal value described in the ticket
+ *                     text does not exist as a distinct enum value — see
+ *                     `analytics-metrics.contract.ts` comment).
+ *   reteiva         — `tax_type = 'reteiva'`.
+ *   reteica         — `tax_type = 'reteica'`.
+ *
+ * Source schema: `tax_type_enum` ∈ `iva | inc | ica | withholding | reteiva |
+ * reteica`.
+ */
+const WITHHOLDING_TAX_TYPES = ['withholding', 'reteiva', 'reteica'] as const;
+
+/**
+ * Runtime Set form of {@link WITHHOLDING_TAX_TYPES}, used for `.includes` /
+ * `.has` checks on values typed as `string` from raw SQL rows. The const
+ * tuple is the type-level source of truth; the Set is the runtime helper.
+ */
+const WITHHOLDING_SET: ReadonlySet<string> = new Set(WITHHOLDING_TAX_TYPES);
+
 /** Grouping key for a financial-summary export row (the ReportBuilder lays out by section). */
 export type FinancialExportSection =
   | 'meta'
@@ -160,6 +185,7 @@ export class FinancialAnalyticsService {
     // SAFE_STATE_REGEX-equivalent guard for the inlined IN list. SQLSTATE list
     // is also charset-validated by sqlStateList; this cast documents intent.
     const revenueStates = sqlStateList(COMPLETED_SALE_STATES);
+    const purchaseStates = sqlStateList(PURCHASE_COMMITTED_STATES);
 
     // QUI-630: GROUP BY on the per-tax rows in SQL — no more findMany of every
     // line into memory (defect 6). Base derived from each tax's own amount/rate
@@ -235,6 +261,41 @@ export class FinancialAnalyticsService {
         AND o.created_at <= ${endDate}
     `);
 
+    // QUI-630 defect 4: the DIAN posición needs ALL sides — ventas IVA generado,
+    // compras IVA descontable, retenciones practicadas (sales) y retenciones
+    // sufridas (purchases). The OLD endpoint only summed IVA from sales and
+    // called it `net_tax`, which is NOT the obligation with the DIAN — it's the
+    // IVA neto después de reembolsos del cliente, no la posición fiscal real.
+    //
+    // Source of truth for the formula: `analytics-metrics.contract.ts`
+    // (`computeNetVatPosition`). The service is a CONSUMER of that helper.
+    //
+    // Tenant scoping: `purchase_orders` carries `organization_id` (NOT a
+    // direct `store_id`); per `vendix-prisma-scopes` we resolve the store
+    // scope through `inventory_locations.store_id`, which `purchase_orders`
+    // already FKs to via `location_id`. This keeps the read inside the store
+    // tenant without scanning the whole org.
+    const purchaseTaxRows = await rawClient.$queryRaw<Array<{
+      tax_type: string;
+      total_tax: string | number;
+      deductible_tax: string | number;
+    }>>(Prisma.sql`
+      SELECT
+        COALESCE(poi.tax_type::text, 'unclassified') AS tax_type,
+        SUM(poi.tax_amount)::decimal AS total_tax,
+        SUM(poi.deductible_tax_amount)::decimal AS deductible_tax
+      FROM purchase_order_items poi
+      -- purchase_orders.created_at is an INSTANTE (not a midnight business
+      -- date), so the tz-aware parseDateRange window is correct.
+      JOIN purchase_orders po ON poi.purchase_order_id = po.id -- tz-audit:ignore
+      JOIN inventory_locations il ON po.location_id = il.id
+      WHERE il.store_id = ${storeId}
+        AND po.status IN (${purchaseStates})
+        AND po.created_at >= ${startDate}
+        AND po.created_at <= ${endDate}
+      GROUP BY COALESCE(poi.tax_type::text, 'unclassified')
+    `);
+
     const taxableRevenue = Number(revenueRows[0]?.taxable_revenue ?? 0);
     const exemptRevenue = Number(revenueRows[0]?.exempt_revenue ?? 0);
 
@@ -273,18 +334,117 @@ export class FinancialAnalyticsService {
     const taxableRevenueRounded = this.round2(taxableRevenue);
     const exemptRevenueRounded = this.round2(exemptRevenue);
 
+    // Block sums: IVA generado / INC / ICA (sales) + IVA descontable +
+    // retenciones practicadas (sales) / sufridas (purchases). Defaults are 0
+    // for blocks with no rows in the period, so the contract's helper is
+    // safely called on every period.
+    const ivaGenerado = this.sumTaxByType(breakdown, 'iva');
+    const incGenerado = this.sumTaxByType(breakdown, 'inc');
+    const icaGenerado = this.sumTaxByType(breakdown, 'ica');
+    const retePracticadas = this.sumRetenciones(breakdown, WITHHOLDING_TAX_TYPES);
+    const ivaDescontable = this.round2(
+      purchaseTaxRows
+        .filter((r) => r.tax_type === 'iva')
+        .reduce((sum, r) => sum + Number(r.deductible_tax ?? 0), 0),
+    );
+    const reteSufridas = this.round2(
+      purchaseTaxRows
+        .filter((r) => WITHHOLDING_SET.has(r.tax_type))
+        .reduce((sum, r) => sum + Number(r.total_tax ?? 0), 0),
+    );
+
+    // NET VAT POSITION — la cifra que la declaración DIAN cierra. Formula
+    // belongs to the CONTRACT (`computeNetVatPosition`); this is the
+    // single point that reads the helper, so a change to the formula
+    // propagates to every consumer instead of silently diverging here.
+    const netVatPosition = this.round2(
+      computeNetVatPosition({
+        iva_generado: ivaGenerado,
+        inc_generado: incGenerado,
+        ica_generado: icaGenerado,
+        iva_descontable: ivaDescontable,
+        rete_practicadas: retePracticadas,
+        rete_sufridas: reteSufridas,
+      }),
+    );
+
+    // Effective tax rate stays null (NOT 0) when the period has no taxable
+    // revenue — matches the contract's `computeGrowth(null)` semantics and
+    // prevents a flat "0 %" badge from masking an empty period.
+    const effectiveTaxRateValue = computeEffectiveTaxRate(
+      totalTaxCollected,
+      taxableRevenueRounded,
+    );
+
     return {
+      // Sales-side collected (revenue side of the declaración).
       total_tax_collected: totalTaxCollected,
       total_tax_refunded: totalTaxRefunded,
-      net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
       total_taxable_revenue: taxableRevenueRounded,
       exempt_revenue: exemptRevenueRounded,
+      // Per-tax-type breakdown for the DIAN declaración (QUI-630 defect 4).
+      iva_generado: ivaGenerado,
+      inc_generado: incGenerado,
+      ica_generado: icaGenerado,
+      iva_descontable: ivaDescontable,
+      rete_practicadas: retePracticadas,
+      rete_sufridas: reteSufridas,
+      /**
+       * NET VAT POSITION — what the store owes the DIAN at the end of the
+       * period. Positive: saldo a cargo. Negative: saldo a favor. Formula is
+       * in `computeNetVatPosition` (analytics-metrics.contract.ts), which is
+       * the single source of truth.
+       */
+      net_vat_position: netVatPosition,
+      /**
+       * `net_tax` is the IVA neto after customer refunds, NOT the DIAN
+       * posición. Kept for the export's "total a pagar" column where it is
+       * the historical definition, but the declaration should now read
+       * `net_vat_position` instead.
+       */
+      net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
+      /**
+       * Effective rate as a percentage of taxable revenue. `null` (NOT `0`)
+       * when the period has no taxable revenue — matches the contract's
+       * `computeGrowth(null)` semantics.
+       */
       effective_tax_rate:
-        taxableRevenueRounded > 0
-          ? this.round2((totalTaxCollected / taxableRevenueRounded) * 100)
-          : 0,
+        effectiveTaxRateValue === null ? null : this.round2(effectiveTaxRateValue),
       breakdown,
     };
+  }
+
+  /**
+   * Sums the `total_tax` field across the rounded breakdown rows for a
+   * specific `tax_type`. Used to derive `iva_generado` / `inc_generado` /
+   * `ica_generado` from the per-tax-name detail rows without re-querying the DB.
+   */
+  private sumTaxByType(
+    breakdown: ReadonlyArray<{ tax_type: string | null; total_tax: number }>,
+    taxType: string,
+  ): number {
+    return this.round2(
+      breakdown
+        .filter((b) => b.tax_type === taxType)
+        .reduce((sum, b) => sum + b.total_tax, 0),
+    );
+  }
+
+  /**
+   * Sums the `total_tax` field across all retenciones in the breakdown. Used
+   * for `rete_practicadas` (sales side). `reteSufridas` is derived from the
+   * purchase-side aggregate instead, because purchase-side rows do not
+   * belong to the sales breakdown.
+   */
+  private sumRetenciones(
+    breakdown: ReadonlyArray<{ tax_type: string | null; total_tax: number }>,
+    taxTypes: readonly string[],
+  ): number {
+    return this.round2(
+      breakdown
+        .filter((b) => b.tax_type !== null && taxTypes.includes(b.tax_type))
+        .reduce((sum, b) => sum + b.total_tax, 0),
+    );
   }
 
   async getCashSessionsReport(query: AnalyticsQueryDto) {

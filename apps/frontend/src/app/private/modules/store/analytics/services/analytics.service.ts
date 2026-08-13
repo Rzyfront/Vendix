@@ -203,6 +203,10 @@ export interface TaxSummary {
   period: { start_date: string; end_date: string };
   total_tax_collected: number;
   total_tax_refunded: number;
+  /**
+   * IVA neto después de reembolsos del cliente. NOT the DIAN posición — kept
+   * for backward compat. Use `net_vat_position` for the declaración.
+   */
   net_tax: number;
   /**
    * Base gravable EXENTA — suma de líneas en el período que NO tienen
@@ -211,9 +215,51 @@ export interface TaxSummary {
    */
   exempt_revenue: number;
   total_taxable_revenue: number;
-  effective_tax_rate: number;
+  /**
+   * Tasa efectiva sobre la base gravable. `null` (NOT 0) cuando el período
+   * no tiene base gravable — mismo contrato que `computeGrowth(null)`. La UI
+   * debe mostrar "sin base" en ese caso.
+   */
+  effective_tax_rate: number | null;
+  /**
+   * DIAN posición — IVA generado en ventas. `0` cuando el período no tiene
+   * ventas gravadas.
+   */
+  iva_generado: number;
+  /**
+   * INC generado en ventas. `0` cuando el período no tiene INC.
+   */
+  inc_generado: number;
+  /**
+   * ICA generado en ventas. `0` cuando el período no tiene ICA.
+   */
+  ica_generado: number;
+  /**
+   * IVA descontable de compras (purchase_order_items.deductible_tax_amount)
+   * sobre PURCHASE_COMMITTED_STATES. Crédito contra la obligación.
+   */
+  iva_descontable: number;
+  /**
+   * Retenciones practicadas sobre pagos de clientes (sales) — el comercio
+   * retiene para la DIAN. Crédito contra la obligación.
+   */
+  rete_practicadas: number;
+  /**
+   * Retenciones sufridas sobre pagos a proveedores (purchases) — el comercio
+   * envía a la DIAN. Débito contra la obligación.
+   */
+  rete_sufridas: number;
+  /**
+   * NET VAT POSITION — la cifra que la declaración DIAN cierra.
+   * Positivo: saldo a cargo. Negativo: saldo a favor.
+   * Fórmula: `(iva_generado + inc_generado + ica_generado) − iva_descontable
+   *          − rete_sufridas + rete_practicadas`. Definida en
+   *          `analytics-metrics.contract.ts` (`computeNetVatPosition`).
+   */
+  net_vat_position: number;
   breakdown: Array<{
     tax_name: string;
+    tax_type: string | null;
     tax_rate: number;
     total_tax: number;
     taxable_amount: number;
