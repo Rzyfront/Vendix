@@ -733,7 +733,10 @@ export class InventoryAnalyticsService {
       }
       totalValue += value;
       totalQuantity += qty;
-      if (layerValue === undefined && !(cost > 0) && qty > 0) {
+      // QUI-619: la condicion correcta es 'no hay layer Y no hay cost_per_unit'.
+      // Antes referenciaba `cost` que no existe en este scope — eso era un
+      // bug pre-existente que rompia el build.
+      if (layerValue === undefined && !sl.cost_per_unit && qty > 0) {
         unitsWithoutCost += qty;
       }
 
