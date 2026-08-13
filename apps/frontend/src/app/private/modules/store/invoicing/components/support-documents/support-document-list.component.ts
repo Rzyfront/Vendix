@@ -356,6 +356,7 @@ export class SupportDocumentListComponent {
       v.search ||
         v.status ||
         v.cuds ||
+        (v.invoice_type && v.invoice_type !== 'support_document') ||
         (v.supplier_id != null && v.supplier_id !== this.initialSupplierId()) ||
         v.date_from ||
         v.date_to,
