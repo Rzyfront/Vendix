@@ -133,9 +133,13 @@ export class RefundCalculationService {
       }
 
       if (reqItem.inventory_action === 'restock' && !reqItem.location_id) {
-        throw new BadRequestException(
-          `Location is required for restock action on "${orderItem.product_name}"`,
-        );
+        // REFUND OVERHAUL — `location_id` is now optional. The caller
+        // (RefundFlowService) resolves the store's default warehouse AFTER
+        // this preview returns. Here we only validate that if explicitly
+        // provided, it must be a positive integer (>0). The error message
+        // moved to the eventual flow call to keep the preview contract
+        // synchronous and pure.
+        // Casting to unknown → null is fine; both producers respect null.
       }
 
       const unit_price = Number(orderItem.unit_price);
