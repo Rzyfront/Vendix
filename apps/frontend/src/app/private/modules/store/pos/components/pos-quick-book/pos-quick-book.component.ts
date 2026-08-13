@@ -7,6 +7,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import { PosCartService } from '../../services/pos-cart.service';
 
 @Component({
   selector: 'app-pos-quick-book',
@@ -23,6 +24,7 @@ export class PosQuickBookComponent {
   created = output<any>();
 
   private http = inject(HttpClient);
+  private cartService = inject(PosCartService);
 
   // Step 1: Select service
   services = signal<any[]>([]);
@@ -187,7 +189,7 @@ export class PosQuickBookComponent {
     };
     const existingOrderId = this.cartService.getCurrentState().linkedOrderId;
     if (existingOrderId != null) {
-      payload.order_id = existingOrderId;
+      payload['order_id'] = existingOrderId;
     }
 
     this.http

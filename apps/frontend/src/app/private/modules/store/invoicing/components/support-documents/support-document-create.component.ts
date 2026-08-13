@@ -19,21 +19,21 @@ import {
 } from '@angular/forms';
 
 import { SupportDocumentService } from '../../services/support-document.service';
-import { SuppliersService } from '../../../../../inventory/services/suppliers.service';
+import { SuppliersService } from '../../../inventory/services/suppliers.service';
 import type {
   CreateSupportDocumentDto,
   SupportDocumentRow,
   SupportDocumentType,
 } from '../../interfaces/support-document.interface';
-import type {
+import {
   ButtonComponent,
   IconComponent,
   InputComponent,
   ModalComponent,
   SelectorComponent,
-  SelectorOption,
   TextareaComponent,
 } from '../../../../../../shared/components/index';
+import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -90,12 +90,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           ></app-selector>
         </div>
 
-        @if (form.controls.invoice_type.value === 'support_adjustment_note') {
+        @if (form.controls['invoice_type'].value === 'support_adjustment_note') {
           <app-input
             label="ID del documento soporte original"
             type="number"
             formControlName="related_invoice_id"
-            [control]="form.controls.related_invoice_id"
+            [control]="form.controls['related_invoice_id']"
             placeholder="ID del documento soporte aceptado por la DIAN"
             [required]="true"
             min="1"
@@ -107,14 +107,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             label="Fecha de emisión"
             type="date"
             formControlName="issue_date"
-            [control]="form.controls.issue_date"
+            [control]="form.controls['issue_date']"
             [required]="true"
           ></app-input>
           <app-input
             label="Fecha de pago"
             type="date"
             formControlName="due_date"
-            [control]="form.controls.due_date"
+            [control]="form.controls['due_date']"
           ></app-input>
         </div>
 
@@ -123,7 +123,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             label="Retenciones aplicadas"
             [currency]="true"
             formControlName="withholding_amount"
-            [control]="form.controls.withholding_amount"
+            [control]="form.controls['withholding_amount']"
             placeholder="0"
           ></app-input>
         </div>
@@ -206,7 +206,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         <app-textarea
           label="Notas"
           formControlName="notes"
-          [control]="form.controls.notes"
+          [control]="form.controls['notes']"
           placeholder="Observaciones adicionales..."
           [rows]="3"
         ></app-textarea>
@@ -294,10 +294,10 @@ export class SupportDocumentCreateComponent {
     });
 
     // Cuando cambia a nota de ajuste, related_invoice_id se vuelve obligatorio.
-    this.form.controls.invoice_type.valueChanges
+    this.form.controls['invoice_type'].valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((type) => {
-        const ctrl = this.form.controls.related_invoice_id;
+        const ctrl = this.form.controls['related_invoice_id'];
         if (type === 'support_adjustment_note') {
           ctrl.setValidators([Validators.required, Validators.min(1)]);
         } else {
@@ -326,7 +326,7 @@ export class SupportDocumentCreateComponent {
     effect(() => {
       const id = this.initialSupplierId();
       if (id != null && !this.supplierTouchedByUser()) {
-        this.form.controls.supplier_id.setValue(id);
+        this.form.controls['supplier_id'].setValue(id);
       }
     });
   }
@@ -344,7 +344,7 @@ export class SupportDocumentCreateComponent {
       .getSuppliers({ limit: 200 } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
+        next: (response: any) => {
           const list = (response?.data ?? []) as Array<{
             id: number;
             name: string;

@@ -301,7 +301,7 @@ export class PosPaymentService {
       return this.chargeAdoptedOrder(
         cartState,
         paymentRequest,
-        user_id,
+        String(user_id),
         register_id,
       );
     }
@@ -906,7 +906,7 @@ export class PosPaymentService {
       amount,
       currency,
       storePaymentMethodId: parseInt(paymentRequest.paymentMethod.id, 10),
-      storeId: parseInt(this.storeContextService.getStoreId() ?? '0', 10),
+      storeId: Number(this.storeContextService.getStoreId() ?? 0),
       customerId: cartState.customer?.id
         ? Number(cartState.customer.id)
         : undefined,

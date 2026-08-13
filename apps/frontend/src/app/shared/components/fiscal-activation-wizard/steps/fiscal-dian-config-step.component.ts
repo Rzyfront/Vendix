@@ -261,7 +261,7 @@ type SuccessInfo =
               Adjunta los documentos que la entidad emisora exige para
               expedir el certificado a nombre de
               <strong>{{ entityDisplayName() }}</strong>
-              (NIT {{ form().getValue().nit }}@if (form().getValue().nit_dv) {-{{ form().getValue().nit_dv }}}).
+              (NIT {{ form.getValue().nit }}@if (form.getValue().nit_dv) {-{{ form.getValue().nit_dv }}}).
               @if (personType() === 'juridica') {
                 Como persona jurídica también necesitas el certificado de
                 existencia y representación legal.
@@ -281,10 +281,8 @@ type SuccessInfo =
                 />
                 @if (getDocumentFile(doc); as picked) {
                   <p class="identity-documents__filename">
-                    {{ picked.file?.name ?? 'archivo seleccionado' }}
-                    @if (picked.file) {
-                      · {{ formatBytes(picked.file.size) }}
-                    }
+                    {{ picked.name ?? 'archivo seleccionado' }}
+                    · {{ formatBytes(picked.size) }}
                   </p>
                 }
               </div>

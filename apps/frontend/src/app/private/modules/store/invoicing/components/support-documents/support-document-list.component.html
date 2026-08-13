@@ -5,13 +5,12 @@
       class="flex-1 min-w-[200px]"
       placeholder="Buscar por número, proveedor o NIT"
       (search)="onSearch($event)"
-      [value]="filters.controls.search.value || ''"
     ></app-inputsearch>
 
     <app-options-dropdown
-      [filterConfigs]="filterConfigs"
+      [filters]="filterConfigs"
       (filterChange)="onFilterChange($event)"
-      (clearFilters)="onClearFilters()"
+      (clearAllFilters)="onClearFilters()"
     ></app-options-dropdown>
 
     <button
@@ -73,8 +72,8 @@
   <app-pagination
     [currentPage]="page()"
     [totalPages]="totalPages()"
-    [totalItems]="total()"
-    [pageSize]="limit()"
+    [total]="total()"
+    [limit]="limit()"
     (pageChange)="onPageChange($event)"
   ></app-pagination>
 

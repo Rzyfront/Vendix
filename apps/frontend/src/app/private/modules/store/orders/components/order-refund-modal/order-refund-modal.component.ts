@@ -263,13 +263,6 @@ interface RefundItemState {
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           } @else if (previewError()) {
-            <!-- REFUND OVERHAUL — error state replaces the silent swallow
-                 that left this step empty when the preview POST failed.
-                 The operator sees the backend message verbatim and can
-                 retry without leaving the modal. Note: `@if (...; as x)`
-                 alias syntax is only valid in the first branch; we
-                 inline the binding here via @let so the inner template
-                 can store it without re-reading the signal. -->
             @let errorMsg = previewError() ?? '';
             <div
               class="p-4 rounded-xl border border-red-200 bg-red-50 flex items-start gap-3"
@@ -736,7 +729,7 @@ export class OrderRefundModalComponent {
     };
   }
 
-  private loadPreview(): void {
+  loadPreview(): void {
     const orderId = this.order()?.id;
     if (!orderId) return;
 

@@ -38,7 +38,7 @@ export class SupportDocumentService {
    * `undefined` y que el ValidationPipe los rechace con 400).
    */
   list(query: SupportDocumentQuery): Observable<InvoiceListResponse> {
-    const params: Record<string, unknown> = {};
+    const params: Record<string, string | number | boolean> = {};
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== '') {
         params[key] = value;

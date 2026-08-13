@@ -83,7 +83,6 @@ export class RefundMethodsService {
       select: { settings: true },
     });
     const cashRegisterEnabled =
-      readBool(cashRegisterSetting?.settings, 'cash_register')?.enabled === true ||
       readBool(cashRegisterSetting?.settings, 'cash_register') === true;
     const cashAvailable = cashRegisterEnabled && !!order.customer_id;
 

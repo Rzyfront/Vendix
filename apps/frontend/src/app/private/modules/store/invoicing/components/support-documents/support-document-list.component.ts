@@ -13,14 +13,17 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { SupportDocumentService } from '../../services/support-document.service';
 import type { SupportDocumentRow } from '../../interfaces/support-document.interface';
 import type {
+  ItemListCardConfig,
+  TableAction,
+  TableColumn,
+} from '../../../../../../shared/components/index';
+import { FilterConfig } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
   IconComponent,
   InputsearchComponent,
-  ItemListCardConfig,
   OptionsDropdownComponent,
   PaginationComponent,
   ResponsiveDataViewComponent,
-  TableAction,
-  TableColumn,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -293,7 +296,7 @@ export class SupportDocumentListComponent {
     },
   ];
 
-  readonly filterConfigs = [
+  readonly filterConfigs: FilterConfig[] = [
     {
       key: 'invoice_type',
       label: 'Tipo',
