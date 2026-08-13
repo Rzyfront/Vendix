@@ -223,10 +223,15 @@ export function round2(value: number): number {
  * `iva_generado` + `inc_generado` + `ica_generado` are the store-side taxes
  * collected on sales (a liability to the DIAN). `iva_descontable` is the
  * VAT sealed as DESCONTABLE on recognized purchases (a credit against the
- * liability). `rete_practicadas` are withholdings the store PRACTICES on
- * customer payments (a credit — money the store keeps on behalf of the DIAN
- * rather than sending). `rete_sufridas` are withholdings the store SUFFERS on
- * supplier payments (a debit — money the store sends to the DIAN).
+ * liability). `rete_practicadas` are sales-side withholdings
+ * (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES
+ * — a credit that REDUCES the store's obligation. `rete_sufridas` are
+ * purchase-side withholdings over PURCHASE_COMMITTED_STATES — also a credit
+ * that REDUCES the store's obligation (the supplier already moved the money
+ * to the DIAN on the store's behalf, so it nets against the gross tax).
+ * Both retenciones are SUBTRACTED from `gross_generado` in the formula
+ * below — the column used to be `+ practiced` which over-stated the position
+ * by 2× the sales-side retenciones (QUI-630 review).
  *
  * Source schema: `tax_type_enum` = `iva | inc | ica | withholding | reteiva |
  * reteica`. The `retefuente` value described in the ticket text does not exist
@@ -242,9 +247,9 @@ export interface VatPositionParts {
   ica_generado: number;
   /** Purchase-side IVA sealed as DESCONTABLE (purchase_order_items.deductible_tax_amount) over PURCHASE_COMMITTED_STATES. */
   iva_descontable: number;
-  /** Purchase-side retainciones practicadas (tax_type IN ('withholding','reteiva','reteica')) over PURCHASE_COMMITTED_STATES. */
+  /** Sales-side retenciones practicadas (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES — credit. */
   rete_practicadas: number;
-  /** Sales-side retenciones sufridas (tax_type IN ('withholding','reteiva','reteica')) over COMPLETED_SALE_STATES. */
+  /** Purchase-side retenciones sufridas (tax_type IN ('withholding','reteiva','reteica')) over PURCHASE_COMMITTED_STATES — credit. */
   rete_sufridas: number;
 }
 
@@ -254,7 +259,7 @@ export interface VatPositionParts {
  *   POSITION = (iva_generado + inc_generado + ica_generado)
  *            − iva_descontable
  *            − rete_sufridas
- *            + rete_practicadas
+ *            − rete_practicadas
  *
  * Convention:
  *   - POSITIVE: the store OWES the DIAN (saldo a cargo).
@@ -263,6 +268,11 @@ export interface VatPositionParts {
  * Pure function — the SOURCE OF TRUTH for the formula lives here, NOT in the
  * service. Any other fiscal aggregate that needs the same figure must call this
  * helper instead of re-deriving the formula.
+ *
+ * QUI-630 review: the formula was `+ rete_practicadas` which treated the
+ * credit as a debit and over-stated the position by 2× the sales-side
+ * retenciones. Corrected to `- rete_practicadas` so both retenciones are
+ * subtracted (both are credits that reduce the obligation).
  */
 export function computeNetVatPosition(parts: VatPositionParts): number {
   const grossGenerated =
@@ -272,7 +282,7 @@ export function computeNetVatPosition(parts: VatPositionParts): number {
   const deductible = Number(parts.iva_descontable ?? 0);
   const suffered = Number(parts.rete_sufridas ?? 0);
   const practiced = Number(parts.rete_practicadas ?? 0);
-  return grossGenerated - deductible - suffered + practiced;
+  return grossGenerated - deductible - suffered - practiced;
 }
 
 /**
