@@ -296,13 +296,17 @@ export class PosPaymentService {
 
     const register_id = this.getRegisterId();
 
-    // QUI-649 — short-circuit: charge the adopted order directly.
+    // QUI-649 — bifurcar al processor de orden adoptada: carga el
+    // `linkedOrderId` directamente, con table session + restaurant table
+    // propagados al backend para que el cierre de mesa refleje el cobro.
     if (cartState.linkedOrderId != null) {
       return this.chargeAdoptedOrder(
         cartState,
         paymentRequest,
         String(user_id),
         register_id,
+        tableSessionId,
+        tableId,
       );
     }
 
@@ -561,26 +565,19 @@ export class PosPaymentService {
   /**
    * Process credit sale (no immediate payment)
    *
-   * QUI-649 — bifurcación: si la orden está adoptada, no creamos una nueva
-   * ni cobramos; la orden auto-creada por el backend ya está en estado
-   * `created`. Retornamos la forma normalizada para que la UI no se rompa.
+   * QUI-649 — bifurcación adoptada: si la orden está adoptada, NO
+   * short-circuit a un success falso. La orden existe en backend y debe
+   * recibir la CxC. Hotfix post-PR-576: la rama vieja retornaba
+   * `of({success: true, payment: null})` sin llamar al backend, así que
+   * el fiado libre adoptado limpiaba el carrito y decía "procesado
+   * correctamente" sin haber registrado la cuenta por cobrar.
+   *
+   * Ahora: la orden adoptada viaja al mismo endpoint con `order_id`
+   * poblado y `requires_payment: false`. El backend registra la CxC
+   * sobre la fila existente y devuelve el mismo shape que la ruta no
+   * adoptada, así que la UI no se rompe.
    */
   processCreditSale(cartState: CartState, createdBy: string): Observable<any> {
-    // QUI-649 — short-circuit: adopted order is already in `created` state.
-    if (cartState.linkedOrderId != null) {
-      return of({
-        success: true,
-        order: {
-          id: cartState.linkedOrderId,
-          order_number: cartState.linkedOrderNumber,
-          status: 'created',
-        },
-        payment: null,
-        message:
-          'Orden adoptada en estado creado (sin cobro inmediato — cobrar después)',
-      });
-    }
-
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
@@ -597,12 +594,16 @@ export class PosPaymentService {
 
     // Backend recalculates discounts from `promotion_ids` + `coupon_code`.
     // See `processSaleWithPayment` comment for full rationale.
-    const credit_data = {
+    const credit_data: any = {
       customer_id: cartState.customer.id,
       customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
+      // QUI-649 — bifurcación: si la orden está adoptada, viajamos con
+      // `order_id` poblado para que el backend registre la CxC sobre la
+      // fila existente en vez de crear una nueva.
+      order_id: cartState.linkedOrderId ?? undefined,
       items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
@@ -682,6 +683,11 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
+      // QUI-649 — bifurcación adoptada (hotfix post-PR-576):
+      // procesamos la CxC sobre la orden adoptada en lugar de crear
+      // una nueva. Si `linkedOrderId` está presente, lo enviamos y el
+      // backend registra el crédito contra esa fila.
+      order_id: cartState.linkedOrderId ?? undefined,
       items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
@@ -894,12 +900,21 @@ export class PosPaymentService {
     paymentRequest: PaymentRequest,
     user_id: string,
     register_id: string | null,
+    tableSessionId?: number | null,
+    tableId?: number | null,
   ): Observable<any> {
     const orderId = cartState.linkedOrderId as number;
     const orderNumber = cartState.linkedOrderNumber;
 
     const amount = Number(cartState.summary.total.toFixed(2));
-    const currency = 'COP';
+    // Hotfix post-PR-576: el valor hardcoded 'COP' rompía tiendas con
+    // otra currency. Usar la currency que el carrito ya trae, con
+    // fallback a 'COP' solo si por algún motivo el cart state no la
+    // expone (compatibilidad hacia atrás).
+    const currency =
+      (cartState.summary as any).currency ||
+      (cartState as any).currency ||
+      'COP';
 
     const paymentPayload = {
       orderId,
@@ -910,6 +925,11 @@ export class PosPaymentService {
       customerId: cartState.customer?.id
         ? Number(cartState.customer.id)
         : undefined,
+      // Hotfix post-PR-576: la firma del helper ignoraba tableSessionId
+      // y tableId, así que los pagos sobre órdenes adoptadas con mesa
+      // abierta nunca cerraban la mesa en backend. Propagamos ambos.
+      tableSessionId: tableSessionId ?? null,
+      tableId: tableId ?? null,
       metadata: {
         is_pos_payment: true,
         is_adopted_order: true,
