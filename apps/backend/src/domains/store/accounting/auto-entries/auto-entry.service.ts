@@ -2689,6 +2689,16 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     return_type?: string;
     user_id?: number;
+    // REFUND OVERHAUL — included by RefundFlowService since step 3.
+    // Drives the credit-side mapping key so the journal entry reflects
+    // where the money actually moves:
+    //   cash              → 1105 Caja
+    //   original_payment  → 1110 Bancos (reversa processor)
+    //   bank_transfer     → 1110 Bancos
+    //   store_credit      → 2335 Wallet Pasivo (customer credit liability)
+    // Falls back to refund.completed.cash (1105) when the method is unknown
+    // or omitted — preserves backward compat for any older event producers.
+    refund_method?: string;
   }) {
     // Replacements only move inventory — no financial entry needed
     if (data.return_type === 'replacement') {
@@ -2727,12 +2737,22 @@ export class AutoEntryService {
       })),
     );
 
-    // Credit: Cash/Bank for the total refund amount
+    // REFUND OVERHAUL — credit-side mapping key per refund_method.
+    const creditKey = this.resolveRefundCreditKey(data.refund_method);
+    const creditLabel =
+      data.refund_method === 'store_credit'
+        ? 'Saldo a favor del cliente (Wallet)'
+        : data.refund_method === 'bank_transfer'
+          ? 'Transferencia bancaria al cliente'
+          : data.refund_method === 'original_payment'
+            ? 'Reembolso al cliente (Pago original)'
+            : 'Reembolso al cliente';
+
     lines.push(
       await this.resolveAccountLine(
         data.organization_id,
-        'refund.completed.cash',
-        'Reembolso al cliente',
+        creditKey,
+        creditLabel,
         0,
         data.amount,
         data.store_id,
@@ -2747,6 +2767,28 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  // REFUND OVERHAUL — pick the credit-side mapping key by refund_method.
+  // Returns the per-method mapping key when the org has it configured,
+  // otherwise falls back to the legacy refund.completed.cash (1105 Caja).
+  // This fallback is intentionally defensive: a tenant that hasn't
+  // refreshed their account_mappings since the new keys were added still
+  // gets a sensible journal entry.
+  private resolveRefundCreditKey(
+    refund_method: string | undefined,
+  ): string {
+    switch (refund_method) {
+      case 'original_payment':
+        return 'refund.completed.original_payment';
+      case 'bank_transfer':
+        return 'refund.completed.bank_transfer';
+      case 'store_credit':
+        return 'refund.completed.store_credit';
+      case 'cash':
+      default:
+        return 'refund.completed.cash';
+    }
   }
 
   /**

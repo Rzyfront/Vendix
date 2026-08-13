@@ -584,6 +584,9 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     return_type?: string;
     user_id?: number;
+    // REFUND OVERHAUL — emitted by RefundFlowService since step 3. Drives
+    // the credit-side mapping key in onRefundCompleted (1105/1110/2335).
+    refund_method?: string;
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'returns'))) return;
@@ -597,6 +600,7 @@ export class AccountingEventsListener {
         tax_breakdown: event.tax_breakdown,
         return_type: event.return_type,
         user_id: event.user_id,
+        refund_method: event.refund_method,
       });
       this.logger.log(
         `Auto-entry created for refund.completed #${event.refund_id}`,

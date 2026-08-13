@@ -49,7 +49,7 @@ export class RefundMethodsService {
           where: { state: { in: ['succeeded', 'pending'] } },
           select: {
             store_payment_method_id: true,
-            store_payment_methods: {
+            store_payment_method: {
               select: {
                 state: true,
                 system_payment_method: {
@@ -79,12 +79,12 @@ export class RefundMethodsService {
     const cashRegisterSetting = await this.prisma.store_settings.findFirst({
       where: {
         store_id: order.store_id,
-        key: 'cash_register',
       },
-      select: { value: true },
+      select: { settings: true },
     });
     const cashRegisterEnabled =
-      readBool(cashRegisterSetting?.value, 'enabled') === true;
+      readBool(cashRegisterSetting?.settings, 'cash_register')?.enabled === true ||
+      readBool(cashRegisterSetting?.settings, 'cash_register') === true;
     const cashAvailable = cashRegisterEnabled && !!order.customer_id;
 
     // Bank accounts
@@ -99,7 +99,7 @@ export class RefundMethodsService {
 
     // Original payment processor gate
     const payment = order.payments[0];
-    const sm = payment?.store_payment_methods;
+    const sm = payment?.store_payment_method;
     const originalPaymentAvailable =
       !!payment &&
       !!sm &&
