@@ -5918,6 +5918,15 @@ model dian_configurations {
   /// habilitó la operación. El gate de emisión exige AMBOS.
   certificate_provisioning_status certificate_provisioning_status_enum @default(not_required)
   certificate_uploaded_at         DateTime?                            @db.Timestamp(6)
+  /// QUI-679 (review fix #6): id of the sibling `dian_configurations` row whose
+  /// cert this row inherited. NULL means the cert was uploaded directly into
+  /// THIS row (the historical case) — `certificate_source = manual_upload_validated`
+  /// continues to mean "validated by a human". Self-reference is forbidden at the
+  /// application layer (`id !== inherited_from_dian_configuration_id`); the DB
+  /// does NOT enforce it because a row's id is assigned AFTER insert and a
+  /// circular self-FK is a chicken-and-egg problem Postgres can't express in a
+  /// CHECK. Nullable on purpose so every historical row stays at NULL.
+  inherited_from_dian_configuration_id Int?
   environment                     dian_environment_enum                @default(test)
   enablement_status               dian_enablement_status_enum          @default(not_started)
   test_set_id                     String?                              @db.VarChar(100)
@@ -5933,11 +5942,18 @@ model dian_configurations {
   dian_audit_logs      dian_audit_logs[]
   fiscal_transmissions fiscal_transmissions[]
   identity_documents   dian_configuration_documents[]
+  /// SELF-FK with `ON DELETE SET NULL`: deleting the source row drops the
+  /// pointer but NEVER deletes the inheritor (a cert copy must outlive the
+  /// metadata of the row it was copied from). Cascade would be wrong — the
+  /// inheritor has its OWN cert bytes in S3 and its OWN enablement_status.
+  inherited_from_config dian_configurations?           @relation("dian_config_inheritance", fields: [inherited_from_dian_configuration_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  inherited_by_configs   dian_configurations[]          @relation("dian_config_inheritance")
 
   @@index([store_id])
   @@index([organization_id])
   @@index([accounting_entity_id, configuration_type])
   @@index([operation_mode, environment, enablement_status])
+  @@index([inherited_from_dian_configuration_id])
 }
 
 /// QUI-657 — documentos de identidad que un tenant SIN certificado de firma
