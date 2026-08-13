@@ -606,12 +606,12 @@ describe('FinancialAnalyticsService', () => {
       expect(result.rete_sufridas).toBe(15);
     });
 
-    it('QUI-630: net_vat_position uses computeNetVatPosition (formula = iva_generado + inc_generado + ica_generado − iva_descontable − rete_sufridas + rete_practicadas)', async () => {
+    it('QUI-630: net_vat_position uses computeNetVatPosition (formula = iva_generado + inc_generado + ica_generado − iva_descontable − rete_sufridas − rete_practicadas)', async () => {
       // Sales: IVA 190 + INC 80 + ICA 50 = 320 collected.
       // Purchases: IVA descontable 95 + reteiva sufrida 15.
       // Retenciones practicadas on sales: retefuente 10.
-      // Formula:
-      //   net_vat_position = (190 + 80 + 50) − 95 − 15 + 10 = 220
+      // Formula (both retenciones are credits, both subtracted):
+      //   net_vat_position = (190 + 80 + 50) − 95 − 15 − 10 = 200
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -663,8 +663,10 @@ describe('FinancialAnalyticsService', () => {
       expect(result.iva_descontable).toBe(95);
       expect(result.rete_practicadas).toBe(10);
       expect(result.rete_sufridas).toBe(15);
-      // (190 + 80 + 50) − 95 − 15 + 10 = 220
-      expect(result.net_vat_position).toBe(220);
+      // (190 + 80 + 50) − 95 − 15 − 10 = 200 (both retenciones are credits).
+      // Was 220 before the fix — the old `+ rete_practicadas` over-counted
+      // the sales-side credit by 2x.
+      expect(result.net_vat_position).toBe(200);
       // `net_tax` is the historical definition (all collected − refunds) and
       // is no longer the DIAN posición — it sums every tax row including
       // withholding/reteiva. 190 (IVA) + 80 (INC) + 50 (ICA) + 10 (retefuente)
@@ -698,6 +700,46 @@ describe('FinancialAnalyticsService', () => {
       expect(result.iva_generado).toBe(50);
       expect(result.iva_descontable).toBe(200);
       expect(result.net_vat_position).toBe(-150);
+    });
+
+    it('QUI-630 review: sales-side retenciones practicadas are credits (subtracted). Locks in the sign semantics for rete_practicadas', async () => {
+      // Sales: IVA 100 + retefuente 40 (practicada on sales) = 100 generated.
+      // Purchases: none. No descontable, no sufridas.
+      // OLD formula (bug): 100 − 0 − 0 + 40 = 140 (over-counted by 80)
+      // NEW formula:        100 − 0 − 0 − 40 = 60  (correct: credit subtracted)
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '100.000',
+          taxable_amount: '526.3157894737',
+        },
+        {
+          tax_type: 'withholding',
+          tax_name: 'ReteFuente 4%',
+          tax_rate: 4,
+          is_compound: false,
+          total_tax: '40.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '526.316', exempt_revenue: '0.000' },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(100);
+      expect(result.rete_practicadas).toBe(40);
+      expect(result.rete_sufridas).toBe(0);
+      expect(result.iva_descontable).toBe(0);
+      // Lock in the credit semantics: a $40 sales-side retencion reduces
+      // the position by $40, not increases it.
+      expect(result.net_vat_position).toBe(60);
     });
 
     it('QUI-630: effective_tax_rate is null (NOT 0) when the period has no taxable revenue', async () => {
