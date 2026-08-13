@@ -1,3 +1,0 @@
-mutation AddComment($input: CommentCreateInput!) {
-  commentCreate(input: $input) { success comment { id } }
-}

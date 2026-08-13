@@ -44,20 +44,11 @@ export class PermissionsGuard implements CanActivate {
     const currentPath = route?.path || request.url;
     const currentMethod = method.toUpperCase();
 
-    // Strip the global `/api` prefix that the seed uses for `permission.path`
-    // but NestJS strips from `route.path`. The named-permission fallback
-    // below has been masking this for the common case, but anything that
-    // depended on path matching alone (or had a method that wasn't `ALL`)
-    // silently failed. Compare normalized paths so both forms work.
-    const stripApi = (p: string) => (p.startsWith('/api/') ? p.slice(4) : p);
-    const normCurrent = stripApi(currentPath);
-
     const hasPermission = user.permissions.some((permission) => {
       // Verificar si coincide exactamente con ruta y método
-      const normPermissionPath = stripApi(permission.path);
       const pathMatches =
-        normPermissionPath === normCurrent ||
-        normCurrent.startsWith(normPermissionPath);
+        permission.path === currentPath ||
+        currentPath.startsWith(permission.path);
       const methodMatches =
         permission.method === currentMethod || permission.method === 'ALL';
       const isActive = permission.status === 'active';
