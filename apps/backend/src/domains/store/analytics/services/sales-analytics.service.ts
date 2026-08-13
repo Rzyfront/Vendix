@@ -24,6 +24,7 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
+import { OPERATING_REVENUE_SQL } from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -689,7 +690,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(o.subtotal_amount - o.discount_amount + o.shipping_cost), 0) AS revenue,
+        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
@@ -752,11 +753,10 @@ export class SalesAnalyticsService {
     >`
       SELECT
         EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
-        -- QUI-613 review: operating revenue (subtotal - discount + shipping,
-        -- ex-IVA). Misma formula que la rama dia/semana/mes para que el
-        -- bucket hour cuadre con los demas y no aparezca 'menos revenue' al
-        -- pasar de granularidad horaria a diaria.
-        COALESCE(SUM(o.subtotal_amount - o.discount_amount + o.shipping_cost), 0) AS revenue,
+        -- QUI-613 review: operating revenue via shared SQL fragment del
+        -- contract (mismo valor que la rama dia/semana/mes). Asi no puede
+        -- haber drift entre granularidades.
+        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o

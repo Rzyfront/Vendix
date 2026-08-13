@@ -151,6 +151,22 @@ export function computeOperatingRevenue(parts: OperatingRevenueParts): number {
 }
 
 /**
+ * SQL expression for operating revenue (ex-VAT), ready to interpolate into
+ * a `$queryRaw` template. Kept in sync with {@link computeOperatingRevenue} so
+ * the JS aggregation and the SQL aggregation cannot drift apart.
+ *
+ * Usage:
+ *   `SELECT COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue FROM orders ...`
+ *
+ * QUI-613 review: avoid the previous drift where day/week/month used the
+ * new formula but the hour branch still used `grand_total` (with VAT). A
+ * shared SQL fragment enforces one definition across all granularities.
+ */
+export const OPERATING_REVENUE_SQL = Prisma.raw(
+  '(o.subtotal_amount - o.discount_amount + o.shipping_cost)',
+) as unknown as Prisma.Sql;
+
+/**
  * How much of the sold volume has a KNOWN unit cost.
  *
  * COGS sums `quantity * COALESCE(cost_price, 0)`, so a line whose cost snapshot
