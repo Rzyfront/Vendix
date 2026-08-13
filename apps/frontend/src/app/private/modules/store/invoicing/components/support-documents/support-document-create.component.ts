@@ -210,6 +210,16 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           placeholder="Observaciones adicionales..."
           [rows]="3"
         ></app-textarea>
+
+        @if (submitError(); as errorMsg) {
+          <div
+            class="text-sm text-error bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
+            role="alert"
+          >
+            <app-icon name="alert-circle" [size]="16"></app-icon>
+            <span>{{ errorMsg }}</span>
+          </div>
+        }
       </form>
 
       <div slot="footer">
