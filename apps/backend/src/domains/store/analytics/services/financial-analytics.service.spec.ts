@@ -1,4 +1,5 @@
 import { FinancialAnalyticsService } from './financial-analytics.service';
+import { Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
@@ -524,7 +525,9 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
       ]);
-      // New purchase-side query (third $queryRaw call).
+      // Orphan-location probe (no orphans in this test).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // New purchase-side query (third $queryRaw call after orphan probe).
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'iva', total_tax: '190.000', deductible_tax: '95.000' },
       ]);
@@ -571,6 +574,9 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // No purchase rows in the period.
       prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
@@ -582,7 +588,9 @@ describe('FinancialAnalyticsService', () => {
     it('QUI-630 defect 4: emits retenciones sufridas from purchase_order_items (withholding + reteiva + reteica)', async () => {
       // Sales side: 1 delivered order with IVA 19% of 1000 = 190 tax.
       // Purchase side: 1 received order with tax_type='reteiva' total_tax=15.
-      // `rete_sufridas` is the debit (money the store sends to the DIAN).
+      // `rete_sufridas` is the credit (purchase-side withholding reduces the
+      // store's tax obligation, since the supplier already moved the money
+      // to the DIAN on the store's behalf).
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -596,6 +604,8 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
       ]);
@@ -649,6 +659,8 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'iva', total_tax: '190.000', deductible_tax: '95.000' },
         { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
@@ -690,6 +702,8 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '263.158', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'iva', total_tax: '380.000', deductible_tax: '200.000' },
       ]);
@@ -728,6 +742,9 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '526.316', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      // No purchase rows in the period.
       prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
@@ -748,6 +765,8 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { taxable_revenue: '0.000', exempt_revenue: '0.000' },
       ]);
+      // Orphan-location probe (no orphans).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.$queryRaw.mockResolvedValueOnce([]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
@@ -757,6 +776,43 @@ describe('FinancialAnalyticsService', () => {
       expect(result.effective_tax_rate).toBeNull();
       expect(result.total_tax_collected).toBe(0);
       expect(result.net_vat_position).toBe(0);
+    });
+
+    it('QUI-630 review: logs a warning when orphan purchase_orders (deleted location) are detected in the period', async () => {
+      // Sales side: 1 delivered order with IVA 19% of 1000 = 190 tax.
+      // Orphan probe: 3 purchase_orders refer to a deleted location.
+      // No purchase tax rows contribute (the orphan rows are EXCLUDED).
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          tax_type: 'iva',
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          is_compound: false,
+          total_tax: '190.000',
+          taxable_amount: '1000.0000000000',
+        },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      // Orphan-location probe: 3 orphans detected.
+      prisma.$queryRaw.mockResolvedValueOnce([{ orphan_count: 3 }]);
+      // Purchase tax rows: empty (the orphan rows are excluded).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.iva_generado).toBe(190);
+      expect(result.iva_descontable).toBe(0);
+      expect(result.net_vat_position).toBe(190);
+      // The orphan probe must have logged a warning with the count.
+      expect(loggerSpy).toHaveBeenCalledWith(
+        expect.stringContaining('3 purchase_order(s)'),
+      );
+      loggerSpy.mockRestore();
     });
 
     it('QUI-630: blocks default to 0 when the period has no rows of that tax type (helper is safe)', async () => {

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Prisma } from '@prisma/client';
@@ -105,6 +105,8 @@ export interface CashSessionExportRow {
 
 @Injectable()
 export class FinancialAnalyticsService {
+  private readonly logger = new Logger(FinancialAnalyticsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -252,6 +254,38 @@ export class FinancialAnalyticsService {
     // scope through `inventory_locations.store_id`, which `purchase_orders`
     // already FKs to via `location_id`. This keeps the read inside the store
     // tenant without scanning the whole org.
+    //
+    // KNOWN LIMITATION (QUI-630 review): the INNER JOIN to inventory_locations
+    // silently drops any purchase_order whose location_id was deleted (FK not
+    // ON DELETE RESTRICT). The store then sees an under-credited posición
+    // with no warning. We detect the orphan count via a parallel LEFT JOIN
+    // probe and log a warning so the discrepancy is visible in app logs;
+    // the data is still NOT counted into the aggregate (a LEFT JOIN would
+    // risk including orphaned rows that actually belong to a DIFFERENT store,
+    // which is worse than under-counting). Follow-up ticket: enforce FK
+    // ON DELETE RESTRICT and treat orphans as a data-integrity error.
+    const orphanRows = await rawClient.$queryRaw<Array<{ orphan_count: bigint | number }>>(
+      Prisma.sql`
+        SELECT COUNT(*) AS orphan_count
+        FROM purchase_orders po
+        LEFT JOIN inventory_locations il ON po.location_id = il.id
+        WHERE po.status IN (${purchaseStates})
+          AND po.created_at >= ${startDate}
+          AND po.created_at <= ${endDate}
+          AND il.id IS NULL
+      `,
+    );
+    const orphanCount = Number(orphanRows[0]?.orphan_count ?? 0);
+    if (orphanCount > 0) {
+      this.logger.warn(
+        `getTaxSummary: ${orphanCount} purchase_order(s) in store_id=${storeId} ` +
+          `period ${startDate.toISOString()}..${endDate.toISOString()} reference a ` +
+          `deleted inventory_location. Their tax rows are EXCLUDED from the ` +
+          `aggregate (inner join). The DIAN posición will be under-counted. ` +
+          `See QUI-630 follow-up for the FK enforcement fix.`,
+      );
+    }
+
     const purchaseTaxRows = await rawClient.$queryRaw<Array<{
       tax_type: string;
       total_tax: string | number;
@@ -374,10 +408,13 @@ export class FinancialAnalyticsService {
        */
       net_vat_position: netVatPosition,
       /**
-       * `net_tax` is the IVA neto after customer refunds, NOT the DIAN
-       * posición. Kept for the export's "total a pagar" column where it is
-       * the historical definition, but the declaration should now read
-       * `net_vat_position` instead.
+       * `net_tax` — net of every tax row minus customer refunds. Historical
+       * definition kept for the export's "total a pagar" column. It is NOT
+       * the DIAN posición (use `net_vat_position` for the declaración) and
+       * it is NOT the "IVA neto" — it sums every tax type (IVA + INC + ICA
+       * + retenciones) collected over the period, then subtracts the
+       * period's refunds. The label carries the legacy name to avoid
+       * breaking the export consumers.
        */
       net_tax: this.round2(totalTaxCollected - totalTaxRefunded),
       /**
