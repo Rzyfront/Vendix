@@ -455,7 +455,9 @@ export class OrderRefundModalComponent {
   // button so the operator can recover without leaving the modal.
   previewError = signal<string | null>(null);
   isProcessing = signal(false);
-  locations = signal<{ id: number; name: string; code: string }[]>([]);
+  locations = signal<
+    { id: number; name: string; code: string; is_default?: boolean }[]
+  >([]);
   // REFUND OVERHAUL — methods + bank_accounts populated from the new
   // /store/orders/:id/flow/refund/available-methods endpoint. Replaces
   // the hardcoded `refundMethods` array; the dropdown reflects what the
@@ -565,6 +567,13 @@ export class OrderRefundModalComponent {
     const order = this.order();
     if (!order?.order_items) return;
 
+    // REFUND OVERHAUL — pre-fill the destination warehouse with the
+    // store's canonical default (the location flagged is_default, or
+    // the first active warehouse). The backend ALSO has a fallback
+    // (RefundFlowService.resolveDefaultLocation) so this is a UX
+    // pre-selection; the source of truth is the backend.
+    const defaultLocationId = this.resolveDefaultLocationFromState();
+
     const items: RefundItemState[] = order.order_items
       .map((oi) => {
         const alreadyRefunded = refundedMap.get(oi.id) || 0;
@@ -576,12 +585,23 @@ export class OrderRefundModalComponent {
           maxQuantity,
           alreadyRefunded,
           inventoryAction: 'restock' as InventoryAction,
-          locationId: null,
+          locationId: defaultLocationId,
         };
       })
       .filter((item) => item.maxQuantity > 0);
 
     this.refundItems.set(items);
+  }
+
+  // REFUND OVERHAUL — picks the canonical default location from the
+  // already-loaded `locations` signal. prefers `is_default=true`; falls
+  // back to the first entry. Returns null until loadLocations() resolves.
+  private resolveDefaultLocationFromState(): number | null {
+    const all = this.locations();
+    if (all.length === 0) return null;
+    const flagged = all.find((l) => l.is_default);
+    if (flagged) return flagged.id;
+    return all[0].id;
   }
 
   private loadLocations(): void {
@@ -591,15 +611,40 @@ export class OrderRefundModalComponent {
       .subscribe({
         next: (res) => {
           const data = res.data || res;
+          // Map preserves `is_default` from the backend so the
+          // default-warehouse picker in initializeItems can find it.
           this.locations.set(
             (Array.isArray(data) ? data : []).map((l: any) => ({
               id: l.id,
               name: l.name,
               code: l.code,
+              is_default: !!l.is_default,
             })),
           );
+          // REFUND OVERHAUL — loadLocations() and loadRefundedQuantities()
+          // fire in parallel; if items were seeded before the default
+          // location was known, backfill the locationId now. No-op if
+          // the items already carry a non-null locationId.
+          this.backfillDefaultLocationOnItems();
         },
       });
+  }
+
+  // REFUND OVERHAUL — if the items already exist but carry locationId=null
+  // (because initializeItems() ran before loadLocations() resolved), patch
+  // them with the default. Keeps the modal consistent with the backend's
+  // own fallback (RefundFlowService.resolveDefaultLocation).
+  private backfillDefaultLocationOnItems(): void {
+    const defaultId = this.resolveDefaultLocationFromState();
+    if (!defaultId) return;
+    const items = this.refundItems();
+    if (items.length === 0) return;
+    if (items.every((i) => i.locationId !== null)) return;
+    this.refundItems.set(
+      items.map((i) =>
+        i.locationId === null ? { ...i, locationId: defaultId } : i,
+      ),
+    );
   }
 
   // REFUND OVERHAUL — fetch the methods + bank_accounts the store can

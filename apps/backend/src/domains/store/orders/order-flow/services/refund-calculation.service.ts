@@ -142,8 +142,16 @@ export class RefundCalculationService {
         // Casting to unknown → null is fine; both producers respect null.
       }
 
-      const unit_price = Number(orderItem.unit_price);
-      const gross_amount = reqItem.quantity * unit_price;
+      // REFUND OVERHAUL — base the refund on `order_items.total_price` (the
+      // actual line amount the customer paid, already net of order-level
+      // discount and proportional tax), NOT on `unit_price * quantity`
+      // (which is the LIST price — over-refunds when the order line has
+      // been discounted to a fraction of its list price, e.g. presentations
+      // like QUI648R T5 with unit_price=5000 but total_price=5).
+      const line_total = Number(orderItem.total_price);
+      const qty_ratio =
+        orderItem.quantity > 0 ? reqItem.quantity / orderItem.quantity : 0;
+      const gross_amount = line_total * qty_ratio;
       const item_discount = gross_amount * discount_ratio;
       const net_amount = gross_amount - item_discount;
 
@@ -169,7 +177,12 @@ export class RefundCalculationService {
         image_url:
           orderItem.products?.product_images?.[0]?.image_url || undefined,
         quantity: reqItem.quantity,
-        unit_price,
+        // REFUND OVERHAUL — report the EFFECTIVE per-unit price (the
+        // actual amount the customer paid per unit), not the LIST price.
+        // For a presentation SKU with unit_price=5000 but total_price=5,
+        // this reports 5 (or 5/qty if multiple units per presentation).
+        unit_price:
+          orderItem.quantity > 0 ? line_total / orderItem.quantity : Number(orderItem.unit_price),
         gross_amount,
         discount_amount: item_discount,
         net_amount,
