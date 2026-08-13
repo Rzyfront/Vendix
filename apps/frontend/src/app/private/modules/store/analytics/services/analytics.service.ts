@@ -204,8 +204,12 @@ export interface TaxSummary {
   total_tax_collected: number;
   total_tax_refunded: number;
   /**
-   * IVA neto después de reembolsos del cliente. NOT the DIAN posición — kept
-   * for backward compat. Use `net_vat_position` for the declaración.
+   * Net of every tax row (IVA + INC + ICA + retenciones) collected minus the
+   * period's refunds. Historical definition kept for the export's "total a
+   * pagar" column. It is NOT the DIAN posición (use `net_vat_position` for
+   * the declaración) and it is NOT the "IVA neto" — it sums every tax type
+   * and subtracts refunds, so the label is a legacy name preserved to avoid
+   * breaking export consumers.
    */
   net_tax: number;
   /**
@@ -218,7 +222,7 @@ export interface TaxSummary {
   /**
    * Tasa efectiva sobre la base gravable. `null` (NOT 0) cuando el período
    * no tiene base gravable — mismo contrato que `computeGrowth(null)`. La UI
-   * debe mostrar "sin base" en ese caso.
+   * debe mostrar "sin base" en ese caso (never `0 %`).
    */
   effective_tax_rate: number | null;
   /**
@@ -240,21 +244,27 @@ export interface TaxSummary {
    */
   iva_descontable: number;
   /**
-   * Retenciones practicadas sobre pagos de clientes (sales) — el comercio
-   * retiene para la DIAN. Crédito contra la obligación.
+   * Sales-side retenciones practicadas (tax_type IN
+   * ('withholding','reteiva','reteica')) sobre COMPLETED_SALE_STATES —
+   * credit that reduces the store's obligation (the store is the
+   * withholding agent on customer payments, so it has already moved the
+   * money to the DIAN on its own behalf).
    */
   rete_practicadas: number;
   /**
-   * Retenciones sufridas sobre pagos a proveedores (purchases) — el comercio
-   * envía a la DIAN. Débito contra la obligación.
+   * Purchase-side retenciones sufridas (tax_type IN
+   * ('withholding','reteiva','reteica')) sobre PURCHASE_COMMITTED_STATES —
+   * also a credit that reduces the store's obligation (the supplier
+   * already moved the money to the DIAN on the store's behalf).
    */
   rete_sufridas: number;
   /**
    * NET VAT POSITION — la cifra que la declaración DIAN cierra.
    * Positivo: saldo a cargo. Negativo: saldo a favor.
    * Fórmula: `(iva_generado + inc_generado + ica_generado) − iva_descontable
-   *          − rete_sufridas + rete_practicadas`. Definida en
-   *          `analytics-metrics.contract.ts` (`computeNetVatPosition`).
+   *          − rete_sufridas − rete_practicadas`. Ambas retenciones son
+   * créditos y se RESTAN. Definida en `analytics-metrics.contract.ts`
+   * (`computeNetVatPosition`).
    */
   net_vat_position: number;
   breakdown: Array<{

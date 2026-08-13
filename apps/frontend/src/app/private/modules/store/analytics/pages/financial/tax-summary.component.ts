@@ -75,7 +75,7 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
 
           <app-stats
             title="Tasa Efectiva"
-            [value]="data()?.effective_tax_rate || 0"
+            [value]="effectiveRateDisplay()"
             valueUnit="%"
             smallText="Porcentaje sobre ingresos"
             iconName="percent"
@@ -165,6 +165,76 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
           </div>
         </app-card>
       </div>
+
+      <!-- DIAN posición panel -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4" overflow="hidden">
+        <div class="flex flex-col gap-1 mb-4">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Posición DIAN</span>
+          <span class="text-xs text-[var(--color-text-secondary)]">
+            Lo que la declaración del período cierra, desglosado por figura fiscal.
+          </span>
+        </div>
+
+        <!-- Hero figure: net_vat_position with sign convention -->
+        <div class="flex items-center gap-3 mb-4 p-4 rounded-xl border"
+             [class]="netVatPositionClass()">
+          <app-icon name="calculator" [class]="netVatPositionIconClass()"></app-icon>
+          <div class="flex-1 min-w-0">
+            <div class="text-xs font-medium opacity-80">
+              {{ netVatPositionLabel() }}
+            </div>
+            <div class="text-2xl font-bold leading-tight">
+              {{ data()?.net_vat_position | currency }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Generado / Descontable / Retenciones breakdown -->
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">IVA generado</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.iva_generado | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Ventas gravadas</div>
+          </div>
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">INC generado</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.inc_generado | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Impuesto nacional al consumo</div>
+          </div>
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">ICA generado</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.ica_generado | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Industria y comercio</div>
+          </div>
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">IVA descontable</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.iva_descontable | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Crédito por compras</div>
+          </div>
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">Retenciones practicadas</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.rete_practicadas | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Ventas (crédito)</div>
+          </div>
+          <div class="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-1">Retenciones sufridas</div>
+            <div class="text-lg font-bold text-[var(--color-text-primary)]">
+              {{ data()?.rete_sufridas | currency }}
+            </div>
+            <div class="text-[10px] text-[var(--color-text-secondary)] mt-0.5">Compras (crédito)</div>
+          </div>
+        </div>
+      </app-card>
 
       <!-- Quick Links -->
       <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
@@ -318,8 +388,12 @@ export class TaxSummaryComponent implements OnInit {
       }],
     });
 
-    // Effective Rate Gauge
-    const rate = Math.min((d.effective_tax_rate || 0), 30);
+    // Effective Rate Gauge — null guard: the contract returns `null` when
+    // there is no taxable revenue. Render the gauge at 0 only if the value
+    // is a number; otherwise render an empty gauge with a "Sin base" label.
+    const rateValue = d.effective_tax_rate;
+    const hasRate = rateValue !== null && rateValue !== undefined;
+    const rate = hasRate ? Math.min(rateValue, 30) : 0;
     this.effectiveRateChartOptions.set({
       legend: {
         data: ['Tasa Efectiva'],
@@ -341,7 +415,7 @@ export class TaxSummaryComponent implements OnInit {
           max: 30,
           splitNumber: 3,
           pointer: {
-            show: true,
+            show: hasRate,
             length: '60%',
             width: 6,
             itemStyle: { color: 'auto' },
@@ -368,15 +442,69 @@ export class TaxSummaryComponent implements OnInit {
           },
           detail: {
             valueAnimation: true,
-            formatter: (value: number) => `${value.toFixed(1)}%`,
+            formatter: (value: number) =>
+              hasRate ? `${value.toFixed(1)}%` : 'Sin base',
             fontSize: 20,
             fontWeight: 'bold',
             offsetCenter: [0, '20%'],
-            color: rate < 10 ? '#22c55e' : rate < 20 ? '#f59e0b' : '#ef4444',
+            color: !hasRate
+              ? textSecondary
+              : rate < 10
+                ? '#22c55e'
+                : rate < 20
+                  ? '#f59e0b'
+                  : '#ef4444',
           },
           data: [{ value: rate }],
         },
       ],
     });
+  }
+
+  /**
+   * Effective rate display value for the KPI card. The StatsComponent accepts
+   * `string | number`, so we return "Sin base" as a string when the contract
+   * returns null (no taxable revenue). The contract's `computeEffectiveTaxRate`
+   * explicitly requires this: never `0 %`, render "Sin base" instead.
+   */
+  effectiveRateDisplay(): string | number {
+    const rate = this.data()?.effective_tax_rate;
+    if (rate === null || rate === undefined) return 'Sin base';
+    return rate;
+  }
+
+  /**
+   * Sign-convention label for the DIAN posición hero figure.
+   * Positivo: "Saldo a cargo" (store owes the DIAN).
+   * Negativo: "Saldo a favor" (store has a credit).
+   * Cero: "Sin saldo".
+   */
+  netVatPositionLabel(): string {
+    const pos = this.data()?.net_vat_position ?? 0;
+    if (pos > 0) return 'Saldo a cargo';
+    if (pos < 0) return 'Saldo a favor';
+    return 'Sin saldo';
+  }
+
+  /**
+   * Visual class for the net_vat_position hero — color-coded by sign so the
+   * merchant sees at a glance whether the store owes the DIAN or has a credit.
+   */
+  netVatPositionClass(): string {
+    const pos = this.data()?.net_vat_position ?? 0;
+    if (pos > 0) {
+      return 'bg-red-50 border-red-200 text-red-700';
+    }
+    if (pos < 0) {
+      return 'bg-green-50 border-green-200 text-green-700';
+    }
+    return 'bg-gray-50 border-gray-200 text-gray-700';
+  }
+
+  netVatPositionIconClass(): string {
+    const pos = this.data()?.net_vat_position ?? 0;
+    if (pos > 0) return 'text-red-600';
+    if (pos < 0) return 'text-green-600';
+    return 'text-gray-500';
   }
 }
