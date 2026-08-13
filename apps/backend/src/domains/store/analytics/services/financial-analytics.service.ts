@@ -24,36 +24,13 @@ import {
   computeEffectiveTaxRate,
   round2 as roundMoney,
   sqlStateList,
+  WITHHOLDING_TAX_TYPES,
+  WITHHOLDING_SET,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 // Aggregated P&L tolerates 1-2 min of staleness → short TTL (ms).
 const PROFIT_LOSS_CACHE_TTL_MS = 120_000;
-
-/**
- * Retenciones (withholdings) — values the store either keeps on behalf of the
- * DIAN (`practicadas`, on customer payments) or sends to the DIAN on supplier
- * payments (`sufridas`). Lives here next to the contract's `tax_type_enum`
- * because the analytic block that consumes these is per-line, not per-entity.
- *
- *   retefuente      — `tax_type = 'withholding'`, distinguished by `tax_name`
- *                     (the `retefuente` literal value described in the ticket
- *                     text does not exist as a distinct enum value — see
- *                     `analytics-metrics.contract.ts` comment).
- *   reteiva         — `tax_type = 'reteiva'`.
- *   reteica         — `tax_type = 'reteica'`.
- *
- * Source schema: `tax_type_enum` ∈ `iva | inc | ica | withholding | reteiva |
- * reteica`.
- */
-const WITHHOLDING_TAX_TYPES = ['withholding', 'reteiva', 'reteica'] as const;
-
-/**
- * Runtime Set form of {@link WITHHOLDING_TAX_TYPES}, used for `.includes` /
- * `.has` checks on values typed as `string` from raw SQL rows. The const
- * tuple is the type-level source of truth; the Set is the runtime helper.
- */
-const WITHHOLDING_SET: ReadonlySet<string> = new Set(WITHHOLDING_TAX_TYPES);
 
 /** Grouping key for a financial-summary export row (the ReportBuilder lays out by section). */
 export type FinancialExportSection =

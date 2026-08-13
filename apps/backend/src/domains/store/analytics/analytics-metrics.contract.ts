@@ -297,3 +297,34 @@ export function computeEffectiveTaxRate(
   if (totalTaxableRevenue <= 0) return null;
   return (totalTax / totalTaxableRevenue) * 100;
 }
+
+/**
+ * `tax_type_enum` values that count as RETENCIONES (withholdings) for the
+ * DIAN posición. Subdivided by name (Tax name) when rendered; the enum value
+ * alone is what the analytics aggregates over.
+ *
+ *   `withholding`  — retefuente (the `retefuente` literal value described in
+ *                    the ticket text does not exist as a distinct enum value
+ *                    — see the `VatPositionParts` block comment above).
+ *   `reteiva`      — retención sobre el IVA.
+ *   `reteica`      — retención sobre el ICA.
+ *
+ * Source schema: `tax_type_enum` ∈ `iva | inc | ica | withholding | reteiva |
+ * reteica`. The const tuple is the type-level source of truth; the Set helper
+ * is provided for runtime `.has` checks on values typed as `string` from raw
+ * SQL rows.
+ */
+export const WITHHOLDING_TAX_TYPES = [
+  'withholding',
+  'reteiva',
+  'reteica',
+] as const;
+
+/**
+ * Runtime Set form of {@link WITHHOLDING_TAX_TYPES}, used for `.has` checks
+ * on values typed as `string` from raw SQL rows. The const tuple is the
+ * type-level source of truth; the Set is the runtime helper.
+ */
+export const WITHHOLDING_SET: ReadonlySet<string> = new Set(
+  WITHHOLDING_TAX_TYPES,
+);
