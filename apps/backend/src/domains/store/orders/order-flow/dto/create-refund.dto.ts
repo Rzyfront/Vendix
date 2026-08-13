@@ -8,7 +8,11 @@ import {
   IsString,
   MaxLength,
   Min,
+  Validate,
   ValidateNested,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
 
 export class CreateRefundItemDto {
@@ -38,6 +42,20 @@ export class CreateRefundItemDto {
   bank_account_id?: number;
 }
 
+@ValidatorConstraint({ name: 'bankTransferRequiresAccount', async: false })
+class BankTransferRequiresAccountConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(_value: any, args: ValidationArguments): boolean {
+    const obj = args.object as CreateRefundDto;
+    if (obj.refund_method !== 'bank_transfer') return true;
+    return obj.items?.some((it) => !!it.bank_account_id) ?? false;
+  }
+  defaultMessage(args: ValidationArguments): string {
+    return 'refund_method=bank_transfer requiere bank_account_id en al menos un ítem';
+  }
+}
+
 export class CreateRefundDto {
   @IsArray()
   @ValidateNested({ each: true })
@@ -57,4 +75,14 @@ export class CreateRefundDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Hotfix post-PR-576: bank_transfer exige UNA cuenta destino. El
+   * frontend la envía en `items[].bank_account_id`; el backend la
+   * persiste en `refund_items.bank_account_id`. Este validador de
+   * grupo exige que al menos una línea lleve `bank_account_id` cuando
+   * `refund_method === 'bank_transfer'`.
+   */
+  @Validate(BankTransferRequiresAccountConstraint)
+  bank_transfer_validated?: true;
 }
