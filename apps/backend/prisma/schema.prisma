@@ -88,12 +88,12 @@ model users {
   coupon_uses coupon_uses[]
 
   // Cash Register
-  cash_register_sessions_opened cash_register_sessions[]  @relation("cash_register_sessions_opened_by")
-  cash_register_sessions_closed cash_register_sessions[]  @relation("cash_register_sessions_closed_by")
-  kds_sessions_opened           kds_sessions[]            @relation("kds_sessions_opened_by")
-  kds_sessions_closed           kds_sessions[]            @relation("kds_sessions_closed_by")
-  order_items_delivered         order_items[]             @relation("order_items_delivered_by")
-  order_item_exclusions_created order_item_exclusions[]   @relation("order_item_exclusions_created_by")
+  cash_register_sessions_opened cash_register_sessions[]         @relation("cash_register_sessions_opened_by")
+  cash_register_sessions_closed cash_register_sessions[]         @relation("cash_register_sessions_closed_by")
+  kds_sessions_opened           kds_sessions[]                   @relation("kds_sessions_opened_by")
+  kds_sessions_closed           kds_sessions[]                   @relation("kds_sessions_closed_by")
+  order_items_delivered         order_items[]                    @relation("order_items_delivered_by")
+  order_item_exclusions_created order_item_exclusions[]          @relation("order_item_exclusions_created_by")
   kti_exclusions_excluded       kitchen_ticket_item_exclusions[] @relation("kti_exclusions_excluded_by")
   cash_register_movements       cash_register_movements[]
 
@@ -142,15 +142,15 @@ model users {
   requires_terms_update  Boolean   @default(false)
 
   // Bookings
-  bookings_as_customer bookings[] @relation("bookings_customer")
-  bookings_created     bookings[] @relation("bookings_created_by")
+  bookings_as_customer            bookings[]                    @relation("bookings_customer")
+  bookings_created                bookings[]                    @relation("bookings_created_by")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
   // requests (and even within the same one).
-  reschedule_requests_as_user      booking_reschedule_requests[] @relation("reschedule_req_user")
-  reschedule_requests_as_customer  booking_reschedule_requests[] @relation("reschedule_req_customer")
-  reschedule_requests_as_decider   booking_reschedule_requests[] @relation("reschedule_req_decided")
+  reschedule_requests_as_user     booking_reschedule_requests[] @relation("reschedule_req_user")
+  reschedule_requests_as_customer booking_reschedule_requests[] @relation("reschedule_req_customer")
+  reschedule_requests_as_decider  booking_reschedule_requests[] @relation("reschedule_req_decided")
 
   // Dispatch Notes
   dispatch_notes_as_customer  dispatch_notes[] @relation("dispatch_notes_customer")
@@ -210,6 +210,11 @@ model users {
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions_opened table_sessions[] @relation("table_sessions_opened_by")
   table_waiters         table_waiters[]
+
+  // QUI-657 — documentos de identidad subidos por este usuario para tramitar
+  // un certificado de firma. `onDelete: SetNull`: el documento sobrevive al
+  // usuario que lo cargó (retención indefinida, ver el modelo).
+  dian_configuration_documents_uploaded dian_configuration_documents[]
 
   @@index([email_verified])
   @@index([state])
@@ -836,9 +841,9 @@ model stores {
   invoice_retry_queue invoice_retry_queue[]
 
   // Bookings
-  bookings              bookings[]
-  service_providers     service_providers[]
-  store_business_hours  store_business_hours[]
+  bookings             bookings[]
+  service_providers    service_providers[]
+  store_business_hours store_business_hours[]
 
   // Dispatch Notes
   dispatch_notes dispatch_notes[]
@@ -888,7 +893,7 @@ model stores {
   fiscal_status_audit_log       fiscal_status_audit_log[]
 
   // Multi-tarifa (Phase 1: price tiers)
-  price_tiers price_tiers[]
+  price_tiers                    price_tiers[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -1113,21 +1118,21 @@ model currencies {
 /// equivalences (1 kg = 1000 g); the integer factor used to convert
 /// purchase→stock at receipt lives on `products.purchase_to_stock_factor`.
 model units_of_measure {
-  id             Int                @id @default(autoincrement())
-  code           String             @unique @db.VarChar(20)
-  name           String             @db.VarChar(60)
-  dimension      uom_dimension_enum
-  is_base        Boolean            @default(false)
-  factor_to_base Decimal            @db.Decimal(18, 6)
+  id                Int                @id @default(autoincrement())
+  code              String             @unique @db.VarChar(20)
+  name              String             @db.VarChar(60)
+  dimension         uom_dimension_enum
+  is_base           Boolean            @default(false)
+  factor_to_base    Decimal            @db.Decimal(18, 6)
   /// Si esta unidad puede ser la unidad de STOCK de un producto. El inventario
   /// es `Int` en la unidad base, así que una unidad cuyo `factor_to_base` no es
   /// entero (pulgada = 25.4 mm, galón = 3785.411784 ml) no puede representarse
   /// sin perder mercancía por redondeo: sirve como unidad de COMPRA o de
   /// presentación, nunca como unidad de stock.
-  is_stock_eligible Boolean         @default(true)
-  is_active      Boolean            @default(true)
-  created_at     DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at     DateTime?          @default(now()) @db.Timestamp(6)
+  is_stock_eligible Boolean            @default(true)
+  is_active         Boolean            @default(true)
+  created_at        DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?          @default(now()) @db.Timestamp(6)
 
   products_stock    products[] @relation("product_stock_uom")
   products_purchase products[] @relation("product_purchase_uom")
@@ -1762,8 +1767,8 @@ model products {
   /// la tienda", que es lo que hace funcionar el caso de una sola estación sin
   /// configurar nada. Las variantes NO sobrescriben esta estación: el ruteo es
   /// una propiedad de cómo se cocina el plato, no de qué opción se vendió.
-  kds_id                    Int?
-  kds                       kds?                   @relation(fields: [kds_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  kds_id Int?
+  kds    kds? @relation(fields: [kds_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   /// QUI-655 — back-relations de exclusion: este producto figura como el
   /// COMPONENTE excluido de la receta de otro plato.
@@ -1788,17 +1793,17 @@ model products {
 // ===== PRICE TIERS (MULTI-TARIFA) =====
 
 model price_tiers {
-  id                  Int       @id @default(autoincrement())
+  id                  Int                  @id @default(autoincrement())
   store_id            Int
-  name                String    @db.VarChar(255)
-  code                String?   @db.VarChar(50)
-  description         String?   @db.Text
+  name                String               @db.VarChar(255)
+  code                String?              @db.VarChar(50)
+  description         String?              @db.Text
   // Global rule: percent discount applied over base_price/sale_price when no
   // explicit override exists in product_price_tier_overrides. Stored as the
   // discount percentage itself (e.g. 15.00 means -15%).
-  discount_percentage Decimal   @default(0) @db.Decimal(5, 2)
-  is_active           Boolean   @default(true)
-  is_default          Boolean   @default(false)
+  discount_percentage Decimal              @default(0) @db.Decimal(5, 2)
+  is_active           Boolean              @default(true)
+  is_default          Boolean              @default(false)
   // Discriminador de los dos ejes que conviven en esta tabla: tarifa de
   // cliente (a quién le vendo) vs unidad de venta (en qué presentación
   // vendo). Los selectores filtran por este campo para no mezclarlos.
@@ -1806,15 +1811,15 @@ model price_tiers {
   // When true, applying this tier is interpreted as selling by package
   // (caja/bulto). Derived from units_per_package: it is set true whenever
   // units_per_package >= 2.
-  is_package_unit     Boolean   @default(false)
+  is_package_unit     Boolean              @default(false)
   // Packaging quantity owned by the tier (units per package, e.g. "Caja x6").
   // Optional. A product can override it via
   // product_price_tier_overrides.override_units_per_package. The effective
   // packSize cascade is: override_units_per_package ?? units_per_package ?? 1.
   units_per_package   Int?
-  sort_order          Int       @default(0)
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
-  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+  sort_order          Int                  @default(0)
+  created_at          DateTime?            @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?            @default(now()) @db.Timestamp(6)
 
   store               stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product_overrides   product_price_tier_overrides[]
@@ -1916,10 +1921,15 @@ model refund_items {
   // on this refund line. Strong link lives in sales_document_serials
   // (document_item_type = refund_item).
   serial_numbers_snapshot String?
+  // Destination bank_account for refund_method='bank_transfer'. Nullable (most
+  // refunds don't use it). SET NULL on bank_account delete preserves the audit
+  // trail of historic refunds without blocking account deletion.
+  bank_account_id         Int?
   created_at              DateTime?            @default(now()) @db.Timestamp(6)
   order_items             order_items          @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
   refunds                 refunds              @relation(fields: [refund_id], references: [id], onUpdate: NoAction)
   inventory_locations     inventory_locations? @relation(fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  bank_accounts           bank_accounts?       @relation(fields: [bank_account_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 }
 
 model refunds {
@@ -2604,8 +2614,8 @@ model purchase_order_receptions {
   notes               String?  @db.Text
   received_at         DateTime @default(now())
 
-  purchase_order    purchase_orders                 @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  received_by       users?                          @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
+  purchase_order    purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  received_by       users?                           @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
   items             purchase_order_reception_items[]
   ap_reception_link ap_reception_links?
 
@@ -2672,7 +2682,7 @@ model sales_order_items {
   /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
   /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
   /// unidad, el comportamiento histórico.
-  price_unit_quantity             Int?
+  price_unit_quantity              Int?
   created_at                       DateTime?         @default(now()) @db.Timestamp(6)
   products                         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants                 product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
@@ -2987,33 +2997,33 @@ model default_templates {
 // ===== PROMOTIONS =====
 
 model promotions {
-  id                  Int                      @id @default(autoincrement())
+  id                  Int                              @id @default(autoincrement())
   store_id            Int
-  name                String                   @db.VarChar(255)
+  name                String                           @db.VarChar(255)
   description         String?
-  code                String?                  @db.VarChar(50)
+  code                String?                          @db.VarChar(50)
   type                promotion_type_enum
-  value               Decimal                   @db.Decimal(12, 2)
-  rule_type           promotion_rule_type_enum  @default(flat)
-  scope               promotion_scope_enum      @default(order)
+  value               Decimal                          @db.Decimal(12, 2)
+  rule_type           promotion_rule_type_enum         @default(flat)
+  scope               promotion_scope_enum             @default(order)
   // For quantity_tiered rules, how quantities are counted toward tiers.
   //   cart_total: sums units across every line in scope (legacy behavior).
   //   per_product: each SKU is evaluated independently; tier fires only when
   //                a single product reaches min_quantity on its own.
   // Default 'cart_total' preserves existing promotion semantics.
   quantity_grouping   promotion_quantity_grouping_enum @default(cart_total)
-  min_purchase_amount Decimal?                  @db.Decimal(12, 2)
-  max_discount_amount Decimal?                  @db.Decimal(12, 2)
+  min_purchase_amount Decimal?                         @db.Decimal(12, 2)
+  max_discount_amount Decimal?                         @db.Decimal(12, 2)
   usage_limit         Int?
-  usage_count         Int                      @default(0)
+  usage_count         Int                              @default(0)
   per_customer_limit  Int?
-  start_date          DateTime                 @db.Timestamp(6)
-  end_date            DateTime?                @db.Timestamp(6)
-  state               promotion_state_enum     @default(draft)
-  is_auto_apply       Boolean                  @default(false)
-  priority            Int                      @default(0)
-  created_at          DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at          DateTime?                @default(now()) @db.Timestamp(6)
+  start_date          DateTime                         @db.Timestamp(6)
+  end_date            DateTime?                        @db.Timestamp(6)
+  state               promotion_state_enum             @default(draft)
+  is_auto_apply       Boolean                          @default(false)
+  priority            Int                              @default(0)
+  created_at          DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
 
   stores                   stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   promotion_products       promotion_products[]
@@ -5127,61 +5137,61 @@ model help_articles {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
-  id                   Int                             @id @default(autoincrement())
-  organization_id      Int
-  store_id             Int
-  accounting_entity_id Int
-  fiscal_document_type fiscal_document_type_enum?
-  invoice_number       String                          @db.VarChar(50)
-  invoice_type         invoice_type_enum
-  status               invoice_status_enum             @default(draft)
-  transmission_status  fiscal_transmission_status_enum @default(draft)
-  dian_status          dian_document_status_enum       @default(not_applicable)
-  accounting_status    fiscal_accounting_status_enum   @default(blocked)
-  customer_id          Int?
-  supplier_id          Int?
-  customer_name        String?                         @db.VarChar(255)
-  customer_tax_id      String?                         @db.VarChar(50)
-  customer_address     Json?
-  order_id             Int?
-  sales_order_id       Int?
-  related_invoice_id   Int?
-  subtotal_amount      Decimal                         @default(0) @db.Decimal(12, 2)
-  discount_amount      Decimal                         @default(0) @db.Decimal(12, 2)
-  tax_amount           Decimal                         @default(0) @db.Decimal(12, 2)
+  id                      Int                             @id @default(autoincrement())
+  organization_id         Int
+  store_id                Int
+  accounting_entity_id    Int
+  fiscal_document_type    fiscal_document_type_enum?
+  invoice_number          String                          @db.VarChar(50)
+  invoice_type            invoice_type_enum
+  status                  invoice_status_enum             @default(draft)
+  transmission_status     fiscal_transmission_status_enum @default(draft)
+  dian_status             dian_document_status_enum       @default(not_applicable)
+  accounting_status       fiscal_accounting_status_enum   @default(blocked)
+  customer_id             Int?
+  supplier_id             Int?
+  customer_name           String?                         @db.VarChar(255)
+  customer_tax_id         String?                         @db.VarChar(50)
+  customer_address        Json?
+  order_id                Int?
+  sales_order_id          Int?
+  related_invoice_id      Int?
+  subtotal_amount         Decimal                         @default(0) @db.Decimal(12, 2)
+  discount_amount         Decimal                         @default(0) @db.Decimal(12, 2)
+  tax_amount              Decimal                         @default(0) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado en
   // cuenta 414505 "Transporte Terrestre". Persistido desde order.shipping_cost
   // en invoicing.service.ts:590. Excluido de IVA (tax_amount sólo cubre
   // producto). shipping_amount = 0 ⇒ comportamiento legacy (sin línea extra).
-  shipping_amount      Decimal                         @default(0) @db.Decimal(12, 2)
-  withholding_amount   Decimal                         @default(0) @db.Decimal(12, 2)
-  total_amount         Decimal                         @default(0) @db.Decimal(12, 2)
-  currency             String?                         @db.VarChar(10)
-  exchange_rate        Decimal?                        @db.Decimal(12, 6)
-  resolution_id        Int?
-  cufe                 String?                         @db.VarChar(255)
-  qr_code              String?
-  xml_document         String?
-  pdf_url              String?
-  send_status          document_send_status_enum       @default(not_applicable)
+  shipping_amount         Decimal                         @default(0) @db.Decimal(12, 2)
+  withholding_amount      Decimal                         @default(0) @db.Decimal(12, 2)
+  total_amount            Decimal                         @default(0) @db.Decimal(12, 2)
+  currency                String?                         @db.VarChar(10)
+  exchange_rate           Decimal?                        @db.Decimal(12, 6)
+  resolution_id           Int?
+  cufe                    String?                         @db.VarChar(255)
+  qr_code                 String?
+  xml_document            String?
+  pdf_url                 String?
+  send_status             document_send_status_enum       @default(not_applicable)
   /// '03' = contingencia del facturador, '04' = indisponibilidad DIAN.
-  contingency_type        String?                      @db.VarChar(2)
-  contingency_declared_at DateTime?                    @db.Timestamp(6)
+  contingency_type        String?                         @db.VarChar(2)
+  contingency_declared_at DateTime?                       @db.Timestamp(6)
   /// Vencimiento del plazo de 48 h para transmitir el documento a la DIAN.
-  contingency_deadline    DateTime?                    @db.Timestamp(6)
+  contingency_deadline    DateTime?                       @db.Timestamp(6)
   contingency_reason      String?
-  provider_response    Json?
-  sent_at              DateTime?                       @db.Timestamp(6)
-  accepted_at          DateTime?                       @db.Timestamp(6)
-  email_sent_at        DateTime?                       @db.Timestamp(6)
-  issue_date           DateTime                        @db.Timestamp(6)
-  due_date             DateTime?                       @db.Timestamp(6)
-  payment_date         DateTime?                       @db.Timestamp(6)
-  accounting_entry_id  Int?
-  created_by_user_id   Int?
-  notes                String?
-  created_at           DateTime?                       @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                       @default(now()) @db.Timestamp(6)
+  provider_response       Json?
+  sent_at                 DateTime?                       @db.Timestamp(6)
+  accepted_at             DateTime?                       @db.Timestamp(6)
+  email_sent_at           DateTime?                       @db.Timestamp(6)
+  issue_date              DateTime                        @db.Timestamp(6)
+  due_date                DateTime?                       @db.Timestamp(6)
+  payment_date            DateTime?                       @db.Timestamp(6)
+  accounting_entry_id     Int?
+  created_by_user_id      Int?
+  notes                   String?
+  created_at              DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                       @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                    stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
@@ -5231,7 +5241,7 @@ model invoice_items {
   /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
   /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
   /// unidad, el comportamiento histórico.
-  price_unit_quantity    Int?
+  price_unit_quantity     Int?
   // QUI-431 serial tracking — immutable CSV snapshot of serial numbers,
   // propagated from the source order_item at invoice build. Legal documents
   // render this snapshot instead of reading the live serial pool.
@@ -5825,6 +5835,31 @@ enum certificate_source_enum {
   issuer_adapter
 }
 
+/// QUI-657 — estado del certificado de firma EN NUESTRA MANO.
+///
+/// ORTOGONAL a `dian_enablement_status_enum`, que describe el estado ante la
+/// DIAN. Un tenant puede estar `documents_submitted` acá y `not_started` allá:
+/// son dos hechos independientes y mezclarlos hacía que "no tengo cert" se
+/// leyera como "la DIAN me rechazó".
+///
+/// - `not_required`   → el tenant trae su propio `.p12` (rama "tengo cert").
+///                      Es el default de toda fila histórica.
+/// - `documents_pending`   → eligió la rama "no tengo cert", aún no envía docs.
+/// - `documents_submitted` → cargó RUT + id (+ cert de existencia si jurídica)
+///                           y está en la cola del superadmin.
+/// - `issuing`        → superadmin tramita el cert ante la entidad emisora.
+/// - `issued`         → cert cargado por el superadmin (`certificate_source =
+///                      issuer_adapter`). Recién acá la emisión se desbloquea.
+/// - `rejected`       → documentación insuficiente; el tenant debe reenviar.
+enum certificate_provisioning_status_enum {
+  not_required
+  documents_pending
+  documents_submitted
+  issuing
+  issued
+  rejected
+}
+
 /// store_id is nullable to support organizations.fiscal_scope=ORGANIZATION,
 /// where the DIAN config is anchored to the organization only (store_id IS NULL).
 /// When fiscal_scope=STORE, store_id is required. The DB enforces:
@@ -5850,54 +5885,97 @@ enum certificate_source_enum {
 /// all four create paths (platform upsert, vendor-support clone, store create,
 /// org create) before 2026-08-05.
 model dian_configurations {
-  id                             Int                          @id @default(autoincrement())
-  organization_id                Int
-  store_id                       Int?
-  accounting_entity_id           Int
-  name                           String                       @db.VarChar(100)
-  nit                            String                       @db.VarChar(20)
-  nit_type                       dian_nit_type_enum           @default(NIT)
-  nit_dv                         String?                      @db.VarChar(1)
-  is_default                     Boolean                      @default(false)
-  configuration_type             dian_configuration_type_enum @default(invoicing)
-  operation_mode                 dian_operation_mode_enum     @default(own_software)
-  software_id                    String                       @db.VarChar(100)
-  software_pin_encrypted         String                       @db.Text
-  certificate_s3_key             String?                      @db.Text
-  certificate_password_encrypted String?                      @db.Text
+  id                              Int                                  @id @default(autoincrement())
+  organization_id                 Int
+  store_id                        Int?
+  accounting_entity_id            Int
+  name                            String                               @db.VarChar(100)
+  nit                             String                               @db.VarChar(20)
+  nit_type                        dian_nit_type_enum                   @default(NIT)
+  nit_dv                          String?                              @db.VarChar(1)
+  is_default                      Boolean                              @default(false)
+  configuration_type              dian_configuration_type_enum         @default(invoicing)
+  operation_mode                  dian_operation_mode_enum             @default(own_software)
+  software_id                     String                               @db.VarChar(100)
+  software_pin_encrypted          String                               @db.Text
+  certificate_s3_key              String?                              @db.Text
+  certificate_password_encrypted  String?                              @db.Text
   /// ARN (or key-id) of the AWS KMS asymmetric RSA key holding the certificate's
   /// private half, non-exportable inside the HSM. When set, the XAdES signature is
   /// produced by KMS and the `.p12` private key is never touched. NULL keeps the
   /// historical custody: private key read from the `.p12` in process memory.
   /// Per-entity on purpose — a platform migrates one fiscal entity at a time.
-  certificate_kms_key_id         String?                      @db.Text
-  certificate_expiry             DateTime?                    @db.Timestamp(6)
-  certificate_fingerprint        String?                      @db.VarChar(128)
-  certificate_subject            String?                      @db.Text
-  certificate_issuer             String?                      @db.Text
-  certificate_serial_number      String?                      @db.VarChar(128)
-  certificate_nit                String?                      @db.VarChar(20)
-  certificate_source             certificate_source_enum      @default(manual_upload_validated)
-  certificate_uploaded_at        DateTime?                    @db.Timestamp(6)
-  environment                    dian_environment_enum        @default(test)
-  enablement_status              dian_enablement_status_enum  @default(not_started)
-  test_set_id                    String?                      @db.VarChar(100)
-  enablement_evidence            Json?
-  enabled_at                     DateTime?                    @db.Timestamp(6)
-  last_test_result               Json?
-  created_at                     DateTime?                    @default(now()) @db.Timestamp(6)
-  updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
+  certificate_kms_key_id          String?                              @db.Text
+  certificate_expiry              DateTime?                            @db.Timestamp(6)
+  certificate_fingerprint         String?                              @db.VarChar(128)
+  certificate_subject             String?                              @db.Text
+  certificate_issuer              String?                              @db.Text
+  certificate_serial_number       String?                              @db.VarChar(128)
+  certificate_nit                 String?                              @db.VarChar(20)
+  certificate_source              certificate_source_enum              @default(manual_upload_validated)
+  /// QUI-657. Ver `certificate_provisioning_status_enum`. Ortogonal a
+  /// `enablement_status`: este dice si TENEMOS el cert; aquel, si la DIAN
+  /// habilitó la operación. El gate de emisión exige AMBOS.
+  certificate_provisioning_status certificate_provisioning_status_enum @default(not_required)
+  certificate_uploaded_at         DateTime?                            @db.Timestamp(6)
+  environment                     dian_environment_enum                @default(test)
+  enablement_status               dian_enablement_status_enum          @default(not_started)
+  test_set_id                     String?                              @db.VarChar(100)
+  enablement_evidence             Json?
+  enabled_at                      DateTime?                            @db.Timestamp(6)
+  last_test_result                Json?
+  created_at                      DateTime?                            @default(now()) @db.Timestamp(6)
+  updated_at                      DateTime?                            @default(now()) @db.Timestamp(6)
 
-  organization         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store                stores?                @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  accounting_entity    accounting_entities    @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization         organizations                  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                stores?                        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity    accounting_entities            @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   dian_audit_logs      dian_audit_logs[]
   fiscal_transmissions fiscal_transmissions[]
+  identity_documents   dian_configuration_documents[]
 
   @@index([store_id])
   @@index([organization_id])
   @@index([accounting_entity_id, configuration_type])
   @@index([operation_mode, environment, enablement_status])
+}
+
+/// QUI-657 — documentos de identidad que un tenant SIN certificado de firma
+/// entrega para que la plataforma le tramite uno ante la entidad emisora.
+///
+/// CUELGA DE `dian_configurations`, NO DE `stores`, a propósito: `store_id` es
+/// nullable por diseño (`organizations.fiscal_scope = 'ORGANIZATION'` ancla la
+/// identidad fiscal a la organización y deja la tienda en NULL). Colgar de
+/// `stores` dejaría sin hogar justo a las organizaciones de alcance-org, que
+/// son las que más probablemente tramitan el cert de forma centralizada.
+///
+/// RETENCIÓN INDEFINIDA (decisión de producto, 2026-08-13): los documentos se
+/// conservan en S3 sin TTL de limpieza. Son el respaldo de la identidad con la
+/// que se expidió un certificado de firma; borrarlos rompería la trazabilidad
+/// de una emisión fiscal que la DIAN puede auditar años después.
+///
+/// Se guarda la CLAVE S3, nunca una URL firmada (`vendix-s3-storage`): las URLs
+/// se firman en cada lectura con vida corta.
+model dian_configuration_documents {
+  id                    Int      @id @default(autoincrement())
+  dian_configuration_id Int
+  /// `rut` | `id` | `certificate_of_existence`. Texto y no enum: el juego de
+  /// documentos exigidos por la entidad emisora cambia por trámite y no merece
+  /// una migración de enum cada vez.
+  document_type         String   @db.VarChar(50)
+  s3_key                String   @db.Text
+  uploaded_by_user_id   Int?
+  uploaded_at           DateTime @default(now()) @db.Timestamp(6)
+  original_filename     String?  @db.VarChar(255)
+  size_bytes            BigInt?
+  mime_type             String?  @db.VarChar(100)
+
+  dian_configuration dian_configurations @relation(fields: [dian_configuration_id], references: [id], onDelete: Cascade)
+  uploaded_by        users?              @relation(fields: [uploaded_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([dian_configuration_id])
+  @@index([dian_configuration_id, document_type])
+  @@map("dian_configuration_documents")
 }
 
 model dian_audit_logs {
@@ -5946,9 +6024,9 @@ model dian_document_events {
   created_at            DateTime? @default(now()) @db.Timestamp(6)
   updated_at            DateTime? @default(now()) @db.Timestamp(6)
 
-  invoice      invoices       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
-  organization organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores?        @relation(fields: [store_id], references: [id], onDelete: SetNull)
+  invoice      invoices      @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: SetNull)
 
   @@index([invoice_id, event_code])
   @@index([status, created_at])
@@ -6366,7 +6444,7 @@ model quotation_items {
   /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
   /// `unit_price * quantity / price_unit_quantity`. `null` o `1` = precio por
   /// unidad, el comportamiento histórico.
-  price_unit_quantity             Int?
+  price_unit_quantity              Int?
   created_at                       DateTime? @default(now()) @db.Timestamp(6)
   updated_at                       DateTime? @default(now()) @db.Timestamp(6)
 
@@ -6940,6 +7018,7 @@ model bank_accounts {
   chart_account        chart_of_accounts?     @relation(fields: [chart_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   bank_transactions    bank_transactions[]
   bank_reconciliations bank_reconciliations[]
+  refund_items         refund_items[]
 
   @@unique([organization_id, account_number])
   @@index([organization_id, store_id])
@@ -7526,33 +7605,33 @@ model invoice_retry_queue {
 }
 
 model bookings {
-  id                        Int                 @id @default(autoincrement())
+  id                        Int                           @id @default(autoincrement())
   store_id                  Int
   customer_id               Int
   product_id                Int
   product_variant_id        Int?
-  booking_number            String              @db.VarChar(50)
-  date                      DateTime            @db.Date
-  start_time                String              @db.VarChar(5)
-  end_time                  String              @db.VarChar(5)
-  status                    booking_status_enum @default(pending)
-  channel                   order_channel_enum  @default(pos)
-  notes                     String?             @db.Text
-  internal_notes            String?             @db.Text
+  booking_number            String                        @db.VarChar(50)
+  date                      DateTime                      @db.Date
+  start_time                String                        @db.VarChar(5)
+  end_time                  String                        @db.VarChar(5)
+  status                    booking_status_enum           @default(pending)
+  channel                   order_channel_enum            @default(pos)
+  notes                     String?                       @db.Text
+  internal_notes            String?                       @db.Text
   order_id                  Int?
   table_id                  Int?
   created_by_user_id        Int?
-  expires_at                DateTime?           @db.Timestamp(6)
+  expires_at                DateTime?                     @db.Timestamp(6)
   provider_id               Int?
-  checked_in_at             DateTime?           @db.Timestamp(6)
-  confirmation_requested_at DateTime?           @db.Timestamp(6)
-  confirmation_deadline     DateTime?           @db.Timestamp(6)
-  arrival_at                DateTime?           @db.Timestamp(6)
+  checked_in_at             DateTime?                     @db.Timestamp(6)
+  confirmation_requested_at DateTime?                     @db.Timestamp(6)
+  confirmation_deadline     DateTime?                     @db.Timestamp(6)
+  arrival_at                DateTime?                     @db.Timestamp(6)
   /// Resolved queue position computed by AppointmentQueueService.
   /// 0 means not in queue (most common case). Lower = sooner.
-  queue_position            Int                 @default(0)
+  queue_position            Int                           @default(0)
   /// Manual priority override for queue ordering. Lower = sooner. 0 = default.
-  priority                  Int                 @default(0)
+  priority                  Int                           @default(0)
   /// Where the service will be performed. `home` = technician goes to the
   /// customer's address; `shop` = customer goes to the technician's shop.
   /// Historical bookings all default to `shop`.
@@ -7560,9 +7639,9 @@ model bookings {
   /// FK to the customer's `addresses` row when service_location_type =
   /// `home`. NULL for `shop` bookings.
   service_address_id        Int?
-  service_address           addresses?          @relation("booking_service_address", fields: [service_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_at                DateTime?           @default(now()) @db.Timestamp(6)
-  updated_at                DateTime?           @default(now()) @db.Timestamp(6)
+  service_address           addresses?                    @relation("booking_service_address", fields: [service_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_at                DateTime?                     @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 
   store            stores             @relation(fields: [store_id], references: [id])
   customer         users              @relation("bookings_customer", fields: [customer_id], references: [id])
@@ -8491,14 +8570,14 @@ model booking_reminder_logs {
 ///   `pending`  → `cancelled`  (customer withdrew their request)
 ///   `approved` / `rejected` / `cancelled` are terminal.
 model booking_reschedule_requests {
-  id                       Int                                                @id @default(autoincrement())
+  id                       Int                                    @id @default(autoincrement())
   store_id                 Int
   booking_id               Int
   /// The new date the customer wants — the booking stays at its
   /// current `date` until the row is approved.
-  requested_date           DateTime                                           @db.Date
-  requested_start_time     String                                             @db.VarChar(5)
-  requested_end_time       String                                             @db.VarChar(5)
+  requested_date           DateTime                               @db.Date
+  requested_start_time     String                                 @db.VarChar(5)
+  requested_end_time       String                                 @db.VarChar(5)
   /// The admin/employee who created the request, if it was filed from
   /// the POS/admin side on behalf of the customer. NULL for requests
   /// filed from the ecommerce portal by the customer themselves.
@@ -8507,25 +8586,25 @@ model booking_reschedule_requests {
   /// NULL for admin-side requests (where the customer is implied by
   /// `booking_id`).
   requested_by_customer_id Int?
-  requested_at             DateTime                                           @default(now()) @db.Timestamp(6)
+  requested_at             DateTime                               @default(now()) @db.Timestamp(6)
   /// Free-text reason the customer typed in the reschedule modal.
-  reason                   String?                                            @db.Text
-  status                   booking_reschedule_request_status_enum             @default(pending)
+  reason                   String?                                @db.Text
+  status                   booking_reschedule_request_status_enum @default(pending)
   /// The admin/employee who approved/rejected the request. NULL while
   /// pending; populated on `approved`/`rejected`.
   decided_by_user_id       Int?
   decided_at               DateTime?
   /// Free-text reason the admin typed when rejecting (also allowed on
   /// approve, but most approvals won't use it).
-  decision_reason          String?                                            @db.Text
-  created_at               DateTime?                                          @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                                          @default(now()) @db.Timestamp(6)
+  decision_reason          String?                                @db.Text
+  created_at               DateTime?                              @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                              @default(now()) @db.Timestamp(6)
 
-  booking              bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store                stores   @relation(fields: [store_id], references: [id])
-  requested_by_user    users?   @relation("reschedule_req_user", fields: [requested_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  requested_by_customer users?  @relation("reschedule_req_customer", fields: [requested_by_customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  decided_by_user      users?   @relation("reschedule_req_decided", fields: [decided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  booking               bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  store                 stores   @relation(fields: [store_id], references: [id])
+  requested_by_user     users?   @relation("reschedule_req_user", fields: [requested_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  requested_by_customer users?   @relation("reschedule_req_customer", fields: [requested_by_customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  decided_by_user       users?   @relation("reschedule_req_decided", fields: [decided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([booking_id])
   @@index([store_id, status])
@@ -9443,9 +9522,9 @@ model kitchen_ticket_items {
   created_at        DateTime?                      @default(now()) @db.Timestamp(6)
   updated_at        DateTime?                      @default(now()) @db.Timestamp(6)
 
-  kitchen_ticket kitchen_tickets @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  order_item     order_items     @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  product        products        @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  kitchen_ticket kitchen_tickets                  @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  order_item     order_items                      @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product        products                         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   exclusions     kitchen_ticket_item_exclusions[]
 
   @@index([kitchen_ticket_id])
@@ -9479,16 +9558,16 @@ model kitchen_ticket_items {
 // atractivo de partir.
 
 model order_item_exclusions {
-  id                  Int       @id @default(autoincrement())
-  order_item_id       Int
+  id                   Int       @id @default(autoincrement())
+  order_item_id        Int
   component_product_id Int
   /// Procedencia de la linea del BOM, root-first, tal como la expone
   /// `BomExplosionLine.path_recipe_ids`. Permite excluir un NODO de sub-receta
   /// completo ("sin salsa criolla") en vez de obligar a desmarcar sus tres hojas
   /// y a saber de memoria cuales venian de la salsa.
-  path_recipe_ids     Int[]
-  created_by_user_id  Int?
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  path_recipe_ids      Int[]
+  created_by_user_id   Int?
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
 
   order_item        order_items @relation(fields: [order_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   component_product products    @relation("order_item_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -9500,12 +9579,12 @@ model order_item_exclusions {
 }
 
 model kitchen_ticket_item_exclusions {
-  id                    Int       @id @default(autoincrement())
+  id                     Int       @id @default(autoincrement())
   kitchen_ticket_item_id Int
-  component_product_id  Int
-  path_recipe_ids       Int[]
-  excluded_by_user_id   Int?
-  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  component_product_id   Int
+  path_recipe_ids        Int[]
+  excluded_by_user_id    Int?
+  created_at             DateTime? @default(now()) @db.Timestamp(6)
 
   kitchen_ticket_item kitchen_ticket_items @relation(fields: [kitchen_ticket_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   component_product   products             @relation("kti_exclusion_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
