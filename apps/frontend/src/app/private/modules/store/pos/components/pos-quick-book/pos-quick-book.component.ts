@@ -170,17 +170,28 @@ export class PosQuickBookComponent {
 
     this.submitting.set(true);
 
+    // QUI-649 — Do NOT pass `skip_order_creation: true`. The backend's
+    // reservation service auto-creates the linked order atomically when
+    // neither `order_id` nor `skip_order_creation` is present (see
+    // reservations.service.ts). If the POS already has an in-progress
+    // order, attach the reservation to it via `order_id` instead of
+    // creating a second order.
+    const payload: Record<string, any> = {
+      customer_id: customer.id,
+      product_id: service.id,
+      date: slot.date || this.selectedDate(),
+      start_time: slot.start_time,
+      end_time: slot.end_time,
+      channel: 'pos',
+      notes: this.notes(),
+    };
+    const existingOrderId = this.cartService.getCurrentState().linkedOrderId;
+    if (existingOrderId != null) {
+      payload.order_id = existingOrderId;
+    }
+
     this.http
-      .post<any>('/api/store/reservations', {
-        customer_id: customer.id,
-        product_id: service.id,
-        date: slot.date || this.selectedDate(),
-        start_time: slot.start_time,
-        end_time: slot.end_time,
-        channel: 'pos',
-        notes: this.notes(),
-        skip_order_creation: true,
-      })
+      .post<any>('/api/store/reservations', payload)
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.submitting.set(false);

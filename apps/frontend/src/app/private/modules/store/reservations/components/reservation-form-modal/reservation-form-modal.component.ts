@@ -1023,8 +1023,15 @@ export class ReservationFormModalComponent {
       notes: this.notes() || undefined,
       provider_id: this.selectedProvider()?.id || undefined,
       skip_availability_check: this.skipAvailabilityCheck() || undefined,
-      ...(this.posMode() && { skip_order_creation: true }),
     };
+
+    // QUI-649 — The backend's `POST /store/reservations` already auto-creates
+    // the linked order atomically (see reservations.service.ts) when neither
+    // `order_id` nor `skip_order_creation` is present. We removed
+    // `...(this.posMode() && { skip_order_creation: true })` because it
+    // created the orphan-reservation bug. POS bookings now always carry an
+    // order — the same behaviour that ecommerce and admin flows already
+    // relied on.
 
     this.reservationsService.createReservation(dto).subscribe({
       next: (booking) => {
