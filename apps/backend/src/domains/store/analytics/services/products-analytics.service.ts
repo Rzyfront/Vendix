@@ -180,7 +180,11 @@ export class ProductsAnalyticsService {
       .map((r) => r.product_id)
       .filter(Boolean) as number[];
     if (productIds.length > 0) {
-      const contextStoreId = RequestContextService.getContext()?.store_id ?? 0;
+      const context = RequestContextService.getContext();
+      if (!context?.store_id) {
+        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      }
+      const contextStoreId = context.store_id;
       // QUI-622 review: StorePrismaService no expone $queryRaw — el `as any`
       // silencia al compilador pero en runtime es undefined. Mismo patrón que
       // aggregateCogs (~L554): usar withoutScope() y filtrar explícito por
