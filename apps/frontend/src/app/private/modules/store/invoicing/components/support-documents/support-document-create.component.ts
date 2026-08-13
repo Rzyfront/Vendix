@@ -259,6 +259,14 @@ export class SupportDocumentCreateComponent {
   readonly submitting = signal(false);
   readonly submitError = signal<string | null>(null);
 
+  /**
+   * Marca si el usuario tocó manualmente el `supplier_id`. El `effect()` de
+   * sincronización con `initialSupplierId` se aborta en cuanto el usuario
+   * elige un proveedor distinto — evita pisar la selección manual cuando el
+   * padre re-emite el mismo `initialSupplierId`.
+   */
+  private readonly supplierTouchedByUser = signal(false);
+
   readonly supplierOptions = signal<SelectorOption[]>([]);
 
   readonly typeOptions: SelectorOption[] = [
@@ -299,13 +307,25 @@ export class SupportDocumentCreateComponent {
         ctrl.updateValueAndValidity({ emitEvent: false });
       });
 
+    // Si el usuario selecciona manualmente un proveedor, marcamos el flag
+    // para que el `effect()` de abajo deje de pisarlo.
+    this.form.controls['supplier_id'].valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        const initial = this.initialSupplierId();
+        if (value != null && value !== initial) {
+          this.supplierTouchedByUser.set(true);
+        }
+      });
+
     this.loadSuppliers();
 
     // Si llega un initialSupplierId después de creado el form (input() tarda),
-    // reflejarlo en el control.
+    // reflejarlo en el control. Sólo se aplica si el usuario no ha tocado
+    // manualmente el proveedor — si no, pisaríamos su selección.
     effect(() => {
       const id = this.initialSupplierId();
-      if (id != null) {
+      if (id != null && !this.supplierTouchedByUser()) {
         this.form.controls.supplier_id.setValue(id);
       }
     });
