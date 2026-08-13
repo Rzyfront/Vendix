@@ -619,8 +619,7 @@ export class OrderRefundModalComponent {
       .getAvailableRefundMethods(orderId.toString())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
-          const data = response.data || response;
+        next: (data) => {
           this.availableMethods.set(data?.methods ?? []);
           this.bankAccounts.set(data?.bank_accounts ?? []);
           // If the previously selected method is now unavailable, fall back
