@@ -262,6 +262,27 @@ interface RefundItemState {
             <div class="flex justify-center items-center py-8">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
+          } @else if (previewError(); as errorMsg) {
+            <!-- REFUND OVERHAUL — error state replaces the silent swallow
+                 that left this step empty when the preview POST failed.
+                 The operator sees the backend message verbatim and can
+                 retry without leaving the modal. -->
+            <div
+              class="p-4 rounded-xl border border-red-200 bg-red-50 flex items-start gap-3"
+              role="alert"
+            >
+              <app-icon name="alert-circle" size="18" class="text-red-600 mt-0.5 flex-shrink-0"></app-icon>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-red-900">No se pudo calcular el resumen</p>
+                <p class="text-xs text-red-700 mt-1 break-words">{{ errorMsg }}</p>
+              </div>
+            </div>
+            <button
+              (click)="loadPreview()"
+              class="w-full p-2.5 rounded-lg border border-border text-sm font-medium text-primary hover:bg-primary/5 transition-colors"
+            >
+              Reintentar
+            </button>
           } @else if (preview()) {
             <h4 class="text-sm font-bold text-gray-900">Resumen del reembolso</h4>
 
@@ -431,8 +452,29 @@ export class OrderRefundModalComponent {
   refundMethod = signal<RefundMethod>('original_payment');
   preview = signal<RefundCalculationResult | null>(null);
   isLoadingPreview = signal(false);
+  // REFUND OVERHAUL — previewError replaces the silent swallow that
+  // left step 3 empty when the POST /flow/refund/preview failed. The
+  // error message from the backend is shown verbatim with a Reintentar
+  // button so the operator can recover without leaving the modal.
+  previewError = signal<string | null>(null);
   isProcessing = signal(false);
   locations = signal<{ id: number; name: string; code: string }[]>([]);
+  // REFUND OVERHAUL — methods + bank_accounts populated from the new
+  // /store/orders/:id/flow/refund/available-methods endpoint. Replaces
+  // the hardcoded `refundMethods` array; the dropdown reflects what the
+  // store can ACTUALLY execute (no more options that 400 at submit).
+  availableMethods = signal<
+    {
+      value: RefundMethod;
+      label: string;
+      icon: string;
+      available: boolean;
+      reason_unavailable?: string;
+    }[]
+  >([]);
+  bankAccounts = signal<{ id: number; label: string }[]>([]);
+  // Bank account selected per item (bank_transfer only).
+  readonly bankAccountByOrderItem = signal<Map<number, number>>(new Map());
 
   steps: StepsLineItem[] = [
     { label: 'Items' },
@@ -440,12 +482,12 @@ export class OrderRefundModalComponent {
     { label: 'Confirmar' },
   ];
 
-  refundMethods = [
-    { value: 'original_payment' as RefundMethod, label: 'Pago original', icon: 'rotate-ccw' },
-    { value: 'cash' as RefundMethod, label: 'Efectivo', icon: 'banknote' },
-    { value: 'bank_transfer' as RefundMethod, label: 'Transferencia', icon: 'landmark' },
-    { value: 'store_credit' as RefundMethod, label: 'Billetera', icon: 'wallet' },
-  ];
+  // REFUND OVERHAUL — `refundMethods` is now a getter that returns from
+  // the `availableMethods` signal (populated by the new endpoint). Old
+  // hardcoded array is gone — see `loadAvailableMethods`.
+  get refundMethods() {
+    return this.availableMethods();
+  }
 
   constructor() {
     effect(() => {
@@ -453,6 +495,7 @@ export class OrderRefundModalComponent {
         this.resetState();
         this.loadLocations();
         this.loadRefundedQuantities();
+        this.loadAvailableMethods();
       }
     });
   }
@@ -562,6 +605,47 @@ export class OrderRefundModalComponent {
       });
   }
 
+  // REFUND OVERHAUL — fetch the methods + bank_accounts the store can
+  // actually execute. Replaces the hardcoded `refundMethods` array so
+  // the dropdown never offers options that the backend would reject.
+  private loadAvailableMethods(): void {
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.ordersService
+      .getAvailableRefundMethods(orderId.toString())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response.data || response;
+          this.availableMethods.set(data?.methods ?? []);
+          this.bankAccounts.set(data?.bank_accounts ?? []);
+          // If the previously selected method is now unavailable, fall back
+          // to the first available one so the modal never shows a stuck
+          // selection.
+          const stillOk = this.availableMethods().some(
+            (m) => m.value === this.refundMethod() && m.available,
+          );
+          if (!stillOk) {
+            const firstAvailable = this.availableMethods().find(
+              (m) => m.available,
+            );
+            if (firstAvailable) this.refundMethod.set(firstAvailable.value);
+          }
+        },
+        error: (err) => {
+          // Soft-fail: keep the hardcoded fallback in the dropdown so the
+          // operator can still attempt the modal. The submit will surface
+          // the real backend error.
+          this.availableMethods.set([
+            { value: 'original_payment', label: 'Pago original', icon: 'rotate-ccw', available: true },
+            { value: 'cash', label: 'Efectivo', icon: 'banknote', available: true },
+            { value: 'bank_transfer', label: 'Transferencia', icon: 'landmark', available: true },
+            { value: 'store_credit', label: 'Billetera', icon: 'wallet', available: true },
+          ]);
+        },
+      });
+  }
+
   toggleItem(orderItemId: number): void {
     this.refundItems.update((items) =>
       items.map((i) =>
@@ -654,6 +738,9 @@ export class OrderRefundModalComponent {
     if (!orderId) return;
 
     this.isLoadingPreview.set(true);
+    // REFUND OVERHAUL — clear any prior error before retrying so the
+    // Reintentar button shows a fresh attempt instead of stale text.
+    this.previewError.set(null);
     this.ordersService
       .previewRefund(orderId.toString(), this.buildDto())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -662,7 +749,15 @@ export class OrderRefundModalComponent {
           this.preview.set(result);
           this.isLoadingPreview.set(false);
         },
-        error: () => {
+        error: (err) => {
+          // REFUND OVERHAUL — capture the backend error so step 3 can
+          // render it instead of a blank body. Previously the error was
+          // swallowed silently and the operator saw an empty modal.
+          this.previewError.set(
+            err?.error?.message ||
+              err?.message ||
+              'No se pudo calcular el resumen del reembolso. Intenta de nuevo.',
+          );
           this.isLoadingPreview.set(false);
         },
       });
@@ -702,8 +797,12 @@ export class OrderRefundModalComponent {
     this.includeShipping.set(false);
     this.refundMethod.set('original_payment');
     this.preview.set(null);
+    this.previewError.set(null);
     this.isLoadingPreview.set(false);
     this.isProcessing.set(false);
+    this.availableMethods.set([]);
+    this.bankAccounts.set([]);
+    this.bankAccountByOrderItem.set(new Map());
   }
 
 }
