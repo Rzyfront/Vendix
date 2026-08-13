@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, viewChild } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -7,12 +7,14 @@ import { SupportDocumentCreateComponent } from './support-document-create.compon
 import { InvoicingNotConfiguredComponent } from '../invoicing-not-configured/invoicing-not-configured.component';
 import { SaveRequirementsModalComponent } from '../../../../../../shared/components/index';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   selectDianConfigsLoading,
   selectDianConfigStatus,
   type DianConfigGateStatus,
   type DianGateReason,
 } from '../../state/selectors/invoicing.selectors';
+import { loadDianConfigs } from '../../state/actions/invoicing.actions';
 import type { SupportDocumentRow } from '../../interfaces/support-document.interface';
 import type { Invoice } from '../../interfaces/invoice.interface';
 
@@ -38,6 +40,7 @@ import type { Invoice } from '../../interfaces/invoice.interface';
   template: `
     <div class="w-full">
       <app-support-document-list
+        #listRef
         (create)="openCreateModal()"
         (view)="viewDocument($event)"
       ></app-support-document-list>
@@ -67,9 +70,13 @@ import type { Invoice } from '../../interfaces/invoice.interface';
 })
 export class SupportDocumentsPageComponent {
   private store = inject(Store);
+  private toast = inject(ToastService);
 
   /** Modal compartido de requisitos fiscales (accedido desde el template). */
   readonly fiscalReq = inject(FiscalRequirementsService);
+
+  /** Referencia al listado para poder re-disparar la carga tras una creación. */
+  readonly listRef = viewChild<SupportDocumentListComponent>('listRef');
 
   // Estado de los modales
   readonly isCreateModalOpen = signal(false);
@@ -92,6 +99,14 @@ export class SupportDocumentsPageComponent {
     { initialValue: false },
   );
 
+  constructor() {
+    // Necesario para el deep-link directo a `/admin/invoicing/support-documents`
+    // sin pasar por la pestaña de facturas: si nadie despacha la carga, el
+    // `selectDianConfigStatus` queda en su `initialValue` (no configurado) y
+    // el gate abre el modal "missing" al primer clic en "Nuevo".
+    this.store.dispatch(loadDianConfigs());
+  }
+
   openCreateModal(): void {
     if (this.dianConfigsLoading()) return;
 
@@ -105,18 +120,23 @@ export class SupportDocumentsPageComponent {
   }
 
   viewDocument(row: SupportDocumentRow): void {
-    // El detalle llega en QUI-683 — por ahora cerramos con un mensaje para
-    // que la fila no parezca muerta y deje claro que la acción es intencional.
-    // eslint-disable-next-line no-console
-    console.info(
-      '[QUI-682 stub] Documento soporte seleccionado:',
-      row.invoice_number,
-      '(detalle en QUI-683)',
-    );
+    // El detalle real llega en QUI-683. Mientras tanto, mostramos un toast
+    // para que la fila no parezca muerta y deje claro que la acción es
+    // intencional. Evita añadir un modal nuevo y abre solo cuando el usuario
+    // interactúa con la fila.
+    this.toast.show({
+      title: 'Detalle en construcción',
+      description: `El detalle del documento ${row.invoice_number ?? row.id} llega en QUI-683.`,
+      variant: 'info',
+    });
   }
 
   onCreated(_invoice: Invoice | SupportDocumentRow): void {
-    // El padre (routing) podría refrescar el tab padre si quisiera; por ahora
-    // el list ya está recargado localmente desde el componente create.
+    // Tras un create exitoso, el form ya emite el documento por `created` y se
+    // cierra. El listado debe re-cargar para mostrar la nueva fila.
+    const list = this.listRef();
+    if (list) {
+      list.load();
+    }
   }
 }
