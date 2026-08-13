@@ -81,9 +81,11 @@ describe('buildTenantFiscalColumns', () => {
   });
 
   it('produce estado idéntico por el mismo payload entre los dos alcances cuando las columnas se solapan', () => {
-    // El mismo NIT + responsabilidades + legal_name produce columnas homólogas
-    // (tax_id, fiscal_responsibilities, tax_regime, legal_name) en ambos
-    // alcances. Las columnas que solo existen en un alcance no se comparan.
+    // El mismo NIT + legal_name produce columnas homólogas (tax_id, legal_name)
+    // en ambos alcances. `fiscal_responsibilities` y `tax_regime` viven SÓLO en
+    // `organizations` (no son columnas de `stores`), así que el alcance tienda
+    // no las emite — no entran en la comparación de "estado idéntico". Ver
+    // QUI-681 para el motivo.
     const org = buildTenantFiscalColumns(
       'organization',
       {
@@ -105,9 +107,15 @@ describe('buildTenantFiscalColumns', () => {
       { tax_responsibilities: ['O-13'] },
     ) as Record<string, unknown>;
 
-    for (const sharedKey of ['tax_id', 'legal_name', 'fiscal_responsibilities', 'tax_regime']) {
+    for (const sharedKey of ['tax_id', 'legal_name']) {
       expect(org[sharedKey]).toEqual(store[sharedKey]);
     }
+    // Y explícitamente: la tienda no emite las columnas exclusivas de org.
+    expect('fiscal_responsibilities' in store).toBe(false);
+    expect('tax_regime' in store).toBe(false);
+    // La org sí las emite.
+    expect('fiscal_responsibilities' in org).toBe(true);
+    expect('tax_regime' in org).toBe(true);
   });
 });
 
@@ -149,6 +157,48 @@ describe('buildStoreFiscalColumns', () => {
     );
     expect(cols.tax_id).toBe('ES-B12345678');
     expect(cols.tax_id_dv).toBeNull();
+  });
+
+  // Regresión QUI-681: el PATCH del wizard fiscal tira 500 porque la tabla
+  // `stores` no tiene `fiscal_responsibilities` ni `tax_regime` (viven sólo en
+  // `organizations`/`users`/`suppliers`). La rama vieja los emitía igual y
+  // Prisma 7 rechazaba con "Unknown argument", convertido en 500 por el
+  // AllExceptionsFilter. Los datos siguen llegando a `fiscal_data` por la vía
+  // del upsert de `store_settings.settings`, así que la pérdida es sólo en la
+  // duplicación a columnas — que era el bug.
+  it('no proyecta fiscal_responsibilities ni tax_regime (no son columnas de stores)', () => {
+    const cols = buildStoreFiscalColumns(
+      {
+        legal_name: 'TEST S.A.S',
+        nit: '234234242',
+        nit_type: 'NIT',
+        tax_responsibilities: ['R-99-PN'],
+        tax_regime: 'COMUN',
+      },
+      {
+        tax_responsibilities: ['R-99-PN'],
+        tax_regime: 'COMUN',
+      },
+    );
+
+    expect('fiscal_responsibilities' in cols).toBe(false);
+    expect('tax_regime' in cols).toBe(false);
+    // Las columnas que SÍ son de `stores` se siguen emitiendo:
+    expect(cols.legal_name).toBe('TEST S.A.S');
+    expect(cols.tax_id).toBe('234234242');
+    expect(cols.tax_id_dv).toBeDefined();
+    expect(cols.nit_type).toBe('NIT');
+  });
+
+  it('el dispatcher con scope=store no produce esas columnas aunque el patch las traiga', () => {
+    const cols = buildTenantFiscalColumns(
+      'store',
+      { nit: '900123456', tax_responsibilities: ['O-13'] },
+      { tax_responsibilities: ['O-13'] },
+    );
+
+    expect('fiscal_responsibilities' in cols).toBe(false);
+    expect('tax_regime' in cols).toBe(false);
   });
 });
 
