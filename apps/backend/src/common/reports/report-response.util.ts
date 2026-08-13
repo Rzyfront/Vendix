@@ -33,19 +33,88 @@ function sanitizeFilename(filename: string): string {
 }
 
 /**
- * Builds a report filename with a store-LOCAL date suffix, e.g.
- * `ventas_2026-01-31.xlsx`. Uses the store timezone (not UTC) so the suffix
- * matches the business day the user sees — reusing the same TZ fix as the cells.
+ * Dual-mode response helper for analytics list endpoints that may be consumed
+ * either by an export-XLSX flow (the caller passes the full array and uses
+ * `rows` for the sheet) or by an in-browser paginator (the caller slices
+ * server-side using `page` / `limit`).
+ *
+ * If `query.page` AND `query.limit` are present, returns a paginated
+ * envelope; otherwise returns a success envelope with the full array.
+ *
+ * Centralized here (QUI-573 transversal) so every analytics controller uses
+ * the same shape — no copy/pasted `if (Array.isArray)` branches per route.
+ */
+export function paginatedOrAll<T = unknown>(
+  responseService: {
+    success: (rows: T[]) => unknown;
+    paginated: (
+      data: T[],
+      total: number,
+      page: number,
+      limit: number,
+    ) => unknown;
+  },
+  query: { page?: number; limit?: number } | undefined,
+  rows: T[],
+): unknown {
+  const page = query?.page;
+  const limit = query?.limit;
+  if (!page || !limit) {
+    return responseService.success(rows);
+  }
+  const total = rows.length;
+  const offset = (page - 1) * limit;
+  return responseService.paginated(
+    rows.slice(offset, offset + limit),
+    total,
+    page,
+    limit,
+  );
+}
+
+/**
+ * Builds a report filename. Default suffix is a single store-local date
+ * (`ventas_2026-08-08.xlsx`). When `dateFrom` and `dateTo` are provided,
+ * the suffix becomes a range (`tax_summary_2026-08-01_al_08.xlsx` or
+ * `_2026-08-01_al_2026-09-15.xlsx` if the range crosses months). Uses the
+ * store timezone so the dates match what the user sees in the cells.
  */
 export function buildReportFilename(
   base: string,
-  options?: { date?: Date; tz?: string; extension?: string },
+  options?: {
+    date?: Date;
+    tz?: string;
+    extension?: string;
+    dateFrom?: Date;
+    dateTo?: Date;
+  },
 ): string {
   const date = options?.date ?? new Date();
   const tz = options?.tz ?? DEFAULT_STORE_TIMEZONE;
   const extension = options?.extension ?? 'xlsx';
-  const suffix = formatCellDate(date, tz);
   const cleanedBase = sanitizeFilename(base).replace(/\.[a-z0-9]+$/i, '');
+
+  let suffix: string;
+  if (options?.dateFrom && options?.dateTo) {
+    const fromStr = formatCellDate(options.dateFrom, tz);
+    const toStr = formatCellDate(options.dateTo, tz);
+    if (fromStr === toStr) {
+      suffix = fromStr;
+    } else {
+      const [fromY, fromM, fromD] = fromStr.split('-');
+      const [toY, toM, toD] = toStr.split('-');
+      if (fromY === toY && fromM === toM) {
+        // Mismo mes: `2026-08-01_al_08` (corto)
+        suffix = `${fromStr}_al_${toD}`;
+      } else {
+        // Meses distintos: rango completo
+        suffix = `${fromStr}_al_${toStr}`;
+      }
+    }
+  } else {
+    suffix = formatCellDate(date, tz);
+  }
+
   return `${cleanedBase}_${suffix}.${extension}`;
 }
 
