@@ -272,8 +272,6 @@ export class OrdersController {
   }
 
   @Put(':id/items')
-  @UseGuards(RolesGuard)
-  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
   @Permissions('store:orders:update')
   async updateOrderItems(
     @Param('id', ParseIntPipe) id: number,

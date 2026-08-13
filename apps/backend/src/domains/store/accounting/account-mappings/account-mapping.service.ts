@@ -196,8 +196,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Bancos (bank transfer)',
   },
   'refund.completed.store_credit': {
-    code: '2335',
-    description: 'Wallet Pasivo (customer credit)',
+    code: '2805',
+    description: 'Anticipos de clientes (customer credit — wallet pasivo)',
   },
   'purchase_order.received.inventory': {
     code: '1435',
