@@ -3437,6 +3437,9 @@ enum order_state_enum {
   cancelled
   refunded
   finished
+  // Bug 7: estado intermedio cuando la orden se cobra con envío + platos.
+  // Queda pendiente de Despachar → Entregar → Finalizar manualmente.
+  pending_delivery
 }
 
 enum order_delivery_type_enum {
