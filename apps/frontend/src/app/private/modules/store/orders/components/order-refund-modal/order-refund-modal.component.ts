@@ -332,9 +332,8 @@ interface RefundItemState {
               <div class="grid grid-cols-2 gap-1.5">
                 @for (method of refundMethods; track method.value) {
                   <button
-                    (click)="refundMethod.set(method.value); selectedBankAccountId.set(null)"
-                    [disabled]="!method.available"
-                    class="p-2.5 rounded-lg border text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    (click)="refundMethod.set(method.value)"
+                    class="p-2.5 rounded-lg border text-left transition-all"
                     [ngClass]="{
                       'border-primary bg-primary/5 ring-1 ring-primary/20': refundMethod() === method.value,
                       'border-border hover:bg-gray-50': refundMethod() !== method.value
@@ -343,31 +342,10 @@ interface RefundItemState {
                     <app-icon [name]="method.icon" size="16" class="mb-1"
                       [ngClass]="refundMethod() === method.value ? 'text-primary' : 'text-gray-400'"></app-icon>
                     <p class="text-xs font-semibold" [ngClass]="refundMethod() === method.value ? 'text-primary' : 'text-gray-700'">{{ method.label }}</p>
-                    @if (!method.available && method.reason_unavailable) {
-                      <p class="text-[10px] text-gray-500 mt-0.5 leading-tight">{{ method.reason_unavailable }}</p>
-                    }
                   </button>
                 }
               </div>
             </div>
-
-            <!-- Hotfix post-PR-576: cuando el método es bank_transfer y hay
-                 cuentas bancarias activas, el operador selecciona UNA. Esa
-                 cuenta se persiste en `refund_items.bank_account_id`. Sin
-                 selección, el backend rechaza con 400. -->
-            @if (refundMethod() === 'bank_transfer' && bankAccounts().length > 0) {
-              <div class="mt-3">
-                <label class="block text-xs font-bold text-gray-700 mb-2">
-                  Cuenta destino de la transferencia
-                </label>
-                <app-selector
-                  [options]="bankAccountSelectorOptions()"
-                  [value]="selectedBankAccountId()"
-                  (valueChange)="selectedBankAccountId.set($event)"
-                  placeholder="Selecciona cuenta bancaria"
-                ></app-selector>
-              </div>
-            }
 
             <!-- Notes -->
             <app-textarea
@@ -501,17 +479,8 @@ export class OrderRefundModalComponent {
     }[]
   >([]);
   bankAccounts = signal<{ id: number; label: string }[]>([]);
-  // Hotfix post-PR-576: el `bankAccountByOrderItem` era estado muerto
-  // (declarado y reseteado, sin setter ni template que lo usara). Lo
-  // reemplazamos por una selección simple: cuando `refund_method ===
-  // 'bank_transfer'`, el operador elige UNA cuenta y esa va en el payload.
-  // El backend persiste `refund_items.bank_account_id` por línea.
-  readonly selectedBankAccountId = signal<number | null>(null);
-
-  // Selector options para el dropdown de cuenta bancaria.
-  readonly bankAccountSelectorOptions = computed(() =>
-    this.bankAccounts().map((b) => ({ value: b.id, label: b.label })),
-  );
+  // Bank account selected per item (bank_transfer only).
+  readonly bankAccountByOrderItem = signal<Map<number, number>>(new Map());
 
   steps: StepsLineItem[] = [
     { label: 'Items' },
@@ -811,26 +780,17 @@ export class OrderRefundModalComponent {
 
   private buildDto(): CreateRefundRequest {
     const selected = this.selectedItems();
-    const method = this.refundMethod();
-    const bankAccountId =
-      method === 'bank_transfer' ? this.selectedBankAccountId() : undefined;
     return {
       items: selected.map((item) => ({
         order_item_id: item.orderItem.id,
         quantity: item.quantity,
         inventory_action: item.inventoryAction,
-        location_id:
-          item.inventoryAction !== 'no_return'
-            ? item.locationId ?? undefined
-            : undefined,
-        bank_account_id:
-          method === 'bank_transfer' ? bankAccountId : undefined,
+        location_id: item.inventoryAction !== 'no_return' ? (item.locationId ?? undefined) : undefined,
       })),
       include_shipping: this.includeShipping(),
-      refund_method: method,
+      refund_method: this.refundMethod(),
       reason: this.reason().trim(),
       notes: this.notes.trim() || undefined,
-      bank_account_id: bankAccountId,
     };
   }
 
@@ -903,7 +863,7 @@ export class OrderRefundModalComponent {
     this.isProcessing.set(false);
     this.availableMethods.set([]);
     this.bankAccounts.set([]);
-    this.selectedBankAccountId.set(null);
+    this.bankAccountByOrderItem.set(new Map());
   }
 
 }

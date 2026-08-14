@@ -76,37 +76,20 @@ export class RefundMethodsService {
     }
 
     // Cash register gate
-    //
-    // Hotfix post-PR-576: la rama vieja leía `cash_register` desde la RAÍZ
-    // del JSON de settings. La clave real vive bajo `pos.cash_register.enabled`
-    // (verificado en `default-store-settings.spec.ts` y `settings-transition-guards.ts`).
-    // Antes de este fix, `readBool(... 'cash_register')` siempre devolvía
-    // undefined, así que `cashAvailable` era siempre false y la tienda nunca
-    // podía ofrecer reembolso en efectivo aunque tuviera caja habilitada.
     const cashRegisterSetting = await this.prisma.store_settings.findFirst({
       where: {
         store_id: order.store_id,
       },
       select: { settings: true },
     });
-    const settings = cashRegisterSetting?.settings as any;
     const cashRegisterEnabled =
-      readBool(settings?.pos?.cash_register, 'enabled') === true;
+      readBool(cashRegisterSetting?.settings, 'cash_register') === true;
     const cashAvailable = cashRegisterEnabled && !!order.customer_id;
 
     // Bank accounts
-    //
-    // Hotfix post-PR-576: el filtro exigía `store_id === order.store_id`
-    // estricto. Las cuentas creadas por la app guardan `store_id: NULL`
-    // (schema confirma `bank_accounts.store_id Int?`), así que el dropdown
-    // del modal estaba vacío en producción. Ahora aceptamos cuentas de
-    // la tienda Y cuentas globales (store_id NULL), con status active.
     const bankAccounts = await this.prisma.bank_accounts.findMany({
       where: {
-        OR: [
-          { store_id: order.store_id },
-          { store_id: null },
-        ],
+        store_id: order.store_id,
         status: 'active',
       },
       select: { id: true, name: true, account_number: true, bank_name: true },
@@ -164,20 +147,7 @@ export class RefundMethodsService {
             ? undefined
             : 'No hay cuentas bancarias activas registradas',
       },
-      // Hotfix post-PR-576: store_credit se reportaba siempre enabled.
-      // Para que el saldo a favor quede registrado contra alguien, la
-      // orden necesita un cliente. Sin cliente, la UI debe mostrar el
-      // método deshabilitado con su razón (la modal no lo deja elegir).
-      {
-        value: 'store_credit',
-        label: 'Billetera del cliente',
-        icon: 'wallet',
-        available: !!order.customer_id,
-        reason_unavailable:
-          order.customer_id ?
-            undefined :
-            'La orden no tiene un cliente asociado para recibir el saldo a favor',
-      },
+      this.enabled('store_credit'),
     ];
 
     return {
