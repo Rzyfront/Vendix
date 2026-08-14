@@ -56,6 +56,19 @@ export const PURCHASE_COMMITTED_STATES = [
 ] as const;
 
 /**
+ * Review states that count as a PUBLIC, RATEABLE review of the period.
+ *
+ * A review becomes part of the public-facing product rating only when it is
+ * approved by moderation — a `pending` review is a moderation queue entry,
+ * not a customer signal, and counting it lets a spam queue show up as a
+ * 5-star average. `rejected` is excluded because the review was thrown out.
+ *
+ * The analytics-metrics contract requires every report that aggregates
+ * reviews to source this set from here, not from a hardcoded literal.
+ */
+export const REVIEW_APPROVED_STATES = ['approved'] as const;
+
+/**
  * Tipos de movimiento que SUMAN existencias.
  *
  * `production` entra: producir una receta crea unidades del producto terminado,
