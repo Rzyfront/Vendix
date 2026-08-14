@@ -1357,6 +1357,7 @@ export class PurchaseOrdersService {
       // sobreescribiría y la orden immediate quedaría con un abono fantasma.
       const {
         expected_date: rawExpectedDate,
+        payment_due_date: rawPaymentDueDate,
         payment_installments: _installmentsInput,
         down_payment_amount: _downPaymentInput,
         ...orderDataRest
@@ -1374,6 +1375,10 @@ export class PurchaseOrdersService {
           ...orderDataRest,
           order_type: orderType,
           expected_date: toDate(rawExpectedDate),
+          // Bug 1: `payment_due_date` viene como `YYYY-MM-DD` (string) del
+          // input HTML; Prisma exige `Date`. Conversión defensiva antes de
+          // persistir para no reventar contra la columna DateTime.
+          payment_due_date: toDate(rawPaymentDueDate),
           created_by_user_id: user_id,
           organization_id,
           order_number,
@@ -1398,7 +1403,8 @@ export class PurchaseOrdersService {
             ? {
                 payment_schedules: {
                   create: installments.map((i) => ({
-                    scheduled_date: new Date(i.scheduled_date),
+                    // Bug 1: convertir scheduled_date string → Date aquí también
+                    scheduled_date: toDate(i.scheduled_date) ?? new Date(i.scheduled_date),
                     amount: i.amount,
                     status: 'planned',
                   })),
