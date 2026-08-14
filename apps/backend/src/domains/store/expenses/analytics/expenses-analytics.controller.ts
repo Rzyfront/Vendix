@@ -144,11 +144,8 @@ export class ExpensesAnalyticsController {
     const buffer = await buildReportBuffer({ sheets: [sheet] });
     const filename = buildReportFilename(base, {
       tz,
-      date: query?.date_from
-        ? new Date(query.date_from)
-        : query?.date_to
-          ? new Date(query.date_to)
-          : undefined,
+      dateFrom: query?.date_from ? new Date(query.date_from) : undefined,
+      dateTo: query?.date_to ? new Date(query.date_to) : undefined,
     });
     sendXlsxReport(res, buffer, filename);
   }
