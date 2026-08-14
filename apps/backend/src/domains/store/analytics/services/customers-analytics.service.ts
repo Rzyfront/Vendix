@@ -448,6 +448,7 @@ export class CustomersAnalyticsService {
       _max: { created_at: true },
       _sum: { grand_total: true },
       _count: { id: true },
+      take: 10000, // defensa: limit superior explícito (vendix-report-xlsx R4)
     });
 
     const customerIds = orders
