@@ -33,6 +33,7 @@ import { SubscriptionGateConfig } from './config/subscription-gate.config';
 import { PaymentsModule } from '../payments/payments.module';
 import { WompiModule } from '../payments/processors/wompi/wompi.module';
 import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/gateway.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Global()
 @Module({
@@ -45,6 +46,10 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     // platform-level credentials.
     WompiModule,
     PlatformGatewayModule,
+    // SubscriptionPaymentBillingWarningListener inyecta NotificationsService
+    // para emitir la campana del comerciante. Sin este import el grafo de Nest
+    // no resuelve y la app no arranca en NINGUN rol (tumbó prod el 2026-08-14).
+    NotificationsModule,
     BullModule.registerQueue(
       { name: 'commission-accrual' },
       { name: 'email-notifications' },
