@@ -156,6 +156,30 @@ export interface RetentionOfferData {
 }
 
 /**
+ * Auto-renew disabled because the originating charge arrived WITHOUT a
+ * tokenizable payment method (no recurring credential). The store must add a
+ * card to restart autopay. Mirrors `paymentMethodExpired` layout.
+ */
+export interface AutoRenewDisabledNoCredentialData {
+  storeName: string;
+  planName: string;
+  organizationName?: string;
+  paymentUrl?: string;
+}
+
+/**
+ * Auto-renewal charge failed (retry budget exhausted by the renewal cron).
+ * Mirrors `paymentMethodExpired` / `dunningSoft` layout — Spanish copy, CTA
+ * to the subscription/payment screen.
+ */
+export interface AutoRenewChargeFailedData {
+  storeName: string;
+  planName: string;
+  organizationName?: string;
+  paymentUrl?: string;
+}
+
+/**
  * `subscription.archived-plan-ending.email` payload.
  *
  * Bucket-aware exactly like {@link TrialEndingData}: the notifier walks the
@@ -389,19 +413,100 @@ export const SubscriptionEmailTemplates = {
     return { subject, html: wrapHtml('Tienda suspendida', body), text };
   },
 
-  /** payment.failed.email — TODO: enqueue origin pendiente (G6) */
+  /**
+   * `subscription.payment-failed.email` — fired when an automatic renewal
+   * charge could not be processed. Renders a debt story (the customer was
+   * actually billed and the bill actually failed), pointing them at the
+   * subscription/payment screen so they can fix the credential.
+   *
+   * The retry ladder is owned by the renewal cron — this email is the
+   * post-retry, customer-visible nudge. Layout mirrors
+   * `paymentMethodExpired` / `dunningSoft` (same CTA shape, same banner).
+   * TODO(G6): wire from `subscription-payment-retry.job` when attempts are
+   * exhausted (currently that path enqueues `subscription.billing.renewal-failed.email`
+   * — `paymentFailed` is the dunning-engine fallback path).
+   */
   paymentFailed(data: DunningData) {
-    const subject = `Falló el cobro de tu suscripción — ${COMPANY_NAME}`;
+    const subject = `Tu pago automático no pudo procesarse`;
+    const paymentUrl =
+      data.retryUrl || `https://<store-slug>.vendix.com/admin/subscription/payment`;
     const body = `
-      <p style="font-size:18px;font-weight:600;margin-top:0;">No pudimos procesar tu pago</p>
-      <p>El cobro de tu plan <strong>${data.planName}</strong> (tienda <strong>${data.storeName}</strong>) no se pudo procesar.</p>
-      ${data.amountDue ? `<p>Monto: <strong>${data.amountDue} ${data.currency || ''}</strong>.</p>` : ''}
-      <p>Verifica tu método de pago para evitar interrupciones en el servicio.</p>
-      ${data.retryUrl ? `<p style="text-align:center;margin:24px 0;"><a href="${data.retryUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;">Actualizar método de pago</a></p>` : ''}
+      <p style="font-size:18px;font-weight:600;margin-top:0;">No pudimos procesar tu pago automático</p>
+      <p>El cobro de la renovación de tu plan <strong>${data.planName}</strong> para la tienda <strong>${data.storeName}</strong> no se pudo procesar.</p>
+      ${data.amountDue ? `<p>Monto pendiente: <strong>${data.amountDue} ${data.currency || ''}</strong>.</p>` : ''}
+      <p>Ya intentamos varias veces. Por favor actualiza tu método de pago desde tu panel para evitar la interrupción del servicio.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${paymentUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Actualizar método de pago</a>
+      </p>
       ${NO_REFUND_NOTICE_HTML}
     `;
-    const text = `${subject}\n\nPlan: ${data.planName} — Tienda: ${data.storeName}\n${data.amountDue ? `Monto: ${data.amountDue} ${data.currency || ''}\n` : ''}${data.retryUrl ? `Actualizar método: ${data.retryUrl}\n` : ''}\n${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
-    return { subject, html: wrapHtml('Falló el cobro', body), text };
+    const text =
+      `${subject}\n\n` +
+      `Plan: ${data.planName} — Tienda: ${data.storeName}\n` +
+      (data.amountDue ? `Monto pendiente: ${data.amountDue} ${data.currency || ''}\n` : '') +
+      `Ya intentamos varias veces. Actualiza tu método de pago para evitar la interrupción del servicio.\n\n` +
+      `Actualizar método: ${paymentUrl}\n\n` +
+      `${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
+    return { subject, html: wrapHtml('Tu pago no pudo procesarse', body), text };
+  },
+
+  /**
+   * `subscription.billing.no-credential.email` — fired when auto-renew was
+   * disabled because the originating charge arrived without a tokenizable
+   * credential. The customer MUST add a card to reactivate autopay.
+   */
+  autoRenewDisabledNoCredential(data: AutoRenewDisabledNoCredentialData) {
+    const subject = `Tu autopago no se pudo activar`;
+    const paymentUrl =
+      data.paymentUrl ||
+      `https://<store-slug>.vendix.com/admin/subscription/payment`;
+    const body = `
+      <p style="font-size:18px;font-weight:600;margin-top:0;color:#B91C1C;">Tu autopago no se pudo activar</p>
+      <p>Tu renovación automática quedó desactivada porque el cobro no incluyó una credencial recurrente.</p>
+      <p>Para reactivar la renovación automática del plan <strong>${data.planName}</strong> (tienda <strong>${data.storeName}</strong>), agrega un método de pago desde tu panel. Si no lo haces, el servicio se interrumpirá al final del periodo actual.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${paymentUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Agregar método de pago</a>
+      </p>
+      ${NO_REFUND_NOTICE_HTML}
+    `;
+    const text =
+      `${subject}\n\n` +
+      `Tu renovación automática quedó desactivada porque el cobro no incluyó una credencial recurrente.\n\n` +
+      `Plan: ${data.planName} — Tienda: ${data.storeName}\n\n` +
+      `Agrega un método de pago para reactivar la renovación automática y evitar la interrupción del servicio.\n\n` +
+      `Agregar método de pago: ${paymentUrl}\n\n` +
+      `${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
+    return { subject, html: wrapHtml('Tu autopago no se pudo activar', body), text };
+  },
+
+  /**
+   * `subscription.billing.renewal-failed.email` — fired by
+   * `BillingWarningProcessor` after the retry budget on an auto-renewal
+   * charge is exhausted. Mirrors the bell notification copy (same title,
+   * same body) so the email and the in-app badge tell the same story.
+   */
+  autoRenewChargeFailed(data: AutoRenewChargeFailedData) {
+    const subject = `Tu renovación automática falló`;
+    const paymentUrl =
+      data.paymentUrl ||
+      `https://<store-slug>.vendix.com/admin/subscription/payment`;
+    const body = `
+      <p style="font-size:18px;font-weight:600;margin-top:0;color:#B91C1C;">Tu renovación automática falló</p>
+      <p>El cobro automático de tu suscripción <strong>${data.planName}</strong> (tienda <strong>${data.storeName}</strong>) no pudo completarse. Ya intentamos varias veces sin éxito.</p>
+      <p>Por favor actualiza tu método de pago para evitar la interrupción del servicio.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${paymentUrl}" style="display:inline-block;background:#B91C1C;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Actualizar método de pago</a>
+      </p>
+      ${NO_REFUND_NOTICE_HTML}
+    `;
+    const text =
+      `${subject}\n\n` +
+      `El cobro automático de tu suscripción no pudo completarse.\n\n` +
+      `Plan: ${data.planName} — Tienda: ${data.storeName}\n\n` +
+      `Actualiza tu método de pago para evitar la interrupción del servicio.\n\n` +
+      `Actualizar método: ${paymentUrl}\n\n` +
+      `${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
+    return { subject, html: wrapHtml('Renovación automática fallida', body), text };
   },
 
   /** subscription.next-renewal.email — pre-renewal notice (G8: explicit no-refund disclosure) */

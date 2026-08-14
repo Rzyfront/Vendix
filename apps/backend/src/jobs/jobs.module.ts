@@ -53,6 +53,7 @@ import { FiscalStatusService } from '../common/services/fiscal-status.service';
 // disk for git history and may be removed in a follow-up cleanup.
 // import { PaymentConfirmedEmailJob } from './payment-confirmed-email.job';
 import { EmailNotificationsProcessor } from './email-notifications.processor';
+import { BillingWarningProcessor } from './billing-warning.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
 import { EmailModule } from '../email/email.module';
@@ -84,6 +85,7 @@ import { ResponseModule } from '../common/responses/response.module';
       { name: 'subscription-payment-retry' },
       { name: 'commission-accrual' },
       { name: 'email-notifications' },
+      { name: 'billing-warning' },
     ),
   ],
   controllers: [SubscriptionWebhookReconcilerController],
@@ -125,6 +127,7 @@ import { ResponseModule } from '../common/responses/response.module';
     FiscalStatusListener,
     WeeklyReportGenerateJob,
     EmailNotificationsProcessor,
+    BillingWarningProcessor,
   ],
 })
 export class JobsModule {}

@@ -20,11 +20,13 @@ describe('SubscriptionRenewalBillingJob', () => {
   let job: SubscriptionRenewalBillingJob;
   let prisma: {
     store_subscriptions: { findMany: jest.Mock; update: jest.Mock };
+    subscription_payments?: { findFirst: jest.Mock };
   };
   let billing: { issueInvoice: jest.Mock };
   let payment: { chargeInvoice: jest.Mock };
   let state: { transition: jest.Mock };
   let retryQueue: { add: jest.Mock };
+  let billingWarningQueue: { add: jest.Mock };
   let config: { get: jest.Mock };
   let gateConfig: { isCronDryRun: jest.Mock };
   let emitter: { emit: jest.Mock };
@@ -56,11 +58,15 @@ describe('SubscriptionRenewalBillingJob', () => {
         findMany: jest.fn().mockResolvedValue([subRow]),
         update: jest.fn().mockResolvedValue(undefined),
       },
+      subscription_payments: {
+        findFirst: jest.fn().mockResolvedValue({ id: 999 }),
+      },
     };
     billing = { issueInvoice: jest.fn().mockResolvedValue(invoice) };
     payment = { chargeInvoice: jest.fn() };
     state = { transition: jest.fn().mockResolvedValue(undefined) };
     retryQueue = { add: jest.fn().mockResolvedValue(undefined) };
+    billingWarningQueue = { add: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn().mockReturnValue('true') };
     gateConfig = { isCronDryRun: jest.fn().mockReturnValue(false) };
     emitter = { emit: jest.fn() };
@@ -78,6 +84,10 @@ describe('SubscriptionRenewalBillingJob', () => {
         {
           provide: getQueueToken('subscription-payment-retry'),
           useValue: retryQueue,
+        },
+        {
+          provide: getQueueToken('billing-warning'),
+          useValue: billingWarningQueue,
         },
       ],
     }).compile();
@@ -127,22 +137,91 @@ describe('SubscriptionRenewalBillingJob', () => {
     expect(data.invoiceId).toBe(invoice.id);
   });
 
-  it('feature flag disabled: log-and-skip, NO enqueue', async () => {
+  it('feature flag disabled: log-and-skip retry, but STILL enqueue billing warning', async () => {
     config.get.mockReturnValue('false');
     payment.chargeInvoice.mockResolvedValue({ id: 3, state: 'failed' });
 
     await job.handleRenewalBilling();
 
     expect(retryQueue.add).not.toHaveBeenCalled();
+    // Even when the retry-queue feature flag is OFF, the customer-visible
+    // billing warning still fires so the operator can't silently drop the
+    // renewal failure.
+    expect(billingWarningQueue.add).toHaveBeenCalledTimes(1);
+    const [name, payload, opts] = billingWarningQueue.add.mock.calls[0];
+    expect(name).toBe('billing-warning-renewal-failed');
+    expect(payload).toMatchObject({
+      storeId: subRow.store_id,
+      sourceEventId: 999,
+      paymentId: 999,
+      storeSubscriptionId: subRow.id,
+    });
+    expect(opts.attempts).toBe(3);
+    expect(opts.backoff).toEqual({ type: 'exponential', delay: 5000 });
   });
 
-  it('feature flag undefined: log-and-skip, NO enqueue', async () => {
+  it('feature flag undefined: log-and-skip retry, but STILL enqueue billing warning', async () => {
     config.get.mockReturnValue(undefined);
     payment.chargeInvoice.mockResolvedValue({ id: 4, state: 'failed' });
 
     await job.handleRenewalBilling();
 
     expect(retryQueue.add).not.toHaveBeenCalled();
+    expect(billingWarningQueue.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('gateway returns state=failed: enqueues retry (battery still has attempts)', async () => {
+    payment.chargeInvoice.mockResolvedValue({ id: 2, state: 'failed' });
+
+    await job.handleRenewalBilling();
+
+    expect(retryQueue.add).toHaveBeenCalledTimes(1);
+    const [name, data, opts] = retryQueue.add.mock.calls[0];
+    expect(name).toBe('retry');
+    expect(data).toEqual({
+      invoiceId: invoice.id,
+      subscriptionId: subRow.id,
+      storeId: subRow.store_id,
+      attempt: 1,
+    });
+    expect(opts.delay).toBe(BACKOFF_DELAYS[0]);
+    expect(opts.attempts).toBe(MAX_ATTEMPTS);
+    expect(opts.backoff).toEqual({
+      type: 'exponential',
+      delay: 60 * 60 * 1000,
+    });
+    // First inline failure — BullMQ still owns the retry budget, so the
+    // customer-facing warning has NOT fired yet. It will fire when the
+    // BullMQ worker exhausts `attempts` (handled by Agent B's
+    // BillingWarningProcessor listener on
+    // `subscription.payment.retry.failed`).
+    expect(billingWarningQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('billing warning enqueue: tolerates missing subscription_payments row by falling back to invoiceId', async () => {
+    (prisma as any).subscription_payments = {
+      findFirst: jest.fn().mockResolvedValue(null),
+    };
+    config.get.mockReturnValue('false');
+    payment.chargeInvoice.mockResolvedValue({ id: 5, state: 'failed' });
+
+    await job.handleRenewalBilling();
+
+    expect(billingWarningQueue.add).toHaveBeenCalledTimes(1);
+    const [, payload] = billingWarningQueue.add.mock.calls[0];
+    // Fallback chain: prefer payment.id, fall back to invoice.id.
+    expect(payload.sourceEventId).toBe(invoice.id);
+    expect(payload.paymentId).toBe(invoice.id);
+  });
+
+  it('billing warning enqueue: throws do not break the renewal loop', async () => {
+    billingWarningQueue.add.mockRejectedValue(new Error('redis down'));
+    config.get.mockReturnValue('false');
+    payment.chargeInvoice.mockResolvedValue({ id: 6, state: 'failed' });
+
+    // handleRenewalBilling() has try/catch around each per-sub processing
+    // pass, so a thrown enqueue must not throw out of the cron tick.
+    await expect(job.handleRenewalBilling()).resolves.toBeUndefined();
   });
 
   it('zero-price (issueInvoice returns null): no charge, no enqueue', async () => {

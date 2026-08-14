@@ -3,6 +3,7 @@
 /// <reference types="jest" />
 import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
+import { subscription_event_type_enum } from '@prisma/client';
 import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier.job';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 
@@ -144,7 +145,11 @@ describe('PaymentMethodExpiryNotifierJob', () => {
     expect(eventsCreate).toHaveBeenCalledTimes(1);
     expect(eventsCreate.mock.calls[0][0].data).toMatchObject({
       store_subscription_id: 7,
-      type: 'state_transition',
+      // G11-event-enum (bright-kindling-possum): the writer now uses the
+      // typed `payment_method_expiring` enum value instead of the legacy
+      // `state_transition` + payload.reason shape. The throttle lookup
+      // accepts both, but new rows should be the typed shape.
+      type: subscription_event_type_enum.payment_method_expiring,
       triggered_by_job: 'payment-method-expiry-notifier',
     });
     expect(eventsCreate.mock.calls[0][0].data.payload).toMatchObject({
@@ -152,6 +157,31 @@ describe('PaymentMethodExpiryNotifierJob', () => {
       payment_method_id: 100,
       last_four: '4242',
     });
+  });
+
+  it('throttle also matches historical legacy `state_transition` + reason rows', async () => {
+    // Card expiring within 14 days...
+    pmFindMany.mockResolvedValue([
+      {
+        id: 200,
+        store_id: 70,
+        store_subscription_id: 11,
+        last4: '4242',
+        brand: 'visa',
+        ...buildExpiryNearby(true),
+      },
+    ]);
+    // ...but the last reminder was written with the LEGACY `state_transition`
+    // shape (pre-G11-event-enum). The cron must still honour it or else the
+    // card gets re-notified every day until it expires.
+    eventsFindFirst.mockResolvedValue({ id: 99 });
+
+    const result = await job.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(queueAdd).not.toHaveBeenCalled();
+    expect(eventsCreate).not.toHaveBeenCalled();
   });
 
   it('skips a card already expired (last day before today)', async () => {

@@ -446,4 +446,63 @@ describe('EmailNotificationsProcessor', () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Billing warning ladder — enqueued by SubscriptionPaymentBillingWarningListener
+  // (Agent A) and BillingWarningProcessor (this PR). Plan: bright-kindling-possum.
+  // ---------------------------------------------------------------------------
+  describe('billing warning ladder', () => {
+    it('subscription.billing.no-credential.email: renders the no-credential template', async () => {
+      const job = makeJob('subscription.billing.no-credential.email', {
+        storeId: 10,
+        subscriptionEventId: 9991,
+      });
+
+      const result = await processor.process(job);
+
+      expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [to, subject, html, text] = sendEmail.mock.calls[0];
+      expect(to).toBe('org@example.com');
+      expect(subject).toContain('autopago');
+      expect(html).toContain('Plan Pro');
+      expect(html).toContain('no son reembolsables'); // NO_REFUND_NOTICE banner
+      expect(text).toContain('Plan Pro');
+    });
+
+    it('subscription.billing.renewal-failed.email: renders the renewal-failed template', async () => {
+      const job = makeJob('subscription.billing.renewal-failed.email', {
+        storeId: 10,
+        subscriptionId: 100,
+      });
+
+      const result = await processor.process(job);
+
+      expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [, subject, html, text] = sendEmail.mock.calls[0];
+      expect(subject).toContain('renovación automática');
+      expect(subject.toLowerCase()).toContain('falló');
+      expect(html).toContain('Plan Pro');
+      expect(html).toContain('no son reembolsables');
+      expect(text).toContain('Plan Pro');
+    });
+
+    it('subscription.billing.no-credential.email: skips when organization has no email', async () => {
+      storesFindUnique.mockResolvedValueOnce({
+        ...STORE,
+        organizations: { ...STORE.organizations, email: null },
+      });
+
+      const result = await processor.process(
+        makeJob('subscription.billing.no-credential.email', {
+          storeId: 10,
+          subscriptionEventId: 9991,
+        }),
+      );
+
+      expect(result).toEqual({ success: false });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+  });
 });

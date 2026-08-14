@@ -125,6 +125,11 @@ export class EmailNotificationsProcessor extends WorkerHost {
           return await this.handleDunningHard(job);
         case 'subscription.suspended.email':
           return await this.handleSuspended(job);
+        // G11 — Billing warning ladder (plan bright-kindling-possum.md).
+        case 'subscription.billing.no-credential.email':
+          return await this.handleAutoRenewDisabledNoCredential(job);
+        case 'subscription.billing.renewal-failed.email':
+          return await this.handleAutoRenewChargeFailed(job);
         // Future: when the corresponding gaps land, switch the stubs to
         // real handlers backed by SubscriptionEmailTemplates.
         case 'subscription.payment-failed.email':
@@ -554,6 +559,69 @@ export class EmailNotificationsProcessor extends WorkerHost {
       planName: planName || ctx.planName,
       // TODO(G10-email-adapter): real domain-aware URL helper.
       reactivateUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `subscription.billing.no-credential.email` handler — enqueued by
+   * `SubscriptionPaymentBillingWarningListener` (Agent A's
+   * `subscription.payment.no_credential` listener) when the renewal cron
+   * observes a charge without a recurring credential and disables
+   * auto-renew. The store must add a card to restart autopay.
+   *
+   * Payload contract is owned by the listener — see
+   * `listeners/subscription-payment-billing-warning.listener.ts`. The caller
+   * passes `subscriptionEventId` (the audit row id), NOT a `subscriptionId` —
+   * we resolve the canonical 1:1 subscription through `loadStoreContext()` by
+   * passing `null` for the second arg.
+   */
+  private async handleAutoRenewDisabledNoCredential(
+    job: Job<{
+      storeId: number;
+      subscriptionEventId: number;
+    }>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { storeId } = job.data;
+
+    const ctx = await this.loadStoreContext(storeId, null);
+    if (!ctx) return { success: false };
+
+    const tpl = SubscriptionEmailTemplates.autoRenewDisabledNoCredential({
+      storeName: ctx.storeName,
+      organizationName: ctx.organizationName,
+      planName: ctx.planName,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      paymentUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `subscription.billing.renewal-failed.email` handler — enqueued by
+   * `BillingWarningProcessor` after the retry budget for an auto-renewal
+   * charge is exhausted. Same copy as the in-app bell notification, with the
+   * NO_REFUND_NOTICE banner so the customer doesn't confuse retry-exhaustion
+   * with a refund.
+   */
+  private async handleAutoRenewChargeFailed(
+    job: Job<{
+      storeId: number;
+      subscriptionId?: number | null;
+      planName?: string | null;
+    }>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { storeId, subscriptionId, planName } = job.data;
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId ?? null);
+    if (!ctx) return { success: false };
+
+    const tpl = SubscriptionEmailTemplates.autoRenewChargeFailed({
+      storeName: ctx.storeName,
+      organizationName: ctx.organizationName,
+      planName: planName || ctx.planName,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      paymentUrl: undefined,
     });
     return this.dispatch(ctx.recipient, tpl, job);
   }
