@@ -223,6 +223,10 @@ export class MemberBulkScannerService {
       }).format(new Date()),
     );
 
+    // Build the per-org phone index ONCE so the per-row lookup in the loop
+    // below is O(1) in memory (QUI-558 review #3: N+1 elimination).
+    const phoneIndex = await this.buildPhoneIndexForOrg(storeId);
+
     // ── Member analysis ───────────────────────────────────────────────────
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -270,10 +274,7 @@ export class MemberBulkScannerService {
       // matches (multiple customers sharing the same phone) leave the
       // row as `create` and surface a warning for the user to merge.
       if (!existingCustomerId && raw.phone) {
-        const byPhone = await this.findCustomerByPhoneInOrg(
-          storeId,
-          raw.phone,
-        );
+        const byPhone = this.findCustomerByPhoneInIndex(raw.phone, phoneIndex);
         if (byPhone?.unique) {
           existingCustomerId = byPhone.id;
           action = 'reuse';
@@ -1298,35 +1299,27 @@ export class MemberBulkScannerService {
   }
 
   /**
-   * Phone lookup (QUI-558). Normalizes to "last 10 digits" so the match
-   * tolerates any of: `+57 300 123 4567`, `300-123-4567`, `(300) 123-4567`,
-   * `3001234567`, `+573001234567`. The derived `digitsLast10` is the join
-   * key — Colombian mobile numbers are 10 digits, and we drop the country
-   * code so a user whose stored phone is `+57 300 123 4567` matches an
-   * OCR'd `3001234567`.
+   * Build the per-org phone index once per `analyzeRoster` call. Returns a
+   * map of `digitsLast10 → customer_id[]` so the per-row lookup is O(1) in
+   * memory instead of one `users.findMany` per member (the N+1 trap that
+   * the QUI-558 review flagged).
    *
-   * Returns `{ id, unique }` so the caller can warn on ambiguous matches
-   * (multiple customers sharing the same phone) — those NEVER auto-reuse;
-   * the user must manually pick.
+   * We can't filter by a computed substring on Postgres without a
+   * generated column, so the practical approach is: pull all customer
+   * phones in the org and match in memory. For a typical gym (≤10k
+   * customers) this is cheap; for very large tenants we can add a
+   * trigram index or a stored normalized column later.
    */
-  private async findCustomerByPhoneInOrg(
+  private async buildPhoneIndexForOrg(
     storeId: number,
-    phone: string,
-  ): Promise<{ id: number; unique: boolean } | null> {
+  ): Promise<Map<string, number[]>> {
+    const index = new Map<string, number[]>();
     const store = await this.prisma.withoutScope().stores.findFirst({
       where: { id: storeId },
       select: { organization_id: true },
     });
-    if (!store) return null;
+    if (!store) return index;
 
-    const digitsLast10 = this.normalizePhoneLast10(phone);
-    if (!digitsLast10) return null;
-
-    // We can't filter by a computed substring on Postgres without a
-    // generated column, so the practical approach is: pull all customer
-    // phones in the org and match in memory. For a typical gym (≤10k
-    // customers) this is cheap; for very large tenants we can add a
-    // trigram index or a stored normalized column later.
     const candidates = await this.prisma.users.findMany({
       where: {
         organization_id: store.organization_id,
@@ -1336,16 +1329,35 @@ export class MemberBulkScannerService {
       select: { id: true, phone: true },
       take: 5000,
     });
-
-    const matches: number[] = [];
     for (const c of candidates) {
       if (!c.phone) continue;
-      if (this.normalizePhoneLast10(c.phone) === digitsLast10) {
-        matches.push(c.id);
+      const digits = this.normalizePhoneLast10(c.phone);
+      if (!digits) continue;
+      const bucket = index.get(digits);
+      if (bucket) {
+        bucket.push(c.id);
+      } else {
+        index.set(digits, [c.id]);
       }
     }
+    return index;
+  }
 
-    if (matches.length === 0) return null;
+  /**
+   * Pure (sync) phone lookup against the pre-built per-org index. Returns
+   * `{ id, unique }` so the caller can warn on ambiguous matches
+   * (multiple customers sharing the same phone) — those NEVER auto-reuse;
+   * the user must manually pick.
+   */
+  private findCustomerByPhoneInIndex(
+    phone: string,
+    index: Map<string, number[]>,
+  ): { id: number; unique: boolean } | null {
+    const digitsLast10 = this.normalizePhoneLast10(phone);
+    if (!digitsLast10) return null;
+
+    const matches = index.get(digitsLast10);
+    if (!matches || matches.length === 0) return null;
     if (matches.length === 1) return { id: matches[0], unique: true };
     // Ambiguous — pick the first for the warning, but flag unique=false.
     return { id: matches[0], unique: false };

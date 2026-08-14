@@ -6,9 +6,13 @@
  *  - `resolveMembershipDates` — status + period inference
  *  - `buildProfileDto`     — tolerant DOB passthrough
  *  - `normalizePhoneLast10` — phone normalization
- *  - `findCustomerByPhoneInOrg` — phone-based reuse lookup
+ *  - `buildPhoneIndexForOrg` + `findCustomerByPhoneInIndex` — phone-based
+ *    reuse lookup (split into build-once + sync lookup to kill the N+1
+ *    round-trip the QUI-558 review flagged).
  *  - `matchPlan`           — fuzzy plan matcher (3-tier)
  *  - `commitRoster`        — REUSE branch fills in missing fields
+ *  - `analyzeRoster`       — end-to-end happy path (covers whitelist,
+ *    date inference, plan resolution, status inference)
  *
  * All private helpers are reached through `(svc as any)`; the suite
  * deliberately avoids touching the AI engine so it stays pure and fast.
@@ -376,58 +380,664 @@ describe('MemberBulkScannerService.matchPlan (QUI-558)', () => {
   });
 });
 
-// ─── findCustomerByPhoneInOrg ─────────────────────────────────────────────
+// ─── findCustomerByPhoneInIndex (sync) + buildPhoneIndexForOrg ───────────
 
-describe('MemberBulkScannerService.findCustomerByPhoneInOrg (QUI-558)', () => {
+describe('MemberBulkScannerService phone index (QUI-558 review #3)', () => {
   const { svc, prisma } = buildService();
-  const find = (storeId: number, phone: string) =>
-    (svc as any).findCustomerByPhoneInOrg(storeId, phone);
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.withoutScope.mockReturnThis();
   });
 
-  it('returns null when the store does not exist', async () => {
+  it('buildPhoneIndexForOrg returns an empty map when the store does not exist', async () => {
     prisma.stores.findFirst.mockResolvedValue(null);
-    const r = await find(99, '+57 300 123 4567');
-    expect(r).toBeNull();
+    const build = (svc as any).buildPhoneIndexForOrg;
+    const idx = await build.call(svc, 99);
+    expect(idx.size).toBe(0);
     expect(prisma.users.findMany).not.toHaveBeenCalled();
   });
 
-  it('returns null when the input phone has no digits', async () => {
-    prisma.stores.findFirst.mockResolvedValue({ organization_id: 5 });
-    const r = await find(1, 'abc');
-    expect(r).toBeNull();
-  });
-
-  it('returns {id, unique:true} when exactly one customer matches', async () => {
+  it('buildPhoneIndexForOrg buckets customers by last-10 digits and skips blank phones', async () => {
     prisma.stores.findFirst.mockResolvedValue({ organization_id: 5 });
     prisma.users.findMany.mockResolvedValue([
       { id: 101, phone: '+57 300 999 1111' },
       { id: 102, phone: '301 222 3344' },
+      { id: 103, phone: null },
+      { id: 104, phone: '' },
     ]);
-    const r = await find(1, '3009991111');
+    const build = (svc as any).buildPhoneIndexForOrg;
+    const idx = await build.call(svc, 1);
+    expect(idx.size).toBe(2);
+    expect(idx.get('3009991111')).toEqual([101]);
+    expect(idx.get('3012223344')).toEqual([102]);
+  });
+
+  it('findCustomerByPhoneInIndex returns {id, unique:true} on a single match', () => {
+    const idx = new Map<string, number[]>([['3009991111', [101]]]);
+    const find = (svc as any).findCustomerByPhoneInIndex;
+    const r = find.call(svc, '+57 300 999 1111', idx);
     expect(r).toEqual({ id: 101, unique: true });
   });
 
-  it('returns {id, unique:false} when multiple customers share the same last-10', async () => {
-    prisma.stores.findFirst.mockResolvedValue({ organization_id: 5 });
-    prisma.users.findMany.mockResolvedValue([
-      { id: 101, phone: '300 123 4567' },
-      { id: 102, phone: '+57 300 123 4567' },
-    ]);
-    const r = await find(1, '3001234567');
+  it('findCustomerByPhoneInIndex returns {id, unique:false} on an ambiguous match', () => {
+    const idx = new Map<string, number[]>([['3001234567', [101, 102]]]);
+    const find = (svc as any).findCustomerByPhoneInIndex;
+    const r = find.call(svc, '3001234567', idx);
     expect(r?.unique).toBe(false);
     expect(r?.id).toBe(101);
   });
 
-  it('returns null when no candidate shares the last-10 digits', async () => {
-    prisma.stores.findFirst.mockResolvedValue({ organization_id: 5 });
-    prisma.users.findMany.mockResolvedValue([
-      { id: 201, phone: '300 999 0000' },
+  it('findCustomerByPhoneInIndex returns null when the input phone has no digits', () => {
+    const idx = new Map<string, number[]>();
+    const find = (svc as any).findCustomerByPhoneInIndex;
+    expect(find.call(svc, 'abc', idx)).toBeNull();
+  });
+
+  it('findCustomerByPhoneInIndex returns null when no bucket matches', () => {
+    const idx = new Map<string, number[]>([['3009990000', [201]]]);
+    const find = (svc as any).findCustomerByPhoneInIndex;
+    expect(find.call(svc, '3001234567', idx)).toBeNull();
+  });
+});
+
+// ─── analyzeRoster end-to-end (covers the N+1 fix, plan resolution) ──────
+
+describe('MemberBulkScannerService.analyzeRoster (QUI-558 review #4)', () => {
+  /**
+   * Builds a richer service graph with `RequestContext` set and a prisma
+   * stub that satisfies EVERY query the analyze path makes:
+   *  - membership_plans.findMany  (existing plans)
+   *  - stores.findFirst × 3+      (phone-index + doc/email lookups, all
+   *                                 need organization_id)
+   *  - store_settings.findFirst   (timezone lookup)
+   *  - users.findMany             (phone index)
+   *  - users.findFirst            (doc/email lookups)
+   *
+   * The mock returns `null` for document/email lookups (force CREATE
+   * branch) and a single customer for the phone match (force REUSE).
+   */
+  function buildAnalyzeHarness(opts: { phoneMatchId?: number | null } = {}) {
+    // Don't resetModules — the service file already imported
+    // RequestContextService from a separate module cache. Resetting
+    // modules would fork the ALS instance and the test's context would
+    // not reach the service. Instead, write the static `currentContext`
+    // directly so getContext() resolves to our stub.
+    const ctxPath = require.resolve('@common/context/request-context.service');
+    const { RequestContextService } = require(ctxPath);
+    (RequestContextService as any).currentContext = {
+      store_id: 1,
+      user_id: 1,
+      organization_id: 1,
+    };
+
+    /**
+     * Run the analyzeRoster call inside the request ALS so
+     * `RequestContextService.getContext()` resolves to our stub.
+     */
+    const runWithCtx = <T>(fn: () => Promise<T>) => fn();
+
+    const findFirst = jest.fn().mockImplementation(async (args: any) => {
+      const w = args?.where ?? {};
+      // store_settings → for timezone
+      if ('store_id' in w && 'key' in w) return { value: 'America/Bogota' };
+      // stores.findFirst for org_id → return the org
+      if ('id' in w && Object.keys(w).length === 1) {
+        return { id: w.id, organization_id: 1 };
+      }
+      // users.findFirst for document/email → null by default
+      if ('document_number' in w || 'email' in w) return null;
+      return null;
+    });
+    const findMany = jest.fn().mockImplementation(async (args: any) => {
+      const w = args?.where ?? {};
+      if ('store_id' in w && !('organization_id' in w)) {
+        // membership_plans.findMany
+        return [
+          { id: 50, code: 'PM', name: 'Plan Mensual', duration_days: 30 },
+        ];
+      }
+      // users.findMany for phone index
+      if ('organization_id' in w) {
+        if (opts.phoneMatchId != null) {
+          return [
+            {
+              id: opts.phoneMatchId,
+              phone: '+57 300 999 1111',
+            },
+          ];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const prisma = {
+      withoutScope: jest.fn().mockReturnThis(),
+      stores: { findFirst },
+      store_settings: { findFirst: findFirst },
+      users: { findFirst, findMany },
+      membership_plans: { findMany },
+      memberships: { findFirst: jest.fn() },
+    } as any;
+
+    const customersService = {
+      create: jest
+        .fn()
+        .mockImplementation((_sid: number, payload: any) =>
+          Promise.resolve({ id: 9000 + Math.floor(Math.random() * 1000), ...payload }),
+        ),
+      findByDocument: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findByPhone: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const svc = new MemberBulkScannerService(
+      /* aiEngine */ {} as any,
+      prisma,
+      /* membershipPlansService */ {} as any,
+      /* membershipsService */ {} as any,
+      /* memberProfilesService */ { upsert: jest.fn().mockResolvedValue(undefined) } as any,
+      /* membershipNotesService */ {
+        bulkSet: jest.fn().mockResolvedValue(undefined),
+      } as any,
+      customersService,
+      /* responseService */ {} as any,
+    );
+
+    return { svc, prisma, findFirst, findMany, customersService, runWithCtx };
+  }
+
+  afterEach(() => {
+    // No-op: ALS contexts are scoped per call and self-clean on resolution.
+  });
+
+  it('runs end-to-end: 1 plan matched + 1 member reuse (phone) + ready', async () => {
+    const { svc, runWithCtx } = buildAnalyzeHarness({ phoneMatchId: 7001 });
+    const result = await runWithCtx(() => svc.analyzeRoster({
+      document_type: 'member_roster',
+      detected_plans: [{ name: 'Plan Mensual' }],
+      members: [
+        {
+          first_name: 'Ana',
+          last_name: 'Rivas',
+          document_type: null,
+          document_number: null,
+          email: null,
+          phone: '+57 300 999 1111',
+          date_of_birth: null,
+          gender: null,
+          emergency_contact_name: null,
+          emergency_contact_phone: null,
+          medical_notes: null,
+          goals: null,
+          height_cm: null,
+          weight_kg: null,
+          plan_name: 'Plan Mensual',
+          membership_start_date: '2099-06-01',
+          membership_end_date: '2099-06-30',
+          raw_row: 'Ana Rivas',
+          notes: [
+            {
+              key: 'eps',
+              value: 'Sura',
+              include_in_summary: true,
+            },
+          ],
+        },
+      ],
+      warnings: [],
+      confidence: 80,
+    });
+
+    expect(result.ready_count).toBe(1);
+    expect(result.with_errors_count).toBe(0);
+    expect(result.members).toHaveLength(1);
+    expect(result.members[0].action).toBe('reuse');
+    expect(result.members[0].existing_customer_id).toBe(7001);
+    expect(result.members[0].plan_ref).toBe(50);
+    expect(result.members[0].resolved_status).toBe('active');
+    expect(result.plans[0].status).toBe('existing');
+    expect(result.plans[0].matched_plan_id).toBe(50);
+  });
+
+  it('creates a `create` action when no customer matches by any key', async () => {
+    const { svc, runWithCtx } = buildAnalyzeHarness({ phoneMatchId: null });
+    const result = await runWithCtx(() =>
+      svc.analyzeRoster({
+        document_type: 'member_roster',
+        detected_plans: [],
+        members: [
+          {
+            first_name: 'Luis',
+            last_name: 'Mora',
+            document_type: null,
+            document_number: null,
+            email: null,
+            phone: '3008887777',
+            date_of_birth: null,
+            gender: null,
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            medical_notes: null,
+            goals: null,
+            height_cm: null,
+            weight_kg: null,
+            plan_name: null,
+            membership_start_date: null,
+            membership_end_date: null,
+            raw_row: 'Luis Mora',
+            notes: [],
+          },
+        ],
+        warnings: [],
+        confidence: 50,
+      }),
+    );
+
+    expect(result.members[0].action).toBe('create');
+    expect(result.members[0].existing_customer_id).toBeNull();
+    expect(result.members[0].status).toBe('warning');
+    // No resolved plan ⇒ user must assign before commit.
+    expect(result.members[0].plan_ref).toBeNull();
+  });
+});
+
+// ─── commitRoster REUSE branch ────────────────────────────────────────────
+
+describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)', () => {
+  /**
+   * Builds the full commit harness:
+   *  - prisma.membership_plans.findFirst    (existing plan lookup)
+   *  - prisma.users.findFirst               (fill-in merge read)
+   *  - customersService.linkCustomerToStore (idempotent link)
+   *  - customersService.update              (fill-in merge write)
+   *  - membershipsService.createFromImport
+   *  - memberProfilesService.upsert
+   *  - membershipNotesService.bulkSet       (the QUI-558 whitelist path)
+   */
+  function buildCommitHarness() {
+    // See buildAnalyzeHarness — currentContext is the cross-module
+    // bridge that survives jest's per-file module cache.
+    const ctxPath = require.resolve('@common/context/request-context.service');
+    const { RequestContextService } = require(ctxPath);
+    (RequestContextService as any).currentContext = {
+      store_id: 1,
+      user_id: 1,
+      organization_id: 1,
+    };
+    const runWithCtx = <T>(fn: () => Promise<T>) => fn();
+
+    const prisma = {
+      withoutScope: jest.fn().mockReturnThis(),
+      stores: { findFirst: jest.fn() },
+      users: {
+        findFirst: jest.fn().mockImplementation(async (args: any) => {
+          // Existing customer has a name but no phone/email yet → fill-in
+          // trigger for both fields.
+          if (args?.where?.id === 7001) {
+            return {
+              first_name: 'Ana',
+              last_name: null,
+              phone: null,
+              email: null,
+            };
+          }
+          return null;
+        }),
+      },
+      membership_plans: {
+        findFirst: jest.fn().mockImplementation(async (args: any) => {
+          if (args?.where?.id === 50) return { id: 50 };
+          return null;
+        }),
+      },
+    } as any;
+
+    const customersService = {
+      linkCustomerToStore: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn().mockResolvedValue({ id: 9001 }),
+    } as any;
+
+    const membershipsService = {
+      createFromImport: jest
+        .fn()
+        .mockResolvedValue({ id: 5550, status: 'active' }),
+    } as any;
+
+    const memberProfilesService = {
+      upsert: jest.fn().mockResolvedValue(undefined),
+    } as any;
+
+    const membershipNotesService = {
+      bulkSet: jest.fn().mockResolvedValue({
+        upserted: 1,
+        created: 1,
+        updated: 0,
+      }),
+    } as any;
+
+    const svc = new MemberBulkScannerService(
+      /* aiEngine */ {} as any,
+      prisma,
+      /* membershipPlansService */ {} as any,
+      membershipsService,
+      memberProfilesService,
+      membershipNotesService,
+      customersService,
+      /* responseService */ {} as any,
+    );
+
+    return {
+      svc,
+      prisma,
+      customersService,
+      membershipsService,
+      memberProfilesService,
+      membershipNotesService,
+      runWithCtx,
+    };
+  }
+
+  afterEach(() => {
+    // No-op: ALS contexts are scoped per call and self-clean on resolution.
+  });
+
+  it('REUSE: links the customer, fills in missing fields, persists notes', async () => {
+    const {
+      svc,
+      customersService,
+      membershipsService,
+      membershipNotesService,
+      runWithCtx,
+    } = buildCommitHarness();
+
+    const result = await runWithCtx(() => svc.commitRoster({
+      plans: [
+        {
+          ref_index: 0,
+          status: 'existing',
+          plan_id: 50,
+        },
+      ],
+      members: [
+        {
+          row_number: 1,
+          existing_customer_id: 7001,
+          plan_ref_index: 0,
+          first_name: 'Ana',
+          last_name: 'Rivas',
+          phone: '+57 300 999 1111',
+          email: 'ana@example.com',
+          status: 'active',
+          period_start: '2026-06-01',
+          period_end: '2026-06-30',
+          notes: [
+            {
+              note_key: 'eps',
+              note_value: 'Sura',
+              include_in_summary: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.ready).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.plan_errors).toEqual([]);
+    expect(result.results).toEqual([
+      {
+        row_number: 1,
+        status: 'success',
+        membership_id: 5550,
+        customer_id: 7001,
+      },
     ]);
-    const r = await find(1, '3001234567');
-    expect(r).toBeNull();
+
+    // REUSE-specific assertions: link + fill-in
+    expect(customersService.linkCustomerToStore).toHaveBeenCalledWith(7001, 1);
+    expect(customersService.update).toHaveBeenCalledWith(
+      1,
+      7001,
+      expect.objectContaining({
+        last_name: 'Rivas',
+        phone: '+57 300 999 1111',
+        email: 'ana@example.com',
+      }),
+    );
+    // Membership created with the caller-supplied status / dates
+    expect(membershipsService.createFromImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer_id: 7001,
+        plan_id: 50,
+        status: 'active',
+        period_start: '2026-06-01',
+        period_end: '2026-06-30',
+      }),
+    );
+    // Notes passed through verbatim to the whitelist-enforcing service
+    expect(membershipNotesService.bulkSet).toHaveBeenCalledWith(
+      7001,
+      expect.objectContaining({
+        notes: [
+          {
+            note_key: 'eps',
+            note_value: 'Sura',
+            include_in_summary: true,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('REUSE: skip fill-in merge when the existing customer already has the value', async () => {
+    // Override the users.findFirst mock to return a "complete" customer
+    // so Object.keys(fillIn).length === 0 ⇒ no update.
+    const ctxPath = require.resolve('@common/context/request-context.service');
+    const { RequestContextService } = require(ctxPath);
+    (RequestContextService as any).currentContext = {
+      store_id: 1,
+      user_id: 1,
+      organization_id: 1,
+    };
+    const runWithCtx = <T>(fn: () => Promise<T>) => fn();
+
+    const prisma = {
+      withoutScope: jest.fn().mockReturnThis(),
+      users: {
+        findFirst: jest.fn().mockResolvedValue({
+          first_name: 'Ana',
+          last_name: 'Rivas',
+          phone: '+57 300 999 1111',
+          email: 'ana@example.com',
+        }),
+      },
+      membership_plans: {
+        findFirst: jest.fn().mockResolvedValue({ id: 50 }),
+      },
+    } as any;
+
+    const customersService = {
+      linkCustomerToStore: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn(),
+      create: jest.fn(),
+    } as any;
+
+    const membershipsService = {
+      createFromImport: jest.fn().mockResolvedValue({ id: 5550 }),
+    } as any;
+
+    const svc = new MemberBulkScannerService(
+      {} as any,
+      prisma,
+      {} as any,
+      membershipsService,
+      { upsert: jest.fn() } as any,
+      { bulkSet: jest.fn() } as any,
+      customersService,
+      {} as any,
+    );
+
+    const result = await runWithCtx(() =>
+      svc.commitRoster({
+        plans: [{ ref_index: 0, status: 'existing', plan_id: 50 }],
+        members: [
+          {
+            row_number: 1,
+            existing_customer_id: 7001,
+            plan_ref_index: 0,
+            first_name: 'Ana',
+            last_name: 'Rivas',
+            phone: '+57 300 999 1111',
+            email: 'ana@example.com',
+            status: 'active',
+          },
+        ],
+      }),
+    );
+
+    expect(result.succeeded).toBe(1);
+    expect(customersService.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── MembershipNotesService bulkSet whitelist (QUI-558 review #5) ────────
+
+describe('MembershipNotesService bulkSet whitelist (QUI-558 review #5)', () => {
+  // Inline-import the service so the spec stays a single file (no extra
+  // jest config changes) and exercise only bulkSet + the export.
+  const path = require('path');
+  const svcPath = path.resolve(
+    __dirname,
+    'membership-notes.service.ts',
+  );
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require(svcPath);
+  const { bulkSet } = mod.MembershipNotesService.prototype;
+  const ALLOWED_MEMBER_NOTE_KEYS = mod.ALLOWED_MEMBER_NOTE_KEYS;
+
+  it('exposes the canonical whitelist', () => {
+    expect(ALLOWED_MEMBER_NOTE_KEYS).toBeInstanceOf(Set);
+    expect(ALLOWED_MEMBER_NOTE_KEYS.has('eps')).toBe(true);
+    expect(ALLOWED_MEMBER_NOTE_KEYS.has('lesiones')).toBe(true);
+    expect(ALLOWED_MEMBER_NOTE_KEYS.has('contacto_emergencia_nombre')).toBe(
+      true,
+    );
+  });
+
+  it('drops unknown note_keys before the dedup loop', async () => {
+    const txNotes = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+    const svc: any = {
+      requireStoreId: () => 1,
+      logger: { warn: jest.fn() },
+      prisma: {
+        users: {
+          findFirst: jest.fn().mockResolvedValue({ id: 7001 }),
+        },
+        $transaction: async (cb: any) =>
+          cb({ membership_member_notes: txNotes }),
+      },
+    };
+
+    const result = await bulkSet.call(svc, 7001, {
+      notes: [
+        { note_key: 'eps', note_value: 'Sura' }, // canonical → keep
+        { note_key: '__pwn__', note_value: 'X' }, // unknown → drop
+        { note_key: 'tipo_sangre', note_value: 'O+' }, // canonical → keep
+        { note_key: 'Notas Privadas', note_value: 'Y' }, // unknown → drop
+      ] as any,
+    });
+
+    // 2 canonical kept; 2 dropped (warning logged once).
+    expect(result.upserted).toBe(2);
+    expect(result.created).toBe(2);
+    expect(txNotes.create).toHaveBeenCalledTimes(2);
+    expect(txNotes.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({ note_key: 'eps' }),
+      }),
+    );
+    expect(txNotes.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({ note_key: 'tipo_sangre' }),
+      }),
+    );
+    expect(svc.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('dropped 2 note(s) with non-canonical keys'),
+    );
+  });
+
+  it('returns 0/0/0 when all keys are non-canonical', async () => {
+    const svc: any = {
+      requireStoreId: () => 1,
+      logger: { warn: jest.fn() },
+      prisma: {
+        users: {
+          findFirst: jest.fn().mockResolvedValue({ id: 7001 }),
+        },
+        $transaction: jest.fn(),
+      },
+    };
+
+    const result = await bulkSet.call(svc, 7001, {
+      notes: [
+        { note_key: '__pwn__', note_value: 'X' },
+        { note_key: 'Notas Privadas', note_value: 'Y' },
+      ] as any,
+    });
+
+    expect(result).toEqual({ upserted: 0, created: 0, updated: 0 });
+    expect(svc.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('dedups canonical keys (last occurrence wins)', async () => {
+    const txNotes = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+    const svc: any = {
+      requireStoreId: () => 1,
+      logger: { warn: jest.fn() },
+      prisma: {
+        users: { findFirst: jest.fn().mockResolvedValue({ id: 7001 }) },
+        $transaction: async (cb: any) =>
+          cb({ membership_member_notes: txNotes }),
+      },
+    };
+
+    await bulkSet.call(svc, 7001, {
+      notes: [
+        { note_key: 'eps', note_value: 'Sura' },
+        { note_key: 'eps', note_value: 'Sanitas' }, // dup, last wins
+        { note_key: 'lesiones', note_value: 'rodilla' },
+        { note_key: 'lesiones', note_value: 'tobillo' }, // dup, last wins
+      ] as any,
+    });
+
+    expect(txNotes.create).toHaveBeenCalledTimes(2);
+    expect(txNotes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          note_key: 'eps',
+          note_value: 'Sanitas',
+        }),
+      }),
+    );
+    expect(txNotes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          note_key: 'lesiones',
+          note_value: 'tobillo',
+        }),
+      }),
+    );
   });
 });

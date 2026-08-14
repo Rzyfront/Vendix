@@ -8,6 +8,30 @@ import {
 } from './dto/membership-note.dto';
 
 /**
+ * Canonical `note_key` whitelist for member notes. Mirrors the prompt's
+ * intent (`member_roster_ocr`) and the frontend picker
+ * (`NOTE_KEYS` in member-bulk-scanner-modal.component.ts). AI extras or
+ * typos from curl/Postman are dropped silently during `bulkSet` — this is
+ * a forward-compat affordance, NOT a feature: clients should only write
+ * the canonical keys below.
+ *
+ * Scope: the list lives in this service (rather than the DTO) so any
+ * caller — bulk importer, ficha del socio "save all notes" action — gets
+ * the same filtering without duplicating the rule.
+ */
+export const ALLOWED_MEMBER_NOTE_KEYS = new Set<string>([
+  'eps',
+  'estado_fisico',
+  'lesiones',
+  'observaciones_medicas',
+  'alergias',
+  'tipo_sangre',
+  'contacto_emergencia_nombre',
+  'contacto_emergencia_telefono',
+  'contacto_emergencia_parentesco',
+]);
+
+/**
  * MembershipNotesService
  *
  * Store-scoped CRUD/upsert for `membership_member_notes`. Mirror of the
@@ -155,9 +179,26 @@ export class MembershipNotesService {
   ): Promise<{ upserted: number; created: number; updated: number }> {
     const storeId = this.requireStoreId();
 
+    // Server-side whitelist (QUI-558 review #5): drop unknown keys silently
+    // — AI extras, typos, or malicious callers cannot write arbitrary
+    // `note_key`s. The frontend picker already restricts input, but the
+    // backend must not rely on that — anyone can hit the endpoint with
+    // curl. Drops happen BEFORE dedup so a payload that mixes canonical
+    // and unknown keys only persists the canonical ones.
+    const incoming = (dto.notes ?? []).filter((n) =>
+      ALLOWED_MEMBER_NOTE_KEYS.has(n.note_key),
+    );
+    if (incoming.length !== (dto.notes ?? []).length) {
+      this.logger.warn(
+        `bulkSet(customer=${customerId}): dropped ${
+          (dto.notes ?? []).length - incoming.length
+        } note(s) with non-canonical keys`,
+      );
+    }
+
     // De-duplicate by note_key (last occurrence wins).
     const dedupMap = new Map<string, SetMembershipNoteDto>();
-    for (const n of dto.notes ?? []) {
+    for (const n of incoming) {
       dedupMap.set(n.note_key, n);
     }
     const unique = Array.from(dedupMap.values());

@@ -1342,8 +1342,11 @@ export class MemberBulkScannerModalComponent {
           ? m.notes
               .filter((n) => n.key?.trim() && n.value?.trim())
               .map((n) => ({
-                key: n.key.trim(),
-                value: n.value.trim(),
+                // Backend CommitMemberNoteDto expects `note_key`/`note_value`
+                // (see scan-roster.dto.ts); rename to match the wire contract
+                // so class-validator + ValidationPipe do not reject the commit.
+                note_key: n.key.trim(),
+                note_value: n.value.trim(),
                 include_in_summary: !!n.include_in_summary,
               }))
           : undefined,
