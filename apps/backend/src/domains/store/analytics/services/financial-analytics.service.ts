@@ -609,24 +609,35 @@ export class FinancialAnalyticsService {
    * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
    * llega `expense.state_changed`, `payment.received` o `refund.completed`.
    *
-   * Implementación defensiva: itera `cache.store.keys()` filtrando por prefijo
-   * y borrando. En NestJS cache-manager (v5) la API `reset()` borra TODO el
-   * cache compartido, lo cual sería excesivo — invalidar solo las keys de
-   * este store limita el blast radius.
+   * Implementación defensiva: el store real es Redis vía `cache-manager-ioredis-yet`.
+   * Esa librería expone `store.keys(pattern)` (NO `store.keys()` sin arg — eso
+   * lanza TypeError). Pasamos el pattern prefijo del store. Si el store no
+   * expone `keys` con pattern, hacemos fallback a `client.keys()` (ioredis) o
+   * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
    */
   async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
     const keyPrefix = `analytics:financial:${prefix}:v3:${storeId}:`;
+    const pattern = `${keyPrefix}*`;
     try {
       const store: any = (this.cache as any).store;
+      let keys: string[] = [];
       if (store && typeof store.keys === 'function') {
-        const keys: string[] = await store.keys();
-        const toDelete = keys.filter((k) => k.startsWith(keyPrefix));
-        await Promise.all(toDelete.map((k) => this.cache.del(k)));
+        // ioredis-yet adapter: keys(pattern) requerido.
+        // Inline in-memory store: keys() sin arg → todas.
+        keys = (await store.keys(pattern)) ?? (await store.keys()) ?? [];
+      } else if (store && store.client && typeof store.client.keys === 'function') {
+        // Fallback: ioredis directo.
+        keys = await store.client.keys(pattern);
       } else if (typeof (this.cache as any).reset === 'function') {
-        // Fallback: si el store no expone `keys`, reset completo.
-        // Es agresivo pero garantiza correctness.
+        // Fallback agresivo: reset completo.
         await (this.cache as any).reset();
+        return;
       }
+      if (keys.length === 0) return;
+      await Promise.all(keys.map((k) => this.cache.del(k)));
+      this.logger.log(
+        `Cache invalidated ${keys.length} keys for store ${storeId} (prefix=${prefix})`,
+      );
     } catch (err) {
       // No bloquear el flujo principal si el cache no se puede invalidar.
       // El TTL de 120s actúa como red de seguridad.

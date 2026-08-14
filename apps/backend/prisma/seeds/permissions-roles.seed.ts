@@ -678,6 +678,12 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'store:memberships:delete',
+      description: 'Eliminar (soft-delete) membresías terminales',
+      path: '/api/store/memberships/:id',
+      method: 'DELETE',
+    },
+    {
       name: 'store:membership_access:read',
       description: 'Ver accesos de membresía',
       path: '/api/store/memberships/access',
