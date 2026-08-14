@@ -605,6 +605,38 @@ export class FinancialAnalyticsService {
   }
 
   /**
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v3:*` para
+   * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
+   * llega `expense.state_changed`, `payment.received` o `refund.completed`.
+   *
+   * Implementación defensiva: itera `cache.store.keys()` filtrando por prefijo
+   * y borrando. En NestJS cache-manager (v5) la API `reset()` borra TODO el
+   * cache compartido, lo cual sería excesivo — invalidar solo las keys de
+   * este store limita el blast radius.
+   */
+  async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
+    const keyPrefix = `analytics:financial:${prefix}:v3:${storeId}:`;
+    try {
+      const store: any = (this.cache as any).store;
+      if (store && typeof store.keys === 'function') {
+        const keys: string[] = await store.keys();
+        const toDelete = keys.filter((k) => k.startsWith(keyPrefix));
+        await Promise.all(toDelete.map((k) => this.cache.del(k)));
+      } else if (typeof (this.cache as any).reset === 'function') {
+        // Fallback: si el store no expone `keys`, reset completo.
+        // Es agresivo pero garantiza correctness.
+        await (this.cache as any).reset();
+      }
+    } catch (err) {
+      // No bloquear el flujo principal si el cache no se puede invalidar.
+      // El TTL de 120s actúa como red de seguridad.
+      this.logger.warn(
+        `Cache invalidation skipped for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
    * Order-level monetary aggregate for one window, over {@link REVENUE_STATES}.
    */
   private async aggregateRevenueOrders(startDate: Date, endDate: Date) {

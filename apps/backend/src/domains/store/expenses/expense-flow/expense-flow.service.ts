@@ -107,6 +107,15 @@ export class ExpenseFlowService {
       amount: updated.amount,
       category_id: updated.category_id,
     });
+    // Bug 5 — evento cross-domain adicional para invalidación de cache del
+    // dashboard. NO reemplaza a expense.approved; ambos coexisten (listener
+    // contable y listener de analytics escuchan eventos distintos).
+    this.event_emitter.emit('expense.state_changed', {
+      expense_id: updated.id,
+      store_id: context.store_id,
+      organization_id: context.organization_id,
+      new_state: updated.state,
+    });
 
     return updated;
   }
@@ -155,6 +164,13 @@ export class ExpenseFlowService {
       store_id: context.store_id,
       amount: updated.amount,
     });
+    // Bug 5 — invalidación de cache del dashboard.
+    this.event_emitter.emit('expense.state_changed', {
+      expense_id: updated.id,
+      store_id: context.store_id,
+      organization_id: context.organization_id,
+      new_state: updated.state,
+    });
 
     return updated;
   }
@@ -183,6 +199,13 @@ export class ExpenseFlowService {
         amount: updated.amount,
       });
     }
+    // Bug 5 — invalidación de cache del dashboard (cubre refund también).
+    this.event_emitter.emit('expense.state_changed', {
+      expense_id: updated.id,
+      store_id: context.store_id,
+      organization_id: context.organization_id,
+      new_state: updated.state,
+    });
 
     return updated;
   }
