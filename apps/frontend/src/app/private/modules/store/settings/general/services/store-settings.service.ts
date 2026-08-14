@@ -10,6 +10,9 @@ import {
 } from '../../../../../../core/models/store-settings.interface';
 import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
 import { CurrencyFormatService } from '../../../../../../shared/pipes';
+import { StoreScopedCache } from '../../../../../../core/utils/store-scoped-cache';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
+import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 
 export type StoreFiscalNitType =
   | 'NIT'
@@ -46,22 +49,47 @@ export class StoreSettingsService {
   private http = inject(HttpClient);
   private store = inject(Store);
   private currencyFormatService = inject(CurrencyFormatService);
+  private tenantFacade = inject(TenantFacade);
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
   private readonly api_base_url = `${environment.apiUrl}/store`;
   private readonly settings_cache_ttl_ms = 60 * 1000;
-  private settings_cache: ApiResponse<StoreSettings> | null = null;
-  private settings_cache_time = 0;
+  // QUI-563 Fase 1: cache scoped by active store_id. A TTL-fresh entry
+  // from a previous tenant returns null on `get()` — silent miss is the
+  // primary defense. Pairs with Fase 2 (TenantCacheRegistry) which evicts
+  // it actively on switch.
+  private settings_cache = new StoreScopedCache<ApiResponse<StoreSettings>>(
+    this.settings_cache_ttl_ms,
+  );
   private settings_request$?: Observable<ApiResponse<StoreSettings>>;
+
+  constructor() {
+    // QUI-563 Fase 2: register with the bus so the switch service evicts
+    // us proactively. Idempotent — re-registering replaces the previous
+    // entry, which is desirable for HMR and test re-instantiation.
+    this.tenantCacheRegistry.register(
+      'store-settings',
+      () => this.invalidateCache(),
+      'StoreSettingsService',
+    );
+  }
+
+  /**
+   * QUI-563 Fase 1: helper that reads the active store_id from TenantFacade
+   * on every call. Centralised so the cache and the request-dedup keys
+   * agree on the tenant boundary.
+   */
+  private get activeStoreId(): number | null {
+    return this.tenantFacade.getCurrentStoreId();
+  }
 
   getSettings(
     options: StoreSettingsRequestOptions = {},
   ): Observable<ApiResponse<StoreSettings>> {
-    const now = Date.now();
-    if (
-      !options.forceRefresh &&
-      this.settings_cache &&
-      now - this.settings_cache_time < this.settings_cache_ttl_ms
-    ) {
-      return of(this.settings_cache);
+    if (!options.forceRefresh) {
+      const cached = this.settings_cache.get(this.activeStoreId);
+      if (cached) {
+        return of(cached);
+      }
     }
 
     if (!options.forceRefresh && this.settings_request$) {
@@ -240,8 +268,17 @@ export class StoreSettingsService {
   }
 
   private cacheSettingsResponse(response: ApiResponse<StoreSettings>): void {
-    this.settings_cache = response;
-    this.settings_cache_time = Date.now();
+    this.settings_cache.set(this.activeStoreId, response);
+  }
+
+  /**
+   * QUI-563 Fase 1/2: drops the in-memory entry. Called by the
+   * TenantCacheRegistry on environment switch (active eviction) and by
+   * the few existing manual callers that used to clear the previous
+   * cache vars.
+   */
+  invalidateCache(): void {
+    this.settings_cache.clear();
   }
 
   private publishStoreSettings(response: ApiResponse<StoreSettings>): void {
@@ -262,12 +299,17 @@ export class StoreSettingsService {
   private handleSettingsReadError(
     error: any,
   ): Observable<ApiResponse<StoreSettings>> {
-    if (this.settings_cache) {
+    // QUI-563 Fase 4: only fall back to cache when the cached entry belongs
+    // to the SAME tenant that just failed. Cross-tenant fallback was the
+    // second window of the bug: even after Fase 0/1/2 closed the happy
+    // path, a 403 on store B would still surface store A's settings.
+    const cached = this.settings_cache.get(this.activeStoreId);
+    if (cached) {
       console.warn(
         'StoreSettingsService: using cached settings after read error',
         error,
       );
-      return of(this.settings_cache);
+      return of(cached);
     }
 
     return this.handleError(error);

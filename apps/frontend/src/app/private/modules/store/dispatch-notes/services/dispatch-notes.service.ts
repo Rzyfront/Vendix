@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, throwError, timer } from 'rxjs';
 import {
@@ -13,6 +13,7 @@ import {
   timeout,
 } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 import {
   DispatchNote,
   DispatchNoteQuery,
@@ -137,6 +138,7 @@ let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } |
 export class DispatchNotesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000;
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
 
   /** Intervalo entre polls de estado del job de escaneo (ms). */
   private readonly RECEIPT_SCAN_POLL_INTERVAL_MS = 1800;
@@ -149,7 +151,17 @@ export class DispatchNotesService {
    */
   private readonly RECEIPT_SCAN_TIMEOUT_MS = 120_000;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // QUI-563 Fase 2: register the module-level cache so the switch
+    // service evicts it on store change.
+    this.tenantCacheRegistry.register(
+      'store-dispatch-notes-stats',
+      () => {
+        dispatchNoteStatsCache = null;
+      },
+      'DispatchNotesService',
+    );
+  }
 
   getDispatchNotes(query: DispatchNoteQuery = {}): Observable<PaginatedDispatchNotesResponse> {
     const params = new URLSearchParams();

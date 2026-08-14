@@ -8,6 +8,7 @@ import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
 import { RouteManagerService } from './route-manager.service';
+import { TenantCacheRegistry } from './tenant-cache-registry.service';
 import { environment } from '../../../environments/environment';
 
 export interface SwitchEnvironmentRequest {
@@ -47,6 +48,11 @@ export class EnvironmentSwitchService {
   private http = inject(HttpClient);
   private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
+  // QUI-563 Fase 2: bus that proactively evicts every registered tenant-
+  // scoped cache before we redirect. Fase 1 still catches stale reads
+  // after a TTL, but clearing here makes the next screen render hit the
+  // network instead of the previous tenant's memory.
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
   private appConfigService = inject(AppConfigService);
   private routeManager = inject(RouteManagerService);
   private router = inject(Router);
@@ -213,6 +219,12 @@ export class EnvironmentSwitchService {
       await this.updateAppConfigAndRoutes(updated_environment);
 
       await this.waitForAuthStateSync();
+
+      // QUI-563 Fase 2: evict every registered tenant-scoped cache BEFORE
+      // navigation, so the next screen renders against the new tenant's
+      // data, not the previous tenant's TTL-fresh entry. Runs after the
+      // NgRx rehydrate so consumers can re-prime against the new state.
+      this.tenantCacheRegistry.clearAll();
 
       // 10. Redirigir y RECARGAR para asegurar contexto limpio
       await this.redirectToEnvironment();
