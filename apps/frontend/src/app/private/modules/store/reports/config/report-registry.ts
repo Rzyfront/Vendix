@@ -155,7 +155,40 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
-  // ─── RESEÑAS (1) ──────────────────────────────────────────────────────────────────
+  {
+    // QUI-542: Cuentas por pagar a proveedores con bucketing de
+    // antigüedad. purchase_orders con payment_status unpaid|partial.
+    id: 'purchase-aging',
+    category: 'purchases',
+    title: 'Cuentas por Pagar (Aging)',
+    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
+    detailedDescription:
+      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
+    icon: 'clock-alert',
+    route: '/admin/reports/purchases/purchase-aging',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'order_number', header: 'OC', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'order_date', header: 'Fecha OC', type: 'date-only' },
+      { key: 'payment_due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'payment_status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'cuentas_por_pagar',
+    stats: [
+      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/aging',
+    exportEndpoint: 'store/analytics/purchases/aging/export',
+  },
+
+  // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
 
   {
     id: 'reviews-summary',
