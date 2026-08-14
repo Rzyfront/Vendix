@@ -281,123 +281,159 @@ export class ReservationsService {
     // 5. Generar numero de reserva
     const booking_number = await this.generateBookingNumber(store_id, dto.date);
 
-    // 6. Crear reserva con transaccion serializable para prevenir condiciones de carrera
-    const booking = await this.prisma.$transaction(
-      async (tx) => {
-        // Re-verificar disponibilidad dentro de la transaccion (si aplica)
-        if (!shouldSkipAvailability && resolvedProviderId) {
-          const providerBooked = await tx.bookings.count({
-            where: {
-              provider_id: resolvedProviderId,
+    // 6. Atomicidad (QUI-649) + fix de regresión post-PR-576:
+    //
+    //    Antes: la orden se creaba con `OrdersService.create()` DENTRO de la
+    //    transacción serializable. Ese método escribe con `this.prisma`
+    //    (autocommit, otra conexión), así que la fila commiteada por fuera
+    //    no era visible al chequeo de FK de `tx.bookings.update` y la
+    //    reserva respondía HTTP 500 cada vez.
+    //
+    //    Ahora: si la reserva debe auto-crear su orden, la creamos ANTES
+    //    de abrir la transacción (autocommit, fila persistente y visible
+    //    desde el inicio). El chequeo de FK dentro del tx ve la fila
+    //    porque ya está commiteada. Si el tx falla, compensamos cancelando
+    //    la orden creada con `OrdersService.cancel`, que libera su stock
+    //    reservado y mantiene el invariante "reserva y orden nacen juntas
+    //    o no nacen".
+    //
+    //    Cuando el cliente ya trae `dto.order_id` (lo creó el POS o el
+    //    storefront antes de la reserva), no tocamos orders aquí: la
+    //    reserva solo apunta a la fila existente.
+    let preCreatedOrder: { id: number } | null = null;
+    if (!dto.order_id && !dto.skip_order_creation) {
+      const priceResult = this.priceResolverService.resolvePrice({
+        product: {
+          base_price: Number(product.base_price),
+          is_on_sale: product.is_on_sale,
+          sale_price:
+            product.sale_price != null ? Number(product.sale_price) : null,
+          track_inventory: product.track_inventory,
+        },
+        variant: selectedVariant
+          ? {
+              price_override:
+                selectedVariant.price_override != null
+                  ? Number(selectedVariant.price_override)
+                  : null,
+              is_on_sale: selectedVariant.is_on_sale,
+              sale_price:
+                selectedVariant.sale_price != null
+                  ? Number(selectedVariant.sale_price)
+                  : null,
+              track_inventory_override:
+                selectedVariant.track_inventory_override,
+            }
+          : undefined,
+      });
+      const price = priceResult.unitPrice;
+      const createdOrder = await this.ordersService.create(
+        {
+          customer_id: dto.customer_id,
+          items: [
+            {
+              product_id: dto.product_id,
+              product_variant_id: dto.product_variant_id,
+              product_name: product.name || 'Servicio',
+              quantity: 1,
+              unit_price: price,
+              total_price: price,
+            },
+          ],
+          subtotal: price,
+          total_amount: price,
+          internal_notes: `Reserva ${booking_number} (orden creada antes de la reserva)`,
+          channel: dto.channel || 'pos',
+          skip_schedule_validation: true,
+        } as any,
+        context?.user_id,
+      );
+      preCreatedOrder = { id: createdOrder.id };
+    }
+
+    let booking: Awaited<ReturnType<typeof this.mapBooking>> | null = null;
+    try {
+      booking = await this.prisma.$transaction(
+        async (tx) => {
+          // Re-verificar disponibilidad dentro de la transaccion (si aplica)
+          if (!shouldSkipAvailability && resolvedProviderId) {
+            const providerBooked = await tx.bookings.count({
+              where: {
+                provider_id: resolvedProviderId,
+                date: new Date(dto.date),
+                start_time: dto.start_time,
+                end_time: dto.end_time,
+                status: { notIn: [booking_status_enum.cancelled] },
+              },
+            });
+
+            if (providerBooked > 0) {
+              throw new ConflictException(
+                'El horario ya no esta disponible (reservado por otro usuario)',
+              );
+            }
+          }
+
+          const orderIdForBooking = dto.order_id ?? preCreatedOrder?.id ?? null;
+
+          const created = await tx.bookings.create({
+            data: {
+              store_id,
+              customer_id: dto.customer_id,
+              product_id: dto.product_id,
+              booking_number,
               date: new Date(dto.date),
               start_time: dto.start_time,
               end_time: dto.end_time,
-              status: { notIn: [booking_status_enum.cancelled] },
-            },
-          });
-
-          if (providerBooked > 0) {
-            throw new ConflictException(
-              'El horario ya no esta disponible (reservado por otro usuario)',
-            );
-          }
-        }
-
-        const created = await tx.bookings.create({
-          data: {
-            store_id,
-            customer_id: dto.customer_id,
-            product_id: dto.product_id,
-            booking_number,
-            date: new Date(dto.date),
-            start_time: dto.start_time,
-            end_time: dto.end_time,
-            status: booking_status_enum.pending,
-            channel: dto.channel || 'pos',
-            notes: dto.notes,
-            order_id: dto.order_id,
-            table_id: dto.table_id ?? null,
-            provider_id: resolvedProviderId,
-            product_variant_id: dto.product_variant_id ?? null,
-            created_by_user_id: context?.user_id,
-            // Phase 1 of service-location feature: 'home' = technician
-            // goes to the customer; 'shop' = customer goes to the local.
-            // service_address_id is only meaningful when home.
-            service_location_type: dto.service_location_type || 'shop',
-            service_address_id:
-              dto.service_location_type === 'home'
-                ? (dto.service_address_id ?? null)
-                : null,
-            updated_at: new Date(),
-          },
-          include: this.BOOKING_INCLUDE,
-        });
-
-        // Atomicidad (QUI-649): reserva y orden auto-vinculada nacen juntas
-        // o no nacen. Si la creación de la orden falla, la reserva también se
-        // revierte al hacer rollback de la transacción.
-        if (!dto.order_id && !dto.skip_order_creation) {
-          const priceResult = this.priceResolverService.resolvePrice({
-            product: {
-              base_price: Number(product.base_price),
-              is_on_sale: product.is_on_sale,
-              sale_price:
-                product.sale_price != null
-                  ? Number(product.sale_price)
-                  : null,
-              track_inventory: product.track_inventory,
-            },
-            variant: selectedVariant
-              ? {
-                  price_override:
-                    selectedVariant.price_override != null
-                      ? Number(selectedVariant.price_override)
-                      : null,
-                  is_on_sale: selectedVariant.is_on_sale,
-                  sale_price:
-                    selectedVariant.sale_price != null
-                      ? Number(selectedVariant.sale_price)
-                      : null,
-                  track_inventory_override:
-                    selectedVariant.track_inventory_override,
-                }
-              : undefined,
-          });
-          const price = priceResult.unitPrice;
-          const order = await this.ordersService.create(
-            {
-              customer_id: dto.customer_id,
-              items: [
-                {
-                  product_id: dto.product_id,
-                  product_variant_id: dto.product_variant_id,
-                  product_name: created.product?.name || 'Servicio',
-                  quantity: 1,
-                  unit_price: price,
-                  total_price: price,
-                },
-              ],
-              subtotal: price,
-              total_amount: price,
-              internal_notes: `Generada desde reserva ${created.booking_number}`,
+              status: booking_status_enum.pending,
               channel: dto.channel || 'pos',
-              skip_schedule_validation: true,
-            } as any,
-            context?.user_id,
-          );
-
-          const updated = await tx.bookings.update({
-            where: { id: created.id },
-            data: { order_id: order.id, updated_at: new Date() },
+              notes: dto.notes,
+              order_id: orderIdForBooking,
+              table_id: dto.table_id ?? null,
+              provider_id: resolvedProviderId,
+              product_variant_id: dto.product_variant_id ?? null,
+              created_by_user_id: context?.user_id,
+              // Phase 1 of service-location feature: 'home' = technician
+              // goes to the customer; 'shop' = customer goes to the local.
+              // service_address_id is only meaningful when home.
+              service_location_type: dto.service_location_type || 'shop',
+              service_address_id:
+                dto.service_location_type === 'home'
+                  ? (dto.service_address_id ?? null)
+                  : null,
+              updated_at: new Date(),
+            },
             include: this.BOOKING_INCLUDE,
           });
-          return await this.mapBooking(updated);
-        }
 
-        return await this.mapBooking(created);
-      },
-      { isolationLevel: 'Serializable' },
-    );
+          return await this.mapBooking(created);
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (err) {
+      // Compensar la orden pre-creada para preservar el invariante de
+      // QUI-649: reserva y orden nacen juntas o no nacen. Si la
+      // cancelación también falla (DB caída, lock), la orden queda en
+      // 'created' huérfana — aceptable, mejor que el bug de "reserva
+      // caída y orden persistida" que el plan repara.
+      if (preCreatedOrder) {
+        try {
+          // OrdersService no expone `cancel()`. La cancelación es una
+          // transición de estado que pasa por `update()` — el seam
+          // `forceOrderState` interno libera las reservas de stock,
+          // emite `order.cancelled` y deja la transición auditada.
+          await this.ordersService.update(preCreatedOrder.id, {
+            state: 'cancelled',
+            internal_notes: `Compensación por fallo de reserva (booking_id=${preCreatedOrder.id}).`,
+          } as any);
+        } catch (cancelErr) {
+          this.logger.error(
+            `Failed to compensate order ${preCreatedOrder.id} after booking failed: ${cancelErr.message}`,
+          );
+        }
+      }
+      throw err;
+    }
 
     // 7. Marcar la mesa como reservada si se asignó una tabla
     if (dto.table_id) {

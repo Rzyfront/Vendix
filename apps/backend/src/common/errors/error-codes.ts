@@ -277,6 +277,12 @@ export const ErrorCodes = {
     devMessage:
       'Ya existe una cuenta de cliente con este correo — puedes recuperarla restableciendo tu contraseña.',
   },
+  AUTH_CUSTOMER_ARCHIVED_001: {
+    code: 'AUTH_CUSTOMER_ARCHIVED_001',
+    httpStatus: 403,
+    devMessage:
+      'La cuenta del cliente está archivada. Solo el comerciante puede reactivarla desde el backoffice.',
+  },
   AUTH_PERM_001: {
     code: 'AUTH_PERM_001',
     httpStatus: 403,

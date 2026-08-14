@@ -187,6 +187,9 @@ export interface ProfitLossSummary {
     net_profit_growth: number | null;
     expenses_growth: number | null;
     orders_growth: number | null;
+    // Hotfix post-PR-576: agregado para que la tarjeta Reembolsos del
+    // dashboard pueda leer su badge de crecimiento.
+    refunds_growth: number | null;
     /** Same `computeGrowth` contract as the other growth fields; `null` when the previous period had no base. */
     balance_growth: number | null;
   };

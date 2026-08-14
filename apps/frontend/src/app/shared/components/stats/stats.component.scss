@@ -102,9 +102,14 @@
 
 .stat-small {
   @apply text-[10px] font-medium mt-1;
-  white-space: nowrap;
+  // Hotfix post-PR-576: el clamp nowrap+ellipsis truncaba textos largos
+  // como "+25.0% vs período anterior" en una sola línea, dejando
+  // información útil invisible. Permitimos wrap en 2 líneas y aplicamos
+  // ellipsis solo si el texto aún no cabe (defensa para mobile).
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 
   // Mobile: emerald color for positive growth like reference
   @media (max-width: 639px) {

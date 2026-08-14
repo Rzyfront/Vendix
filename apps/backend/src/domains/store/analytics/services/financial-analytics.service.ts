@@ -884,7 +884,12 @@ export class FinancialAnalyticsService {
        * assert "no change" about a period that had nothing.
        */
       comparison: {
-        operating_revenue: this.round2(previousOperatingRevenue),
+        // Hotfix post-PR-576: emitir el valor NETO de reembolsos para que
+        // case con `revenue.operating_revenue` (también neto). Antes la
+        // comparación era gross y cualquier cliente que leyera
+        // `comparison.operating_revenue` veía una diferencia artificial
+        // con la badge `revenue_growth` (que sí es net/net).
+        operating_revenue: this.round2(previousOperatingRevenueNetRefunds),
         net_profit: this.round2(previousNetProfit),
         operating_expenses: this.round2(previousExpenseAggregates),
         order_count: previousOrderCount,
@@ -902,6 +907,13 @@ export class FinancialAnalyticsService {
         orders_growth: computeGrowth(
           orderAggregates._count.id || 0,
           previousOrderCount,
+        ),
+        // Hotfix post-PR-576: dashboard reembolsa tarjeta con
+        // `comparison.refunds_growth`; sin este campo el template del
+        // frontend no compila (TS2339).
+        refunds_growth: computeGrowth(
+          refundSubtotal,
+          previousRefundSubtotal,
         ),
         balance_growth: computeGrowth(balance, previousBalance),
       },

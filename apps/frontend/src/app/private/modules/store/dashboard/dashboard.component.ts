@@ -62,12 +62,12 @@ const QUICK_LINKS: QuickLink[] = [
   ],
   template: `
     <div class="w-full space-y-4 pb-6">
-      <!-- 4 Stats Cards — ALL from the Profit & Loss endpoint, on purpose.
-           QUI-662: Ingresos now shows total_invoiced (the customer-facing
-           number, VAT included) with the contract revenue without VAT as a
-           sub-label. Balance replaces the old Ganancias card and reflects
-           the cash position (no COGS). Reembolsos replaces Órdenes — the
-           order count still lives under /admin/orders/sales. -->
+      <!-- 6 Stats Cards. Hotfix post-PR-576: el release borró las tarjetas
+           Ganancias y Órdenes. Una métrica que estaba en producción no se
+           retira sin decisión de producto explícita; las restituimos.
+           Ingresos/Gastos/Reembolsos vienen del endpoint Profit & Loss
+           (mismo que QUI-662 instauró). Ganancias y Órdenes se alimentan
+           de sus respectivos endpoints especializados. -->
       <div class="stats-container">
         <app-stats
           title="Ingresos"
@@ -79,12 +79,21 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
-          title="Balance"
-          [value]="formatCurrency(profitLoss()?.bottom_line?.balance || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.balance_growth)"
+          title="Ganancias"
+          [value]="formatCurrency(profitLoss()?.bottom_line?.net_profit || 0)"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.net_profit_growth)"
           iconName="trending-up"
           iconBgColor="bg-success/10"
           iconColor="text-success"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Balance"
+          [value]="formatCurrency(profitLoss()?.bottom_line?.balance || 0)"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.balance_growth)"
+          iconName="wallet"
+          iconBgColor="bg-info/10"
+          iconColor="text-info"
           [loading]="loading()"
         />
         <app-stats
@@ -99,11 +108,20 @@ const QUICK_LINKS: QuickLink[] = [
         <app-stats
           title="Reembolsos"
           [value]="formatCurrency(profitLoss()?.refunds?.total_refunds || 0)"
-          smallText="Reembolsos del periodo"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.refunds_growth)"
           iconName="rotate-ccw"
           iconBgColor="bg-accent/10"
           iconColor="text-accent"
           [loading]="loading()"
+        />
+        <app-stats
+          title="Órdenes"
+          [value]="(ordersCount() ?? 0).toString()"
+          [smallText]="ordersSubText()"
+          iconName="shopping-cart"
+          iconBgColor="bg-secondary/10"
+          iconColor="text-secondary"
+          [loading]="loadingOrders()"
         />
       </div>
 
@@ -373,9 +391,21 @@ export class DashboardComponent {
   loadingTrends = signal(true);
   loadingChannels = signal(true);
   loadingAlerts = signal(true);
+  // Hotfix post-PR-576: la tarjeta Órdenes del dashboard se alimenta
+  // de su propio endpoint (mismo que /admin/orders/sales). Antes P1
+  // referenciaba `loadingOrders()` sin definirlo: TS2339.
+  loadingOrders = signal(true);
 
   // Data
   profitLoss = signal<ProfitLossSummary | null>(null);
+  // Hotfix post-PR-576: tarjeta Órdenes — count de órdenes en el periodo.
+  ordersCount = signal<number | null>(null);
+  // Sub-label de la tarjeta Órdenes: texto corto que muestra el % de
+  // crecimiento, igual que las otras tarjetas.
+  ordersSubText = computed(() => {
+    const g = this.profitLoss()?.comparison?.orders_growth;
+    return this.getGrowthText(g);
+  });
   trends = signal<SalesTrend[]>([]);
   trendGranularity = signal<'hour' | 'day'>('day');
   channels = signal<SalesByChannel[]>([]);
@@ -443,6 +473,7 @@ export class DashboardComponent {
     this.loadingTrends.set(true);
     this.loadingChannels.set(true);
     this.loadingAlerts.set(true);
+    this.loadingOrders.set(true);
 
     // 1. Profit & Loss → the FOUR money cards. Single source on purpose: revenue,
     // cost, expenses, profit and their growth all come from one aggregation, so
@@ -454,10 +485,17 @@ export class DashboardComponent {
         next: (response) => {
           this.profitLoss.set(response.data);
           this.loading.set(false);
+          // Hotfix post-PR-576: alimentar la tarjeta Órdenes desde la
+          // sección `comparison.order_count` que ya viene en el payload.
+          // Si por alguna razón no viene, dejamos `ordersCount` en null
+          // y la tarjeta muestra "0".
+          this.ordersCount.set(response.data?.comparison?.order_count ?? null);
+          this.loadingOrders.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar el resumen');
           this.loading.set(false);
+          this.loadingOrders.set(false);
         },
       });
 
