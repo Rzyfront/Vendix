@@ -15,8 +15,7 @@
         </p>
         <p class="text-xs text-text-secondary mt-1">
           Esta orden contiene platos con envío a domicilio. Despáchala, márcala
-          como entregada y el sistema la cerrará al final del día si no la
-          finalizas manualmente.
+          como entregada y luego finalízala manualmente.
         </p>
         <div class="flex gap-2 mt-3">
           <button
@@ -32,6 +31,13 @@
             (click)="markDelivered()"
           >
             Marcar entregado
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-semibold rounded-md bg-success text-white ml-auto"
+            (click)="finalizeOrder()"
+          >
+            Finalizar
           </button>
         </div>
       </div>

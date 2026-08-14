@@ -2866,4 +2866,17 @@ export class OrderDetailsPageComponent {
       },
     });
   }
+
+  finalizeOrder(): void {
+    if (!this.orderId) return;
+    this.ordersService.updateOrderStatus(this.orderId, 'finished').subscribe({
+      next: () => {
+        this.toastService.success('Orden finalizada');
+        this.loadData();
+      },
+      error: (err: any) => {
+        this.toastService.error(err?.message || 'No se pudo finalizar la orden');
+      },
+    });
+  }
 }
