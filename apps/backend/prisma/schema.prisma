@@ -3287,6 +3287,8 @@ enum notification_type_enum {
   /// report and mislead the person who is looking for it.
   vexi_task_completed
   vexi_task_failed
+  auto_renew_disabled_no_credential
+  auto_renew_charge_failed
 }
 
 model notifications {
@@ -8813,6 +8815,9 @@ enum subscription_event_type_enum {
   scheduled_cancel
   chargeback_received
   manual_payment
+  auto_renew_disabled_no_credential
+  renewal_failed
+  payment_method_expiring
 }
 
 enum partner_payout_batch_state_enum {
@@ -9179,6 +9184,24 @@ model webhook_event_dedup {
   @@unique([processor, event_id])
   @@index([processor, event_id])
   @@index([received_at])
+}
+
+/// Dedupe primitive for billing-warning notifications and emails.
+/// Mirrors webhook_event_dedup. A retry that re-detects the same condition
+/// for the same (store, type, source_event_id) collapses to a single row,
+/// so the notification bell and the email are emitted at most once per
+/// source event. period_id is informational only (NULL for the no-credential
+/// case where no SaaS period has been opened yet).
+model billing_warning_logs {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  type            String    @db.VarChar(64)
+  period_id       Int?
+  source_event_id Int
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@unique([store_id, type, source_event_id])
+  @@index([store_id, type, created_at])
 }
 
 model platform_settings {
