@@ -320,6 +320,13 @@ export class NotificationsService {
       // `notification_subscriptions.in_app`) y el toggle no existía en la UI.
       'ap_installment_due_soon',
       'ap_installment_overdue',
+      // Billing-warning detection — opt-in bell row for "no recurring credential
+      // persisted" and "automatic charge failed" paths. The
+      // `SubscriptionPaymentBillingWarningListener` emits both via
+      // `notificationsService.createAndBroadcast` after stamping the
+      // `billing_warning_logs` dedupe row.
+      'auto_renew_disabled_no_credential',
+      'auto_renew_charge_failed',
     ];
 
     const existing = await this.subscriptionsModel.findMany({

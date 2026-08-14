@@ -27,6 +27,7 @@ import { SubscriptionManualPaymentService } from './services/subscription-manual
 import { SubscriptionRedemptionService } from './services/subscription-redemption.service';
 import { SubscriptionStateListener } from './listeners/subscription-state.listener';
 import { SubscriptionAccountingListener } from './listeners/subscription-accounting.listener';
+import { SubscriptionPaymentBillingWarningListener } from './listeners/subscription-payment-billing-warning.listener';
 import { ReconcileStuckPendingJob } from './jobs/reconcile-stuck-pending.job';
 import { SubscriptionGateConfig } from './config/subscription-gate.config';
 import { PaymentsModule } from '../payments/payments.module';
@@ -85,6 +86,11 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     // SaaS) on subscription invoice/payment/refund events. NestJS needs it as
     // a provider so the @OnEvent wiring is active.
     SubscriptionAccountingListener,
+    // Listener: stamps `billing_warning_logs` and broadcasts the bell +
+    // enqueues the transactional email on
+    // `subscription.payment.no_credential`. Wired as a provider so the
+    // @OnEvent decorator activates.
+    SubscriptionPaymentBillingWarningListener,
     // Cron safety-net: catches subscriptions stuck in pending_payment whose
     // last payment is already succeeded (synchronous webhook promotion +
     // listener both missed). Runs every 5 minutes, idempotent.

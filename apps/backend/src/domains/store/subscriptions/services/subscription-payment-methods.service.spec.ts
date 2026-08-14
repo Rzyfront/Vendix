@@ -9,6 +9,7 @@ import { PlatformGatewayService } from '../../../superadmin/subscriptions/gatewa
 import { WompiProcessor } from '../../payments/processors/wompi/wompi.processor';
 import { WompiClientFactory } from '../../payments/processors/wompi/wompi.factory';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { SubscriptionStateService } from './subscription-state.service';
 
 const wompiCredsMock = {
   public_key: 'pub_test',
@@ -28,9 +29,14 @@ describe('SubscriptionPaymentMethodsService', () => {
   let pmUpdateMany: jest.Mock;
   let pmUpdate: jest.Mock;
   let eventsCreate: jest.Mock;
+  let eventsFindUnique: jest.Mock;
+  let eventsUpdate: jest.Mock;
   let executeRaw: jest.Mock;
+  let queryRaw: jest.Mock;
   let createPaymentSourceFromCardToken: jest.Mock;
   let getActiveCredentials: jest.Mock;
+  let reEnableAutoRenewInTx: jest.Mock;
+  let txMock: any;
 
   beforeEach(async () => {
     pmFindMany = jest.fn();
@@ -41,11 +47,15 @@ describe('SubscriptionPaymentMethodsService', () => {
     pmUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
     pmUpdate = jest.fn();
     eventsCreate = jest.fn().mockResolvedValue(undefined);
+    eventsFindUnique = jest.fn();
+    eventsUpdate = jest.fn().mockResolvedValue(undefined);
     executeRaw = jest.fn().mockResolvedValue(undefined);
+    queryRaw = jest.fn().mockResolvedValue([]);
     createPaymentSourceFromCardToken = jest.fn();
     getActiveCredentials = jest.fn().mockResolvedValue(wompiCredsMock);
+    reEnableAutoRenewInTx = jest.fn().mockResolvedValue(true);
 
-    const txMock = {
+    txMock = {
       subscription_payment_methods: {
         findFirst: pmFindFirst,
         count: pmCount,
@@ -53,8 +63,17 @@ describe('SubscriptionPaymentMethodsService', () => {
         create: pmCreate,
         update: pmUpdate,
       },
-      subscription_events: { create: eventsCreate },
+      subscription_events: {
+        create: eventsCreate,
+        findUnique: eventsFindUnique,
+        update: eventsUpdate,
+      },
+      store_subscriptions: {
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({ id: 1, auto_renew: true }),
+      },
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
     };
 
     const prismaMock = {
@@ -85,6 +104,10 @@ describe('SubscriptionPaymentMethodsService', () => {
               }),
             }),
           },
+        },
+        {
+          provide: SubscriptionStateService,
+          useValue: { reEnableAutoRenewInTx },
         },
       ],
     }).compile();
@@ -225,6 +248,114 @@ describe('SubscriptionPaymentMethodsService', () => {
         is_default: true,
         providerPaymentSourceId: '12345',
       });
+    });
+  });
+
+  // ── tokenize re-enable hook (billing-warning resolution) ────────────
+
+  describe('tokenize re-enables auto_renew when an unresolved audit row exists', () => {
+    function setupHappyTokenize(cof_registered_at: Date | null) {
+      subFindUnique.mockResolvedValue({ id: 1 });
+      pmFindFirst.mockResolvedValue(null);
+      pmCount.mockResolvedValue(0);
+      createPaymentSourceFromCardToken.mockResolvedValue({
+        paymentSourceId: '12345',
+        acceptanceTokenUsed: 'acc_used_xyz',
+        publicData: {
+          last_four: '4242',
+          brand: 'visa',
+          exp_month: '12',
+          exp_year: '2030',
+        },
+      });
+      pmCreate.mockResolvedValue({
+        id: 88,
+        type: 'card',
+        last4: '4242',
+        brand: 'visa',
+        is_default: true,
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        provider_payment_source_id: '12345',
+        cof_registered_at,
+      });
+    }
+
+    it('flips auto_renew back on and stamps resolved_at on the audit row', async () => {
+      setupHappyTokenize(new Date('2026-07-01T00:00:00Z'));
+      queryRaw.mockResolvedValueOnce([{ id: 555 }]); // unresolved audit row
+      eventsFindUnique.mockResolvedValueOnce({
+        payload: {
+          event_id: 'no-cred-77-wompi-tx',
+          transaction_id: 'wompi-tx',
+          payment_id: 77,
+          store_subscription_id: 1,
+          source: 'no_credential_post_register',
+          resolved_at: null,
+        },
+      });
+
+      await service.tokenize({
+        card_token: 'tok_widget_abc',
+        acceptance_token: 'acc_widget',
+        personal_auth_token: 'pat_widget',
+        last4: '4242',
+        brand: 'visa',
+        expiry_month: '12',
+        expiry_year: '2030',
+      });
+
+      // 1) Raw SQL lookup for the unresolved audit row fired.
+      expect(queryRaw).toHaveBeenCalled();
+      // 2) State service flipped auto_renew back on.
+      expect(reEnableAutoRenewInTx).toHaveBeenCalledTimes(1);
+      expect(reEnableAutoRenewInTx).toHaveBeenCalledWith(txMock, 42);
+      // 3) Audit row updated with resolved_at.
+      expect(eventsUpdate).toHaveBeenCalledTimes(1);
+      const updateArg = eventsUpdate.mock.calls[0][0];
+      expect(updateArg).toMatchObject({ where: { id: 555 } });
+      expect(updateArg.data.payload).toMatchObject({
+        event_id: 'no-cred-77-wompi-tx',
+        transaction_id: 'wompi-tx',
+        resolved_at: expect.any(String),
+      });
+    });
+
+    it('does NOT re-enable when no unresolved audit row exists', async () => {
+      setupHappyTokenize(new Date('2026-07-01T00:00:00Z'));
+      queryRaw.mockResolvedValueOnce([]); // no audit row
+
+      await service.tokenize({
+        card_token: 'tok_widget_abc',
+        acceptance_token: 'acc_widget',
+        personal_auth_token: 'pat_widget',
+        last4: '4242',
+        brand: 'visa',
+        expiry_month: '12',
+        expiry_year: '2030',
+      });
+
+      expect(reEnableAutoRenewInTx).not.toHaveBeenCalled();
+      expect(eventsUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does NOT re-enable when the new PM has no cof_registered_at', async () => {
+      setupHappyTokenize(null);
+      queryRaw.mockResolvedValueOnce([{ id: 555 }]);
+
+      await service.tokenize({
+        card_token: 'tok_widget_abc',
+        acceptance_token: 'acc_widget',
+        personal_auth_token: 'pat_widget',
+        last4: '4242',
+        brand: 'visa',
+        expiry_month: '12',
+        expiry_year: '2030',
+      });
+
+      // cof_registered_at is the gate — without it the PM is not
+      // considered a recurring credential, so no re-enable fires.
+      expect(reEnableAutoRenewInTx).not.toHaveBeenCalled();
+      expect(eventsUpdate).not.toHaveBeenCalled();
     });
   });
 

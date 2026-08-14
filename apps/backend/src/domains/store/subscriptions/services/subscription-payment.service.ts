@@ -1707,6 +1707,12 @@ export class SubscriptionPaymentService {
     // post-commit side effects, so no caller sees a clean success.
     let promotionFailure: unknown = null;
 
+    // Captured by the in-tx `disableAutoRenewForMissingCredential` so the
+    // post-commit emit can pass it to the billing-warning listener. Stays
+    // null when a recurring PM is already persisted (no gate fired → no
+    // listener dedupe row).
+    let noCredentialEventId: number | null = null;
+
     // If an external transaction is provided (e.g. from the atomic webhook
     // dedup flow), execute writes directly inside it — no nested $transaction.
     // Otherwise open a new transaction (charge() / handleZeroInvoice paths).
@@ -1770,6 +1776,29 @@ export class SubscriptionPaymentService {
         this.logger.warn(
           `autoRegisterPaymentMethodFromGateway failed for invoice ${invoiceId}: ${e?.message ?? e}`,
         );
+      }
+
+      // ── Billing-warning detection: if the gateway did NOT persist a
+      // recurring credential, we cannot trust the next renewal — turn
+      // `auto_renew` off and stamp a `subscription_events` audit row so
+      // the store's renewal cron doesn't silently try to charge nothing.
+      //
+      // NOT wrapped in try/catch on purpose: a failure here rolls back the
+      // entire transaction, taking the (already captured) payment with it.
+      // The user constraint is "don't consume plan days silently" — a
+      // captured charge with no recurring credential IS that failure mode,
+      // so we refuse to commit it. The webhook will redeliver (caller-owned
+      // tx) or the inline charge() will return non-2xx (self-owned tx),
+      // and Wompi's idempotency makes that retry cheap.
+      const insertedEventId = await this.disableAutoRenewForMissingCredential(
+        tx,
+        invoice,
+        paymentId,
+        transactionId,
+        externalTx ? 'webhook' : 'checkout_commit',
+      );
+      if (insertedEventId != null) {
+        noCredentialEventId = insertedEventId;
       }
 
       // Synchronous subscription-state promotion (root-cause fix for
@@ -2003,6 +2032,29 @@ export class SubscriptionPaymentService {
           `subscription.payment.succeeded emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
         );
       }
+
+      // Emit `subscription.payment.no_credential` when the gate flipped
+      // auto_renew off in this very transaction. The
+      // SubscriptionPaymentBillingWarningListener upserts a dedupe row
+      // into `billing_warning_logs` keyed on the subscription_event id,
+      // then broadcasts the bell + enqueues the email.
+      //
+      // Wrapped for the same reason as the success emit above; the
+      // listener also swallows internally.
+      if (noCredentialEventId != null) {
+        try {
+          this.eventEmitter.emit('subscription.payment.no_credential', {
+            subscriptionEventId: noCredentialEventId,
+            storeId: invoice.store_id,
+            paymentId,
+            source: 'self',
+          });
+        } catch (e: any) {
+          this.logger.warn(
+            `subscription.payment.no_credential emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+          );
+        }
+      }
     }
 
     // The collection is recorded, the side effects fired — and the store is NOT
@@ -2013,6 +2065,90 @@ export class SubscriptionPaymentService {
     }
 
     return result;
+  }
+
+  /**
+   * Billing-warning gate — fired immediately after `autoRegisterPaymentMethodFromGateway`
+   * inside `handleChargeSuccess.executeWrites`.
+   *
+   * If the gateway approved the charge but no `subscription_payment_methods`
+   * row was persisted for this subscription (`cof_registered_at` not set on
+   * any active row), the next renewal will have nothing to charge — silently
+   * consume the plan window, then expire. We flip `store_subscriptions.auto_renew`
+   * to false NOW and stamp a `subscription_events` audit row so:
+   *   1. The renewal cron skips this store until the user tokenizes a card.
+   *   2. The post-commit `subscription.payment.no_credential` emit can hand
+   *      the event id to the billing-warning listener for bell + email.
+   *
+   * Idempotency: the check is "does any active PM exist for this subscription
+   * with `cof_registered_at IS NOT NULL`?" — a re-delivered webhook or a
+   * retry therefore short-circuits without flipping auto_renew twice.
+   *
+   * NOT wrapped in try/catch by the caller. The gate is the
+   * "don't consume plan days silently" invariant — if THIS fails, the
+   * charge is rolled back so the merchant can retry with a fresh
+   * payment_source_id. Wompi's idempotency makes the retry cheap.
+   *
+   * Returns the new `subscription_events.id` when the gate flipped, or
+   * null when a recurring PM was already on file (no-op).
+   */
+  private async disableAutoRenewForMissingCredential(
+    tx: Prisma.TransactionClient,
+    invoice: any,
+    paymentId: number,
+    transactionId: string | undefined,
+    triggeredByJob: 'webhook' | 'checkout_commit',
+  ): Promise<number | null> {
+    const subscriptionId = invoice?.store_subscription_id as number | undefined;
+    if (!subscriptionId || !Number.isInteger(subscriptionId)) {
+      return null;
+    }
+    const storeId = invoice?.store_id as number | undefined;
+    if (!storeId || !Number.isInteger(storeId)) {
+      return null;
+    }
+
+    // Is there ANY active PM with a recorded recurring credential?
+    // `cof_registered_at` is the "Wompi has a payment_source we can MIT"
+    // anchor. A row that exists but has it NULL means tokenize raced and
+    // failed — we treat that as no recurring credential for renewals.
+    const recurringPm = await tx.subscription_payment_methods.findFirst({
+      where: {
+        store_subscription_id: subscriptionId,
+        state: subscription_payment_method_state_enum.active,
+        cof_registered_at: { not: null },
+      },
+      select: { id: true },
+    });
+    if (recurringPm) {
+      return null;
+    }
+
+    // Flip auto_renew off (only if it was on — preserves any user-toggled
+    // off state we might have missed). Idempotent on retry.
+    await tx.store_subscriptions.updateMany({
+      where: { store_id: storeId, auto_renew: true },
+      data: { auto_renew: false, updated_at: new Date() },
+    });
+
+    const event = await tx.subscription_events.create({
+      data: {
+        store_subscription_id: subscriptionId,
+        type: 'auto_renew_disabled_no_credential',
+        payload: {
+          event_id: `no-cred-${paymentId}-${transactionId ?? 'no-tx'}`,
+          transaction_id: transactionId ?? null,
+          payment_id: paymentId,
+          store_subscription_id: subscriptionId,
+          source: 'no_credential_post_register',
+          resolved_at: null,
+        } as Prisma.InputJsonValue,
+        triggered_by_job: triggeredByJob,
+      },
+      select: { id: true },
+    });
+
+    return event.id;
   }
 
   /**
