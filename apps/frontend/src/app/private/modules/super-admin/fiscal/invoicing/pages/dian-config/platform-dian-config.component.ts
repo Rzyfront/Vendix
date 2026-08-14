@@ -530,12 +530,29 @@ export class PlatformDianConfigComponent {
    */
   onRunTestSet(): void {
     if (!this.store.configured() || this.testSetBusy()) return;
+    // PR 7 — guard UI anti-doble-click. PR 4+5 ya rechazan server-side con 409,
+    // pero esto evita un viaje de red y un toast de error cuando el usuario
+    // hace doble-click antes de que la primera llamada termine.
+    // El signal está tipado como `unknown` (el servicio devuelve `unknown`);
+    // afirmamos la forma mínima `{ pending?: boolean }` para evitar que el
+    // compilador rechace el acceso a `.pending`.
+    if ((this.testSetResult() as { pending?: boolean } | null)?.pending) {
+      this.toast.warning(
+        'Ya hay un set de pruebas en validación. Consulta su estado en lugar de reenviar.',
+      );
+      return;
+    }
     this.testSetBusy.set(true);
     this.fiscal
       .runTestSet()
       .pipe(
         switchMap(({ job_id }) =>
-          pollAsyncJob(() => this.fiscal.getTestSetJobStatus(job_id)),
+          pollAsyncJob(() => this.fiscal.getTestSetJobStatus(job_id), {
+            onStall: () =>
+              this.toast.warning(
+                'El servicio de fondo no responde; consulta el estado más tarde.',
+              ),
+          }),
         ),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -555,8 +572,25 @@ export class PlatformDianConfigComponent {
           // enviar el lote antes de romperse, y el estado real vive en el backend.
           this.reloadStatus();
         },
-        error: (err: { error?: { message?: string } }) => {
+        error: (err: any) => {
           this.testSetBusy.set(false);
+          // PR 6 — distinguir timeout del resto.
+          if (err?.name === 'TimeoutError') {
+            this.toast.error(
+              'El envío excedió el tiempo de espera. Consulta el estado antes de reenviar.',
+            );
+            this.reloadStatus();
+            return;
+          }
+          // PR 6 — mismo manejo del 409 que el wizard de tienda.
+          if (err?.status === 409) {
+            this.toast.warning(
+              err?.error?.message ??
+                'Ya hay un set de pruebas en validación en la DIAN.',
+            );
+            this.reloadStatus();
+            return;
+          }
           // NUNCA afirmar «no se pudo enviar»: si el envío ya arrancó, el lote
           // salió y quemó su bloque de consecutivos autorizados, que no se
           // recuperan. Un mensaje que asegura que no pasó nada invita a reenviar

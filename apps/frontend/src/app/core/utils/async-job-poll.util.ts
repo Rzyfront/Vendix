@@ -1,4 +1,4 @@
-import { Observable, filter, switchMap, take, takeWhile, timeout, timer } from 'rxjs';
+import { Observable, filter, switchMap, take, takeWhile, tap, timeout, timer } from 'rxjs';
 
 /**
  * Sondeo de un job de BullMQ expuesto por el backend como `202 { job_id }` + un
@@ -53,6 +53,15 @@ export interface PollAsyncJobOptions {
    * caso de referencia y margen para una DIAN lenta.
    */
   timeoutMs?: number;
+  /**
+   * Callback invocado UNA vez cuando el job lleva `elapsedMs > stallThresholdMs`
+   * sin alcanzar un estado terminal. Sirve para avisar al usuario que el
+   * servicio de fondo está lento (o muerto) sin esperar al timeout completo.
+   *
+   * Umbral por defecto: `intervalMs * 30` (90 s con defaults).
+   */
+  onStall?: (info: { elapsedMs: number; lastStatus: AsyncJobState }) => void;
+  stallThresholdMs?: number;
 }
 
 /**
@@ -69,9 +78,22 @@ export function pollAsyncJob<T>(
 ): Observable<AsyncJobStatus<T>> {
   const intervalMs = options.intervalMs ?? 3_000;
   const timeoutMs = options.timeoutMs ?? 300_000;
+  const stallThresholdMs = options.stallThresholdMs ?? intervalMs * 30;
+  const onStall = options.onStall;
+  const startedAt = Date.now();
+  let stallFired = false;
 
   return timer(0, intervalMs).pipe(
     switchMap(() => poll()),
+    tap((job) => {
+      // Solo emitimos una vez, y solo si NO es terminal.
+      if (stallFired || isTerminalJobState(job.status) || !onStall) return;
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= stallThresholdMs) {
+        stallFired = true;
+        onStall({ elapsedMs, lastStatus: job.status });
+      }
+    }),
     // `inclusive: true` para que el estado terminal SÍ se emita antes de cerrar.
     takeWhile((job) => !isTerminalJobState(job.status), true),
     filter((job) => isTerminalJobState(job.status)),
