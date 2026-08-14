@@ -233,11 +233,32 @@ jobs:
           # nginx y el SO. El worker no sirve HTTP ni sostiene SSE, pero carga el
           # MISMO grafo de módulos (cliente Prisma incluido), que es el grueso del
           # heap en reposo; el set de pruebas DIAN añade apenas unos MB de XML.
-          # 768 MiB de contenedor con 640 MiB de heap V8 es el techo que cabe sin
-          # empujar la caja al OOM. Es un punto de partida MEDIBLE, no una
-          # certeza: reconfirmar con 'docker stats' y 'free -m' tras el primer
-          # despliegue y subirlo (o subir la instancia) si el worker muere con
-          # código 137.
+          # Presupuesto de memoria del worker — MEDIDO en producción, no estimado.
+          #
+          # El worker NO es un proceso ligero: carga el `AppModule` ÍNTEGRO (el
+          # mismo grafo que la API, cliente Prisma incluido), así que su coste de
+          # arranque es casi el de la API. Los 768m/640 originales se eligieron
+          # como "punto de partida medible" y resultaron insuficientes por un
+          # factor de ~3:
+          #
+          #   cap 640  -> muere a 639 MB   (FATAL ERROR: Reached heap limit)
+          #   cap 1024 -> muere a 1022 MB, con Mark-Compact liberando 0.2 MB
+          #               (1022.4 -> 1022.2), a mitad del InstanceLoader
+          #
+          # Es decir: no se estabiliza por debajo del GiB. El docker-compose de
+          # desarrollo ya lo documentaba para el mismo grafo bajo node:24-alpine
+          # (`--max-old-space-size=2048` en la API, 1024 en el worker con 1536m
+          # de contenedor).
+          #
+          # Estos valores asumen t3.large (8 GiB). En la t3.medium anterior
+          # (3.86 GiB, ~1.6 GiB disponibles con la API en 1.73 GiB) NO cabían y
+          # el worker quedaba en crash-loop permanente; el gate de más abajo lo
+          # detecta y devuelve la API a 'all', pero eso es degradación, no
+          # solución. Si se vuelve a bajar el tipo de instancia, hay que bajar
+          # estos números o el worker no arrancará jamás.
+          #
+          # --memory-swap deja 512m de colchón sobre el límite de RAM para
+          # absorber un pico puntual sin que el cgroup mate el proceso.
           #
           # --stop-timeout 60: en el cierre ordenado BullMQ espera a que termine
           # el job en vuelo. Sin esto docker manda SIGKILL a los 10 s y el lock
@@ -248,26 +269,52 @@ jobs:
             --name vendix-backend-worker \\
             --network vendix-net \\
             --restart unless-stopped \\
-            --memory=768m \\
+            --memory=2560m \\
+            --memory-swap=3072m \\
             --stop-timeout 60 \\
             --env-file /opt/vendix/.env \\
             -e VENDIX_PROCESS_ROLE=worker \\
-            -e NODE_OPTIONS="--max-old-space-size=640" \\
+            -e NODE_OPTIONS="--max-old-space-size=2048" \\
             -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
             -e BASE_DOMAIN="\$BASE_DOMAIN" \\
             -e FRONTEND_URL="\$FRONTEND_URL" \\
             -e NODE_ENV="\$NODE_ENV" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG; then
-            echo "⏳ Waiting for worker to start (30s)..."
-            sleep 30
-            if sudo docker ps --filter "name=^/vendix-backend-worker\$" --filter "status=running" -q | grep -q .; then
+            # PR 2 — gate robusto. set +e local para que un fallo del gate no
+            # aborte el script antes del fallback a 'all' (bash de GitHub
+            # Actions corre con set -e implícito).
+            # Todas las variables van con \$: este bloque viaja dentro de un
+            # heredoc SIN comillas (`<< ENDSSH`, línea 81), así que un `$` sin
+            # escapar lo expande el runner de GitHub y NUNCA llega al EC2. Sin
+            # los escapes, `while [ \$SECONDS -lt \$END ]` se enviaba como
+            # `while [ 0 -lt ]` (test inválido → el bucle no entra) y el
+            # `docker inspect` se ejecutaba en el runner, no en la instancia.
+            set +e
+            END=\$((SECONDS + 90))
+            WORKER_READY=0
+            while [ \$SECONDS -lt \$END ]; do
+              if sudo docker logs vendix-backend-worker 2>&1 | grep -q "WORKER_READY pid="; then
+                WORKER_READY=1
+                break
+              fi
+              # Si el contenedor ya reinició (OOM o crash temprano antes del
+              # ancla), abortamos el loop: no se va a estabilizar solo.
+              RESTARTS=\$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
+              if [ "\$RESTARTS" -gt 0 ]; then
+                echo "⚠️  Worker restarted (\$RESTARTS times) before emitting WORKER_READY anchor."
+                break
+              fi
+              sleep 2
+            done
+            if [ "\$WORKER_READY" = "1" ]; then
               WORKER_UP=1
-              echo "✅ Worker container is running"
+              echo "✅ Worker container is running and ready (WORKER_READY anchor found)"
               sudo docker logs vendix-backend-worker --tail 20 || true
             else
-              echo "⚠️  Worker container is NOT running — logs:"
+              echo "⚠️  Worker container is NOT healthy — logs:"
               sudo docker logs vendix-backend-worker --tail 50 || true
             fi
+            set -e
           else
             echo "⚠️  Could not start the worker container."
           fi

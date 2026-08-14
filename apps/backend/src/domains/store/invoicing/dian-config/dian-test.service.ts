@@ -163,7 +163,7 @@ export class DianTestService {
     return new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  private async getConfigById(config_id: number) {
+  async getConfigById(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
       where: { id: config_id },
     });
@@ -398,6 +398,25 @@ export class DianTestService {
       },
     };
 
+    // PR 5 — guard anti-duplicado. La guarda anterior solo leía
+    // last_test_result.pending, que se escribe al final del worker; entre el
+    // add() y la primera escritura de pending (puede ser minutos), N clicks
+    // encolaban N jobs y quemaban N bloques de 50 consecutivos autorizados
+    // irrecuperables. Aquí consultamos la cola BullMQ directamente: barato
+    // porque solo hay 1-2 jobs vivos esperados y la cola ya tiene
+    // removeOnComplete/Fail configurado.
+    if (!options.validate_only && !options.smoke) {
+      const liveJobs = await this.testSetQueue.getJobs(['waiting', 'active']);
+      const dup = liveJobs.find((j) => j?.data?.config_id === config_id);
+      if (dup) {
+        throw new VendixHttpException(
+          ErrorCodes.DIAN_TEST_SET_002,
+          `Ya hay un lote del config ${config_id} en cola (job ${dup.id}). Consulta su estado antes de reenviar.`,
+          { dian_configuration_id: config_id, job_id: String(dup.id) },
+        );
+      }
+    }
+
     const job = await this.testSetQueue.add('run', payload, {
       // `attempts: 1` — sin reintento, a diferencia del resto de las colas del
       // repo. Cada intento reservaría un bloque NUEVO de consecutivos
@@ -412,6 +431,37 @@ export class DianTestService {
       `Set de pruebas DIAN encolado job=${job.id} config=${config_id} resolucion=${resolution_id}`,
     );
     return { job_id: String(job.id) };
+  }
+
+  /**
+   * PR 4 — escribe `last_test_result.abandoned = true` y limpia `pending`.
+   *
+   * Se invoca desde el listener `onFailed` del processor cuando el job
+   * falla por OOM, exit 137 o error del servicio. La condición de carrera
+   * con el cron de repoll es benigna: el repoll lee `last_test_result` por
+   * su propia ruta; si está `abandoned: true` simplemente no hace nada.
+   */
+  async persistTestSetAbandonment(
+    config_id: number,
+    reason: string,
+  ): Promise<void> {
+    const current = await this.prisma.dian_configurations.findUnique({
+      where: { id: config_id },
+      select: { last_test_result: true },
+    });
+    const last = (current?.last_test_result ?? {}) as Record<string, any>;
+    await this.prisma.dian_configurations.update({
+      where: { id: config_id },
+      data: {
+        last_test_result: {
+          ...last,
+          pending: false,
+          abandoned: true,
+          abandoned_reason: reason,
+          abandoned_at: new Date().toISOString(),
+        },
+      },
+    });
   }
 
   /**

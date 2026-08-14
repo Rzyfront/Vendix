@@ -2532,10 +2532,17 @@ export class DianConfigWizardComponent {
       .pipe(
         switchMap((response: any) => {
           const jobId = String(response?.data?.job_id ?? response?.job_id ?? '');
-          return pollAsyncJob(() =>
-            this.invoicingService
-              .getDianTestSetJob(cfg.id, jobId)
-              .pipe(map((res: any) => res?.data ?? res)),
+          return pollAsyncJob(
+            () =>
+              this.invoicingService
+                .getDianTestSetJob(cfg.id, jobId)
+                .pipe(map((res: any) => res?.data ?? res)),
+            {
+              onStall: () =>
+                this.toast.warning(
+                  'El servicio de fondo no responde; consulta el estado más tarde.',
+                ),
+            },
           );
         }),
         takeUntilDestroyed(this.destroyRef),
@@ -2565,6 +2572,14 @@ export class DianConfigWizardComponent {
         error: (err: any) => {
           this.runningTestSet.set(false);
           this.stopTips();
+          // PR 6 — distinguir timeout (consumidor muerto / sin respuesta) del resto.
+          if (err?.name === 'TimeoutError') {
+            this.toast.error(
+              'El envío excedió el tiempo de espera. Consulta el estado del set antes de reenviar.',
+            );
+            this.checkTestSetStatus(true);
+            return;
+          }
           // 409 = a batch is already in flight for this config. Surface the real
           // state instead of a dead-end error.
           if (err?.status === 409) {
