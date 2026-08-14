@@ -9,6 +9,7 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { SALES_ORDER_COMPLETED_STATES } from '../analytics-metrics.contract';
 import {
   formatPeriodFromDate,
   parseDateRange,
@@ -1028,7 +1029,7 @@ export class SalesAnalyticsService {
       where: {
         created_at: { gte: startDate, lte: endDate },
         created_by_user_id: { not: null },
-        status: { notIn: ['draft', 'cancelled'] },
+        status: { in: SALES_ORDER_COMPLETED_STATES },
       },
       select: {
         id: true,
