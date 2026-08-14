@@ -20,15 +20,20 @@ LOG_DIR="${BUILDCHECK_LOG_DIR:-$ROOT/.buildcheck}"
 TIMEOUT="${BUILDCHECK_TIMEOUT:-900}"
 BE_MEM="${BUILDCHECK_BE_MEM:-3072}"
 FE_MEM="${BUILDCHECK_FE_MEM:-4096}"
-TEST_MEM="${BUILDCHECK_TEST_MEM:-4096}"
-# Jest con `--maxWorkers=2` arranca 2 procesos Node: cada uno carga el módulo
-# root, ts-jest levanta el programa TypeScript (~2.5GB por worker), el
-# store-prisma.service carga el cliente Prisma, y el código de reports
-# (registry de 13 entries + AnalyticsController + 13 services) añade ~300MB.
-# Con 2048MB el heap muere a mitad de la suite (Ineffective mark-compacts
-# near heap limit → FATAL ERROR), el runner termina el job a los 900s
-# con exit 143 (SIGTERM), y todos los specs posteriores reportan FAIL porque
-# comparten proceso. 4096MB cabe con margen en el runner de 7GB del CI.
+TEST_MEM="${BUILDCHECK_TEST_MEM:-6144}"
+# Por qué este número es raro:
+#   - 2GB OOM-killed a mitad de la suite (25 specs después).
+#   - 4GB OOM-killed también. El síntoma no es "pico de uso": V8 reporta
+#     "Ineffective mark-compacts near heap limit", que significa que NO
+#     logra compactar el heap (fragmentación por módulos grandes del
+#     AnalyticsModule + @prisma/client + ts-jest). Subir el techo le da
+#     más espacio para compactar sin OOM-kill.
+#   - 6GB en el runner de 7GB deja 1GB para SO + scripts. Si vuelve a
+#     fallar, el siguiente paso NO es más memoria (mismo síntoma), es
+#     cambiar ts-jest por @swc/jest (la transformación es 5-10× más
+#     eficiente en V8 y produce heaps más compactos).
+# Si en otra ronda el heap sigue sin alcanzar, NO subir más: enrutá el
+# fix por @swc/jest y este comentario queda como dead letter.
 TEST_WORKERS="${BUILDCHECK_TEST_WORKERS:-2}"
 # RAM mínima libre exigida por paso, en MB. La VM de Docker ya retiene lo suyo.
 NEED_BE="${BUILDCHECK_NEED_BE:-2048}"
