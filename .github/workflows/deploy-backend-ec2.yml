@@ -233,11 +233,32 @@ jobs:
           # nginx y el SO. El worker no sirve HTTP ni sostiene SSE, pero carga el
           # MISMO grafo de módulos (cliente Prisma incluido), que es el grueso del
           # heap en reposo; el set de pruebas DIAN añade apenas unos MB de XML.
-          # 768 MiB de contenedor con 640 MiB de heap V8 es el techo que cabe sin
-          # empujar la caja al OOM. Es un punto de partida MEDIBLE, no una
-          # certeza: reconfirmar con 'docker stats' y 'free -m' tras el primer
-          # despliegue y subirlo (o subir la instancia) si el worker muere con
-          # código 137.
+          # Presupuesto de memoria del worker — MEDIDO en producción, no estimado.
+          #
+          # El worker NO es un proceso ligero: carga el `AppModule` ÍNTEGRO (el
+          # mismo grafo que la API, cliente Prisma incluido), así que su coste de
+          # arranque es casi el de la API. Los 768m/640 originales se eligieron
+          # como "punto de partida medible" y resultaron insuficientes por un
+          # factor de ~3:
+          #
+          #   cap 640  -> muere a 639 MB   (FATAL ERROR: Reached heap limit)
+          #   cap 1024 -> muere a 1022 MB, con Mark-Compact liberando 0.2 MB
+          #               (1022.4 -> 1022.2), a mitad del InstanceLoader
+          #
+          # Es decir: no se estabiliza por debajo del GiB. El docker-compose de
+          # desarrollo ya lo documentaba para el mismo grafo bajo node:24-alpine
+          # (`--max-old-space-size=2048` en la API, 1024 en el worker con 1536m
+          # de contenedor).
+          #
+          # Estos valores asumen t3.large (8 GiB). En la t3.medium anterior
+          # (3.86 GiB, ~1.6 GiB disponibles con la API en 1.73 GiB) NO cabían y
+          # el worker quedaba en crash-loop permanente; el gate de más abajo lo
+          # detecta y devuelve la API a 'all', pero eso es degradación, no
+          # solución. Si se vuelve a bajar el tipo de instancia, hay que bajar
+          # estos números o el worker no arrancará jamás.
+          #
+          # --memory-swap deja 512m de colchón sobre el límite de RAM para
+          # absorber un pico puntual sin que el cgroup mate el proceso.
           #
           # --stop-timeout 60: en el cierre ordenado BullMQ espera a que termine
           # el job en vuelo. Sin esto docker manda SIGKILL a los 10 s y el lock
@@ -248,11 +269,12 @@ jobs:
             --name vendix-backend-worker \\
             --network vendix-net \\
             --restart unless-stopped \\
-            --memory=768m \\
+            --memory=2560m \\
+            --memory-swap=3072m \\
             --stop-timeout 60 \\
             --env-file /opt/vendix/.env \\
             -e VENDIX_PROCESS_ROLE=worker \\
-            -e NODE_OPTIONS="--max-old-space-size=640" \\
+            -e NODE_OPTIONS="--max-old-space-size=2048" \\
             -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
             -e BASE_DOMAIN="\$BASE_DOMAIN" \\
             -e FRONTEND_URL="\$FRONTEND_URL" \\
