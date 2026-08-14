@@ -41,6 +41,7 @@ const DEFAULT_NUM_FMT: Record<
   currency: '#,##0.00',
   percent: '0.00%',
   date: 'dd/mm/yyyy',
+  'date-only': 'dd/mm/yyyy',
 };
 
 /** Per-type default column widths (Excel width units). */
@@ -50,6 +51,7 @@ const DEFAULT_WIDTH: Record<ReportColumnType, number> = {
   currency: 16,
   date: 14,
   percent: 12,
+  'date-only': 14,
 };
 
 /** Per-type default horizontal alignment. */
@@ -59,6 +61,7 @@ const DEFAULT_ALIGN: Record<ReportColumnType, ReportColumnAlign> = {
   currency: 'right',
   date: 'center',
   percent: 'right',
+  'date-only': 'center',
 };
 
 /** Soft header fill (light slate) + text color, matching the admin UI. */
@@ -90,6 +93,25 @@ export function formatCellDate(
   const date = utc instanceof Date ? utc : new Date(utc);
   const parts = localCivil(date, tz);
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+/**
+ * Formats a business-date column (Prisma `@db.Date`) as the raw UTC calendar
+ * day, with NO timezone conversion. Use this for `date-only` columns where
+ * the source value is a business date (issue_date, due_date, payment_due_date,
+ * order_date, etc.) — not an instant in time.
+ *
+ * Why no TZ: Prisma materializes `@db.Date` as `Date` at UTC midnight of the
+ * business day. Applying `formatCellDate` with `America/Bogota` (UTC-5) would
+ * walk the instant back into the previous calendar day, causing the off-by-one
+ * date-drift bug that the leader flagged in PR #571.
+ *
+ * @example formatDateOnly('2026-02-01T00:00:00Z') === '2026-02-01'
+ * @example formatDateOnly(new Date('2026-02-01T05:00:00Z')) === '2026-02-01'
+ */
+export function formatDateOnly(utc: Date | string | number): string {
+  const date = utc instanceof Date ? utc : new Date(utc);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
 /**
@@ -172,6 +194,19 @@ function applyTypedCell(
         cell.value = null;
       } else {
         cell.value = toCellDate(value as Date | string | number, tz);
+      }
+      cell.numFmt = column.numFmt ?? DEFAULT_NUM_FMT.date;
+      break;
+    }
+    case 'date-only': {
+      // Business-date columns (Prisma `@db.Date`) — NO timezone conversion.
+      // The source Date IS the business day at UTC midnight; rendering it
+      // through formatCellDate(tz) would walk the instant back a day in any
+      // tz west of UTC. See formatDateOnly.
+      if (value === null || value === undefined || value === '') {
+        cell.value = null;
+      } else {
+        cell.value = formatDateOnly(value as Date | string | number);
       }
       cell.numFmt = column.numFmt ?? DEFAULT_NUM_FMT.date;
       break;
