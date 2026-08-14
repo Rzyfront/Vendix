@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   FormArray,
@@ -461,10 +462,16 @@ export class PoConfigurePlanModalComponent {
   });
 
   constructor() {
+    // Bug 2 (candidato): reset SOLO en la transición de cerrado→abierto, no
+    // cada vez que el padre re-renderice con un `order` distinto. Antes leía
+    // `order()` dentro del effect y se gatillaba también ante cualquier
+    // update del padre (e.g. polling HTTP), pisando el input del usuario
+    // mientras tipeaba. Se rastrea la apertura anterior con untracked.
+    let prevOpen = false;
     effect(() => {
-      if (this.isOpen()) {
-        // Reset al abrir con el plan actual como semilla.
-        const o = this.order();
+      const open = this.isOpen();
+      if (open && !prevOpen) {
+        const o = untracked(() => this.order());
         if (o) {
           this.form.controls.mode.setValue(
             (o.payment_plan as ConfigurePaymentPlanMode) ?? 'immediate',
@@ -474,6 +481,7 @@ export class PoConfigurePlanModalComponent {
           this.resetInstallments(2);
         }
       }
+      prevOpen = open;
     });
   }
 
