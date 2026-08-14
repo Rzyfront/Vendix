@@ -148,6 +148,7 @@ export class ReviewsAnalyticsService {
         store_id: storeId,
         created_at: { gte: startDate, lte: endDate },
         product_id: { not: null },
+        state: { in: REVIEW_APPROVED_STATES },
       },
       include: {
         products: { select: { name: true, sku: true } },
