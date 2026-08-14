@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
@@ -130,6 +130,69 @@ export class DianTestSetProcessor extends WorkerHost {
       // Se relanza para que BullMQ marque el job como failed y `failedReason`
       // llegue al cliente que sondea. Con `attempts: 1` no hay reintento.
       throw error;
+    }
+  }
+
+  /**
+   * PR 4 — cleanup cuando el job falla por OOM, exit 137 o error del servicio.
+   *
+   * Sin esto, `last_test_result.pending` queda colgado en `true` cuando el
+   * worker muere a mitad del envío y el tenant queda encerrado: la guarda
+   * de `enqueueTestSet` lo rechaza con `DIAN_TEST_SET_002` para siempre.
+   *
+   * Se ejecuta DESPUÉS de que BullMQ ya movió el job a `failed`. La
+   * limpieza solo escribe si el job NO llegó a la terminación natural
+   * (que ya escribe `pending: false`).
+   *
+   * Usa `@OnWorkerEvent('failed')` y NO `@OnQueueEvent('failed')`:
+   * la primera entrega el `Job` completo (con `data` y `context`) y
+   * corre dentro del ciclo de vida del `WorkerHost` — no exige una
+   * clase aparte con `@QueueEventsListener`. La firma real de
+   * `WorkerListener['failed']` es `(job, error, prev)` con `job`
+   * posiblemente `undefined` cuando un stalled job llega al límite
+   * `maxStalledCount` y `removeOnFail` lo borra.
+   */
+  @OnWorkerEvent('failed')
+  async onFailed(
+    job: Job<DianTestSetJob> | undefined,
+    err: Error,
+    _prev: string,
+  ): Promise<void> {
+    if (!job) {
+      this.logger.warn(
+        'onFailed invoked with undefined job (stalled job removed by removeOnFail); nothing to clean',
+      );
+      return;
+    }
+    const { config_id } = job.data;
+    this.logger.warn(
+      `Job ${job.id} (config=${config_id}) failed: ${err?.message ?? 'unknown'}. Limpiando last_test_result.pending.`,
+    );
+    try {
+      await RequestContextService.runIsolated(
+        {
+          is_super_admin: job.data.context?.is_super_admin ?? false,
+          is_owner: job.data.context?.is_owner ?? false,
+          store_id: job.data.context?.store_id,
+          organization_id: job.data.context?.organization_id,
+          user_id: job.data.context?.user_id,
+          request_id: `failed-${job.id}`,
+        },
+        async () => {
+          const config = await this.dianTestService.getConfigById(config_id);
+          const previous = (config.last_test_result ?? {}) as Record<string, any>;
+          if (previous.pending === true && previous.abandoned !== true) {
+            await this.dianTestService.persistTestSetAbandonment(
+              config_id,
+              'worker failure: ' + (err?.message ?? 'unknown').slice(0, 200),
+            );
+          }
+        },
+      );
+    } catch (cleanupErr: any) {
+      this.logger.error(
+        `Cleanup failed for job=${job.id} config=${config_id}: ${cleanupErr?.message}`,
+      );
     }
   }
 }
