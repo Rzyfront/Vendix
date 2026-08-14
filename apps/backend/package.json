@@ -153,9 +153,19 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": [
-        "ts-jest",
+        "@swc/jest",
         {
-          "isolatedModules": true
+          "jsc": {
+            "target": "es2022",
+            "parser": {
+              "syntax": "typescript",
+              "decorators": false
+            },
+            "transform": {
+              "legacyDecorator": false,
+              "decoratorMetadata": false
+            }
+          }
         }
       ]
     },
