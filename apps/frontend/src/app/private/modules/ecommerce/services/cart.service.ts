@@ -21,6 +21,16 @@ export interface CartItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  // Bug 8: presentación comercial (Caja 12und, Bulto 50kg). Presente
+  // cuando el producto tiene has_multiple_price_tiers y el cliente eligió
+  // una tier de tipo 'sale_unit'. El render del cart muestra label +
+  // cantidad incluida + precio de la presentación, no "1 × precio base".
+  price_tier?: {
+    id: number;
+    label: string;
+    units_per_package: number;
+    presentation_price: number;
+  } | null;
   product: {
     name: string;
     slug: string;
