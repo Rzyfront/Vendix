@@ -163,8 +163,8 @@
       "^src/(.*)$": "<rootDir>/$1",
       "^@common/(.*)$": "<rootDir>/common/$1"
     },
-    "maxWorkers": 2,
-    "workerIdleMemoryLimit": "1024MB"
+    "maxWorkers": 4,
+    "workerIdleMemoryLimit": "512MB"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
