@@ -236,8 +236,11 @@ jobs:
         working-directory: apps/backend
         run: npx prisma generate
       - name: jest (acotado, --runInBand)
-        working-directory: apps/backend
-        run: npm run buildcheck:test -- --runInBand
+        # El script `buildcheck:test` (raíz del monorepo) acepta `--test <path>`
+        # para filtrar, o suite completa. Aquí corremos la suite entera con
+        # pool acotado por el script (maxWorkers=2, workerIdleMemoryLimit=1GB).
+        # Antes apuntaba a apps/backend y fallaba con "Missing script".
+        run: npm run buildcheck:test -- --test
 
   mobile-build:
     name: Mobile Build (expo export)
