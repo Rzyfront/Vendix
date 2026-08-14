@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, concatMap, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   Quotation,

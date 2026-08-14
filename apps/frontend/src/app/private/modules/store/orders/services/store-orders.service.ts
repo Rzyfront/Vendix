@@ -5,7 +5,7 @@ import { catchError, map } from 'rxjs/operators';
 import { throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
   Order,

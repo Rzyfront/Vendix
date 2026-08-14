@@ -4,7 +4,7 @@ import { Observable, catchError, throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   InventoryLocation,
   CreateLocationDto,

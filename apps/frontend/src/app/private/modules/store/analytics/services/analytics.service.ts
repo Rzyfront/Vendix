@@ -3,7 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ApiResponse,

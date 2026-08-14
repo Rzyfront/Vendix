@@ -13,7 +13,7 @@ import {
   timeout,
 } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   DispatchNote,
   DispatchNoteQuery,

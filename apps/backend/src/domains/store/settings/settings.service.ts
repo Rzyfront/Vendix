@@ -441,6 +441,7 @@ export class SettingsService {
     ) {
       throw new VendixHttpException(
         ErrorCodes.STORE_SETTINGS_STORE_MISMATCH_001,
+        `Settings payload was loaded for store ${expected_store_id} but the active tenant is ${store_id}`,
         {
           expected_store_id,
           active_store_id: store_id,
