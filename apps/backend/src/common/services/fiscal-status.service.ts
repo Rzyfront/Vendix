@@ -3,7 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../errors';
-import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import {
+  tryResolveTenantFiscalIdentity,
+  type MissingFiscalField,
+} from '@common/helpers/fiscal-identity.helper';
 import {
   FiscalArea,
   FiscalDetectorSignals,
@@ -186,6 +189,16 @@ export class FiscalStatusService {
     fiscal_scope: 'STORE' | 'ORGANIZATION',
   ): Promise<{
     legal_data: FiscalWizardPrefill['legal_data'];
+    /**
+     * Internal augmentation produced by `readLegalData` from the SAME
+     * `tryResolveTenantFiscalIdentity` call. The strict resolver throws when
+     * `legal_name` / `municipality_code` / `department` are missing — those
+     * three land here as entries of `MissingFiscalField`. Empty array ⇒
+     * the strict resolver would NOT throw, i.e. the identity is complete
+     * enough to emit. Kept off the public prefill shape; this is the only
+     * consumer (`deriveSatisfiedSteps`).
+     */
+    legal_data_missing: MissingFiscalField[];
     dian_config: FiscalWizardPrefill['dian_config'];
     resolution: FiscalWizardPrefill['resolution'];
     puc: FiscalWizardPrefill['puc'];
@@ -209,7 +222,10 @@ export class FiscalStatusService {
         store_id,
       });
 
-    const legal_data = await this.readLegalData(
+    const {
+      prefill: legal_data,
+      missing: legal_data_missing,
+    } = await this.readLegalData(
       client,
       organization_id,
       store_id,
@@ -256,6 +272,11 @@ export class FiscalStatusService {
 
     return {
       legal_data,
+      // Internal-only augmentation: the strictness flag kept out of the
+      // public prefill payload. Populated by `readLegalData` from the SAME
+      // `tryResolveTenantFiscalIdentity` call that already powers the
+      // prefill, so no extra resolver work is added.
+      legal_data_missing,
       dian_config,
       resolution,
       puc,
@@ -276,6 +297,7 @@ export class FiscalStatusService {
    */
   private deriveSatisfiedSteps(sources: {
     legal_data: FiscalWizardPrefill['legal_data'];
+    legal_data_missing: MissingFiscalField[];
     dian_config: FiscalWizardPrefill['dian_config'];
     resolution: FiscalWizardPrefill['resolution'];
     puc: FiscalWizardPrefill['puc'];
@@ -287,14 +309,22 @@ export class FiscalStatusService {
   }): Set<FiscalWizardStepId> {
     const satisfied = new Set<FiscalWizardStepId>();
 
-    // legal_data: requires the fiscal NIT, its verification digit (DV) and the
-    // tax regime. Without a tax regime the legal/tax identity is incomplete for
-    // DIAN purposes, so legal_data is NOT satisfied.
+    // legal_data: requires NIT, DV, the tax regime (explicit guard) AND a
+    // complete strict-resolver outcome — i.e. `legal_name`, `municipality_code`
+    // and `department` are all present. The strict resolver throws on emission
+    // when any of those three is missing; without this mirror, the activation
+    // guard would mark the step satisfied and let the wizard finalize, only to
+    // have the next DIAN emission throw on `municipality_code` / `department`
+    // (those were the missing fields causing the prod defect — the prefill
+    // had passed with `nit + nit_dv + tax_regime` only). `legal_data_missing`
+    // is reused from the SAME `tryResolveTenantFiscalIdentity` call that
+    // produced the prefill, so no extra resolver work is added.
     if (
       sources.legal_data &&
       sources.legal_data.nit &&
       sources.legal_data.nit_dv &&
-      sources.legal_data.fiscal_regime
+      sources.legal_data.fiscal_regime &&
+      sources.legal_data_missing.length === 0
     ) {
       satisfied.add('legal_data');
     }
@@ -381,12 +411,20 @@ export class FiscalStatusService {
     organization_id: number,
     store_id: number | null,
     fiscal_scope: 'STORE' | 'ORGANIZATION',
-  ): Promise<FiscalWizardPrefill['legal_data']> {
+  ): Promise<{
+    prefill: FiscalWizardPrefill['legal_data'];
+    missing: MissingFiscalField[];
+  }> {
     const organization = await client.organizations.findUnique({
       where: { id: organization_id },
       select: { id: true, legal_name: true, tax_id: true },
     });
-    if (!organization) return null;
+    if (!organization) {
+      // No organization row ⇒ the strict resolver would throw on `legal_name`,
+      // so the activation guard MUST see a non-empty `missing` for it to not
+      // satisfy the step. Empty `missing` would falsely mark the step complete.
+      return { prefill: null, missing: ['legal_name'] };
+    }
 
     // Fiscal data (regime, CIIU, responsibilities, person type) lives in the
     // settings JSON, scope-aware: organization_settings when fiscal_scope is
@@ -463,7 +501,7 @@ export class FiscalStatusService {
     // El NIT inicial del resolvedor viene del JSON (fuente única) o de
     // `dian_configurations` — nunca de la columna `organizations.tax_id`,
     // que puede estar vacía o rancia.
-    const { identity } = tryResolveTenantFiscalIdentity({
+    const { identity, missing } = tryResolveTenantFiscalIdentity({
       nit: dian?.nit ?? '',
       fiscal_data: fiscalData ?? null,
       organization: {
@@ -485,27 +523,36 @@ export class FiscalStatusService {
         : null;
 
     return {
-      organization_id,
-      legal_name,
-      tax_id,
-      nit,
-      nit_dv,
-      nit_type,
-      person_type,
-      fiscal_address: address
-        ? {
-            address_line1: address.address_line1 ?? null,
-            address_line2: address.address_line2 ?? null,
-            city: address.city ?? null,
-            state: address.state_province ?? null,
-            country: address.country_code ?? null,
-            postal_code: address.postal_code ?? null,
-          }
-        : null,
-      fiscal_regime,
-      ciiu,
-      tax_responsibilities,
-      tax_scheme,
+      prefill: {
+        organization_id,
+        legal_name,
+        tax_id,
+        nit,
+        nit_dv,
+        nit_type,
+        person_type,
+        fiscal_address: address
+          ? {
+              address_line1: address.address_line1 ?? null,
+              address_line2: address.address_line2 ?? null,
+              city: address.city ?? null,
+              state: address.state_province ?? null,
+              country: address.country_code ?? null,
+              postal_code: address.postal_code ?? null,
+            }
+          : null,
+        fiscal_regime,
+        ciiu,
+        tax_responsibilities,
+        tax_scheme,
+      },
+      // Reuse the SAME resolver call that already powers `legal_name`/NIT/DV
+      // resolution. The strict `resolveTenantFiscalIdentity` throws when ANY
+      // of `legal_name`/`municipality_code`/`department` is missing — and the
+      // activation guard must mirror that contract or it happily marks the
+      // step satisfied and lets the wizard finalize, only to have the next
+      // DIAN emission throw. Empty array ⇒ strict resolver would not throw.
+      missing,
     };
   }
 
