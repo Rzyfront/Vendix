@@ -234,6 +234,9 @@ export class MembershipsService {
 
     const where: Prisma.membershipsWhereInput = {
       store_id: storeId,
+      // Bug 10: excluir soft-deleted por default. Toggle "Mostrar eliminadas"
+      // puede override via query.include_deleted=true (futuro).
+      deleted_at: null,
       ...(status !== undefined && { status }),
       ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(plan_id !== undefined && { plan_id }),
@@ -369,6 +372,53 @@ export class MembershipsService {
 
   async cancel(id: number) {
     return this.transition(id, 'cancel', membership_status_enum.cancelled);
+  }
+
+  /**
+   * Bug 10 — soft-delete con audit. Solo permite eliminar membresías en
+   * estado terminal (cancelled, suspended, expired). `active`, `frozen` y
+   * `pending_payment` devuelven 409 — el operador debe primero suspender
+   * o cancelar la membresía. La fila se marca deleted_at + deleted_by +
+   * reason; el estado NO se muta.
+   *
+   * La query base (findAll, findOne) debe filtrar deleted_at IS NULL para
+   * no servir filas eliminadas al listado.
+   */
+  async softDelete(
+    id: number,
+    deletedByUserId: number | null,
+    reason?: string,
+  ): Promise<void> {
+    const storeId = this.requireStoreId();
+    const membership = await this.memberships.findFirst({
+      where: { id, store_id: storeId, deleted_at: null },
+      select: { id: true, status: true },
+    });
+    if (!membership) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Membresía no encontrada o ya eliminada',
+      );
+    }
+    const DELETABLE: membership_status_enum[] = [
+      membership_status_enum.cancelled,
+      membership_status_enum.suspended,
+      membership_status_enum.expired,
+    ];
+    if (!DELETABLE.includes(membership.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `No se puede eliminar una membresía en estado '${membership.status}'. Cancélela o suspéndala primero.`,
+      );
+    }
+    await this.memberships.update({
+      where: { id },
+      data: {
+        deleted_at: new Date(),
+        deleted_by_user_id: deletedByUserId ?? null,
+        deletion_reason: reason ?? null,
+      },
+    });
   }
 
   /**

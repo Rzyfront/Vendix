@@ -135,6 +135,23 @@ export class MembershipsController {
     }
   }
 
+  // Bug 10 — soft-delete con audit. Solo terminales (expired | suspended |
+  // cancelled) — active/frozen/pending_payment devuelven 409.
+  @Delete(':id')
+  @Permissions('store:memberships:delete')
+  async delete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason?: string } = {},
+  ) {
+    try {
+      const userId = RequestContextService.getUserId();
+      await this.service.softDelete(id, userId, body?.reason);
+      return this.responseService.deleted('Membresía eliminada');
+    } catch (error: any) {
+      return this.fail(error, 'Error al eliminar la membresía');
+    }
+  }
+
   @Post(':id/suspend')
   @Permissions('store:memberships:update')
   async suspend(@Param('id', ParseIntPipe) id: number) {
