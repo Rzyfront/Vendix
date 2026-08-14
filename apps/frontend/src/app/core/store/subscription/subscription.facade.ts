@@ -29,7 +29,23 @@ export type SubscriptionUiState =
   | { kind: 'expired' }
   | { kind: 'suspended' }
   | { kind: 'blocked' }
-  | { kind: 'no_plan' };
+  | { kind: 'no_plan' }
+  // Billing-warning detection — surfaced ONLY when the subscription is
+  // otherwise `active` (otherwise the existing terminal/lifecycle kind wins).
+  // Both surface a warning banner that links to /admin/subscription/payment
+  // and references the originating notification id so the bell can be
+  // marked-read alongside the banner.
+  | {
+      kind: 'auto_renew_disabled_no_credential';
+      paymentMethodEditUrl: string;
+      notificationId: number;
+    }
+  | {
+      kind: 'renewal_failed';
+      paymentMethodEditUrl: string;
+      notificationId: number;
+      lastRetryAt: string | null;
+    };
 
 const EXPIRING_SOON_THRESHOLD_DAYS = 7;
 
@@ -260,6 +276,51 @@ export class SubscriptionFacade {
       const daysUntilRenewal = daysBetween(sub.next_billing_at);
       if (daysUntilRenewal > 0 && daysUntilRenewal <= EXPIRING_SOON_THRESHOLD_DAYS) {
         return { kind: 'expiring_soon', daysUntilRenewal };
+      }
+
+      // Billing-warning detection — only meaningful on an otherwise-healthy
+      // subscription. Reads `auto_renew_warning_*` fields that Agent A wires
+      // up on `store_subscriptions`. Defensive optional-chain + typeof guards
+      // so the kind stays absent when the backend hasn't yet populated the
+      // fields (e.g. mid-deploy or older row revisions), instead of throwing.
+      //
+      // `paymentMethodEditUrl` is hardcoded to the canonical PM-edit route.
+      // No new route injection — the page already exists and any future
+      // route can be swapped here without changing the union shape.
+      const PM_EDIT_URL = '/admin/subscription/payment';
+      const warningType: string | null =
+        typeof sub.auto_renew_warning_type === 'string'
+          ? (sub.auto_renew_warning_type as string)
+          : null;
+      const warningNotificationId: number | null =
+        typeof sub.auto_renew_warning_notification_id === 'number'
+          ? (sub.auto_renew_warning_notification_id as number)
+          : null;
+      const lastRetryAt: string | null =
+        typeof sub.auto_renew_last_retry_at === 'string'
+          ? (sub.auto_renew_last_retry_at as string)
+          : null;
+
+      if (
+        warningType === 'auto_renew_charge_failed' &&
+        warningNotificationId != null
+      ) {
+        return {
+          kind: 'renewal_failed',
+          paymentMethodEditUrl: PM_EDIT_URL,
+          notificationId: warningNotificationId,
+          lastRetryAt,
+        };
+      }
+      if (
+        warningType === 'auto_renew_disabled_no_credential' &&
+        warningNotificationId != null
+      ) {
+        return {
+          kind: 'auto_renew_disabled_no_credential',
+          paymentMethodEditUrl: PM_EDIT_URL,
+          notificationId: warningNotificationId,
+        };
       }
     }
 

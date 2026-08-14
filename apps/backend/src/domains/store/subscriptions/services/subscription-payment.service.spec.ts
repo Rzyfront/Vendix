@@ -1374,6 +1374,116 @@ describe('SubscriptionPaymentService', () => {
     });
   });
 
+  // ── Billing-warning gate: disableAutoRenewForMissingCredential ───────────
+  //
+  // Called inside handleChargeSuccess.executeWrites immediately after the
+  // PM auto-register attempt. Asserts:
+  //   * A recurring PM on file → no-op (returns null, no audit row, no flip).
+  //   * No recurring PM → flips auto_renew off, stamps subscription_events,
+  //     returns the new event id (the post-commit emit feeds it to the
+  //     billing-warning listener).
+  describe('disableAutoRenewForMissingCredential', () => {
+    let pmFindFirst: jest.Mock;
+    let subUpdateMany: jest.Mock;
+    let eventsCreate: jest.Mock;
+    let txMock: any;
+
+    const invoice = {
+      id: 500,
+      store_id: 10,
+      store_subscription_id: 200,
+      invoice_number: 'SAAS-20260423-00001',
+      state: 'issued',
+      total: new Prisma.Decimal(100),
+      currency: 'COP',
+      partner_organization_id: null,
+      split_breakdown: null,
+    };
+
+    beforeEach(() => {
+      pmFindFirst = jest.fn();
+      subUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      eventsCreate = jest.fn().mockResolvedValue({ id: 9991 });
+      txMock = {
+        subscription_payment_methods: {
+          findFirst: pmFindFirst,
+        },
+        store_subscriptions: {
+          updateMany: subUpdateMany,
+        },
+        subscription_events: { create: eventsCreate },
+      };
+    });
+
+    async function invoke(triggeredByJob: 'webhook' | 'checkout_commit') {
+      return (service as any).disableAutoRenewForMissingCredential(
+        txMock,
+        invoice,
+        77,
+        'wompi-tx-abc',
+        triggeredByJob,
+      );
+    }
+
+    it('returns null when a recurring PM is already on file', async () => {
+      pmFindFirst.mockResolvedValue({ id: 555 });
+
+      const result = await invoke('webhook');
+
+      expect(result).toBeNull();
+      expect(subUpdateMany).not.toHaveBeenCalled();
+      expect(eventsCreate).not.toHaveBeenCalled();
+    });
+
+    it('flips auto_renew off and stamps an audit row when no PM exists', async () => {
+      pmFindFirst.mockResolvedValue(null);
+
+      const result = await invoke('checkout_commit');
+
+      // auto_renew flipped off, scoped to this store only.
+      expect(subUpdateMany).toHaveBeenCalledTimes(1);
+      expect(subUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: 10,
+            auto_renew: true,
+          }),
+          data: expect.objectContaining({ auto_renew: false }),
+        }),
+      );
+
+      // Audit row inserted.
+      expect(eventsCreate).toHaveBeenCalledTimes(1);
+      const data = eventsCreate.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        store_subscription_id: 200,
+        type: 'auto_renew_disabled_no_credential',
+        triggered_by_job: 'checkout_commit',
+      });
+      expect(data.payload).toMatchObject({
+        transaction_id: 'wompi-tx-abc',
+        payment_id: 77,
+        store_subscription_id: 200,
+        source: 'no_credential_post_register',
+      });
+      expect(data.payload.event_id).toEqual(expect.stringContaining('no-cred-77'));
+      expect(data.payload.resolved_at).toBeNull();
+
+      // Returns the new event id so the post-commit emit can carry it.
+      expect(result).toBe(9991);
+    });
+
+    it('uses "webhook" as triggered_by_job when called from the webhook path', async () => {
+      pmFindFirst.mockResolvedValue(null);
+      eventsCreate.mockResolvedValue({ id: 9992 });
+
+      await invoke('webhook');
+
+      expect(eventsCreate).toHaveBeenCalledTimes(1);
+      expect(eventsCreate.mock.calls[0][0].data.triggered_by_job).toBe('webhook');
+    });
+  });
+
   // ──────────────────────────────────────────────────────────────────────────
   // Wompi Phase 6 — chargeInvoice routing (recurrent vs legacy) + revoke
   // ──────────────────────────────────────────────────────────────────────────

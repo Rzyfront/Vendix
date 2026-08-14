@@ -186,16 +186,22 @@ export class SubscriptionBannerComponent implements OnInit {
 
   readonly level = computed<BannerLevel>(() => {
     // The banner only renders when `visible()` matches a known UI-state kind
-    // (expiring_soon / grace_*). Drive severity from the SAME selector so the
-    // CSS modifier always matches a defined palette — otherwise we render
-    // `sub-banner--none`, which has no background/border/color and produces a
-    // ghost banner with only icons visible.
+    // (expiring_soon / grace_* / billing-warning). Drive severity from the
+    // SAME selector so the CSS modifier always matches a defined palette —
+    // otherwise we render `sub-banner--none`, which has no background/border/
+    // color and produces a ghost banner with only icons visible.
     const ui = this.facade.subscriptionUiState();
     if (ui.kind === 'grace_hard') return 'danger';
     if (ui.kind === 'grace_soft') return 'warning';
     if (ui.kind === 'expiring_soon') {
       return ui.daysUntilRenewal <= 1 ? 'danger' : 'warning';
     }
+    // Billing-warning detection — never block reads (mora / grace / suspend
+    // remain the canonical write-blocking mechanism). Auto-renew disabled by
+    // missing credential is recoverable, so it's a warning; a charge that
+    // actually failed is the imminent failure mode → danger.
+    if (ui.kind === 'auto_renew_disabled_no_credential') return 'warning';
+    if (ui.kind === 'renewal_failed') return 'danger';
     // PM warnings only matter while subscription is healthy. They reach the
     // banner only if `visible()` is later expanded to allow them — kept here
     // for forward-compat.
@@ -230,15 +236,17 @@ export class SubscriptionBannerComponent implements OnInit {
     if (!this.canManageSubscription()) return false;
     if (this.dismissed()) return false;
     // RNC-PaidPlan — Top alert is now driven by the unified subscription UI
-    // state (ADR-4). Only `expiring_soon` and `grace_*` surface here; pending
-    // changes and terminal states are absorbed by the local subscription
-    // module banners so the user never sees two simultaneous messages about
-    // the same concern.
+    // state (ADR-4). Only `expiring_soon`, `grace_*`, and the billing-warning
+    // kinds surface here; pending changes and terminal states are absorbed by
+    // the local subscription module banners so the user never sees two
+    // simultaneous messages about the same concern.
     const ui = this.facade.subscriptionUiState();
     return (
       ui.kind === 'expiring_soon' ||
       ui.kind === 'grace_soft' ||
-      ui.kind === 'grace_hard'
+      ui.kind === 'grace_hard' ||
+      ui.kind === 'auto_renew_disabled_no_credential' ||
+      ui.kind === 'renewal_failed'
     );
   });
 
@@ -301,6 +309,29 @@ export class SubscriptionBannerComponent implements OnInit {
       };
     }
 
+    // Billing-warning detection — banner surfaces ONLY when the
+    // subscription is otherwise `active`. The CTA lands on the existing
+    // PM-edit modal flow (`paymentMethodEditUrl` is the route from the
+    // facade, currently `/admin/subscription/payment`).
+    if (ui.kind === 'auto_renew_disabled_no_credential') {
+      return {
+        title: 'Tu autopago no se pudo activar',
+        detail:
+          'Tu renovación automática quedó desactivada porque el cargo no incluyó una credencial recurrente.',
+        ctaText: 'Agregar método de pago',
+        iconName: 'alert-triangle',
+      };
+    }
+    if (ui.kind === 'renewal_failed') {
+      return {
+        title: 'Tu renovación automática falló',
+        detail:
+          'El cobro automático de tu suscripción no pudo completarse.',
+        ctaText: 'Actualizar método de pago',
+        iconName: 'alert-octagon',
+      };
+    }
+
     // PM warning fallback (only reachable if `visible()` is widened later).
     const pm = this.pmWarning();
     if (pm === 'invalid') {
@@ -328,6 +359,17 @@ export class SubscriptionBannerComponent implements OnInit {
     // consumes them; org-admin is plan-agnostic). visible() already gates
     // rendering on `currentStoreId !== null`, so every CTA below targets a
     // store-admin route.
+    const ui = this.facade.subscriptionUiState();
+    // Billing-warning detection — both kinds route to the PM-edit page
+    // surfaced by the facade. Centralising the URL in the facade means the
+    // route can evolve (deep-link a specific method, add returnTo, etc.)
+    // without touching the banner component.
+    if (ui.kind === 'auto_renew_disabled_no_credential') {
+      return ui.paymentMethodEditUrl;
+    }
+    if (ui.kind === 'renewal_failed') {
+      return ui.paymentMethodEditUrl;
+    }
     const subLevel = this.facade.bannerLevel();
     const pm = this.pmWarning();
     // G11 — PM warnings always route to the payment-method page.

@@ -15,6 +15,7 @@ import {
   WompiConfig,
   WompiEnvironment,
 } from '../../payments/processors/wompi/wompi.types';
+import { SubscriptionStateService } from './subscription-state.service';
 
 export interface TokenizeWidgetConfig {
   public_key: string;
@@ -45,6 +46,7 @@ export class SubscriptionPaymentMethodsService {
     private readonly platformGw: PlatformGatewayService,
     private readonly wompiProcessor: WompiProcessor,
     private readonly wompiClientFactory: WompiClientFactory,
+    private readonly stateService: SubscriptionStateService,
   ) {}
 
   async listForStore() {
@@ -298,8 +300,107 @@ export class SubscriptionPaymentMethodsService {
         `PAYMENT_METHOD_TOKENIZED store=${storeId} sub=${subscriptionId} pm=${created.id} psid=${psid} default=${inheritsDefault}`,
       );
 
+      // Billing-warning re-enable: if the merchant previously paid an
+      // invoice that left no recurring credential (auto_renew was flipped
+      // off + a `subscription_events` audit row stamped with
+      // `payload.resolved_at === null`), tokenizing a fresh card is the
+      // user-facing cure. Flip `auto_renew` back on and mark the audit row
+      // resolved so the next charge success doesn't re-fire the warning.
+      await this.reEnableAutoRenewAfterCredential(
+        tx,
+        storeId,
+        subscriptionId,
+        created,
+      );
+
       return this._mapPmResponse(created);
     });
+  }
+
+  /**
+   * Hook called at the end of `tokenizeAndRegister`'s `create` branch.
+   *
+   * Looks up the most-recent unresolved
+   * `subscription_events` row of type
+   * `auto_renew_disabled_no_credential` for this subscription. If one
+   * exists AND the new PM has `cof_registered_at` set (i.e. Wompi
+   * accepted the recurring credential), the row is "resolved":
+   *   1. `store_subscriptions.auto_renew` flips back to true.
+   *   2. The audit row's `payload.resolved_at` is stamped with `now` so
+   *      future dedupe hits skip both the bell and the email.
+   *
+   * Both writes run inside the SAME tx as the PM insert, so a failure
+   * here rolls back the tokenization — the merchant is asked to retry,
+   * never left in a half-state where the PM exists but auto_renew is
+   * still off.
+   *
+   * Returns true when a re-enable happened (used by tests).
+   */
+  private async reEnableAutoRenewAfterCredential(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    subscriptionId: number,
+    created: { id: number; cof_registered_at: Date | null },
+  ): Promise<boolean> {
+    if (!created.cof_registered_at) {
+      return false;
+    }
+
+    // Find the most-recent unresolved audit row. Prisma's JSON path filter
+    // for `payload.resolved_at === null` is brittle across Prisma 7 minor
+    // versions — fall back to a raw SQL filter to keep this dependency-
+    // free. Same effect either way: pick the latest unresolved row.
+    const unresolved = await tx.$queryRaw<
+      Array<{ id: number }>
+    >(Prisma.sql`
+      SELECT id FROM subscription_events
+      WHERE store_subscription_id = ${subscriptionId}
+        AND type = 'auto_renew_disabled_no_credential'
+        AND (
+          payload->>'resolved_at' IS NULL
+        )
+      ORDER BY id DESC
+      LIMIT 1
+    `);
+    const unresolvedRow = unresolved?.[0];
+    if (!unresolvedRow) {
+      return false;
+    }
+
+    const flipped = await this.stateService.reEnableAutoRenewInTx(tx, storeId);
+    // `flipped === false` means auto_renew was already on (manual toggle
+    // between charge and tokenize). We still stamp resolved_at so the
+    // dedupe row is settled and the listener won't re-fire on the next
+    // charge success.
+
+    // Read + merge: Prisma's JSON column doesn't accept jsonb_set directly
+    // through `update.data` — go through a normal read → write so the
+    // payload shape stays a plain JSON object for downstream readers.
+    const existing = await tx.subscription_events.findUnique({
+      where: { id: unresolvedRow.id },
+      select: { payload: true },
+    });
+    const prevPayload =
+      existing?.payload &&
+      typeof existing.payload === 'object' &&
+      !Array.isArray(existing.payload)
+        ? (existing.payload as Record<string, unknown>)
+        : {};
+    await tx.subscription_events.update({
+      where: { id: unresolvedRow.id },
+      data: {
+        payload: {
+          ...prevPayload,
+          resolved_at: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(
+      `BILLING_WARNING_RESOLVED store=${storeId} sub=${subscriptionId} pm=${created.id} auditEvent=${unresolvedRow.id} autoRenewFlipped=${flipped}`,
+    );
+
+    return true;
   }
 
   async setDefault(id: string) {

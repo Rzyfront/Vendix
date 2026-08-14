@@ -36,7 +36,13 @@ export type PaywallCode =
   | 'STATE_BLOCKED'
   | 'STATE_CANCELLED'
   | 'STATE_EXPIRED'
-  | 'STATE_PAYMENT_SUCCEEDED';
+  | 'STATE_PAYMENT_SUCCEEDED'
+  // Billing-warning detection — warn-but-NOT-block reads. mora / grace /
+  // suspend remain the canonical write-blocking mechanism; these variants
+  // are informational and land the user on the PM-edit page so they can
+  // tokenise a recurring credential or replace a failed one.
+  | 'auto_renew_disabled_no_credential'
+  | 'renewal_failed';
 
 /**
  * Mirror of the backend `store_subscriptions.lock_reason` value that means
@@ -466,6 +472,47 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     iconName: 'check-circle',
     badgeLabel: 'Pago confirmado',
     secondaryCtaLabel: '',
+  },
+  // ── Billing-warning detection — warn-but-not-block reads ──────────────────
+  // mora / grace / suspend remain the canonical write-blocking mechanism.
+  // These variants are scoped to INFORM the user: the merchant keeps reading
+  // while we route them to the PM-edit page where they can tokenise a
+  // recurring credential or replace a failed one. `severity: 'warning'` keeps
+  // the modal tone consistent with SUBSCRIPTION_007; the write gate never
+  // opens these as block paywalls.
+  auto_renew_disabled_no_credential: {
+    title: 'Tu autopago no se pudo activar',
+    description:
+      'Agrega un método de pago para reactivar la renovación automática y evitar la interrupción del servicio.',
+    ctaLabel: 'Agregar método de pago',
+    ctaRoute: '/admin/subscription/payment',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'alert-triangle',
+    badgeLabel: 'Auto-pago',
+    benefits: [
+      'Mantén tu suscripción activa sin renovaciones manuales',
+      'El cargo recurrente se reintenta automáticamente al guardar la tarjeta',
+      'Evita que la tienda caiga en mora por un cargo perdido',
+    ],
+    secondaryCtaLabel: 'Más tarde',
+  },
+  renewal_failed: {
+    title: 'Tu renovación automática falló',
+    description:
+      'El cobro automático no pudo completarse. Actualiza tu método de pago para evitar la interrupción del servicio.',
+    ctaLabel: 'Actualizar método de pago',
+    ctaRoute: '/admin/subscription/payment',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'alert-octagon',
+    badgeLabel: 'Renovación',
+    benefits: [
+      'Reanuda la renovación automática al confirmar el nuevo método',
+      'Conservas los días de plan ya consumidos',
+      'Evitas la entrada a mora o suspensión por un cargo fallido',
+    ],
+    secondaryCtaLabel: 'Más tarde',
   },
 };
 

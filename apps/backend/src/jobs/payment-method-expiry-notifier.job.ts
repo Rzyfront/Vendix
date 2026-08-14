@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Prisma, subscription_payment_method_state_enum } from '@prisma/client';
+import {
+  Prisma,
+  subscription_event_type_enum,
+  subscription_payment_method_state_enum,
+} from '@prisma/client';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 
 /**
@@ -10,9 +14,10 @@ import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
  *
  *  1. **Pre-expiry notice** (existing): warn stores whose tokenized card on an
  *     active/trial subscription will expire within the next 14 days. Throttled
- *     7 days via a `subscription_events` row with `payload.reason=
- *     'pm_expiry_notice'`. The actual email rendering happens in
- *     `EmailNotificationsProcessor` under job name
+ *     7 days via a `subscription_events` row with `type=
+ *     'payment_method_expiring'` (the dedicated enum value added by the
+ *     bright-kindling-possum migration). The actual email rendering happens
+ *     in `EmailNotificationsProcessor` under job name
  *     `subscription.payment-method-expiring.email`.
  *
  *  2. **Post-expiry invalidation** (Sprint 2 — `S2.2`): close the loop. Cards
@@ -31,9 +36,14 @@ import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
  * notification email is one-shot per invalidation transition (the next run
  * will not re-enqueue because state is no longer `active`).
  *
- * TODO(G11-event-enum): when `subscription_event_type_enum` gains dedicated
- *   `payment_method_expiring_notice` and `payment_method_invalidated` values,
- *   switch to those and drop the `payload.reason` filter.
+ * G11-event-enum (RESOLVED by bright-kindling-possum Step 1): the
+ * `subscription_event_type_enum` gained a dedicated `payment_method_expiring`
+ * value. The pre-expiry pass now writes its audit rows under that typed
+ * value. The throttle lookup still accepts the legacy `state_transition` +
+ * `payload.reason='pm_expiry_notice'` shape (because no dedicated
+ * `payment_method_invalidated` enum value yet exists for the post-expiry
+ * pass to use). When one is added, both passes should be migrated off
+ * `state_transition`.
  */
 @Injectable()
 export class PaymentMethodExpiryNotifierJob {
@@ -129,25 +139,40 @@ export class PaymentMethodExpiryNotifierJob {
           continue;
         }
 
-        // Throttle: skip if a notice row was written in the last 7 days for
-        // this same payment method.
+        // Throttle: skip if a notice row was written in the last 7 days for this
+        // same payment method. We accept BOTH the new typed enum value
+        // (`payment_method_expiring`) AND the legacy `state_transition` +
+        // `payload.reason='pm_expiry_notice'` shape, because historical rows
+        // predate the G11-event-enum migration and would otherwise re-trigger
+        // for every card.
         const lastReminder = await this.prisma
           .withoutScope()
           .subscription_events.findFirst({
             where: {
               store_subscription_id: pm.store_subscription_id,
-              type: 'state_transition',
               created_at: { gte: sevenDaysAgo },
-              payload: {
-                path: ['reason'],
-                equals: 'pm_expiry_notice',
-              },
-              AND: [
+              OR: [
                 {
+                  type: subscription_event_type_enum.payment_method_expiring,
                   payload: {
                     path: ['payment_method_id'],
                     equals: pm.id,
                   },
+                },
+                {
+                  type: 'state_transition',
+                  payload: {
+                    path: ['reason'],
+                    equals: 'pm_expiry_notice',
+                  },
+                  AND: [
+                    {
+                      payload: {
+                        path: ['payment_method_id'],
+                        equals: pm.id,
+                      },
+                    },
+                  ],
                 },
               ],
             },
@@ -181,7 +206,11 @@ export class PaymentMethodExpiryNotifierJob {
         await this.prisma.withoutScope().subscription_events.create({
           data: {
             store_subscription_id: pm.store_subscription_id,
-            type: 'state_transition',
+            // G11-event-enum (bright-kindling-possum): stamp the new typed
+            // value instead of `state_transition` + reason. The throttle
+            // lookup above accepts both shapes so legacy rows still count
+            // toward the 7-day window.
+            type: subscription_event_type_enum.payment_method_expiring,
             payload: {
               reason: 'pm_expiry_notice',
               payment_method_id: pm.id,

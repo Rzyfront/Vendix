@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { booking_status_enum, Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { ReservationsService } from '../reservations.service';
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import {
   resolveStoreTimezone,
   localCivil,
@@ -46,6 +47,7 @@ export class AutoNoShowJob {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly reservationsService: ReservationsService,
+    private readonly storeContextRunner: StoreContextRunner,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -64,7 +66,11 @@ export class AutoNoShowJob {
       let totalArchived = 0;
       for (const store of stores) {
         try {
-          totalArchived += await this.archiveStore(store.id);
+          const archived = await this.storeContextRunner.runInStoreContext(
+            store.id,
+            () => this.archiveStore(store.id),
+          );
+          totalArchived += archived;
         } catch (err: any) {
           this.logger.error(
             `AutoNoShowJob store ${store.id} failed: ${err?.message ?? err}`,

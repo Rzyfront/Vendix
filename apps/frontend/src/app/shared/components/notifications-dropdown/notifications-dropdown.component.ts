@@ -226,6 +226,14 @@ export class NotificationsDropdownComponent {
         return d?.table_session_id
           ? `/admin/restaurant-ops/tables/session/${d.table_session_id}`
           : '/admin/restaurant-ops/tables';
+      // Billing-warning detection — bell + email are emitted by the same
+      // listener; the actionable destination is the PM-edit page where the
+      // user can tokenise a recurring credential or replace the failed one.
+      // `getSafeRoute()` only accepts leading-slash absolute paths, so
+      // returning the hardcoded route is safe regardless of `d.route`.
+      case 'auto_renew_disabled_no_credential':
+      case 'auto_renew_charge_failed':
+        return '/admin/subscription/payment';
       default:
         return null;
     }
@@ -284,6 +292,12 @@ export class NotificationsDropdownComponent {
       // success acknowledgement — info-tier to avoid burying pending.
       table_payment_pending: 'bell-ring',
       table_payment_confirmed: 'circle-check',
+      // Billing-warning detection — paired with the banner and the paywall
+      // variants. `no_credential` is recoverable (warning tone),
+      // `charge_failed` is the imminent failure mode (danger tone) so the
+      // octagon reads louder than the triangle in the bell list.
+      auto_renew_disabled_no_credential: 'alert-triangle',
+      auto_renew_charge_failed: 'alert-octagon',
     };
     return map[type] ?? 'bell';
   }

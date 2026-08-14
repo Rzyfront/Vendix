@@ -569,6 +569,49 @@ export class SubscriptionStateService {
   }
 
   /**
+   * Billing-warning detection — flips `store_subscriptions.auto_renew` back
+   * to `true` when the merchant has just tokenized a fresh payment method
+   * (the `reEnableAutoRenewAfterCredential` hook in
+   * SubscriptionPaymentMethodsService.tokenizeAndRegister) and an unresolved
+   * `auto_renew_disabled_no_credential` audit row still exists for this
+   * subscription.
+   *
+   * Deliberately a simple guarded UPDATE — no `ensureOperational` walk,
+   * no cache invalidation, no emit. The caller (`tokenizeAndRegister`)
+   * already owns the in-tx context: it stamps the audit row's
+   * `payload.resolved_at` on success, so the listener's next dedupe hit
+   * won't re-fire. The store's subscription STATE is unchanged — only the
+   * "auto-renew at next period end" flag moves.
+   *
+   * Returns true when the flip happened, false otherwise (already on,
+   * no subscription row, etc.). Idempotent on retry: a second call is a
+   * no-op because the guard `auto_renew: false` no longer matches.
+   */
+  async reEnableAutoRenewInTx(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+  ): Promise<boolean> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+    const sub = await tx.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: { id: true, auto_renew: true },
+    });
+    if (!sub) {
+      return false;
+    }
+    if (sub.auto_renew !== false) {
+      return false;
+    }
+    await tx.store_subscriptions.update({
+      where: { id: sub.id },
+      data: { auto_renew: true, updated_at: new Date() },
+    });
+    return true;
+  }
+
+  /**
    * Legal walk from `from` to `active`.
    *
    * - `[]`   → already operational, nothing to do.

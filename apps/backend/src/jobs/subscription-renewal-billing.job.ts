@@ -41,6 +41,8 @@ export class SubscriptionRenewalBillingJob {
     private readonly gateConfig: SubscriptionGateConfig,
     @InjectQueue('subscription-payment-retry')
     private readonly retryQueue: Queue,
+    @InjectQueue('billing-warning')
+    private readonly billingWarningQueue: Queue,
   ) {}
 
   @Cron('0 2 * * *')
@@ -343,6 +345,18 @@ export class SubscriptionRenewalBillingJob {
         `Charge failed for invoice ${invoiceId} (subscription ${subscriptionId}): ${reason}. ` +
           `Retry queue disabled (SUBSCRIPTION_RETRY_QUEUE_ENABLED!=true) — skipping retry.`,
       );
+      try {
+        await this.enqueueBillingWarningOnRetryExhausted(
+          invoiceId,
+          subscriptionId,
+          storeId,
+          reason,
+        );
+      } catch (enqueueError: any) {
+        this.logger.error(
+          `Failed to enqueue billing warning for invoice ${invoiceId}: ${enqueueError?.message ?? enqueueError}`,
+        );
+      }
       return;
     }
 
@@ -371,6 +385,51 @@ export class SubscriptionRenewalBillingJob {
     } catch (enqueueError: any) {
       this.logger.error(
         `Failed to enqueue retry for invoice ${invoiceId}: ${enqueueError?.message ?? enqueueError}`,
+      );
+    }
+  }
+
+  /**
+   * Enqueue the customer-visible billing warning when the retry budget is
+   * exhausted. Wrapped in try/catch — a lost enqueue is logged but never
+   * breaks the renewal loop.
+   */
+  private async enqueueBillingWarningOnRetryExhausted(
+    invoiceId: number,
+    subscriptionId: number,
+    storeId: number,
+    reason: string,
+  ): Promise<void> {
+    const payment = await this.prisma.subscription_payments.findFirst({
+      where: { invoice_id: invoiceId },
+      orderBy: { id: 'desc' },
+      select: { id: true },
+    });
+    const sourceEventId = payment?.id ?? invoiceId;
+
+    try {
+      await this.billingWarningQueue.add(
+        'billing-warning-renewal-failed',
+        {
+          storeId,
+          sourceEventId,
+          paymentId: payment?.id ?? invoiceId,
+          storeSubscriptionId: subscriptionId,
+        },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 100 },
+        },
+      );
+      this.logger.log(
+        `BILLING_WARNING_ENQUEUED invoice=${invoiceId} subscription=${subscriptionId} store=${storeId} source=${reason}`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `BILLING_WARNING_ENQUEUE_FAILED invoice=${invoiceId} err=${err?.message ?? err}`,
+        err?.stack,
       );
     }
   }
