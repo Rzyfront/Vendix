@@ -666,14 +666,6 @@ export interface RefundItemRequest {
   inventory_action: InventoryAction;
   location_id?: number;
   reason?: string;
-  /**
-   * Hotfix post-PR-576: la columna `refund_items.bank_account_id` ya
-   * existe en DB con FK + ON DELETE SET NULL, pero ni el modal ni el
-   * DTO la enviaban. Para `refund_method === 'bank_transfer'` el
-   * operador debe seleccionar la cuenta destino (auditable). Si llega
-   * `null` para `bank_transfer`, el backend devuelve 400.
-   */
-  bank_account_id?: number;
 }
 
 export interface CreateRefundRequest {
@@ -682,7 +674,6 @@ export interface CreateRefundRequest {
   refund_method: RefundMethod;
   reason: string;
   notes?: string;
-  bank_account_id?: number;
 }
 
 export interface RefundItemCalculation {

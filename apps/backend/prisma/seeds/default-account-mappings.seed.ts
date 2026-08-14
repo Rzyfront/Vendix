@@ -69,7 +69,7 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // account_mapping row without losing the default.
   'refund.completed.original_payment': '1110',
   'refund.completed.bank_transfer': '1110',
-  'refund.completed.store_credit': '2805',
+  'refund.completed.store_credit': '2335',
   'purchase_order.received.inventory': '1435',
   'purchase_order.received.accounts_payable': '2205',
   'support_document.accepted.expense': '5195',

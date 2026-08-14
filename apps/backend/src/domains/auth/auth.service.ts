@@ -1094,13 +1094,7 @@ export class AuthService {
         //   - the customer is not yet linked to this ecommerce store, OR
         //   - the customer is linked but still pending_verification (the
         //     POS-created account they can't log in to).
-        //
-        // Hotfix post-PR-576: NO dispares el CTA para clientes archivados.
-        // Archivar es decisión del comerciante; el flujo público no debe
-        // reactivar ni sugerir "reclamar" una cuenta archivada, ni
-        // exponer al mundo que existe.
-        const isArchived = existingUser.state === 'archived';
-        if ((!alreadyLinked || !isActive) && !isArchived) {
+        if (!alreadyLinked || !isActive) {
           throw new VendixHttpException(
             ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001,
           );
@@ -2814,17 +2808,6 @@ export class AuthService {
       return { message: genericMessage };
     }
 
-    // Hotfix post-PR-576: clientes archivados no reciben token de
-    // recuperación. Archivar es decisión del comerciante; el flujo
-    // público debe tratar al archivado como inexistente y NO emitir
-    // nada que sugiera reactivarlo.
-    if (user.state === 'archived') {
-      this.logger.warn(
-        `forgotPasswordCustomer: archived user ${user.id} (${email}) — token suppressed`,
-      );
-      return { message: genericMessage };
-    }
-
     // 4. Invalidar tokens anteriores
     await this.prismaService.password_reset_tokens.updateMany({
       where: { user_id: user.id },
@@ -3019,25 +3002,6 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-    // Hotfix post-PR-576: clientes archivados NO se reactivan vía reset.
-    // La rama vieja promovía cualquier state !== 'active' (incluyendo
-    // 'archived') a 'active'. Archivar es decisión del comerciante y
-    // solo el comerciante la revierte (vía backoffice o el seed manual).
-    if (resetToken.users.state === 'archived') {
-      // Invalidamos el token para que no se pueda reintentar.
-      await this.prismaService.password_reset_tokens.updateMany({
-        where: { id: resetToken.id, used: false },
-        data: { used: true },
-      });
-      this.logger.warn(
-        `resetCustomerPassword: archived user ${resetToken.users.id} — activation blocked`,
-      );
-      throw new VendixHttpException(
-        ErrorCodes.AUTH_CUSTOMER_ARCHIVED_001,
-        'Esta cuenta está archivada. Contacta al comerciante para reactivarla.',
-      );
-    }
 
     // Activate the account if it was left in pending_verification. The
     // email is considered verified because the customer proved control

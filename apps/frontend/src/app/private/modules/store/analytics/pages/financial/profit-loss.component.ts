@@ -305,17 +305,13 @@ export class ProfitLossComponent implements OnInit {
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       // The bars are the ACTUAL chain behind net_profit:
-      // operating_revenue − COGS − operating_expenses.
-      //
-      // Hotfix post-PR-576: `operating_revenue` ya viene NETO de
-      // reembolsos (ver `financial-analytics.service.ts:851`). Antes este
-      // chart restaba `subtotal_refunds` encima, doble-contando los
-      // reembolsos: una vez en `operating_revenue` y otra acá. La
-      // consecuencia era que la suma de las barras NUNCA igualaba el
-      // KPI de Ganancia Neta que el mismo chart pinta encima.
+      // operating_revenue − COGS − subtotal_refunds − operating_expenses.
+      // They used to start at `gross_revenue` (before discounts) and subtract
+      // `total_refunds` (tax and freight included), so the bars never added up to
+      // the bottom line printed above them.
       series: [
         {
-          name: 'Ingresos (neto de reembolsos)',
+          name: 'Ingresos',
           type: 'bar',
           data: [d.revenue?.operating_revenue || 0],
           itemStyle: { color: '#22c55e' },
@@ -325,6 +321,12 @@ export class ProfitLossComponent implements OnInit {
           type: 'bar',
           data: [-(d.costs?.cost_of_goods_sold || 0)],
           itemStyle: { color: '#ef4444' },
+        },
+        {
+          name: 'Reembolsos',
+          type: 'bar',
+          data: [-(d.refunds?.subtotal_refunds || 0)],
+          itemStyle: { color: '#f59e0b' },
         },
         {
           name: 'Gastos Operativos',

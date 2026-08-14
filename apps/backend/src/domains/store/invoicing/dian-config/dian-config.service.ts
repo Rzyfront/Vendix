@@ -1363,61 +1363,8 @@ export class DianConfigService {
    * el guard de permisos y por el scope de su store) como al superadmin, que
    * lee la cola de TODOS los tenants por definición. La autorización la ponen
    * los `@Permissions` del controlador, no este SELECT.
-   *
-   * Hotfix post-PR-576: el predicado de tenant va AQUÍ, no en el controlador.
-   * Un handler tenant-facing que recibe `:id` debe responder 404 cuando ese
-   * `id` pertenece a otro tenant — eso es autorización por fila, no por
-   * permiso. Los 5 handlers superadmin cruzan tenants a propósito y llaman a
-   * `loadConfigForIdentityDocumentsAsSuperAdmin`; los 4 tenant-facing llaman
-   * a este método y obtienen 404 cuando el `store_id` o `organization_id` no
-   * matchea el contexto.
    */
   private async loadConfigForIdentityDocuments(config_id: number) {
-    const context = this.getContext();
-    const organizationId = context?.organization_id;
-    const storeId = context?.store_id;
-    const fiscalScope = await this.fiscalScope.requireFiscalScope(organizationId);
-
-    const where =
-      fiscalScope === 'ORGANIZATION'
-        ? { id: config_id, organization_id: organizationId, store_id: null }
-        : { id: config_id, store_id: storeId };
-
-    const config = await this.prisma
-      .withoutScope()
-      .dian_configurations.findFirst({
-        where,
-        select: {
-          id: true,
-          organization_id: true,
-          store_id: true,
-          nit: true,
-          nit_dv: true,
-          name: true,
-          configuration_type: true,
-          certificate_s3_key: true,
-          certificate_provisioning_status: true,
-          organization: { select: { person_type: true, name: true } },
-          store: { select: { name: true } },
-        },
-      });
-
-    if (!config) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
-    }
-    return config;
-  }
-
-  /**
-   * Variante superadmin del loader: cruza el límite de tenant a propósito.
-   * Solo callable desde handlers detrás de `RolesGuard + SUPER_ADMIN`. Los
-   * 5 endpoints `super-admin/fiscal/certificates-pending/*` usan este método;
-   * los 4 endpoints `/store/invoicing/dian-config/:id/identity-documents*`
-   * usan el `loadConfigForIdentityDocuments` tenant-scoped.
-   */
-  private async loadConfigForIdentityDocumentsAsSuperAdmin(
-    config_id: number,
-  ) {
     const config = await this.prisma
       .withoutScope()
       .dian_configurations.findUnique({
@@ -1856,9 +1803,7 @@ export class DianConfigService {
 
   /** Marca el expediente como en trámite ante la entidad emisora. */
   async markCertificateIssuing(config_id: number) {
-    const config = await this.loadConfigForIdentityDocumentsAsSuperAdmin(
-      config_id,
-    );
+    const config = await this.loadConfigForIdentityDocuments(config_id);
 
     if (config.certificate_provisioning_status !== 'documents_submitted') {
       throw new BadRequestException(
@@ -1883,9 +1828,7 @@ export class DianConfigService {
    * definitivo de la entidad emisora, que hoy no tiene flujo.
    */
   async rejectCertificateRequest(config_id: number, reason: string) {
-    const config = await this.loadConfigForIdentityDocumentsAsSuperAdmin(
-      config_id,
-    );
+    const config = await this.loadConfigForIdentityDocuments(config_id);
 
     if (!reason?.trim()) {
       throw new BadRequestException(

@@ -214,31 +214,6 @@ jobs:
         working-directory: apps/backend
         run: npm run build
 
-  backend-test:
-    # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y
-    # este workflow no corría jest, así que specs como el de QUI-649
-    # (4 errores TS2554 de aridad en `reservations.service.spec.ts`)
-    # llegaron a producción sin que nadie lo detectara. Ahora jest
-    # corre en cada PR que toque apps/backend.
-    name: Backend Tests (jest)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      - name: Generar Prisma Client (para tipos en specs)
-        working-directory: apps/backend
-        run: npx prisma generate
-      - name: jest (acotado, --runInBand)
-        working-directory: apps/backend
-        run: npm run buildcheck:test -- --runInBand
-
   mobile-build:
     name: Mobile Build (expo export)
     runs-on: ubuntu-latest

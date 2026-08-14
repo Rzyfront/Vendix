@@ -231,20 +231,17 @@ export class PosCartService {
    *     vino de un escaneo con tarifa.
    */
   addToCart(request: AddToCartRequest): Observable<CartState> {
-    // Validate request FIRST. Hotfix post-PR-576: el carrito adoptado se
-    // saltaba la validación por un early-return mal puesto, así que un
-    // cajero podía meter líneas con SKU inválido o stock insuficiente en
-    // una orden ya persistida en backend.
+    const adoptedId = this.cartState().linkedOrderId;
+    if (adoptedId != null) {
+      return this.addItemToAdoptedOrder(request, adoptedId);
+    }
+
+    // Validate request
     const validationErrors = this.validateAddToCartRequest(request);
     if (validationErrors.length > 0) {
       return throwError(
         () => new Error(validationErrors.map((e) => e.message).join(', ')),
       );
-    }
-
-    const adoptedId = this.cartState().linkedOrderId;
-    if (adoptedId != null) {
-      return this.addItemToAdoptedOrder(request, adoptedId);
     }
 
     return of(request).pipe(

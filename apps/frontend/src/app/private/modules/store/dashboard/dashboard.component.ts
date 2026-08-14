@@ -62,12 +62,12 @@ const QUICK_LINKS: QuickLink[] = [
   ],
   template: `
     <div class="w-full space-y-4 pb-6">
-      <!-- 6 Stats Cards. Hotfix post-PR-576: el release borró las tarjetas
-           Ganancias y Órdenes. Una métrica que estaba en producción no se
-           retira sin decisión de producto explícita; las restituimos.
-           Ingresos/Gastos/Reembolsos vienen del endpoint Profit & Loss
-           (mismo que QUI-662 instauró). Ganancias y Órdenes se alimentan
-           de sus respectivos endpoints especializados. -->
+      <!-- 4 Stats Cards — ALL from the Profit & Loss endpoint, on purpose.
+           QUI-662: Ingresos now shows total_invoiced (the customer-facing
+           number, VAT included) with the contract revenue without VAT as a
+           sub-label. Balance replaces the old Ganancias card and reflects
+           the cash position (no COGS). Reembolsos replaces Órdenes — the
+           order count still lives under /admin/orders/sales. -->
       <div class="stats-container">
         <app-stats
           title="Ingresos"
@@ -79,21 +79,12 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
-          title="Ganancias"
-          [value]="formatCurrency(profitLoss()?.bottom_line?.net_profit || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.net_profit_growth)"
-          iconName="trending-up"
-          iconBgColor="bg-success/10"
-          iconColor="text-success"
-          [loading]="loading()"
-        />
-        <app-stats
           title="Balance"
           [value]="formatCurrency(profitLoss()?.bottom_line?.balance || 0)"
           [smallText]="getGrowthText(profitLoss()?.comparison?.balance_growth)"
-          iconName="wallet"
-          iconBgColor="bg-info/10"
-          iconColor="text-info"
+          iconName="trending-up"
+          iconBgColor="bg-success/10"
+          iconColor="text-success"
           [loading]="loading()"
         />
         <app-stats
@@ -108,20 +99,11 @@ const QUICK_LINKS: QuickLink[] = [
         <app-stats
           title="Reembolsos"
           [value]="formatCurrency(profitLoss()?.refunds?.total_refunds || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.refunds_growth)"
+          smallText="Reembolsos del periodo"
           iconName="rotate-ccw"
           iconBgColor="bg-accent/10"
           iconColor="text-accent"
           [loading]="loading()"
-        />
-        <app-stats
-          title="Órdenes"
-          [value]="(ordersCount() ?? 0).toString()"
-          [smallText]="ordersSubText()"
-          iconName="shopping-cart"
-          iconBgColor="bg-secondary/10"
-          iconColor="text-secondary"
-          [loading]="loadingOrders()"
         />
       </div>
 

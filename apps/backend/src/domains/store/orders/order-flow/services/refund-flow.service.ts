@@ -311,24 +311,12 @@ export class RefundFlowService {
           });
         }
 
-        // 6. Mark refund as pending or completed
-        //
-        // Hotfix post-PR-576: el bug original_payment revertía dinero en DB
-        // (mark completed) sin reversar nada en Wompi/cash_on_delivery/etc.
-        // Para `original_payment` dejamos el refund como `pending` dentro de
-        // la tx y luego, en el `.then()` de abajo, `dispatchRefundProcessor`
-        // llama al processor real (Wompi.reverse, etc.) y exige éxito antes
-        // de promover a `completed`. Si el processor no está integrado
-        // (la mayoría de las tiendas hoy), el refund queda `pending` para
-        // intervención manual del operador — exactamente la semántica que
-        // el comentario en `:428-431` describía pero nunca implementó.
-        const finalState =
-          dto.refund_method === 'original_payment' ? 'pending' : 'completed';
+        // 6. Mark refund as completed
         const completedRefund = await tx.refunds.update({
           where: { id: refund.id },
           data: {
-            state: finalState,
-            processed_at: finalState === 'completed' ? new Date() : null,
+            state: 'completed',
+            processed_at: new Date(),
             updated_at: new Date(),
           },
           include: {
@@ -343,23 +331,7 @@ export class RefundFlowService {
         return completedRefund;
       })
       .then(async (completedRefund) => {
-        // 7. Dispatch the original_payment reversal to the processor BEFORE
-        // emitting refund.completed. Hotfix post-PR-576: la rama vieja
-        // marcaba `state='completed'` sin reversar el dinero en el processor.
-        // Ahora emitimos `payment.refund.requested` y dejamos el refund en
-        // `pending`. El listener del processor (cuando existe) lo promueve
-        // a `completed` o rechaza con `failed`. Sin listener, el operador
-        // cierra manualmente — comportamiento correcto: nunca marcamos
-        // `completed` un refund que no se reversó en el gateway.
-        if (dto.refund_method === 'original_payment') {
-          await this.dispatchRefundProcessor(
-            order,
-            completedRefund,
-            Number(calculation.total_refund),
-          );
-        }
-
-        // 8. Emit events after transaction (and processor dispatch) completes
+        // 7. Emit events after transaction completes
         try {
           // Preserve the original fiscal-type mix so the tax reversal posts
           // proportionally against each tax's PUC account (IVA→2408, INC→2436).
@@ -544,96 +516,6 @@ export class RefundFlowService {
         data: { serial_numbers_snapshot: returnedSerialNumbers.join(', ') },
       });
     }
-  }
-
-  /**
-   * Dispatch the `original_payment` reversal to the corresponding payment
-   * processor. Hotfix post-PR-576: el comentario en `:428-431` nombraba
-   * esta función pero nunca existía — los reembolsos `original_payment`
-   * quedaban `completed` en DB sin reversar nada en Wompi/cash_on_delivery.
-   *
-   * Esta implementación sigue el patrón de "marcar pending + emitir evento
-   * de processor dispatch", que es el mínimo cambio coherente con el
-   * resto del módulo de pagos. Los listeners de cada processor (Wompi,
-   * Stripe, PayPal) escuchan `payment.refund.requested` y llaman a su
-   * `refundPayment` API. Si la integración no existe (la mayoría de las
-   * tiendas hoy), el refund queda `pending` para intervención manual del
-   * operador — exactamente la semántica que el comentario original
-   * describía pero nunca implementó.
-   *
-   * Devuelve `{ status: 'succeeded' | 'pending' | 'failed', message? }`.
-   */
-  private async dispatchRefundProcessor(
-    order: any,
-    completedRefund: any,
-    amount: number,
-  ): Promise<{ status: 'succeeded' | 'pending' | 'failed'; message?: string }> {
-    const activePayment = order.payments?.find(
-      (p: any) => p.state === 'succeeded' || p.state === 'pending',
-    );
-
-    if (!activePayment) {
-      this.logger.warn(
-        `Refund #${completedRefund.id}: no active payment found, leaving pending for manual operator intervention.`,
-      );
-      return { status: 'pending', message: 'No active payment on the order' };
-    }
-
-    const systemMethodType =
-      activePayment.store_payment_method?.system_payment_method?.type;
-    const transactionId = activePayment.transaction_id;
-
-    if (!transactionId) {
-      this.logger.warn(
-        `Refund #${completedRefund.id}: payment has no transaction_id (method=${systemMethodType ?? 'unknown'}), leaving pending.`,
-      );
-      return { status: 'pending', message: 'Payment has no gateway transaction_id' };
-    }
-
-    // El processor real se invoca desde el listener del módulo de pagos
-    // (`payment.refund.requested`). Aquí decidimos el state destino del
-    // refund basándonos en si la integración existe:
-    //
-    // - `wompi` / `paypal` / `stripe` con integración configurada → el
-    //   listener revierte; nosotros dejamos `pending` y leemos el resultado
-    //   vía callback en una corrida posterior.
-    //
-    // Para mantener el scope acotado al hotfix y no acoplar este módulo a
-    // `PaymentGatewayService` (cambio de firma del constructor), marcamos
-    // `pending` para todos los métodos reversibles y emitimos el evento.
-    // El listener del processor (cuando existe) lo marca `completed` o
-    // rechaza con `failed`. Sin listener (la mayoría de las tiendas hoy),
-    // el refund permanece `pending` y el operador lo cierra manualmente.
-
-    const reversible = ['wompi', 'paypal', 'stripe'].includes(systemMethodType);
-    if (reversible) {
-      try {
-        this.eventEmitter.emit('payment.refund.requested', {
-          refund_id: completedRefund.id,
-          payment_id: activePayment.id,
-          transaction_id: transactionId,
-          processor_type: systemMethodType,
-          store_id: order.store_id,
-          amount,
-          // Listener puede llamar `refunds.update({state: 'completed'|'failed'})`
-          // con su propia concurrencia.
-        });
-        this.logger.log(
-          `Refund #${completedRefund.id}: payment.refund.requested emitted for ${systemMethodType}`,
-        );
-      } catch (e: any) {
-        this.logger.error(
-          `Refund #${completedRefund.id}: emit failed ${e?.message ?? e}`,
-        );
-      }
-    }
-
-    return {
-      status: 'pending',
-      message: reversible
-        ? `${systemMethodType} dispatch emitted; awaiting processor callback`
-        : `${systemMethodType ?? 'unknown'} requires manual operator intervention`,
-    };
   }
 
   /**
