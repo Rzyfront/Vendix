@@ -1052,7 +1052,7 @@ export class SalesAnalyticsService {
         order_count: r._count.id,
         revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
         percentage: total > 0
-          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+          ? Number(r._sum.grand_total || 0) / total
           : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
