@@ -20,10 +20,15 @@ LOG_DIR="${BUILDCHECK_LOG_DIR:-$ROOT/.buildcheck}"
 TIMEOUT="${BUILDCHECK_TIMEOUT:-900}"
 BE_MEM="${BUILDCHECK_BE_MEM:-3072}"
 FE_MEM="${BUILDCHECK_FE_MEM:-4096}"
-TEST_MEM="${BUILDCHECK_TEST_MEM:-2048}"
-# Jest sin tope usa cores-1 workers y cada worker de ts-jest levanta su propio
-# program de TypeScript (~2.5GB en este repo). Con 16GB y la VM de Docker
-# ocupando ~8GB, eso es OOM garantizado.
+TEST_MEM="${BUILDCHECK_TEST_MEM:-4096}"
+# Jest con `--maxWorkers=2` arranca 2 procesos Node: cada uno carga el módulo
+# root, ts-jest levanta el programa TypeScript (~2.5GB por worker), el
+# store-prisma.service carga el cliente Prisma, y el código de reports
+# (registry de 13 entries + AnalyticsController + 13 services) añade ~300MB.
+# Con 2048MB el heap muere a mitad de la suite (Ineffective mark-compacts
+# near heap limit → FATAL ERROR), el runner termina el job a los 900s
+# con exit 143 (SIGTERM), y todos los specs posteriores reportan FAIL porque
+# comparten proceso. 4096MB cabe con margen en el runner de 7GB del CI.
 TEST_WORKERS="${BUILDCHECK_TEST_WORKERS:-2}"
 # RAM mínima libre exigida por paso, en MB. La VM de Docker ya retiene lo suyo.
 NEED_BE="${BUILDCHECK_NEED_BE:-2048}"
