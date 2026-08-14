@@ -844,7 +844,7 @@ export class ProductsAnalyticsService {
       const data = results.slice((page - 1) * limit, page * limit);
 
       return {
-        data,
+        products: data,
         summary,
         meta: {
           pagination: {
