@@ -9,19 +9,25 @@
 
 /**
  * How a cell value is written into the worksheet.
- *  - `text`     -> written as a string (never coerced to a number).
- *  - `number`   -> written as a real number with a numeric `numFmt`.
- *  - `currency` -> written as a real number with the money `numFmt`.
- *  - `percent`  -> written as a real number; the value MUST be a FRACTION
- *                  (0.15 = 15%), because Excel's `%` format multiplies by 100.
- *  - `date`     -> written as a real date pinned to the store-LOCAL calendar day
- *                  (root fix for the off-by-one TZ bug — see report-builder).
+ *  - `text`       -> written as a string (never coerced to a number).
+ *  - `number`     -> written as a real number with a numeric `numFmt`.
+ *  - `currency`   -> written as a real number with the money `numFmt`.
+ *  - `percent`    -> written as a real number; the value MUST be a FRACTION
+ *                    (0.15 = 15%), because Excel's `%` format multiplies by 100.
+ *  - `date`       -> written as a real date pinned to the store-LOCAL calendar day
+ *                    (root fix for the off-by-one TZ bug — see report-builder).
+ *  - `date-only`  -> written as the raw UTC calendar day of a business-date
+ *                    column (Prisma `@db.Date` materialized as Date at UTC midnight).
+ *                    No TZ conversion is applied: e.g. 2026-02-01 stays 2026-02-01
+ *                    regardless of the store timezone, because the source IS the
+ *                    business date, not an instant. String-rendered as `YYYY-MM-DD`.
  */
 export type ReportColumnType =
   | 'text'
   | 'number'
   | 'currency'
   | 'date'
+  | 'date-only'
   | 'percent';
 
 /** Horizontal alignment of a column's cells. */

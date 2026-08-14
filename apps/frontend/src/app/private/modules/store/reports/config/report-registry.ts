@@ -173,8 +173,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     columns: [
       { key: 'order_number', header: 'OC', type: 'text' },
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
+      { key: 'order_date', header: 'Fecha OC', type: 'date-only' },
+      { key: 'payment_due_date', header: 'Vencimiento', type: 'date-only' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
       { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
