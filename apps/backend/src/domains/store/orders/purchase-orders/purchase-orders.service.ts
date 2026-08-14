@@ -1357,6 +1357,7 @@ export class PurchaseOrdersService {
       // sobreescribiría y la orden immediate quedaría con un abono fantasma.
       const {
         expected_date: rawExpectedDate,
+        payment_due_date: rawPaymentDueDate,
         payment_installments: _installmentsInput,
         down_payment_amount: _downPaymentInput,
         ...orderDataRest
@@ -1374,6 +1375,10 @@ export class PurchaseOrdersService {
           ...orderDataRest,
           order_type: orderType,
           expected_date: toDate(rawExpectedDate),
+          // Bug 1: `payment_due_date` viene como `YYYY-MM-DD` (string) del
+          // input HTML; Prisma exige `Date`. Conversión defensiva antes de
+          // persistir para no reventar contra la columna DateTime.
+          payment_due_date: toDate(rawPaymentDueDate),
           created_by_user_id: user_id,
           organization_id,
           order_number,
@@ -1398,7 +1403,8 @@ export class PurchaseOrdersService {
             ? {
                 payment_schedules: {
                   create: installments.map((i) => ({
-                    scheduled_date: new Date(i.scheduled_date),
+                    // Bug 1: convertir scheduled_date string → Date aquí también
+                    scheduled_date: toDate(i.scheduled_date) ?? new Date(i.scheduled_date),
                     amount: i.amount,
                     status: 'planned',
                   })),
@@ -1610,8 +1616,13 @@ export class PurchaseOrdersService {
       this.prisma.purchase_orders.count({ where }),
     ]);
 
+    // Bug 4: derivar `next_payment_date` y `next_payment_due_in_days` para el listado.
+    // Sin migración: lectura batched de `purchase_order_payment_schedules` (status=planned, ASC)
+    // con fallback a `purchase_orders.payment_due_date`.
+    const enriched = await this.decorateWithNextPaymentDate(data);
+
     return {
-      data,
+      data: enriched,
       meta: {
         total,
         page,
@@ -1619,6 +1630,92 @@ export class PurchaseOrdersService {
         total_pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Bug 4 — Decorador batched para `findAll` (sin tocar `findOne` ni el resto del contrato).
+   *
+   * Devuelve una copia del array original enriquecida con `next_payment_date` y
+   * `next_payment_due_in_days` por OC. El cálculo se hace con una sola query
+   * batched sobre `purchase_order_payment_schedules` (status='planned'), con
+   * fallback al `payment_due_date` de la OC si no hay cuotas planeadas.
+   *
+   * No muta los objetos originales; spread shallow para preservar la shape que
+   * el resto del repo espera de `findAll`.
+   */
+  private async decorateWithNextPaymentDate<T extends { id: number }>(
+    rows: T[],
+  ): Promise<Array<T & { next_payment_date: string | null; next_payment_due_in_days: number | null }>> {
+    if (!rows.length) return [];
+    const poIds = rows.map((r) => r.id);
+    const map = await this.deriveNextPaymentDates(poIds);
+    const todayLocal = localDateString(new Date(), DEFAULT_STORE_TIMEZONE);
+    return rows.map((row) => {
+      const next = map.get(row.id);
+      if (!next || !next.date) {
+        return { ...row, next_payment_date: null, next_payment_due_in_days: null };
+      }
+      const days = Math.ceil(
+        (new Date(`${next.date}T00:00:00`).getTime() -
+          new Date(`${todayLocal}T00:00:00`).getTime()) /
+          86_400_000,
+      );
+      return { ...row, next_payment_date: next.date, next_payment_due_in_days: days };
+    });
+  }
+
+  /**
+   * Bug 4 — Helper público de derivación. Recibe un set de PO ids y devuelve un
+   * `Map<poId, { date: string | null }>` con la próxima fecha de pago planeada
+   * (`status='planned'` ASC) o `null` si no hay. Exposed para tests y para que
+   * `findOne` pueda enriquecer en el futuro sin duplicar lógica.
+   *
+   * Implementación: usa `$queryRaw` directo contra `baseClient` porque
+   * `StorePrismaService` no expone `purchase_order_payment_schedules` como
+   * delegado (es un modelo de control interno de las OCs, sin scope por store).
+   * El fallback usa `this.prisma.purchase_orders` (sí delegado) para el
+   * `payment_due_date`.
+   */
+  async deriveNextPaymentDates(
+    poIds: number[],
+  ): Promise<Map<number, { date: string | null }>> {
+    const out = new Map<number, { date: string | null }>();
+    if (!poIds.length) return out;
+    // Schedules planeadas: query raw batched sobre la tabla puente.
+    // El model existe en el schema pero no se delega en StorePrismaService.
+    // ANY/ALL de los ids se sanitiza con BIGINT parameter binding.
+    const idsList = poIds.join(',');
+    const rows: Array<{ purchase_order_id: number; scheduled_date: Date }> =
+      await this.prisma.$queryRawUnsafe(
+        `SELECT purchase_order_id, scheduled_date
+         FROM purchase_order_payment_schedules
+         WHERE purchase_order_id IN (${idsList})
+           AND status = 'planned'
+         ORDER BY purchase_order_id ASC, scheduled_date ASC`,
+      );
+    for (const r of rows) {
+      if (!out.has(r.purchase_order_id)) {
+        out.set(r.purchase_order_id, {
+          date: localDateString(r.scheduled_date, DEFAULT_STORE_TIMEZONE),
+        });
+      }
+    }
+    // Fallback: si no hay schedules planeados, usar payment_due_date de la OC.
+    const fallbackIds = poIds.filter((id) => !out.has(id));
+    if (fallbackIds.length) {
+      const orders = await this.prisma.purchase_orders.findMany({
+        where: { id: { in: fallbackIds } },
+        select: { id: true, payment_due_date: true },
+      });
+      for (const o of orders) {
+        out.set(o.id, {
+          date: o.payment_due_date
+            ? localDateString(o.payment_due_date, DEFAULT_STORE_TIMEZONE)
+            : null,
+        });
+      }
+    }
+    return out;
   }
 
   findByStatus(

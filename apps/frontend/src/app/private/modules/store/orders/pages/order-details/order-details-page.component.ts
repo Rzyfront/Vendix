@@ -2838,4 +2838,45 @@ export class OrderDetailsPageComponent {
     };
     return labels[action] || action;
   }
+
+  // Bug 7 — wirean los botones Despachar / Marcar entregado del banner
+  // `pending_delivery` (template). Endpoints ya existentes en order-flow.
+  dispatchOrder(): void {
+    if (!this.orderId) return;
+    this.ordersService.flowShipOrder(this.orderId, {} as any).subscribe({
+      next: () => {
+        this.toastService.success('Orden despachada');
+        this.loadData();
+      },
+      error: (err: any) => {
+        this.toastService.error(err?.message || 'No se pudo despachar la orden');
+      },
+    });
+  }
+
+  markDelivered(): void {
+    if (!this.orderId) return;
+    this.ordersService.flowDeliverOrder(this.orderId, {} as any).subscribe({
+      next: () => {
+        this.toastService.success('Orden marcada como entregada');
+        this.loadData();
+      },
+      error: (err: any) => {
+        this.toastService.error(err?.message || 'No se pudo marcar como entregada');
+      },
+    });
+  }
+
+  finalizeOrder(): void {
+    if (!this.orderId) return;
+    this.ordersService.updateOrderStatus(this.orderId, 'finished').subscribe({
+      next: () => {
+        this.toastService.success('Orden finalizada');
+        this.loadData();
+      },
+      error: (err: any) => {
+        this.toastService.error(err?.message || 'No se pudo finalizar la orden');
+      },
+    });
+  }
 }

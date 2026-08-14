@@ -605,6 +605,49 @@ export class FinancialAnalyticsService {
   }
 
   /**
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v3:*` para
+   * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
+   * llega `expense.state_changed`, `payment.received` o `refund.completed`.
+   *
+   * Implementación defensiva: el store real es Redis vía `cache-manager-ioredis-yet`.
+   * Esa librería expone `store.keys(pattern)` (NO `store.keys()` sin arg — eso
+   * lanza TypeError). Pasamos el pattern prefijo del store. Si el store no
+   * expone `keys` con pattern, hacemos fallback a `client.keys()` (ioredis) o
+   * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
+   */
+  async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
+    const keyPrefix = `analytics:financial:${prefix}:v3:${storeId}:`;
+    const pattern = `${keyPrefix}*`;
+    try {
+      const store: any = (this.cache as any).store;
+      let keys: string[] = [];
+      if (store && typeof store.keys === 'function') {
+        // ioredis-yet adapter: keys(pattern) requerido.
+        // Inline in-memory store: keys() sin arg → todas.
+        keys = (await store.keys(pattern)) ?? (await store.keys()) ?? [];
+      } else if (store && store.client && typeof store.client.keys === 'function') {
+        // Fallback: ioredis directo.
+        keys = await store.client.keys(pattern);
+      } else if (typeof (this.cache as any).reset === 'function') {
+        // Fallback agresivo: reset completo.
+        await (this.cache as any).reset();
+        return;
+      }
+      if (keys.length === 0) return;
+      await Promise.all(keys.map((k) => this.cache.del(k)));
+      this.logger.log(
+        `Cache invalidated ${keys.length} keys for store ${storeId} (prefix=${prefix})`,
+      );
+    } catch (err) {
+      // No bloquear el flujo principal si el cache no se puede invalidar.
+      // El TTL de 120s actúa como red de seguridad.
+      this.logger.warn(
+        `Cache invalidation skipped for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
    * Order-level monetary aggregate for one window, over {@link REVENUE_STATES}.
    */
   private async aggregateRevenueOrders(startDate: Date, endDate: Date) {

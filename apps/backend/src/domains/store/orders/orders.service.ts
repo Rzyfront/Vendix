@@ -217,13 +217,21 @@ export class OrdersService {
             await this.generateOrderNumber(store_id);
         }
 
+        // Bug 7: si la orden tiene envío a domicilio Y contiene al menos un
+        // producto tipo `prepared` (plato), la orden NO se auto-finaliza.
+        // Queda en `pending_delivery` para que el operador la despache,
+        // entregue y finalice manualmente. El default sigue siendo `created`.
+        const orderState = await this.resolveInitialOrderState(
+          createOrderDto,
+        );
+
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.orders.create({
           data: {
             customer_id: createOrderDto.customer_id ?? null,
             store_id: store_id, // Force strict store_id
             order_number: createOrderDto.order_number,
-            state: createOrderDto.state || order_state_enum.created,
+            state: orderState,
             subtotal_amount: createOrderDto.subtotal,
             tax_amount: createOrderDto.tax_amount || 0,
             shipping_cost: createOrderDto.shipping_cost || 0,
@@ -287,6 +295,14 @@ export class OrdersService {
                     price_override_reason: item.price_override_reason,
                     weight: item.weight,
                     weight_unit: item.weight_unit,
+                    // Bug 12: persistir UoM de venta al cobro. El ticket y
+                    // los reportes históricos mostrarán "1 × 250 g" en vez
+                    // de "1 × und".
+                    sale_unit_code_snapshot: (item as any).sale_unit_code ?? null,
+                    sale_quantity_snapshot:
+                      (item as any).sale_quantity != null
+                        ? new Prisma.Decimal((item as any).sale_quantity)
+                        : null,
                     item_type: itemType,
                     cost_price: item.product_id
                       ? await resolveCostPrice(
@@ -1439,5 +1455,40 @@ export class OrdersService {
     });
 
     return logs;
+  }
+
+  /**
+   * Bug 7 — Resuelve el estado inicial de la orden al crearla.
+   *
+   * Reglas:
+   *  - Si el caller pasó `state` explícito, se respeta.
+   *  - Si `delivery_type === 'home_delivery'` Y al menos un item es
+   *    `product_type='prepared'` (plato), retorna `pending_delivery` para
+   *    que la orden quede esperando Despachar → Entregar → Finalizar.
+   *  - En cualquier otro caso, retorna `created` (default histórico).
+   *
+   * La detección de "prepared" usa los items del DTO. Si el item NO trae
+   * `product_type` (caso de productos nuevos o líneas sin expandir), se
+   * considera NO-prepared y la orden sigue el flujo normal. Esto evita
+   * falsos positivos en líneas sin expandir.
+   */
+  private async resolveInitialOrderState(
+    dto: CreateOrderDto,
+  ): Promise<order_state_enum> {
+    if (dto.state) {
+      return dto.state as order_state_enum;
+    }
+    const deliveryType = (dto as any).delivery_type;
+    if (deliveryType !== 'home_delivery') {
+      return order_state_enum.created;
+    }
+    const items = dto.items || [];
+    const hasPreparedItem = items.some(
+      (it: any) => it.product_type === 'prepared',
+    );
+    if (hasPreparedItem) {
+      return 'pending_delivery' as order_state_enum;
+    }
+    return order_state_enum.created;
   }
 }

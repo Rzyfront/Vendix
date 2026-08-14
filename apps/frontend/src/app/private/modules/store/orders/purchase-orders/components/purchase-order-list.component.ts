@@ -138,6 +138,31 @@ export class PurchaseOrderListComponent {
       transform: (value: string) =>
         value ? new Date(value).toLocaleDateString() : '-',
     },
+    // Bug 4 frontend: columna "Próximo pago" derivada del backend
+    // (`next_payment_date` + `next_payment_due_in_days`). Badge de color
+    // según urgencia: verde >7d, amarillo ≤7d, rojo vencido, gris sin plan.
+    {
+      key: 'next_payment',
+      label: 'Próximo pago',
+      priority: 2,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          // computed en runtime vía transform: el color va en el label HTML,
+          // no en colorMap, porque el badge component soporta 1 color estático
+          // por celda. Aquí dejamos fallback neutro.
+          ok: '#10b981',
+          soon: '#f59e0b',
+          overdue: '#ef4444',
+          none: '#9ca3af',
+        },
+      },
+      transform: (value: any, row?: any) =>
+        this.formatNextPaymentBadge(row?.next_payment_due_in_days),
+      sortable: true,
+    },
     {
       key: 'total_amount',
       label: 'Total',
@@ -493,5 +518,18 @@ export class PurchaseOrderListComponent {
       cancelled: 'Cancelada',
     };
     return labels[status] || status;
+  }
+
+  /**
+   * Bug 4 frontend — Etiqueta del badge de "Próximo pago" según días restantes.
+   * Verde > 7d, amarillo 0–7d, rojo < 0 (vencida), gris si null.
+   * Devuelve solo el label; el color va por CSS class del badge (negociado
+   * en el colorMap de la columna: ok / soon / overdue / none).
+   */
+  formatNextPaymentBadge(days: number | null | undefined): string {
+    if (days === null || days === undefined) return 'Sin plan';
+    if (days < 0) return `Vencida hace ${Math.abs(days)}d`;
+    if (days === 0) return 'Vence hoy';
+    return `Vence en ${days}d`;
   }
 }

@@ -121,10 +121,18 @@ import {
 
           <!-- SKU + unit price. Unit price only shows when qty > 1 (with qty 1
                it equals the line total, so it is redundant); the SKU collapses
-               on very narrow screens (see max-width media query below). -->
+               on very narrow screens (see max-width media query below).
+               Bug 8: si el item tiene price_tier (multitarifa 'sale_unit'),
+               se muestra la presentación comercial ("Caja 12 und — $X")
+               en vez del unit_price plano. -->
           <div class="ci-sub">
             <span class="ci-sku">SKU: {{ item().variant?.sku || item().product.sku }}</span>
-            @if (item().quantity > 1) {
+            @if (item().price_tier; as tier) {
+              <span class="ci-tier" [title]="'Presentación: ' + tier.label">
+                {{ tier.label }} ({{ tier.units_per_package }} und) —
+                {{ tier.presentation_price | currency }}
+              </span>
+            } @else if (item().quantity > 1) {
               <span class="ci-unit">
                 {{ item().unit_price | currency }}
                 <span class="ci-tax">c/u</span>

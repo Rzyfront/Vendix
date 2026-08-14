@@ -68,6 +68,9 @@ export class OrderUtils {
       finished: 100,
       cancelled: 0,
       refunded: 0,
+      // Bug 7: estado intermedio post-cobro, pre-despacho. Progreso entre
+      // processing y shipped — el operador ya cobró pero aún no despachó.
+      pending_delivery: 70,
     };
     return progressMap[order.state] || 0;
   }

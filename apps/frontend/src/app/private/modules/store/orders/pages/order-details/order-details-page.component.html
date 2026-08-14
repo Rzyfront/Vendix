@@ -1,4 +1,49 @@
 <div>
+  <!-- Bug 7 — banner para órdenes en estado `pending_delivery`. Informa al
+       operador que la orden requiere despacho manual + entrega + finalizado
+       (el estado ya no se auto-finaliza al cobrar). Los 2 botones wirean a
+       los endpoints existentes de order-flow: ship y deliver. El auto-finish
+       job cierra la orden al final del día si nadie la finaliza manualmente. -->
+  @if (order()?.state === 'pending_delivery') {
+    <div
+      class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
+    >
+      <div class="text-warning shrink-0 mt-0.5">⚠️</div>
+      <div class="flex-1">
+        <p class="font-semibold text-text-primary text-sm">
+          Orden pendiente de despacho
+        </p>
+        <p class="text-xs text-text-secondary mt-1">
+          Esta orden contiene platos con envío a domicilio. Despáchala, márcala
+          como entregada y luego finalízala manualmente.
+        </p>
+        <div class="flex gap-2 mt-3">
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+            (click)="dispatchOrder()"
+          >
+            Despachar
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-semibold rounded-md bg-info text-white"
+            (click)="markDelivered()"
+          >
+            Marcar entregado
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-semibold rounded-md bg-success text-white ml-auto"
+            (click)="finalizeOrder()"
+          >
+            Finalizar
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   <!-- Loading State -->
   @if (isLoading()) {
     <div class="flex justify-center items-center h-64">

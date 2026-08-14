@@ -41,6 +41,7 @@ export class OrderFormatUtils {
       cancelled: 'Cancelled',
       refunded: 'Refunded',
       finished: 'Finished',
+      pending_delivery: 'Pendiente de despacho',
     };
     return statusMap[status] || status;
   }
@@ -76,6 +77,7 @@ export class OrderFormatUtils {
       cancelled: 'red',
       refunded: 'gray',
       finished: 'green',
+      pending_delivery: 'orange',
     };
     return colorMap[status] || 'gray';
   }

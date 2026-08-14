@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
   Param,
@@ -23,6 +24,7 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { RequestContextService } from 'src/common/context/request-context.service';
 
 /**
  * Store-scoped memberships (generalized membership core).
@@ -132,6 +134,23 @@ export class MembershipsController {
       );
     } catch (error: any) {
       return this.fail(error, 'Error al actualizar la membresía');
+    }
+  }
+
+  // Bug 10 — soft-delete con audit. Solo terminales (expired | suspended |
+  // cancelled) — active/frozen/pending_payment devuelven 409.
+  @Delete(':id')
+  @Permissions('store:memberships:delete')
+  async delete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason?: string } = {},
+  ) {
+    try {
+      const userId = RequestContextService.getUserId() ?? null;
+      await this.service.softDelete(id, userId, body?.reason);
+      return this.responseService.deleted('Membresía eliminada');
+    } catch (error: any) {
+      return this.fail(error, 'Error al eliminar la membresía');
     }
   }
 

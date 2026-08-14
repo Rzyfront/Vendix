@@ -157,6 +157,12 @@ export class PopHeaderComponent {
   readonly suppliers = signal<PopSupplier[]>([]);
   readonly locations = signal<PopLocation[]>([]);
 
+  // Bug 3: loading signals exposed to the shell so the config step can
+  // render a skeleton until the HTTP responses land. Avoids the user
+  // opening the wizard on a slow first load and seeing empty selectors.
+  readonly loadingSuppliers = signal(true);
+  readonly loadingLocations = signal(true);
+
   // Selector options
   readonly supplierOptions = signal<SelectorOption[]>([]);
   readonly locationOptions = signal<SelectorOption[]>([]);
@@ -333,6 +339,7 @@ export class PopHeaderComponent {
   }
 
   private loadLocations(): Observable<void> {
+    this.loadingLocations.set(true);
     return this.inventoryService
       .getLocations({ is_active: true })
       .pipe(
@@ -355,10 +362,12 @@ export class PopHeaderComponent {
               this.onLocationChange(this.selectedLocationId());
             }
           }
+          this.loadingLocations.set(false);
         }),
         map(() => void 0),
         catchError((error) => {
           console.error("Error loading locations:", error);
+          this.loadingLocations.set(false);
           return of(void 0);
         }),
       );

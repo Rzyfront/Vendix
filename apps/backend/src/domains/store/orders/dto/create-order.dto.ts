@@ -116,6 +116,19 @@ export class CreateOrderItemDto {
   @MaxLength(10)
   weight_unit?: string;
 
+  // Bug 12: UoM de venta snapshot. Frontend envía 'kg'/'und'/'L' + factor
+  // (ej. 250g por bolsa). Backend persiste en order_items para que el
+  // ticket y los reportes históricos no dependan de products.
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  sale_unit_code?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Transform(({ value }) => (value == null ? undefined : parseFloat(value)))
+  sale_quantity?: number;
+
   /**
    * Multi-tarifa: id de la tarifa de precios aplicada a esta línea (opcional).
    * Si está presente y la tarifa no es la default, el caller debe tener
@@ -125,6 +138,16 @@ export class CreateOrderItemDto {
   @IsInt()
   @Min(1)
   applied_price_tier_id?: number;
+
+  /**
+   * Bug 7 — Tipo de producto de la línea (opcional). El frontend POS lo envía
+   * para que `resolveInitialOrderState` detecte si la orden lleva un plato
+   * (`product_type='prepared'`) y active el flujo `pending_delivery`.
+   * Si ausente, se trata como no-prepared (orden normal).
+   */
+  @IsOptional()
+  @IsIn(['physical', 'prepared', 'service', 'custom', 'combo', 'ingredient'])
+  product_type?: 'physical' | 'prepared' | 'service' | 'custom' | 'combo' | 'ingredient';
 }
 
 export class CreateOrderDto {
@@ -156,6 +179,16 @@ export class CreateOrderDto {
   @IsOptional()
   @IsEnum(order_state_enum)
   state?: order_state_enum;
+
+  /**
+   * Bug 7 — Tipo de entrega de la orden. Necesario para que
+   * `resolveInitialOrderState` decida si la orden va a `pending_delivery`
+   * cuando además incluye un item `product_type='prepared'`. Default histórico
+   * (no enviado) se trata como `pickup`.
+   */
+  @IsOptional()
+  @IsIn(['pickup', 'home_delivery', 'direct_delivery', 'other', 'dine_in'])
+  delivery_type?: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' | 'dine_in';
 
   @IsOptional()
   @IsEnum(payments_state_enum)

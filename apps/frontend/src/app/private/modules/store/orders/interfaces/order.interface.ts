@@ -325,7 +325,9 @@ export type OrderState =
   | 'delivered'
   | 'cancelled'
   | 'refunded'
-  | 'finished';
+  | 'finished'
+  // Bug 7: estado intermedio para órdenes con envío a domicilio + platos.
+  | 'pending_delivery';
 
 export type PaymentStatus =
   | 'pending'

@@ -76,7 +76,10 @@ export class InvoiceNumberGenerator {
     const client = this.prisma.withoutScope();
     const updated = await client.$transaction(async (tx: any) => {
       const lockKey = `invoice_resolution:${accounting_entity_id}:${document_type}`;
-      await tx.$queryRawUnsafe(
+      // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
+      // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
+      // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
+      await tx.$executeRawUnsafe(
         'SELECT pg_advisory_xact_lock(hashtext($1))',
         lockKey,
       );

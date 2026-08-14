@@ -1237,6 +1237,12 @@ model order_items {
   description                      String?
   weight                           Decimal?                 @db.Decimal(10, 3)
   weight_unit                      String?                  @db.VarChar(10)
+  // Bug 12: UoM de venta en el momento del cobro. El frontend envía
+  // 'kg'/'und'/'L' + el factor de presentación (ej. 250g por bolsa). El
+  // snapshot se persiste para no depender de cambios futuros en
+  // products.units_per_package que rompan el ticket histórico.
+  sale_unit_code_snapshot          String?                  @db.VarChar(20)
+  sale_quantity_snapshot           Decimal?                 @db.Decimal(18, 6)
   item_type                        String?                  @default("physical") @db.VarChar(20)
   // Multi-tarifa snapshot (Phase 1: price tiers).
   // applied_price_tier_id keeps a soft FK with ON DELETE SET NULL so
@@ -3437,6 +3443,9 @@ enum order_state_enum {
   cancelled
   refunded
   finished
+  // Bug 7: estado intermedio cuando la orden se cobra con envío + platos.
+  // Queda pendiente de Despachar → Entregar → Finalizar manualmente.
+  pending_delivery
 }
 
 enum order_delivery_type_enum {
@@ -3832,24 +3841,30 @@ model membership_plans {
 }
 
 model memberships {
-  id              Int                    @id @default(autoincrement())
-  store_id        Int
-  customer_id     Int
-  plan_id         Int
-  kind            membership_kind_enum   @default(generic)
-  status          membership_status_enum @default(pending_payment)
-  period_start    DateTime?
-  period_end      DateTime?
-  auto_renew      Boolean                @default(false)
-  source_order_id Int?
-  notes           String?
-  created_at      DateTime               @default(now())
-  updated_at      DateTime               @updatedAt
+  id                Int                    @id @default(autoincrement())
+  store_id          Int
+  customer_id       Int
+  plan_id           Int
+  kind              membership_kind_enum   @default(generic)
+  status            membership_status_enum @default(pending_payment)
+  period_start      DateTime?
+  period_end        DateTime?
+  auto_renew        Boolean                @default(false)
+  source_order_id   Int?
+  notes             String?
+  // Bug 10: soft-delete audit. Solo terminales ({expired, suspended, cancelled})
+  // se pueden eliminar. El listado filtra deleted_at IS NULL por default.
+  deleted_at        DateTime?
+  deleted_by_user_id Int?
+  deletion_reason   String?
+  created_at        DateTime               @default(now())
+  updated_at        DateTime               @updatedAt
 
   @@index([store_id, customer_id])
   @@index([store_id, status])
   @@index([store_id, period_end])
   @@index([plan_id])
+  @@index([store_id, deleted_at])
 }
 
 model membership_profiles {
