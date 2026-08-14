@@ -261,24 +261,30 @@ jobs:
             # PR 2 — gate robusto. set +e local para que un fallo del gate no
             # aborte el script antes del fallback a 'all' (bash de GitHub
             # Actions corre con set -e implícito).
+            # Todas las variables van con \$: este bloque viaja dentro de un
+            # heredoc SIN comillas (`<< ENDSSH`, línea 81), así que un `$` sin
+            # escapar lo expande el runner de GitHub y NUNCA llega al EC2. Sin
+            # los escapes, `while [ \$SECONDS -lt \$END ]` se enviaba como
+            # `while [ 0 -lt ]` (test inválido → el bucle no entra) y el
+            # `docker inspect` se ejecutaba en el runner, no en la instancia.
             set +e
-            END=$((SECONDS + 90))
+            END=\$((SECONDS + 90))
             WORKER_READY=0
-            while [ $SECONDS -lt $END ]; do
+            while [ \$SECONDS -lt \$END ]; do
               if sudo docker logs vendix-backend-worker 2>&1 | grep -q "WORKER_READY pid="; then
                 WORKER_READY=1
                 break
               fi
               # Si el contenedor ya reinició (OOM o crash temprano antes del
               # ancla), abortamos el loop: no se va a estabilizar solo.
-              RESTARTS=$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
-              if [ "$RESTARTS" -gt 0 ]; then
-                echo "⚠️  Worker restarted ($RESTARTS times) before emitting WORKER_READY anchor."
+              RESTARTS=\$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
+              if [ "\$RESTARTS" -gt 0 ]; then
+                echo "⚠️  Worker restarted (\$RESTARTS times) before emitting WORKER_READY anchor."
                 break
               fi
               sleep 2
             done
-            if [ "$WORKER_READY" = "1" ]; then
+            if [ "\$WORKER_READY" = "1" ]; then
               WORKER_UP=1
               echo "✅ Worker container is running and ready (WORKER_READY anchor found)"
               sudo docker logs vendix-backend-worker --tail 20 || true
