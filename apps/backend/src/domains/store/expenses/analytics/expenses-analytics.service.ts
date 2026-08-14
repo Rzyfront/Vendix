@@ -147,7 +147,7 @@ export class ExpensesAnalyticsService {
         expense_count: b.expense_count,
         percentage:
           total > 0
-            ? Math.round((b.total_amount / total) * 10000) / 100
+            ? b.total_amount / total
             : 0,
         average_expense:
           b.expense_count > 0
