@@ -258,16 +258,35 @@ jobs:
             -e FRONTEND_URL="\$FRONTEND_URL" \\
             -e NODE_ENV="\$NODE_ENV" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG; then
-            echo "⏳ Waiting for worker to start (30s)..."
-            sleep 30
-            if sudo docker ps --filter "name=^/vendix-backend-worker\$" --filter "status=running" -q | grep -q .; then
+            # PR 2 — gate robusto. set +e local para que un fallo del gate no
+            # aborte el script antes del fallback a 'all' (bash de GitHub
+            # Actions corre con set -e implícito).
+            set +e
+            END=$((SECONDS + 90))
+            WORKER_READY=0
+            while [ $SECONDS -lt $END ]; do
+              if sudo docker logs vendix-backend-worker 2>&1 | grep -q "WORKER_READY pid="; then
+                WORKER_READY=1
+                break
+              fi
+              # Si el contenedor ya reinició (OOM o crash temprano antes del
+              # ancla), abortamos el loop: no se va a estabilizar solo.
+              RESTARTS=$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
+              if [ "$RESTARTS" -gt 0 ]; then
+                echo "⚠️  Worker restarted ($RESTARTS times) before emitting WORKER_READY anchor."
+                break
+              fi
+              sleep 2
+            done
+            if [ "$WORKER_READY" = "1" ]; then
               WORKER_UP=1
-              echo "✅ Worker container is running"
+              echo "✅ Worker container is running and ready (WORKER_READY anchor found)"
               sudo docker logs vendix-backend-worker --tail 20 || true
             else
-              echo "⚠️  Worker container is NOT running — logs:"
+              echo "⚠️  Worker container is NOT healthy — logs:"
               sudo docker logs vendix-backend-worker --tail 50 || true
             fi
+            set -e
           else
             echo "⚠️  Could not start the worker container."
           fi
