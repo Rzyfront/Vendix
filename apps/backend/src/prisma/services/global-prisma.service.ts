@@ -680,6 +680,13 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.webhook_event_dedup;
   }
 
+  // Dedupe table for billing-warning notifications + emails
+  // (auto_renew_disabled_no_credential + renewal_failed). Mirrors
+  // webhook_event_dedup pattern: global, no tenant scope.
+  get billing_warning_logs() {
+    return this.baseClient.billing_warning_logs;
+  }
+
   get redemption_consumptions() {
     return this.baseClient.redemption_consumptions;
   }

@@ -165,16 +165,9 @@ export class BillingWarningProcessor extends WorkerHost {
     }
 
     // 1) Upsert the dedupe row. P2002 collapses to "no-op".
-    // KNOWN TS GAP: `billing_warning_logs` was added in Step 1's migration
-    // before the `GlobalPrismaService` getter was added. We access it via
-    // `(this.prisma as any)` to keep this file scoped — adding the getter is
-    // the orchestrator's job so both this processor AND Agent A's listener
-    // can rely on it. Until then, the cast is harmless (the underlying
-    // baseClient exposes the model at runtime via the generated Prisma
-    // client).
     let isFirstInsert = false;
     try {
-      await (this.prisma as any).billing_warning_logs.create({
+      await this.prisma.billing_warning_logs.create({
         data: {
           store_id: storeId,
           type: 'renewal_failed',

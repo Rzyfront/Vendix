@@ -81,16 +81,9 @@ export class SubscriptionPaymentBillingWarningListener {
       // Dedupe row. Unique(store_id, type, source_event_id) — a P2002 here
       // means another listener instance / retry already stamped this event,
       // and the bell + email were already enqueued. Skip both.
-      //
-      // KNOWN TS GAP: `billing_warning_logs` was added in Step 1's migration
-      // but the workspace-root `@prisma/client` generated snapshot does not
-      // expose the delegate on `GlobalPrismaService`. Mirror the workaround
-      // from `apps/backend/src/jobs/billing-warning.processor.ts` — cast to
-      // `any` and trust the runtime client. Once the generated client catches
-      // up this cast disappears.
       let firstInsert = false;
       try {
-        await (this.prisma as any).billing_warning_logs.create({
+        await this.prisma.billing_warning_logs.create({
           data: {
             store_id: storeId,
             type: 'auto_renew_disabled_no_credential',
