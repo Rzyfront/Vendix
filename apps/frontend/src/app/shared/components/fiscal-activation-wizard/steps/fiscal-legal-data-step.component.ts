@@ -319,9 +319,9 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
     // `WizardPrefillLegalData` (todavía) no expone los campos del DTO estricto
     // del resolver de identidad (`municipality_code`, `ciiu_code`,
     // `vat_periodicity`, `is_withholding_agent`, `is_self_withholder`). El
-    // backend los devuelve en `fiscal_data` desde `PATCH /:scope/settings/
-    // fiscal-data`, pero el endpoint de wizard-prefill todavía no los mapea.
-    // Los leemos defensivamente vía bracket-notation + cast a un shape
+    // endpoint de `fiscal-data` (GET/PATCH /:scope/settings/fiscal-data) sí los
+    // persiste y devuelve, pero el snapshot de wizard-prefill todavía no los
+    // mapea. Los leemos defensivamente vía bracket-notation + cast a un shape
     // extendido, sin tocar la interfaz pública del modelo.
     const extra = legal as unknown as {
       municipality_code?: string | null;
