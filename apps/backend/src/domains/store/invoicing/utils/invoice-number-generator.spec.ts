@@ -13,7 +13,7 @@ describe('InvoiceNumberGenerator', () => {
       range_to: 20,
     };
     const tx = {
-      $queryRawUnsafe: jest.fn(),
+      $executeRawUnsafe: jest.fn(),
       invoice_resolutions: {
         findFirst: jest.fn().mockResolvedValue(resolution),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -50,7 +50,7 @@ describe('InvoiceNumberGenerator', () => {
     ).resolves.toEqual({ invoice_number: 'FE11', resolution_id: 9 });
 
     expect(fiscalScope.resolveAccountingEntityForFiscal).not.toHaveBeenCalled();
-    expect(tx.$queryRawUnsafe).toHaveBeenCalledWith(
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       'invoice_resolution:77:support_document',
     );
