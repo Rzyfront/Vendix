@@ -122,6 +122,13 @@ async function bootstrapWorker(): Promise<void> {
 
   logger.log('⚙️  Vendix Backend arrancó como WORKER (sin servidor HTTP)');
   logger.log('   Consume las colas BullMQ y ejecuta los @Cron programados.');
+  // PR 3 — ancla canónica que el gate del workflow (PR 2) busca con
+  // `docker logs ... | grep -q "WORKER_READY pid="`. Se emite DESPUÉS de
+  // `createApplicationContext` y `enableShutdownHooks`, lo que prueba que
+  // `onModuleInit` de @nestjs/bullmq ya construyó los Workers y que
+  // `onApplicationBootstrap` de ScheduleModule ya montó los @Cron. Mover
+  // este log a un punto anterior haría que mienta.
+  logger.log(`WORKER_READY pid=${process.pid} role=worker`);
 }
 
 async function bootstrap() {
@@ -559,5 +566,9 @@ async function bootstrapApi(role: VendixProcessRole) {
       ? '🧵 Rol del proceso: api (sin workers ni tareas programadas)'
       : '🧵 Rol del proceso: all (API + workers + tareas programadas, comportamiento histórico)',
   );
+  // PR 3 — ancla canónica equivalente al `WORKER_READY` del proceso worker.
+  // Permite a monitorización / smoke tests confirmar que la API está viva y
+  // bajo qué rol.
+  logger.log(`API_READY pid=${process.pid} role=${role}`);
 }
 bootstrap();
