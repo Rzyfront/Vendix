@@ -159,12 +159,17 @@
             "target": "es2022",
             "parser": {
               "syntax": "typescript",
-              "decorators": false
+              "decorators": true,
+              "dynamicImport": false
             },
             "transform": {
-              "legacyDecorator": false,
-              "decoratorMetadata": false
-            }
+              "legacyDecorator": true,
+              "decoratorMetadata": true
+            },
+            "keepClassNames": true
+          },
+          "module": {
+            "type": "commonjs"
           }
         }
       ]
