@@ -1,10 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
   Order,
@@ -85,11 +86,20 @@ let storeOrdersStatsCache: CacheEntry<Observable<OrderStats>> | null = null;
 export class StoreOrdersService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
 
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
-  ) {}
+  ) {
+    // QUI-563 Fase 2: register the module-level cache so the switch
+    // service evicts it on store change.
+    this.tenantCacheRegistry.register(
+      'store-orders-stats',
+      () => this.invalidateCache(),
+      'StoreOrdersService',
+    );
+  }
 
   /**
    * Construye parámetros URL manejando arrays y objetos complejos

@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ApiResponse,
@@ -308,6 +309,18 @@ export class AnalyticsService {
   private http = inject(HttpClient);
   private readonly authFacade = inject(AuthFacade);
   private readonly CACHE_TTL = 60000; // 60 seconds for analytics
+  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
+
+  constructor() {
+    // QUI-563 Fase 2: register with the bus. The service already detects
+    // a scope change inside `withCache()`, but the bus evicts proactively
+    // BEFORE the next read — first render after a switch hits the network.
+    this.tenantCacheRegistry.register(
+      'store-analytics',
+      () => this.invalidateCache(),
+      'AnalyticsService',
+    );
+  }
 
   private getApiUrl(endpoint: string): string {
     return `${environment.apiUrl}/store/analytics/${endpoint}`;
