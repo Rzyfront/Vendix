@@ -52,6 +52,10 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   finished: ['refunded'],
   cancelled: ['pending_payment', 'created', 'processing'],
   refunded: [],
+  // Bug 7: estado intermedio post-cobro con envío a domicilio + platos.
+  // Sólo avanza a shipped (Despachar) o delivered (Marcar entregado).
+  // Finalizar va por PATCH /store/orders/:id?state=finished (atajo).
+  pending_delivery: ['shipped', 'delivered'],
 };
 
 const CANCELABLE_STATES: OrderState[] = [
