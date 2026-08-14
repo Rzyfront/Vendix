@@ -63,7 +63,7 @@ export interface ReportAdaptedData {
 export interface ReportColumn {
   key: string;
   header: string;
-  type: 'text' | 'number' | 'currency' | 'date' | 'percentage';
+  type: 'text' | 'number' | 'currency' | 'date' | 'date-only' | 'percentage';
   align?: 'left' | 'center' | 'right';
   footer?: 'sum' | 'average' | 'count';
 }
