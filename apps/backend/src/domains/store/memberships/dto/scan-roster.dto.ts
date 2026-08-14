@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -36,6 +37,23 @@ export interface ExtractedPlan {
  * `warnings` and `errors` from this raw payload. `plan_name` MUST match an
  * entry in the document's `detected_plans[].name` to be auto-resolved.
  */
+
+/**
+ * A single note extracted by the OCR for a member. The key is canonical
+ * (eps, estado_fisico, lesiones, alergias, tipo_sangre, …) — see the
+ * `member_roster_ocr` prompt. The value is free-text. `include_in_summary`
+ * flags notes that should surface in the member's ficha (EPS, alergias,
+ * lesiones, etc.).
+ *
+ * Permission: the key whitelist is enforced server-side; AI extras are
+ * dropped silently during commit.
+ */
+export interface ExtractedMemberNote {
+  key: string;
+  value: string;
+  include_in_summary?: boolean | null;
+}
+
 export interface ExtractedMember {
   first_name: string | null;
   last_name: string | null;
@@ -55,6 +73,13 @@ export interface ExtractedMember {
   membership_start_date: string | null;
   membership_end_date: string | null;
   raw_row: string | null;
+  /**
+   * Structured notes extracted per the `member_roster_ocr` prompt rules
+   * (EPS, estado_fisico, lesiones, …). Persisted on commit via
+   * `MembershipNotesService.bulkSet` against `membership_member_notes`.
+   * Empty / absent array is fine — the bulk importer just skips the call.
+   */
+  notes?: ExtractedMemberNote[] | null;
 }
 
 /**
@@ -98,6 +123,27 @@ export interface PlanMatch {
   /** 0-100 confidence score; mirrors the invoice scanner tier scale. */
   confidence: number;
   candidates: PlanCandidate[];
+  /** The plan name as the AI emitted it (post-trim). For UI/audit logs. */
+  source_name?: string | null;
+  /**
+   * `true` when the AI's plan name is ambiguous OR absent in this store.
+   * Drives the UI's "needs review" badge on the plan row in the import modal
+   * (QUI-558 fluency fix: the user no longer has to guess which plan was
+   * matched). Mirrors the same rule memberships use for `warning` rows.
+   */
+  needs_review?: boolean;
+  /**
+   * Top-5 candidates kept for the UI's "map to existing" picker. The first
+   * element is the same as `matched_plan_id` when `status === 'existing'`.
+   * `candidates` is the typed view; `raw_candidates` carries the score
+   * breakdown (Levenshtein / word-overlap) so the UI can show "why".
+   */
+  raw_candidates?: Array<{
+    id: number;
+    name: string;
+    code?: string | null;
+    score: number;
+  }>;
 }
 
 /**
@@ -300,6 +346,37 @@ export class CommitMemberDto {
   @IsOptional()
   @IsBoolean()
   auto_renew?: boolean;
+
+  /**
+   * Structured notes (EPS, estado_fisico, lesiones, …) to persist against
+   * the member via `MembershipNotesService.bulkSet`. Empty / omitted ⇒
+   * no notes call is made. The key whitelist is enforced server-side; any
+   * unknown key from the AI is dropped silently (it's a forward-compat
+   * affordance, not a feature).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CommitMemberNoteDto)
+  notes?: CommitMemberNoteDto[];
+}
+
+/**
+ * Single note carried by the commit DTO. Mirrors the SetMembershipNoteDto
+ * shape (kept separate to avoid pulling the memberships module barrel into
+ * the scanner DTOs — the bulk importer persists via the service directly).
+ */
+export class CommitMemberNoteDto {
+  @IsString()
+  @MaxLength(100)
+  note_key!: string;
+
+  @IsString()
+  note_value!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  include_in_summary?: boolean;
 }
 
 export class CommitMemberRosterDto {

@@ -640,7 +640,14 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "weight_kg": "number or null",
       "plan_name": "string or null — MUST match a name in detected_plans[].name",
       "membership_start_date": "YYYY-MM-DD or null — when this membership period started",
-      "membership_end_date": "YYYY-MM-DD or null — expiration date of this membership period"
+      "membership_end_date": "YYYY-MM-DD or null — expiration date of this membership period",
+      "notes": [
+        {
+          "key": "eps | estado_fisico | lesiones | observaciones_medicas | alergias | tipo_sangre | contacto_emergencia_nombre | contacto_emergencia_telefono | contacto_emergencia_parentesco",
+          "value": "string — the value for the note",
+          "include_in_summary": "boolean or null — true for items that should surface in the member's ficha (EPS, alergias, lesiones)"
+        }
+      ]
     }
   ],
   "warnings": ["string"],
@@ -669,7 +676,16 @@ RULES:
 17. "medical_notes" / "goals": free-text strings. Trim whitespace. Use null when absent.
 18. "warnings": array of short Spanish strings about anything ambiguous, missing, or potentially wrong. Empty array if none.
 19. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality. Lower when OCR is uncertain, when names are split heuristically, when dates are inferred.
-20. OMIT any field you did not extract — do NOT emit keys with null or empty values. Include ONLY the fields you actually read for each member and each plan. Whenever an earlier rule says "leave null" or "use null", OMIT that key entirely instead. This is the single most important rule for keeping the output within the token budget. NEVER invent data.`,
+20. OMIT any field you did not extract — do NOT emit keys with null or empty values. Include ONLY the fields you actually read for each member and each plan. Whenever an earlier rule says "leave null" or "use null", OMIT that key entirely instead. This is the single most important rule for keeping the output within the token budget. NEVER invent data.
+21. "notes" (per member): extract structured fields that have no first-class slot in the schema but matter for the member's ficha — EPS, salud, lesiones, contacto de emergencia. Use the canonical key list below; do NOT invent new keys. The value is free-text and may be a single word ("Sanitas"), a short phrase ("Rodilla derecha operada 2023"), or a phone number; trim whitespace. Set "include_in_summary": true for items that should surface as "important" in the ficha (EPS, alergias, lesiones, tipo_sangre) — the rest default to false. If the document has no note-like fields for a member, OMIT the entire "notes" array.
+    - "eps": Colombian health insurer (Sanitas, Sura, Nueva EPS, Compensar, Famisanar, Salud Total, Coomeva, etc.). include_in_summary = true.
+    - "estado_fisico": short observer note (e.g. "Buena condición", "Limitación leve de movilidad"). include_in_summary = false.
+    - "lesiones": injuries, surgeries, chronic pain. include_in_summary = true.
+    - "observaciones_medicas": medical conditions, medications, treatments not covered by lesiones. include_in_summary = true.
+    - "alergias": drug/food/environmental allergies. include_in_summary = true.
+    - "tipo_sangre": blood type (A+, O-, etc.). include_in_summary = false.
+    - "contacto_emergencia_nombre" / "contacto_emergencia_telefono" / "contacto_emergencia_parentesco": mirror the top-level emergency_contact fields; emit only when distinct from them. include_in_summary = true.
+22. Do NOT extract the same value into both a top-level field (e.g. emergency_contact_name) and a notes entry. If the source shows the field clearly, populate the top-level slot; only emit a note when the source implies a related but distinct value (e.g. a second emergency contact).`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the document (handled by scanRoster()).
       prompt_template: null,

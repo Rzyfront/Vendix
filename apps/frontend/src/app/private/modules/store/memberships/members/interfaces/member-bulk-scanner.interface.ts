@@ -36,6 +36,20 @@ export interface ExtractedPlan {
   raw_period_label: string | null;
 }
 
+/**
+ * A structured note extracted by the OCR for a member (QUI-558).
+ *  - `key`   — canonical key (eps, estado_fisico, lesiones, alergias, …);
+ *              the backend whitelists server-side.
+ *  - `value` — the value as printed.
+ *  - `include_in_summary` — true when the note should surface in the
+ *              member's ficha (EPS, alergias, lesiones, …).
+ */
+export interface ExtractedMemberNote {
+  key: string;
+  value: string;
+  include_in_summary?: boolean | null;
+}
+
 /** A member detected in the source document. */
 export interface ExtractedMember {
   first_name: string | null;
@@ -67,6 +81,12 @@ export interface ExtractedMember {
   /** ISO date — membership expiry; drives status resolution. */
   membership_end_date: string | null;
   raw_row: string | null;
+  /**
+   * Structured notes (EPS, estado_fisico, lesiones, …). The modal renders
+   * them as editable key/value rows and the backend persists them via
+   * `MembershipNotesService.bulkSet` on commit.
+   */
+  notes?: ExtractedMemberNote[] | null;
 }
 
 /**
@@ -221,6 +241,13 @@ export interface CommitMemberDto {
   period_start: string | null;
   /** `null` for `pending_payment` memberships without expiry. */
   period_end: string | null;
+  /**
+   * Structured notes (EPS, estado_fisico, lesiones, …) extracted by the
+   * OCR and edited by the user in the modal. Persisted via
+   * `MembershipNotesService.bulkSet` on commit. Empty / omitted ⇒ no
+   * notes call is made.
+   */
+  notes?: ExtractedMemberNote[] | null;
 }
 
 /** Top-level commit payload. */

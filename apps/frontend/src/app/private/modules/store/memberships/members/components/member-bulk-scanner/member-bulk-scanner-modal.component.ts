@@ -38,6 +38,7 @@ import {
   CommitMemberDto,
   CommitMemberRosterDto,
   CommitPlanDto,
+  ExtractedMemberNote,
   MemberRosterAnalysis,
   PlanCandidate,
   PlanMatch,
@@ -552,6 +553,74 @@ const ACCEPTED_MIMETYPES = [
                         </div>
                       </div>
 
+                      <!-- Notas estructuradas (QUI-558): EPS, estado físico, lesiones, etc. -->
+                      <details class="bg-surface-secondary rounded p-2 mt-1">
+                        <summary class="cursor-pointer text-xs font-medium text-text-secondary flex items-center justify-between">
+                          <span>
+                            Notas (EPS, salud física, lesiones)
+                            @if (m.notes.length > 0) {
+                              <span class="ml-1 text-text-tertiary">({{ m.notes.length }})</span>
+                            }
+                          </span>
+                          <span class="text-text-tertiary text-[10px]">clic para expandir</span>
+                        </summary>
+                        <div class="mt-2 space-y-2">
+                          @if (m.notes.length === 0) {
+                            <p class="text-xs text-text-tertiary italic">
+                              Sin notas extraídas. Agrega una (EPS, alergias, lesiones, …) si quieres registrarlas en la ficha del socio.
+                            </p>
+                          }
+                          @for (n of m.notes; track $index) {
+                            <div class="grid grid-cols-12 gap-2 items-start">
+                              <select
+                                class="col-span-4 text-xs border border-border rounded px-2 py-2 bg-surface"
+                                [ngModel]="n.key"
+                                (ngModelChange)="updateNote(m, $index, { key: $event })"
+                                [name]="'note_key_' + m.row_number + '_' + $index"
+                              >
+                                <option value="" disabled>Selecciona…</option>
+                                @for (k of NOTE_KEYS; track k.key) {
+                                  <option [value]="k.key">{{ k.label }}</option>
+                                }
+                              </select>
+                              <input
+                                type="text"
+                                placeholder="Valor"
+                                class="col-span-5 text-xs border border-border rounded px-2 py-2 bg-surface"
+                                [ngModel]="n.value"
+                                (ngModelChange)="updateNote(m, $index, { value: $event })"
+                                [name]="'note_value_' + m.row_number + '_' + $index"
+                              />
+                              <label class="col-span-2 flex items-center text-xs text-text-secondary cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  class="mr-1"
+                                  [ngModel]="n.include_in_summary"
+                                  (ngModelChange)="updateNote(m, $index, { include_in_summary: $event })"
+                                  [name]="'note_imp_' + m.row_number + '_' + $index"
+                                />
+                                Ficha
+                              </label>
+                              <button
+                                type="button"
+                                class="col-span-1 text-xs text-red-600 hover:underline"
+                                (click)="removeNote(m, $index)"
+                                [attr.aria-label]="'Eliminar nota ' + noteLabel(n.key)"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          }
+                          <button
+                            type="button"
+                            class="text-xs text-primary hover:underline"
+                            (click)="addNote(m)"
+                          >
+                            + Agregar nota
+                          </button>
+                        </div>
+                      </details>
+
                       <!-- Per-row warnings / errors -->
                       @if (m.errors.length > 0 || m.warnings.length > 0) {
                         <div class="space-y-1">
@@ -939,6 +1008,12 @@ export class MemberBulkScannerModalComponent {
       warnings: m.warnings ?? [],
       errors: m.errors ?? [],
       excluded: !!m.excluded,
+      // Deep-clone so edits don't mutate the underlying analysis signal.
+      notes: (m.notes ?? []).map((n) => ({
+        key: n.key,
+        value: n.value,
+        include_in_summary: n.include_in_summary ?? false,
+      })),
     };
   }
 
@@ -1003,6 +1078,90 @@ export class MemberBulkScannerModalComponent {
     // there's now at least one of the two), drop that error.
     this.recomputeRowStatus(next);
     this.replaceMember(next);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Notes editor (QUI-558)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Canonical key whitelist for member notes. Mirrors the server-side
+   * whitelist in `member_roster_ocr` and the `MembershipNotesService`
+   * scheme. The user can pick from this list in the modal — the AI is
+   * free to emit any canonical key; the picker keeps the UI tidy.
+   */
+  readonly NOTE_KEYS: Array<{ key: string; label: string }> = [
+    { key: 'eps', label: 'EPS' },
+    { key: 'estado_fisico', label: 'Estado físico' },
+    { key: 'lesiones', label: 'Lesiones' },
+    { key: 'observaciones_medicas', label: 'Observaciones médicas' },
+    { key: 'alergias', label: 'Alergias' },
+    { key: 'tipo_sangre', label: 'Tipo de sangre' },
+    { key: 'contacto_emergencia_nombre', label: 'Contacto emergencia (nombre)' },
+    { key: 'contacto_emergencia_telefono', label: 'Contacto emergencia (teléfono)' },
+    { key: 'contacto_emergencia_parentesco', label: 'Contacto emergencia (parentesco)' },
+  ];
+
+  /**
+   * Default `include_in_summary` per key. Items flagged here surface in the
+   * member's ficha (QUI-558: EPS, alergias, lesiones, etc. are surfaced by
+   * default). Mirrors the prompt's intent.
+   */
+  readonly IMPORTANT_KEYS = new Set<string>([
+    'eps',
+    'lesiones',
+    'observaciones_medicas',
+    'alergias',
+    'tipo_sangre',
+    'contacto_emergencia_nombre',
+    'contacto_emergencia_telefono',
+    'contacto_emergencia_parentesco',
+  ]);
+
+  /** Add a fresh note row to the editable member. */
+  addNote(member: EditableMember, key?: string): void {
+    const notes = [...member.notes];
+    const resolvedKey = key ?? '';
+    notes.push({
+      key: resolvedKey,
+      value: '',
+      include_in_summary: this.IMPORTANT_KEYS.has(resolvedKey),
+    });
+    this.replaceMember({ ...member, notes });
+  }
+
+  /** Patch a single note field (key/value/include_in_summary). */
+  updateNote(
+    member: EditableMember,
+    index: number,
+    patch: Partial<ExtractedMemberNote>,
+  ): void {
+    const notes = [...member.notes];
+    if (!notes[index]) return;
+    const nextNote = { ...notes[index], ...patch };
+    if (patch.key !== undefined && patch.include_in_summary === undefined) {
+      nextNote.include_in_summary = this.IMPORTANT_KEYS.has(patch.key);
+    }
+    notes[index] = nextNote;
+    this.replaceMember({ ...member, notes });
+  }
+
+  /** Drop a note row. */
+  removeNote(member: EditableMember, index: number): void {
+    const notes = member.notes.filter((_, i) => i !== index);
+    this.replaceMember({ ...member, notes });
+  }
+
+  /** Returns the canonical key label for the picker / chips. */
+  noteLabel(key: string): string {
+    return this.NOTE_KEYS.find((k) => k.key === key)?.label ?? key;
+  }
+
+  /** `true` when the row has at least one note with a non-empty key+value. */
+  hasMeaningfulNotes(member: EditableMember): boolean {
+    return member.notes.some(
+      (n) => n.key?.trim() && n.value?.trim(),
+    );
   }
 
   /** Editable status override. */
@@ -1177,6 +1336,17 @@ export class MemberBulkScannerModalComponent {
         status: m.resolved_status,
         period_start: m.period_start ?? null,
         period_end: m.period_end ?? null,
+        // Drop notes without a key/value pair (the backend will skip them
+        // anyway, but trimming here keeps the payload small).
+        notes: this.hasMeaningfulNotes(m)
+          ? m.notes
+              .filter((n) => n.key?.trim() && n.value?.trim())
+              .map((n) => ({
+                key: n.key.trim(),
+                value: n.value.trim(),
+                include_in_summary: !!n.include_in_summary,
+              }))
+          : undefined,
       }));
 
     this.confirmed.emit({ plans: commitPlans, members: commitMembers });
@@ -1275,4 +1445,10 @@ interface EditableMember {
   warnings: string[];
   errors: string[];
   excluded: boolean;
+  /**
+   * Structured notes (EPS, estado_fisico, lesiones, …) — QUi-558.
+   * Seeded from the AI's `ExtractedMember.notes[]`. The modal renders them
+   * as an editable key/value list and the commit DTO carries them verbatim.
+   */
+  notes: ExtractedMemberNote[];
 }

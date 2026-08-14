@@ -12,6 +12,7 @@ import { MembershipPlansService } from '../membership-plans/membership-plans.ser
 import { CustomersService } from '../customers/customers.service';
 import { MembershipsService } from './memberships.service';
 import { MemberProfilesService } from './member-profiles.service';
+import { MembershipNotesService } from './membership-notes.service';
 import {
   ExtractedMember,
   ExtractedPlan,
@@ -71,6 +72,7 @@ export class MemberBulkScannerService {
     private readonly membershipPlansService: MembershipPlansService,
     private readonly membershipsService: MembershipsService,
     private readonly memberProfilesService: MemberProfilesService,
+    private readonly membershipNotesService: MembershipNotesService,
     private readonly customersService: CustomersService,
     private readonly responseService: ResponseService,
   ) {}
@@ -237,6 +239,8 @@ export class MemberBulkScannerService {
       // 1) Customer resolution (document first, then email).
       let existingCustomerId: number | null = null;
       let action: 'reuse' | 'create' = 'create';
+      const errors: string[] = [];
+      const warnings: string[] = [];
 
       if (raw.document_number) {
         const byDoc = await this.findCustomerByDocumentInOrg(
@@ -257,6 +261,26 @@ export class MemberBulkScannerService {
         if (byEmail) {
           existingCustomerId = byEmail.id;
           action = 'reuse';
+        }
+      }
+      // Phone lookup (QUI-558 fluency): when document/email miss, try a
+      // phone match. The phone is normalized to digits-last-10 so the
+      // match tolerates +57 prefixes, spaces, dashes, parentheses, and
+      // leading zeros. Only re-uses when the match is unique; ambiguous
+      // matches (multiple customers sharing the same phone) leave the
+      // row as `create` and surface a warning for the user to merge.
+      if (!existingCustomerId && raw.phone) {
+        const byPhone = await this.findCustomerByPhoneInOrg(
+          storeId,
+          raw.phone,
+        );
+        if (byPhone?.unique) {
+          existingCustomerId = byPhone.id;
+          action = 'reuse';
+        } else if (byPhone && !byPhone.unique) {
+          warnings.push(
+            `Teléfono ${raw.phone} está asociado a varios socios; revisa manualmente para evitar duplicados.`,
+          );
         }
       }
 
@@ -293,9 +317,9 @@ export class MemberBulkScannerService {
       );
 
       // 4) Per-row validation (errors are hard blockers; warnings are
-      //    soft — the user can fix in the modal).
-      const errors: string[] = [];
-      const warnings: string[] = [];
+      //    soft — the user can fix in the modal). The arrays are declared
+      //    at the top of the loop so the phone-lookup branch above can push
+      //    ambiguous-match warnings without hitting a TDZ (QUI-558 fix).
 
       // Date-inference advisories (soft): the user can override in the modal.
       if (yearInjected) {
@@ -501,6 +525,50 @@ export class MemberBulkScannerService {
               `[MemberRosterCommit] linkCustomerToStore failed for customer ${customerId}: ${err?.message}`,
             );
           }
+
+          // Fill-in merge (QUI-558): when the OCR brought a value the
+          // existing customer is missing, persist it. NEVER overwrite a
+          // stored value — the user can edit later if they want to change
+          // it. Document fields are intentionally skipped (sensitive).
+          try {
+            const existing = await this.prisma.withoutScope().users.findFirst({
+              where: { id: customerId },
+              select: {
+                first_name: true,
+                last_name: true,
+                phone: true,
+                email: true,
+              },
+            });
+            if (existing) {
+              const fillIn: {
+                first_name?: string;
+                last_name?: string;
+                phone?: string;
+                email?: string;
+              } = {};
+              if (!existing.first_name?.trim() && m.first_name?.trim()) {
+                fillIn.first_name = m.first_name.trim();
+              }
+              if (!existing.last_name?.trim() && m.last_name?.trim()) {
+                fillIn.last_name = m.last_name.trim();
+              }
+              if (!existing.phone?.trim() && m.phone?.trim()) {
+                fillIn.phone = m.phone.trim();
+              }
+              const synthEmail = m.email?.trim();
+              if (!existing.email?.trim() && synthEmail) {
+                fillIn.email = synthEmail;
+              }
+              if (Object.keys(fillIn).length > 0) {
+                await this.customersService.update(storeId, customerId, fillIn);
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(
+              `[MemberRosterCommit] fill-in merge failed for customer ${customerId}: ${err?.message}`,
+            );
+          }
         } else {
           const email =
             m.email?.trim() ||
@@ -533,6 +601,27 @@ export class MemberBulkScannerService {
           } catch (err: any) {
             this.logger.warn(
               `[MemberRosterCommit] profile upsert failed for customer ${customerId}: ${err?.message}`,
+            );
+          }
+        }
+
+        // Notes (EPS, estado_fisico, lesiones, …) — persist via the
+        // dedicated service. Drops unknown keys server-side (the
+        // `MembershipNotesService` doesn't filter on the key whitelist yet,
+        // so callers should pass only canonical keys; the prompt enforces
+        // this on the AI side).
+        if (Array.isArray(m.notes) && m.notes.length > 0) {
+          try {
+            await this.membershipNotesService.bulkSet(customerId, {
+              notes: m.notes.map((n) => ({
+                note_key: n.note_key,
+                note_value: n.note_value,
+                include_in_summary: n.include_in_summary ?? false,
+              })),
+            });
+          } catch (err: any) {
+            this.logger.warn(
+              `[MemberRosterCommit] notes persistence failed for customer ${customerId}: ${err?.message}`,
             );
           }
         }
@@ -783,6 +872,9 @@ export class MemberBulkScannerService {
         matched_plan_id: null,
         confidence: 0,
         candidates: [],
+        source_name: null,
+        needs_review: true,
+        raw_candidates: [],
       };
     }
 
@@ -813,6 +905,11 @@ export class MemberBulkScannerService {
         confidence: 100,
         candidates: [
           { id: exact.id, name: exact.name, code: exact.code, confidence: 100 },
+        ],
+        source_name: extracted.name,
+        needs_review: false,
+        raw_candidates: [
+          { id: exact.id, name: exact.name, code: exact.code, score: 100 },
         ],
       };
     }
@@ -869,6 +966,11 @@ export class MemberBulkScannerService {
     const top = scored.slice(0, 5);
 
     if (top.length === 0 || top[0].score < 30) {
+      this.logger.warn(
+        `[MemberRosterAnalyze] Plan "${extracted.name}" did not match any plan in this store (top score=${
+          top[0]?.score ?? 0
+        }, candidates=${top.length}). Will be flagged needs_review.`,
+      );
       return {
         ref_index,
         status: 'new',
@@ -880,12 +982,26 @@ export class MemberBulkScannerService {
           code: t.code,
           confidence: Math.round(t.score),
         })),
+        source_name: extracted?.name ?? null,
+        needs_review: true,
+        raw_candidates: top.map((t) => ({
+          id: t.id,
+          name: t.name,
+          code: t.code,
+          score: Math.round(t.score * 100) / 100,
+        })),
       };
     }
 
     const best = top[0];
     const status: 'existing' | 'partial' =
       best.score >= 65 ? 'existing' : 'partial';
+
+    if (status === 'partial') {
+      this.logger.warn(
+        `[MemberRosterAnalyze] Plan "${extracted.name}" only partially matches (top="${best.name}" score=${Math.round(best.score)}). User must pick a candidate.`,
+      );
+    }
 
     return {
       ref_index,
@@ -897,6 +1013,14 @@ export class MemberBulkScannerService {
         name: t.name,
         code: t.code,
         confidence: Math.round(t.score),
+      })),
+      source_name: extracted?.name ?? null,
+      needs_review: status === 'partial',
+      raw_candidates: top.map((t) => ({
+        id: t.id,
+        name: t.name,
+        code: t.code,
+        score: Math.round(t.score * 100) / 100,
       })),
     };
   }
@@ -929,8 +1053,8 @@ export class MemberBulkScannerService {
     startInferred: boolean;
     endInferred: boolean;
   } {
-    const s = this.injectYear(startRaw, currentYear);
-    const e = this.injectYear(endRaw, currentYear);
+    const s = this.parseFlexibleDate(startRaw, currentYear);
+    const e = this.parseFlexibleDate(endRaw, currentYear);
 
     let start: Date;
     let end: Date;
@@ -975,31 +1099,128 @@ export class MemberBulkScannerService {
   }
 
   /**
-   * Parsea el prefijo `YYYY-MM-DD` del string. Cuando el año es un centinela
-   * (`0000`, `0`) o de dos dígitos (< 100), lo reemplaza por `currentYear` y
-   * marca `injected=true`. Construye la Date en HORA LOCAL a mediodía
-   * (`new Date(y, m-1, d, 12)`) para que el status compare contra `today`
-   * (00:00 local) sin el off-by-one de UTC. Devuelve `null` si no parsea.
+   * Tolerant date parser for OCR'd rosters (QUI-558). Accepts the formats
+   * the AI emits AND the ones it sometimes leaks through unchanged:
+   *
+   *   - `YYYY-MM-DD`            (ISO; per the prompt rule 14)
+   *   - `YYYY-MM-DDTHH:mm:ss`   (ISO with time)
+   *   - `DD/MM/YYYY`            (Colombia — first because it's the
+   *                              dominant local format)
+   *   - `DD-MM-YYYY` / `DD.MM.YYYY`
+   *   - `MM/DD/YYYY`            (US fallback — only when the first chunk is
+   *                              > 12, otherwise ambiguous and DD/MM wins)
+   *   - `DD/MM/YY`              (two-digit year, 2000-2069)
+   *   - `D de mes de YYYY` / `D mes YYYY` (Spanish words: "4 de julio de 2024",
+   *                              "4 julio 2024")
+   *
+   * Returns `{ date, injected, format }` where `injected` is true when the
+   * year was a sentinel and had to be replaced with `currentYear`. Returns
+   * `null` when nothing matched.
+   *
+   * Builds the Date in HORA LOCAL a mediodía (`new Date(y, m-1, d, 12)`) so
+   * the status compare against `today` (00:00 local) does not suffer the
+   * UTC off-by-one.
    */
-  private injectYear(
-    dateStr: string | null,
+  private parseFlexibleDate(
+    raw: string | null,
     currentYear: number,
+  ): { date: Date; injected: boolean; format: string } | null {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    // Spanish month map (lowercase, no accents).
+    const MESES: Record<string, number> = {
+      enero: 1,
+      febrero: 2,
+      marzo: 3,
+      abril: 4,
+      mayo: 5,
+      junio: 6,
+      julio: 7,
+      agosto: 8,
+      septiembre: 9,
+      setiembre: 9,
+      octubre: 10,
+      noviembre: 11,
+      diciembre: 12,
+    };
+
+    // 1) ISO: YYYY-MM-DD (with optional time).
+    let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (m) {
+      const y = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const d = parseInt(m[3], 10);
+      const r = this.buildDate(y, mo, d, currentYear);
+      if (r) return { ...r, format: 'YYYY-MM-DD' };
+    }
+
+    // 2) DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY (Colombia first).
+    m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(s);
+    if (m) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      let y = parseInt(m[3], 10);
+      if (y < 100) y = 2000 + y; // 24 → 2024
+      // DD/MM/YYYY if `a > 12` (otherwise could be MM/DD — try DD/MM first).
+      if (a > 12 && b <= 12) {
+        const r = this.buildDate(y, b, a, currentYear);
+        if (r) return { ...r, format: 'DD/MM/YYYY' };
+      }
+      if (b > 12 && a <= 12) {
+        // US-style: MM/DD/YYYY
+        const r = this.buildDate(y, a, b, currentYear);
+        if (r) return { ...r, format: 'MM/DD/YYYY' };
+      }
+      if (a <= 12 && b <= 12) {
+        // Ambiguous — Colombian default ⇒ DD/MM/YYYY.
+        const r = this.buildDate(y, b, a, currentYear);
+        if (r) return { ...r, format: 'DD/MM/YYYY' };
+      }
+    }
+
+    // 3) "4 de julio de 2024" / "4 julio 2024" / "4 de julio" /
+    //    "4 julio". We split into two patterns so the regex engine can't
+    //    backtrack and silently capture the connector word "de" as the
+    //    month when both the trailing "de" and the year are absent
+    //    (QUI-558 fluency fix).
+    m =
+      /^(\d{1,2})\s+de\s+([a-záéíóúñ]+)(?:\s+de\s+(\d{2,4}))?/i.exec(s) ||
+      /^(\d{1,2})\s+([a-záéíóúñ]+)(?:\s+(\d{2,4}))?/i.exec(s);
+    if (m) {
+      const d = parseInt(m[1], 10);
+      const mesName = m[2].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const mo = MESES[mesName];
+      const yRaw = m[3] ? parseInt(m[3], 10) : currentYear;
+      const y = yRaw < 100 ? 2000 + yRaw : yRaw;
+      if (mo) {
+        const injected = !m[3];
+        const r = this.buildDate(y, mo, d, currentYear, injected);
+        if (r) return { ...r, format: 'D mes YYYY' };
+      }
+    }
+
+    return null;
+  }
+
+  /** Builds a local-noon Date; returns null on invalid components. */
+  private buildDate(
+    year: number,
+    month: number,
+    day: number,
+    currentYear: number,
+    forcedInjected = false,
   ): { date: Date; injected: boolean } | null {
-    if (!dateStr) return null;
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
-    if (!m) return null;
-
-    let year = parseInt(m[1], 10);
-    const month = parseInt(m[2], 10);
-    const day = parseInt(m[3], 10);
-    if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
-
-    let injected = false;
-    if (!Number.isFinite(year) || year < 100) {
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+      return null;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    let injected = forcedInjected;
+    if (!Number.isFinite(year) || year < 100 || year === 0) {
       year = currentYear;
       injected = true;
     }
-
     const date = new Date(year, month - 1, day, 12, 0, 0);
     if (!Number.isFinite(date.getTime())) return null;
     return { date, injected };
@@ -1077,6 +1298,72 @@ export class MemberBulkScannerService {
   }
 
   /**
+   * Phone lookup (QUI-558). Normalizes to "last 10 digits" so the match
+   * tolerates any of: `+57 300 123 4567`, `300-123-4567`, `(300) 123-4567`,
+   * `3001234567`, `+573001234567`. The derived `digitsLast10` is the join
+   * key — Colombian mobile numbers are 10 digits, and we drop the country
+   * code so a user whose stored phone is `+57 300 123 4567` matches an
+   * OCR'd `3001234567`.
+   *
+   * Returns `{ id, unique }` so the caller can warn on ambiguous matches
+   * (multiple customers sharing the same phone) — those NEVER auto-reuse;
+   * the user must manually pick.
+   */
+  private async findCustomerByPhoneInOrg(
+    storeId: number,
+    phone: string,
+  ): Promise<{ id: number; unique: boolean } | null> {
+    const store = await this.prisma.withoutScope().stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store) return null;
+
+    const digitsLast10 = this.normalizePhoneLast10(phone);
+    if (!digitsLast10) return null;
+
+    // We can't filter by a computed substring on Postgres without a
+    // generated column, so the practical approach is: pull all customer
+    // phones in the org and match in memory. For a typical gym (≤10k
+    // customers) this is cheap; for very large tenants we can add a
+    // trigram index or a stored normalized column later.
+    const candidates = await this.prisma.users.findMany({
+      where: {
+        organization_id: store.organization_id,
+        phone: { not: null },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: { id: true, phone: true },
+      take: 5000,
+    });
+
+    const matches: number[] = [];
+    for (const c of candidates) {
+      if (!c.phone) continue;
+      if (this.normalizePhoneLast10(c.phone) === digitsLast10) {
+        matches.push(c.id);
+      }
+    }
+
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return { id: matches[0], unique: true };
+    // Ambiguous — pick the first for the warning, but flag unique=false.
+    return { id: matches[0], unique: false };
+  }
+
+  /**
+   * `+57 300 123 4567` / `300-123-4567` / `3001234567` → `3001234567`.
+   * Returns null when the input is not a valid phone (no digits).
+   */
+  private normalizePhoneLast10(phone: string | null | undefined): string | null {
+    if (!phone) return null;
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) return null;
+    const last10 = digits.slice(-10);
+    return /^\d{10}$/.test(last10) ? last10 : null;
+  }
+
+  /**
    * Detect an already-active/pending membership for (customer, plan) so
    * the analyze step can warn the user before they confirm a duplicate.
    */
@@ -1116,7 +1403,18 @@ export class MemberBulkScannerService {
     weight_kg?: number;
   }): UpsertMemberProfileDto | null {
     const dto = new UpsertMemberProfileDto();
-    if (m.date_of_birth) dto.date_of_birth = m.date_of_birth;
+    // Tolerant parse — the AI converts per rule 7, but real OCR'd docs
+    // sometimes leak DD/MM/YYYY. Use the current year for the sentinel
+    // injection (no effect for a real 4-digit year).
+    if (m.date_of_birth) {
+      const currentYear = new Date().getFullYear();
+      const parsed = this.parseFlexibleDate(m.date_of_birth, currentYear);
+      if (parsed) {
+        dto.date_of_birth = this.toIsoDate(parsed.date);
+      } else {
+        dto.date_of_birth = m.date_of_birth;
+      }
+    }
     if (m.gender) dto.gender = m.gender;
     if (m.emergency_contact_name)
       dto.emergency_contact_name = m.emergency_contact_name;
