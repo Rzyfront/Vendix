@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -10,6 +11,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
@@ -32,6 +34,12 @@ import {
 } from '../interfaces/rut-scan-result.interface';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
+import { FiscalOperationsService } from '../../../../private/modules/fiscal-operations/services/fiscal-operations.service';
+import {
+  FiscalApiScope,
+  FiscalResponsibilitiesCatalog,
+  FiscalVatPeriodicity,
+} from '../../../../private/modules/fiscal-operations/interfaces/fiscal-operations.interface';
 
 @Component({
   selector: 'app-fiscal-legal-data-step',
@@ -85,6 +93,10 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
         #form
         [initialValue]="initial()"
         [disabled]="submitting() || readOnlyForStore()"
+        [catalog]="catalog()"
+        [showVatPeriodicity]="true"
+        [showLocationHelpers]="true"
+        [requireMunicipalityCode]="true"
         (validityChange)="onValidity($event)"
         (valueChange)="onValueChange($event)"
       ></app-legal-data-form>
@@ -165,14 +177,24 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 })
 export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
+  private readonly fiscalOps = inject(FiscalOperationsService);
   private readonly http = inject(HttpClient);
   private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly stepId: FiscalWizardStepId = 'legal_data';
   readonly valid = signal(false);
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<LegalDataValue> | null>(null);
+
+  /**
+   * Catálogo DIAN de responsabilidades (casilla 53 del RUT) que se pasa al
+   * `LegalDataFormComponent`. Lo cargamos una sola vez por scope al montar
+   * el paso. Sin catálogo, el form cae a su lista de respaldo (6 códigos) —
+   * que ahora incluye O-48 y O-49 aunque la red falle.
+   */
+  readonly catalog = signal<FiscalResponsibilitiesCatalog | null>(null);
 
   /** Visibility of the AI RUT scanner modal. */
   readonly scannerOpen = signal(false);
@@ -206,14 +228,44 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
   private hydrated = false;
 
   constructor() {
+    // Cargamos el catálogo de responsabilidades del scope actual. La promesa
+    // es best-effort: si falla, el form usa su lista de respaldo que ya trae
+    // O-48 / O-49 (antes de este cambio ni siquiera los mostraba).
+    this.loadResponsibilitiesCatalog();
+
     effect(() => {
       const key = this.service.fiscalContextKey();
-      if (key && key !== this.loadedContextKey) {
+      if (key && this.loadedContextKey !== key) {
+        // Cambio de scope → recargar el catálogo del nuevo scope también.
         this.loadedContextKey = key;
         this.hydrated = false;
+        this.loadResponsibilitiesCatalog();
         void this.loadInitial();
       }
     });
+  }
+
+  /**
+   * Trae el catálogo DIAN de responsabilidades para el scope actual. El
+   * endpoint vive en `/fiscal/responsibilities/catalog` (mismo namespace
+   * que usa el panel "Identidad"). Si falla la red, conservamos el valor
+   * anterior y dejamos que el form pinte con su lista de respaldo.
+   */
+  private loadResponsibilitiesCatalog(): void {
+    const scope: FiscalApiScope =
+      this.service.userScope() === 'organization' ? 'organization' : 'store';
+    this.fiscalOps
+      .getResponsibilitiesCatalog(scope)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.data) this.catalog.set(res.data);
+        },
+        error: () => {
+          // Silencioso: el form tiene lista de respaldo, el usuario puede
+          // completar el paso aunque la red esté caída.
+        },
+      });
   }
 
   private baseUrl(): string {
@@ -263,6 +315,22 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
     // 'JURIDICA') intact instead of overwriting them with null/garbage.
     const nit_type = this.normalizeNitType(legal.nit_type);
     const person_type = this.normalizePersonType(legal.person_type);
+
+    // `WizardPrefillLegalData` (todavía) no expone los campos del DTO estricto
+    // del resolver de identidad (`municipality_code`, `ciiu_code`,
+    // `vat_periodicity`, `is_withholding_agent`, `is_self_withholder`). El
+    // backend los devuelve en `fiscal_data` desde `PATCH /:scope/settings/
+    // fiscal-data`, pero el endpoint de wizard-prefill todavía no los mapea.
+    // Los leemos defensivamente vía bracket-notation + cast a un shape
+    // extendido, sin tocar la interfaz pública del modelo.
+    const extra = legal as unknown as {
+      municipality_code?: string | null;
+      ciiu_code?: string | null;
+      vat_periodicity?: FiscalVatPeriodicity | '' | null;
+      is_withholding_agent?: boolean | null;
+      is_self_withholder?: boolean | null;
+    };
+
     return {
       ...(tax_regime ? { tax_regime } : {}),
       ...(nit_type ? { nit_type } : {}),
@@ -273,7 +341,31 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
       ciiu: legal.ciiu ?? '',
       tax_responsibilities: legal.tax_responsibilities ?? [],
       tax_scheme: legal.tax_scheme ?? '',
+      municipality_code: extra.municipality_code ?? '',
+      ciiu_code: extra.ciiu_code ?? legal.ciiu ?? '',
+      vat_periodicity: this.normalizeVatPeriodicity(extra.vat_periodicity),
+      is_withholding_agent: extra.is_withholding_agent ?? false,
+      is_self_withholder: extra.is_self_withholder ?? false,
     };
+  }
+
+  /**
+   * Normaliza `vat_periodicity` al set conocido por el form
+   * (`monthly | bimonthly | four_monthly | ''`). El backend lo persiste como
+   * string; un valor desconocido lo serializamos como '' para que no se
+   * cuele al PATCH.
+   */
+  private normalizeVatPeriodicity(
+    value: FiscalVatPeriodicity | '' | null | undefined,
+  ): FiscalVatPeriodicity | '' {
+    const VALID: FiscalVatPeriodicity[] = [
+      'monthly',
+      'bimonthly',
+      'four_monthly',
+    ];
+    return VALID.includes(value as FiscalVatPeriodicity)
+      ? (value as FiscalVatPeriodicity)
+      : '';
   }
 
   private normalizeTaxRegime(

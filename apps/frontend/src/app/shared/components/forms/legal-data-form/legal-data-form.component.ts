@@ -5,10 +5,11 @@ import {
   effect,
   inject,
   input,
+  OnInit,
   output,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   FormControl,
@@ -22,12 +23,21 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../selector/selector.component';
+import { ToggleComponent } from '../../toggle/toggle.component';
+import { TooltipComponent } from '../../tooltip/tooltip.component';
+import { AlertBannerComponent } from '../../alert-banner/alert-banner.component';
+import { IconComponent } from '../../icon/icon.component';
 import { computeNitDv, nitDvValidator } from '../../../utils/nit.util';
 import {
   CountryService,
   Department,
   City,
 } from '../../../../services/country.service';
+import {
+  FiscalResponsibilitiesCatalog,
+  FiscalResponsibilityCatalogEntry,
+  FiscalVatPeriodicity,
+} from '../../../../private/modules/fiscal-operations/interfaces/fiscal-operations.interface';
 
 export type PersonType = 'NATURAL' | 'JURIDICA';
 export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
@@ -47,6 +57,19 @@ export interface LegalDataValue {
   city: string;
   tax_responsibilities: string[];
   tax_scheme: string;
+  /**
+   * Código DANE del municipio (Divipola 5 dígitos) — columna real
+   * `stores.municipality_code` / `organizations.municipality_code`.
+   */
+  municipality_code: string;
+  /** Código CIIU dedicado a la cascada store→org. */
+  ciiu_code: string;
+  /** Periodicidad de declaración de IVA (art. 600 ET). Solo si O-48. */
+  vat_periodicity: FiscalVatPeriodicity | '';
+  /** Marca de retenedor en la fuente. */
+  is_withholding_agent: boolean;
+  /** Marca de autorretenedor. */
+  is_self_withholder: boolean;
 }
 
 interface LegalDataControls {
@@ -63,16 +86,35 @@ interface LegalDataControls {
   city: FormControl<string>;
   tax_responsibilities: FormControl<string[]>;
   tax_scheme: FormControl<string>;
+  municipality_code: FormControl<string>;
+  ciiu_code: FormControl<string>;
+  vat_periodicity: FormControl<FiscalVatPeriodicity | ''>;
+  is_withholding_agent: FormControl<boolean>;
+  is_self_withholder: FormControl<boolean>;
 }
 
+/**
+ * Lista de respaldo (compatibilidad hacia atrás). Cuando el padre no inyecta
+ * un catálogo fresco del backend (panel "Identidad" lo hace; el wizard, antes
+ * de este cambio, lo usaba para el listado de toggles), caemos a esta lista
+ * estática para no romper consumidores existentes. Mantenemos los 6 códigos
+ * que ya estaban antes más O-48 y O-49 que el wizard nunca llegó a mostrar.
+ */
 const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
   { code: 'R-99-PN', label: 'R-99-PN - No aplica - Persona natural' },
   { code: 'O-13', label: 'O-13 - Gran contribuyente' },
   { code: 'O-15', label: 'O-15 - Autorretenedor' },
   { code: 'O-23', label: 'O-23 - Agente retención IVA' },
   { code: 'O-47', label: 'O-47 - Régimen simple de tributación' },
+  { code: 'O-48', label: 'O-48 - Responsable de IVA' },
+  { code: 'O-49', label: 'O-49 - No responsable de IVA' },
   { code: 'R-99-PJ', label: 'R-99-PJ - No aplica - Persona jurídica' },
 ];
+
+/** Código DIAN "Responsable de IVA" — habilita el selector de periodicidad. */
+const VAT_RESPONSIBLE_CODE = 'O-48';
+/** Código DIAN "No responsable de IVA" — excluyente con O-48 (aviso suave). */
+const VAT_NOT_RESPONSIBLE_CODE = 'O-49';
 
 /** Document types that carry a DIAN verification digit (DV). Only NIT does. */
 const DV_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>(['NIT']);
@@ -84,10 +126,25 @@ const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
   'NIT_EXTRANJERIA',
 ]);
 
+const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
+  'monthly',
+  'bimonthly',
+  'four_monthly',
+];
+
 @Component({
   selector: 'app-legal-data-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    InputComponent,
+    SelectorComponent,
+    ToggleComponent,
+    TooltipComponent,
+    AlertBannerComponent,
+    IconComponent,
+  ],
   template: `
     <form [formGroup]="form" class="space-y-4">
       <!--
@@ -233,37 +290,280 @@ const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
         }
       </div>
 
+      <!--
+        "Ubicación DIAN": códigos DANE del municipio (Divipola 5 dígitos) y
+        CIIU dedicado. El backend persiste estos valores en columnas reales
+        (stores.municipality_code, stores.ciiu_code) que consume
+        calculateIca al generar declaraciones. El catálogo api-colombia es
+        solo referencia (devuelve IDs no-DANE; el código oficial lo captura
+        el usuario).
+      -->
+      @if (showLocationHelpers()) {
+        <fieldset
+          class="space-y-3 rounded-lg border border-border p-3 md:p-4 bg-[var(--color-surface-secondary)]"
+        >
+          <legend class="text-sm font-medium text-text-primary px-1">
+            Ubicación DIAN
+          </legend>
+          <p class="text-xs text-text-secondary -mt-1">
+            Códigos oficiales que viajan en tus documentos electrónicos y
+            determinan la tarifa de ICA.
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <app-input
+                label="Código DANE del municipio"
+                formControlName="municipality_code"
+                placeholder="Ej: 11001 (Bogotá)"
+                [maxlength]="10"
+                [required]="requireMunicipalityCode()"
+                helperText="Divipola 5 dígitos. Se persiste en store.municipality_code."
+              ></app-input>
+            </div>
+            <div>
+              <app-input
+                label="Código CIIU (DIAN)"
+                formControlName="ciiu_code"
+                placeholder="Ej: 4711 (Comercio al por menor)"
+                [maxlength]="10"
+                helperText="4 dígitos. Se persiste en store.ciiu_code (cascada store→org)."
+              ></app-input>
+            </div>
+          </div>
+
+          <div>
+            <div
+              class="flex items-center gap-1.5 text-sm font-medium text-text-primary mb-2"
+            >
+              <span>Referencia geográfica (api-colombia)</span>
+              <app-tooltip
+                content="Selector auxiliar para confirmar departamento/municipio antes de capturar el código DANE."
+                position="bottom"
+                size="sm"
+              >
+                <span
+                  class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                >
+                  <app-icon name="help-circle" [size]="12"></app-icon>
+                </span>
+              </app-tooltip>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <app-selector
+                [options]="departmentOptions()"
+                [placeholder]="
+                  loadingDepartments() ? 'Cargando...' : 'Departamento'
+                "
+                [disabled]="true"
+              ></app-selector>
+              <app-selector
+                [options]="cityOptions()"
+                [placeholder]="cityPlaceholder()"
+                [disabled]="true"
+              ></app-selector>
+            </div>
+            <p class="text-[11px] text-text-secondary mt-2">
+              La api-colombia devuelve IDs no-DANE; usa los selectores como
+              referencia y captura el código DANE manualmente arriba.
+            </p>
+          </div>
+        </fieldset>
+      }
+
+      <!--
+        Responsabilidades fiscales (casilla 53 del RUT). Cada toggle se
+        renderiza desde el catálogo que el padre inyecta o, en su defecto,
+        desde la lista de respaldo. Cuando O-48 está activo, aparece el
+        selector de periodicidad de IVA debajo del toggle.
+      -->
       @if (showResponsibilities()) {
-        <fieldset class="space-y-2">
-          <legend class="text-sm font-medium text-text-primary">
+        <fieldset
+          class="space-y-3 rounded-lg border border-border p-3 md:p-4"
+        >
+          <legend class="text-sm font-medium text-text-primary px-1">
             Responsabilidades tributarias (RUT)
           </legend>
-          <p class="text-xs text-text-secondary mb-2">
-            Marca todas las responsabilidades registradas en tu RUT. La principal
-            (la de arriba) debe estar entre las marcadas.
+          <p class="text-xs text-text-secondary -mt-1">
+            Marca todas las responsabilidades registradas en tu RUT. La
+            principal (la de arriba) debe estar entre las marcadas.
           </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            @for (resp of taxResponsibilities; track resp.code) {
-              <label
-                class="flex items-start gap-2 text-sm cursor-pointer p-2 rounded border border-border hover:bg-gray-50"
+
+          @if (vatConflict()) {
+            <app-alert-banner variant="warning" icon="alert-triangle">
+              «Responsable de IVA» (O-48) y «No responsable de IVA» (O-49)
+              son excluyentes. Revisa cuál aplica según tu RUT.
+            </app-alert-banner>
+          }
+
+          <div class="space-y-2">
+            @for (entry of responsibilityEntries(); track entry.code) {
+              <div
+                class="flex flex-col gap-1 rounded border border-border px-3 py-2 hover:bg-gray-50"
               >
-                <input
-                  type="checkbox"
-                  class="mt-0.5"
-                  [checked]="isResponsibilityChecked(resp.code)"
-                  [disabled]="disabled()"
-                  (change)="onResponsibilityToggle(resp.code, $event)"
-                />
-                <span class="text-text-secondary">{{ resp.label }}</span>
-              </label>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <div
+                      class="flex items-center gap-1.5 text-sm font-medium text-text-primary"
+                    >
+                      <span>{{ entry.label }}</span>
+                      <span
+                        class="text-[11px] font-semibold text-[var(--color-primary)] bg-[var(--color-primary-light)] rounded px-1.5 py-0.5"
+                      >
+                        {{ entry.code }}
+                      </span>
+                      @if (entryTooltip(entry)) {
+                        <app-tooltip
+                          [content]="entryTooltip(entry)"
+                          position="bottom"
+                          size="sm"
+                        >
+                          <span
+                            class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                          >
+                            <app-icon name="help-circle" [size]="12"></app-icon>
+                          </span>
+                        </app-tooltip>
+                      }
+                    </div>
+                    @if (entryDescription(entry)) {
+                      <p class="text-xs text-text-secondary mt-0.5 leading-5">
+                        {{ entryDescription(entry) }}
+                      </p>
+                    }
+                  </div>
+                  <app-toggle
+                    [checked]="isResponsibilityChecked(entry.code)"
+                    [disabled]="disabled()"
+                    [ariaLabel]="entry.label"
+                    (toggled)="onResponsibilityToggle(entry.code, $event)"
+                  ></app-toggle>
+                </div>
+
+                @if (
+                  showVatPeriodicity() && entry.code === vatResponsibleCode
+                ) {
+                  <div
+                    class="mt-1 ml-1 rounded-lg border border-border bg-[var(--color-surface)] p-3 md:max-w-md"
+                  >
+                    <div
+                      class="flex items-center gap-1.5 text-sm font-medium text-text-primary mb-2"
+                    >
+                      <span>¿Cada cuánto declaras IVA?</span>
+                      <app-tooltip
+                        content="La DIAN la asigna según tus ingresos; la mayoría declara de forma bimestral."
+                        position="bottom"
+                        size="sm"
+                      >
+                        <span
+                          class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                        >
+                          <app-icon name="help-circle" [size]="12"></app-icon>
+                        </span>
+                      </app-tooltip>
+                    </div>
+                    <app-selector
+                      [formControl]="vatPeriodicityControlProxy"
+                      [options]="vatPeriodicityOptions"
+                      placeholder="Selecciona la periodicidad"
+                    ></app-selector>
+                  </div>
+                }
+              </div>
             }
           </div>
         </fieldset>
       }
+
+      <!--
+        Retención en la fuente: dos toggles que la DIAN declara en el RUT.
+        El primero activa el rol de agente retenedor; el segundo activa el
+        régimen de autorretenedor. Son excluyentes solo a nivel conceptual —
+        el panel "Identidad" los renderiza sin bloqueo, igual que acá.
+      -->
+      <fieldset class="space-y-3 rounded-lg border border-border p-3 md:p-4">
+        <legend class="text-sm font-medium text-text-primary px-1">
+          Retención en la fuente
+        </legend>
+        <p class="text-xs text-text-secondary -mt-1">
+          Configura tu rol ante la DIAN para autorretenciones y retenciones
+          que aplican a tus documentos.
+        </p>
+
+        <div
+          class="flex flex-col gap-1 rounded border border-border px-3 py-2 hover:bg-gray-50"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div
+                class="flex items-center gap-1.5 text-sm font-medium text-text-primary"
+              >
+                <span>¿Eres agente de retención en la fuente?</span>
+                <app-tooltip
+                  content="Activa el rol de retenedor. Tus facturas deben practicar retenciones en la fuente a tus clientes cuando aplique."
+                  position="bottom"
+                  size="sm"
+                >
+                  <span
+                    class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                  >
+                    <app-icon name="help-circle" [size]="12"></app-icon>
+                  </span>
+                </app-tooltip>
+              </div>
+              <p class="text-xs text-text-secondary mt-0.5 leading-5">
+                Define si tu NIT está registrado como retenedor. Aparece en
+                el RUT (casilla 54).
+              </p>
+            </div>
+            <app-toggle
+              [checked]="isWithholdingAgentChecked()"
+              [disabled]="disabled()"
+              ariaLabel="Agente de retención en la fuente"
+              (toggled)="onWithholdingAgentToggle($event)"
+            ></app-toggle>
+          </div>
+        </div>
+
+        <div
+          class="flex flex-col gap-1 rounded border border-border px-3 py-2 hover:bg-gray-50"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div
+                class="flex items-center gap-1.5 text-sm font-medium text-text-primary"
+              >
+                <span>¿Eres autorretenedor?</span>
+                <app-tooltip
+                  content="Régimen de autorretención. Tus facturas liquidan autorretenciones sobre tu propia actividad económica."
+                  position="bottom"
+                  size="sm"
+                >
+                  <span
+                    class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                  >
+                    <app-icon name="help-circle" [size]="12"></app-icon>
+                  </span>
+                </app-tooltip>
+              </div>
+              <p class="text-xs text-text-secondary mt-0.5 leading-5">
+                Define si tu NIT practica autorretenciones. Aparece en el RUT
+                (casilla 55).
+              </p>
+            </div>
+            <app-toggle
+              [checked]="isSelfWithholderChecked()"
+              [disabled]="disabled()"
+              ariaLabel="Autorretenedor"
+              (toggled)="onSelfWithholderToggle($event)"
+            ></app-toggle>
+          </div>
+        </div>
+      </fieldset>
     </form>
   `,
 })
-export class LegalDataFormComponent {
+export class LegalDataFormComponent implements OnInit {
   // ── Inputs / Outputs ──────────────────────────────────────
   readonly initialValue = input<Partial<LegalDataValue> | null>(null);
   readonly disabled = input<boolean>(false);
@@ -274,6 +574,34 @@ export class LegalDataFormComponent {
    * Default `true` para no alterar el wizard de activación.
    */
   readonly showResponsibilities = input<boolean>(true);
+
+  /**
+   * Catálogo fresco que el padre (panel Identidad) trae del backend. Cuando
+   * se inyecta, el fieldset renderiza entradas desde acá (con descripción y
+   * tooltip de efectos) en vez de la lista de respaldo. Si se omite, se usa
+   * `TAX_RESPONSIBILITY_CODES` para no romper consumidores existentes.
+   */
+  readonly catalog = input<FiscalResponsibilitiesCatalog | null>(null);
+
+  /**
+   * Cuando es `true` y el toggle O-48 está encendido, se muestra el selector
+   * de periodicidad de IVA. El Centro Fiscal lo controla desde fuera; el
+   * wizard lo deja activo por defecto.
+   */
+  readonly showVatPeriodicity = input<boolean>(true);
+
+  /**
+   * Cuando es `true` se renderiza la tarjeta "Ubicación DIAN" con los
+   * inputs de municipality_code y ciiu_code. El panel ya tiene su propia
+   * tarjeta ICA; el wizard lo deja activo por defecto.
+   */
+  readonly showLocationHelpers = input<boolean>(true);
+
+  /**
+   * Hace que `municipality_code` sea obligatorio (aparece como `required` en
+   * el input y entra al reporte de `describeProblems()`). Default `true`.
+   */
+  readonly requireMunicipalityCode = input<boolean>(true);
 
   readonly valueChange = output<LegalDataValue>();
   readonly validityChange = output<boolean>();
@@ -296,6 +624,43 @@ export class LegalDataFormComponent {
   private readonly cities = signal<City[]>([]);
   readonly loadingDepartments = signal(false);
   readonly loadingCities = signal(false);
+
+  /** Catálogo de responsabilidades expuesto al template (respaldo o inyectado). */
+  private readonly fallbackResponsibilities = TAX_RESPONSIBILITY_CODES;
+  readonly responsibilityEntries = computed<
+    FiscalResponsibilityCatalogEntry[]
+  >(() => {
+    const cat = this.catalog();
+    if (cat?.responsibilities?.length) return cat.responsibilities;
+    // Adaptamos la lista de respaldo al shape del catálogo para que el
+    // template sea uniforme. Mantenemos la descripción vacía y sin efectos
+    // cuando no hay catálogo fresco.
+    return this.fallbackResponsibilities.map((r) => ({
+      code: r.code,
+      label: r.label,
+      description: '',
+      effects: [],
+    }));
+  });
+
+  readonly vatResponsibleCode = VAT_RESPONSIBLE_CODE;
+  readonly vatNotResponsibleCode = VAT_NOT_RESPONSIBLE_CODE;
+
+  /** True cuando O-48 y O-49 están marcadas a la vez (aviso suave). */
+  readonly vatConflict = computed(() => {
+    // Lee del signal mirror para que el `computed` reaccione a cada toggle.
+    const selected = this.taxResponsibilitiesValue() ?? [];
+    return (
+      selected.includes(VAT_RESPONSIBLE_CODE) &&
+      selected.includes(VAT_NOT_RESPONSIBLE_CODE)
+    );
+  });
+
+  readonly vatPeriodicityOptions: SelectorOption[] = [
+    { value: 'monthly', label: 'Mensual' },
+    { value: 'bimonthly', label: 'Bimestral' },
+    { value: 'four_monthly', label: 'Cuatrimestral' },
+  ];
 
   readonly requiresDv = computed(() => DV_DOCUMENT_TYPES.has(this.selectedNitType()));
   readonly isColombia = computed(() => this.selectedCountry() === 'CO');
@@ -359,11 +724,16 @@ export class LegalDataFormComponent {
       }),
       tax_responsibilities: new FormControl<string[]>([], { nonNullable: true }),
       tax_scheme: new FormControl('', { nonNullable: true }),
+      municipality_code: new FormControl('', { nonNullable: true }),
+      ciiu_code: new FormControl('', { nonNullable: true }),
+      vat_periodicity: new FormControl<FiscalVatPeriodicity | ''>('', {
+        nonNullable: true,
+      }),
+      is_withholding_agent: new FormControl(false, { nonNullable: true }),
+      is_self_withholder: new FormControl(false, { nonNullable: true }),
     },
     { validators: nitDvValidator },
   );
-
-  readonly taxResponsibilities = TAX_RESPONSIBILITY_CODES;
 
   readonly personTypeOptions: SelectorOption[] = [
     { value: 'NATURAL', label: 'Persona Natural' },
@@ -385,7 +755,7 @@ export class LegalDataFormComponent {
     { value: 'GRAN_CONTRIBUYENTE', label: 'Gran Contribuyente' },
   ];
 
-  readonly taxSchemeOptions: SelectorOption[] = TAX_RESPONSIBILITY_CODES.map(
+  readonly taxSchemeOptions: SelectorOption[] = this.fallbackResponsibilities.map(
     (r) => ({ value: r.code, label: r.label }),
   );
 
@@ -411,6 +781,10 @@ export class LegalDataFormComponent {
    * válido. Distingue campo faltante de campo inconsistente: un DV que no
    * corresponde al NIT no es un dato "incompleto" y decírselo así al usuario
    * lo manda a buscar un campo vacío que no existe.
+   *
+   * `municipality_code` solo se reporta cuando el flag
+   * `requireMunicipalityCode` está activo (default `true`); el panel
+   * "Identidad" lo desactiva porque ya tiene su propia tarjeta ICA.
    */
   describeProblems(): string[] {
     const problems: string[] = [];
@@ -425,6 +799,13 @@ export class LegalDataFormComponent {
       problems.push(label);
     }
 
+    if (this.requireMunicipalityCode()) {
+      const muni = this.form.controls.municipality_code;
+      if (muni && !muni.disabled && !muni.value.trim()) {
+        problems.push('Código DANE del municipio');
+      }
+    }
+
     if (this.form.errors?.['nitDv']) {
       problems.push(
         'el dígito de verificación no corresponde al número de documento',
@@ -437,20 +818,54 @@ export class LegalDataFormComponent {
   /** Single in-flight departments fetch shared across init + prefill paths. */
   private departmentsPromise: Promise<void> | null = null;
 
-  constructor() {
+  ngOnInit(): void {
     // Default country is CO, so load its department catalog eagerly. The
     // prefill path reuses the same promise (no double fetch).
     if (this.form.controls.country.value === 'CO') {
       void this.ensureDepartments();
     }
+  }
 
+  /**
+   * Adapter that lets the template bind `vat_periodicity` to the same
+   * `FormControl` that lives on the typed group (`form.controls.vat_periodicity`)
+   * while keeping the public `getValue()` synchronous. The template uses
+   * `[formControl]="vatPeriodicityControlProxy"` to stay compatible with
+   * `SelectorComponent`'s CVA contract.
+   */
+  get vatPeriodicityControlProxy(): FormControl<FiscalVatPeriodicity | ''> {
+    return this.form.controls.vat_periodicity;
+  }
+
+  /** Mirror signal para el template (reaccionar al form sin re-renderizar). */
+  private readonly vatPeriodicityValue = toSignal(
+    this.form.controls.vat_periodicity.valueChanges,
+    { initialValue: this.form.controls.vat_periodicity.value },
+  );
+
+  /**
+   * Mirror signal del array de responsabilidades marcadas. Lo necesitamos
+   * porque `form.controls.tax_responsibilities.value` NO es un signal — leer
+   * su valor dentro de un `effect()` no registra dependencia, así que el
+   * effect no re-corre cuando el usuario togglea O-48 off. Con este signal,
+   * cualquier `setValue` dispara `valueChanges` y el effect se re-ejecuta.
+   */
+  private readonly taxResponsibilitiesValue = toSignal(
+    this.form.controls.tax_responsibilities.valueChanges,
+    { initialValue: this.form.controls.tax_responsibilities.value },
+  );
+
+  constructor() {
     // Prefill from initial value: patch silently, then sync the derived
     // signals (DV visibility, country branch) and load the Colombia catalog
     // so the pre-existing department/city resolve to selectable options.
     effect(() => {
       const v = this.initialValue();
       if (!v) return;
-      this.form.patchValue(v, { emitEvent: false });
+      this.form.patchValue(
+        { ...v, vat_periodicity: this.normalizeVatPeriodicity(v.vat_periodicity) },
+        { emitEvent: false },
+      );
 
       const type = this.form.controls.nit_type.value;
       this.selectedNitType.set(type);
@@ -474,6 +889,19 @@ export class LegalDataFormComponent {
     effect(() => {
       if (this.disabled()) this.form.disable({ emitEvent: false });
       else this.form.enable({ emitEvent: false });
+    });
+
+    // Limpia vat_periodicity cuando O-48 se desmarca: el backend lo ignora,
+    // pero no queremos persistir basura ('') sobre una periodicidad que el
+    // usuario no eligió. Leemos el array desde el signal mirror (no del
+    // `.value` directo) para que el effect re-corra ante cada toggle.
+    effect(() => {
+      const selected = this.taxResponsibilitiesValue() ?? [];
+      const isVatResponsible = selected.includes(VAT_RESPONSIBLE_CODE);
+      const current = this.vatPeriodicityValue();
+      if (!isVatResponsible && current) {
+        this.form.controls.vat_periodicity.setValue('', { emitEvent: false });
+      }
     });
 
     // React to user edits: document type drives DV/number validators;
@@ -514,7 +942,11 @@ export class LegalDataFormComponent {
 
   // ── Public API for parent ─────────────────────────────────
   getValue(): LegalDataValue {
-    return this.form.getRawValue();
+    const raw = this.form.getRawValue();
+    return {
+      ...raw,
+      vat_periodicity: this.normalizeVatPeriodicity(raw.vat_periodicity),
+    };
   }
 
   markAllTouched(): void {
@@ -535,13 +967,50 @@ export class LegalDataFormComponent {
     return this.form.controls.tax_responsibilities.value.includes(code);
   }
 
-  onResponsibilityToggle(code: string, event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
+  onResponsibilityToggle(code: string, enabled: boolean): void {
     const current = this.form.controls.tax_responsibilities.value;
-    const next = checked
+    const next = enabled
       ? Array.from(new Set([...current, code]))
       : current.filter((c) => c !== code);
     this.form.controls.tax_responsibilities.setValue(next);
+    // Limpia vat_periodicity cuando O-48 se apaga. Lo hacemos aquí (en
+    // adición al effect reactivo) para que sea determinístico en tests
+    // sincrónicos: un effect programado por zoneless puede no correr antes
+    // de la siguiente aserción. El effect sigue activo como red de
+    // seguridad cuando `tax_responsibilities` cambia por otra vía
+    // (p. ej. `patchValue` desde `initialValue`).
+    if (!enabled && code === VAT_RESPONSIBLE_CODE) {
+      this.form.controls.vat_periodicity.setValue('', { emitEvent: false });
+    }
+  }
+
+  /** True cuando el toggle de "agente de retención" está encendido. */
+  isWithholdingAgentChecked(): boolean {
+    return this.form.controls.is_withholding_agent.value;
+  }
+
+  onWithholdingAgentToggle(enabled: boolean): void {
+    this.form.controls.is_withholding_agent.setValue(enabled);
+  }
+
+  /** True cuando el toggle de "autorretenedor" está encendido. */
+  isSelfWithholderChecked(): boolean {
+    return this.form.controls.is_self_withholder.value;
+  }
+
+  onSelfWithholderToggle(enabled: boolean): void {
+    this.form.controls.is_self_withholder.setValue(enabled);
+  }
+
+  /** Tooltip de efectos cuando el catálogo los expone (cadena vacía = nada). */
+  entryTooltip(entry: FiscalResponsibilityCatalogEntry): string {
+    if (!entry.effects?.length) return '';
+    return `Activa: ${entry.effects.join(' • ')}`;
+  }
+
+  /** Descripción legible para la responsabilidad; vacío = no mostramos nada. */
+  entryDescription(entry: FiscalResponsibilityCatalogEntry): string {
+    return entry.description ?? '';
   }
 
   // ── Internal ──────────────────────────────────────────────
@@ -568,6 +1037,19 @@ export class LegalDataFormComponent {
       this.dvHint.set('');
     }
     dv.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /**
+   * Mantiene `vat_periodicity` en el set conocido por el backend
+   * (`monthly | bimonthly | four_monthly`). Lo que no esté en el set se
+   * serializa como '' para que el backend lo descarte silenciosamente.
+   */
+  private normalizeVatPeriodicity(
+    value: FiscalVatPeriodicity | '' | null | undefined,
+  ): FiscalVatPeriodicity | '' {
+    return VALID_VAT_PERIODICITIES.includes(value as FiscalVatPeriodicity)
+      ? (value as FiscalVatPeriodicity)
+      : '';
   }
 
   private ensureDepartments(): Promise<void> {
@@ -608,6 +1090,6 @@ export class LegalDataFormComponent {
     const isValid = this.form.valid;
     this.valid.set(isValid);
     this.validityChange.emit(isValid);
-    this.valueChange.emit(this.form.getRawValue());
+    this.valueChange.emit(this.getValue());
   }
 }
