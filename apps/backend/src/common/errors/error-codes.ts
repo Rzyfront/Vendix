@@ -594,6 +594,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required',
   },
+  STORE_SETTINGS_STORE_MISMATCH_001: {
+    // QUI-563 Fase 3: the client remembers the store_id it loaded the
+    // form from. If the active tenant (per token) differs at save time,
+    // the request is rejected — the form was filled with data from
+    // another store and persisting it would silently corrupt config.
+    code: 'STORE_SETTINGS_STORE_MISMATCH_001',
+    httpStatus: 409,
+    devMessage:
+      'Settings payload was loaded under a different store than the active tenant',
+  },
 
   // Marketing
   MKT_AD_STORAGE_001: {
