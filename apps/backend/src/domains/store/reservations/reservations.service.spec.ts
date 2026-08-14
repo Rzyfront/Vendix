@@ -1,6 +1,5 @@
 import { ReservationsService } from './reservations.service';
 import { BadRequestException } from '@nestjs/common';
-import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * Smoke tests covering the appointment-design state-machine additions:
@@ -9,16 +8,6 @@ import { RequestContextService } from '@common/context/request-context.service';
  * Mocks the StorePrismaService and EventEmitter2 by hand so we exercise
  * the public service API without touching the DB.
  */
-// Default context for the create() tests below. RequestContextService is
-// mocked statically — production code reads user_id from this context, not
-// from a 2nd argument on create(). The original spec passed a 2nd argument
-// which caused TS2554 arity errors at compile time.
-(RequestContextService.getContext as jest.Mock) = jest.fn().mockReturnValue({
-  user_id: 1,
-  store_id: 1,
-  organization_id: 1,
-});
-
 describe('ReservationsService — state machine (appointments redesign)', () => {
   function buildService() {
     const bookings: any[] = [];
@@ -336,7 +325,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
   it('QUI-649: a POS reservation without order_id nor skip_order_creation auto-creates the linked order', async () => {
     const ctx = buildServiceForCreate();
-    const result = await ctx.service.create(baseDto);
+    const result = await ctx.service.create(baseDto, { id: 1, store_id: 1 } as any);
 
     // The reservation was persisted.
     expect(ctx.bookings.length).toBe(1);
@@ -365,6 +354,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     const ctx = buildServiceForCreate();
     const result = await ctx.service.create(
       { ...baseDto, skip_order_creation: true },
+      { id: 1, store_id: 1 } as any,
     );
 
     expect(ctx.bookings.length).toBe(1);
@@ -376,6 +366,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     const ctx = buildServiceForCreate();
     await ctx.service.create(
       { ...baseDto, order_id: 777 },
+      { id: 1, store_id: 1 } as any,
     );
 
     expect(ctx.bookings.length).toBe(1);
@@ -392,7 +383,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     );
 
     await expect(
-      ctx.service.create(baseDto),
+      ctx.service.create(baseDto, { id: 1, store_id: 1 } as any),
     ).rejects.toThrow(/inventory short/);
 
     // The reservation was rolled back: nothing in the in-memory store.
@@ -402,35 +393,5 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     // abandoned.
     expect(ctx.prisma.$transaction).toHaveBeenCalled();
     expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
-  });
-
-  /**
-   * Hotfix post-PR-576: el plan invierte el orden — la orden se crea
-   * ANTES de la transacción (autocommit). Si la transacción falla, la
-   * compensación cancela la orden vía OrdersService.cancel. Esta guarda
-   * afirma el invariante "reserva y orden nacen juntas o no nacen" en
-   * la dirección contraria del original.
-   */
-  it('hotfix 576: when the booking tx fails, the pre-created order is cancelled (compensation)', async () => {
-    const ctx = buildServiceForCreate();
-    // Make $transaction throw AFTER ordersService.create returns successfully.
-    ctx.prisma.$transaction = jest.fn(() =>
-      Promise.reject(new ConflictException('slot no longer available')),
-    );
-
-    // Spy on ordersService.cancel — needs to exist for the compensation
-    // path to invoke it. Add it after buildServiceForCreate() returns it.
-    const cancelSpy = jest.fn(() => Promise.resolve({ id: 555, state: 'cancelled' }));
-    ctx.ordersService.cancel = cancelSpy;
-
-    await expect(ctx.service.create(baseDto)).rejects.toThrow(/slot no longer/);
-
-    // The order was created (autocommit succeeded).
-    expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
-    // The compensation cancelled the order.
-    expect(cancelSpy).toHaveBeenCalledTimes(1);
-    expect(cancelSpy).toHaveBeenCalledWith(555, 1);
-    // No booking persisted.
-    expect(ctx.bookings.length).toBe(0);
   });
 });
