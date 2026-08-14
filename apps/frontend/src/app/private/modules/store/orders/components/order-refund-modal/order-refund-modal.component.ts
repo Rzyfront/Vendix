@@ -351,10 +351,6 @@ interface RefundItemState {
               </div>
             </div>
 
-            <!-- Hotfix post-PR-576: cuando el método es bank_transfer y hay
-                 cuentas bancarias activas, el operador selecciona UNA. Esa
-                 cuenta se persiste en `refund_items.bank_account_id`. Sin
-                 selección, el backend rechaza con 400. -->
             @if (refundMethod() === 'bank_transfer' && bankAccounts().length > 0) {
               <div class="mt-3">
                 <label class="block text-xs font-bold text-gray-700 mb-2">
@@ -362,8 +358,8 @@ interface RefundItemState {
                 </label>
                 <app-selector
                   [options]="bankAccountSelectorOptions()"
-                  [value]="selectedBankAccountId()"
-                  (valueChange)="selectedBankAccountId.set($event)"
+                  [(ngModel)]="selectedBankAccountIdModel"
+                  (ngModelChange)="selectedBankAccountId.set($event)"
                   placeholder="Selecciona cuenta bancaria"
                 ></app-selector>
               </div>
@@ -507,6 +503,10 @@ export class OrderRefundModalComponent {
   // 'bank_transfer'`, el operador elige UNA cuenta y esa va en el payload.
   // El backend persiste `refund_items.bank_account_id` por línea.
   readonly selectedBankAccountId = signal<number | null>(null);
+  // `app-selector` es ControlValueAccessor: necesita un ngModel. Esta
+  // propiedad espejo existe solo para alimentar el two-way binding;
+  // la fuente de verdad es `selectedBankAccountId`.
+  readonly selectedBankAccountIdModel = signal<number | null>(null);
 
   // Selector options para el dropdown de cuenta bancaria.
   readonly bankAccountSelectorOptions = computed(() =>
@@ -812,8 +812,15 @@ export class OrderRefundModalComponent {
   private buildDto(): CreateRefundRequest {
     const selected = this.selectedItems();
     const method = this.refundMethod();
+    const selectedBankId = this.selectedBankAccountId();
+    // `bankAccountId` queda `number | undefined` (no `null`). El DTO
+    // espera `number | undefined`; mandar `null` rompería el tipado y
+    // haría que el backend reciba un literal `null` que no matchea el
+    // optional int.
     const bankAccountId =
-      method === 'bank_transfer' ? this.selectedBankAccountId() : undefined;
+      method === 'bank_transfer' && selectedBankId != null
+        ? selectedBankId
+        : undefined;
     return {
       items: selected.map((item) => ({
         order_item_id: item.orderItem.id,
