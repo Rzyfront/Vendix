@@ -1237,6 +1237,12 @@ model order_items {
   description                      String?
   weight                           Decimal?                 @db.Decimal(10, 3)
   weight_unit                      String?                  @db.VarChar(10)
+  // Bug 12: UoM de venta en el momento del cobro. El frontend envía
+  // 'kg'/'und'/'L' + el factor de presentación (ej. 250g por bolsa). El
+  // snapshot se persiste para no depender de cambios futuros en
+  // products.units_per_package que rompan el ticket histórico.
+  sale_unit_code_snapshot          String?                  @db.VarChar(20)
+  sale_quantity_snapshot           Decimal?                 @db.Decimal(18, 6)
   item_type                        String?                  @default("physical") @db.VarChar(20)
   // Multi-tarifa snapshot (Phase 1: price tiers).
   // applied_price_tier_id keeps a soft FK with ON DELETE SET NULL so

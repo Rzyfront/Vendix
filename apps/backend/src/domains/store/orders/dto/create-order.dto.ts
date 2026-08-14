@@ -116,6 +116,19 @@ export class CreateOrderItemDto {
   @MaxLength(10)
   weight_unit?: string;
 
+  // Bug 12: UoM de venta snapshot. Frontend envía 'kg'/'und'/'L' + factor
+  // (ej. 250g por bolsa). Backend persiste en order_items para que el
+  // ticket y los reportes históricos no dependan de products.
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  sale_unit_code?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Transform(({ value }) => (value == null ? undefined : parseFloat(value)))
+  sale_quantity?: number;
+
   /**
    * Multi-tarifa: id de la tarifa de precios aplicada a esta línea (opcional).
    * Si está presente y la tarifa no es la default, el caller debe tener

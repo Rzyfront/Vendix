@@ -295,6 +295,14 @@ export class OrdersService {
                     price_override_reason: item.price_override_reason,
                     weight: item.weight,
                     weight_unit: item.weight_unit,
+                    // Bug 12: persistir UoM de venta al cobro. El ticket y
+                    // los reportes históricos mostrarán "1 × 250 g" en vez
+                    // de "1 × und".
+                    sale_unit_code_snapshot: (item as any).sale_unit_code ?? null,
+                    sale_quantity_snapshot:
+                      (item as any).sale_quantity != null
+                        ? new Prisma.Decimal((item as any).sale_quantity)
+                        : null,
                     item_type: itemType,
                     cost_price: item.product_id
                       ? await resolveCostPrice(
