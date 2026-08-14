@@ -176,6 +176,27 @@ export class EnvironmentSwitchService {
         expires_in: normalized_tokens.expiresIn,
       };
 
+      // QUI-563 Fase 0: falla ruidosa si el backend omitió parte del contexto
+      // operativo en el switch. El reducer también rechaza el fallback al
+      // tenant anterior (ver auth.reducer.ts:restoreAuthState). La
+      // recuperación automática (refetch explícito) queda para Fase 1+.
+      if (
+        response_data.user_settings === undefined ||
+        response_data.store_settings === undefined ||
+        response_data.default_panel_ui === undefined
+      ) {
+        console.error(
+          '[EnvironmentSwitch] Switch response missing operating context — refetch needed',
+          {
+            hasUserSettings: response_data.user_settings !== undefined,
+            hasStoreSettings: response_data.store_settings !== undefined,
+            hasDefaultPanelUi: response_data.default_panel_ui !== undefined,
+            targetEnvironment,
+            storeSlug,
+          },
+        );
+      }
+
       this.authFacade.restoreAuthState(
         response_data.user,
         tokens_payload,
