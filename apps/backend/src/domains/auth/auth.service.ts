@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   ConflictException,
   UnauthorizedException,
   BadRequestException,
@@ -88,6 +89,11 @@ export interface UserAccountLookupResult {
 
 @Injectable()
 export class AuthService {
+  // Hotfix post-PR-576: P1 referenciaba this.logger.warn() en
+  // forgotPasswordCustomer y resetCustomerPassword sin que la clase lo
+  // declarara. TS2345: 'Property logger does not exist on type AuthService'.
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prismaService: GlobalPrismaService,
     private readonly jwtService: JwtService,

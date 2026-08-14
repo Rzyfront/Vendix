@@ -1376,7 +1376,21 @@ export class DianConfigService {
     const context = this.getContext();
     const organizationId = context?.organization_id;
     const storeId = context?.store_id;
-    const fiscalScope = await this.fiscalScope.requireFiscalScope(organizationId);
+
+    // Tenant scope guard (hotfix post-PR-576): el método exige un
+    // contexto con tenant resuelto. Sin él, no hay predicado de propiedad
+    // aplicable y respondemos 404 antes de tocar la DB.
+    if (!organizationId && !storeId) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    // `requireFiscalScope` solo aplica en alcance ORGANIZATION. En
+    // alcance STORE la organización del cert puede ser nula (es de la
+    // tienda); usamos el predicado por store_id y saltamos el lookup de
+    // organización para evitar un 400 espurio.
+    const fiscalScope = storeId
+      ? 'STORE'
+      : await this.fiscalScope.requireFiscalScope(organizationId as number);
 
     const where =
       fiscalScope === 'ORGANIZATION'

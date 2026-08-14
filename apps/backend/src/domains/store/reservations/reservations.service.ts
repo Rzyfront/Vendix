@@ -418,7 +418,14 @@ export class ReservationsService {
       // caída y orden persistida" que el plan repara.
       if (preCreatedOrder) {
         try {
-          await this.ordersService.cancel(preCreatedOrder.id, context?.user_id);
+          // OrdersService no expone `cancel()`. La cancelación es una
+          // transición de estado que pasa por `update()` — el seam
+          // `forceOrderState` interno libera las reservas de stock,
+          // emite `order.cancelled` y deja la transición auditada.
+          await this.ordersService.update(preCreatedOrder.id, {
+            state: 'cancelled',
+            internal_notes: `Compensación por fallo de reserva (booking_id=${preCreatedOrder.id}).`,
+          } as any);
         } catch (cancelErr) {
           this.logger.error(
             `Failed to compensate order ${preCreatedOrder.id} after booking failed: ${cancelErr.message}`,

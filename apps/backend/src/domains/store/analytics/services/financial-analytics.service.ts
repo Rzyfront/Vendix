@@ -908,6 +908,13 @@ export class FinancialAnalyticsService {
           orderAggregates._count.id || 0,
           previousOrderCount,
         ),
+        // Hotfix post-PR-576: dashboard reembolsa tarjeta con
+        // `comparison.refunds_growth`; sin este campo el template del
+        // frontend no compila (TS2339).
+        refunds_growth: computeGrowth(
+          refundSubtotal,
+          previousRefundSubtotal,
+        ),
         balance_growth: computeGrowth(balance, previousBalance),
       },
     };
