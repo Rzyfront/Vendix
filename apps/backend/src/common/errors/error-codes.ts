@@ -36,6 +36,46 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Resource conflict',
   },
+  /**
+   * RED DE SEGURIDAD DEL FILTRO GLOBAL — Prisma P2020 («value out of range»).
+   *
+   * Por qué existe: `ParseIntPipe` acepta `999999999999999999` porque ES un
+   * entero sintácticamente válido; quien lo rechaza es Postgres, ya dentro de la
+   * consulta, con `22003` sobre una columna `int4`. Sin este código, cualquier
+   * `:id` desmesurado —o un bot barriendo la API— produce un 500 que ensucia la
+   * observabilidad con falsos incidentes de servidor.
+   *
+   * Por qué 400 y no 404: la petición nunca llegó a ser una búsqueda. Postgres
+   * se negó a comparar el valor, así que responder 404 afirmaría que se buscó y
+   * no se encontró, cuando lo cierto es que el identificador no es legal para la
+   * columna.
+   *
+   * El texto crudo de Prisma NO viaja al cliente: incluye el fragmento de la
+   * invocación con nombres de tabla y columna. Ese detalle va al log.
+   */
+  SYS_VALUE_OUT_OF_RANGE_001: {
+    code: 'SYS_VALUE_OUT_OF_RANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'A value in the request exceeds the range the database column can store (Prisma P2020)',
+  },
+  /**
+   * RED DE SEGURIDAD DEL FILTRO GLOBAL — subconjunto ESTRECHO de
+   * `PrismaClientValidationError`: solo el desajuste de TIPO de un valor.
+   *
+   * `PrismaClientValidationError` cubre dos poblaciones muy distintas y
+   * mezclarlas sería el peor de los arreglos. «Unknown argument» o «Argument X
+   * is missing» son consultas que Vendix construyó mal: bugs del servidor, y
+   * deben seguir siendo 500 para que sigan doliendo y se vean. Solo el caso
+   * «Invalid value provided. Expected Int, provided String» tiene su origen en
+   * el dato que mandó el cliente, y ese es el único que este código traduce.
+   */
+  SYS_INVALID_FIELD_VALUE_001: {
+    code: 'SYS_INVALID_FIELD_VALUE_001',
+    httpStatus: 400,
+    devMessage:
+      'A request value does not match the type the model field expects (narrow PrismaClientValidationError subset)',
+  },
 
   // Role scope (QUI-72) — shared by superadmin / organization / store levels.
   // Live next to SYS_* on purpose: the scope matrix is cross-domain, so the
@@ -1767,6 +1807,33 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Non-USD currency requires either a manual exchange rate or the USD cross rate for the date: the TRM only quotes USD/COP, so any other currency needs a second leg Vendix does not source',
+  },
+  /**
+   * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
+   * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
+   * `municipality_code` o `department`.
+   *
+   * POR QUÉ UN SOLO CÓDIGO Y NO TRES. Los códigos se dividen por PANTALLA a la
+   * que hay que ir, no por campo (mismo criterio que `INVOICING_PREVALIDATION_*`).
+   * Los tres campos se llenan en el mismo sitio —la identidad fiscal del
+   * tenant—, así que un solo código con `details.missing` nombrando TODOS los
+   * huecos manda al operador una sola vez y con la lista completa, en vez de
+   * hacerle descubrirlos de a uno por reintento.
+   *
+   * POR QUÉ 422 Y NO 500. El problema no es que Vendix se rompiera: es que el
+   * tenant no ha declarado su municipio DIAN. El resolvedor ya lo diagnostica
+   * con precisión —dice el NIT, el campo ausente y dónde llenarlo— y ese
+   * diagnóstico se perdía entero al degradarse a `SYS_INTERNAL_001`, dejando al
+   * operador con «Error interno del servidor» ante un PDF que nunca iba a salir.
+   *
+   * `details` lleva `nit`, `missing_field` (el que cortó) y `missing` (todos),
+   * más el `cta` al wizard fiscal, igual que `FISCAL_VAT_NOT_RESPONSIBLE_001`.
+   */
+  FISCAL_IDENTITY_INCOMPLETE: {
+    code: 'FISCAL_IDENTITY_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'Issuer fiscal identity is missing a field required to issue (legal_name, municipality_code or department)',
   },
   FISCAL_CONFIG_INCOMPLETE: {
     code: 'FISCAL_CONFIG_INCOMPLETE',

@@ -44,6 +44,8 @@ import {
 } from './organization-fiscal-columns.helper';
 import { isVatResponsible } from './vat-responsibility.helper';
 import { normalizeNit } from '../utils/nit.util';
+import { VendixHttpException } from '../errors/vendix-http.exception';
+import { ErrorCodes } from '../errors/error-codes';
 
 /**
  * Identidad fiscal cruda del tenant.
@@ -270,8 +272,25 @@ function buildFiscalIdentity(
  * NO lo uses en superficies de LECTURA o EDICIÓN — usa
  * `tryResolveTenantFiscalIdentity`. Ver la nota de asimetría más abajo.
  *
- * @throws Error si `legal_name`, `municipality_code` o `department` son
- *   irresolubles, en ese orden de precedencia.
+ * POR QUÉ LANZA `VendixHttpException` Y NO UN `Error` PELADO:
+ *
+ * Un `Error` pelado llega al filtro global sin tipo, y el filtro no puede hacer
+ * otra cosa que degradarlo a `SYS_INTERNAL_001` con HTTP 500. Medido en vivo:
+ * `GET /store/invoicing/:id/pdf` y `POST /store/invoicing/:id/events` devolvían
+ * «Error interno del servidor» en un tenant al que solo le faltaba el municipio
+ * DIAN. El diagnóstico —que ya era exacto: NIT, campo ausente y dónde llenarlo—
+ * se perdía entero en el trayecto, y quien lo leía concluía que Vendix estaba
+ * roto en vez de ir a completar su identidad fiscal.
+ *
+ * Los tres campos vienen de DATOS DEL TENANT, no de invariantes de programación:
+ * ninguno es inalcanzable desde una petición HTTP, así que los tres son 422 y
+ * ninguno debe seguir siendo 500. El mensaje se conserva textual —era la parte
+ * buena—; lo único que cambia es el vehículo.
+ *
+ * @throws VendixHttpException `FISCAL_IDENTITY_INCOMPLETE` (HTTP 422) si
+ *   `legal_name`, `municipality_code` o `department` son irresolubles, en ese
+ *   orden de precedencia. `details.missing` lleva TODOS los huecos, no solo el
+ *   que cortó, para que la superficie los pida de una sola vez.
  */
 export function resolveTenantFiscalIdentity(
   source: FiscalIdentitySource,
@@ -279,20 +298,35 @@ export function resolveTenantFiscalIdentity(
   const { identity, missing } = buildFiscalIdentity(source);
   const nit = identity.nit;
 
+  /**
+   * Construye la excepción con el contexto completo. `missing_field` es el que
+   * cortó (respeta la precedencia histórica) y `missing` es la lista entera.
+   */
+  const incomplete = (field: MissingFiscalField, detail: string) =>
+    new VendixHttpException(ErrorCodes.FISCAL_IDENTITY_INCOMPLETE, detail, {
+      nit,
+      missing_field: field,
+      missing,
+      cta: '/admin/fiscal/wizard',
+    });
+
   if (missing.includes('legal_name')) {
-    throw new Error(
+    throw incomplete(
+      'legal_name',
       `No hay razón social para el NIT ${nit}: se necesita ` +
         `fiscal_data.legal_name, config_name o la fila de la organización.`,
     );
   }
   if (missing.includes('municipality_code')) {
-    throw new Error(
+    throw incomplete(
+      'municipality_code',
       `No hay municipio DIAN para el NIT ${nit}: se necesita ` +
         `fiscal_data.municipality_code o una dirección con municipality_code.`,
     );
   }
   if (missing.includes('department')) {
-    throw new Error(
+    throw incomplete(
+      'department',
       `No hay departamento para el NIT ${nit}: se necesita ` +
         `fiscal_data.department o la columna state_province de la dirección. ` +
         `Derivar de municipality_code.slice(0,2) produciría un código numérico ` +
@@ -339,8 +373,10 @@ export function tryResolveTenantFiscalIdentity(
  * `dian-test.service.ts`) consumen este resultado; los consumidores no-DIAN
  * consumen `TenantFiscalIdentity` directo sin pasar por aquí.
  *
- * @throws Error si la proyección requiere datos que `TenantFiscalIdentity` no
- *   pudo resolver (delegación: ya lanzó antes en `resolveTenantFiscalIdentity`).
+ * No lanza por su cuenta: los datos que la proyección necesita ya los exigió
+ * `resolveTenantFiscalIdentity` con `FISCAL_IDENTITY_INCOMPLETE` (422). Duplicar
+ * la validación acá haría que el mismo hueco saliera con dos códigos distintos
+ * según por dónde entrara la petición.
  */
 export function projectTenantIdentityToDian(
   identity: TenantFiscalIdentity,
