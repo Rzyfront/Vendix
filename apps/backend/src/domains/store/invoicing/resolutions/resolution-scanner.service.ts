@@ -3,6 +3,10 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
+import {
+  isWellFormedTechnicalKey,
+  TECHNICAL_KEY_LENGTH,
+} from '../fiscal-document-requirements';
 import sharp = require('sharp');
 
 /**
@@ -71,7 +75,11 @@ const ENVIRONMENTS = new Set<ScannedResolutionEnvironment>([
 const PREFIX_RE = /^[A-Z0-9]{1,10}$/;
 const RESOLUTION_NUMBER_RE = /^\d{4,25}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TECHNICAL_KEY_RE = /^[0-9a-f]{40}$/;
+// La forma de la ClTec NO se declara aquí: la declara
+// `fiscal-document-requirements.ts` y la comparten las cuatro puertas por las
+// que la clave entra o se usa (este escáner, el DTO de alta, el servicio de
+// resoluciones y el generador de consecutivos). Tener aquí una copia de la
+// expresión regular es cómo dos puertas acaban aceptando cosas distintas.
 
 /** Sanity ceiling for a single authorized range. */
 const MAX_RANGE_SPAN = 500_000_000;
@@ -400,6 +408,13 @@ export class ResolutionScannerService {
    * character produces a syntactically perfect resolution whose every invoice
    * the DIAN rejects for an invalid CUFE — with no hint that OCR was the cause.
    * So even a perfectly-shaped key comes back `verified: false`.
+   *
+   * Y una clave con la forma equivocada NO se devuelve: vuelve como `value:
+   * null` con la advertencia. Un OCR que se coma dos caracteres es la hipótesis
+   * principal de cómo entró en producción una ClTec de 38 — perfectamente
+   * hexadecimal, perfectamente inútil, rechazada por la DIAN con el consecutivo
+   * ya gastado. Devolverla «por si acaso» es exactamente el camino por el que
+   * llegó a guardarse.
    */
   private buildTechnicalKey(
     raw: unknown,
@@ -415,12 +430,12 @@ export class ResolutionScannerService {
         'No se leyó clave técnica. Solo las resoluciones de habilitación la traen.',
       );
     }
-    if (!TECHNICAL_KEY_RE.test(value)) {
+    if (!isWellFormedTechnicalKey(value)) {
       return {
         value: null,
         confidence,
         verified: false,
-        warning: `La clave técnica leída no tiene 40 caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
+        warning: `La clave técnica leída no tiene ${TECHNICAL_KEY_LENGTH} caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
       };
     }
     return {

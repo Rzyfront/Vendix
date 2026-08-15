@@ -18,6 +18,7 @@ import {
   Max,
   ValidateNested,
   IsNotEmpty,
+  Matches,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -39,6 +40,31 @@ import {
 
 export * from './product-enums';
 
+/**
+ * Forma sintáctica de una subcuenta PUC colombiana (`products.account_code`,
+ * `product_variants.account_code`).
+ *
+ * Solo dígitos: el PUC del Decreto 2650/1993 es estrictamente numérico y así lo
+ * siembra `colombia-puc.data.ts` — ni puntos, ni guiones, ni espacios. Aceptar
+ * "4135.50" o "4135 " haría que el código NUNCA case contra
+ * `chart_of_accounts.code` y el producto caería en silencio al ingreso por
+ * defecto: un fallo mudo, que es peor que un 400.
+ *
+ * Mínimo 4 dígitos porque la jerarquía es Clase(1) → Grupo(2) → Cuenta(4) →
+ * Subcuenta(6+): apuntar un producto a una Clase ('4') o a un Grupo ('41') no
+ * significa nada contablemente. Máximo 20 = el ancho real de la columna
+ * (`VarChar(20)`, mismo que el precedente `withholding_concepts.account_code`).
+ *
+ * OJO — esto valida la FORMA, no la EXISTENCIA. Que el código exista en el
+ * `chart_of_accounts` de la organización y que acepte movimientos
+ * (`accepts_entries = true`) es una validación contra la base que no cabe en un
+ * DTO: vive en `AutoEntryService.validateProductAccountCode()`.
+ */
+export const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
+
+export const PUC_ACCOUNT_CODE_MESSAGE =
+  'La cuenta contable debe ser un código PUC numérico de 4 a 20 dígitos (por ejemplo 413550). No admite puntos, guiones ni espacios.';
+
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
   @IsInt()
@@ -57,6 +83,17 @@ export class StockByLocationDto {
 }
 
 export class CreateVariantWithStockDto {
+  /**
+   * Subcuenta PUC de ingreso propia de la variante. Gana sobre la del producto
+   * padre. Ausente ⇒ hereda del padre; si el padre tampoco la define, cae al
+   * ingreso por defecto. Ver `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsOptional()
   @IsInt()
   @Type(() => Number)
@@ -176,6 +213,17 @@ export class ProductImageDto {
 }
 
 export class CreateProductDto {
+  /**
+   * Subcuenta PUC de ingreso propia del producto. `null`/ausente ⇒ el asiento
+   * de la venta usa el mapping por defecto (`invoice.validated.revenue`), que
+   * es el comportamiento histórico. Ver `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string;
+
   @IsOptional()
   @IsInt()
   store_id?: number;
@@ -526,6 +574,18 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  /**
+   * Subcuenta PUC de ingreso propia del producto. Enviar `null` la limpia y
+   * devuelve el producto al ingreso por defecto. Cambiarla NO reescribe
+   * asientos ya posteados: esos quedaron congelados en el snapshot
+   * `invoice_items.account_code`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsOptional()
   @IsInt()
   brand_id?: number;
@@ -967,6 +1027,16 @@ export class ProductQueryDto {
 
 // Product Variants DTOs
 export class CreateProductVariantDto {
+  /**
+   * Subcuenta PUC de ingreso propia de la variante. Gana sobre la del producto
+   * padre. Ver `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsString()
   @MaxLength(100)
   sku: string;
@@ -1064,6 +1134,16 @@ export class CreateProductVariantDto {
 }
 
 export class UpdateProductVariantDto {
+  /**
+   * Subcuenta PUC de ingreso propia de la variante. `null` la limpia y devuelve
+   * la variante a heredar del producto padre. Ver `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -1177,6 +1257,16 @@ export class UpdateProductVariantDto {
 }
 
 export class UpdateProductWithVariantsDto {
+  /**
+   * Subcuenta PUC de ingreso propia del producto. `null` la limpia. Ver
+   * `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsOptional()
   @IsInt()
   brand_id?: number;
@@ -1404,6 +1494,16 @@ export class UpdateProductWithVariantsDto {
 }
 
 export class UpdateVariantWithStockDto {
+  /**
+   * Subcuenta PUC de ingreso propia de la variante. `null` la limpia y vuelve a
+   * heredar del producto padre. Ver `PUC_ACCOUNT_CODE_REGEX`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
   @IsInt()
   id: number;
 

@@ -29,7 +29,17 @@ export const DIAN_DOCUMENT_TYPE_SCHEME_IDS: Record<string, string> = {
   NIT: '31',
   TI: '12',
   RC: '11',
-  PA: '21',
+  // DEFECTO CORREGIDO: valía '21'. En la tabla de la DIAN el 21 es «Tarjeta de
+  // extranjería»; «Pasaporte», que es lo que 'PA' significa en `DOCUMENT_TYPES`
+  // (`document-types.ts`), es el 41. Verificado contra
+  // `Caja_de_herramientas.../Listas de valores/TipoIdFiscal-2.1.gc` y contra el
+  // Schematron `DIAN_UBL21-listacodigos_v1.6.sch`, que coinciden en los 10
+  // códigos {11,12,13,21,22,31,41,42,50,91}.
+  PA: '41',
+  // NO VERIFICADO: el 47 no aparece ni en el `.gc` ni en el Schematron, y el
+  // control de cambios del anexo 1.9 (§2.1) solo menciona la inclusión del 48
+  // (PPT). Se conserva por compatibilidad; confirmar contra
+  // `Tablas Referenciadas/13.2.1 Documento de identificación.xlsx`.
   PEP: '47',
   PPT: '48',
   DIE: '42',

@@ -94,6 +94,7 @@ export { DianTechnicalResponseComponent } from './dian-technical-response/dian-t
 export type { DianTechnicalResponseData } from './dian-technical-response/dian-technical-response.component';
 export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/store-fiscal-identity-form.component';
 export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
+export { AccountSelectComponent } from './account-select/account-select.component';
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
 export { SaveRequirementsModalComponent } from './save-requirements-modal/save-requirements-modal.component';
 export { StoreUnavailableBannerComponent } from './store-unavailable-banner/store-unavailable-banner.component';

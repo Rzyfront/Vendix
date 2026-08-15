@@ -20,6 +20,7 @@ import {
 import { ResponseService } from '../../../../common/responses/response.service';
 
 import { OrgAccountMappingsService } from './account-mappings.service';
+import { buildMappingKeyCatalog } from '../../../store/accounting/account-mappings/account-mapping.service';
 import {
   UpsertAccountMappingDto,
   ResetAccountMappingDto,
@@ -42,6 +43,21 @@ export class OrgAccountMappingsController {
     private readonly mappings: OrgAccountMappingsService,
     private readonly responseService: ResponseService,
   ) {}
+
+  /**
+   * Org mirror of `GET /store/accounting/account-mappings/keys`.
+   *
+   * Same static catalog (built from `DEFAULT_ACCOUNT_MAPPINGS`, which the org
+   * mapping service already resolves against) — exposed here so an ORG_ADMIN
+   * running the fiscal wizard does not need store-scoped permissions just to
+   * render the mapping form.
+   */
+  @Get('keys')
+  @SkipModuleFlowGuard() // bootstrap: wizard renders the mapping form while module is still WIP
+  @Permissions('organization:accounting:account_mappings:read')
+  getMappingKeys() {
+    return this.responseService.success(buildMappingKeyCatalog());
+  }
 
   @Get()
   @SkipModuleFlowGuard() // bootstrap: wizard reads current mapping state during setup

@@ -233,6 +233,67 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
     area: 'invoicing',
   },
 
+  // ── Facturacion: preconditions de CONFIGURACION ────────────
+  //
+  // QUE ENTRA EN ESTE MAPA (y por que no entran los demas codigos INVOICING_*).
+  // Estar aqui significa que `presentFiscalError` SECUESTRA el error: en lugar
+  // de un toast, se abre el modal de requisitos con un texto fijo y un CTA. Eso
+  // solo es correcto cuando el fallo cumple las tres condiciones:
+  //
+  //   (a) es una PRECONDICION que vive en la configuracion, no en el documento;
+  //   (b) tiene un destino concreto adonde mandar al usuario a arreglarlo;
+  //   (c) no trae detalle por-instancia que una fila fija destruiria.
+  //
+  // Por (c) quedan FUERA `INVOICING_PROVIDER_004` —trae en `details.dian_errors`
+  // las reglas que la DIAN nombro, y una fila estatica las borraria justo cuando
+  // son lo unico accionable— e `INVOICING_CUFE_001`, que es un fallo interno de
+  // coherencia: no hay nada que el comerciante pueda ir a configurar.
+  //
+  // Por (a) quedan fuera `INVOICING_STATUS_*`, `INVOICING_DUP_001`,
+  // `INVOICING_FIND_*` y `INVOICING_VALIDATE_001` (estado del documento), y por
+  // (b) los `INVOICING_RESOLUTION_003..005` y `007..011`, que se levantan
+  // MIENTRAS el usuario edita la resolucion: mandarlo "a DIAN" cuando ya esta
+  // parado en DIAN es ruido; esos van al campo del formulario.
+  //
+  // `INVOICING_RESOLUTION_001/002` tampoco entran: no los lanza nadie en el
+  // backend — la numeracion falla con `FISCAL_RESOLUTION_MISSING` /
+  // `FISCAL_RESOLUTION_EXHAUSTED`, que ya estan arriba.
+
+  // Precondicion: la tienda no tiene habilitada la configuracion DIAN de
+  // software propio con la que se transmite. 412 = precondicion de config.
+  // CTA: completarla en Facturacion -> Configuracion DIAN.
+  INVOICING_PROVIDER_002: {
+    label: 'Falta la configuración DIAN de la tienda',
+    reason:
+      'El proveedor de facturación electrónica no está configurado para esta tienda. Complétalo en Facturación → Configuración DIAN antes de transmitir.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la habilitacion de produccion esta incompleta — tipicamente
+  // la resolucion sin clave tecnica (ClTec), sin la cual el CUFE se firmaria
+  // mal y la DIAN rechazaria el documento gastando el consecutivo.
+  // CTA: completar la config DIAN / la resolucion de numeracion.
+  INVOICING_PROVIDER_003: {
+    label: 'Habilitación DIAN incompleta',
+    reason:
+      'Faltan datos obligatorios para transmitir a la DIAN (normalmente la clave técnica de la resolución de numeración). Revisa la configuración DIAN y la resolución antes de reintentar.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la identidad fiscal no tiene entidad contable activa y una
+  // resolucion no puede colgar de la nada. Gemelo de MISSING_ACCOUNTING_ENTITY.
+  // CTA: completar los datos legales.
+  INVOICING_RESOLUTION_006: {
+    label: 'Falta la entidad contable activa',
+    reason:
+      'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala en los datos legales antes de crear la resolución.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a Datos legales', navigate: 'legal_data' },
+  },
+
   // ── Habilitacion / certificado DIAN ────────────────────────
   // Precondicion: falta configurar la conexion DIAN. CTA: configurarla.
   DIAN_CONFIG_001: {

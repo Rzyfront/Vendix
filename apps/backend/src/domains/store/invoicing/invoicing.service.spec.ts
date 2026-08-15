@@ -2,6 +2,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { InvoicingService } from './invoicing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 
 describe('InvoicingService support adjustment notes', () => {
   const requestContext = {
@@ -133,6 +134,35 @@ describe('InvoicingService support adjustment notes', () => {
             year: new Date().getFullYear(),
           }),
           assertInvoiceNotRequired: jest.fn(),
+        } as any,
+        // Instancia REAL, no un doble: el motor aritmético es puro (sin Prisma,
+        // sin contexto, sin HTTP) y mockearlo dejaría los importes que persiste
+        // `create()` sin cubrir, que es exactamente el defecto que vino a
+        // cerrar.
+        new InvoiceCalculatorService(),
+        // TRM: doble que NUNCA sale a la red. Ninguno de estos casos factura en
+        // divisa, y una instancia real dejaría los tests dependiendo de que
+        // datos.gov.co responda.
+        {
+          resolveExchangeRate: jest.fn().mockResolvedValue(null),
+          getTrm: jest.fn().mockResolvedValue(null),
+          ...overrides.trm,
+        } as any,
+        // Retenciones: por defecto NO hay ninguna resuelta, que es el caso de
+        // una tienda sin conceptos configurados y el que estos flujos asumen.
+        {
+          resolveSuffered: jest.fn().mockResolvedValue({
+            lines: [],
+            uvt_value_used: 0,
+            counterparty_type: null,
+          }),
+          resolveSelf: jest.fn().mockResolvedValue({
+            lines: [],
+            uvt_value_used: 0,
+            counterparty_type: null,
+          }),
+          persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+          ...overrides.withholdingFlow,
         } as any,
       ),
       prisma,

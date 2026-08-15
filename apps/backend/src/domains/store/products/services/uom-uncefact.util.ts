@@ -37,7 +37,21 @@ const UNECE_BY_CODE: Record<string, string> = {
   mm: 'MMT',
   cm: 'CMT',
   m: 'MTR',
-  km: 'KMT',
+  // `KTM`, no `KMT`. No es un typo de este archivo: la lista de la DIAN está
+  // corrompida en el ORIGEN y hay que enviarle el código corrompido.
+  //
+  // La DIAN publicó su catálogo de unidades pasado por un traductor automático
+  // que alcanzó también a la columna de CÓDIGOS, no sólo a los nombres. Su
+  // Schematron —el validador ejecutable, no la documentación— acepta `LUN` (mes,
+  // por «Monday»), `SÍ` (montaje, por «AY»), `ÉL` (por «HE»), `ANA` (año, por
+  // «ANN») y `G K` **con un espacio en medio** (por «GK»); y rechaza los códigos
+  // UN/ECE correctos `MON`, `AY`, `HE`, `ANN`, `GK`. El kilómetro sigue el mismo
+  // patrón: el validador acepta `KTM` y rechaza `KMT`.
+  //
+  // Verificado extrayendo los 1089 códigos del `contains()` de
+  // `DIAN_UBL21-listacodigos_v1.6.sch` y contrastando esta tabla entera contra
+  // ellos: de las 25 unidades de Vendix, ésta era la única rechazada.
+  km: 'KTM',
   in: 'INH',
   ft: 'FOT',
   yd: 'YRD',

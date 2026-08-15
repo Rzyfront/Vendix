@@ -1028,6 +1028,115 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   },
 };
 
+/**
+ * Human label for the *event* half of a mapping key (everything before the
+ * account role). `DEFAULT_ACCOUNT_MAPPINGS[key].description` already names the
+ * account role, so `label = MAPPING_EVENT_LABELS[event] + ' · ' + description`
+ * reproduces the label format the frontend used to hardcode.
+ *
+ * Adding a mapping key with a new event prefix only requires one entry here;
+ * anything missing degrades to the raw prefix instead of breaking the catalog.
+ */
+export const MAPPING_EVENT_LABELS: Record<string, string> = {
+  'ap.payment': 'Pago de CxP',
+  'ap.write_off': 'Castigo de CxP',
+  'ar.write_off': 'Castigo de cartera (CxC)',
+  'cash_register.closed': 'Cierre de caja',
+  'cash_register.movement': 'Movimiento de caja',
+  'cash_register.opened': 'Apertura de caja',
+  'commission.calculated': 'Comisión calculada',
+  'credit_note.accepted': 'Nota crédito aceptada',
+  'credit_sale.created': 'Venta a crédito',
+  'depreciation.monthly': 'Depreciación mensual',
+  'dispatch_note.delivered': 'Remisión entregada',
+  'dispatch_note.received': 'Remisión recibida',
+  'dispatch_note.return': 'Remisión devuelta',
+  'dispatch_route.closed': 'Cierre de planilla de ruta',
+  'dispatch_route.settlement': 'Cuadre de planilla de ruta',
+  'disposal.fixed_asset': 'Baja de activo fijo',
+  'expense.approved': 'Gasto aprobado',
+  'expense.cancelled': 'Gasto cancelado',
+  'expense.paid': 'Gasto pagado',
+  'expense.refunded': 'Gasto reembolsado',
+  'intercompany_transfer.received': 'Transferencia intercompany recibida',
+  'intercompany_transfer.shipped': 'Transferencia intercompany enviada',
+  'inventory.adjusted': 'Ajuste de inventario',
+  'invoice.validated': 'Factura validada',
+  'kitchen.fired': 'Fired a cocina',
+  'layaway.cancelled': 'Plan separe cancelado',
+  'layaway.completed': 'Plan separe completado',
+  'layaway.payment': 'Pago plan separe',
+  'order.completed': 'Orden completada',
+  'payment.received': 'Pago recibido',
+  'payroll.approved': 'Nómina aprobada',
+  'payroll.paid': 'Nómina pagada',
+  'production.completed': 'Producción completada',
+  'purchase.vat_recognized': 'IVA descontable de compra (POP)',
+  'purchase_order.payment': 'Pago orden de compra',
+  'purchase_order.received': 'Orden de compra recibida',
+  'refund.completed': 'Reembolso completado',
+  saas_bad_debt: 'Cartera incobrable SaaS',
+  saas_partner_payout: 'Pago comisión partner SaaS',
+  saas_refund: 'Reembolso suscripción SaaS',
+  saas_revenue: 'Ingreso suscripción SaaS',
+  saas_subscription_expense: 'Gasto suscripción SaaS',
+  'settlement.approved': 'Liquidación aprobada',
+  'settlement.paid': 'Liquidación pagada',
+  'stock_transfer.completed': 'Transferencia de stock',
+  'support_document.accepted': 'Documento soporte aceptado',
+  'vat.declaration': 'Declaración de IVA',
+  'wallet.debit': 'Uso de wallet',
+  'wallet.topup': 'Recarga de wallet',
+  'withholding.applied': 'Retención aplicada',
+  'withholding.practiced': 'Retención practicada',
+  'withholding.suffered': 'Retención sufrida',
+};
+
+/** One row of the mapping-key catalog served to the frontend. */
+export interface MappingKeyCatalogEntry {
+  key: string;
+  label: string;
+  /** Event half of the key (`invoice.validated`), for grouping in the UI. */
+  event: string;
+  /** Account role half of the key (`accounts_receivable`). */
+  role: string;
+  /** PUC code the default cascade falls back to. */
+  default_code: string;
+  /** Raw account description from `DEFAULT_ACCOUNT_MAPPINGS`. */
+  description: string;
+}
+
+/** Splits `invoice.validated.accounts_receivable` into event + role. */
+function splitMappingKey(key: string): { event: string; role: string } {
+  const parts = key.split('.');
+  if (parts.length >= 3) {
+    return { event: parts.slice(0, 2).join('.'), role: parts.slice(2).join('.') };
+  }
+  return { event: parts[0], role: parts.slice(1).join('.') };
+}
+
+/**
+ * Canonical catalog of every mapping key the accounting engine understands.
+ *
+ * This is the single source of truth. The frontend used to re-declare a
+ * partial copy of it (and drifted: 234 keys here vs 179 there), so it is now
+ * exposed over HTTP instead of being duplicated.
+ */
+export function buildMappingKeyCatalog(): MappingKeyCatalogEntry[] {
+  return Object.entries(DEFAULT_ACCOUNT_MAPPINGS).map(([key, def]) => {
+    const { event, role } = splitMappingKey(key);
+    const eventLabel = MAPPING_EVENT_LABELS[event] ?? event;
+    return {
+      key,
+      label: `${eventLabel} · ${def.description}`,
+      event,
+      role,
+      default_code: def.code,
+      description: def.description,
+    };
+  });
+}
+
 @Injectable()
 export class AccountMappingService {
   private readonly logger = new Logger(AccountMappingService.name);

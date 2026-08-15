@@ -96,6 +96,36 @@ export interface FiscalDocumentRequirements {
   key_algorithm: FiscalKeyAlgorithm;
   /** Rótulo en español para la UI del panel y de la consola. */
   label: string;
+  /**
+   * ¿El documento se compone de LÍNEAS de venta (`cac:InvoiceLine`,
+   * `cac:CreditNoteLine`, `cac:DebitNoteLine`)?
+   *
+   * La nómina electrónica no: el DSPNE declara devengados y deducciones, no
+   * líneas de un catálogo. Exigirle «al menos una línea» la bloquearía siempre.
+   */
+  requires_lines: boolean;
+  /**
+   * Nombre UBL del grupo de totales, o `null` cuando el documento no lo lleva.
+   *
+   * NO ES COSMÉTICO Y NO ES UN SINÓNIMO. La nota débito lo nombra
+   * `cac:RequestedMonetaryTotal` y todo lo demás `cac:LegalMonetaryTotal`; la
+   * DIAN publica un XPath distinto por tipo (Anexo 1.9 §11.4.6), así que emitir
+   * el nombre equivocado publica los importes donde nadie los lee y rechaza por
+   * DAU01/DAU02/DAU04/DAU06 a la vez. Se declara aquí para que la prevalidación
+   * pueda NOMBRAR el elemento correcto en su mensaje en vez de decir «los
+   * totales» y dejar al operador buscando cuál.
+   */
+  monetary_total_element: 'LegalMonetaryTotal' | 'RequestedMonetaryTotal' | null;
+  /**
+   * ¿`operation_type` (el `cbc:CustomizationID`) de este documento se lee de la
+   * tabla `TipoOperacionF-2.1.gc` — la de FACTURA?
+   *
+   * Las notas tienen tablas propias (`TipoOperacionNC` / `TipoOperacionND`) cuyos
+   * valores NO se solapan con los de factura: '20' es una nota crédito con
+   * referencia, no una factura de exportación. Juzgar el `operation_type` de una
+   * nota contra la tabla de factura la rechazaría por FAD02 estando bien.
+   */
+  uses_invoice_operation_types: boolean;
 }
 
 /**
@@ -142,6 +172,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: true,
     key_algorithm: 'CUFE',
     label: 'Factura electrónica de venta',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: true,
   },
   /**
    * La DIAN no emite Autorización de Numeración para las notas: la Res.
@@ -161,6 +194,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota crédito',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
   debit_note: {
     document_type: 'debit_note',
@@ -169,6 +205,10 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota débito',
+    requires_lines: true,
+    // El ÚNICO documento cuyo grupo de totales NO es `cac:LegalMonetaryTotal`.
+    monetary_total_element: 'RequestedMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
   /**
    * Documento soporte en adquisiciones a no obligados a facturar (Res.
@@ -182,6 +222,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Documento soporte',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
   /** Nota de ajuste al documento soporte: ajusta, no numera contra rango propio. */
   support_adjustment_note: {
@@ -191,6 +234,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Nota de ajuste al documento soporte',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
   /**
    * Nómina electrónica. NO lleva resolución de numeración: el DSPNE numera con su
@@ -205,6 +251,12 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nómina electrónica',
+    // El DSPNE declara devengados y deducciones, no líneas de catálogo, y su
+    // grupo de totales es `cac:...` propio del esquema de nómina. La aritmética
+    // de factura no le aplica y prevalidarla contra ella la bloquearía siempre.
+    requires_lines: false,
+    monetary_total_element: null,
+    uses_invoice_operation_types: false,
   },
   payroll_adjustment: {
     document_type: 'payroll_adjustment',
@@ -213,6 +265,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nota de ajuste de nómina electrónica',
+    requires_lines: false,
+    monetary_total_element: null,
+    uses_invoice_operation_types: false,
   },
   /**
    * Documento equivalente electrónico del tiquete POS (Res. 000165/2023,
@@ -228,6 +283,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Documento equivalente POS',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
   /**
    * Nota de ajuste al documento equivalente ('93' débito / '94' crédito, numeral
@@ -240,6 +298,9 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota de ajuste al documento equivalente',
+    requires_lines: true,
+    monetary_total_element: 'LegalMonetaryTotal',
+    uses_invoice_operation_types: false,
   },
 });
 
@@ -314,6 +375,107 @@ export function requiresAuthorizedRange(
 /** ¿La clave de este documento se alimenta de la ClTec del rango? */
 export function acceptsTechnicalKey(document_type: FiscalDocumentType): boolean {
   return FISCAL_DOCUMENT_REQUIREMENTS[document_type].accepts_technical_key;
+}
+
+/** ¿Este documento se compone de líneas de venta? */
+export function requiresLines(document_type: FiscalDocumentType): boolean {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type].requires_lines;
+}
+
+/** Nombre UBL del grupo de totales, o `null` si el documento no lo lleva. */
+export function monetaryTotalElementFor(
+  document_type: FiscalDocumentType,
+): 'LegalMonetaryTotal' | 'RequestedMonetaryTotal' | null {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type].monetary_total_element;
+}
+
+/** ¿Su `cbc:CustomizationID` se juzga contra la tabla de tipos de FACTURA? */
+export function usesInvoiceOperationTypes(
+  document_type: FiscalDocumentType,
+): boolean {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type]
+    .uses_invoice_operation_types;
+}
+
+/**
+ * Moneda del documento — `cbc:DocumentCurrencyCode`.
+ *
+ * Es COP y no es negociable: la factura electrónica colombiana se DECLARA en
+ * pesos. La operación en divisa se informa aparte (`cac:PaymentAlternativeCurrencyTotal`
+ * y la tasa de cambio), y ese bloque NO cambia la moneda del documento. Poner
+ * `USD` en `DocumentCurrencyCode` hace que todos los `@currencyID` del documento
+ * declaren dólares sobre importes que son pesos.
+ */
+export const DIAN_DOCUMENT_CURRENCY = 'COP';
+
+// -----------------------------------------------------------------------------
+// FORMA DE LA CLAVE TÉCNICA (ClTec)
+//
+// Vive aquí, junto a `accepts_technical_key`, porque es la otra mitad de la
+// misma pregunta: la tabla dice QUIÉN lleva ClTec y esto dice QUÉ ES una ClTec.
+// Siendo este módulo puro, las cuatro puertas por las que la clave entra o se
+// usa —DTO de alta, servicio de resoluciones, escáner por IA y generador de
+// consecutivos— pueden juzgarla con la MISMA regla en vez de reescribir cada una
+// su expresión regular.
+//
+// EL INCIDENTE QUE LO MOTIVA: en producción se guardó una ClTec de 38
+// caracteres (todos hexadecimales, sin espacios — dos perdidos al copiarla). El
+// CUFE se calculó con ella, la DIAN lo recomputó con la verdadera, los hashes
+// difirieron y respondió «Valor del CUFE no está calculado correctamente». Para
+// entonces el consecutivo autorizado ya estaba gastado, y eso no se recupera.
+//
+// La ClTec es la ÚNICA entrada del hash que el XML NO transporta, así que la
+// DIAN es el primer sistema capaz de notar que está mal. Validar su FORMA al
+// escribirla es la última oportunidad barata de detectarlo.
+// -----------------------------------------------------------------------------
+
+/** La ClTec es el hex de un SHA-1: 40 caracteres, ni uno más ni uno menos. */
+export const TECHNICAL_KEY_LENGTH = 40;
+
+/**
+ * Forma exacta que emite la DIAN. Se aceptan mayúsculas porque el valor viaja
+ * copiado a mano desde un PDF; el vector oficial del Anexo Técnico 1.9 §11.2
+ * (`693ff6f2a553c3646a063436fd4dd9ded0311471`) es minúscula.
+ */
+export const TECHNICAL_KEY_PATTERN = /^[0-9a-fA-F]{40}$/;
+
+/**
+ * Quita el ruido de transporte de un valor pegado: espacios, tabuladores y
+ * saltos de línea que un PDF inserta al copiar y que jamás forman parte de un
+ * hexadecimal. Y pasa a minúscula.
+ *
+ * LO SEGUNDO NO ES COSMÉTICO. El hexadecimal es insensible a mayúsculas como
+ * valor, pero el CUFE hashea el LITERAL: `693FF6F2…` y `693ff6f2…` son la misma
+ * clave y producen huellas distintas. La DIAN emite la ClTec en minúscula —así
+ * la imprime el vector oficial del Anexo 1.9 §11.2 y así la da por sentado el
+ * escáner de habilitación—, de modo que una mayúscula sólo puede venir de cómo
+ * el PDF la renderiza, nunca de una clave distinta. Sin esta línea, pegarla en
+ * mayúscula pasaría la validación de forma y reproduciría el fallo de los 38
+ * caracteres por otra vía: hash correcto en apariencia, rechazo de la DIAN,
+ * consecutivo gastado.
+ *
+ * No repara nada más. Un guion, una «o» por un cero o un carácter perdido se
+ * conservan tal cual para que {@link isWellFormedTechnicalKey} los denuncie: una
+ * clave arreglada en silencio es exactamente cómo entró la de 38 caracteres.
+ */
+export function normalizeTechnicalKey(raw: string | null | undefined): string {
+  return (raw ?? '').replace(/\s+/g, '').toLowerCase();
+}
+
+/**
+ * ¿El valor tiene la forma que emite la DIAN? Normaliza antes de juzgar, así que
+ * acepta indistintamente el valor crudo del usuario o uno ya normalizado.
+ *
+ * Deliberadamente FUERA de {@link validateResolutionDraft}: aquella responde
+ * «¿este tipo de documento debe llevar ClTec?» y se traduce a
+ * `INVOICING_RESOLUTION_008`; esta responde «¿esto es una ClTec?» y se traduce a
+ * `INVOICING_RESOLUTION_011`. Mezclarlas devolvería el mismo código para dos
+ * correcciones distintas: borrar el campo o volver a copiarlo completo.
+ */
+export function isWellFormedTechnicalKey(
+  value: string | null | undefined,
+): boolean {
+  return TECHNICAL_KEY_PATTERN.test(normalizeTechnicalKey(value));
 }
 
 /**

@@ -5,13 +5,17 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 import {
   FISCAL_DOCUMENT_TYPES,
+  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_PATTERN,
+  normalizeTechnicalKey,
   type FiscalDocumentType,
 } from '../../fiscal-document-requirements';
 
@@ -135,10 +139,35 @@ export class CreateResolutionDto {
    * consecutivo autorizado. El servicio la rechaza para esos tipos.
    *
    * Admite `null` explícito (`@IsOptional` no valida `null`) porque borrar una
-   * ClTec mal guardada es justamente la corrección que hay que poder hacer.
+   * ClTec mal guardada es justamente la corrección que hay que poder hacer. El
+   * `@Transform` conserva esa vía y le añade la cadena vacía: un campo que el
+   * formulario manda en blanco significa «sin clave», no «clave de 0
+   * caracteres», y guardarlo como `''` creaba un tercer estado que ningún lector
+   * distingue de `null`.
+   *
+   * La FORMA sí se exige, y es la validación que faltaba. Con solo
+   * `@MaxLength(255)` entró en producción una ClTec de 38 caracteres: el CUFE
+   * salió calculado con ella, la DIAN lo recomputó con la suya y rechazó la
+   * factura por «Valor del CUFE no está calculado correctamente», con el
+   * consecutivo autorizado ya gastado. `@MaxLength` sobra desde que la forma
+   * exige exactamente 40.
+   *
+   * El `@Transform` solo quita espacios y saltos de línea —lo que un PDF inserta
+   * al copiar—; no completa ni corrige caracteres, porque una clave reparada en
+   * silencio es indistinguible de una correcta hasta que la DIAN la rechaza.
    */
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const normalized = normalizeTechnicalKey(value);
+    return normalized === '' ? null : normalized;
+  })
   @IsString()
-  @MaxLength(255)
+  @Matches(TECHNICAL_KEY_PATTERN, {
+    message:
+      `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
+      'caracteres hexadecimales (0-9, a-f), tal como la entrega la DIAN en la ' +
+      'autorización de numeración. Déjala vacía si este documento no lleva clave técnica.',
+  })
   technical_key?: string | null;
 }

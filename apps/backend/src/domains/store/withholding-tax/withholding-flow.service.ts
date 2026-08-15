@@ -6,7 +6,10 @@ import { WithholdingResolverService } from './withholding-resolver.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
 import { deriveCounterpartyType } from './withholding-classification.util';
 import type { TenantFiscalProfile } from './withholding-resolver.service';
-import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
+import {
+  WithholdingLine,
+  WithholdingRoleValue,
+} from 'src/common/interfaces/withholding-breakdown.interface';
 
 /**
  * Cliente Prisma mínimo que la cadena de retenciones necesita, para poder pasarle
@@ -55,6 +58,11 @@ export interface WithholdingResolution {
  * Persisted-context for a batch of withholding lines. `supplier_id` is only
  * written for role='practiced' (Caso 1, we withhold a supplier); `customer_id`
  * is only written for role='suffered' (Caso 2, a customer withholds us).
+ *
+ * `role='self'` (Caso 3, autorretención) NO escribe ninguna de las dos: la
+ * autorretención no tiene contraparte, y apuntar al cliente de la venta que la
+ * originó haría creer que ese cliente retuvo algo. Queda atada al documento por
+ * `invoice_id`, que es lo único cierto.
  */
 export interface PersistWithholdingContext {
   organization_id: number;
@@ -63,7 +71,7 @@ export interface PersistWithholdingContext {
   invoice_id?: number | null;
   supplier_id?: number | null;
   customer_id?: number | null;
-  role: 'practiced' | 'suffered';
+  role: WithholdingRoleValue;
   counterparty_type?: string | null;
   uvt_value_used: number;
   year?: number;
@@ -408,6 +416,65 @@ export class WithholdingFlowService {
     );
 
     return { lines, uvt_value_used, counterparty_type };
+  }
+
+  /**
+   * CASO 3 — self (AUTORRETENCIÓN). La tienda vende y se retiene a sí misma.
+   * Resuelve las líneas aplicables (pasivos propios, 2365/2368).
+   *
+   * NO recibe contraparte, y eso no es una simplificación: la autorretención
+   * nace de una calidad del EMISOR (Decreto 2201/2016 para renta; régimen
+   * municipal para ICA), así que aplica igual en una venta de mostrador anónima
+   * que en una venta a un gran contribuyente. Pedir un `customer_id` aquí
+   * habría hecho que las ventas B2C —donde no hay cliente— dejaran de
+   * autorretener, que es exactamente donde más se factura.
+   *
+   * Mismo contrato de cero-regresión que sus dos hermanas: si el emisor no es
+   * autorretenedor (`is_self_withholder` false, el default), devuelve
+   * `lines: []` y nunca lanza.
+   */
+  async resolveSelf(params: {
+    organization_id: number;
+    store_id?: number | null;
+    base: number;
+    appliesTo?: string | string[];
+    year?: number;
+    /** Cliente de la transacción en curso; ver {@link WithholdingDbClient}. */
+    client?: WithholdingDbClient;
+  }): Promise<WithholdingResolution> {
+    const year = params.year ?? new Date().getFullYear();
+
+    const tenant = await this.getTenantFiscalProfile(
+      params.organization_id,
+      params.store_id ?? null,
+      params.client,
+    );
+
+    // Corte temprano: sin la calidad de autorretenedor no hay nada que
+    // resolver, y así se ahorra la lectura de conceptos y de UVT en el 100 %
+    // de las tiendas, que es el caso normal.
+    if (tenant.is_self_withholder !== true) {
+      return { lines: [], uvt_value_used: 0, counterparty_type: null };
+    }
+
+    const lines = await this.resolver.resolveSelfWithholding({
+      organization_id: params.organization_id,
+      base: params.base,
+      year,
+      appliesTo: params.appliesTo,
+      tenant,
+      client: params.client,
+    });
+
+    const uvt_value_used = await this.safeUvtValue(
+      params.organization_id,
+      year,
+      params.client,
+    );
+
+    // `counterparty_type` queda en null a propósito: no hay contraparte cuya
+    // clasificación fiscal haya intervenido en la decisión.
+    return { lines, uvt_value_used, counterparty_type: null };
   }
 
   /**

@@ -3,6 +3,11 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import {
+  isWellFormedTechnicalKey,
+  normalizeTechnicalKey,
+  TECHNICAL_KEY_LENGTH,
+} from '../fiscal-document-requirements';
 
 type FiscalDocumentType =
   | 'sales_invoice'
@@ -100,6 +105,47 @@ export class InvoiceNumberGenerator {
 
       if (!resolution) {
         throw new VendixHttpException(ErrorCodes.FISCAL_RESOLUTION_MISSING);
+      }
+
+      // PRECONDICIÓN DE LA FACTURA DE VENTA — clave técnica utilizable.
+      //
+      // ESTE es el punto exacto donde todavía no se ha gastado nada: el lock ya
+      // serializa la asignación y el `updateMany` de abajo aún no ha movido
+      // `current_number`. Un consecutivo autorizado es irrecuperable, así que
+      // cualquier condición que vaya a hacer que la DIAN rechace el documento
+      // tiene que fallar ANTES de consumirlo.
+      //
+      // Solo `sales_invoice`: su CUFE lleva la ClTec como 14º campo del hash. En
+      // los demás tipos ese campo es el Software-PIN (ver
+      // `fiscal-document-requirements.ts`), y exigirles ClTec bloquearía notas y
+      // documentos equivalentes que legítimamente no la tienen.
+      //
+      // El caso real: una ClTec de 38 caracteres guardada sin que nadie mirara
+      // su forma. El XML salió perfecto —la ClTec no viaja en él—, la DIAN
+      // recomputó el CUFE con la verdadera y respondió «Valor del CUFE no está
+      // calculado correctamente». El número ya estaba quemado.
+      if (document_type === 'sales_invoice') {
+        const technical_key = normalizeTechnicalKey(
+          typeof resolution.technical_key === 'string'
+            ? resolution.technical_key
+            : null,
+        );
+        if (!isWellFormedTechnicalKey(technical_key)) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_RESOLUTION_011,
+            `La resolución ${resolution.prefix}${resolution.resolution_number} no tiene una clave técnica (ClTec) utilizable: ` +
+              `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN emite exactamente ` +
+              `${TECHNICAL_KEY_LENGTH} en hexadecimal. Corrígela en Facturación → Resoluciones copiándola del PDF de la Autorización ` +
+              'de Numeración antes de emitir: con una clave equivocada la DIAN rechaza la factura por CUFE mal calculado y el ' +
+              'consecutivo autorizado que gasta no se recupera. No se asignó numeración.',
+            {
+              resolution_id: resolution.id,
+              document_type,
+              technical_key_length: technical_key.length,
+              expected_length: TECHNICAL_KEY_LENGTH,
+            },
+          );
+        }
       }
 
       // The cursor must never sit below the authorized floor. A blind

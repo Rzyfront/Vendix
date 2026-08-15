@@ -1611,6 +1611,19 @@ model product_variants {
   preparation_time_minutes      Int?
   attributes                    Json?
   image_id                      Int?
+  /// Subcuenta PUC de INGRESO propia de ESTA variante. Gana sobre
+  /// `products.account_code` porque la variante es la unidad realmente vendida:
+  /// dos presentaciones del mismo producto pueden pertenecer a líneas de negocio
+  /// distintas y el mapping por producto no sabría separarlas.
+  ///
+  /// NULL ⇒ hereda de `products.account_code`; si el producto tampoco la define,
+  /// cae al mapping por defecto. Es decir NULL = comportamiento histórico, cero
+  /// impacto en variantes existentes.
+  ///
+  /// Mismas reglas que `products.account_code`: debe existir en
+  /// `chart_of_accounts` de la organización y tener `accepts_entries = true`.
+  /// Mismo patrón que `withholding_concepts.account_code`.
+  account_code                  String?                         @db.VarChar(20)
   created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
   bookings                      bookings[]
@@ -1731,6 +1744,32 @@ model products {
   // (product_price_tier_overrides.override_units_per_package). The product
   // no longer owns packaging fields.
   has_multiple_price_tiers       Boolean                          @default(false)
+  /// Subcuenta PUC de INGRESO propia de este producto (p. ej. `413550` para una
+  /// línea de comercio al por menor que el contador quiere separar de `4135`).
+  ///
+  /// QUÉ: override del catálogo vivo. Cuando está presente, el asiento de la
+  /// factura acredita ESTA cuenta en vez de la que resuelve el mapping
+  /// `invoice.validated.revenue`. Como cada línea resuelve su propia cuenta, una
+  /// misma factura produce un asiento MIXTO: una línea de ingreso por cuenta
+  /// resuelta, conviviendo con las que caen al ingreso por defecto.
+  ///
+  /// POR QUÉ: un PUC real no tiene una sola cuenta de ingreso. Sin esta columna
+  /// la única salida es un asiento manual de reclasificación por cada venta, que
+  /// es exactamente el trabajo que la contabilidad automática debía eliminar.
+  ///
+  /// NULL ⇒ comportamiento histórico: resolver por el mapping por defecto. Por
+  /// eso la columna nace nullable y sin DEFAULT — ningún producto existente
+  /// cambia de cuenta ni un solo asiento ya posteado se reescribe.
+  ///
+  /// El código debe existir en `chart_of_accounts` de la organización Y aceptar
+  /// movimientos (`accepts_entries = true`): una cuenta de AGRUPACIÓN no puede
+  /// recibir un asiento. Mismo patrón, mismo tipo y mismo ancho que el
+  /// precedente ya probado `withholding_concepts.account_code`.
+  ///
+  /// OJO: NO es la cuenta que se contabiliza — es la cuenta VIGENTE. La que se
+  /// contabiliza es el snapshot `invoice_items.account_code`, capturado al
+  /// facturar. Ver el orden de resolución en `resolveInvoiceRevenueLines()`.
+  account_code                   String?                          @db.VarChar(20)
   created_at                     DateTime?                        @default(now()) @db.Timestamp(6)
   updated_at                     DateTime?                        @default(now()) @db.Timestamp(6)
   inventory_adjustments          inventory_adjustments[]
@@ -5193,11 +5232,58 @@ model invoices {
   transmission_status     fiscal_transmission_status_enum @default(draft)
   dian_status             dian_document_status_enum       @default(not_applicable)
   accounting_status       fiscal_accounting_status_enum   @default(blocked)
+  /// `cbc:CustomizationID` — tipo de operación DIAN: '10' estándar, '09' AIU,
+  /// '11' mandatos, '12' transporte (Anexo Técnico 1.9).
+  ///
+  /// NULL equivale a '10'. No lleva DEFAULT a propósito: un DEFAULT dejaría dos
+  /// representaciones del mismo valor conviviendo —las facturas históricas en
+  /// NULL y las nuevas en '10'— y el lector tendría que manejar ambas igual.
+  /// Con NULL ⇒ '10' hay una sola regla y cero filas tocadas por la migración.
+  operation_type          String?                         @db.VarChar(2)
   customer_id             Int?
   supplier_id             Int?
   customer_name           String?                         @db.VarChar(255)
   customer_tax_id         String?                         @db.VarChar(50)
   customer_address        Json?
+  /// Correo del adquiriente al momento de facturar. Es SNAPSHOT, igual que
+  /// `customer_address`: la DIAN exige `cac:Contact/cbc:ElectronicMail` y el
+  /// acuse de recibo se manda a esta dirección, así que el correo que valió es
+  /// el de la emisión, no el que el cliente tenga hoy en su ficha.
+  customer_email          String?                         @db.VarChar(255)
+  /// Teléfono del adquiriente al momento de facturar (`cac:Contact/cbc:Telephone`).
+  /// Snapshot por la misma razón que `customer_email`.
+  customer_phone          String?                         @db.VarChar(50)
+  /// Código DIAN del tipo de identificación del adquiriente: '11','12','13',
+  /// '21','22','31','41','42','47','48','50','91' (Anexo Técnico 1.9, tabla de
+  /// tipos de documento).
+  ///
+  /// CRÍTICO — no es un campo decorativo: decide si al calcular el CUFE se le
+  /// recorta el dígito de verificación al número. SOLO el NIT ('31') lleva DV.
+  /// A una cédula como 1118860776 recortarle el último dígito la convierte en la
+  /// cédula de otra persona, la huella no cuadra y la DIAN rechaza el documento
+  /// habiendo gastado ya el consecutivo. La lógica vive en `dianPartyId()`
+  /// (`common/utils/nit.util.ts`) y necesita este dato persistido para que un
+  /// reenvío años después recalcule el MISMO CUFE.
+  ///
+  /// VarChar(5) y no (2) porque el provider todavía acepta el alias interno
+  /// ('CC', 'NIT', 'NUIP') además del código numérico.
+  customer_document_type  String?                         @db.VarChar(5)
+  /// Dígito de verificación del NIT del adquiriente. Se emite como `<NIT>-<DV>`
+  /// en el XML pero NUNCA dentro del número que entra al hash del CUFE.
+  customer_verification_digit String?                     @db.VarChar(1)
+  /// CÓDIGO DIAN de régimen fiscal del adquiriente (`cbc:TaxLevelCode`):
+  /// '48' responsable de IVA, '49' no responsable.
+  ///
+  /// Es el CÓDIGO, no la etiqueta de `users.tax_regime`. 'GRAN_CONTRIBUYENTE' no
+  /// cabe en 10 caracteres, y eso es deliberado: el XML necesita el código, así
+  /// que un intento de guardar la etiqueta debe fallar ruidosamente en vez de
+  /// persistir un valor que el builder no sabe emitir.
+  customer_tax_regime     String?                         @db.VarChar(10)
+  /// Responsabilidades fiscales DIAN del adquiriente (O-13, O-15, O-23, O-47…),
+  /// como lista. Ausente ⇒ el builder cae a 'R-99-PN'. Json y no String[] para
+  /// alinearse con `customer_address`, el otro snapshot del adquiriente en esta
+  /// misma tabla; la fuente viva `users.fiscal_responsibilities` sí es String[].
+  customer_fiscal_responsibilities Json?
   order_id                Int?
   sales_order_id          Int?
   related_invoice_id      Int?
@@ -5213,6 +5299,30 @@ model invoices {
   total_amount            Decimal                         @default(0) @db.Decimal(12, 2)
   currency                String?                         @db.VarChar(10)
   exchange_rate           Decimal?                        @db.Decimal(12, 6)
+  /// Divisa ISO 4217 en que se PACTÓ la operación (USD, EUR…).
+  ///
+  /// LEER ANTES DE ASUMIR LO CONTRARIO: esta columna NO cambia la moneda del
+  /// documento. La factura electrónica se emite SIEMPRE en pesos colombianos —
+  /// `DocumentCurrencyCode` = COP, Res. DIAN 000042/2020 art. 73—. Lo único que
+  /// hacen `foreign_currency`, `foreign_total_amount` y `exchange_rate_date` es
+  /// DECLARAR la conversión en el bloque `cac:PaymentExchangeRate`. El importe
+  /// legal sigue siendo `total_amount` en COP.
+  foreign_currency        String?                         @db.VarChar(3)
+  /// Total equivalente expresado en `foreign_currency`. Informativo/declarativo:
+  /// no sustituye a `total_amount` (ver la nota de `foreign_currency`).
+  /// Decimal(14,2) — más holgura que los 12,2 vecinos porque una divisa débil
+  /// multiplica la cantidad de dígitos del mismo importe.
+  foreign_total_amount    Decimal?                        @db.Decimal(14, 2)
+  /// Fecha en que se fijó la tasa de cambio (`cac:PaymentExchangeRate/cbc:Date`).
+  /// Es fecha-sólo, no instante: la TRM es del día, no de una hora.
+  exchange_rate_date      DateTime?                       @db.Date
+  /// `cbc:PaymentMeansCode` grupo forma de pago: '1' contado, '2' crédito.
+  /// Mismo dominio y mismo ancho que `orders.payment_form`, del que se propaga.
+  payment_form            String?                         @db.VarChar(2)
+  /// Medio de pago DIAN (`cac:PaymentMeans/cbc:PaymentMeansCode`): '10' efectivo,
+  /// '42' consignación, '48' tarjeta crédito, '49' tarjeta débito…
+  /// Hoy el builder emite '10' fijo; persistirlo permite declarar el real.
+  payment_means_code      String?                         @db.VarChar(3)
   resolution_id           Int?
   cufe                    String?                         @db.VarChar(255)
   qr_code                 String?
@@ -5297,11 +5407,48 @@ model invoice_items {
   // propagated from the source order_item at invoice build. Legal documents
   // render this snapshot instead of reading the live serial pool.
   serial_numbers_snapshot String?
+  /// Código UN/ECE rec. 20 de la unidad realmente vendida ('EA', 'MTR', 'KGM',
+  /// 'LTR'). Va al XML como `@unitCode` de `cbc:InvoicedQuantity`.
+  ///
+  /// Hoy no se persiste: se resuelve en CADA envío y, cuando la resolución
+  /// falla, cae a 'EA' EN SILENCIO. La DIAN valida la coherencia entre cantidad
+  /// y unidad, así que 3 metros declarados como 'EA' dicen "3 unidades" y el
+  /// documento queda mintiendo. Snapshot ⇒ un reenvío años después emite la
+  /// misma unidad que se emitió la primera vez. NULL = 'EA' (histórico).
+  unit_code               String?   @db.VarChar(10)
+  /// SNAPSHOT de la cuenta PUC de ingreso de esta línea al momento de facturar.
+  ///
+  /// Que el producto se remapee a otra cuenta mañana NO debe reescribir un
+  /// asiento ya contabilizado: el asiento tiene que poder reconstruirse desde el
+  /// documento, no desde el catálogo vivo. Mismo patrón y mismo ancho que
+  /// `withholding_concepts.account_code`. NULL ⇒ resolver por el mapping vigente
+  /// (comportamiento histórico).
+  account_code            String?   @db.VarChar(20)
+  /// Componente AIU al que pertenece la línea: Administración, Imprevistos o
+  /// Utilidad. Marca qué parte del contrato entra a la base gravable del IVA
+  /// (`CustomizationID` = '09', ver `invoices.operation_type`).
+  ///
+  /// CUIDADO — son DOS regímenes distintos y no comparten base gravable:
+  ///   · E.T. art. 462-1 (aseo, vigilancia, servicios temporales de empleo):
+  ///     la base es el AIU COMPLETO (A+I+U), y no puede ser inferior al 10% del
+  ///     valor del contrato.
+  ///   · Decreto 1372/1992 art. 3 (contratos de construcción): la base es
+  ///     ÚNICAMENTE la Utilidad del constructor.
+  /// Cuál aplica depende del contrato, no del producto, así que el régimen es
+  /// configuración de la tienda y no se puede deducir de esta columna sola.
+  ///
+  /// NULL = línea normal, no AIU — que es el 100% del histórico.
+  aiu_component           aiu_component_enum?
   created_at              DateTime? @default(now()) @db.Timestamp(6)
 
   invoice         invoices          @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   product         products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  /// Tributos que declaran gravar ESTA línea. Ver `invoice_taxes.invoice_item_id`:
+  /// la relación es opcional del otro lado, así que una línea sin filas acá no
+  /// es una línea sin impuestos — es un documento cuyo desglose no se persistió
+  /// (todo el histórico, y los documentos con un solo tributo).
+  invoice_taxes   invoice_taxes[]
 
   @@index([invoice_id])
 }
@@ -5309,6 +5456,35 @@ model invoice_items {
 model invoice_taxes {
   id             Int            @id @default(autoincrement())
   invoice_id     Int
+  /// Línea del documento que este tributo grava. NULL = fila de CABECERA, que
+  /// es el 100 % del histórico y sigue siendo la forma canónica de un documento
+  /// con un solo tributo.
+  ///
+  /// POR QUÉ EXISTE — el emisor UBL escribe un `cac:TaxSubtotal` por cada
+  /// tributo DE LA LÍNEA. Sin este vínculo cae al camino histórico de heredarle
+  /// a toda línea el PRIMER tributo del documento, y en una cuenta mixta
+  /// IVA + INC eso hace que todas las líneas declaren el esquema de la primera:
+  /// una cuenta de restaurante sale entera como IVA 19 % o entera como INC 8 %,
+  /// y la DIAN recompone los impuestos desde lo que recibe.
+  ///
+  /// DOS FORMAS, NUNCA MEZCLADAS EN EL MISMO DOCUMENTO (ver
+  /// `InvoicingService.needsPersistedLineTaxes`):
+  ///   · 1 solo tributo  ⇒ UNA fila agregada de cabecera, `invoice_item_id` NULL.
+  ///     El camino histórico ya emite EXACTAMENTE el mismo XML, así que partirla
+  ///     por línea no cambiaría un byte y sí multiplicaría las filas que leen el
+  ///     PDF, el detalle del panel y los reportes fiscales.
+  ///   · ≥2 tributos     ⇒ UNA fila por (línea × tributo), todas con
+  ///     `invoice_item_id`. NO conviven con filas agregadas: cada consumidor de
+  ///     esta tabla SUMA sus filas (`cac:TaxTotal` de cabecera, declaraciones,
+  ///     exógena, ICA), y agregado + desglose juntos duplicarían el impuesto del
+  ///     documento y lo harían rechazar por FAS01b.
+  ///
+  /// `ON DELETE SET NULL`: borrar una línea no puede arrastrar la fila de
+  /// tributo —es dato fiscal— pero tampoco puede dejarla apuntando a un id
+  /// muerto. Degradar a NULL la devuelve al camino histórico, que sigue siendo
+  /// correcto. Es además lo que permite que `InvoicingService.update()` borre
+  /// las líneas antes que los tributos sin chocar contra la FK.
+  invoice_item_id Int?
   tax_rate_id    Int?
   tax_name       String         @db.VarChar(100)
   tax_rate       Decimal        @db.Decimal(5, 2)
@@ -5320,10 +5496,12 @@ model invoice_taxes {
   // `TaxInclusiveIndicator` XML attribute. Defaults to ADDITIONAL.
   is_inclusive   Boolean?       @default(false)
 
-  invoice   invoices   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
-  tax_rates tax_rates? @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice      invoices       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  invoice_item invoice_items? @relation(fields: [invoice_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tax_rates    tax_rates?     @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([invoice_id])
+  @@index([invoice_item_id])
 }
 
 /// Uniqueness lives in DB partial unique indexes that Prisma cannot express as
@@ -5362,6 +5540,24 @@ model invoice_resolutions {
   valid_to             DateTime                  @db.Timestamp(6)
   is_active            Boolean                   @default(true)
   technical_key        String?                   @db.VarChar(255)
+  /// Clave técnica DIAN cifrada (AES-256-GCM, `TechnicalKeyVaultService`).
+  ///
+  /// Es la fuente de verdad PREFERIDA: `reveal()` la descifra y sólo cae a
+  /// `technical_key` cuando está vacía o no abre. No hubo backfill por SQL —ni
+  /// puede haberlo: la llave maestra no está disponible para el runner de
+  /// migraciones—, así que las filas viejas se cifran solas la primera vez que
+  /// alguien las lee, una a una y sin mutación masiva. Mismo patrón ya probado
+  /// en `DianSecretEnvelopeService` para el Software-PIN.
+  technical_key_encrypted String?                @db.Text
+  /// SHA-256 de la ClTec normalizada. Sin llave, a propósito.
+  ///
+  /// Existe porque el cifrado usa salt e IV frescos por registro: dos filas con
+  /// la misma ClTec dan ciphertexts distintos, y eso rompe la única consulta que
+  /// compara claves ENTRE filas — el detector de ClTec compartida entre NIT
+  /// (`findResolutionsSharingTechnicalKey`), que corre sin scope sobre toda la
+  /// plataforma. Contra la columna cifrada esa igualdad nunca coincide y su
+  /// vacío se lee como «no hay contaminación».
+  technical_key_fingerprint String?              @db.VarChar(64)
   created_at           DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
@@ -5374,6 +5570,10 @@ model invoice_resolutions {
   @@index([accounting_entity_id, document_type, is_active])
   @@index([organization_id, accounting_entity_id])
   @@index([organization_id, accounting_entity_id, document_type])
+  // `map` explícito para que el nombre coincida con el de la migración; sin él
+  // Prisma lo llamaría `invoice_resolutions_technical_key_fingerprint_idx` y
+  // cada `migrate dev` posterior detectaría drift contra un índice que ya existe.
+  @@index([technical_key_fingerprint], map: "idx_invoice_resolutions_technical_key_fingerprint")
 }
 
 // ===== ACCOUNTING DOMAIN =====
@@ -6987,9 +7187,26 @@ enum withholding_type_enum {
   reteica
 }
 
+// Punto de vista desde el que se mira una retención: quién la soporta.
+//
+//   · practiced — la tienda RETIENE a un tercero. Descuenta del pago al
+//     proveedor y le queda una obligación con la DIAN (pasivo).
+//   · suffered  — a la tienda LE RETIENEN. Cobra menos y acumula un anticipo
+//     de impuesto (activo).
+//   · self      — AUTORRETENCIÓN: la tienda se retiene a sí misma. No hay
+//     tercero al otro lado. Reconoce a la vez un gasto y un pasivo propios, y
+//     el cliente paga el 100% de la factura.
+//
+// `self` NO es un caso de `practiced`, aunque se le parezca: en `practiced` la
+// contrapartida es una MENOR salida de caja hacia el proveedor; en `self` no
+// sale ni entra un peso de más. Colapsarlos descuadra el asiento en silencio.
+//
+// Para los TRES: `cac:WithholdingTaxTotal` NO resta de `cbc:PayableAmount`
+// (Anexo Técnico 1.9 §11.9.1). Restarla es rechazo por descuadre aritmético.
 enum withholding_role_enum {
   practiced
   suffered
+  self
 }
 
 enum exogenous_report_status_enum {
@@ -10048,4 +10265,36 @@ enum tax_regime_enum {
   AUTORRETENEDOR
   ESPECIAL
   NO_APLICA
+}
+
+// ============================================================================
+// Régimen AIU — componente de una línea de factura
+// ============================================================================
+//
+// En ciertos servicios el IVA no grava el valor total del contrato sino un
+// subconjunto, y la factura se desglosa en Administración + Imprevistos +
+// Utilidad. Qué subconjunto es la base gravable depende del régimen, y son DOS:
+//
+//   · E.T. art. 462-1 — servicios integrales de aseo y cafetería, vigilancia,
+//     y servicios temporales de empleo: la tarifa se aplica sobre el AIU
+//     COMPLETO (A+I+U), que además no puede ser inferior al 10% del valor del
+//     contrato.
+//   · Decreto 1372/1992 art. 3 — contratos de construcción de bien inmueble:
+//     la base es ÚNICAMENTE la Utilidad del constructor.
+//
+// Confundirlos no produce un error visible: produce una factura que declara
+// menos IVA del que debía, aceptada por la DIAN y corregible solo con nota.
+// Por eso el régimen es configuración explícita de la tienda
+// (`store_settings.invoicing.aiu`) y no se deduce de los datos de la línea.
+//
+// La línea declara a qué componente pertenece para que la base se calcule sobre
+// el subconjunto correcto, y la cabecera lo marca con
+// `invoices.operation_type` = '09' (`cbc:CustomizationID`, Anexo Técnico 1.9).
+//
+// `invoice_items.aiu_component` es NULLABLE: NULL = línea normal, no AIU.
+
+enum aiu_component_enum {
+  administracion
+  imprevistos
+  utilidad
 }

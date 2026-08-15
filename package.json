@@ -29,6 +29,7 @@
     "zoneless:audit": "bash apps/frontend/scripts/zoneless-audit.sh",
     "tz:audit": "bash scripts/tz-audit.sh",
     "state-refresh:audit": "bash scripts/state-refresh-audit.sh",
+    "dian:ubl-model": "node scripts/generate-dian-ubl-content-model.js",
     "// ----- DATABASE (Backend) -----": "",
     "db:reset-seed": "npm run db:reset -w apps/backend && npm run db:seed -w apps/backend",
     "// ----- DOCKER -----": "",

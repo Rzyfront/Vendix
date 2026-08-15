@@ -9,6 +9,7 @@ import {
 } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.service';
 import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 import {
   isFiscalDocumentType,
@@ -17,6 +18,7 @@ import {
   type FiscalDocumentType,
   type FiscalRequirementViolation,
 } from '../fiscal-document-requirements';
+import { assertTechnicalKeyShape } from '../utils/technical-key.util';
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -63,6 +65,7 @@ export class ResolutionsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   private getContext() {
@@ -99,6 +102,13 @@ export class ResolutionsService {
       document_type,
       resolution_number: dto.resolution_number,
       technical_key: dto.technical_key,
+    });
+    // Después de los requisitos por tipo, no antes: si el documento no admite
+    // ClTec, lo que hay que decirle a quien configura es «borra el campo», no
+    // «tiene 38 caracteres». Se guarda lo que devuelve, no `dto.technical_key`,
+    // para que lo validado y lo persistido sean el mismo valor.
+    const technical_key = this.assertTechnicalKeyShape(dto.technical_key, {
+      document_type,
     });
     this.assertRange(dto.range_from, dto.range_to);
 
@@ -174,7 +184,10 @@ export class ResolutionsService {
         valid_from,
         valid_to,
         is_active: dto.is_active ?? true,
-        technical_key: dto.technical_key ?? null,
+        // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
+        // huella. Escribir sólo `technical_key` es lo que dejó la columna
+        // cifrada en NULL desde que se creó.
+        ...this.technicalKeyVault.sealForWrite(technical_key),
       },
     });
 
@@ -265,6 +278,21 @@ export class ResolutionsService {
       );
     }
 
+    // La FORMA de la ClTec se juzga SOLO cuando el PATCH la escribe, por la misma
+    // razón que el bloque de arriba: una fila anterior a esta validación puede
+    // venir con la clave mal copiada, y bloquear todo PATCH que la arrastre
+    // dejaría al comerciante sin poder corregir el resto de la resolución ni
+    // retirarla. Lo que no se puede es GUARDAR una clave con forma inválida — y
+    // si una vieja sobrevive, `InvoiceNumberGenerator` la corta antes de gastar
+    // el consecutivo, que es donde el daño sería irreversible.
+    const patched_technical_key =
+      dto.technical_key !== undefined
+        ? this.assertTechnicalKeyShape(dto.technical_key, {
+            resolution_id: id,
+            document_type: next_document_type,
+          })
+        : undefined;
+
     const next_range_from = dto.range_from ?? current.range_from;
     const next_range_to = dto.range_to ?? current.range_to;
     if (dto.range_from !== undefined || dto.range_to !== undefined) {
@@ -315,9 +343,12 @@ export class ResolutionsService {
       ...(dto.valid_from && { valid_from: next_valid_from }),
       ...(dto.valid_to && { valid_to: next_valid_to }),
       ...(dto.is_active !== undefined && { is_active: dto.is_active }),
-      ...(dto.technical_key !== undefined && {
-        technical_key: dto.technical_key,
-      }),
+      // Las tres columnas van juntas o no va ninguna. Actualizar sólo
+      // `technical_key` dejaría la copia cifrada y la huella apuntando a la clave
+      // ANTERIOR, y como `reveal()` prefiere la cifrada, la resolución seguiría
+      // hasheando el CUFE con la clave que el usuario acaba de corregir.
+      ...(dto.technical_key !== undefined &&
+        this.technicalKeyVault.sealForWrite(patched_technical_key)),
     };
 
     const updated = await this.prisma.invoice_resolutions.update({
@@ -461,6 +492,37 @@ export class ResolutionsService {
         violations: violations.map(({ field, code }) => ({ field, code })),
       },
     );
+  }
+
+  /**
+   * Exige que la ClTec tenga la FORMA que emite la DIAN y devuelve el valor
+   * normalizado que hay que persistir (`null` si no hay clave).
+   *
+   * POR QUÉ NO BASTA EL DTO: los tres carriles de escritura pasan por aquí, pero
+   * no todos por el mismo `ValidationPipe` —la consola de super admin entra por
+   * `TenantContextRunner` y un llamador interno puede construir el DTO a mano—,
+   * así que lo que este servicio no exige no lo exige nadie.
+   *
+   * POR QUÉ IMPORTA LA FORMA Y NO SOLO LA PRESENCIA: la ClTec es el 14º campo
+   * del CUFE y la única entrada del hash que el XML NO transporta. La DIAN
+   * recomputa el CUFE con la clave que ella emitió, así que es el PRIMER sistema
+   * capaz de notar que la nuestra está mal — y lo notifica rechazando el
+   * documento con el consecutivo autorizado ya consumido. Pasó en producción con
+   * una clave de 38 caracteres que el `@MaxLength(255)` de entonces aceptó sin
+   * mirar: «Valor del CUFE no está calculado correctamente», número quemado.
+   *
+   * La AUSENCIA de clave no se juzga aquí: eso depende del tipo de documento y
+   * ya lo decidió `assertFiscalRequirements` (`INVOICING_RESOLUTION_008`).
+   */
+  private assertTechnicalKeyShape(
+    raw: string | null | undefined,
+    details: Record<string, unknown> = {},
+  ): string | null {
+    // La regla vive en `utils/technical-key.util.ts` porque hay TRES carriles de
+    // escritura de resoluciones —tienda, organización y consola de super admin—
+    // en tres dominios distintos, y durante un tiempo sólo éste la aplicaba. Un
+    // método privado no se puede compartir; una copia por carril se desincroniza.
+    return assertTechnicalKeyShape(raw, details);
   }
 
   /** El rango tiene que ser un intervalo real de enteros positivos. */

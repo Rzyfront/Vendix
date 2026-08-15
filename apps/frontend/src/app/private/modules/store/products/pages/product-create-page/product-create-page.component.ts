@@ -12,7 +12,7 @@ import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { KdsStationsService } from '../../../restaurant-ops/kds/services';
 import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
-import { map, switchMap } from 'rxjs/operators';
+import { map, startWith, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -65,6 +65,7 @@ import { ServiceProvider } from '../../../reservations/interfaces/reservation.in
 import { CategoryQuickCreateComponent } from '../../components/category-quick-create.component';
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
+import { AccountCodeSelectComponent } from '../../components/account-code-select.component';
 import { ProductImageSourceModalComponent } from '../../components/product-image-source-modal.component';
 import { ProductImageAiEnhanceModalComponent } from '../../components/product-image-ai-enhance-modal.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
@@ -129,6 +130,12 @@ interface GeneratedVariant {
   image_file?: File;
   image_id?: number;
   track_inventory_override?: boolean | null;
+  /**
+   * Subcuenta PUC propia de la variante. GANA sobre la del producto: la
+   * variante es la unidad que realmente se factura. `null` ⇒ hereda del
+   * producto, y si el producto tampoco la declara, cae al ingreso por defecto.
+   */
+  account_code?: string | null;
 }
 
 export type { GeneratedVariant };
@@ -212,6 +219,7 @@ interface PriceTierOverrideRow {
     ProductSerialsManagerModalComponent,
     SaveRequirementsModalComponent,
     SaleConfigHintComponent,
+    AccountCodeSelectComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -882,6 +890,29 @@ export class ProductCreatePageComponent {
   readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
+
+  /**
+   * Cuenta PUC del producto, leída como señal.
+   *
+   * Un `computed()` NO reacciona a un `FormControl` — se evaluaría una sola vez
+   * con el valor inicial y el aviso "hereda del producto" de cada variante
+   * quedaría congelado en el código viejo. El puente correcto es `toSignal`
+   * sobre `valueChanges`.
+   */
+  readonly productAccountCode = toSignal(
+    this.productForm.get('account_code')!.valueChanges.pipe(
+      startWith(this.productForm.get('account_code')!.value),
+      map((code: string | null) => (code ? String(code) : null)),
+    ),
+    { initialValue: null as string | null },
+  );
+
+  /**
+   * Bloque de cuentas por variante, plegado por defecto: la precedencia por
+   * variante es la excepción, no la norma.
+   */
+  readonly isVariantAccountingOpen = signal(false);
+
   isSubmitting = signal(false);
   // Modal de "requisitos para guardar": consolida en un solo lugar todo lo que
   // impide guardar (errores de form + reglas de variantes + reservas), en vez
@@ -1613,6 +1644,7 @@ export class ProductCreatePageComponent {
       brand_ids: draft.brand_id ? [draft.brand_id] : [],
       tax_category_ids: draft.tax_category_ids || [],
       state: draft.state || ProductState.ACTIVE,
+      account_code: draft.account_code ?? null,
     });
   }
 
@@ -1863,6 +1895,9 @@ export class ProductCreatePageComponent {
         // corresponde `base_price`. 1 = precio por unidad, el comportamiento
         // de siempre.
         price_unit_quantity: [1 as number],
+        // Subcuenta PUC con la que se acredita el ingreso al facturar. Vacío =
+        // mapping contable por defecto de la organización.
+        account_code: [null as string | null],
       },
       {
         validators: [
@@ -2099,6 +2134,7 @@ export class ProductCreatePageComponent {
       stock_uom_id: (product as any).stock_uom_id ?? null,
       purchase_uom_id: (product as any).purchase_uom_id ?? null,
       price_unit_quantity: Number((product as any).price_unit_quantity ?? 1) || 1,
+      account_code: product.account_code ?? null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -2162,7 +2198,14 @@ export class ProductCreatePageComponent {
           v.track_inventory_override === undefined
             ? undefined
             : v.track_inventory_override,
+        account_code: v.account_code ?? null,
       }));
+
+      // Si alguna variante ya trae cuenta propia, el bloque se abre solo: un
+      // dato contable ya asignado no puede quedar escondido tras un clic.
+      this.isVariantAccountingOpen.set(
+        this.generatedVariants.some((v) => !!v.account_code),
+      );
 
       // Reconstruct variantAttributes from loaded variants
       const attributeMap = new Map<string, Set<string>>();
@@ -2266,6 +2309,11 @@ export class ProductCreatePageComponent {
       (sum, v) => sum + (Number(v.stock) || 0),
       0,
     );
+  }
+
+  /** Cuántas variantes declaran cuenta propia (el resto hereda del producto). */
+  get variantsWithAccountCount(): number {
+    return this.generatedVariants.filter((v) => !!v.account_code).length;
   }
 
   toggleVariants(isChecked: boolean): void {
@@ -3907,6 +3955,10 @@ export class ProductCreatePageComponent {
         1,
         Number(formValue.price_unit_quantity ?? 1) || 1,
       ),
+      // Se envía explícitamente null cuando queda vacía, no se omite: omitirla
+      // en una edición dejaría pegada la cuenta anterior aunque el operador la
+      // haya limpiado, y el ingreso seguiría acreditándose donde ya no debe.
+      account_code: formValue.account_code || null,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
@@ -3952,6 +4004,8 @@ export class ProductCreatePageComponent {
             v.track_inventory_override === undefined
               ? null
               : v.track_inventory_override,
+          // null = heredar la cuenta del producto; un código = la variante manda.
+          account_code: v.account_code || null,
         };
       });
 

@@ -20,6 +20,7 @@ import {
   dianLineExtensionTotal,
   dianRate,
   dianSum,
+  dianUnitPrice,
   toDecimal,
 } from '../../../utils/dian-money.util';
 
@@ -1177,7 +1178,12 @@ export class UblCommonBuilder {
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        .txt(dianAmount(item.unit_price));
+        // `dianUnitPrice`, no `dianAmount`: este campo admite 0-6 decimales y el
+        // precio despejado de una línea con impuesto incluido los necesita. Un
+        // precio redondo se sigue emitiendo con 2, así que ningún documento del
+        // histórico cambia. Ver la regla FAV06 en `clearInclusiveLine`: el
+        // importe de la línea se valida contra ESTE número.
+        .txt(dianUnitPrice(item.unit_price));
       // `BaseQuantity` declara a cuánta cantidad aplica `PriceAmount`. Para un
       // producto que publica su precio por N unidades de stock es N, no 1: con
       // `1.00` el documento afirma "$28.000 por gramo" en vez de "por kilo".

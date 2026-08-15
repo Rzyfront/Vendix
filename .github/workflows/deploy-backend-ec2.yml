@@ -134,14 +134,22 @@ jobs:
           sudo docker network inspect vendix-net >/dev/null 2>&1 || sudo docker network create vendix-net
 
           echo "🧬 Running Prisma migrations before app start..."
+          # El gate que sigue a migrate deploy interroga la BASE
+          # (information_schema), no el cliente Prisma. El cliente se genera
+          # desde schema.prisma en build, así que siempre tiene los campos
+          # nuevos: preguntarle si existen no puede detectar nada. Un migrate
+          # deploy que no aplique su migración deja al cliente creyendo en
+          # columnas que la base no tiene, y eso sale como ColumnNotFound (HTTP
+          # 500) en la primera escritura, con el deploy ya marcado success.
+          # Ver apps/backend/prisma/assert-schema-columns.js.
           sudo docker run --rm \
             --memory=768m \
             --network=host \
             --env-file /opt/vendix/.env \
             -e DATABASE_URL="\$DATABASE_URL" \
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            sh -c "npx prisma migrate deploy && node -e \"const {Prisma}=require('@prisma/client'); const models=Prisma.dmmf.datamodel.models; const has=(model,field)=>models.find(m=>m.name===model)?.fields.some(f=>f.name===field); const hasModel=(model)=>models.some(m=>m.name===model); const missing=[]; if(!has('organizations','fiscal_scope')) missing.push('organizations.fiscal_scope'); if(!has('accounting_entities','fiscal_scope')) missing.push('accounting_entities.fiscal_scope'); if(!has('dian_configurations','accounting_entity_id')) missing.push('dian_configurations.accounting_entity_id'); if(!hasModel('fiscal_scope_audit_log')) missing.push('fiscal_scope_audit_log'); if(missing.length){throw new Error('Generated Prisma Client is missing fiscal-scope schema: '+missing.join(', '));}\""
-          echo "✅ Migrations and Prisma Client smoke-check completed!"
+            sh -c "npx prisma migrate deploy && node prisma/assert-schema-columns.js"
+          echo "✅ Migrations and database schema gate completed!"
 
           echo "🗄️  Ensuring vendix-redis container is running..."
           if ! sudo docker ps --filter name=^/vendix-redis$ --filter status=running -q | grep -q .; then

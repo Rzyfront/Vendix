@@ -3,18 +3,55 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
+import {
+  VendixHttpException,
+  ErrorCodes,
+  ErrorCodeEntry,
+} from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   ProviderInvoiceData,
+  ProviderInvoiceTax,
   ProviderResponse,
 } from '../providers/invoice-provider.interface';
-import { dianAmount, dianRate } from '../utils/dian-money.util';
+import {
+  dianAmount,
+  dianLineExtension,
+  dianRate,
+  dianSum,
+  toDecimal,
+} from '../utils/dian-money.util';
+import {
+  buildAiuNote,
+  DIAN_AIU_NOTE_MAX_LENGTH,
+  DIAN_AIU_NOTE_MIN_LENGTH,
+  DIAN_AIU_NOTE_PREFIX,
+  UblCommonBuilder,
+} from '../providers/dian-direct/xml/ubl-common.builder';
+import type {
+  DianDocumentExtras,
+  DianExchangeRateDeclaration,
+  ProviderInvoiceWithholding,
+  UblDocumentLine,
+} from '../providers/dian-direct/xml/ubl-common.builder';
+import { DIAN_INVOICE_OPERATION_TYPES } from '../providers/dian-direct/constants/dian-document-types';
+import { DIAN_TAX_CODES } from '../providers/dian-direct/constants/dian-tax-codes';
+import type {
+  AiuSettings,
+  AiuVatRegime,
+} from '../../settings/interfaces/store-settings.interface';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
-import { WithholdingFlowService } from '../../withholding-tax/withholding-flow.service';
-import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
+import {
+  WithholdingFlowService,
+  WithholdingResolution,
+} from '../../withholding-tax/withholding-flow.service';
+import {
+  WithholdingLine,
+  WithholdingRoleValue,
+} from 'src/common/interfaces/withholding-breakdown.interface';
 import {
   DEFAULT_STORE_TIMEZONE,
   localDateString,
@@ -25,6 +62,24 @@ import {
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import { resolveUneceUnitCode } from '../../products/services/uom-uncefact.util';
 import { toCustomerInvoiceData } from '../utils/customer-invoice-data.adapter';
+import {
+  AcquirerIdentificationMode,
+  CustomerFiscalIdentityInput,
+  CustomerFiscalIdentityReport,
+  CustomerFiscalIdentityValidator,
+} from '../validators/customer-fiscal-identity.validator';
+import {
+  FiscalDocumentFinding,
+  FiscalDocumentFindingCategory,
+  FiscalDocumentReport,
+  FiscalDocumentValidationInput,
+  FiscalDocumentValidator,
+} from '../validators/fiscal-document.validator';
+import {
+  FiscalDocumentType,
+  isFiscalDocumentType,
+  toFiscalDocumentType,
+} from '../fiscal-document-requirements';
 
 type InvoiceStatus =
   | 'draft'
@@ -39,16 +94,156 @@ const VALID_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   draft: ['validated', 'cancelled'],
   validated: ['sent', 'cancelled'],
   sent: ['accepted', 'rejected'],
-  accepted: ['voided'],
+  // Un documento ACEPTADO por la DIAN no se anula: se corrige con una nota
+  // crédito. `void()` ya lo rechazaba sin excepción, así que declarar aquí
+  // `['voided']` no habilitaba nada — sólo mentía. Y la mentira sí tenía
+  // consecuencia: esta tabla es lo que `getValidTransitions` publica como
+  // «acciones disponibles», y el frontend pintaba «Anular» sobre una factura
+  // aceptada para que el backend contestara 409 al pulsarla.
+  accepted: [],
   rejected: ['sent', 'voided'],
   cancelled: [],
   voided: [],
 };
 
+/**
+ * Un motivo de rechazo tal como lo publica la DIAN: el código de la regla
+ * (`FAB10a`, `FAU01`…) y su texto. El proveedor los deja en
+ * `provider_response.provider_data.dian_errors[]`.
+ *
+ * Se declara aquí, estructuralmente, en vez de importar `DianValidationError` de
+ * `providers/dian-direct/`: `provider_data` es la bolsa libre de CADA proveedor,
+ * así que este flujo no puede depender del tipo de uno solo. Lee lo que reconoce
+ * y descarta el resto.
+ */
+interface DianRejectionReason {
+  code?: string;
+  message: string;
+  severity?: string;
+}
+
+/** Lo que la DIAN dijo del documento, listo para viajar en `details`. */
+interface DianRejectionEvidence {
+  dian_errors: DianRejectionReason[];
+  dian_status_code?: string;
+  dian_status_description?: string;
+}
+
+/**
+ * Tope del mensaje del proveedor que se devuelve al cliente. Un `Error` de
+ * transporte trae una línea; uno de una librería XML puede traer el documento
+ * entero, y el `message` de la respuesta HTTP no es sitio para eso.
+ */
+const PROVIDER_MESSAGE_MAX_LENGTH = 500;
+
+/**
+ * El payload del proveedor MÁS lo que la Fase 6 declara: tipo de operación,
+ * tasa de cambio, retenciones y los tributos POR LÍNEA.
+ *
+ * Los tres bloques viven en `DianDocumentExtras` / `UblLineTaxExtras` y no en
+ * `ProviderInvoiceData` porque el contrato base es el de CUALQUIER proveedor,
+ * mientras que estos campos describen exigencias del Anexo Técnico DIAN. Todos
+ * son opcionales, así que un proveedor que los ignore recibe exactamente el
+ * mismo payload de antes.
+ */
+type DianProviderInvoiceData = ProviderInvoiceData &
+  DianDocumentExtras & { items: UblDocumentLine[] };
+
+/**
+ * Una resolución de retenciones junto con el rol que la produjo.
+ *
+ * Existe porque el XML y la contabilidad tienen que declarar EXACTAMENTE las
+ * mismas retenciones. La resolución corre UNA vez, antes de transmitir —el
+ * `cac:WithholdingTaxTotal` la necesita para armar el documento— y las mismas
+ * líneas se persisten después de la aceptación. Resolver dos veces (una para el
+ * XML y otra para el asiento) permitiría que el documento emitido y el asiento
+ * contable declararan retenciones distintas si la configuración fiscal cambiara
+ * entre ambos instantes.
+ */
+interface WithholdingBatch {
+  role: WithholdingRoleValue;
+  resolution: WithholdingResolution;
+}
+
+/**
+ * Lo que el AIU cambia en la EMISIÓN: el régimen que decide qué líneas gravan y
+ * la nota legal de la línea de Administración.
+ *
+ * Se recompone acá, desde la misma configuración y con la misma `buildAiuNote`
+ * que usó `InvoicingService` al crear el documento, porque la nota no se
+ * persiste en ninguna columna. Ver la nota de `resolveAiuContext` allá.
+ */
+interface AiuEmissionContext {
+  regime: AiuVatRegime;
+  /** Cadena YA COMPUESTA para `cbc:Note` de la línea de Administración. */
+  note: string;
+}
+
+/**
+ * Tope de tributos de cabecera sobre los que se intenta reconstruir el desglose
+ * por línea. La reconstrucción enumera subconjuntos (2^n), así que un documento
+ * con muchos tributos distintos se deja en el camino histórico en vez de gastar
+ * tiempo exponencial en el envío.
+ */
+const LINE_TAX_MAX_CANDIDATES = 6;
+
+/** Tolerancia de un centavo al contrastar el impuesto reconstruido de una línea. */
+const ONE_CENT = '0.01';
+
+/**
+ * LA RESOLUCIÓN SIN SU CLAVE TÉCNICA.
+ *
+ * Gemela de la de `invoicing.service.ts` — la misma lista, a propósito: las dos
+ * alimentan las mismas pantallas y una que se quede corta reabriría la fuga por
+ * el otro lado. Si se añade una columna pública a `invoice_resolutions`, va en
+ * las dos.
+ *
+ * `resolution: true` publicaba la fila entera en toda respuesta de este
+ * servicio (`PATCH :id/validate`, `PATCH :id/send`, `accept`, `void`,
+ * contingencia, rechazo…), y con ella las TRES columnas de clave técnica:
+ * `technical_key` (la ClTec en claro, 14.ª entrada del hash del CUFE),
+ * `technical_key_encrypted` (ciphertext atacable fuera de línea) y
+ * `technical_key_fingerprint` (SHA-256 sin llave — índice ciego que correlaciona
+ * resoluciones entre tenants).
+ *
+ * Es lista BLANCA, no exclusión: lo que se añada mañana a la tabla no se
+ * publica solo.
+ *
+ * A DIFERENCIA DE `invoicing.service.ts`, ESTE SERVICIO SÍ NECESITA LA ClTec —
+ * sin ella no hay CUFE—. No viaja acá: se lee aparte, por su id y sólo con las
+ * dos columnas del vault, en `revealResolutionTechnicalKey()`, que es el único
+ * punto del archivo donde el secreto entra en memoria.
+ *
+ * Lo que el emisor SÍ resuelve desde estos campos públicos es el bloque
+ * `sts:InvoiceControl` (`resolveInvoiceControl`, que consume `resolution_number`,
+ * `prefix`, `range_from`, `range_to`, `valid_from`, `valid_to` e `is_active`) y
+ * el `resolution_number` de `provider_data`. Todos están abajo: un `undefined`
+ * silencioso en cualquiera de ellos vuelve a producir el bloque de autorización
+ * vacío del 14/08/2026, que quemó un consecutivo autorizado irrecuperable.
+ */
+const RESOLUTION_PUBLIC_SELECT = {
+  id: true,
+  organization_id: true,
+  store_id: true,
+  accounting_entity_id: true,
+  document_type: true,
+  resolution_number: true,
+  resolution_date: true,
+  prefix: true,
+  range_from: true,
+  range_to: true,
+  current_number: true,
+  valid_from: true,
+  valid_to: true,
+  is_active: true,
+  created_at: true,
+  updated_at: true,
+} as const;
+
 const INVOICE_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
-  resolution: true,
+  resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
     // Step 8 — Anexo 19 wiring. The customer fields here are the contract the
     // customer-invoice-data.adapter consumes; `person_type`, `tax_regime`,
@@ -127,94 +322,240 @@ export class InvoiceFlowService {
     private readonly fiscal_ledger: FiscalTransmissionLedgerService,
     private readonly fiscal_gate: FiscalGateService,
     private readonly withholdingFlow: WithholdingFlowService,
+    private readonly acquirerIdentity: CustomerFiscalIdentityValidator,
+    private readonly fiscalDocument: FiscalDocumentValidator,
   ) {}
 
   /**
-   * Resuelve el desglose de retenciones (Bloque C) para una factura ya aceptada,
-   * justo antes de emitir el evento contable. Degrada a `[]` ante cualquier fallo
-   * para NUNCA romper la aceptación de la factura (contrato cero-regresión).
+   * Familia de hallazgo → código de error. Es todo el cableado HTTP de la
+   * prevalidación, y vive AQUÍ y no en el validador a propósito: aquel es puro y
+   * no conoce transporte, igual que `CustomerFiscalIdentityValidator`.
    *
-   * - support_document → CASO 1 practiced: el tenant compró y puede retener al
-   *   proveedor (pasivo 2365/2367/2368).
-   * - factura de venta  → CASO 2 suffered: el cliente, si es agente retenedor,
-   *   retiene al tenant (activo 1355xx).
-   *
-   * Persiste las filas `withholding_calculations` y devuelve las líneas para
-   * adjuntarlas como `withholding_breakdown` en el payload del evento.
+   * Cuatro códigos para ~30 hallazgos porque lo que el operador necesita saber es
+   * a qué pantalla ir; el hallazgo exacto viaja completo en `details.blockers[]`.
    */
-  private async resolveWithholdingForInvoice(
-    updated: any,
+  private static readonly PREVALIDATION_ERROR_CODES: Record<
+    FiscalDocumentFindingCategory,
+    ErrorCodeEntry
+  > = {
+    arithmetic: ErrorCodes.INVOICING_PREVALIDATION_001,
+    resolution: ErrorCodes.INVOICING_PREVALIDATION_002,
+    technical_key: ErrorCodes.INVOICING_PREVALIDATION_003,
+    content: ErrorCodes.INVOICING_PREVALIDATION_004,
+  };
+
+  /**
+   * Con qué bloqueante se redacta el mensaje cuando hay varios.
+   *
+   * No es el primero de la lista: el orden lo decide QUÉ HAY QUE ARREGLAR
+   * ANTES. Una resolución vencida invalida el documento entero, así que mandar
+   * a corregir el descuadre de una línea sería mandar a corregir lo que no
+   * importa todavía. La aritmética va última porque suele ser consecuencia del
+   * contenido (una línea sin cantidad descuadra el total), no su causa.
+   *
+   * Los demás bloqueantes NO se pierden: viajan completos en `details.blockers`.
+   */
+  private static readonly PREVALIDATION_CATEGORY_PRECEDENCE: FiscalDocumentFindingCategory[] =
+    ['resolution', 'technical_key', 'content', 'arithmetic'];
+
+  /**
+   * Resuelve el desglose de retenciones (Bloque C) SIN persistir nada.
+   *
+   * - documento soporte → CASO 1 `practiced`: el tenant compró y puede retener
+   *   al proveedor (pasivo 2365/2367/2368).
+   * - documento de venta → CASO 2 `suffered` (el cliente, si es agente
+   *   retenedor, retiene al tenant — activo 1355xx) **y** CASO 3 `self`
+   *   (AUTORRETENCIÓN, pasivo propio 2365/2368).
+   *
+   * ## Por qué `self` va acá y no era opcional añadirlo
+   *
+   * La autorretención nace de una calidad del EMISOR (Decreto 2201/2016 para
+   * renta; régimen municipal para ICA), no de la contraparte: aplica igual en
+   * una venta de mostrador anónima. `InvoicingService.resolveWithholdingAmount`
+   * YA la sumaba al crear la factura, así que `invoices.withholding_amount`
+   * incluía la autorretención mientras que este flujo —el único que persiste
+   * `withholding_calculations` y el único que alimenta el asiento— sólo resolvía
+   * `suffered`. Resultado: un agregado que nadie podía descomponer, sin fila de
+   * cálculo y sin asiento del pasivo frente a la DIAN.
+   *
+   * ## Degrada, nunca lanza
+   *
+   * Cualquier fallo devuelve `[]` para NUNCA romper la emisión ni la aceptación
+   * (contrato cero-regresión). Una retención que no se pudo resolver deja el
+   * documento SIN `cac:WithholdingTaxTotal`, que es exactamente el
+   * comportamiento histórico y no es motivo de rechazo: la DIAN valida
+   * `cbc:PayableAmount` sin mirar ese grupo (Anexo 1.9 §11.9.1).
+   */
+  private async resolveWithholdingBatches(
+    invoice: any,
     is_support_document: boolean,
-  ): Promise<WithholdingLine[]> {
+  ): Promise<WithholdingBatch[]> {
     try {
-      const organization_id = Number(updated.organization_id);
+      const organization_id = Number(invoice.organization_id);
       const store_id =
-        updated.store_id != null ? Number(updated.store_id) : null;
-      const accounting_entity_id =
-        updated.accounting_entity_id != null
-          ? Number(updated.accounting_entity_id)
-          : null;
-      const invoice_id = Number(updated.id);
-      const base = Number(updated.subtotal_amount);
-      const ivaAmount = Number(updated.tax_amount);
+        invoice.store_id != null ? Number(invoice.store_id) : null;
+      const base = Number(invoice.subtotal_amount);
+      const ivaAmount = Number(invoice.tax_amount);
 
       if (is_support_document) {
-        // CASO 1 — practiced (compro a proveedor).
         const supplier_id =
-          updated.supplier_id != null ? Number(updated.supplier_id) : null;
-        const wh = await this.withholdingFlow.resolvePracticed({
+          invoice.supplier_id != null ? Number(invoice.supplier_id) : null;
+        const practiced = await this.withholdingFlow.resolvePracticed({
           organization_id,
           store_id,
           supplier_id,
           base,
           ivaAmount,
         });
-        await this.withholdingFlow.persistWithholdingLines({
-          organization_id,
-          store_id,
-          accounting_entity_id,
-          invoice_id,
-          supplier_id,
-          role: 'practiced',
-          counterparty_type: wh.counterparty_type,
-          uvt_value_used: wh.uvt_value_used,
-          lines: wh.lines,
-        });
-        return wh.lines;
+        return [{ role: 'practiced', resolution: practiced }];
       }
 
-      // CASO 2 — suffered (vendo; el cliente agente me retiene). El cliente sale
-      // directo de `invoices.customer_id` (cargado en INVOICE_INCLUDE). Si la
-      // venta es de mostrador/anónima → null → resolveSuffered devuelve [].
+      // El cliente sale directo de `invoices.customer_id` (cargado en
+      // INVOICE_INCLUDE). Si la venta es de mostrador/anónima → null →
+      // `resolveSuffered` devuelve []. `resolveSelf` NO recibe contraparte a
+      // propósito: ver arriba.
       const customer_id =
-        updated.customer_id != null ? Number(updated.customer_id) : null;
-      const wh = await this.withholdingFlow.resolveSuffered({
-        organization_id,
-        store_id,
-        customer_id,
-        base,
-        ivaAmount,
-      });
-      await this.withholdingFlow.persistWithholdingLines({
-        organization_id,
-        store_id,
-        accounting_entity_id,
-        invoice_id,
-        customer_id,
-        role: 'suffered',
-        counterparty_type: wh.counterparty_type,
-        uvt_value_used: wh.uvt_value_used,
-        lines: wh.lines,
-      });
-      return wh.lines;
+        invoice.customer_id != null ? Number(invoice.customer_id) : null;
+      const [suffered, self] = await Promise.all([
+        this.withholdingFlow.resolveSuffered({
+          organization_id,
+          store_id,
+          customer_id,
+          base,
+          ivaAmount,
+        }),
+        this.withholdingFlow.resolveSelf({
+          organization_id,
+          store_id,
+          base,
+        }),
+      ]);
+
+      return [
+        { role: 'suffered', resolution: suffered },
+        { role: 'self', resolution: self },
+      ];
     } catch (error) {
       this.logger.error(
-        `Withholding resolution failed for invoice #${updated.id}; degrading to empty breakdown: ${
+        `Withholding resolution failed for invoice #${invoice.id}; degrading to empty breakdown: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       return [];
     }
+  }
+
+  /**
+   * Persiste las filas `withholding_calculations` de cada lote y devuelve las
+   * líneas que quedaron efectivamente registradas, para adjuntarlas como
+   * `withholding_breakdown` en el evento contable.
+   *
+   * Un lote cuya persistencia falle NO aporta sus líneas al desglose: el asiento
+   * automático posteará una línea por retención, y hacerlo sin la fila de
+   * cálculo que la respalda dejaría un saldo en la declaración sin nada detrás.
+   * El fallo se registra y la aceptación del documento continúa.
+   */
+  private async persistWithholdingBatches(
+    invoice: any,
+    batches: WithholdingBatch[],
+  ): Promise<WithholdingLine[]> {
+    const organization_id = Number(invoice.organization_id);
+    const store_id = invoice.store_id != null ? Number(invoice.store_id) : null;
+    const accounting_entity_id =
+      invoice.accounting_entity_id != null
+        ? Number(invoice.accounting_entity_id)
+        : null;
+    const invoice_id = Number(invoice.id);
+    const supplier_id =
+      invoice.supplier_id != null ? Number(invoice.supplier_id) : null;
+    const customer_id =
+      invoice.customer_id != null ? Number(invoice.customer_id) : null;
+
+    const persisted: WithholdingLine[] = [];
+
+    for (const batch of batches) {
+      if (batch.resolution.lines.length === 0) continue;
+
+      try {
+        await this.withholdingFlow.persistWithholdingLines({
+          organization_id,
+          store_id,
+          accounting_entity_id,
+          invoice_id,
+          // `persistWithholdingLines` ya decide por rol cuál de las dos columnas
+          // escribe; se le pasan las dos y él descarta la que no aplica. `self`
+          // no escribe ninguna: la autorretención no tiene contraparte.
+          supplier_id,
+          customer_id,
+          role: batch.role,
+          counterparty_type: batch.resolution.counterparty_type,
+          uvt_value_used: batch.resolution.uvt_value_used ?? 0,
+          lines: batch.resolution.lines,
+        });
+        persisted.push(...batch.resolution.lines);
+      } catch (error) {
+        this.logger.error(
+          `Failed to persist '${batch.role}' withholding lines for invoice #${invoice.id}; they are dropped from the accounting breakdown: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return persisted;
+  }
+
+  /**
+   * Resuelve Y persiste el desglose de retenciones en un solo paso.
+   *
+   * Es el camino de `accept()`, que no transmite y por tanto no necesita las
+   * líneas antes de armar el XML. `send()` NO usa este método: allí la
+   * resolución tiene que ocurrir ANTES de transmitir, porque el
+   * `cac:WithholdingTaxTotal` del documento se construye con ella.
+   */
+  private async resolveWithholdingForInvoice(
+    updated: any,
+    is_support_document: boolean,
+  ): Promise<WithholdingLine[]> {
+    const batches = await this.resolveWithholdingBatches(
+      updated,
+      is_support_document,
+    );
+    return this.persistWithholdingBatches(updated, batches);
+  }
+
+  /**
+   * Traduce las líneas resueltas al contrato que el builder UBL escribe en
+   * `cac:WithholdingTaxTotal`.
+   *
+   * ## ⚠️ LAS DOS TARIFAS NO ESTÁN EN LA MISMA UNIDAD
+   *
+   * `WithholdingLine.rate` es una **fracción** (`0.025`) — así la guarda
+   * `withholding_concepts.rate` y así la multiplica el calculador
+   * (`amount = base × rate`). `ProviderInvoiceWithholding.rate` es un
+   * **porcentaje formateado** (`'2.50'`), porque va directo a `cbc:Percent`.
+   *
+   * Sin el `× 100` la DIAN recibe una retención del **0,025 %** donde hubo una
+   * del 2,5 %. Y el documento es sintácticamente válido —el importe retenido va
+   * aparte y es correcto—, así que nada lo rechaza: la tarifa equivocada sólo
+   * aparece al cruzar la declaración, meses después.
+   *
+   * Las retenciones en cero se descartan: `cbc:Percent` sin importe no declara
+   * nada y el builder las filtraría igual.
+   */
+  private toProviderWithholdings(
+    lines: WithholdingLine[],
+  ): ProviderInvoiceWithholding[] {
+    return lines
+      .filter((line) => Number(line.amount) > 0)
+      .map((line) => ({
+        withholding_type: line.withholding_type,
+        concept_code: line.concept_code,
+        // FRACCIÓN → PORCENTAJE. Ver el bloque de arriba antes de tocar esto.
+        rate: dianRate(toDecimal(line.rate).times(100)),
+        base: dianAmount(line.base),
+        amount: dianAmount(line.amount),
+      }));
   }
 
   /**
@@ -292,6 +633,93 @@ export class InvoiceFlowService {
       message: response.message ?? null,
       provider_data: response.provider_data ?? null,
     };
+  }
+
+  /**
+   * Extrae de la respuesta del proveedor lo que la DIAN dijo del documento.
+   *
+   * POR QUÉ EXISTE. El motivo real del rechazo —«Valor del CUFE no está calculado
+   * correctamente», medido en producción— SÍ llegaba y SÍ quedaba guardado en
+   * `invoices.provider_response.provider_data.dian_errors[]`. Lo que no llegaba
+   * era al operador: la excepción viajaba con `details` de dos campos
+   * (`invoice_id`, `tracking_id`) y el texto se quedaba en la fila. Quien emitía
+   * leía «documento rechazado» y no tenía nada que corregir, mientras la causa
+   * estaba escrita a un JOIN de distancia.
+   *
+   * `provider_data` es la bolsa libre del proveedor, así que se lee a la
+   * defensiva: lo que no tenga la forma esperada se descarta en vez de romper la
+   * ruta de error, que es el peor sitio donde puede fallar algo.
+   */
+  private extractDianRejection(
+    response: ProviderResponse,
+  ): DianRejectionEvidence {
+    const data = (response.provider_data ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    if (!data || typeof data !== 'object') return { dian_errors: [] };
+
+    const raw: unknown[] = Array.isArray(data.dian_errors)
+      ? (data.dian_errors as unknown[])
+      : [];
+
+    const dian_errors = raw.reduce<DianRejectionReason[]>((acc, entry) => {
+      if (!entry || typeof entry !== 'object') return acc;
+      const row = entry as Record<string, unknown>;
+      const message = typeof row.message === 'string' ? row.message.trim() : '';
+      // Un motivo sin texto no le dice nada a nadie; el código solo no basta.
+      if (!message) return acc;
+
+      const reason: DianRejectionReason = { message };
+      if (typeof row.code === 'string' && row.code) reason.code = row.code;
+      if (typeof row.severity === 'string' && row.severity) {
+        reason.severity = row.severity;
+      }
+      acc.push(reason);
+      return acc;
+    }, []);
+
+    const evidence: DianRejectionEvidence = { dian_errors };
+    if (typeof data.dian_status_code === 'string') {
+      evidence.dian_status_code = data.dian_status_code;
+    }
+    if (typeof data.dian_status_description === 'string') {
+      evidence.dian_status_description = data.dian_status_description;
+    }
+    return evidence;
+  }
+
+  /**
+   * Mensaje del rechazo, en orden de fidelidad decreciente: el que compuso el
+   * proveedor (ya trae los motivos de la DIAN concatenados), los motivos crudos,
+   * la descripción del estado, y solo al final la frase genérica del catálogo.
+   */
+  private dianRejectionMessage(
+    response: ProviderResponse,
+    evidence: DianRejectionEvidence,
+  ): string {
+    const provider_message = response.message?.trim();
+    if (provider_message) return provider_message;
+
+    // Las advertencias no rechazan un documento: si hay motivos bloqueantes, el
+    // mensaje habla de ellos y no de una nota al margen.
+    const blocking = evidence.dian_errors.filter(
+      (reason) => reason.severity !== 'warning',
+    );
+    const reasons = (blocking.length ? blocking : evidence.dian_errors).map(
+      (reason) => (reason.code ? `${reason.code}: ${reason.message}` : reason.message),
+    );
+    if (reasons.length) {
+      return `La DIAN rechazó el documento — ${reasons.join(' | ')}`;
+    }
+
+    if (evidence.dian_status_description) {
+      return `La DIAN rechazó el documento (${
+        evidence.dian_status_code ?? 'sin código'
+      }): ${evidence.dian_status_description}`;
+    }
+
+    return ErrorCodes.INVOICING_PROVIDER_004.devMessage;
   }
 
   private fiscalDocumentType(invoice_type: string) {
@@ -558,13 +986,58 @@ export class InvoiceFlowService {
       'validate',
     );
 
-    // Basic validation checks
     if (!invoice.invoice_items || invoice.invoice_items.length === 0) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_VALIDATE_001,
-        'Invoice must have at least one item',
+        'La factura no tiene ninguna línea. Agrega al menos un producto o servicio antes de validarla.',
       );
     }
+
+    // PUERTA DE IDENTIDAD FISCAL DEL ADQUIRIENTE.
+    //
+    // Hasta acá `validate()` sólo contaba ítems: el módulo entero no tenía UNA
+    // sola verificación del adquiriente, y los huecos los tapaban los builders
+    // inventando `Consumidor Final` / `222222222222` / `Bogotá`. Eso no produce
+    // un error, produce un documento legalmente emitido que declara datos que
+    // nadie verificó.
+    //
+    // Se corta acá y no en `send()` porque `validated` es el último estado en
+    // que el documento todavía se puede corregir sin nota. Los avisos NO
+    // bloquean: son ausencias que hacen al documento decir menos, no decir algo
+    // falso (ver la regla de severidad del validador).
+    const identity = this.acquirerIdentity.validate(
+      this.buildAcquirerIdentityInput(invoice),
+    );
+
+    if (!identity.emittable) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        `No se puede validar el documento: ${identity.blockers[0].problem} ${identity.blockers[0].fix}`,
+        {
+          blockers: identity.blockers,
+          warnings: identity.warnings,
+        },
+      );
+    }
+
+    for (const warning of identity.warnings) {
+      this.logger.warn(
+        `Invoice #${id} — ${warning.code} (${warning.field}): ${warning.problem}`,
+      );
+    }
+
+    // PREVALIDACIÓN FISCAL — la segunda mitad de la misma puerta.
+    //
+    // La identidad juzga a QUIÉN se le factura; esto juzga QUÉ se declara: que
+    // las cuentas cuadren como las recompone la DIAN (FAU14, TaxSubtotal,
+    // PayableAmount), que la resolución respalde el consecutivo y que la ClTec
+    // esté completa. Va DESPUÉS de la identidad a propósito: un adquiriente sin
+    // identificar es el defecto más barato de corregir de los dos.
+    //
+    // Y va acá y no en `send()` porque después de `send()` el consecutivo ya se
+    // gastó: el 14/08/2026 una ClTec de 38 caracteres hizo rechazar una factura
+    // real y quemó un consecutivo autorizado que no se recupera.
+    await this.assertFiscalDocumentEmittable(invoice);
 
     const updated = await this.prisma.invoices.update({
       where: { id },
@@ -574,6 +1047,406 @@ export class InvoiceFlowService {
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) validated`);
     return updated;
+  }
+
+  /**
+   * Qué le falta a este documento para poder emitirse — SIN cambiar nada.
+   *
+   * Existe para que el usuario vea el problema mientras todavía está en el
+   * formulario, en vez de descubrirlo al pulsar «Validar» o, peor, en el
+   * rechazo de la DIAN. Es exactamente el mismo veredicto que aplica
+   * `validate()`, producido por el mismo validador: una segunda lista de
+   * requisitos escrita aparte se desincroniza el primer día.
+   */
+  async getEmitReadiness(id: number): Promise<
+    CustomerFiscalIdentityReport & {
+      invoice_id: number;
+      invoice_number: string;
+      status: string;
+      has_items: boolean;
+      /** El informe de identidad SIN aplanar, para leerlo sin ambigüedad. */
+      identity: CustomerFiscalIdentityReport;
+      /**
+       * El veredicto de prevalidación fiscal, o `null` cuando el `invoice_type`
+       * no se emite a la DIAN y por tanto no hay nada que prevalidar.
+       */
+      fiscal_document: FiscalDocumentReport | null;
+    }
+  > {
+    const invoice = await this.getInvoice(id);
+    const identity = this.acquirerIdentity.validate(
+      this.buildAcquirerIdentityInput(invoice),
+    );
+    const fiscal_document = await this.runFiscalDocumentPrevalidation(invoice);
+
+    return {
+      // Los campos de identidad siguen aplanados en la raíz: es el contrato que
+      // ya consume el formulario y romperlo no aporta nada.
+      ...identity,
+      // …pero `emittable` pasa a ser el AND de las DOS puertas. Si sólo
+      // reflejara la identidad, la pantalla diría «listo para emitir» sobre un
+      // documento que `validate()` va a rechazar un clic después — que es
+      // exactamente la desincronización que este endpoint existe para evitar.
+      emittable: identity.emittable && (fiscal_document?.emittable ?? true),
+      identity,
+      fiscal_document,
+      invoice_id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      status: invoice.status,
+      has_items: (invoice.invoice_items?.length ?? 0) > 0,
+    };
+  }
+
+  /**
+   * ÚNICO PUNTO DE ESTE ARCHIVO DONDE LA ClTec ENTRA EN MEMORIA.
+   *
+   * `INVOICE_INCLUDE` ya NO la trae: publicarla en toda respuesta de facturación
+   * la ponía en el navegador, y con la 14.ª entrada del hash del CUFE en la mano
+   * se puede recomputar el fiscal key de cualquier documento emitido bajo esa
+   * resolución. Pero el emisor sí la necesita —sin ella no hay CUFE—, así que en
+   * vez de arrastrarla «por si acaso» se lee AQUÍ, donde se usa, y sólo con las
+   * dos columnas que el vault necesita para abrirla.
+   *
+   * SE LEE POR LA FACTURA, NO POR `invoice_resolutions` DIRECTAMENTE, y eso es
+   * deliberado: `invoices` es store-scoped y `invoice_resolutions` es
+   * fiscal-entity-scoped, dos filtros de tenant DISTINTOS. Consultando por el
+   * mismo `where: { id }` y el mismo accessor con el que ya se cargó el
+   * documento, la fila que devuelve esta lectura es por construcción la misma
+   * resolución que `resolveInvoiceControl` va a declarar. Preguntarle a la otra
+   * tabla abriría la posibilidad de que un scope resolviera y el otro no, y una
+   * ClTec `null` donde había una produce un CUFE mal calculado — el fallo del
+   * 14/08/2026, que quema un consecutivo autorizado irrecuperable.
+   *
+   * NUNCA se registra el valor: los diagnósticos de este dominio reportan su
+   * LONGITUD (ver `assertTechnicalKeyShape` y el rechazo de
+   * `dian-direct.provider.ts`), nunca el secreto.
+   *
+   * @returns la ClTec en claro, o `null` si el documento no cuelga de una
+   *   resolución o la resolución no tiene clave. `null` NO se disfraza de cadena
+   *   vacía: quien la exige tiene que poder distinguir «no hay» de «hay pero
+   *   está mal formada».
+   */
+  private async revealResolutionTechnicalKey(
+    invoice_id: number,
+  ): Promise<string | null> {
+    const row = await this.prisma.invoices.findFirst({
+      where: { id: invoice_id },
+      select: {
+        resolution: {
+          select: {
+            // Sólo las dos que el vault abre. La huella NO se lee: no sirve para
+            // revelar y su única función es la correlación entre filas, que vive
+            // en `fiscal-production-readiness.service.ts`.
+            technical_key: true,
+            technical_key_encrypted: true,
+          },
+        },
+      },
+    });
+
+    // Por el vault, no por la columna: la copia cifrada es la que se escribe
+    // hoy, y el emisor tiene que hashear la MISMA clave que el prevalidador
+    // juzgó. Leer una y hashear la otra es el desajuste que rechazó una factura
+    // en producción.
+    return this.technicalKeyVault.reveal(row?.resolution);
+  }
+
+  /**
+   * Corre el prevalidador fiscal sobre una factura ya cargada con
+   * `INVOICE_INCLUDE`. Devuelve `null` cuando el `invoice_type` no tiene
+   * traducción a documento fiscal: no hay nada que prevalidar contra la DIAN, y
+   * dejar escapar el `Error` de `toFiscalDocumentType` lo degradaría a un
+   * `SYS_INTERNAL_001` ("Error interno del servidor") delante del comerciante.
+   */
+  private async runFiscalDocumentPrevalidation(
+    invoice: any,
+  ): Promise<FiscalDocumentReport | null> {
+    const document_type = this.resolveFiscalDocumentType(invoice);
+    if (!document_type) return null;
+
+    const timezone = await this.resolveTimezone(invoice);
+    // MISMO resolutor de unidades que `send()`. Si el prevalidador juzgara una
+    // unidad distinta de la que se va a emitir, aprobaría documentos que la
+    // DIAN rechaza y al revés.
+    const unit_code_by_item = await this.resolveLineUnitCodes(
+      invoice.invoice_items || [],
+    );
+    // La ClTec ya no viaja en `INVOICE_INCLUDE` (ver `RESOLUTION_PUBLIC_SELECT`).
+    // El prevalidador la exige: su regla `technical_key` es la que atrapó la
+    // clave de 38 caracteres antes de gastar el consecutivo, y sin cargarla acá
+    // esa regla se apagaría en silencio contra un `undefined` — el peor de los
+    // desenlaces, porque el documento pasaría la puerta y lo rechazaría la DIAN.
+    const technical_key = await this.revealResolutionTechnicalKey(invoice.id);
+
+    return this.fiscalDocument.validate(
+      this.buildFiscalDocumentInput(
+        invoice,
+        document_type,
+        timezone,
+        unit_code_by_item,
+        technical_key,
+      ),
+    );
+  }
+
+  /**
+   * Prevalidación como PUERTA: el mismo informe, pero lanzando.
+   *
+   * Los avisos no bloquean —son ausencias que hacen al documento decir menos,
+   * no decir algo falso— pero sí se registran: son la lista de lo que hoy se
+   * emite a medias.
+   */
+  private async assertFiscalDocumentEmittable(invoice: any): Promise<void> {
+    const report = await this.runFiscalDocumentPrevalidation(invoice);
+    if (!report) return;
+
+    if (!report.emittable) {
+      const blocker = this.pickLeadingBlocker(report.blockers);
+      const error_code =
+        InvoiceFlowService.PREVALIDATION_ERROR_CODES[blocker.category];
+
+      throw new VendixHttpException(
+        error_code,
+        `No se puede validar el documento: ${blocker.problem} ${blocker.fix}`,
+        {
+          invoice_id: invoice.id,
+          document_type: report.document_type,
+          blockers: report.blockers,
+          warnings: report.warnings,
+          // Los importes que el XML REALMENTE va a declarar. Sin ellos, un
+          // descuadre obliga a reconstruir a mano la aritmética del emisor.
+          computed: report.computed,
+        },
+      );
+    }
+
+    for (const warning of report.warnings) {
+      this.logger.warn(
+        `Invoice #${invoice.id} — ${warning.code} (${warning.field}): ${warning.problem}`,
+      );
+    }
+  }
+
+  /** El bloqueante que redacta el mensaje (ver PREVALIDATION_CATEGORY_PRECEDENCE). */
+  private pickLeadingBlocker(
+    blockers: FiscalDocumentFinding[],
+  ): FiscalDocumentFinding {
+    for (const category of InvoiceFlowService.PREVALIDATION_CATEGORY_PRECEDENCE) {
+      const match = blockers.find((finding) => finding.category === category);
+      if (match) return match;
+    }
+    return blockers[0];
+  }
+
+  /**
+   * `invoices.fiscal_document_type` manda; el `invoice_type` es el fallback
+   * histórico (las filas anteriores a la columna no lo tienen). `null` = este
+   * documento no se emite a la DIAN.
+   */
+  private resolveFiscalDocumentType(invoice: {
+    fiscal_document_type?: string | null;
+    invoice_type: string;
+  }): FiscalDocumentType | null {
+    if (
+      invoice.fiscal_document_type &&
+      isFiscalDocumentType(invoice.fiscal_document_type)
+    ) {
+      return invoice.fiscal_document_type;
+    }
+    try {
+      return toFiscalDocumentType(invoice.invoice_type);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Traduce la fila persistida al contrato del prevalidador, con la MISMA
+   * precedencia con la que `send()` arma `provider_data`.
+   *
+   * Dos cosas que NO son cosméticas:
+   *
+   * - `price_unit_quantity` se gatea igual que en `send()`: sólo viaja cuando la
+   *   cantidad está en unidad mínima. Si la línea se vendió por presentación,
+   *   `unit_price` ya es el precio del paquete y volver a dividir declararía un
+   *   importe N veces menor — y el prevalidador vería un descuadre inventado.
+   * - `unit_code` se deja en `null` cuando no hay ninguno, en vez de rellenarlo
+   *   con `EA`: el validador distingue «no declara unidad» (aviso, el emisor
+   *   caerá a `EA` y eso en una línea por pieza es correcto) de «declara una
+   *   unidad que no existe» (bloqueante, se emitiría `EA` tapando metros).
+   */
+  private buildFiscalDocumentInput(
+    invoice: any,
+    document_type: FiscalDocumentType,
+    timezone: string,
+    unit_code_by_item: Map<number, string>,
+    /**
+     * ClTec EN CLARO, ya revelada por el vault. Llega como parámetro y no se
+     * lee de `invoice.resolution` porque esa relación ya no la trae: se carga
+     * aparte, en el punto de uso (`revealResolutionTechnicalKey`). Obligatorio
+     * a propósito —sin valor por defecto— para que un llamador nuevo no pueda
+     * omitirla y apagar la regla `technical_key` del prevalidador sin notarlo.
+     */
+    technical_key: string | null,
+  ): FiscalDocumentValidationInput {
+    return {
+      document_type,
+      invoice_number: invoice.invoice_number,
+      issue_date: invoice.issue_date,
+      timezone,
+      currency: invoice.currency,
+      operation_type: invoice.operation_type,
+      subtotal_amount: invoice.subtotal_amount,
+      discount_amount: invoice.discount_amount,
+      tax_amount: invoice.tax_amount,
+      withholding_amount: invoice.withholding_amount,
+      total_amount: invoice.total_amount,
+      items: (invoice.invoice_items || []).map((item: any, index: number) => ({
+        line_number: index + 1,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        tax_amount: item.tax_amount,
+        price_unit_quantity:
+          item.stock_units_consumed == null &&
+          Number(item.price_unit_quantity) > 1
+            ? item.price_unit_quantity
+            : undefined,
+        unit_code: item.unit_code ?? unit_code_by_item.get(item.id) ?? null,
+        aiu_component: item.aiu_component ?? null,
+      })),
+      taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
+        tax_name: tax.tax_name,
+        tax_type: tax.tax_type,
+        tax_rate: tax.tax_rate,
+        taxable_amount: tax.taxable_amount,
+        tax_amount: tax.tax_amount,
+      })),
+      resolution: invoice.resolution
+        ? {
+            id: invoice.resolution.id,
+            resolution_number: invoice.resolution.resolution_number,
+            prefix: invoice.resolution.prefix,
+            range_from: invoice.resolution.range_from,
+            range_to: invoice.resolution.range_to,
+            current_number: invoice.resolution.current_number,
+            valid_from: invoice.resolution.valid_from,
+            valid_to: invoice.resolution.valid_to,
+            is_active: invoice.resolution.is_active,
+            technical_key: invoice.resolution.technical_key,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Arma lo que el validador va a juzgar, con la MISMA precedencia con la que
+   * `send()` arma `provider_data`: ficha viva del cliente → snapshot de la
+   * factura → proveedor (documento soporte). Si el gate juzgara otros datos que
+   * los que se emiten, aprobaría documentos que la DIAN rechaza y viceversa.
+   *
+   * ## De dónde sale `identification_mode`
+   *
+   * El validador lo exige sin valor por defecto, a propósito: es la pieza que
+   * convierte al Consumidor Final en una decisión en vez de un fallback. Hoy la
+   * factura no tiene columna donde declararlo, así que la decisión se deriva
+   * acá, explícita y en un solo sitio: un documento SIN cliente asociado y SIN
+   * identificación persistida es una venta de mostrador —el carril legítimo del
+   * POS (§D del plan)—; cualquier otra cosa es nominativa y tiene que
+   * identificar a su adquiriente.
+   *
+   * La derivación es correcta pero implícita: mientras el emisor no pueda
+   * declarar el modo, no hay forma de distinguir «venta a consumidor final» de
+   * «se me olvidó poner el cliente». Una columna `invoices.acquirer_mode`
+   * cerraría esa ambigüedad; queda anotada, no adivinada.
+   */
+  private buildAcquirerIdentityInput(
+    invoice: any,
+  ): CustomerFiscalIdentityInput {
+    const customer = invoice.customer
+      ? toCustomerInvoiceData(invoice.customer)
+      : undefined;
+
+    const document_number =
+      customer?.customer_tax_id ??
+      invoice.customer_tax_id ??
+      invoice.supplier?.tax_id ??
+      null;
+
+    const mode: AcquirerIdentificationMode =
+      !invoice.customer_id && !document_number && !invoice.supplier_id
+        ? 'final_consumer'
+        : 'nominative';
+
+    // `invoice.customer_address` es JSONB y el histórico guardó ahí tanto un
+    // objeto como una cadena suelta. Una cadena es la línea de dirección y nada
+    // más: no trae municipio ni país, y hay que dejar que el validador lo
+    // reporte en vez de leer propiedades de un `string` y obtener `undefined`
+    // silencioso en cada campo.
+    const raw_address =
+      customer?.customer_address ??
+      invoice.customer_address ??
+      invoice.supplier?.addresses?.[0] ??
+      null;
+    const address =
+      typeof raw_address === 'string'
+        ? { address_line: raw_address }
+        : (raw_address as Record<string, any> | null);
+
+    return {
+      identification_mode: mode,
+      document_type:
+        customer?.customer_document_type ??
+        invoice.customer_document_type ??
+        invoice.supplier?.document_type ??
+        null,
+      document_number,
+      verification_digit:
+        customer?.customer_verification_digit ??
+        invoice.customer_verification_digit ??
+        invoice.supplier?.verification_digit ??
+        null,
+      person_type: customer?.customer_person_type ?? null,
+      legal_name:
+        customer?.customer_name ??
+        invoice.customer_name ??
+        invoice.supplier?.name ??
+        null,
+      first_name: invoice.customer?.first_name ?? null,
+      last_name: invoice.customer?.last_name ?? null,
+      tax_regime:
+        customer?.customer_regime ??
+        invoice.customer_tax_regime ??
+        invoice.supplier?.tax_regime ??
+        null,
+      tax_responsibilities:
+        customer?.customer_tax_responsibilities ??
+        (Array.isArray(invoice.customer_fiscal_responsibilities)
+          ? (invoice.customer_fiscal_responsibilities as string[])
+          : null),
+      email: customer?.customer_email ?? invoice.customer_email ?? null,
+      phone: customer?.customer_phone ?? invoice.customer_phone ?? null,
+      address: address
+        ? {
+            address_line: address.address_line1 ?? address.address_line ?? null,
+            // `municipality_code` es el DANE de 5 dígitos; el departamento son
+            // sus dos primeros. No se inventa: si el municipio no está, el
+            // departamento tampoco, y el validador lo reporta.
+            city_code: address.municipality_code ?? address.city_code ?? null,
+            city_name: address.city ?? address.city_name ?? null,
+            department_code:
+              address.department_code ??
+              (address.municipality_code
+                ? String(address.municipality_code).slice(0, 2)
+                : null),
+            department_name:
+              address.state_province ?? address.department_name ?? null,
+            country_code: address.country_code ?? null,
+            postal_code: address.postal_code ?? null,
+          }
+        : null,
+    };
   }
 
   /**
@@ -713,6 +1586,508 @@ export class InvoiceFlowService {
     return out;
   }
 
+  /**
+   * `store_settings.settings.invoicing.aiu` — la MISMA lectura que hace
+   * `InvoicingService.loadAiuSettings`. Se duplica en vez de compartirse porque
+   * importar `InvoicingService` desde aquí cierra un ciclo de módulos
+   * (`InvoicingService` ya depende de este flujo).
+   */
+  private async loadAiuSettings(
+    store_id: number | bigint | null,
+  ): Promise<AiuSettings> {
+    if (store_id == null) return {};
+
+    // `findFirst`, no `findUnique`: la extensión de scoping mezcla el filtro de
+    // tenant y un WhereUnique no admite el `AND` resultante.
+    const row = await this.prisma.store_settings.findFirst({
+      where: { store_id: Number(store_id) },
+      select: { settings: true },
+    });
+
+    const settings = row?.settings as Record<string, any> | null;
+    const aiu = settings?.invoicing?.aiu;
+    return aiu && typeof aiu === 'object' ? (aiu as AiuSettings) : {};
+  }
+
+  /**
+   * Contexto AIU del documento que se va a emitir, o `null` cuando no es un
+   * contrato AIU — que es el 100 % del histórico y no cuesta ninguna lectura.
+   *
+   * LANZA si el objeto del contrato falta o no cabe en la cota de CAV03. No es
+   * una omisión cosmética: la regla valida el `cbc:Note` de la línea de
+   * Administración y un documento AIU sin esa nota se rechaza CON el consecutivo
+   * ya gastado. `InvoicingService` valida lo mismo al crear; acá se vuelve a
+   * comprobar porque la configuración pudo cambiar entre la creación y el envío,
+   * y porque la nota no se persiste en ninguna columna del documento.
+   */
+  private async resolveAiuEmissionContext(invoice: {
+    id: number;
+    store_id: number | bigint | null;
+    operation_type?: string | null;
+  }): Promise<AiuEmissionContext | null> {
+    const operation_type = (invoice.operation_type || '').trim();
+    if (operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) return null;
+
+    const settings = await this.loadAiuSettings(invoice.store_id);
+    const contract_object = (settings.contract_object || '').trim();
+    // MISMA función que usó la creación: las dos cadenas no pueden divergir.
+    const note = buildAiuNote(contract_object);
+
+    if (
+      note.length < DIAN_AIU_NOTE_MIN_LENGTH ||
+      note.length > DIAN_AIU_NOTE_MAX_LENGTH
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_002,
+        `No se puede emitir el contrato AIU: el objeto del contrato falta o no tiene la longitud que ` +
+          `exige la DIAN. La nota de la línea de Administración debe medir entre ` +
+          `${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} caracteres contando el prefijo ` +
+          `obligatorio «${DIAN_AIU_NOTE_PREFIX}». Descríbelo en la configuración de facturación de la tienda.`,
+        {
+          invoice_id: invoice.id,
+          note_length: note.length,
+          has_contract_object: !!contract_object,
+        },
+      );
+    }
+
+    return {
+      // Default explícito y conservador, el mismo que la creación: bajo
+      // `et_462_1` tributa el AIU completo, o sea se declara MÁS IVA. Una tienda
+      // que no configuró nada declara de más —recuperable— y no de menos, que es
+      // sanción.
+      regime: settings.regime ?? 'et_462_1',
+      note,
+    };
+  }
+
+  /**
+   * ¿La línea entra a la base gravable del IVA bajo el régimen declarado?
+   *
+   * Espeja `InvoiceCalculatorService.isAiuTaxable`, que es el que produjo los
+   * importes persistidos. Las dos respuestas son legales y la diferencia es toda
+   * la base gravable: `et_462_1` grava el AIU completo, `decreto_1372_1992`
+   * grava sólo la Utilidad. Una línea SIN componente nunca grava en ninguno de
+   * los dos: es la porción de COSTO reembolsable del contrato.
+   */
+  private isAiuComponentTaxable(
+    component: string | null,
+    regime: AiuVatRegime,
+  ): boolean {
+    if (!component) return false;
+    return regime === 'et_462_1' ? true : component === 'utilidad';
+  }
+
+  /**
+   * Marca las líneas del payload con lo que el AIU cambia en el XML.
+   *
+   * · `omit_tax_total` — la línea NO emite `cac:TaxTotal` (regla CAX01). Es
+   *   distinto de «no tiene impuestos»: un bien EXENTO sí lo emite, con
+   *   `cbc:Percent` en 0,00. Por eso viaja como bandera y no se deduce de que el
+   *   importe sea cero.
+   * · `note` — sólo la línea de ADMINISTRACIÓN, y con el literal exacto de
+   *   CAV03.
+   *
+   * `aiu_component` NO viaja crudo: `UblDocumentLine` no lo declara y ningún
+   * builder lo lee. Su única función en la emisión es decidir estas dos cosas,
+   * que son las que el documento realmente declara.
+   */
+  private attachAiuLineExtras(
+    lines: UblDocumentLine[],
+    rows: any[],
+    aiu: AiuEmissionContext,
+  ): void {
+    lines.forEach((line, index) => {
+      const component = (rows[index]?.aiu_component ?? null) as string | null;
+      line.omit_tax_total = !this.isAiuComponentTaxable(component, aiu.regime);
+      if (component === 'administracion') {
+        line.note = aiu.note;
+      }
+    });
+  }
+
+  /**
+   * Puebla los tributos DE CADA LÍNEA del payload que va al emisor UBL.
+   *
+   * Hay DOS fuentes posibles y se prefieren en este orden:
+   *
+   *   1. **El desglose PERSISTIDO** (`invoice_taxes.invoice_item_id`). Es el
+   *      dato real: quién grava qué lo decidió el motor al crear el documento,
+   *      no se deduce de nada. Ver `attachPersistedLineTaxes`.
+   *   2. **La reconstrucción por subconjuntos**, para el histórico. Todos los
+   *      documentos anteriores a la columna guardan sus tributos agregados por
+   *      cabecera y no hay a quién preguntarle: se deduce enumerando
+   *      combinaciones. Ver `attachReconstructedLineTaxes`.
+   *
+   * El segundo camino NO se borra ni se degrada: es lo único que sirve a las
+   * facturas ya emitidas, que se reenvían tal cual años después.
+   */
+  private attachLineTaxes(
+    lines: UblDocumentLine[],
+    rows: any[],
+    header_taxes: any[],
+  ): void {
+    if (this.attachPersistedLineTaxes(lines, rows, header_taxes)) return;
+    this.attachReconstructedLineTaxes(lines, rows, header_taxes);
+  }
+
+  /**
+   * Usa el desglose por línea PERSISTIDO, cuando el documento lo tiene.
+   *
+   * ## Qué cuenta como "lo tiene"
+   *
+   * TODAS las filas de tributo del documento apuntan a una línea. La condición
+   * es deliberadamente todo-o-nada: un documento con unas filas vinculadas y
+   * otras de cabecera tendría DOS verdades sobre el mismo impuesto —el agregado
+   * y el desglose— y sumarlas duplicaría el `cac:TaxTotal`. Por eso
+   * `InvoicingService` escribe una forma o la otra, nunca las dos, y acá se
+   * verifica antes de creerle. Con la condición rota se devuelve `false` y el
+   * documento cae a la reconstrucción, que es el comportamiento previo.
+   *
+   * ## Tres guardas por línea, y por qué ninguna sobra
+   *
+   * · **Línea sin filas** ⇒ se deja sin desglose. No es lo mismo que "no tiene
+   *   impuestos": el emisor la resolverá por su camino histórico, exactamente
+   *   como hasta hoy. Inventarle un tributo cero con el esquema de otra línea
+   *   sería peor que no decir nada.
+   * · **`invoice_items.is_inclusive`** ⇒ se salta. Ver la nota extensa al final
+   *   de este bloque: no es una limitación del vínculo, es que el emisor todavía
+   *   escribe la base SIN despejar en `cbc:LineExtensionAmount`.
+   * · **La base persistida tiene que coincidir con la que el emisor va a
+   *   escribir** (`dianLineExtension`), y la suma de las cuotas con el impuesto
+   *   de la línea. Las dos cifras se calcularon en momentos distintos y por
+   *   caminos distintos —el motor al crear, `dianLineExtension` al emitir— y hay
+   *   al menos un caso real donde divergen: una línea con `stock_units_consumed`
+   *   hace que el emisor OMITA `price_unit_quantity`, así que su base no es la
+   *   que el motor usó. Emitir el desglose igual dejaría un `cac:TaxSubtotal`
+   *   en desacuerdo con el `cbc:LineExtensionAmount` de su propia línea, que es
+   *   un XML internamente contradictorio: peor que un desglose ausente.
+   *
+   * ## `is_inclusive`: por qué el vínculo NO levanta la exclusión
+   *
+   * Con el desglose persistido ya no hace falta despejar la base hacia atrás
+   * para saber QUÉ tributo lleva la línea — eso era la limitación de la
+   * reconstrucción, y aquí desaparece. Pero el problema de la línea inclusiva no
+   * es de identificación sino de BASE: el emisor escribe
+   * `cbc:LineExtensionAmount = dianLineExtension(item)`, o sea
+   * `cantidad × precio − descuento` con el impuesto TODAVÍA DENTRO, mientras que
+   * la base gravable real es esa cifra despejada (`/(1 + tarifa)`). Las dos
+   * salidas posibles son malas:
+   *
+   *   · Declarar la base despejada en el `TaxSubtotal` ⇒ la línea dice una base
+   *     y su `LineExtensionAmount` dice otra. Contradicción interna.
+   *   · Declarar la base inclusiva ⇒ `TaxAmount ≠ TaxableAmount × Percent`, que
+   *     es exactamente la igualdad que la DIAN recomputa sobre el XML recibido.
+   *
+   * El arreglo de verdad es que el emisor escriba la base despejada, y eso exige
+   * persistir `line_extension_amount` en `invoice_items` (hoy no existe la
+   * columna: quantity, unit_price, discount_amount, tax_amount, total_amount, y
+   * ninguna guarda la base). Es un defecto ANTERIOR y ajeno a este vínculo: se
+   * documenta y no se agrava.
+   */
+  private attachPersistedLineTaxes(
+    lines: UblDocumentLine[],
+    rows: any[],
+    header_taxes: any[],
+  ): boolean {
+    // Se clasifican las retenciones con la MISMA función del emisor: una
+    // retención infiltrada en `invoice_taxes` por el camino legacy de
+    // `dto.taxes[]` no es un tributo del documento y nunca llevó línea.
+    const document_rows = (header_taxes || []).filter(
+      (tax: any) =>
+        !UblCommonBuilder.isWithholdingTax({
+          tax_name: tax.tax_name,
+          tax_rate: dianRate(tax.tax_rate),
+          taxable_amount: dianAmount(tax.taxable_amount),
+          tax_amount: dianAmount(tax.tax_amount),
+          tax_type: tax.tax_type ?? undefined,
+        }),
+    );
+
+    if (document_rows.length === 0) return false;
+    // Todo-o-nada: basta una fila sin vínculo para que el documento sea
+    // "de cabecera" y haya que reconstruirlo entero.
+    if (document_rows.some((tax: any) => tax.invoice_item_id == null)) {
+      return false;
+    }
+    if (lines.length !== rows.length) return false;
+
+    /** `invoice_items.id` → tributos que esa línea declara. */
+    const taxes_by_item = new Map<number, ProviderInvoiceTax[]>();
+    for (const tax of document_rows) {
+      const item_id = Number(tax.invoice_item_id);
+      const bucket = taxes_by_item.get(item_id) ?? [];
+      bucket.push({
+        tax_name: tax.tax_name,
+        tax_rate: dianRate(tax.tax_rate),
+        taxable_amount: dianAmount(tax.taxable_amount),
+        tax_amount: dianAmount(tax.tax_amount),
+        tax_type: tax.tax_type ?? undefined,
+      });
+      taxes_by_item.set(item_id, bucket);
+    }
+
+    const tolerance = toDecimal(ONE_CENT);
+
+    lines.forEach((line, index) => {
+      const row = rows[index];
+      const persisted = taxes_by_item.get(Number(row?.id));
+      if (!persisted || persisted.length === 0) return;
+
+      if (row?.is_inclusive === true) {
+        this.logger.warn(
+          `Line ${index + 1} has a persisted tax breakdown but its price includes tax; ` +
+            `the emitter still writes the tax-inclusive amount in cbc:LineExtensionAmount, so declaring the ` +
+            `cleared taxable base here would contradict the line itself. Falling back to the historical path.`,
+        );
+        return;
+      }
+
+      // La base que el emisor VA A ESCRIBIR, no la que la fila afirma: son dos
+      // cálculos distintos y sólo la primera llega a la DIAN.
+      const emitted_base = dianAmount(dianLineExtension(line));
+      const base_matches = persisted.every((tax) =>
+        toDecimal(tax.taxable_amount).equals(toDecimal(emitted_base)),
+      );
+      if (!base_matches) {
+        this.logger.warn(
+          `Line ${index + 1} persisted tax base does not match the ${emitted_base} the emitter writes in ` +
+            `cbc:LineExtensionAmount; the line keeps the document's primary tax rather than emitting a ` +
+            `TaxSubtotal that contradicts its own line`,
+        );
+        return;
+      }
+
+      // La suma de las cuotas tiene que ser el impuesto de la línea: es lo que
+      // hace que la Σ de las líneas siga siendo la cabecera que la DIAN
+      // contrasta (FAS01b).
+      const total = toDecimal(dianSum(persisted.map((tax) => tax.tax_amount)));
+      if (total.minus(toDecimal(line.tax_amount)).abs().greaterThan(tolerance)) {
+        this.logger.warn(
+          `Line ${index + 1} persisted taxes add up to ${total.toFixed(2)} but the line declares ` +
+            `${line.tax_amount}; the breakdown is not emitted to avoid a header/line mismatch`,
+        );
+        return;
+      }
+
+      line.taxes = persisted;
+    });
+
+    return true;
+  }
+
+  /**
+   * Reconstruye los tributos DE CADA LÍNEA a partir de los tributos de cabecera.
+   *
+   * ## Por qué hay que reconstruirlos
+   *
+   * Los documentos ANTERIORES a `invoice_taxes.invoice_item_id` —y los que se
+   * siguen escribiendo con un solo tributo— persisten sus tributos agregados por
+   * cabecera. El builder, en cambio, escribe un `cac:TaxSubtotal`
+   * por cada tributo de la línea, y sin desglose cae al camino histórico —
+   * heredar el PRIMER tributo del documento—. En una factura mixta IVA + INC eso
+   * hace que TODAS las líneas declaren el esquema de la primera: una cuenta de
+   * restaurante sale entera como IVA 19 % o entera como INC 8 %, y la DIAN
+   * recompone los impuestos desde lo que recibe.
+   *
+   * Este camino NO se puede borrar aunque el vínculo persistido ya exista: las
+   * facturas ya emitidas se reenvían tal cual, y las suyas nunca van a tener
+   * `invoice_item_id`.
+   *
+   * ## Cómo se reconstruye SIN inventar
+   *
+   * Cada línea persistida conoce su base (`dianLineExtension`, exactamente el
+   * importe que el builder escribe en `cbc:LineExtensionAmount`) y su impuesto
+   * (`invoice_items.tax_amount`). Con eso se enumeran los subconjuntos de
+   * tributos de cabecera y se busca el que reproduce el impuesto de la línea al
+   * centavo. Se acepta ÚNICAMENTE cuando hay exactamente UN subconjunto que
+   * cuadra; con cero o con varios la línea se deja sin desglose y el builder
+   * vuelve a su camino histórico. No se elige "el más probable": una elección
+   * ambigua emitiría un esquema fiscal que nadie verificó, que es peor que el
+   * defecto conocido.
+   *
+   * Cada tributo emitido SALE de una fila de cabecera, así que el
+   * `cbc:Percent`/`cbc:Name`/`cbc:ID` de la línea coincide por construcción con
+   * el `cac:TaxTotal` de cabecera, que es lo que compara la regla FAS01b.
+   *
+   * ## Dos exclusiones deliberadas
+   *
+   * · **Documento con un solo tributo** — el camino histórico ya produce
+   *   EXACTAMENTE el mismo XML (misma base, mismo importe, mismo esquema), así
+   *   que no se toca: cero riesgo, cero beneficio.
+   * · **Línea con precio impuesto-incluido** (`invoice_items.is_inclusive`) — su
+   *   base gravable NO es `dianLineExtension` sino esa cifra despejada hacia
+   *   atrás, mientras que el builder sigue emitiendo la primera en
+   *   `cbc:LineExtensionAmount`. Declarar acá la base despejada dejaría el
+   *   `TaxSubtotal` de la línea en desacuerdo con su propio
+   *   `LineExtensionAmount`. Es un defecto anterior y ajeno a este paso; se
+   *   documenta y no se agrava. Ver la nota extensa de
+   *   `attachPersistedLineTaxes`: el vínculo persistido tampoco lo levanta,
+   *   porque el problema no es identificar el tributo sino la base que el
+   *   emisor escribe.
+   */
+  private attachReconstructedLineTaxes(
+    lines: UblDocumentLine[],
+    rows: any[],
+    header_taxes: any[],
+  ): void {
+    const candidates: ProviderInvoiceTax[] = (header_taxes || [])
+      .map((tax: any) => ({
+        tax_name: tax.tax_name,
+        tax_rate: dianRate(tax.tax_rate),
+        taxable_amount: dianAmount(tax.taxable_amount),
+        tax_amount: dianAmount(tax.tax_amount),
+        tax_type: tax.tax_type ?? undefined,
+      }))
+      // Una RETENCIÓN infiltrada en `invoice_taxes` (el DTO legacy lo permite)
+      // no es un tributo del documento: tiene su propio grupo y no puede sumar
+      // al `TaxAmount` que la DIAN contrasta. Se clasifica con la MISMA función
+      // que usa el builder para filtrarlas.
+      .filter((tax) => !UblCommonBuilder.isWithholdingTax(tax));
+
+    if (
+      candidates.length < 2 ||
+      candidates.length > LINE_TAX_MAX_CANDIDATES ||
+      lines.length !== rows.length
+    ) {
+      return;
+    }
+
+    // Divisor POR TRIBUTO, no uno fijo: el ICA se guarda por mil (7 significa
+    // 7 ‰ = 0,7 %) y el emisor lo divide por 10 antes de escribir `cbc:Percent`.
+    // Con un `/100` para todos, la cuota de ICA sale diez veces mayor, ningún
+    // subconjunto cuadra y TODA factura con ICA pierde el desglose de línea sin
+    // más síntoma que un `warn`. Se clasifica con la misma función del emisor.
+    const divisors = candidates.map((tax) =>
+      UblCommonBuilder.resolveTaxCodeFromTax(tax) === DIAN_TAX_CODES.ICA
+        ? toDecimal(1000)
+        : toDecimal(100),
+    );
+    const tolerance = toDecimal(ONE_CENT);
+    const last_mask = (1 << candidates.length) - 1;
+
+    lines.forEach((line, index) => {
+      if (rows[index]?.is_inclusive === true) return;
+
+      const base = toDecimal(dianLineExtension(line));
+      if (!base.greaterThan(0)) return;
+
+      const declared = toDecimal(line.tax_amount);
+
+      let match: ProviderInvoiceTax[] | null = null;
+      let ambiguous = false;
+
+      for (let mask = 1; mask <= last_mask; mask++) {
+        // Se conservan los ÍNDICES, no sólo los tributos: el divisor de cada uno
+        // vive en `divisors` en la misma posición, y un `filter` sobre
+        // `candidates` la perdería.
+        const chosen_indexes: number[] = [];
+        for (let i = 0; i < candidates.length; i++) {
+          if ((mask >> i) & 1) chosen_indexes.push(i);
+        }
+        const chosen = chosen_indexes.map((i) => candidates[i]);
+        // Se trunca CADA cuota antes de sumar, igual que el XML: la DIAN
+        // recompone el documento sobre los importes que recibe, no sobre la
+        // precisión plena que los originó.
+        const amounts = chosen_indexes.map((i) =>
+          toDecimal(
+            dianAmount(
+              base
+                .times(toDecimal(candidates[i].tax_rate))
+                .dividedBy(divisors[i]),
+            ),
+          ),
+        );
+        const total = amounts.reduce(
+          (acc, amount) => acc.plus(amount),
+          toDecimal(0),
+        );
+        if (total.minus(declared).abs().greaterThan(tolerance)) continue;
+
+        if (match) {
+          ambiguous = true;
+          break;
+        }
+        match = chosen.map((tax, i) => ({
+          ...tax,
+          taxable_amount: dianAmount(base),
+          tax_amount: dianAmount(amounts[i]),
+        }));
+      }
+
+      if (ambiguous || !match) {
+        this.logger.warn(
+          `Line ${index + 1} tax breakdown is not reconstructible from the ${candidates.length} header taxes ` +
+            `(${ambiguous ? 'several combinations match' : 'none matches'} ${declared.toFixed(2)}); ` +
+            `the line inherits the document's primary tax, which may declare the wrong DIAN scheme`,
+        );
+        return;
+      }
+
+      line.taxes = match;
+    });
+  }
+
+  /**
+   * `cac:PaymentExchangeRate` — la DECLARACIÓN de la conversión cuando la
+   * operación se pactó en divisa.
+   *
+   * **NO cambia la moneda del documento.** La factura electrónica colombiana se
+   * emite siempre en pesos (Res. DIAN 000042/2020 art. 73; Oficios 901544 y
+   * 903436 de 2020; Concepto 1509 de 2024): `cbc:DocumentCurrencyCode` y todos
+   * los `@currencyID` siguen en COP. Este grupo es el único sitio donde la
+   * divisa aparece.
+   *
+   * LANZA cuando el documento declara divisa y no tiene tasa. Es el punto exacto
+   * donde tiene que fallar: `InvoicingService` degrada a propósito si la TRM no
+   * responde al crear («el error sólo lo lanza quien necesite la tasa para
+   * emitir»), y emitir en silencio produciría una factura que dice haberse
+   * pactado en dólares sin decir a cuánto — irreparable sin nota crédito. Una
+   * tasa inventada sería peor: un valor en pesos que no corresponde a la
+   * operación.
+   */
+  private buildExchangeRateDeclaration(
+    invoice: any,
+  ): DianExchangeRateDeclaration | undefined {
+    const foreign_currency = (invoice.foreign_currency || '')
+      .trim()
+      .toUpperCase();
+    if (!foreign_currency || foreign_currency === 'COP') return undefined;
+
+    const rate = toDecimal(invoice.exchange_rate);
+    // `equals(1)` también se rechaza: FAR03 rechaza `SourceCurrencyBaseRate` en
+    // 1.00, así que una tasa de 1 no es "sin conversión", es un documento que la
+    // DIAN va a devolver.
+    if (!rate.greaterThan(0) || rate.equals(1)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_TRM_001,
+        `No se puede emitir el documento: está pactado en ${foreign_currency} pero no tiene tasa de cambio. ` +
+          `La DIAN exige declarar cuántos pesos vale una unidad de la divisa (cac:PaymentExchangeRate). ` +
+          `Escribe la tasa en el documento o vuelve a intentarlo cuando la TRM oficial esté disponible.`,
+        {
+          invoice_id: invoice.id,
+          foreign_currency,
+          exchange_rate: invoice.exchange_rate ?? null,
+          exchange_rate_date: invoice.exchange_rate_date ?? null,
+        },
+      );
+    }
+
+    return {
+      foreign_currency,
+      // PESOS POR UNA UNIDAD de la divisa — el sentido que fija FAR03, y el
+      // opuesto al que uno escribiría espontáneamente.
+      rate: dianAmount(rate),
+      // `exchange_rate_date` es `@db.Date`: Prisma la devuelve a medianoche UTC
+      // y es una fecha-sólo, no un instante. Convertirla a la zona de la tienda
+      // la correría al día anterior — el off-by-one clásico—, así que se lee por
+      // sus componentes UTC, que es donde el valor realmente está.
+      date: invoice.exchange_rate_date
+        ? new Date(invoice.exchange_rate_date).toISOString().slice(0, 10)
+        : undefined,
+    };
+  }
+
   async send(id: number) {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
@@ -734,6 +2109,44 @@ export class InvoiceFlowService {
     const unitCodeByItem = await this.resolveLineUnitCodes(
       invoice.invoice_items || [],
     );
+
+    // Contrato AIU: régimen de base gravable + nota legal de la línea de
+    // Administración. `null` en todo documento que no sea AIU, que es el 100 %
+    // del histórico y no cuesta ninguna lectura.
+    const aiu = await this.resolveAiuEmissionContext(invoice);
+
+    const is_support_document = this.isSupportDocumentType(invoice.invoice_type);
+
+    // RETENCIONES — se resuelven ANTES de transmitir porque el
+    // `cac:WithholdingTaxTotal` del documento se construye con ellas, y las
+    // MISMAS líneas se persisten después de la aceptación. Resolverlas dos veces
+    // (una para el XML y otra para el asiento) permitiría que el documento
+    // emitido y la contabilidad declararan retenciones distintas.
+    //
+    // NO restan de `cbc:PayableAmount` (Anexo 1.9 §11.9.1) — vale para los tres
+    // roles, autorretención incluida. Restarlas rompe `base + impuestos = total`
+    // y el documento se rechaza por descuadre aritmético.
+    const withholding_batches = await this.resolveWithholdingBatches(
+      invoice,
+      is_support_document,
+    );
+    const withholding_lines = withholding_batches.flatMap(
+      (batch) => batch.resolution.lines,
+    );
+
+    if (
+      withholding_lines.length === 0 &&
+      Number(invoice.withholding_amount || 0) > 0
+    ) {
+      // El agregado que la factura muestra no se pudo descomponer. No bloquea:
+      // el importe no viaja al XML por ninguna vía (la DIAN valida los totales
+      // sin mirar el grupo de retenciones), pero el documento saldrá sin
+      // declararlas y el asiento no tendrá con qué postearlas.
+      this.logger.warn(
+        `Invoice #${id} declares withholding_amount=${invoice.withholding_amount} but no withholding line ` +
+          `could be resolved; the document will be emitted without cac:WithholdingTaxTotal`,
+      );
+    }
 
     // Step 8 — customer-side wiring for the provider payload.
     //
@@ -775,8 +2188,67 @@ export class InvoiceFlowService {
       ...supportDocSupplierFallback,
     };
 
+    // Las líneas del payload se arman APARTE y antes que el resto porque los
+    // tributos por línea se reconstruyen sobre la base que estas mismas líneas
+    // declaran (`dianLineExtension`). Derivarla de la fila de la base de datos
+    // en vez de la línea ya construida permitiría que la base con la que se
+    // calcula el impuesto y la que viaja en `cbc:LineExtensionAmount` no fueran
+    // la misma cifra.
+    const provider_items: UblDocumentLine[] = (invoice.invoice_items || []).map(
+      (item: any) => ({
+        description: item.description,
+        // Quantity keeps its own scale: UBL InvoicedQuantity is not a monetary
+        // value and fractional units (1.5 kg) must survive.
+        quantity: item.quantity.toString(),
+        unit_price: dianAmount(item.unit_price),
+        discount_amount: dianAmount(item.discount_amount),
+        tax_amount: dianAmount(item.tax_amount),
+        total_amount: dianAmount(item.total_amount),
+        // El SNAPSHOT manda sobre la resolución en vivo. `invoice_items.unit_code`
+        // congela la unidad que se emitió, así que un reenvío años después
+        // declara lo mismo aunque el producto haya cambiado de unidad de stock
+        // entretanto — y la DIAN recomputa el documento sobre lo que recibe, no
+        // sobre el catálogo de hoy. Sin snapshot se resuelve en vivo, y sólo si
+        // eso tampoco da nada se declara `EA`: en una línea libre, sin producto,
+        // "cada" es la unidad correcta, no un relleno.
+        unit_code: item.unit_code ?? unitCodeByItem.get(item.id) ?? 'EA',
+        // Escala de precio de la línea. Solo viaja cuando la cantidad está en
+        // unidad mínima: si la línea se vendió por presentación, `unit_price`
+        // ya es el precio del paquete y `quantity` cuenta paquetes, así que
+        // dividir otra vez declararía un importe N veces menor.
+        price_unit_quantity:
+          item.stock_units_consumed == null &&
+          Number(item.price_unit_quantity) > 1
+            ? String(item.price_unit_quantity)
+            : undefined,
+      }),
+    );
+
+    // Multi-impuesto por línea: sin esto, en una factura mixta IVA + INC todas
+    // las líneas heredan el esquema del PRIMER tributo de la cabecera.
+    this.attachLineTaxes(
+      provider_items,
+      invoice.invoice_items || [],
+      invoice.invoice_taxes || [],
+    );
+
+    if (aiu) {
+      this.attachAiuLineExtras(provider_items, invoice.invoice_items || [], aiu);
+    }
+
+    // ClTec: lectura APARTE y en el punto de uso. Ya no viaja en
+    // `INVOICE_INCLUDE` —publicarla mandaba la 14.ª entrada del hash del CUFE al
+    // navegador en cada respuesta—, así que se carga aquí, contra la MISMA
+    // factura y por el mismo accessor con el que se cargó el documento.
+    //
+    // Se resuelve ANTES de armar `provider_data` y no dentro del literal porque
+    // el literal es síncrono; y no se registra su valor en ningún log ni
+    // `details`: quien la necesita diagnosticar mira su longitud, que es lo que
+    // ya hace `dian-direct.provider.ts` al rechazar una clave mal formada.
+    const resolution_technical_key = await this.revealResolutionTechnicalKey(id);
+
     // Build provider data from invoice
-    const provider_data: ProviderInvoiceData = {
+    const provider_data: DianProviderInvoiceData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
       issue_date: this.formatIssueDate(invoice.issue_date, timezone),
@@ -832,26 +2304,31 @@ export class InvoiceFlowService {
       tax_amount: dianAmount(invoice.tax_amount),
       withholding_amount: dianAmount(invoice.withholding_amount),
       total_amount: dianAmount(invoice.total_amount),
+      // El documento se emite SIEMPRE en COP; la divisa sólo se DECLARA en
+      // `exchange_rate` (ver abajo). Esta moneda es la del documento.
       currency: invoice.currency || undefined,
-      items: (invoice.invoice_items || []).map((item: any) => ({
-        description: item.description,
-        // Quantity keeps its own scale: UBL InvoicedQuantity is not a monetary
-        // value and fractional units (1.5 kg) must survive.
-        quantity: item.quantity.toString(),
-        unit_price: dianAmount(item.unit_price),
-        discount_amount: dianAmount(item.discount_amount),
-        tax_amount: dianAmount(item.tax_amount),
-        total_amount: dianAmount(item.total_amount),
-        unit_code: unitCodeByItem.get(item.id) ?? 'EA',
-        // Escala de precio de la línea. Solo viaja cuando la cantidad está en
-        // unidad mínima: si la línea se vendió por presentación, `unit_price`
-        // ya es el precio del paquete y `quantity` cuenta paquetes, así que
-        // dividir otra vez declararía un importe N veces menor.
-        price_unit_quantity:
-          item.stock_units_consumed == null && Number(item.price_unit_quantity) > 1
-            ? String(item.price_unit_quantity)
-            : undefined,
-      })),
+      // `cbc:CustomizationID` — tipo de operación. Estaba CABLEADO a '10' en el
+      // builder, así que un contrato AIU salía declarado como operación estándar
+      // y la DIAN no aplicaba sus reglas CAV/CAX: el documento entraba con una
+      // base gravable que nadie validaba. NULL ≡ '10', y el builder lo resuelve.
+      //
+      // Sólo lo lee `UblInvoiceBuilder`: las notas, el documento soporte y el
+      // documento equivalente tienen su `CustomizationID` fijado por su propia
+      // tabla (20/22, 30/32, 10…), así que este campo no puede contaminarlos.
+      operation_type: invoice.operation_type ?? undefined,
+      // Divisa pactada. NO cambia `DocumentCurrencyCode` ni ningún `@currencyID`:
+      // es una declaración aparte, y sin ella el XML no dice en qué se pactó la
+      // operación aunque la factura lo tenga persistido.
+      exchange_rate: this.buildExchangeRateDeclaration(invoice),
+      // Forma de pago ('1' contado / '2' crédito) → `cac:PaymentMeans/cbc:ID`.
+      payment_form: invoice.payment_form ?? undefined,
+      // Medio de pago ('10' efectivo, '42' consignación, '48' tarjeta…) →
+      // `cbc:PaymentMeansCode`. El nombre difiere del de la columna
+      // (`invoices.payment_means_code`) porque el contrato del proveedor es
+      // anterior; el builder lee `payment_means` y sin él emitía '10' fijo, o
+      // sea declaraba efectivo en toda venta con tarjeta.
+      payment_means: invoice.payment_means_code ?? undefined,
+      items: provider_items,
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,
         tax_rate: dianRate(tax.tax_rate),
@@ -859,6 +2336,10 @@ export class InvoiceFlowService {
         tax_amount: dianAmount(tax.tax_amount),
         tax_type: tax.tax_type ?? undefined,
       })),
+      // `cac:WithholdingTaxTotal`. NO resta de `cbc:PayableAmount` (§11.9.1) y
+      // el builder lo escribe en su propio grupo. La tarifa cambia de unidad al
+      // mapear — ver `toProviderWithholdings`, que es donde está el peligro.
+      withholdings: this.toProviderWithholdings(withholding_lines),
       resolution_number: invoice.resolution?.resolution_number,
       technical_key: invoice.resolution?.technical_key || undefined,
       notes: invoice.notes || undefined,
@@ -960,8 +2441,9 @@ export class InvoiceFlowService {
         provider_response = await provider.sendInvoice(provider_data);
       }
     } catch (error) {
+      const cause = error instanceof Error ? error : new Error(String(error));
       this.logger.error(
-        `Failed to send invoice #${id} to provider: ${error.message}`,
+        `Failed to send invoice #${id} to provider: ${cause.message}`,
       );
 
       if (
@@ -973,10 +2455,10 @@ export class InvoiceFlowService {
 
       // Enqueue for retry if it's a transient error (network, timeout, SOAP fault)
       // Don't retry certificate expiry or validation errors
-      const is_transient = this.isTransientError(error);
+      const is_transient = this.isTransientError(cause);
       if (is_transient) {
         this.retry_queue
-          .enqueue(id, invoice.organization_id, invoice.store_id, error.message)
+          .enqueue(id, invoice.organization_id, invoice.store_id, cause.message)
           .catch((e) =>
             this.logger.error(
               `Failed to enqueue invoice #${id} for retry: ${e.message}`,
@@ -984,8 +2466,31 @@ export class InvoiceFlowService {
           );
       }
 
-      await this.fiscal_ledger.markError(transmission.id, error);
-      throw new VendixHttpException(ErrorCodes.INVOICING_PROVIDER_001);
+      await this.fiscal_ledger.markError(transmission.id, cause);
+
+      // UN ERROR YA TIPADO SE RESPETA. El proveedor lanza con nombre propio
+      // —`INVOICING_PROVIDER_003` cuando la resolución no tiene ClTec, el gate
+      // fiscal, el rechazo del contexto— y cada uno trae su código, su mensaje y
+      // sus `details`. Reemplazarlos por _001 no solo pierde el detalle: afirma
+      // que hubo un fallo de comunicación con la DIAN cuando lo que hubo fue un
+      // dato ausente, y manda a revisar la red en vez de la resolución.
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
+
+      // Lo que queda SÍ es un fallo de transporte o de preparación del envío: la
+      // DIAN no llegó a juzgar el documento. `_001` (502) es correcto — pero con
+      // la causa real, no con la frase genérica del catálogo, que era todo lo que
+      // el operador recibía.
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_001,
+        cause.message?.trim().slice(0, PROVIDER_MESSAGE_MAX_LENGTH) || undefined,
+        {
+          invoice_id: id,
+          fiscal_transmission_id: transmission.id,
+          retry_scheduled: is_transient,
+        },
+      );
     }
 
     // A DIAN OUTAGE IS NOT A REJECTION. Anexo Técnico 1.9 §12.2: when the
@@ -1028,16 +2533,34 @@ export class InvoiceFlowService {
         include: INVOICE_INCLUDE,
       });
 
+      // EL MOTIVO REAL, NO SOLO EL HECHO. La DIAN nombra la regla que se violó
+      // («Valor del CUFE no está calculado correctamente») y esa frase es la única
+      // que le dice al comerciante qué corregir. Viaja en `details.dian_errors`
+      // —la misma lista que queda persistida en `provider_response`— para que el
+      // frontend pueda enumerarla en vez de mostrar «documento rechazado» a secas.
+      const rejection = this.extractDianRejection(provider_response);
+
       this.logger.warn(
-        `Invoice #${id} (${rejected.invoice_number}) rejected by provider: ${provider_response.message || 'no provider message'}`,
+        `Invoice #${id} (${rejected.invoice_number}) rejected by provider: ${
+          provider_response.message || 'no provider message'
+        }${
+          rejection.dian_errors.length
+            ? ` | DIAN: ${rejection.dian_errors
+                .map((reason) =>
+                  reason.code ? `${reason.code} ${reason.message}` : reason.message,
+                )
+                .join(' ; ')}`
+            : ''
+        }`,
       );
 
       throw new VendixHttpException(
         ErrorCodes.INVOICING_PROVIDER_004,
-        provider_response.message || 'Invoice provider rejected the document',
+        this.dianRejectionMessage(provider_response, rejection),
         {
           invoice_id: id,
           tracking_id: provider_response.tracking_id,
+          ...rejection,
         },
       );
     }
@@ -1071,14 +2594,15 @@ export class InvoiceFlowService {
         {
           invoice_id: id,
           tracking_id: provider_response.tracking_id,
+          // Una respuesta que se declara exitosa pero no trae CUFE ni tracking
+          // suele traer el porqué en el estado de la DIAN. Es lo único que hay
+          // para diagnosticarla, así que también viaja.
+          ...this.extractDianRejection(provider_response),
         },
       );
     }
 
     await this.fiscal_ledger.markAccepted(transmission.id, provider_response);
-    const is_support_document = this.isSupportDocumentType(
-      invoice.invoice_type,
-    );
 
     // Update invoice with provider response
     const updated = await this.prisma.invoices.update({
@@ -1105,9 +2629,12 @@ export class InvoiceFlowService {
       await this.ensureSupportDocumentAccountsPayable(updated);
     }
 
-    const withholding_breakdown = await this.resolveWithholdingForInvoice(
+    // LAS MISMAS líneas que se declararon en el XML, ahora persistidas. No se
+    // vuelven a resolver: el documento ya salió con ellas y el asiento tiene que
+    // hablar de esas y no de las que la configuración diga dentro de un segundo.
+    const withholding_breakdown = await this.persistWithholdingBatches(
       updated,
-      is_support_document,
+      withholding_batches,
     );
 
     this.event_emitter.emit(
@@ -1285,20 +2812,28 @@ export class InvoiceFlowService {
 
   async void(id: number) {
     const invoice = await this.getInvoice(id);
+
+    // El caso ACEPTADO se atiende ANTES de las dos compuertas genéricas, y el
+    // orden es lo único que hace útil el mensaje. Con `accepted: []` en la
+    // tabla, `validateTransition` contestaría «transición inválida» —cierto,
+    // pero mudo sobre qué hacer—, y con el período cerrado ganaría el error de
+    // período, que aquí es una respuesta a la pregunta equivocada: la factura
+    // no se anula ni con el período abierto. Quien pregunta necesita saber que
+    // el camino es una nota crédito, no que la transición no existe.
+    if (invoice.status === 'accepted') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_STATUS_002,
+        'Un documento aceptado por la DIAN no se anula: emite una nota crédito que lo corrija o lo revierta. La anulación sólo aplica a documentos que la DIAN nunca aceptó.',
+        { invoice_id: id, invoice_status: invoice.status },
+      );
+    }
+
     this.validateTransition(invoice.status, 'voided');
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
       invoice.issue_date,
       'void',
     );
-
-    if (invoice.status === 'accepted') {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_STATUS_002,
-        'Accepted DIAN documents cannot be voided directly. Use a credit note or adjustment document.',
-        { invoice_id: id },
-      );
-    }
 
     const updated = await this.prisma.invoices.update({
       where: { id },

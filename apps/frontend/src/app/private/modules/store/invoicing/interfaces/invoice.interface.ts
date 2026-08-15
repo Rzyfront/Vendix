@@ -60,6 +60,18 @@ export interface Invoice {
   updated_at: string;
 
   // Relations
+  /**
+   * OJO — ESTOS DOS NOMBRES NO SON LOS DEL BACKEND.
+   *
+   * `GET /store/invoicing/:id` devuelve la fila de Prisma tal cual, e `include`
+   * nombra las relaciones como la tabla: `invoice_items` / `invoice_taxes`.
+   * Nada en el frontend las renombra. `items` y `taxes` se quedan por los
+   * consumidores que ya los declaran, pero el detalle lee PRIMERO los nombres
+   * reales — leyendo sólo `items` la tabla de productos salía siempre vacía
+   * («Sin productos») sobre facturas que sí tenían líneas.
+   */
+  invoice_items?: InvoiceItem[];
+  invoice_taxes?: InvoiceTax[];
   items?: InvoiceItem[];
   taxes?: InvoiceTax[];
   resolution?: InvoiceResolution;
@@ -72,26 +84,151 @@ export interface Invoice {
   accepted_at?: string;
 
   /**
+   * Los TRES estados fiscales que conviven con `status`, verificados en
+   * `schema.prisma` (modelo `invoices`). Son columnas NOT NULL con DEFAULT, así
+   * que el backend siempre las manda; se declaran opcionales sólo porque hay
+   * consumidores que construyen `Invoice` parciales.
+   *
+   * `status` dice dónde está el documento en el flujo de Vendix;
+   * `transmission_status` qué pasó con el envío; `dian_status` qué dijo la DIAN;
+   * `accounting_status` si el asiento quedó posteado. Confundirlos es lo que
+   * hacía que una factura en contingencia —válida y entregada— se viera igual
+   * que una que nadie envió.
+   */
+  transmission_status?: InvoiceTransmissionStatus | string;
+  dian_status?: InvoiceDianStatus | string;
+  accounting_status?: InvoiceAccountingStatus | string;
+
+  /**
+   * Contingencia (Anexo Técnico 1.9 §12). `contingency_deadline` lo PERSISTE el
+   * backend (`InvoiceRetryQueueService.declareContingency`), no se calcula en el
+   * navegador: el plazo de 48 h corre desde la PRIMERA declaración y un
+   * reintento no lo empuja hacia adelante.
+   */
+  contingency_type?: string | null;
+  contingency_declared_at?: string | null;
+  contingency_deadline?: string | null;
+  contingency_reason?: string | null;
+
+  /**
+   * XML firmado del documento electrónico (`invoices.xml_document`, columna
+   * `String?`). Viaja en el payload de la factura porque el backend hace
+   * `include` sin `select`; NO existe un endpoint dedicado para descargarlo, así
+   * que la descarga se arma en el cliente con este contenido.
+   */
+  xml_document?: string | null;
+
+  /**
    * DIAN retry-queue state attached by the backend list endpoint.
    * Only present for invoices whose send/transmission status is in an
    * error or pending-send state; `null` for the rest.
+   *
+   * HUECO DE BACKEND CONOCIDO: sólo lo adjunta `GET /store/invoicing`
+   * (`invoicing.service.ts` → `findAll`). `GET /store/invoicing/:id` NO lo trae,
+   * así que el detalle lo conserva de la fila de la lista con la que se abrió.
    */
   retry_status?: InvoiceRetryStatus | null;
 }
 
+/** Espejo de `fiscal_transmission_status_enum` (schema.prisma). */
+export type InvoiceTransmissionStatus =
+  | 'draft'
+  | 'queued'
+  | 'signing'
+  | 'signed'
+  | 'submitted'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'retrying'
+  | 'cancelled'
+  | 'contingency';
+
+/** Espejo de `dian_document_status_enum` (schema.prisma). */
+export type InvoiceDianStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'not_applicable';
+
+/** Espejo de `fiscal_accounting_status_enum` (schema.prisma). */
+export type InvoiceAccountingStatus =
+  | 'blocked'
+  | 'provisional'
+  | 'posted'
+  | 'reversed'
+  | 'not_applicable';
+
+/**
+ * `invoice_retry_queue.status`. `contingency` faltaba: es el estado terminal de
+ * la cola cuando se agotan los reintentos reglamentados y el documento se
+ * expide bajo contingencia (`RETRY_STATUS` en `invoice-retry-queue.service.ts`).
+ */
 export type InvoiceRetryQueueStatus =
   | 'pending'
   | 'processing'
   | 'failed'
-  | 'completed';
+  | 'completed'
+  | 'contingency';
 
 export interface InvoiceRetryStatus {
-  status: InvoiceRetryQueueStatus;
+  status: InvoiceRetryQueueStatus | string;
   attempts: number;
   max_attempts: number;
   last_error: string | null;
   /** ISO timestamp of the next scheduled retry attempt. */
   next_retry_at: string | null;
+}
+
+/**
+ * Un evento RADIAN registrado contra la factura (Res. 000085/2022), tal como lo
+ * devuelve `GET /store/invoicing/:id/events`.
+ *
+ * Espejo de la tabla `dian_document_events` VERIFICADA en `schema.prisma`. El
+ * endpoint hace `findMany` sin `select`, así que la respuesta TAMBIÉN trae
+ * `request_xml` y `response_xml`: se dejan deliberadamente fuera de este tipo —
+ * son documentos completos que nadie lee en una lista y que sólo engordarían el
+ * árbol de componentes.
+ */
+export interface DianDocumentEvent {
+  id: number;
+  invoice_id: number;
+  /** '030'…'051'. Numeral 14.2.1 del Anexo Técnico. */
+  event_code: string;
+  event_number: string | null;
+  /** CUDE del propio ApplicationResponse, no el CUFE de la factura. */
+  cude: string | null;
+  referenced_cufe: string | null;
+  /** `pending` | `accepted` | `rejected` | `error` (VarChar, no enum). */
+  status: string;
+  dian_status_code: string | null;
+  dian_status_message: string | null;
+  issued_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/**
+ * Respuesta de `POST /store/invoicing/:id/pdf/regenerate`. `key` es la llave S3
+ * persistida en `invoices.pdf_url`; `url` es la firmada, la ÚNICA que se puede
+ * abrir en el navegador.
+ */
+export interface InvoicePdfResult {
+  key: string;
+  url: string;
+}
+
+/**
+ * Respuesta de `GET /store/invoicing/:id/pdf`.
+ *
+ * OJO: `invoices.pdf_url` NO es una URL, es una LLAVE S3
+ * (`stores/{id}/invoices/{id}/invoice-XXX.pdf`, ver `invoice-pdf.service.ts`).
+ * Abrirla directamente desde el navegador produce una ruta relativa rota. Este
+ * endpoint es el que la firma; si la factura todavía no tiene PDF, lo genera.
+ */
+export interface InvoicePdfUrl {
+  url: string;
 }
 
 export type InvoiceType =

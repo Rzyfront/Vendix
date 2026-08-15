@@ -17,6 +17,9 @@ import {
   InvoiceListResponse,
   ApiResponse,
   DianEmissionStatus,
+  DianDocumentEvent,
+  InvoicePdfResult,
+  InvoicePdfUrl,
   PosUvtThreshold,
 } from '../interfaces/invoice.interface';
 
@@ -129,6 +132,48 @@ export class InvoicingService {
     return this.http.patch<ApiResponse<Invoice>>(
       this.getApiUrl(`${id}/void`),
       {},
+    );
+  }
+
+  // ── Documento electrónico: PDF y eventos RADIAN ───────────
+
+  /**
+   * URL FIRMADA del PDF de la factura (`GET :id/pdf`, verificado en
+   * `invoicing.controller.ts:178`).
+   *
+   * NO se abre `invoice.pdf_url` directamente: esa columna guarda la LLAVE S3,
+   * no una URL (`invoice-pdf.service.ts` → `generatePdf` persiste `s3_key`).
+   * Este endpoint la firma; y si la factura aún no tiene PDF, lo genera en el
+   * momento y devuelve la URL del recién creado.
+   */
+  getInvoicePdfUrl(id: number): Observable<ApiResponse<InvoicePdfUrl>> {
+    return this.http.get<ApiResponse<InvoicePdfUrl>>(
+      this.getApiUrl(`${id}/pdf`),
+    );
+  }
+
+  /**
+   * Vuelve a construir el PDF y lo sube a S3 pisando el anterior
+   * (`POST :id/pdf/regenerate`, verificado en `invoicing.controller.ts:185`).
+   *
+   * Es la salida cuando el PDF guardado quedó viejo respecto del documento —
+   * p. ej. se generó antes de que la DIAN devolviera el CUFE y el QR.
+   */
+  regenerateInvoicePdf(id: number): Observable<ApiResponse<InvoicePdfResult>> {
+    return this.http.post<ApiResponse<InvoicePdfResult>>(
+      this.getApiUrl(`${id}/pdf/regenerate`),
+      {},
+    );
+  }
+
+  /**
+   * Eventos RADIAN registrados contra la factura (`GET :id/events`, verificado
+   * en `invoicing.controller.ts:196`). El backend los devuelve del más nuevo al
+   * más viejo (`orderBy: { id: 'desc' }`).
+   */
+  getDianEvents(id: number): Observable<ApiResponse<DianDocumentEvent[]>> {
+    return this.http.get<ApiResponse<DianDocumentEvent[]>>(
+      this.getApiUrl(`${id}/events`),
     );
   }
 

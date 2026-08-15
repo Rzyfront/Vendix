@@ -59,7 +59,25 @@ export interface InvoicePdfData {
 
   // DIAN
   cufe?: string;
-  /** DIAN verification URL returned by the provider, persisted on `invoices.qr_code`. */
+  /**
+   * CONTENIDO del código QR tal como se transmitió, leído de `invoices.qr_code`.
+   *
+   * No es «la URL»: el Anexo Técnico 1.9 §11.7 define el QR como un bloque de
+   * once líneas —diez campos etiquetados más la URL del catálogo— que permite al
+   * adquiriente verificar el documento leyendo el propio código, sin conexión.
+   * `CufeCalculator.buildQrContent()` lo compone y el proveedor lo persiste.
+   *
+   * ESTE BUILDER NO LO RECOMPONE, Y LA DECISIÓN ES DELIBERADA. La representación
+   * gráfica debe mostrar lo que se transmitió, no una reconstrucción que puede
+   * discrepar: aquí no hay hora de emisión, ni ambiente DIAN, ni el desglose
+   * IVA/INC/ICA, ni las identificaciones sin dígito de verificación, y la fecha
+   * llega ya formateada como `DD/MM/YYYY` en vez del `AAAA-MM-DD` del anexo.
+   * Recomponer con esos datos produciría un QR distinto del que la DIAN validó —
+   * exactamente la divergencia que el §11.7 existe para impedir.
+   *
+   * Se tolera recibir aquí una URL suelta: es lo que persistieron los documentos
+   * anteriores al cambio y lo que usa la vista previa de formato.
+   */
   qr_code?: string;
   /**
    * `qr_code` rendered as a PNG, ready for `doc.image()`.
@@ -143,11 +161,24 @@ export interface PdfLayout {
    * would only waste paper (roll).
    */
   footer_gap: number;
+  /**
+   * Banda al pie que el contenido NO puede ocupar, reservada para repetir el QR
+   * en cada página (Anexo Técnico 1.9 §11.7).
+   *
+   * Vale 0 salvo en documentos de más de una página: reservarla siempre encogería
+   * la caja de la factura de una sola página —el caso normal— sin que nadie
+   * aproveche el hueco, y en `half_letter` esos ~72 pt son el 18% del pliego, lo
+   * justo para empujar una venta de dos ítems a una segunda página. `generate`
+   * mide primero y solo entonces reserva.
+   */
+  bottom_reserve: number;
 }
 
 export const GEOMETRY: Record<
   PrintFormat,
-  Omit<PdfLayout, 'format' | 'content'> & { height: number }
+  // `bottom_reserve` queda fuera: no es geometría del papel sino una decisión de
+  // esta impresión concreta, que `generate` toma después de contar las páginas.
+  Omit<PdfLayout, 'format' | 'content' | 'bottom_reserve'> & { height: number }
 > = {
   letter: {
     width: 612,
@@ -203,6 +234,21 @@ export const GEOMETRY: Record<
 /** Probe height for the measuring pass: tall enough never to break a page. */
 const ROLL_PROBE_HEIGHT = 20000;
 
+/**
+ * Lado mínimo del código QR: 2 cm (Anexo Técnico 1.9 §11.7).
+ *
+ * Es un mínimo legible, no estético: por debajo de 2 cm un QR con las once líneas
+ * del anexo deja de leerse con la cámara de un teléfono sobre papel térmico, y el
+ * adquiriente pierde la única vía de verificación que le da el documento impreso.
+ */
+const QR_MIN_SIDE = 20 * MM;
+
+/**
+ * Alto de la banda al pie que se reserva —solo en documentos de varias páginas—
+ * para repetir el QR: el código al mínimo del anexo más su rótulo y aire.
+ */
+const QR_STAMP_BAND = QR_MIN_SIDE + 16;
+
 export class InvoicePdfBuilder {
   /**
    * Generates a professional invoice PDF compliant with Colombian DIAN requirements.
@@ -211,7 +257,23 @@ export class InvoicePdfBuilder {
     const layout = this.resolveLayout(data.format);
 
     if (!layout.roll) {
-      const { buffer } = await this.render(data, layout);
+      const first = await this.render(data, layout);
+
+      // EL QR VA EN TODAS LAS PÁGINAS (Anexo Técnico 1.9 §11.7). En un documento
+      // de una sola página la sección de verificación ya lo pone ahí, así que no
+      // hay nada que repetir y reservar la banda al pie solo encogería la caja.
+      // Cuando SÍ hay varias, se vuelve a componer con la banda reservada para que
+      // el sello de cada página no caiga encima del contenido: es la única forma
+      // de garantizar que no se solapen, porque PDFKit pagina contra el margen
+      // inferior y no sabe nada de un sello dibujado en coordenadas absolutas.
+      if (first.pages <= 1 || !data.qr_code_buffer) {
+        return first.buffer;
+      }
+
+      const { buffer } = await this.render(data, {
+        ...layout,
+        bottom_reserve: QR_STAMP_BAND,
+      });
       return buffer;
     }
 
@@ -242,27 +304,39 @@ export class InvoicePdfBuilder {
       ...geometry,
       format: key,
       content: geometry.width - geometry.margin * 2,
+      bottom_reserve: 0,
     };
   }
 
   private static render(
     data: InvoicePdfData,
     L: PdfLayout,
-  ): Promise<{ buffer: Buffer; end_y: number }> {
+  ): Promise<{ buffer: Buffer; end_y: number; pages: number }> {
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({
           size: [L.width, L.height],
-          margin: L.margin,
+          // `margins` y no `margin`: el inferior lleva la banda del QR cuando hay
+          // varias páginas, y es ese margen el que hace que PDFKit corte el texto
+          // antes de invadirla.
+          margins: {
+            top: L.margin,
+            left: L.margin,
+            right: L.margin,
+            bottom: L.margin + L.bottom_reserve,
+          },
           bufferPages: true,
         });
         const chunks: Buffer[] = [];
         // Captured before `doc.end()`: reading `doc.y` from the `end` callback
         // would report the cursor after PDFKit finalised the document.
         let end_y = L.margin;
+        let pages = 1;
 
         doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-        doc.on('end', () => resolve({ buffer: Buffer.concat(chunks), end_y }));
+        doc.on('end', () =>
+          resolve({ buffer: Buffer.concat(chunks), end_y, pages }),
+        );
         doc.on('error', reject);
 
         // --- Header: Logo + Company Info ---
@@ -326,15 +400,27 @@ export class InvoicePdfBuilder {
         }
 
         // --- QR Code ---
+        // Se anota en qué página cayó la sección de verificación: es la única que
+        // NO recibe el sello repetido, porque ya lleva el código a tamaño grande
+        // con su URL debajo.
+        let qr_page_index = -1;
         if (data.qr_code) {
           doc.moveDown(0.5);
           this.drawQrSection(doc, L, data.qr_code, data.qr_code_buffer);
+          qr_page_index = this.currentPageIndex(doc);
         }
 
         // --- Footer ---
         this.drawFooter(doc, L);
 
+        const range = doc.bufferedPageRange();
+        pages = range.count;
+        // Antes del sello: `switchToPage` + `text` mueven el cursor, y en rollo el
+        // alto del papel se corta justo por `end_y`.
         end_y = doc.y;
+
+        this.stampQrOnRemainingPages(doc, L, data, qr_page_index);
+
         doc.end();
       } catch (error) {
         reject(error);
@@ -350,6 +436,14 @@ export class InvoicePdfBuilder {
   }
 
   /**
+   * Última `y` utilizable por el contenido. Descuenta la banda del QR, que existe
+   * justamente para que nada del flujo entre en ella.
+   */
+  private static bottomLimit(L: PdfLayout): number {
+    return L.height - L.margin - L.bottom_reserve;
+  }
+
+  /**
    * Starts a new page when `needed` points do not fit. No-op on roll paper,
    * whose height is cut to the measured content, so nothing can overflow.
    */
@@ -359,8 +453,85 @@ export class InvoicePdfBuilder {
     needed: number,
   ): void {
     if (L.roll) return;
-    if (doc.y + needed > L.height - L.margin) {
+    if (doc.y + needed > this.bottomLimit(L)) {
       doc.addPage();
+    }
+  }
+
+  /**
+   * Índice de la página que se está dibujando, dentro del rango que `bufferPages`
+   * mantiene abierto. Las páginas solo se añaden al final, así que la actual es
+   * siempre la última del rango.
+   */
+  private static currentPageIndex(doc: PDFKit.PDFDocument): number {
+    const range = doc.bufferedPageRange();
+    return range.start + range.count - 1;
+  }
+
+  /** Lado del QR, nunca por debajo del mínimo del anexo ni más ancho que el papel. */
+  private static qrSide(L: PdfLayout, preferred: number): number {
+    return Math.min(Math.max(preferred, QR_MIN_SIDE), L.content);
+  }
+
+  /**
+   * Repite el QR en las páginas que no llevan la sección de verificación
+   * (Anexo Técnico 1.9 §11.7: el código va en TODAS las páginas del documento).
+   *
+   * Se sella en la banda inferior que `generate` reservó, así que no puede pisar
+   * el contenido. Solo se dibuja el código y su rótulo: el CUFE y la URL viven en
+   * la sección completa, y repetir un bloque de texto en cada página no aporta
+   * verificación, únicamente ruido.
+   */
+  private static stampQrOnRemainingPages(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    data: InvoicePdfData,
+    qr_page_index: number,
+  ): void {
+    const qr_buffer = data.qr_code_buffer;
+    if (!qr_buffer) return;
+
+    const range = doc.bufferedPageRange();
+    if (range.count <= 1) return;
+
+    // Al mínimo del anexo: el sello gasta el menor pie posible en cada página, y
+    // el tamaño grande se reserva para la sección de verificación.
+    const side = this.qrSide(L, QR_MIN_SIDE);
+    const x = L.margin + L.content - side;
+
+    for (let i = range.start; i < range.start + range.count; i++) {
+      if (i === qr_page_index) continue;
+      doc.switchToPage(i);
+
+      // `doc.page.height` y no `L.height`: en rollo la caja definitiva se calcula
+      // por pasada y `switchToPage` ya apunta a la página real.
+      const band_top = doc.page.height - L.margin - QR_STAMP_BAND;
+
+      // Escribir dentro de la banda del margen inferior hace que PDFKit añada una
+      // página en blanco y se lleve el sello a ella. Se anula el margen mientras
+      // dura el sello, igual que en `dispatch-note-pdf.builder.ts`.
+      const prev_bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+
+      doc
+        .font('Helvetica')
+        .fontSize(this.fs(L, 6))
+        .fillColor('#666666')
+        .text('Verificacion DIAN', L.margin, band_top + 2, {
+          width: L.content,
+          align: 'right',
+          lineBreak: false,
+        });
+
+      try {
+        doc.image(qr_buffer, x, band_top + 11, { fit: [side, side] });
+      } catch {
+        // Un buffer corrupto no puede tumbar el documento: el resto de la
+        // representación gráfica sigue siendo válido.
+      }
+
+      doc.fillColor('#000000');
+      doc.page.margins.bottom = prev_bottom;
     }
   }
 
@@ -720,7 +891,7 @@ export class InvoicePdfBuilder {
     // reserve was calibrated for letter: on half-letter it threw away 38% of the
     // sheet, pushing the second item to a new page. The blocks that follow the
     // table get their own reserve via `ensureSpace`.
-    const row_limit = L.height - L.margin - this.fs(L, 8) * 3;
+    const row_limit = this.bottomLimit(L) - this.fs(L, 8) * 3;
 
     for (const item of items) {
       if (doc.y > row_limit) {
@@ -1020,17 +1191,23 @@ export class InvoicePdfBuilder {
   }
 
   /**
-   * Verification block: the scannable QR first, the URL underneath as backup.
+   * Verification block: the scannable QR first, the catalogue URL underneath as
+   * backup.
    *
    * The QR is what makes the printed invoice verifiable — the acquirer points a
    * phone at the paper. The URL stays because a hyperlink still helps on screen
    * and because a QR damaged by a worn thermal head leaves something readable,
    * but it is no longer the only thing printed.
+   *
+   * Lo que se IMPRIME como texto es solo la URL, aunque el código lleve las once
+   * líneas del §11.7: los otros diez campos ya están en la cara del documento
+   * (número, fecha, NIT, importes, CUFE) y repetirlos como un bloque suelto no
+   * añade verificación.
    */
   private static drawQrSection(
     doc: PDFKit.PDFDocument,
     L: PdfLayout,
-    qr_url: string,
+    qr_content: string,
     qr_buffer?: Buffer,
   ): void {
     doc
@@ -1045,8 +1222,9 @@ export class InvoicePdfBuilder {
     if (qr_buffer) {
       // Sized off the printable width, never a fixed pixel box: on `thermal_80`
       // the content is ~207 pt, so a 200 pt code would eat the margins. Capped
-      // so it never dominates a letter sheet either.
-      const side = Math.min(L.roll ? 84 : 110, L.content);
+      // so it never dominates a letter sheet either, y con el suelo de 2 cm que
+      // exige el anexo por debajo del cual el código deja de leerse en papel.
+      const side = this.qrSide(L, L.roll ? 84 : 110);
       const x = L.margin + (L.content - side) / 2;
       const y = doc.y + 3;
       try {
@@ -1061,16 +1239,37 @@ export class InvoicePdfBuilder {
       }
     }
 
+    const url = this.qrDisplayUrl(qr_content);
     doc
       .font('Helvetica')
       .fontSize(this.fs(L, 6))
-      .text(qr_url, L.margin, doc.y + 2, {
+      .text(url, L.margin, doc.y + 2, {
         align: 'center',
         width: L.content,
-        link: qr_url,
+        link: url,
       });
 
     doc.fillColor('#000000');
+  }
+
+  /**
+   * URL del catálogo dentro del contenido del QR.
+   *
+   * El §11.7 la fija como última de las once líneas, así que se busca desde el
+   * final. Un `qr_code` que sea una URL suelta —documentos anteriores al cambio,
+   * y la vista previa de formato— cae en el mismo camino sin ramas aparte.
+   */
+  private static qrDisplayUrl(qr_content: string): string {
+    const lines = qr_content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].startsWith('http')) return lines[i];
+    }
+
+    return lines[lines.length - 1] ?? qr_content.trim();
   }
 
   private static drawSectionTitle(

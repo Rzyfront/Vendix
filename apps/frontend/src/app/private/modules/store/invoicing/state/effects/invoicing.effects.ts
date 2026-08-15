@@ -1,15 +1,44 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
-import { Store } from '@ngrx/store';
-import { of } from 'rxjs';
+import { Action, Store } from '@ngrx/store';
+import { Observable, of } from 'rxjs';
 import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { InvoicingService } from '../../services/invoicing.service';
 import * as InvoicingActions from '../actions/invoicing.actions';
 import { selectInvoicingState } from '../selectors/invoicing.selectors';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
+import {
+  ApiFailure,
+  DianRejection,
+  blockingReasons,
+  describeApiFailure,
+  formatReason,
+  readDianRejection,
+} from '../../utils/invoicing-errors.util';
 
+/**
+ * NINGUN FALLO DE FACTURACION PUEDE SER INVISIBLE.
+ *
+ * Antes, la mitad de estos `catchError` se limitaba a meter un texto en
+ * `state.error` — un campo que NADIE lee: `selectInvoicesError` no tiene un solo
+ * consumidor. El resultado real para el usuario era el peor posible: el modal se
+ * cerraba, no aparecia ningun mensaje, y la factura no existia. Creia haber
+ * facturado.
+ *
+ * Ahora TODO fallo pasa por `fail()`, que es el unico punto de reporte:
+ *
+ *  1. Si el error es una restriccion fiscal reconocida (codigo curado en
+ *     `FISCAL_RESTRICTION_MAP`), lo toma el modal de requisitos: motivo humano
+ *     + CTA a la pantalla donde se arregla.
+ *  2. Si es un rechazo de la DIAN (`INVOICING_PROVIDER_004`), el toast lleva el
+ *     encabezado + el primer motivo REAL, y la lista completa se guarda en el
+ *     state para pintarla en el detalle de la factura.
+ *  3. En cualquier otro caso, toast con el copy en español del `error_code`.
+ *
+ * El mensaje que se muestra SIEMPRE sale de `ERROR_MESSAGES[error_code]`; el
+ * `message` del backend es de desarrollador y no se muestra nunca.
+ */
 @Injectable()
 export class InvoicingEffects {
   private actions$ = inject(Actions);
@@ -24,6 +53,82 @@ export class InvoicingEffects {
    * operaciones se disparan desde el detalle de factura.
    */
   private fiscalReq = inject(FiscalRequirementsService);
+
+  /**
+   * Ultimo toast de error emitido. La pantalla de facturacion dispara cuatro
+   * cargas en paralelo al montarse (facturas, stats, resoluciones, configs
+   * DIAN): si la API esta caida, sin esto el usuario recibe cuatro veces el
+   * mismo texto. Se colapsan los repetidos inmediatos, nunca los distintos.
+   */
+  private lastToast: { message: string; at: number } = { message: '', at: 0 };
+
+  // ── Reporte de fallos (punto unico) ───────────────────────
+
+  /**
+   * Reporta un fallo y construye las acciones que lo dejan asentado en el state.
+   *
+   * @param error  El error crudo (se necesita entero: el modal fiscal y el
+   *               detalle del rechazo viven en `details`).
+   * @param build  Constructor de la accion de fallo del flujo que corresponda.
+   */
+  private fail(
+    error: unknown,
+    build: (failure: ApiFailure) => Action,
+  ): Observable<Action> {
+    const failure = describeApiFailure(error);
+    const rejection = readDianRejection(failure);
+    this.report(error, failure, rejection);
+
+    return rejection
+      ? of(build(failure), InvoicingActions.dianDocumentRejected({ rejection }))
+      : of(build(failure));
+  }
+
+  /** Decide POR DONDE se le cuenta al usuario lo que fallo. */
+  private report(
+    error: unknown,
+    failure: ApiFailure,
+    rejection: DianRejection | null,
+  ): void {
+    // 1) Restriccion fiscal: el modal ya explica el motivo y ofrece el CTA a la
+    //    pantalla de configuracion. Un toast encima seria ruido duplicado.
+    if (this.fiscalReq.presentFiscalError(error)) {
+      return;
+    }
+
+    // 2) Rechazo de la DIAN: el encabezado solo dice que paso; el motivo dice
+    //    que corregir. Va el primero en el toast y la lista completa al panel
+    //    del detalle, que es donde se puede leer con calma.
+    if (rejection) {
+      const first = blockingReasons(rejection)[0];
+      const detail = first
+        ? formatReason(first)
+        : (rejection.statusDescription ?? '');
+      const extra = Math.max(blockingReasons(rejection).length - 1, 0);
+      this.toast(
+        detail
+          ? `${detail}${extra > 0 ? ` (+${extra} motivo(s) más en el detalle)` : ''}`
+          : failure.message,
+        'La DIAN rechazó el documento',
+        6000,
+      );
+      return;
+    }
+
+    // 3) Resto: el copy en español del codigo.
+    this.toast(failure.message);
+  }
+
+  private toast(message: string, title?: string, duration = 3000): void {
+    const now = Date.now();
+    if (message === this.lastToast.message && now - this.lastToast.at < 3000) {
+      return;
+    }
+    this.lastToast = { message, at: now };
+    this.toastService.error(message, title, duration);
+  }
+
+  // ── Invoices ──────────────────────────────────────────────
 
   // Load invoices using filter-as-state from store
   loadInvoices$ = createEffect(() =>
@@ -46,9 +151,9 @@ export class InvoicingEffects {
             InvoicingActions.loadInvoicesSuccess({ invoices: response.data, meta: response.meta })
           ),
           catchError((error) =>
-            of(InvoicingActions.loadInvoicesFailure({
-              error: error.error?.message || error.message || 'Error loading invoices'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.loadInvoicesFailure({ error: f.message }),
+            ),
           )
         )
       )
@@ -106,9 +211,9 @@ export class InvoicingEffects {
             InvoicingActions.loadInvoiceSuccess({ invoice: response.data })
           ),
           catchError((error) =>
-            of(InvoicingActions.loadInvoiceFailure({
-              error: error.error?.message || error.message || 'Error loading invoice'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.loadInvoiceFailure({ error: f.message }),
+            ),
           )
         )
       )
@@ -125,9 +230,9 @@ export class InvoicingEffects {
             InvoicingActions.loadInvoiceStatsSuccess({ stats: response.data })
           ),
           catchError((error) =>
-            of(InvoicingActions.loadInvoiceStatsFailure({
-              error: error.error?.message || error.message || 'Error loading stats'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.loadInvoiceStatsFailure({ error: f.message }),
+            ),
           )
         )
       )
@@ -135,18 +240,27 @@ export class InvoicingEffects {
   );
 
   // Create invoice
+  //
+  // EL FALLO SILENCIOSO ORIGINAL VIVIA AQUI. El error se traducia a un texto que
+  // solo llegaba a `state.error`, y el modal ya se habia cerrado antes de que la
+  // respuesta existiera: la factura no se creaba y nadie se enteraba.
   createInvoice$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.createInvoice),
       switchMap(({ invoice }) =>
         this.invoicingService.createInvoice(invoice).pipe(
-          map((response) =>
-            InvoicingActions.createInvoiceSuccess({ invoice: response.data })
-          ),
+          map((response) => {
+            this.toastService.success('Factura creada');
+            return InvoicingActions.createInvoiceSuccess({ invoice: response.data });
+          }),
           catchError((error) =>
-            of(InvoicingActions.createInvoiceFailure({
-              error: error.error?.message || error.message || 'Error creating invoice'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.createInvoiceFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
           )
         )
       )
@@ -159,16 +273,19 @@ export class InvoicingEffects {
       ofType(InvoicingActions.createFromOrder),
       switchMap(({ orderId }) =>
         this.invoicingService.createFromOrder(orderId).pipe(
-          map((response) =>
-            InvoicingActions.createFromOrderSuccess({ invoice: response.data })
-          ),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.createFromOrderFailure({
-              error: error.error?.message || error.message || 'Error creating invoice from order',
-              errorCode: error?.error?.error_code ?? null,
-            }));
-          })
+          map((response) => {
+            this.toastService.success('Factura creada desde el pedido');
+            return InvoicingActions.createFromOrderSuccess({ invoice: response.data });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.createFromOrderFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          )
         )
       )
     )
@@ -180,16 +297,21 @@ export class InvoicingEffects {
       ofType(InvoicingActions.createFromSalesOrder),
       switchMap(({ salesOrderId }) =>
         this.invoicingService.createFromSalesOrder(salesOrderId).pipe(
-          map((response) =>
-            InvoicingActions.createFromSalesOrderSuccess({ invoice: response.data })
-          ),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.createFromSalesOrderFailure({
-              error: error.error?.message || error.message || 'Error creating invoice from sales order',
-              errorCode: error?.error?.error_code ?? null,
-            }));
-          })
+          map((response) => {
+            this.toastService.success('Factura creada desde la orden de venta');
+            return InvoicingActions.createFromSalesOrderSuccess({
+              invoice: response.data,
+            });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.createFromSalesOrderFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          )
         )
       )
     )
@@ -205,9 +327,9 @@ export class InvoicingEffects {
             InvoicingActions.updateInvoiceSuccess({ invoice: response.data })
           ),
           catchError((error) =>
-            of(InvoicingActions.updateInvoiceFailure({
-              error: error.error?.message || error.message || 'Error updating invoice'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.updateInvoiceFailure({ error: f.message }),
+            ),
           )
         )
       )
@@ -222,9 +344,9 @@ export class InvoicingEffects {
         this.invoicingService.deleteInvoice(id).pipe(
           map(() => InvoicingActions.deleteInvoiceSuccess({ id })),
           catchError((error) =>
-            of(InvoicingActions.deleteInvoiceFailure({
-              error: error.error?.message || error.message || 'Error deleting invoice'
-            }))
+            this.fail(error, (f) =>
+              InvoicingActions.deleteInvoiceFailure({ error: f.message }),
+            ),
           )
         )
       )
@@ -238,12 +360,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.validateInvoice(id).pipe(
           map((response) => InvoicingActions.validateInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.validateInvoiceFailure({
-              error: error.error?.message || error.message || 'Error validating invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.validateInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -256,12 +377,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.sendInvoice(id).pipe(
           map((response) => InvoicingActions.sendInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.sendInvoiceFailure({
-              error: error.error?.message || error.message || 'Error sending invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.sendInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -274,12 +394,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.acceptInvoice(id).pipe(
           map((response) => InvoicingActions.acceptInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.acceptInvoiceFailure({
-              error: error.error?.message || error.message || 'Error accepting invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.acceptInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -292,12 +411,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.rejectInvoice(id).pipe(
           map((response) => InvoicingActions.rejectInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.rejectInvoiceFailure({
-              error: error.error?.message || error.message || 'Error rejecting invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.rejectInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -310,12 +428,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.cancelInvoice(id).pipe(
           map((response) => InvoicingActions.cancelInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.cancelInvoiceFailure({
-              error: error.error?.message || error.message || 'Error cancelling invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.cancelInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -328,12 +445,11 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.voidInvoice(id).pipe(
           map((response) => InvoicingActions.voidInvoiceSuccess({ invoice: response.data })),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.voidInvoiceFailure({
-              error: error.error?.message || error.message || 'Error voiding invoice'
-            }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.voidInvoiceFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
@@ -345,15 +461,19 @@ export class InvoicingEffects {
       ofType(InvoicingActions.createCreditNote),
       switchMap(({ dto }) =>
         this.invoicingService.createCreditNote(dto).pipe(
-          map((response) =>
-            InvoicingActions.createCreditNoteSuccess({ invoice: response.data })
-          ),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.createCreditNoteFailure({
-              error: error.error?.message || error.message || 'Error creating credit note'
-            }));
-          })
+          map((response) => {
+            this.toastService.success('Nota crédito creada');
+            return InvoicingActions.createCreditNoteSuccess({ invoice: response.data });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.createCreditNoteFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          )
         )
       )
     )
@@ -365,21 +485,101 @@ export class InvoicingEffects {
       ofType(InvoicingActions.createDebitNote),
       switchMap(({ dto }) =>
         this.invoicingService.createDebitNote(dto).pipe(
-          map((response) =>
-            InvoicingActions.createDebitNoteSuccess({ invoice: response.data })
-          ),
-          catchError((error) => {
-            this.fiscalReq.presentFiscalError(error);
-            return of(InvoicingActions.createDebitNoteFailure({
-              error: error.error?.message || error.message || 'Error creating debit note'
-            }));
-          })
+          map((response) => {
+            this.toastService.success('Nota débito creada');
+            return InvoicingActions.createDebitNoteSuccess({ invoice: response.data });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.createDebitNoteFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          )
         )
       )
     )
   );
 
-  // Load resolutions
+  // ── Eventos RADIAN (Res. 000085/2022) ─────────────────────
+
+  /**
+   * `GET /store/invoicing/:id/events`. El backend los ordena de mas nuevo a mas
+   * viejo; el orden cronologico lo arma el detalle, que es quien lo pinta.
+   *
+   * `switchMap` y no `exhaustMap`: abrir la factura B mientras carga la A tiene
+   * que CANCELAR la A. Con `exhaustMap` la segunda apertura se ignoraria y el
+   * usuario veria el panel vacio de una factura que si tiene eventos.
+   */
+  loadDianEvents$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.loadDianEvents),
+      switchMap(({ invoiceId }) =>
+        this.invoicingService.getDianEvents(invoiceId).pipe(
+          map((response) =>
+            InvoicingActions.loadDianEventsSuccess({
+              invoiceId,
+              events: response?.data ?? [],
+            }),
+          ),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.loadDianEventsFailure({
+                invoiceId,
+                error: f.message,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  // ── Regenerar PDF ─────────────────────────────────────────
+
+  /**
+   * `POST /store/invoicing/:id/pdf/regenerate`.
+   *
+   * `exhaustMap` DELIBERADO: cada llamada reconstruye el PDF y lo sube a S3
+   * pisando el anterior. Un doble click con `switchMap` cancelaria la
+   * suscripcion del frontend pero NO la escritura del backend — dos subidas
+   * concurrentes sobre la misma llave. Con `exhaustMap` el segundo click se
+   * ignora hasta que el primero termina.
+   *
+   * NO se despacha `loadInvoice` despues: el reducer de `loadInvoice` limpia
+   * `dianRejection`, y regenerar un PDF no debe borrar de pantalla los motivos
+   * por los que la DIAN rechazo el documento. La llave S3 (`pdf_url`) tampoco
+   * cambia — el backend la reescribe con el mismo valor.
+   */
+  regenerateInvoicePdf$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.regenerateInvoicePdf),
+      exhaustMap(({ id }) =>
+        this.invoicingService.regenerateInvoicePdf(id).pipe(
+          map((response) => {
+            this.toastService.success('PDF regenerado');
+            return InvoicingActions.regenerateInvoicePdfSuccess({
+              id,
+              url: response?.data?.url ?? null,
+            });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.regenerateInvoicePdfFailure({
+                id,
+                error: f.message,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  // ── Resolutions ───────────────────────────────────────────
+
   loadResolutions$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.loadResolutions),
@@ -388,17 +588,16 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.loadResolutionsSuccess({ resolutions: response.data })
           ),
-          catchError((error) => {
-            const msg = extractApiErrorMessage(error);
-            this.toastService.error(msg);
-            return of(InvoicingActions.loadResolutionsFailure({ error: msg }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.loadResolutionsFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
   );
 
-  // Create resolution
   createResolution$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.createResolution),
@@ -408,17 +607,16 @@ export class InvoicingEffects {
             this.toastService.success('Resolución creada');
             return InvoicingActions.createResolutionSuccess({ resolution: response.data });
           }),
-          catchError((error) => {
-            const msg = extractApiErrorMessage(error);
-            this.toastService.error(msg);
-            return of(InvoicingActions.createResolutionFailure({ error: msg }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.createResolutionFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
   );
 
-  // Update resolution
   updateResolution$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.updateResolution),
@@ -428,17 +626,42 @@ export class InvoicingEffects {
             this.toastService.success('Resolución actualizada');
             return InvoicingActions.updateResolutionSuccess({ resolution: response.data });
           }),
-          catchError((error) => {
-            const msg = extractApiErrorMessage(error);
-            this.toastService.error(msg);
-            return of(InvoicingActions.updateResolutionFailure({ error: msg }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.updateResolutionFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )
   );
 
-  // Load DIAN configs (gate pre-factura)
+  // Delete resolution
+  //
+  // Sin los toasts, un rechazo legítimo del backend (409: la resolución ya
+  // numeró documentos) se veía exactamente igual que no hacer nada: la fila se
+  // quedaba y el usuario concluía que borrar está roto.
+  deleteResolution$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.deleteResolution),
+      switchMap(({ id }) =>
+        this.invoicingService.deleteResolution(id).pipe(
+          map(() => {
+            this.toastService.success('Resolución eliminada');
+            return InvoicingActions.deleteResolutionSuccess({ id });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.deleteResolutionFailure({ error: f.message }),
+            ),
+          )
+        )
+      )
+    )
+  );
+
+  // ── DIAN configs (gate pre-factura) ───────────────────────
+
   loadDianConfigs$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.loadDianConfigs),
@@ -449,36 +672,11 @@ export class InvoicingEffects {
               configs: response?.data ?? [],
             })
           ),
-          catchError((error) => {
-            const msg = extractApiErrorMessage(error);
-            this.toastService.error(msg);
-            return of(InvoicingActions.loadDianConfigsFailure({ error: msg }));
-          })
-        )
-      )
-    )
-  );
-
-  // Delete resolution
-  //
-  // Sin los toasts, un rechazo legítimo del backend (409: la resolución ya
-  // numeró documentos) se veía exactamente igual que no hacer nada: la fila se
-  // quedaba y el usuario concluía que borrar está roto. `extractApiErrorMessage`
-  // es lo que trae el motivo real, igual que en los effects hermanos.
-  deleteResolution$ = createEffect(() =>
-    this.actions$.pipe(
-      ofType(InvoicingActions.deleteResolution),
-      switchMap(({ id }) =>
-        this.invoicingService.deleteResolution(id).pipe(
-          map(() => {
-            this.toastService.success('Resolución eliminada');
-            return InvoicingActions.deleteResolutionSuccess({ id });
-          }),
-          catchError((error) => {
-            const msg = extractApiErrorMessage(error);
-            this.toastService.error(msg);
-            return of(InvoicingActions.deleteResolutionFailure({ error: msg }));
-          })
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.loadDianConfigsFailure({ error: f.message }),
+            ),
+          )
         )
       )
     )

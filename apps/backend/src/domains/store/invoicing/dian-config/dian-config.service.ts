@@ -864,6 +864,12 @@ export class DianConfigService {
       ...config,
       environment: 'production',
       enablement_status: 'enabled',
+      // Declara el override en vez de dejarlo implícito. La respuesta lleva
+      // `environment` y `enablement_status` REALES en la cabecera y, más abajo,
+      // sendos checks con esas mismas claves evaluados sobre los valores
+      // forzados de arriba. Sin esta marca son dos afirmaciones opuestas sobre
+      // el mismo campo en el mismo payload y el checklist se lee como roto.
+      assume_production: true,
       shared_technical_key,
     });
 
@@ -1089,6 +1095,7 @@ export class DianConfigService {
       // ADEMÁS de la promoción misma y no una lista que se resuelve sola.
       environment: 'production',
       enablement_status: 'enabled',
+      assume_production: true,
       shared_technical_key,
     });
 

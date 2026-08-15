@@ -62,6 +62,26 @@ export interface ProductionReadinessCheck {
   days_remaining?: number;
   /** Percentage of the numbering range still available, on range warnings. */
   percent_remaining?: number;
+  /**
+   * `true` cuando el `satisfied` de este check NO describe la configuración real,
+   * sino el escenario hipotético bajo el que se evaluó.
+   *
+   * `getProductionReadiness` llama al evaluador con `environment: 'production'` y
+   * `enablement_status: 'enabled'` forzados a propósito, porque la pregunta que
+   * responde el endpoint es «si promovieras AHORA, ¿qué te faltaría?». Sin ese
+   * override, los dos ejes que el propio botón de promoción va a cambiar saldrían
+   * siempre insatisfechos y taparían lo que de verdad bloquea.
+   *
+   * El problema no era el override sino el silencio: la respuesta trae
+   * `environment: "test"` y `enablement_status: "not_started"` en la cabecera y,
+   * unas líneas más abajo, sendos checks con esas mismas claves diciendo
+   * `satisfied: true`. Dos afirmaciones opuestas sobre el mismo campo en el mismo
+   * payload, sin nada que distinga cuál es la real — se lee como un checklist
+   * roto, y quien lo audite concluirá que el evaluador miente.
+   *
+   * Ausente (o `false`) = el check habla de la configuración tal como está.
+   */
+  assumed?: boolean;
 }
 
 /** A check counts against `ready` only when it is blocking. */
@@ -125,6 +145,17 @@ export type SharedTechnicalKeyFinding = {
 type ReadinessConfig = {
   /** Resultado de `findResolutionsSharingTechnicalKey`. `null` = comprobado y limpio. */
   shared_technical_key: SharedTechnicalKeyFinding | null;
+  /**
+   * `true` cuando el llamador FORZÓ `environment`/`enablement_status` para
+   * preguntar «si promoviera ahora, ¿qué me faltaría?» en vez de describir la
+   * configuración tal como está.
+   *
+   * Sólo marca los dos checks correspondientes con `assumed: true`; no cambia
+   * ninguna evaluación. Opcional y por defecto `false`, así que quien construya
+   * esta forma a mano —los specs, el gate— sigue compilando y sigue leyéndose
+   * como lo que es: una foto de la realidad.
+   */
+  assume_production?: boolean;
   id: number;
   operation_mode: string;
   environment: string;
@@ -504,6 +535,7 @@ export class FiscalProductionReadinessService {
         action:
           'Promueve la configuración a producción una vez la DIAN apruebe el set.',
         owner: 'tenant',
+        assumed: config.assume_production === true,
       },
       {
         key: 'environment',
@@ -511,6 +543,7 @@ export class FiscalProductionReadinessService {
         satisfied: config.environment === 'production',
         action: 'Cambia el ambiente a Producción en el paso de Ambiente.',
         owner: 'tenant',
+        assumed: config.assume_production === true,
       },
       {
         key: 'software_id',

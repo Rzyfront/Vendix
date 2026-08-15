@@ -23,51 +23,78 @@ export class ChartOfAccountsService {
     return context;
   }
 
-  async findAll(query: QueryAccountDto) {
+  /**
+   * Builds the tenant-scoped `where` shared by {@link findAll} and
+   * {@link findAllPaginated} so both read exactly the same rows.
+   */
+  private buildWhere(
+    accountingEntityId: number,
+    query: QueryAccountDto,
+  ): Prisma.chart_of_accountsWhereInput {
     const {
       search,
+      ids,
       account_type,
       parent_id,
       level,
       accepts_entries,
       is_active,
-      tree,
-      limit,
-      offset,
     } = query;
-    const context = this.getContext();
-    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
-      organization_id: context.organization_id!,
-      store_id: context.store_id,
-    });
 
-    const where: Prisma.chart_of_accountsWhereInput = {
-      accounting_entity_id: accountingEntity.id,
-      ...(search && {
-        OR: [
-          { code: { contains: search, mode: 'insensitive' as const } },
-          { name: { contains: search, mode: 'insensitive' as const } },
-        ],
-      }),
+    return {
+      accounting_entity_id: accountingEntityId,
+      // `ids` is the hydration path for server-search selectors: when present
+      // it pins the result set, so `search` is intentionally ignored (a
+      // selector never sends both).
+      ...(ids?.length
+        ? { id: { in: ids } }
+        : search
+          ? {
+              OR: [
+                { code: { contains: search, mode: 'insensitive' as const } },
+                { name: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
       ...(account_type && { account_type: account_type as any }),
       ...(parent_id !== undefined && { parent_id }),
       ...(level !== undefined && { level }),
       ...(accepts_entries !== undefined && { accepts_entries }),
       ...(is_active !== undefined && { is_active }),
     };
+  }
 
-    if (tree) {
+  private async resolveEntity() {
+    const context = this.getContext();
+    return this.fiscalScopeService.resolveAccountingEntityForFiscal({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+  }
+
+  /**
+   * Flat list of accounts.
+   *
+   * Kept array-returning on purpose: `OrgChartOfAccountsService` delegates to
+   * this method for `fiscal_scope=STORE` and returns the value straight to the
+   * org controller, which wraps it with `responseService.success()`. The
+   * paginated envelope lives in {@link findAllPaginated}, consumed only by the
+   * store controller.
+   */
+  async findAll(query: QueryAccountDto) {
+    const accountingEntity = await this.resolveEntity();
+
+    if (query.tree) {
       return this.getTree();
     }
 
-    const take = limit ?? 100;
-    const skip = offset ?? 0;
+    const where = this.buildWhere(accountingEntity.id, query);
 
     const accounts = await this.prisma.chart_of_accounts.findMany({
       where,
       orderBy: { code: 'asc' },
-      take,
-      skip,
+      take: query.limit ?? 100,
+      skip: query.offset ?? 0,
       include: {
         parent: {
           select: { id: true, code: true, name: true },
@@ -86,6 +113,60 @@ export class ChartOfAccountsService {
     });
 
     return accounts;
+  }
+
+  /**
+   * Same rows as {@link findAll}, plus the total the client needs to know
+   * whether there is more to search for.
+   *
+   * Envelope shape mirrors the sibling `JournalEntriesService.findAll`
+   * (`{ data, meta: { total, page, limit, total_pages } }`) so the controller
+   * can hand it to `ResponseService.paginated()` — the repo-wide contract.
+   */
+  async findAllPaginated(query: QueryAccountDto) {
+    const accountingEntity = await this.resolveEntity();
+    const where = this.buildWhere(accountingEntity.id, query);
+
+    const limit = query.limit ?? 100;
+    // `offset` is the selector-facing cursor; `page` stays supported for the
+    // table-style consumers. Whichever arrives, both are reported back.
+    const skip = query.offset ?? (query.page ? (query.page - 1) * limit : 0);
+    const page = query.page ?? Math.floor(skip / limit) + 1;
+
+    const [data, total] = await Promise.all([
+      this.prisma.chart_of_accounts.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        take: limit,
+        skip,
+        include: {
+          parent: {
+            select: { id: true, code: true, name: true },
+          },
+          children: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              account_type: true,
+              level: true,
+            },
+            orderBy: { code: 'asc' },
+          },
+        },
+      }),
+      this.prisma.chart_of_accounts.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getTree() {

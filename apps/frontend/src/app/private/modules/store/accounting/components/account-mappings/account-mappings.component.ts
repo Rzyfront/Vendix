@@ -7,6 +7,7 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
@@ -18,22 +19,18 @@ import { environment } from '../../../../../../../environments/environment';
 import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { AppType } from '../../../../../../core/models/environment.enum';
 
-import {
-  AccountMapping,
-  ChartAccount,
-} from '../../interfaces/accounting.interface';
+import { AccountMapping } from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,
   selectAccountMappingsLoading,
-  selectLeafAccounts,
 } from '../../state/selectors/accounting.selectors';
 import {
   loadAccountMappings,
   saveAccountMappings,
   resetAccountMappings,
-  loadAccounts,
 } from '../../state/actions/accounting.actions';
 import {
+  AccountSelectComponent,
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
@@ -467,10 +464,12 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   selector: 'vendix-account-mappings',
   standalone: true,
   imports: [
+    AccountSelectComponent,
     ButtonComponent,
     CardComponent,
     IconComponent,
     EmptyStateComponent,
+    FormsModule,
     NgClass,
   ],
   templateUrl: './account-mappings.component.html',
@@ -486,11 +485,13 @@ export class AccountMappingsComponent {
   readonly loading = toSignal(this.store.select(selectAccountMappingsLoading), {
     initialValue: false,
   });
-  readonly leaf_accounts = toSignal(this.store.select(selectLeafAccounts), {
-    initialValue: [] as ChartAccount[],
-  });
+  // `leaf_accounts` is gone: each row's `app-account-select` searches the chart
+  // of accounts server-side. The old markup rendered the whole leaf list as
+  // <option>s inside every one of the ~230 mapping rows.
 
   // Local state
+  /** `mapping_key` → short account label, from the backend key catalog. */
+  readonly mapping_labels = signal<Record<string, string>>({});
   readonly mapping_groups = signal<MappingGroup[]>([]);
   readonly changed_mappings = signal<Map<string, number>>(new Map());
   readonly has_changes = signal(false);
@@ -500,7 +501,10 @@ export class AccountMappingsComponent {
 
   constructor() {
     this.store.dispatch(loadAccountMappings({}));
-    this.store.dispatch(loadAccounts());
+    // No `loadAccounts()` here any more — this screen no longer needs the whole
+    // chart in memory. (The accounting shell still dispatches it for the other
+    // tabs that read `selectLeafAccounts`.)
+    this.loadMappingKeyCatalog();
 
     this.store
       .select(selectAccountMappings)
@@ -558,8 +562,33 @@ export class AccountMappingsComponent {
         return null;
     }
   }
+  /**
+   * Pulls the canonical mapping-key catalog once. Failure is non-fatal: rows
+   * fall back to showing the raw `mapping_key`, which is still usable, so a
+   * flaky catalog request never blocks editing the mappings themselves.
+   */
+  private loadMappingKeyCatalog(): void {
+    this.http
+      .get<{ data?: MappingKeyCatalogEntry[] }>(
+        `${environment.apiUrl}/store/accounting/account-mappings/keys`,
+      )
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        const entries = res?.data ?? [];
+        if (entries.length === 0) return;
+        this.mapping_labels.set(
+          Object.fromEntries(
+            entries.map((e) => [e.key, e.description || e.label || e.key]),
+          ),
+        );
+      });
+  }
+
   getLabel(mapping_key: string): string {
-    return MAPPING_LABELS[mapping_key] || mapping_key;
+    return this.mapping_labels()[mapping_key] || mapping_key;
   }
 
   getSourceLabel(source: string): string {
@@ -571,19 +600,22 @@ export class AccountMappingsComponent {
     return labels[source] || source;
   }
 
-  getSelectedAccountId(mapping: AccountMapping): number | string {
+  getSelectedAccountId(mapping: AccountMapping): number | null {
     const changedMappings = this.changed_mappings();
     if (changedMappings.has(mapping.mapping_key)) {
       return changedMappings.get(mapping.mapping_key)!;
     }
-    return mapping.account_id || '';
+    return mapping.account_id ?? null;
   }
 
-  onAccountChange(mapping_key: string, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
+  /**
+   * `app-account-select` is a CVA, so it emits the account id directly instead
+   * of a DOM `Event` the way the old native `<select>` did.
+   */
+  onAccountSelected(mapping_key: string, account_id: number | null): void {
     const updatedMap = new Map(this.changed_mappings());
-    if (value) {
-      updatedMap.set(mapping_key, Number(value));
+    if (account_id != null) {
+      updatedMap.set(mapping_key, Number(account_id));
     } else {
       updatedMap.delete(mapping_key);
     }

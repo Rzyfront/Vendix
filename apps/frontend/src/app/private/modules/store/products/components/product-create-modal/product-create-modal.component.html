@@ -95,6 +95,53 @@
       </div>
 
 
+      <!-- Contabilidad (opcional, plegada) -->
+      <div class="rounded-xl border border-gray-200">
+        <button
+          type="button"
+          (click)="isAccountingOpen.set(!isAccountingOpen())"
+          class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+        >
+          <span class="flex items-center gap-2 min-w-0">
+            <app-icon
+              name="calculator"
+              size="16"
+              class="text-gray-500 shrink-0"
+            ></app-icon>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-gray-800">
+                Cuenta contable (opcional)
+              </span>
+              <span class="block text-xs text-gray-500 truncate">
+                @if (productForm.get("account_code")?.value) {
+                  Cuenta {{ productForm.get("account_code")?.value }}
+                } @else {
+                  Usa la cuenta de ingresos por defecto
+                }
+              </span>
+            </span>
+          </span>
+          <app-icon
+            [name]="isAccountingOpen() ? 'chevron-up' : 'chevron-down'"
+            size="16"
+            class="text-gray-400 shrink-0"
+          ></app-icon>
+        </button>
+
+        @if (isAccountingOpen()) {
+          <div class="px-3 pb-3 pt-1 border-t border-gray-100">
+            <app-account-code-select
+              formControlName="account_code"
+            ></app-account-code-select>
+            <small class="text-xs text-gray-500 mt-1 block">
+              Cuenta del PUC con la que se acredita el ingreso de este producto
+              al facturar. Si la dejas vacía, el ingreso va a la cuenta de
+              ingresos por defecto de la organización.
+            </small>
+          </div>
+        }
+      </div>
+
       <!-- Advanced CTA -->
       <app-tooltip
         content="Haz clic para añadir variantes, imágenes, descripción y más opciones al producto"

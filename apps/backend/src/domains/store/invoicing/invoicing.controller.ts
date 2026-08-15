@@ -214,6 +214,25 @@ export class InvoicingController {
     );
   }
 
+  /**
+   * Qué le falta al documento para poder emitirse, sin cambiar nada.
+   *
+   * Se declara ANTES de `@Get(':id')` a propósito: Nest resuelve las rutas por
+   * orden de declaración, y `:id` con un segmento extra no colisiona, pero
+   * mantener las rutas específicas arriba es lo que evita que un `:id`
+   * demasiado laxo se coma una ruta hermana el día que alguien la agregue.
+   *
+   * Es de lectura (`invoicing:read`): consultar si una factura está lista no
+   * debería exigir permiso de escritura — quien la revisa no siempre es quien
+   * la emite.
+   */
+  @Get(':id/emit-readiness')
+  @Permissions('invoicing:read')
+  async getEmitReadiness(@Param('id') id: string) {
+    const result = await this.invoice_flow_service.getEmitReadiness(+id);
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('invoicing:read')
   async findOne(@Param('id') id: string) {

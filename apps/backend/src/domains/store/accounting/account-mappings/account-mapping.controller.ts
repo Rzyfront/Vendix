@@ -16,7 +16,10 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { AccountMappingService } from './account-mapping.service';
+import {
+  AccountMappingService,
+  buildMappingKeyCatalog,
+} from './account-mapping.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import {
   UpsertAccountMappingDto,
@@ -39,6 +42,26 @@ export class AccountMappingController {
       throw new Error('No request context found');
     }
     return context;
+  }
+
+  /**
+   * Canonical catalog of every mapping key the accounting engine understands
+   * (`key`, human `label`, `event`/`role` split and the default PUC code).
+   *
+   * Exists so the frontend stops re-declaring its own partial copy of
+   * `DEFAULT_ACCOUNT_MAPPINGS`. Static data — no tenant reads — so it is safe
+   * behind the read permission and skips the module-flow gate like the other
+   * bootstrap routes the wizard needs.
+   *
+   * Declared BEFORE `@Get()` has no bearing here (there is no `:param` route
+   * in this controller), but it is kept first to follow the repo convention of
+   * static routes ahead of dynamic ones.
+   */
+  @Get('keys')
+  @SkipModuleFlowGuard() // bootstrap: wizard renders the mapping form while module is still WIP
+  @Permissions('store:accounting:account_mappings:read')
+  getMappingKeys() {
+    return this.response_service.success(buildMappingKeyCatalog());
   }
 
   @Get()

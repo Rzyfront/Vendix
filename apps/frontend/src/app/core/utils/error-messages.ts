@@ -643,9 +643,108 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer los documentos de habilitación. Intenta con fotos más nítidas o escribe los datos a mano.',
   HABILITATION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  INVOICING_RESOLUTION_006:
+    'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala antes de crear la resolución.',
+  INVOICING_RESOLUTION_007:
+    'Ya existe una resolución activa con ese prefijo para ese tipo de documento. Usa otro prefijo o desactiva la anterior.',
+  // 008 es la puerta del contrato fiscal por tipo de documento: qué campos exige
+  // la DIAN a una factura de venta, a una nota, a un documento soporte. La
+  // corrección es distinta según el campo, así que el backend manda el detalle.
+  INVOICING_RESOLUTION_008:
+    'La resolución no cumple lo que la DIAN exige para ese tipo de documento. Revisa los campos señalados.',
+  // El rango y la vigencia los fija la DIAN en la autorización de numeración:
+  // aquí no se corrige un criterio propio, se transcribe bien el documento.
+  INVOICING_RESOLUTION_009:
+    'El rango autorizado no es válido: deben ser dos números enteros positivos y el final mayor que el inicial. Cópialos de la autorización de numeración.',
+  INVOICING_RESOLUTION_010:
+    'La vigencia no es válida: la fecha final debe ser posterior a la inicial. Cópialas de la autorización de numeración.',
+  /**
+   * ESTE MENSAJE EXISTE POR UN RECHAZO REAL DE LA DIAN.
+   *
+   * Se guardó una clave técnica de 38 caracteres —dos perdidos al copiarla, todos
+   * hexadecimales, nada a la vista que delatara el error—. La ClTec es el único
+   * dato del CUFE que NO viaja en el XML, así que la DIAN fue el primer sistema
+   * capaz de notarlo: recomputó el hash con la clave verdadera, no coincidió y
+   * rechazó la factura. El consecutivo autorizado ya estaba gastado, y eso no se
+   * recupera.
+   *
+   * Por eso el texto dice DÓNDE conseguirla y no solo qué está mal: quien captura
+   * una resolución no tiene por qué saber que son 40 caracteres.
+   */
+  INVOICING_RESOLUTION_011:
+    'La clave técnica (ClTec) debe tener exactamente 40 caracteres hexadecimales. Cópiala completa del PDF de la autorización de numeración de la DIAN: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
+  INVOICING_PROVIDER_002:
+    'El proveedor de facturación electrónica no está configurado para esta tienda. Complétalo en Facturación → Configuración DIAN.',
+  INVOICING_PROVIDER_003:
+    'Faltan datos obligatorios para transmitir a la DIAN. Revisa la configuración DIAN y la resolución de numeración.',
+  // Este NO es un fallo de Vendix: la DIAN juzgó el documento y lo rechazó
+  // nombrando la regla que se violó. Ese detalle viaja en `details.dian_errors`,
+  // así que la UI debe enumerarlo — este texto es solo el encabezado.
+  INVOICING_PROVIDER_004:
+    'La DIAN rechazó el documento. Revisa los motivos que reporta y corrígelos antes de reintentar.',
+  INVOICING_CUFE_001:
+    'Los valores con los que se calculó la clave del documento no coinciden con los del XML. No se transmitió nada y no se gastó numeración. Reporta este caso: es un fallo interno, no un dato tuyo.',
+  // El backend recalcula toda la aritmética del documento, así que un importe
+  // de impuesto que no cuadre se corrige solo. Este código es el único caso que
+  // no se puede recalcular: importe sin tarifa. El mensaje del backend nombra la
+  // línea concreta, así que la UI debe preferirlo sobre este texto genérico.
+  INVOICING_CALC_001:
+    'Una línea declara un impuesto pero no indica su tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero.',
+  /**
+   * PREVALIDACIÓN FISCAL — los cuatro mensajes siguientes son ENCABEZADOS.
+   *
+   * El backend rechaza el documento ANTES de firmarlo y transmitirlo, y manda en
+   * `details.blockers[]` un hallazgo por regla incumplida, cada uno con su
+   * `problem` (qué está mal y por qué la DIAN lo rechaza) y su `fix` (qué tocar y
+   * en qué pantalla). La UI DEBE enumerar esa lista: estos textos solo dicen de
+   * qué familia es el problema, porque un documento puede incumplir varias reglas
+   * a la vez y ninguna frase única las describe.
+   *
+   * Por qué vale la pena mostrarlos bien: un rechazo de la DIAN gasta un
+   * consecutivo autorizado que no se recupera. Todo lo que se corrija en esta
+   * pantalla es numeración que no se pierde.
+   */
+  INVOICING_PREVALIDATION_001:
+    'Las cuentas del documento no cuadran y la DIAN lo rechazaría. Revisa los descuadres señalados: normalmente basta con volver a guardar el documento para que se recalculen los totales.',
+  INVOICING_PREVALIDATION_002:
+    'La resolución de numeración no respalda este documento: revisa su vigencia, su rango y que el prefijo coincida con el número emitido. Se corrige en Facturación → Resoluciones.',
+  // El caso real: una clave técnica de 38 caracteres hizo rechazar una factura y
+  // quemó el consecutivo. El texto dice DÓNDE conseguirla porque quien captura
+  // una resolución no tiene por qué saber que son 40 caracteres.
+  INVOICING_PREVALIDATION_003:
+    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
+  INVOICING_PREVALIDATION_004:
+    'El contenido del documento no se puede emitir tal como está: revisa la moneda, las unidades de medida de las líneas y el tipo de operación. El detalle señala cada línea y qué corregir.',
+
+  /**
+   * AIU — el error que estos tres mensajes evitan NO se ve.
+   *
+   * Un contrato AIU mal clasificado produce una factura que la DIAN ACEPTA
+   * declarando menos IVA del que se debe; el faltante aparece meses después, ya
+   * con sanción e intereses, y sólo se corrige con nota crédito. Por eso los
+   * textos nombran la pantalla de configuración: quien factura no tiene por qué
+   * saber que existen dos regímenes de base gravable, pero sí tiene que poder
+   * llegar a donde se elige el suyo.
+   */
+  INVOICING_AIU_001:
+    'La base gravable del AIU es menor al 10% del valor del contrato, que es el mínimo legal para los servicios del artículo 462-1 (aseo y cafetería, vigilancia y servicios temporales de empleo). Sube el AIU o, si tu contrato es de construcción de bien inmueble, cambia el régimen en Configuración → Facturación → AIU.',
+  INVOICING_AIU_002:
+    'Falta el objeto del contrato AIU, o no tiene la longitud que exige la DIAN (entre 20 y 5.000 caracteres). Descríbelo en Configuración → Facturación → AIU: viaja en la línea de Administración y sin él la DIAN rechaza el documento.',
+  INVOICING_AIU_003:
+    'Una línea está marcada como componente AIU (Administración, Imprevistos o Utilidad) pero el documento no es un contrato AIU. Cambia el tipo de operación a AIU o quita la marca de la línea: como está, el componente se ignora y la línea se factura como una venta normal.',
+
+  /**
+   * DIVISA — la factura siempre se emite en pesos; la divisa sólo se DECLARA.
+   * Ninguno de los dos casos se puede resolver adivinando una tasa, así que los
+   * mensajes piden el dato en vez de prometer un reintento.
+   */
+  INVOICING_TRM_001:
+    'No se pudo obtener la TRM oficial para la fecha de la operación y no se indicó una tasa manual. Escribe la tasa de cambio en el documento: no se inventa ninguna, porque una tasa equivocada cambia el valor en pesos de la factura.',
+  INVOICING_CURRENCY_001:
+    'Para una divisa distinta del dólar hay que indicar la tasa de cambio a mano. La TRM oficial sólo cotiza dólar-peso, así que Vendix no puede derivar la equivalencia de otra moneda por su cuenta.',
 
   // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
   KITCHEN_TICKET_NOT_READY:

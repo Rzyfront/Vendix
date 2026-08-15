@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
@@ -292,16 +292,355 @@ export class AutoEntryService {
    * organization (any of its accounting entities). Used to validate a
    * per-concept withholding `account_code` override before preferring it over
    * the mapping-key default.
+   *
+   * `require_accepts_entries` (default `false`) endurece la comprobación para
+   * los overrides de CATÁLOGO nuevos (`products.account_code`,
+   * `product_variants.account_code`): además de existir, la cuenta debe estar
+   * activa y aceptar movimientos.
+   *
+   * OJO — POR QUÉ EL DEFAULT ES `false` Y NO SE PUEDE CAMBIAR A LA LIGERA:
+   * en `colombia-puc.data.ts` la regla es `accepts_entries = code.length >= 6`,
+   * o sea SOLO las subcuentas de nivel 4. Las cuentas de nivel 3 que el sistema
+   * usa como mapping por defecto — `4135` Ingresos, `1305` CxC, `1105` Caja,
+   * `2408` IVA — tienen `accepts_entries = false`. Activar esta comprobación de
+   * forma global tumbaría TODOS los asientos automáticos existentes. Por eso el
+   * guard se aplica ÚNICAMENTE al override que un humano escribió a mano, que
+   * es el único caso donde alguien puede teclear una cuenta de agrupación por
+   * error; el default resuelto por mapping se sigue aceptando tal cual.
    */
   private async accountCodeExistsForOrg(
     organization_id: number,
     code: string,
+    require_accepts_entries = false,
   ): Promise<boolean> {
     const account = await this.prisma.chart_of_accounts.findFirst({
-      where: { organization_id, code },
+      where: {
+        organization_id,
+        code,
+        ...(require_accepts_entries && {
+          is_active: true,
+          accepts_entries: true,
+        }),
+      },
       select: { id: true },
     });
     return !!account;
+  }
+
+  /**
+   * Valida que un `account_code` escrito a mano sobre un producto o una
+   * variante sea CONTABILIZABLE en la organización, y lanza con un mensaje
+   * accionable en español cuando no lo es.
+   *
+   * Pensado para el camino de ESCRITURA (guardar un producto), no para el de
+   * posteo: el objetivo es que el error salga cuando el humano teclea la cuenta
+   * y todavía puede corregirla, en vez de dejarlo pasar y descubrirlo semanas
+   * después con un asiento roto o mal clasificado.
+   *
+   * Distingue los dos fallos porque exigen acciones distintas:
+   *   · la cuenta no existe            → hay que crearla en el PUC
+   *   · existe pero es de AGRUPACIÓN   → hay que bajar a una subcuenta hija
+   *
+   * `code` vacío/`null` ⇒ no hay nada que validar (limpiar el override es
+   * legítimo: devuelve el producto al ingreso por defecto).
+   */
+  async validateProductAccountCode(
+    organization_id: number,
+    code?: string | null,
+  ): Promise<void> {
+    const trimmed = (code ?? '').trim();
+    if (!trimmed) return;
+
+    const account = await this.prisma.chart_of_accounts.findFirst({
+      where: { organization_id, code: trimmed },
+      select: { id: true, name: true, is_active: true, accepts_entries: true },
+    });
+
+    if (!account) {
+      throw new BadRequestException(
+        `La cuenta contable '${trimmed}' no existe en el plan de cuentas (PUC) de esta organización. ` +
+          `Créala primero en Contabilidad → Plan de Cuentas, o elige una cuenta existente.`,
+      );
+    }
+
+    if (!account.is_active) {
+      throw new BadRequestException(
+        `La cuenta contable '${trimmed}' (${account.name}) está inactiva y no puede recibir movimientos. ` +
+          `Actívala en Contabilidad → Plan de Cuentas, o elige otra cuenta.`,
+      );
+    }
+
+    if (!account.accepts_entries) {
+      throw new BadRequestException(
+        `La cuenta contable '${trimmed}' (${account.name}) es una cuenta de agrupación y no admite movimientos: ` +
+          `un asiento no se puede registrar sobre ella. Elige una de sus subcuentas ` +
+          `(las subcuentas tienen 6 dígitos o más, por ejemplo '${trimmed}05').`,
+      );
+    }
+  }
+
+  /**
+   * Reparte a céntimos exactos `total_cents` entre `weights`, por el método del
+   * RESTO MAYOR (Hamilton): cada peso recibe su parte entera y los céntimos que
+   * sobran se entregan de a uno a los pesos con mayor parte fraccionaria.
+   *
+   * Garantía dura: `suma(resultado) === total_cents`, SIEMPRE. Es lo que evita
+   * que agrupar y redondear por cuenta descuadre el asiento contra el total de
+   * la factura (y que `postAutoEntry` lo rechace, con razón).
+   *
+   * El desempate por índice ascendente hace el reparto DETERMINISTA: el mismo
+   * asiento reprocesado dos veces produce exactamente las mismas cifras.
+   */
+  private static allocateByLargestRemainder(
+    total_cents: number,
+    weights: number[],
+  ): number[] {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    if (sum <= 0) return weights.map(() => 0);
+
+    const exact = weights.map((w) => (total_cents * w) / sum);
+    const out = exact.map((e) => Math.floor(e));
+    let left = total_cents - out.reduce((a, b) => a + b, 0);
+
+    const by_remainder = exact
+      .map((e, i) => ({ i, frac: e - Math.floor(e) }))
+      .sort((a, b) => b.frac - a.frac || a.i - b.i);
+
+    for (let k = 0; k < by_remainder.length && left > 0; k++, left--) {
+      out[by_remainder[k].i] += 1;
+    }
+    return out;
+  }
+
+  /**
+   * ASIENTO MIXTO — construye UNA línea de asiento por cuenta de ingreso
+   * resuelta, en vez de acreditar una sola cuenta para toda la factura.
+   *
+   * Hoy el asiento de venta acredita `invoice.validated.revenue` (4135) y punto.
+   * Un PUC real separa líneas de negocio en subcuentas distintas, así que este
+   * método agrupa las líneas de la factura por la cuenta que cada una resuelve y
+   * emite una línea de asiento por grupo. Las líneas con subcuenta propia
+   * conviven con las que caen al ingreso por defecto: de ahí el asiento mixto.
+   *
+   * ORDEN DE RESOLUCIÓN POR LÍNEA (el primero no nulo GANA):
+   *   1. `invoice_items.account_code`      ← SNAPSHOT al momento de facturar
+   *   2. `product_variants.account_code`   ← catálogo vivo, unidad vendida
+   *   3. `products.account_code`           ← catálogo vivo, producto padre
+   *   4. mapping `invoice.validated.revenue` (por defecto 4135)
+   *
+   * El snapshot manda sobre el catálogo A PROPÓSITO: que el producto se remapee
+   * mañana NO debe reescribir un asiento ya contabilizado. El asiento tiene que
+   * poder reconstruirse desde el documento, no desde el catálogo vivo.
+   *
+   * "El primero no nulo gana" — y si ese primero NO es contabilizable, se cae al
+   * DEFAULT, no al siguiente eslabón de la cadena. Es deliberado: los eslabones
+   * 2 y 3 son estado vivo que pudo cambiar después de emitir el documento, así
+   * que no son un sustituto legítimo de un snapshot inválido. Una sola regla,
+   * fácil de razonar, y el warning dice exactamente qué cuenta arreglar.
+   *
+   * ═══ CÓMO SE RESUELVE EL REDONDEO (lo que impide descuadrar el asiento) ═══
+   * El ancla es `revenue_total`: el MISMO escalar que la implementación legacy
+   * acreditaba en una sola línea. Nunca se recalcula sumando las líneas de la
+   * factura — sumar céntimos línea a línea diverge del total del documento.
+   *
+   *   · Cada grupo con cuenta PROPIA toma su base exacta (suma de sus líneas,
+   *     neta de impuesto), en céntimos enteros.
+   *   · El grupo POR DEFECTO toma el RESTO: `revenue_total − Σ(overrides)`.
+   *     No se calcula, se despeja. Así el cuadre es exacto por construcción y
+   *     cualquier deriva (redondeo, flete, descuentos de cabecera que no bajan a
+   *     las líneas) queda absorbida por la cuenta de ingreso genérica, que es
+   *     justo donde un contador espera encontrarla.
+   *   · Si los overrides reclaman MÁS que `revenue_total` (p.ej. alguien puso un
+   *     snapshot en la línea de flete, que se acredita aparte en 414505), no se
+   *     inventa ingreso: se reparte `revenue_total` entre TODOS los grupos por
+   *     resto mayor. Sigue cuadrando al céntimo.
+   *
+   * Toda la aritmética va en CÉNTIMOS ENTEROS, no en float: `0.1 + 0.2 !== 0.3`
+   * y el guard de balance de `postAutoEntry` tolera 0.001, no más.
+   *
+   * ═══ CERO REGRESIÓN ═══
+   * Sin líneas, sin overrides, o con todos los overrides apuntando a la cuenta
+   * por defecto, devuelve UNA sola línea por `revenue_total` — byte por byte lo
+   * que emitía la implementación anterior.
+   */
+  private async resolveInvoiceRevenueLines(params: {
+    organization_id: number;
+    store_id?: number;
+    invoice_id: number;
+    /** Ingreso a repartir (subtotal − flete). Es el ANCLA del cuadre. */
+    revenue_total: number;
+    default_mapping_key: string;
+    label: string;
+  }): Promise<(AutoEntryLine | null)[]> {
+    const {
+      organization_id,
+      store_id,
+      invoice_id,
+      revenue_total,
+      default_mapping_key,
+      label,
+    } = params;
+
+    const default_mapping = await this.account_mapping_service.getMapping(
+      organization_id,
+      default_mapping_key,
+      store_id,
+    );
+    const default_account = default_mapping?.account_code ?? null;
+
+    // Línea única por el total — el comportamiento histórico exacto, incluida
+    // la línea en cero (que NO se filtra: `postAutoEntry` sólo descarta nulls, y
+    // cuenta para el mínimo de 2 líneas).
+    const legacy_single_line = (): (AutoEntryLine | null)[] => [
+      default_account
+        ? {
+            account_code: default_account,
+            description: label,
+            debit_amount: 0,
+            credit_amount: revenue_total,
+          }
+        : null,
+    ];
+
+    if (!default_account || !(revenue_total > 0)) return legacy_single_line();
+
+    // Se lee SIN scope y con el predicado de tenant explícito: este método corre
+    // dentro de un listener de eventos, donde el AsyncLocalStorage de contexto
+    // de tienda puede estar ya vacío. `invoice: { organization_id }` mantiene el
+    // aislamiento multi-tenant sin depender del ALS.
+    const items = await this.prisma.withoutScope().invoice_items.findMany({
+      where: { invoice_id, invoice: { organization_id } },
+      select: {
+        id: true,
+        total_amount: true,
+        tax_amount: true,
+        account_code: true,
+        product: { select: { account_code: true } },
+        product_variant: { select: { account_code: true } },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    if (items.length === 0) return legacy_single_line();
+
+    // Una consulta por código distinto, no por línea: una factura de 50 líneas
+    // del mismo producto valida su cuenta UNA vez.
+    const postable_cache = new Map<string, boolean>();
+    const isPostable = async (code: string): Promise<boolean> => {
+      const cached = postable_cache.get(code);
+      if (cached !== undefined) return cached;
+      const ok = await this.accountCodeExistsForOrg(organization_id, code, true);
+      postable_cache.set(code, ok);
+      if (!ok) {
+        this.logger.warn(
+          `Invoice #${invoice_id}: cuenta de ingreso '${code}' inexistente, inactiva o de agrupación ` +
+            `en la organización #${organization_id}; esas líneas se acreditan en la cuenta por ` +
+            `defecto '${default_account}'. Corrige la cuenta del producto/variante en el PUC.`,
+        );
+      }
+      return ok;
+    };
+
+    const toCents = (n: number) => Math.round(Number(n || 0) * 100);
+
+    // Base de ingreso de la línea = total NETO de impuesto. `invoicing.service`
+    // construye `total_amount = (cantidad * precio − descuento) + tax`, así que
+    // restar `tax_amount` devuelve la base gravable tanto si el precio traía el
+    // impuesto incluido como si no.
+    const override_base_cents = new Map<string, number>();
+    let has_default_bucket = false;
+
+    for (const item of items) {
+      const base_cents =
+        toCents(item.total_amount as any) - toCents(item.tax_amount as any);
+
+      const declared =
+        item.account_code ??
+        item.product_variant?.account_code ??
+        item.product?.account_code ??
+        null;
+
+      const trimmed = (declared ?? '').trim();
+
+      if (!trimmed || trimmed === default_account) {
+        has_default_bucket = true;
+        continue;
+      }
+      if (!(await isPostable(trimmed))) {
+        has_default_bucket = true;
+        continue;
+      }
+
+      override_base_cents.set(
+        trimmed,
+        (override_base_cents.get(trimmed) ?? 0) + base_cents,
+      );
+    }
+
+    // Ninguna línea declaró cuenta propia contabilizable ⇒ legacy exacto.
+    if (override_base_cents.size === 0) return legacy_single_line();
+
+    const revenue_cents = toCents(revenue_total);
+    // Orden estable por código de cuenta: el mismo asiento reprocesado produce
+    // las líneas en el mismo orden.
+    const override_codes = [...override_base_cents.keys()].sort();
+    const override_cents = override_codes.map(
+      (c) => override_base_cents.get(c) ?? 0,
+    );
+    const override_total = override_cents.reduce((a, b) => a + b, 0);
+
+    const makeLine = (code: string, cents: number): AutoEntryLine => ({
+      account_code: code,
+      description: code === default_account ? label : `${label} (${code})`,
+      debit_amount: 0,
+      credit_amount: cents / 100,
+    });
+
+    // Caso patológico: los overrides reclaman más ingreso del que la factura
+    // reconoce (una línea de flete con snapshot, bases de línea que no suman el
+    // subtotal, un override negativo). NO se inventa ingreso: se reparte el
+    // ancla entre todos los grupos por resto mayor.
+    if (override_total <= 0 || override_total > revenue_cents) {
+      this.logger.warn(
+        `Invoice #${invoice_id}: las cuentas de ingreso propias suman ${override_total / 100} ` +
+          `y el ingreso reconocido es ${revenue_total}; se reparte proporcionalmente para no ` +
+          `inventar ingreso. Revisa las cuentas de las líneas.`,
+      );
+      const codes = has_default_bucket
+        ? [default_account, ...override_codes]
+        : override_codes;
+      // Pesos SIEMPRE clampeados a ≥ 0: una base negativa (línea con descuento
+      // mayor que el precio) produciría una acreditación negativa, que no es una
+      // línea de asiento válida.
+      const weights = (
+        has_default_bucket
+          ? [revenue_cents - override_total, ...override_cents]
+          : override_cents
+      ).map((c) => Math.max(0, c));
+      const allocated = AutoEntryService.allocateByLargestRemainder(
+        revenue_cents,
+        weights,
+      );
+      const lines = codes
+        .map((code, i) => makeLine(code, allocated[i]))
+        .filter((l) => l.credit_amount !== 0);
+      // Todo el peso en cero (factura 100% descontada, p.ej.): cae al legacy.
+      return lines.length > 0 ? lines : legacy_single_line();
+    }
+
+    // Camino normal: cada override toma su base exacta y el DEFAULT despeja el
+    // resto. Σ === revenue_cents por construcción.
+    const remainder_cents = revenue_cents - override_total;
+    const lines: AutoEntryLine[] = [];
+
+    if (remainder_cents > 0) {
+      lines.push(makeLine(default_account, remainder_cents));
+    }
+    override_codes.forEach((code, i) => {
+      lines.push(makeLine(code, override_cents[i]));
+    });
+
+    return lines;
   }
 
   /**
@@ -892,6 +1231,20 @@ export class AutoEntryService {
      * cargado vía INVOICE_INCLUDE) — PROHIBIDO resolverlo aquí por lookup.
      */
     customer?: { id: number; name?: string; tax_id?: string };
+    /**
+     * Fase 7.4 — contrapartida configurable. OMITIR ⇒ 1305 CxC, que es el
+     * comportamiento histórico y el correcto mientras el cobro se contabilice
+     * aparte en `payment.received`.
+     *
+     * PASAR ESTO SÓLO si la factura se liquida en el mismo acto y NO se va a
+     * emitir un `payment.received` por ese mismo dinero. Si se emiten los dos,
+     * el ingreso de caja se contabiliza DOS VECES.
+     */
+    settlement?: {
+      payment_method?: string;
+      store_payment_method_id?: number;
+      bank_account_id?: number;
+    };
   }) {
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
@@ -918,23 +1271,16 @@ export class AutoEntryService {
     const product_revenue = Math.max(0, Number(data.subtotal || 0) - shipping_amount);
 
     const lines: (AutoEntryLine | null)[] = await Promise.all([
-      this.resolveAccountLine(
-        data.organization_id,
-        'invoice.validated.accounts_receivable',
-        'Accounts Receivable',
-        accounts_receivable,
-        0,
-        data.store_id,
-        customer_third_party,
-      ),
-      this.resolveAccountLine(
-        data.organization_id,
-        'invoice.validated.revenue',
-        'Revenue',
-        0,
-        product_revenue,
-        data.store_id,
-      ),
+      // Fase 7.4 — contrapartida. Sin `settlement` resuelve 1305 CxC, idéntico
+      // al histórico.
+      this.resolveInvoiceCounterpartLine({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        amount: accounts_receivable,
+        description: 'Accounts Receivable',
+        settlement: data.settlement,
+        third_party: customer_third_party,
+      }),
       // Plan Despacho Economía — FASE 4 paso 14. Línea de flete separada.
       // Solo se materializa si shipping_amount > 0 (idempotente con el legacy).
       ...(shipping_amount > 0
@@ -950,6 +1296,22 @@ export class AutoEntryService {
           ]
         : []),
     ]);
+
+    // ASIENTO MIXTO — una línea de ingreso por cuenta PUC resuelta, en vez de
+    // una sola línea a 4135. Ancla el reparto en `product_revenue`, el mismo
+    // escalar que la implementación anterior acreditaba de una sola vez, así que
+    // el cuadre del asiento no cambia. Sin cuentas propias devuelve una sola
+    // línea: cero regresión.
+    lines.push(
+      ...(await this.resolveInvoiceRevenueLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        invoice_id: data.invoice_id,
+        revenue_total: product_revenue,
+        default_mapping_key: 'invoice.validated.revenue',
+        label: 'Revenue',
+      })),
+    );
 
     lines.push(
       ...(await this.resolveTaxLines({
@@ -1159,15 +1521,249 @@ export class AutoEntryService {
   }
 
   /**
-   * Resolve the cash/bank mapping key based on payment method.
-   * cash/efectivo → payment.received.cash (1105)
-   * transfer/card/other → payment.received.bank (1110)
+   * Medio de pago CANÓNICO (`system_payment_methods.name`, que es estable y no
+   * lo edita el tenant) → mapping key de la cuenta que recibe el dinero.
+   *
+   * Es el mismo patrón explícito que `resolveRefundCreditKey` ya usa bien: un
+   * switch declarado, no una comparación de substrings sobre una etiqueta que
+   * cualquiera puede renombrar.
+   *
+   * Todas las keys de este mapa YA EXISTEN en `DEFAULT_ACCOUNT_MAPPINGS` — esta
+   * generalización no introduce ninguna key nueva, así que no hay que
+   * re-sincronizar `default-account-mappings.seed.ts` ni las etiquetas del
+   * frontend (el trío que el skill `vendix-auto-entries` advierte que ya está
+   * desalineado).
+   */
+  private static readonly PAYMENT_METHOD_MAPPING_KEYS: Record<string, string> =
+    {
+      cash: 'payment.received.cash', // 1105 Caja
+      cash_on_delivery: 'payment.received.cash', // 1105 — el repartidor recibe efectivo
+      bank_transfer: 'payment.received.bank', // 1110 Bancos
+      stripe_card: 'payment.received.bank', // 1110
+      paypal: 'payment.received.bank', // 1110
+      payment_vouchers: 'payment.received.bank', // 1110
+      wompi: 'payment.received.wompi', // 1110 (key propia para override)
+      wallet: 'wallet.debit.customer_advance', // 2805 — drena el anticipo, no es caja
+    };
+
+  /**
+   * Aliases para RECUPERAR el código canónico cuando lo único que llega es una
+   * ETIQUETA legible.
+   *
+   * Por qué hace falta: los emisores (`payments.service.ts`,
+   * `table-sessions.service.ts`, …) mandan hoy
+   * `store_payment_method.system_payment_method.display_name` — o sea
+   * "Efectivo", "Wompi (Nequi, PSE, Tarjetas, Bancolombia)", "Pago Contra
+   * Entrega". Ese texto es EDITABLE por el tenant vía
+   * `store_payment_methods.display_name`, que es exactamente la fragilidad que
+   * esta tabla acota: mientras la etiqueta siga siendo reconocible, la cuenta no
+   * se mueve; y cuando deja de serlo, se cae al comportamiento histórico en vez
+   * de a una cuenta arbitraria.
+   *
+   * EL ORDEN IMPORTA: `cash_on_delivery` va ANTES que `cash` porque "Cash on
+   * Delivery" contiene "cash" y se lo llevaría el patrón equivocado.
+   */
+  private static readonly PAYMENT_METHOD_ALIASES: ReadonlyArray<
+    readonly [RegExp, string]
+  > = [
+    [/contra\s*entrega|contraentrega|cash[\s_-]*on[\s_-]*delivery|\bcod\b/, 'cash_on_delivery'],
+    [/wompi|nequi|\bpse\b|bancolombia/, 'wompi'],
+    [/wallet|monedero|prepago|saldo\s*a\s*favor/, 'wallet'],
+    [/\befectivo\b|\bcash\b/, 'cash'],
+    [/transferencia|bank[\s_-]*transfer|consignaci/, 'bank_transfer'],
+    [/paypal/, 'paypal'],
+    [/stripe|tarjeta|\bcard\b|cr[eé]dito|d[eé]bito/, 'stripe_card'],
+    [/voucher|bono/, 'payment_vouchers'],
+  ];
+
+  /**
+   * Normaliza un medio de pago a su código canónico. Acepta tanto el código ya
+   * canónico (`cash`, `wompi`, …) como la etiqueta legible. Devuelve `null`
+   * cuando no reconoce nada — el llamador decide el fallback.
+   */
+  private normalizePaymentMethodCode(raw?: string | null): string | null {
+    if (!raw) return null;
+    const norm = raw
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // quita tildes: "Crédito" → "credito"
+      .toLowerCase()
+      .trim();
+    if (!norm) return null;
+
+    if (AutoEntryService.PAYMENT_METHOD_MAPPING_KEYS[norm]) return norm;
+
+    for (const [pattern, code] of AutoEntryService.PAYMENT_METHOD_ALIASES) {
+      if (pattern.test(norm)) return code;
+    }
+    return null;
+  }
+
+  /**
+   * Resuelve la mapping key de la cuenta que recibe el dinero, por SWITCH
+   * explícito sobre el medio de pago canónico.
+   *
+   * Reemplaza la comparación por substrings (`includes('cash') ||
+   * includes('efectivo')`) que decidía la contabilidad a partir de una etiqueta
+   * renombrable: bastaba con que un tenant llamara "Contado" a su método de
+   * efectivo para que el dinero empezara a entrar en Bancos, en silencio.
+   *
+   * DOS CORRECCIONES DELIBERADAS DE COMPORTAMIENTO (antes caían en 1110 Bancos
+   * porque su etiqueta no contenía "cash" ni "efectivo"):
+   *   · `cash_on_delivery` → 1105 Caja. El repartidor recibe efectivo; nunca
+   *     entró a un banco.
+   *   · `wallet` → 2805 Anticipos de Clientes. Pagar con saldo prepago no
+   *     ingresa dinero: DRENA un pasivo que el cliente ya había pagado antes.
+   *     Contabilizarlo como banco duplicaba el ingreso de caja.
+   *     OJO al solaparse con `onWalletDebited` (evento `wallet.debited`), que
+   *     postea DR 2805 / CR ingresos por su cuenta. Hoy ese evento SÓLO lo
+   *     emite `wallet.service.ts` en un ajuste manual de saldo, no en un cobro
+   *     de POS/checkout, así que no hay doble conteo — pero si alguien cablea
+   *     `wallet.debited` al flujo de pago, los dos caminos escribirían el mismo
+   *     asiento y hay que dejar UNO solo.
+   * El resto de los medios conocidos resuelven a la MISMA cuenta que antes
+   * (1105 efectivo / 1110 lo demás), así que no hay reclasificación masiva.
+   *
+   * Fallback idéntico al histórico cuando la etiqueta no se reconoce: sin dato
+   * ⇒ Caja; con dato irreconocible ⇒ Bancos.
    */
   private resolveCashBankKey(payment_method?: string): string {
-    if (!payment_method) return 'payment.received.cash';
-    const method = payment_method.toLowerCase();
-    const is_cash = method.includes('cash') || method.includes('efectivo');
-    return is_cash ? 'payment.received.cash' : 'payment.received.bank';
+    const canonical = this.normalizePaymentMethodCode(payment_method);
+    if (canonical) {
+      return AutoEntryService.PAYMENT_METHOD_MAPPING_KEYS[canonical];
+    }
+    return payment_method
+      ? 'payment.received.bank'
+      : 'payment.received.cash';
+  }
+
+  /**
+   * Contrapartida del asiento de VENTA (Fase 7.4).
+   *
+   * Hoy `onInvoiceValidated` debita SIEMPRE 1305 (CxC). Eso es correcto — y
+   * sigue siendo el default — porque el cobro se contabiliza por separado en
+   * `payment.received` (DR caja / CR 1305). Debitar caja aquí ADEMÁS haría que
+   * el mismo dinero se contabilizara dos veces.
+   *
+   * Por eso la contrapartida alterna es OPT-IN explícito (`settlement`): sólo
+   * se usa cuando la factura se liquida en el mismo acto y NO va a emitirse un
+   * `payment.received` por ese dinero.
+   *
+   * ORDEN DE RESOLUCIÓN (de lo más específico a lo más genérico):
+   *   1. `bank_accounts.chart_account_id` — la cuenta PUC de ESTE banco concreto.
+   *      Es el dato más específico que existe: no "es una transferencia" sino
+   *      "entró a esta cuenta".
+   *   2. `store_payment_methods.custom_config.accounting.account_code` — override
+   *      por método de la tienda. Namespaced bajo `accounting.` y fuera de la
+   *      whitelist pública de `buildPaymentInstructions()`, así que no se filtra
+   *      al storefront.
+   *   3. switch canónico medio de pago → mapping key (`resolveCashBankKey`).
+   *   4. CxC (1305) — el histórico.
+   *
+   * Cualquier override que no sea contabilizable se ignora con warning y se cae
+   * al siguiente escalón: la contabilidad nunca se pierde por un dato mal
+   * configurado.
+   */
+  private async resolveInvoiceCounterpartLine(params: {
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    description: string;
+    settlement?: {
+      payment_method?: string;
+      store_payment_method_id?: number;
+      bank_account_id?: number;
+    };
+    third_party?: AutoEntryThirdParty;
+  }): Promise<AutoEntryLine | null> {
+    const {
+      organization_id,
+      store_id,
+      amount,
+      description,
+      settlement,
+      third_party,
+    } = params;
+
+    const receivableLine = () =>
+      this.resolveAccountLine(
+        organization_id,
+        'invoice.validated.accounts_receivable',
+        description,
+        amount,
+        0,
+        store_id,
+        third_party,
+      );
+
+    if (!settlement) return receivableLine();
+
+    const rawLine = (account_code: string): AutoEntryLine => ({
+      account_code,
+      description,
+      debit_amount: amount,
+      credit_amount: 0,
+      ...(third_party && { third_party }),
+    });
+
+    // 1. Cuenta PUC del banco concreto que recibió el dinero.
+    if (settlement.bank_account_id) {
+      const bank = await this.prisma.withoutScope().bank_accounts.findFirst({
+        where: { id: settlement.bank_account_id, organization_id },
+        select: {
+          chart_account: {
+            select: { code: true, accepts_entries: true, is_active: true },
+          },
+        },
+      });
+      const chart = bank?.chart_account;
+      if (chart?.code && chart.accepts_entries && chart.is_active) {
+        return rawLine(chart.code);
+      }
+      this.logger.warn(
+        `Cuenta bancaria #${settlement.bank_account_id} sin cuenta PUC contabilizable asociada; ` +
+          `se resuelve la contrapartida por el medio de pago.`,
+      );
+    }
+
+    // 2. Override por método de pago de la tienda. Exige `store_id`: se lee por
+    //    el cliente SIN scope, así que el predicado de tenant tiene que ir
+    //    explícito o un id ajeno leería la config de otra tienda.
+    if (settlement.store_payment_method_id && store_id) {
+      const method = await this.prisma
+        .withoutScope()
+        .store_payment_methods.findFirst({
+          where: { id: settlement.store_payment_method_id, store_id },
+          select: { custom_config: true },
+        });
+      const configured = (method?.custom_config as any)?.accounting
+        ?.account_code;
+      const code = typeof configured === 'string' ? configured.trim() : '';
+      if (code) {
+        if (await this.accountCodeExistsForOrg(organization_id, code, true)) {
+          return rawLine(code);
+        }
+        this.logger.warn(
+          `El método de pago #${settlement.store_payment_method_id} declara la cuenta '${code}', ` +
+            `que no existe, está inactiva o es de agrupación en la organización #${organization_id}; ` +
+            `se ignora y se resuelve por el medio de pago.`,
+        );
+      }
+    }
+
+    // 3. Switch canónico medio de pago → mapping key.
+    const key = this.resolveCashBankKey(settlement.payment_method);
+    const line = await this.resolveAccountLine(
+      organization_id,
+      key,
+      description,
+      amount,
+      0,
+      store_id,
+      third_party,
+    );
+
+    // 4. Sin mapping configurado para ese medio: CxC, nunca perder el asiento.
+    return line ?? (await receivableLine());
   }
 
   /**

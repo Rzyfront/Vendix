@@ -141,6 +141,16 @@ describe('InvoiceFlowService support documents', () => {
     // withholding" keeps the arity honest without inventing behaviour.
     const withholdingFlow = {
       resolvePracticed: jest.fn().mockResolvedValue({ lines: [], total: 0 }),
+      // Las ventas resuelven DOS lados: lo que el cliente nos retiene
+      // (`suffered`) y lo que nos autorretenemos (`self`). Sin estos dos stubs
+      // la resolución revienta y el `try/catch` degrada a cero retenciones, con
+      // lo que el test pasaría verde sin haber ejercido nunca ese camino.
+      resolveSuffered: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
+      resolveSelf: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
       persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
       ...overrides.withholdingFlow,
     };

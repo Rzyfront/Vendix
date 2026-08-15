@@ -236,6 +236,19 @@ export class ProductVariantService {
         service_pricing_type: createVariantDto.service_pricing_type,
         buffer_minutes: createVariantDto.buffer_minutes,
         preparation_time_minutes: createVariantDto.preparation_time_minutes,
+        // Cuenta PUC de ingreso de la variante. Se enumera campo por campo, así
+        // que omitirla la DESCARTABA en silencio: el DTO la acepta, la
+        // validación pasa, llega el 200 y el dato no queda —y el `as any` de
+        // abajo impide que el compilador lo note—. `executeUpdateVariant` sí la
+        // persistía (usa `...variantData`), de modo que el campo se guardaba al
+        // editar una variante y se perdía al crearla: el peor de los dos, porque
+        // funciona lo suficiente para que nadie sospeche.
+        //
+        // La variante manda sobre el producto al contabilizar
+        // (`resolveInvoiceRevenueLines`), así que perderla no deja el ingreso
+        // «sin cuenta»: lo manda a la del producto o a la de por defecto, y el
+        // asiento cuadra igual contra la subcuenta equivocada.
+        account_code: createVariantDto.account_code,
         created_at: new Date(),
         updated_at: new Date(),
       } as any,

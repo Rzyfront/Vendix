@@ -1,6 +1,5 @@
 import {
   Component,
-  computed,
   DestroyRef,
   effect,
   inject,
@@ -10,29 +9,16 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import {
-  FormControl,
-  FormGroup,
-  FormRecord,
-  ReactiveFormsModule,
-} from '@angular/forms';
+import { FormControl, FormRecord, ReactiveFormsModule } from '@angular/forms';
 
-import {
-  SelectorComponent,
-  SelectorOption,
-} from '../../selector/selector.component';
+import { AccountSelectComponent } from '../../account-select/account-select.component';
+import { ChartAccountScope } from '../../../services/chart-account-lookup.service';
 import { ButtonComponent } from '../../button/button.component';
 import { IconComponent } from '../../icon/icon.component';
 
 export interface MappingKeyDef {
   key: string;
   label: string;
-}
-
-export interface AccountOption {
-  id: number | string;
-  code: string;
-  name: string;
 }
 
 export interface AccountMappingsValue {
@@ -45,7 +31,7 @@ export interface AccountMappingsValue {
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    SelectorComponent,
+    AccountSelectComponent,
     ButtonComponent,
     IconComponent,
   ],
@@ -70,11 +56,12 @@ export interface AccountMappingsValue {
               {{ def.label }}
               <div class="text-xs text-text-secondary font-mono">{{ def.key }}</div>
             </label>
-            <app-selector
+            <app-account-select
               [formControlName]="def.key"
-              [options]="accountOptions()"
+              [scope]="scope()"
+              [storeId]="storeId()"
               placeholder="Seleccione cuenta"
-            ></app-selector>
+            ></app-account-select>
           </div>
         }
 
@@ -91,7 +78,15 @@ export class AccountMappingsFormComponent {
   readonly initialValue = input<Partial<AccountMappingsValue> | null>(null);
   readonly disabled = input<boolean>(false);
   readonly mappingKeys = input<MappingKeyDef[]>([]);
-  readonly availableAccounts = input<AccountOption[]>([]);
+  /**
+   * Which controller answers the account lookup. Forwarded to every row.
+   *
+   * There is no `availableAccounts` input any more: each row now searches the
+   * chart of accounts server-side through `app-account-select`, so the parent
+   * no longer has to pull the whole catalog up front just to fill dropdowns.
+   */
+  readonly scope = input<ChartAccountScope>('store');
+  readonly storeId = input<number | null>(null);
 
   readonly valueChange = output<AccountMappingsValue>();
   readonly validityChange = output<boolean>();
@@ -102,13 +97,6 @@ export class AccountMappingsFormComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly form = new FormRecord<FormControl<number | string | null>>({});
-
-  readonly accountOptions = computed<SelectorOption[]>(() =>
-    this.availableAccounts().map((a) => ({
-      value: a.id,
-      label: `${a.code} - ${a.name}`,
-    })),
-  );
 
   constructor() {
     // Build / rebuild controls based on mappingKeys input

@@ -25,6 +25,7 @@ import {
   CORRECCION_POR_VIOLACION,
   ROTULO_CAMPO_INMUTABLE,
 } from '../../../store/invoicing/resolutions/resolutions.service';
+import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
 
@@ -137,6 +138,14 @@ export class OrgInvoiceResolutionsService {
       resolution_number: dto.resolution_number,
       technical_key: dto.technical_key,
     });
+    // `assertFiscalRequirements` juzga si la clave DEBE estar; esto juzga si la
+    // que trajeron sirve. Son preguntas distintas y hasta ahora sólo el carril
+    // de tienda hacía la segunda: por acá entraba una ClTec mal copiada sin que
+    // nadie la mirara, y una ClTec mal copiada quema un consecutivo autorizado.
+    // Se guarda lo que devuelve —normalizado—, no `dto.technical_key`.
+    const technical_key = assertTechnicalKeyShape(dto.technical_key, {
+      prefix: dto.prefix,
+    });
     this.assertRange(dto.range_from, dto.range_to);
 
     // Validadas, no solo convertidas: el escáner por IA y un año a medio teclear
@@ -185,7 +194,7 @@ export class OrgInvoiceResolutionsService {
         valid_from,
         valid_to,
         is_active: dto.is_active ?? true,
-        technical_key: dto.technical_key ?? null,
+        technical_key,
       },
       include: {
         store: { select: { id: true, name: true, slug: true } },
@@ -349,7 +358,12 @@ export class OrgInvoiceResolutionsService {
     // y su `PartialType` no llevan inicializadores de propiedad.
     if (dto.is_active !== undefined) update_data.is_active = dto.is_active;
     if (dto.technical_key !== undefined) {
-      update_data.technical_key = dto.technical_key;
+      // Normalizada y validada, igual que en el alta. Mandar `null` para borrar
+      // la clave sigue siendo válido —lo juzga `assertFiscalRequirements` según
+      // el tipo de documento—; lo que ya no pasa es una clave presente y rota.
+      update_data.technical_key = assertTechnicalKeyShape(dto.technical_key, {
+        resolution_id: id,
+      });
     }
 
     let next_accounting_entity_id = current.accounting_entity_id;

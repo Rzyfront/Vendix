@@ -4,10 +4,11 @@ import {
   output,
   inject,
   effect,
+  computed,
   signal,
+  viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { firstValueFrom } from 'rxjs';
 
 
 import {
@@ -23,7 +24,6 @@ import { RepartosService } from '../../../store-delivery/services/repartos.servi
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Store } from '@ngrx/store';
-import { Actions, ofType } from '@ngrx/effects';
 import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actions';
 import {
   selectDianConfigStatus,
@@ -32,6 +32,8 @@ import {
   DianGateReason,
 } from '../../invoicing/state/selectors/invoicing.selectors';
 import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
+import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
+import { PosFiscalStatus } from '../services/pos-fiscal.service';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -41,7 +43,8 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
     ModalComponent,
     IconComponent,
     SaveRequirementsModalComponent,
-    InvoicingNotConfiguredComponent
+    InvoicingNotConfiguredComponent,
+    PosFiscalStatusComponent
 ],
   template: `
     <app-modal
@@ -195,7 +198,18 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
           }
         </div>
       </div>
-    
+
+      <!-- Estado fiscal de la venta. Va FUERA del recibo (print:hidden) porque
+           es información de operación, no parte del documento que se entrega, y
+           porque el ticket ya declara por su cuenta si es copia informativa.
+           Nunca abre nada: informa mientras el cajero sigue trabajando. -->
+      <div class="max-w-md mx-auto mt-4 print:hidden">
+        <app-pos-fiscal-status
+          [orderId]="orderId ? +orderId : null"
+          (statusChanged)="onFiscalStatus($event)"
+        ></app-pos-fiscal-status>
+      </div>
+
       <div slot="footer" class="flex flex-col gap-3 w-full">
         <!-- CTA Primario: full-width, prominente -->
         <app-button
@@ -418,6 +432,20 @@ private authFacade = inject(AuthFacade);
   );
   readonly isNotConfiguredModalOpen = signal(false);
   readonly notConfiguredReason = signal<DianGateReason>('missing');
+
+  /**
+   * El indicador fiscal es el dueño del estado del documento: consulta, repite
+   * la consulta mientras sigue en camino y pinta el desenlace. El botón
+   * «Factura» del pie sólo le delega la emisión, para que no existan dos
+   * fuentes de verdad sobre la misma venta.
+   */
+  private readonly fiscalIndicator = viewChild(PosFiscalStatusComponent);
+
+  /** Último estado fiscal leído, para el pie y para el ticket. */
+  readonly fiscalStatus = signal<PosFiscalStatus | null>(null);
+
+  /** Sólo se avisa por toast la emisión que el cajero pidió a mano. */
+  private awaitingManualEmit = false;
 
   constructor() {
     const user = this.authFacade.getCurrentUser();

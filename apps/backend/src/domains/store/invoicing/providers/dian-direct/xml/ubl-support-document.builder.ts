@@ -53,11 +53,8 @@ export class UblSupportDocumentBuilder {
       document_type_element: 'InvoiceTypeCode',
     });
 
-    if (support_document_data.due_date) {
-      doc
-        .ele(UBL_NAMESPACES.CBC, 'DueDate')
-        .txt(support_document_data.due_date);
-    }
+    // `cbc:DueDate` lo emite ahora `buildSharedMetadata`, en su posición de la
+    // secuencia. Aquí quedaba detrás de todo el bloque de metadatos.
 
     UblCommonBuilder.buildSupplierParty(
       doc,
@@ -233,6 +230,21 @@ export class UblSupportDocumentBuilder {
     doc
       .ele(UBL_NAMESPACES.CBC, 'IssueTime')
       .txt(data.issue_time || UblSupportDocumentBuilder.defaultIssueTime());
+
+    // `cbc:DueDate` va aquí —entre `IssueTime` y el código de tipo— y sólo en la
+    // raíz `Invoice`.
+    //
+    // Se emitía en `buildDocument`, DESPUÉS de este bloque completo, o sea
+    // detrás de `cbc:LineCountNumeric`: la secuencia de `InvoiceType` lo ubica en
+    // la posición 10 y allí quedaba en la 22, así que todo documento soporte con
+    // fecha de vencimiento salía inválido por estructura. `CreditNoteType` —la
+    // raíz de la nota de ajuste— NO declara `DueDate` en absoluto, y por eso la
+    // condición se ata a `document_type_element`, que es el discriminante que
+    // este método ya usa para distinguir las dos raíces.
+    if (data.due_date && document_type_element === 'InvoiceTypeCode') {
+      doc.ele(UBL_NAMESPACES.CBC, 'DueDate').txt(data.due_date);
+    }
+
     doc.ele(UBL_NAMESPACES.CBC, document_type_element).txt(document_type_code);
     if (data.notes) {
       doc.ele(UBL_NAMESPACES.CBC, 'Note').txt(data.notes);

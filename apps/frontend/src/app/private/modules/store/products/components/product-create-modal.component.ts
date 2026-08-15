@@ -37,6 +37,7 @@ import { PosBarcodeService } from '../../pos/services/pos-barcode.service';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
 import { BrandQuickCreateComponent } from './brand-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
+import { AccountCodeSelectComponent } from './account-code-select.component';
 
 @Component({
   selector: 'app-product-create-modal',
@@ -53,6 +54,7 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
+    AccountCodeSelectComponent,
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
@@ -89,6 +91,12 @@ export class ProductCreateModalComponent {
   isCategoryCreateOpen = signal(false);
   isBrandCreateOpen = signal(false);
   isTaxCategoryCreateOpen = signal(false);
+
+  /**
+   * Bloque contable plegado. Se abre solo si el producto ya trae cuenta
+   * (edición), para que el dato no quede escondido detrás de un clic.
+   */
+  readonly isAccountingOpen = signal(false);
 
   private allTaxCategories: TaxCategory[] = [];
   private isInitialized = signal(false);
@@ -150,6 +158,9 @@ export class ProductCreateModalComponent {
       tax_category_ids: [[] as number[]],
       allow_pos_price_override: [false],
       state: [ProductState.ACTIVE],
+      // Subcuenta PUC de ingreso. Vacío = mapping contable por defecto, que es
+      // lo que necesita el 99% de los productos: por eso vive plegada.
+      account_code: [null as string | null],
     });
   }
 
@@ -159,7 +170,9 @@ export class ProductCreateModalComponent {
       tax_category_ids: [],
       allow_pos_price_override: false,
       state: ProductState.ACTIVE,
+      account_code: null,
     });
+    this.isAccountingOpen.set(false);
   }
 
   goToAdvancedCreation(): void {
@@ -175,6 +188,8 @@ export class ProductCreateModalComponent {
       tax_category_ids: val.tax_category_ids || [],
       allow_pos_price_override: !!val.allow_pos_price_override,
       state: val.state || 'active',
+      // Viaja al formulario avanzado para que el salto no pierda la cuenta.
+      account_code: val.account_code || null,
     };
 
     this.router.navigate(['/admin/products/create'], {
@@ -228,7 +243,12 @@ export class ProductCreateModalComponent {
       ),
       allow_pos_price_override: prod.allow_pos_price_override === true,
       state: prod.state || ProductState.ACTIVE,
+      account_code: prod.account_code ?? null,
     });
+
+    if (prod.account_code) {
+      this.isAccountingOpen.set(true);
+    }
   }
 
   private loadCategories(): void {
@@ -364,6 +384,9 @@ export class ProductCreateModalComponent {
       tax_category_ids: val.tax_category_ids || [],
       allow_pos_price_override: !!val.allow_pos_price_override,
       state: val.state,
+      // Se envía siempre, incluso en null: omitirlo en una edición dejaría
+      // pegada la cuenta anterior aunque el operador la haya limpiado.
+      account_code: val.account_code || null,
     };
 
     if (!this.isEditMode) {

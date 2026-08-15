@@ -162,6 +162,15 @@ describe('InvoiceFlowService POS equivalent document', () => {
     };
     const withholdingFlow = {
       resolvePracticed: jest.fn().mockResolvedValue({ lines: [], total: 0 }),
+      // El documento equivalente es una VENTA: resuelve `suffered` + `self`, no
+      // `practiced`. Sin estos dos stubs la resolución lanza y el `try/catch`
+      // la degrada a cero, tapando cualquier regresión en ese camino.
+      resolveSuffered: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
+      resolveSelf: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
       persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
       ...overrides.withholdingFlow,
     };

@@ -137,12 +137,122 @@ describe('CufeCalculator', () => {
     });
   });
 
-  describe('generateQrUrl', () => {
-    it('embeds the document key in the DIAN catalog URL', () => {
-      const cufe = CufeCalculator.generate(base);
-      expect(CufeCalculator.generateQrUrl(cufe)).toBe(
-        `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${cufe}`,
+  /**
+   * §11.7 — el QR de la representación gráfica.
+   *
+   * Reemplaza al antiguo `generateQrUrl(cufe)`, que tenía la URL de producción
+   * escrita a mano y un docstring que se declaraba «fake […] for testing
+   * purposes» mientras seis rutas del proveedor real lo consumían.
+   */
+  describe('resolveQrUrl (§11.7.1)', () => {
+    it('apunta al catálogo de producción sólo en ambiente 1', () => {
+      expect(CufeCalculator.resolveQrUrl('ABC', '1')).toBe(
+        'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=ABC',
       );
+    });
+
+    /**
+     * El defecto que esto fija: un documento emitido en habilitación NO existe
+     * en el catálogo de producción. Apuntar siempre allí producía un QR que,
+     * escaneado, responde «documento no encontrado» — el adquiriente no puede
+     * verificar nada.
+     */
+    it('apunta al catálogo de habilitación en ambiente 2', () => {
+      expect(CufeCalculator.resolveQrUrl('ABC', '2')).toBe(
+        'https://catalogo-vpfe-hab.dian.gov.co/document/searchqr?documentkey=ABC',
+      );
+    });
+
+    it('trata un ambiente ausente o desconocido como habilitación', () => {
+      // Lado seguro: mandar a alguien al catálogo de pruebas es un error
+      // visible; publicar como productivo un documento de pruebas, no.
+      expect(CufeCalculator.resolveQrUrl('ABC', undefined)).toContain(
+        'catalogo-vpfe-hab',
+      );
+      expect(CufeCalculator.resolveQrUrl('ABC', '')).toContain(
+        'catalogo-vpfe-hab',
+      );
+    });
+  });
+
+  describe('buildQrContent (§11.7)', () => {
+    const qr_base = {
+      invoice_number: 'SETP990000001',
+      issue_date: '2026-08-04',
+      issue_time: '10:15:30-05:00',
+      issuer_nit: '900123456-1',
+      issuer_document_type: '31',
+      customer_nit: '1020304050',
+      customer_document_type: '13',
+      total_before_tax: '1000.00',
+      tax_iva: '190.00',
+      total_amount: '1190.00',
+      document_key: 'CUFE_DE_PRUEBA',
+      environment: '2',
+    };
+
+    /**
+     * El QR **no es la URL**. El anexo fija once líneas para que el adquiriente
+     * verifique el documento leyendo el propio código, sin conexión. Guardar
+     * sólo la URL —lo que se hacía— elimina esa verificación.
+     */
+    it('emite las once líneas del anexo, en orden', () => {
+      const lines = CufeCalculator.buildQrContent(qr_base).split('\n');
+      expect(lines).toHaveLength(11);
+      expect(lines.slice(0, 10).map((l) => l.split(':')[0])).toEqual([
+        'NumFac',
+        'FecFac',
+        'HorFac',
+        'NitFac',
+        'DocAdq',
+        'ValFac',
+        'ValIva',
+        'ValOtroIm',
+        'ValTolFac',
+        'CUFE',
+      ]);
+      expect(lines[10]).toBe(
+        CufeCalculator.resolveQrUrl('CUFE_DE_PRUEBA', '2'),
+      );
+    });
+
+    it('agrega en ValOtroIm todo impuesto que no sea IVA', () => {
+      const content = CufeCalculator.buildQrContent({
+        ...qr_base,
+        tax_inc: '80.00',
+        tax_ica: '8.28',
+        tax_other: '1.72',
+      });
+      expect(content).toContain('ValOtroIm: 90.00');
+      // Y el IVA sigue solo en su propia línea.
+      expect(content).toContain('ValIva: 190.00');
+    });
+
+    it('trata los impuestos ausentes como 0.00 en vez de omitir la línea', () => {
+      expect(CufeCalculator.buildQrContent(qr_base)).toContain(
+        'ValOtroIm: 0.00',
+      );
+    });
+
+    /**
+     * La cara visible y el hash deben declarar los MISMOS números. Si el QR
+     * formateara por su cuenta, un documento podría mostrar cifras que no son
+     * las que la DIAN validó.
+     */
+    it('publica las identificaciones con la misma regla que el hash', () => {
+      const content = CufeCalculator.buildQrContent(qr_base);
+      expect(content).toContain('NitFac: 900123456'); // NIT: sin DV
+      expect(content).toContain('DocAdq: 1020304050'); // cédula: íntegra
+    });
+
+    it('formatea los importes con la misma regla que el hash', () => {
+      const content = CufeCalculator.buildQrContent({
+        ...qr_base,
+        total_before_tax: '1000',
+        tax_iva: '190.009',
+      });
+      expect(content).toContain('ValFac: 1000.00');
+      expect(content).toContain('ValIva: 190.00'); // truncado, no redondeado
     });
   });
 
@@ -311,6 +421,38 @@ describe('CufeCalculator', () => {
    * set de pruebas tenía mal. (El vector de evento §11.6 ya se cubre arriba.)
    */
   describe('vectores del Anexo Técnico 1.9', () => {
+    /**
+     * Vector de control de la pág. 657, el único del anexo que trae una clave
+     * técnica REAL —40 hexadecimales, la forma que el WS de Rangos de
+     * Numeración entrega— en vez de un valor abreviado de ejemplo.
+     *
+     * Por eso es el ancla de esta suite: fija a la vez la composición de los 15
+     * campos y la forma de la ClTec. Si alguna de las dos se rompe, falla aquí.
+     */
+    it('reproduce el CUFE publicado en la pág. 657 (ClTec de 40 hex)', () => {
+      const OFFICIAL_CLTEC = '693ff6f2a553c3646a063436fd4dd9ded0311471';
+      expect(OFFICIAL_CLTEC).toHaveLength(40);
+
+      expect(
+        CufeCalculator.generate({
+          invoice_number: '323200000129',
+          issue_date: '2019-01-16',
+          issue_time: '10:53:10-05:00',
+          total_before_tax: '1500000.00',
+          tax_iva: '285000.00',
+          tax_inc: '0.00',
+          tax_ica: '0.00',
+          total_amount: '1785000.00',
+          issuer_nit: '700085371',
+          customer_nit: '800199436',
+          technical_key: OFFICIAL_CLTEC,
+          environment: '1',
+        }),
+      ).toBe(
+        '8bb918b19ba22a694f1da11c643b5e9de39adf60311cf179179e9b33381030bcd4c3c3f156c506ed5908f9276f5bd9b4',
+      );
+    });
+
     it('reproduce el CUFE de factura de §11.2 (ClTec en la 14ª posición)', () => {
       expect(
         CufeCalculator.generate({
@@ -400,6 +542,124 @@ describe('CufeCalculator', () => {
       expect(cude).not.toBe(
         'b9483dc2a17167feedf37b6bd67c4204e7b601933e0e389cffbd545e4d0ec370b403cbb41ff656776cb6cb5d8348ecd4',
       );
+    });
+  });
+
+  /**
+   * REGRESIÓN DE UN INCIDENTE REAL DE PRODUCCIÓN (14/08/2026).
+   *
+   * Una factura se rechazó con «Valor del CUFE no está calculado
+   * correctamente.» y quemó un consecutivo autorizado, irrecuperable.
+   *
+   * El diagnóstico recompuso el hash desde los valores literales del XML
+   * transmitido y reprodujo EXACTAMENTE el CUFE persistido: la composición de
+   * este calculador era correcta. Lo que estaba mal era la ENTRADA — la
+   * `technical_key` almacenada tenía **38 caracteres hexadecimales**, todos
+   * válidos, sin espacios ni saltos de línea, cuando la clave técnica de la
+   * DIAN es un SHA-1 en hex de **exactamente 40** (§11.2, y el vector oficial
+   * de la pág. 657 lo confirma). Se perdieron dos caracteres en la captura.
+   *
+   * La lección que estos tests fijan: **el CUFE no puede detectar su propia
+   * entrada corrupta.** Hashea cualquier cadena y devuelve 96 hex de aspecto
+   * impecable; el primer sistema capaz de notar el error es la DIAN, y para
+   * entonces el consecutivo ya se gastó. Por eso la defensa vive AGUAS ARRIBA
+   * —DTO, servicio, escáner OCR y precondición previa a tomar el consecutivo—
+   * y no aquí.
+   */
+  describe('regresión: clave técnica truncada (incidente de producción)', () => {
+    const CLTEC_VALIDA = '693ff6f2a553c3646a063436fd4dd9ded0311471';
+    const CLTEC_TRUNCADA = CLTEC_VALIDA.slice(0, 38);
+
+    it('dos caracteres perdidos bastan para producir un CUFE que la DIAN rechaza', () => {
+      expect(CLTEC_VALIDA).toHaveLength(40);
+      expect(CLTEC_TRUNCADA).toHaveLength(38);
+      expect(CLTEC_TRUNCADA).toMatch(/^[0-9a-f]+$/); // hex válido: nada delata el defecto
+
+      expect(
+        CufeCalculator.generate({ ...base, technical_key: CLTEC_TRUNCADA }),
+      ).not.toBe(
+        CufeCalculator.generate({ ...base, technical_key: CLTEC_VALIDA }),
+      );
+    });
+
+    it('el calculador acepta la clave truncada sin protestar — por eso la puerta va aguas arriba', () => {
+      // Documenta el límite del componente, no un comportamiento deseable: el
+      // hash de una entrada inválida es indistinguible del de una válida.
+      const cufe = CufeCalculator.generate({
+        ...base,
+        technical_key: CLTEC_TRUNCADA,
+      });
+      expect(cufe).toMatch(/^[0-9a-f]{96}$/);
+    });
+  });
+
+  /**
+   * §11.2 exige `NitOFE` y `NumAdq` «sin puntos, sin guiones y SIN dígito de
+   * verificación». `onlyDigits()` sólo cumplía los dos primeros: sobre
+   * `900123456-7` devolvía `9001234567`, con el DV pegado.
+   *
+   * El recorte NO puede ser ciego. **Sólo el NIT lleva DV.** Una cédula son
+   * dígitos de dato de punta a punta; quitarle el último la convierte en la
+   * cédula de otra persona — un daño peor que el que se quería evitar. De ahí
+   * que la decisión dependa del tipo de documento declarado.
+   */
+  describe('identificación de las partes (§11.2): el DV se recorta sólo al NIT', () => {
+    it('recorta el DV de un adquiriente NIT', () => {
+      expect(
+        CufeCalculator.generate({
+          ...base,
+          customer_nit: '900123456-7',
+          customer_document_type: '31',
+        }),
+      ).toBe(
+        CufeCalculator.generate({
+          ...base,
+          customer_nit: '900123456',
+          customer_document_type: '31',
+        }),
+      );
+    });
+
+    it('deja intacta la cédula de un adquiriente persona natural', () => {
+      const cedula = CufeCalculator.generate({
+        ...base,
+        customer_nit: '1020304050',
+        customer_document_type: '13',
+      });
+      // Un recorte ciego habría hasheado nueve dígitos: otra persona.
+      const mutilada = CufeCalculator.generate({
+        ...base,
+        customer_nit: '102030405',
+        customer_document_type: '13',
+      });
+      expect(cedula).not.toBe(mutilada);
+    });
+
+    it('trata un tipo de documento ausente como NO-NIT y preserva el número', () => {
+      // Lectura conservadora: sin declaración de tipo, no se mutila por
+      // suposición. El adquiriente de una factura POS llega así.
+      expect(
+        CufeCalculator.generate({
+          ...base,
+          customer_nit: '1020304050',
+          customer_document_type: undefined,
+        }),
+      ).toBe(
+        CufeCalculator.generate({
+          ...base,
+          customer_nit: '1020304050',
+          customer_document_type: '13',
+        }),
+      );
+    });
+
+    it('recorta el DV del emisor aunque el llamador no declare su tipo', () => {
+      // Un OFE es siempre NIT — no existe factura electrónica emitida por una
+      // cédula—, así que aquí la suposición sí es segura y evita depender de
+      // que cada ruta recuerde declararlo.
+      expect(
+        CufeCalculator.generate({ ...base, issuer_nit: '900123456-1' }),
+      ).toBe(CufeCalculator.generate({ ...base, issuer_nit: '900123456' }));
     });
   });
 });

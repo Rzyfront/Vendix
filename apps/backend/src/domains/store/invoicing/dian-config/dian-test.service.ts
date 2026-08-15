@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import AdmZip = require('adm-zip');
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DianSecretEnvelopeService } from '../../../../common/services/dian-secret-envelope.service';
+import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -20,6 +21,10 @@ import { UblInvoiceBuilder } from '../providers/dian-direct/xml/ubl-invoice.buil
 import { UblCreditNoteBuilder } from '../providers/dian-direct/xml/ubl-credit-note.builder';
 import { UblDebitNoteBuilder } from '../providers/dian-direct/xml/ubl-debit-note.builder';
 import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builder';
+import {
+  UblStructureValidator,
+  summarizeUblViolations,
+} from '../providers/dian-direct/xml/ubl-structure.validator';
 import { CufeCalculator } from '../utils/cufe-calculator';
 import {
   DianIssuerData,
@@ -64,6 +69,11 @@ import {
   NOTE_PHASE_POLL_DELAY_MS,
 } from './note-phase-gate.util';
 import { resolveIssuerFiscalIdentity } from '../utils/fiscal-issuer.util';
+import {
+  isWellFormedTechnicalKey,
+  normalizeTechnicalKey,
+  TECHNICAL_KEY_LENGTH,
+} from '../fiscal-document-requirements';
 import {
   DianTestSetJob,
   DianTestSetJobState,
@@ -829,6 +839,42 @@ export class DianTestService {
     // fallar sin quemar consecutivos autorizados, que no se recuperan.
     const software_code = softwareCodeForOperationMode(config.operation_mode);
 
+    // La ClTec del rango se resuelve AQUÍ por el mismo motivo que `software_code`:
+    // es el 14º campo del CUFE de cada factura del set y el bloque de numeración
+    // todavía no está reservado.
+    //
+    // Antes se hacía `resolution.technical_key || ''` en el sitio de uso: sin
+    // clave se hasheaba la cadena vacía y salían 30 facturas con un CUFE que la
+    // DIAN nunca podría reproducir. El set se rechazaba entero, la habilitación
+    // no avanzaba y el mensaje no decía por qué — mientras 50 consecutivos
+    // autorizados quedaban gastados. Es el mismo hueco que quemó una factura
+    // real en producción con una clave de 38 caracteres, solo que multiplicado
+    // por el tamaño del set.
+    //
+    // Solo se exige cuando el set incluye facturas: las vías de diagnóstico de
+    // nota (`validate_kind`) emiten un CUDE con Software-PIN y no tocan la ClTec.
+    let invoice_technical_key = '';
+    if (composition.invoices > 0) {
+      const technical_key = normalizeTechnicalKey(resolution.technical_key);
+      if (!isWellFormedTechnicalKey(technical_key)) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_RESOLUTION_011,
+          `La resolución ${resolution.prefix}${resolution.resolution_number} no tiene una clave técnica (ClTec) utilizable: ` +
+            `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN emite exactamente ` +
+            `${TECHNICAL_KEY_LENGTH} en hexadecimal. Cópiala completa desde la resolución de habilitación que generó el portal DIAN ` +
+            'antes de enviar el set: con una clave equivocada la DIAN rechaza los documentos por CUFE mal calculado y los ' +
+            'consecutivos que gasten no se recuperan. No se reservó numeración.',
+          {
+            dian_configuration_id: config_id,
+            resolution_id,
+            technical_key_length: technical_key.length,
+            expected_length: TECHNICAL_KEY_LENGTH,
+          },
+        );
+      }
+      invoice_technical_key = technical_key;
+    }
+
     // The documents must consume FRESH numbers. Starting at `range_from`
     // (the old behaviour) meant a second run re-emitted the exact same numbers
     // and CUFEs, which DIAN rejects as duplicates. `current_number` is the last
@@ -1119,7 +1165,10 @@ export class DianTestService {
         total_amount: total,
         issuer_nit: config.nit,
         customer_nit: '222222222222',
-        technical_key: resolution.technical_key || '',
+        // Probada con forma de ClTec antes de reservar numeración. La cadena
+        // vacía es inalcanzable: este bucle solo corre cuando
+        // `composition.invoices > 0`, que es la condición que exige la clave.
+        technical_key: invoice_technical_key,
         environment: environment === 'test' ? '2' : '1',
       });
 
@@ -1170,6 +1219,8 @@ export class DianTestService {
       });
 
       // Sign XML if certificate available
+      this.assertStructurallyValid(xml);
+
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
@@ -1328,6 +1379,8 @@ export class DianTestService {
         original_invoice_date: ref_invoice.date,
       });
 
+      this.assertStructurallyValid(xml);
+
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
@@ -1457,6 +1510,8 @@ export class DianTestService {
         original_invoice_cufe: ref_invoice.cufe,
         original_invoice_date: ref_invoice.date,
       });
+
+      this.assertStructurallyValid(xml);
 
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
@@ -3407,6 +3462,46 @@ export class DianTestService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Aborta el set de pruebas si un documento no cumple el modelo de contenido
+   * de los XSD oficiales.
+   *
+   * Se replica aquí y no se hereda del provider porque el set de pruebas firma
+   * por su cuenta (`this.xml_signer.sign`) sin pasar por
+   * `DianDirectProvider.signXml`, que es donde vive la compuerta de emisión. Sin
+   * esta copia, el camino más importante para detectar un defecto estructural
+   * —el que la tienda usa para probar que sabe emitir, ANTES de tocar
+   * producción— sería justo el que no lo detecta.
+   *
+   * Corre ANTES del `if` del certificado: en desarrollo no hay .p12 y el
+   * documento se arma igual, así que atarla a la firma la apagaría exactamente
+   * donde más barato es descubrir el problema.
+   */
+  private assertStructurallyValid(xml: string): void {
+    const result = UblStructureValidator.validate(xml);
+    if (result.valid) return;
+
+    const summary = summarizeUblViolations(result.violations);
+    this.logger.error(
+      `Set de pruebas: XML estructuralmente inválido ` +
+        `(${result.root ?? 'raíz desconocida'}): ${result.violations.length} ` +
+        `violación(es). ${summary.join(' | ')}`,
+    );
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_XSD_001,
+      'Uno de los documentos del set de pruebas no cumple la estructura que ' +
+        'exige la DIAN, así que el set no se envió. Es un defecto del generador ' +
+        'de XML, no de la configuración de la tienda — repórtalo con el detalle ' +
+        'que acompaña este error.',
+      {
+        document_root: result.root,
+        violation_count: result.violations.length,
+        violations: summary,
+      },
+    );
   }
 
   /**

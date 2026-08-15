@@ -1543,6 +1543,30 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Resolution validity window is inverted or empty',
   },
+  /**
+   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 caracteres
+   * hexadecimales, el hex de un SHA-1.
+   *
+   * No es una validación cosmética — es la que faltaba. En producción se guardó
+   * una ClTec de 38 caracteres (todos hex, sin espacios: un par de caracteres
+   * perdidos al copiar o al leerla por OCR). Nadie la revisó porque el DTO solo
+   * pedía `@IsString() @MaxLength(255)`. El CUFE se calculó con ella, la DIAN lo
+   * recomputó con la verdadera, los hashes difirieron y respondió «Valor del CUFE
+   * no está calculado correctamente» — con el consecutivo autorizado ya gastado,
+   * que es irrecuperable.
+   *
+   * La ClTec es la única entrada del hash que el XML NO lleva, así que la DIAN es
+   * el primer sistema capaz de detectar que está mal. Por eso su forma se valida
+   * al ESCRIBIRLA: es la última oportunidad barata.
+   *
+   * 422 y no 400: el payload está bien formado, el valor fiscal no.
+   */
+  INVOICING_RESOLUTION_011: {
+    code: 'INVOICING_RESOLUTION_011',
+    httpStatus: 422,
+    devMessage:
+      'Technical key (ClTec) must be exactly 40 hexadecimal characters as issued by the DIAN numbering-range web service',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
@@ -1567,6 +1591,182 @@ export const ErrorCodes = {
     code: 'INVOICING_PROVIDER_004',
     httpStatus: 422,
     devMessage: 'Invoice provider rejected the document',
+  },
+  /**
+   * Los campos que se hashearon en el CUFE/CUDE no coinciden con los que quedaron
+   * escritos en el XML que se iba a transmitir.
+   *
+   * La DIAN recomputa la huella LEYENDO EL XML. Si el hash se armó con un valor y
+   * el XML declara otro —el NIT del adquiriente con dígito de verificación en un
+   * lado y sin él en el otro, el IVA clasificado por nombre acá y por `tax_type`
+   * allá, un total que se recalculó después de hashear— el documento se rechaza y
+   * el consecutivo autorizado se pierde.
+   *
+   * Este código existe para que esa divergencia se detecte ANTES de firmar y
+   * transmitir, comparando lo hasheado contra el XML ya construido. Es un fallo de
+   * coherencia interna, no del contribuyente: `details` nombra el campo divergente
+   * y ambos valores para que sea depurable sin leer el XML entero.
+   */
+  INVOICING_CUFE_001: {
+    code: 'INVOICING_CUFE_001',
+    httpStatus: 422,
+    devMessage:
+      'Document key was computed from values that diverge from the built XML; transmission aborted before consuming numbering',
+  },
+  /**
+   * El XML construido no respeta el modelo de contenido de los XSD de la DIAN:
+   * un elemento fuera del orden que fija `xsd:sequence`, uno que el tipo no
+   * admite, o uno obligatorio que falta.
+   *
+   * UBL ordena los hijos de cada elemento por secuencia, y ese orden lo sostenían
+   * comentarios en los builders, no una compuerta. La consecuencia real fue una
+   * familia de defectos silenciosos: `cbc:ID` al final de `cac:Person` en vez de
+   * al principio, `cac:Contact` detrás de `cac:Person`, `cbc:DueDate` detrás de
+   * `cbc:LineCountNumeric`. Cada uno produce un documento con TODO el contenido
+   * correcto que la DIAN rechaza por estructura, con un mensaje que no dice qué
+   * elemento sobra ni dónde — y el consecutivo autorizado ya se gastó.
+   *
+   * Se corta antes de firmar y transmitir: acá no hay nada perdido, el borrador
+   * conserva su número y se reemite en cuanto se corrija. `details` nombra la
+   * ruta del elemento y qué esperaba el esquema.
+   *
+   * Es un fallo de coherencia interna del generador, nunca del contribuyente:
+   * ningún dato que capture un usuario puede provocarlo.
+   */
+  INVOICING_XSD_001: {
+    code: 'INVOICING_XSD_001',
+    httpStatus: 422,
+    devMessage:
+      'Built XML violates the DIAN UBL content model; transmission aborted before signing',
+  },
+  /**
+   * Una línea declara importe de impuesto pero no declara NINGUNA tarifa de la
+   * que derivarlo.
+   *
+   * Desde que el servidor recalcula toda la aritmética (`InvoiceCalculatorService`)
+   * el `tax_amount` que manda el cliente es informativo: se contrasta y, si
+   * difiere, gana el servidor. Este caso es el único irrecuperable — sin tarifa
+   * no hay nada que recalcular, y un importe de impuesto suelto no puede
+   * producir un `cac:TaxSubtotal` válido porque la DIAN exige `cbc:Percent` y
+   * valida `TaxAmount = TaxableAmount × Percent/100`.
+   *
+   * Se corta al crear/actualizar, no al emitir: acá todavía no se ha gastado
+   * numeración autorizada. `details` nombra la línea y el importe huérfano.
+   */
+  INVOICING_CALC_001: {
+    code: 'INVOICING_CALC_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice line declares a tax amount without any tax rate to derive it from',
+  },
+  /**
+   * PREVALIDACIÓN FISCAL — los cuatro códigos siguientes traducen el veredicto de
+   * `FiscalDocumentValidator` (`validators/fiscal-document.validator.ts`), la
+   * puerta que rechaza en LOCAL lo que la DIAN rechazaría.
+   *
+   * POR QUÉ SON CUATRO Y NO UNO. El validador emite ~30 hallazgos distintos, pero
+   * quien está frente al formulario solo necesita saber A DÓNDE IR: los totales,
+   * la resolución, la clave técnica o el contenido del documento. Cada código es
+   * una de esas cuatro pantallas. El hallazgo exacto —qué regla del Anexo, qué
+   * línea, qué importe se esperaba— viaja íntegro en `details.blockers[]`, con su
+   * `problem` y su `fix` redactados, así que el frontend debe preferirlos sobre
+   * el texto genérico del catálogo.
+   *
+   * POR QUÉ NO ES UN 500 NI UN 400 GENÉRICO. El payload está bien formado; lo que
+   * no cuadra es el documento fiscal. Un 500 diría que Vendix se rompió y no
+   * dejaría nada que corregir, que es exactamente lo que el operador recibía
+   * antes: «error interno» y una factura que la DIAN rechazaba después.
+   *
+   * LO QUE ESTOS CÓDIGOS AHORRAN. Un rechazo de la DIAN no cuesta un reintento —
+   * cuesta un consecutivo autorizado, que es irrecuperable y deja un hueco en la
+   * numeración que hay que justificar. Fallar acá no gasta nada.
+   */
+  INVOICING_PREVALIDATION_001: {
+    code: 'INVOICING_PREVALIDATION_001',
+    httpStatus: 422,
+    devMessage:
+      'Document arithmetic does not satisfy the DIAN rules (FAU14 header vs lines, TaxAmount = TaxableAmount x Percent/100, or PayableAmount identity)',
+  },
+  INVOICING_PREVALIDATION_002: {
+    code: 'INVOICING_PREVALIDATION_002',
+    httpStatus: 412,
+    devMessage:
+      'The numbering resolution does not back the document being issued (inactive, out of validity at issue date, exhausted range, or prefix/sequence mismatch)',
+  },
+  /**
+   * El código que cierra el incidente del 14/08/2026: una ClTec de 38 caracteres
+   * hizo rechazar una factura real y quemó un consecutivo autorizado.
+   *
+   * La ClTec es la ÚNICA entrada del CUFE que el XML no transporta, así que la
+   * DIAN es el primer sistema capaz de notar que está mal — a menos que se mire
+   * antes de firmar. Ni el mensaje, ni los `details`, ni los logs llevan nunca su
+   * VALOR: solo su longitud, que es el único dato necesario para corregirla.
+   */
+  INVOICING_PREVALIDATION_003: {
+    code: 'INVOICING_PREVALIDATION_003',
+    httpStatus: 422,
+    devMessage:
+      'Technical key (ClTec) is missing or malformed for a document type whose key is built from it; never log or return its value, only its length',
+  },
+  INVOICING_PREVALIDATION_004: {
+    code: 'INVOICING_PREVALIDATION_004',
+    httpStatus: 422,
+    devMessage:
+      'Document content is not emittable (currency other than COP, unit of measure outside the DIAN list, missing/invalid lines, or CustomizationID incoherent with the AIU lines)',
+  },
+  /**
+   * AIU — los tres códigos siguientes cubren el contrato de servicios AIU
+   * (`cbc:CustomizationID = '09'`), donde el error NO se manifiesta como un
+   * rechazo sino como una factura ACEPTADA que declara menos IVA del debido.
+   *
+   * Por qué merecen códigos propios y no un `INVOICING_VALIDATE_001` genérico:
+   * el AIU tiene dos regímenes de base gravable incompatibles —E.T. art. 462-1
+   * (base = A+I+U completo, piso del 10 % del valor del contrato) y Decreto
+   * 1372/1992 art. 3 (base = sólo la Utilidad)— y cuál aplica depende del
+   * CONTRATO, no del producto. Elegir el equivocado no produce ningún síntoma
+   * visible: la DIAN acepta el documento y el faltante sólo se corrige con nota
+   * crédito, ya con la sanción corriendo. Por eso la elección es configuración
+   * explícita de la tienda (`store_settings.invoicing.aiu`) y por eso estos
+   * errores nombran la configuración a tocar, no «el dato».
+   */
+  INVOICING_AIU_001: {
+    code: 'INVOICING_AIU_001',
+    httpStatus: 422,
+    devMessage:
+      'AIU taxable base is below the legal floor (E.T. art. 462-1: the AIU cannot be less than 10% of the contract value); the base is never inflated silently because that would change the amount the customer signed',
+  },
+  INVOICING_AIU_002: {
+    code: 'INVOICING_AIU_002',
+    httpStatus: 422,
+    devMessage:
+      'AIU contract object is missing or out of range; rule CAV03 requires the Administracion line cbc:Note to start with the literal prefix and be 20-5000 characters including it',
+  },
+  INVOICING_AIU_003: {
+    code: 'INVOICING_AIU_003',
+    httpStatus: 422,
+    devMessage:
+      'Line declares an aiu_component on a document whose operation_type is not the AIU one (09); the component would be silently ignored and the line taxed as standard',
+  },
+  /**
+   * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos
+   * (Res. DIAN 000042/2020 art. 73; Oficios 901544 y 903436 de 2020; Concepto
+   * 1509 de 2024). La divisa no cambia `cbc:DocumentCurrencyCode`: se DECLARA
+   * en `cac:PaymentExchangeRate`. Estos dos códigos cubren los únicos casos en
+   * que esa declaración no se puede construir, y ninguno de los dos puede
+   * resolverse adivinando una tasa: una tasa inventada es una factura con un
+   * valor en pesos que no corresponde a la operación.
+   */
+  INVOICING_TRM_001: {
+    code: 'INVOICING_TRM_001',
+    httpStatus: 422,
+    devMessage:
+      'Could not resolve the official TRM for the exchange rate date and no manual rate was supplied; never guess a rate',
+  },
+  INVOICING_CURRENCY_001: {
+    code: 'INVOICING_CURRENCY_001',
+    httpStatus: 422,
+    devMessage:
+      'Non-USD currency requires either a manual exchange rate or the USD cross rate for the date: the TRM only quotes USD/COP, so any other currency needs a second leg Vendix does not source',
   },
   FISCAL_CONFIG_INCOMPLETE: {
     code: 'FISCAL_CONFIG_INCOMPLETE',

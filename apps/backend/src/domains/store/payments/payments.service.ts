@@ -55,6 +55,14 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
+// Sólo el CONTRATO del evento fiscal del POS: un tipo y una constante, sin
+// servicios. Así el cobro anuncia la venta sin depender del módulo de
+// facturación — la emisión vive del otro lado del `emit`.
+import {
+  POS_SALE_COMPLETED_EVENT,
+  PosSaleCompletedEvent,
+} from '../invoicing/pos/pos-sale-completed.event';
+import { DEFAULT_POS_AUTO_EMIT } from '../settings/interfaces/store-settings.interface';
 import { WompiClientFactory } from './processors/wompi/wompi.factory';
 import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WompiEnvironment } from './processors/wompi/wompi.types';
@@ -1671,6 +1679,41 @@ export class PaymentsService {
               err.stack,
             );
           }
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // AQUÍ LA VENTA SE DESACOPLA DE LA TRANSMISIÓN A LA DIAN.
+        //
+        // Todo lo de arriba ya está confirmado en base de datos: el pedido, el
+        // pago, el inventario y el movimiento de caja. `emit()` no espera al
+        // oyente, así que a partir de esta línea la facturación electrónica
+        // corre por su cuenta y NADA de lo que le pase puede volver acá: ni un
+        // timeout de la DIAN, ni un certificado vencido, ni una caída de red
+        // pueden dejar al cajero sin poder cobrar al siguiente cliente.
+        //
+        // Va DESPUÉS del commit y no junto a los otros `emit` de la
+        // transacción (paso 4) porque un oyente que lea el pedido antes del
+        // COMMIT correría contra él, y sobre todo porque un rollback posterior
+        // dejaría un documento fiscal emitido de una venta que nunca existió —
+        // y eso la DIAN no lo deshace.
+        //
+        // El estado resultante se consulta aparte:
+        // `GET /store/invoicing/pos/orders/:orderId/fiscal-status`.
+        if (result.order?.id) {
+          this.eventEmitter.emit(POS_SALE_COMPLETED_EVENT, {
+            organization_id: Number(context?.organization_id),
+            store_id: ctxStoreId,
+            user_id: user?.id,
+            order_id: Number(result.order.id),
+            order_number: result.order.order_number,
+            // La tienda decide si el documento sale solo. Ausente ≡ sí: una
+            // tienda habilitada ante la DIAN debe soportar cada venta con un
+            // documento, y esperar a que alguien se acuerde de pedirlo a mano
+            // es como se acumulan ventas sin soporte.
+            auto_emit:
+              (settings as any)?.invoicing?.pos?.auto_emit ??
+              DEFAULT_POS_AUTO_EMIT,
+          } as PosSaleCompletedEvent);
         }
       }
 

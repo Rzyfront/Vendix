@@ -1,5 +1,9 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  aiu_component_enum,
+  tax_type_enum,
+} from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -11,12 +15,35 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import {
+  CreateInvoiceDto,
+  CreateInvoiceItemDto,
+  CreateInvoiceTaxDto,
+} from './dto/create-invoice.dto';
+import { TaxFiscalType } from '../taxes/dto';
 import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
+import {
+  CalculatedLine,
+  CalculatedTax,
+  InvoiceCalculatorAiuInput,
+  InvoiceCalculatorResult,
+  InvoiceCalculatorService,
+} from './services/invoice-calculator.service';
+import { TrmService } from './services/trm.service';
+import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
+import { AiuSettings } from '../settings/interfaces/store-settings.interface';
+import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
+import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
+import {
+  buildAiuNote,
+  DIAN_AIU_NOTE_MAX_LENGTH,
+  DIAN_AIU_NOTE_MIN_LENGTH,
+  DIAN_AIU_NOTE_PREFIX,
+} from './providers/dian-direct/xml/ubl-common.builder';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -32,10 +59,61 @@ const RETRY_ELIGIBLE_TRANSMISSION_STATUSES = [
   'error',
 ];
 
+/**
+ * LA RESOLUCIÓN SIN SU CLAVE TÉCNICA.
+ *
+ * `resolution: true` arrastraba la fila `invoice_resolutions` COMPLETA hasta el
+ * navegador en toda respuesta de facturación —`GET /store/invoicing`,
+ * `GET :id`, y todo lo que devuelva una factura—, y esa fila lleva tres
+ * columnas que no pueden salir del servidor:
+ *
+ *   · `technical_key` — la ClTec en claro. Es la 14.ª entrada del hash del CUFE
+ *     (`cufe-calculator.ts`): quien la tiene puede recomputar el CUFE de
+ *     cualquier documento emitido bajo esa resolución, que es exactamente la
+ *     prueba de integridad que la DIAN confronta.
+ *   · `technical_key_encrypted` — la misma clave sellada. Sin la llave maestra
+ *     no se abre, pero publicar el ciphertext regala el material para atacarlo
+ *     fuera de línea sin límite de intentos.
+ *   · `technical_key_fingerprint` — SHA-256 pelado, SIN llave a propósito (ver
+ *     su nota en `schema.prisma`). Es un índice ciego: publicarlo permite
+ *     correlacionar qué resoluciones de qué tenants comparten ClTec, que es
+ *     justo lo que `findResolutionsSharingTechnicalKey` detecta como
+ *     contaminación, y además admite ataque por diccionario contra un valor de
+ *     formato conocido.
+ *
+ * Se enumeran las columnas PÚBLICAS en vez de excluir las tres sensibles porque
+ * `select` es una lista blanca: una columna secreta que se añada mañana a
+ * `invoice_resolutions` no se publica sola. El precedente correcto ya estaba en
+ * el repo — `domains/organization/invoicing/invoicing.service.ts` — y esto lo
+ * generaliza a la ruta de tienda, que es la que sirve el panel.
+ *
+ * ESTE SERVICIO NO NECESITA LA ClTec: no calcula CUFE ni arma XML. Quien sí la
+ * necesita es el emisor, y la carga aparte y en el punto de uso —ver
+ * `revealResolutionTechnicalKey` en `invoice-flow.service.ts`—.
+ */
+const RESOLUTION_PUBLIC_SELECT = {
+  id: true,
+  organization_id: true,
+  store_id: true,
+  accounting_entity_id: true,
+  document_type: true,
+  resolution_number: true,
+  resolution_date: true,
+  prefix: true,
+  range_from: true,
+  range_to: true,
+  current_number: true,
+  valid_from: true,
+  valid_to: true,
+  is_active: true,
+  created_at: true,
+  updated_at: true,
+} as const;
+
 const INVOICE_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
-  resolution: true,
+  resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
     select: { id: true, first_name: true, last_name: true, email: true },
   },
@@ -77,6 +155,39 @@ const INVOICE_INCLUDE = {
   },
 };
 
+/**
+ * Lo mínimo que hace falta para escribir una fila de `invoice_taxes`.
+ *
+ * Existe como tipo con nombre —y no inline en `buildInvoiceTaxCreateInput`—
+ * porque ahora hay TRES productores que tienen que encajar en el mismo molde:
+ * el motor de cálculo (`CalculatedTax`), el camino legacy de `dto.taxes[]`, y
+ * la agregación de `order_item_taxes` que hace `createFromOrder`. Un molde
+ * compartido es lo que impide que uno de los tres vuelva a olvidar `tax_type`
+ * —con el que el CUFE arma `ValImp1/2/3`— como ya pasó con `update()`.
+ */
+export interface InvoiceTaxRowInput {
+  tax_rate_id?: number | null;
+  tax_name: string;
+  /**
+   * `string | number` porque las filas que salen del motor vienen ya
+   * formateadas a 2 decimales truncados; el DTO legacy sigue mandando `number`.
+   * `Prisma.Decimal` acepta ambos sin pérdida.
+   */
+  tax_rate: number | string;
+  taxable_amount: number | string;
+  tax_amount: number | string;
+  tax_type?: TaxFiscalType | string | null;
+  is_inclusive?: boolean;
+}
+
+/**
+ * El desglose de tributos de UN documento, ya listo para persistir, indexado
+ * por posición de línea: `line_taxes[i]` son los tributos de la i-ésima línea
+ * creada. Se resuelve ANTES de escribir y se consume DESPUÉS, cuando ya existen
+ * los `invoice_items.id` a los que apuntar.
+ */
+type DocumentLineTaxes = InvoiceTaxRowInput[][];
+
 @Injectable()
 export class InvoicingService {
   private readonly logger = new Logger(InvoicingService.name);
@@ -89,6 +200,16 @@ export class InvoicingService {
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscalGate: FiscalGateService,
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
+    private readonly calculator: InvoiceCalculatorService,
+    // TRM oficial para las operaciones pactadas en divisa. NUNCA tumba la
+    // emisión: cuando la fuente externa no responde, `resolveExchangeRate`
+    // devuelve `null` y el documento sigue si trae tasa manual.
+    private readonly trm: TrmService,
+    // Resolutor de retenciones. Acá se usa SÓLO para CALCULAR el agregado que
+    // va en `invoices.withholding_amount` al crear; la PERSISTENCIA de
+    // `withholding_calculations` sigue siendo de `InvoiceFlowService` en la
+    // aceptación. Ver la nota de `resolveWithholdingAmount`.
+    private readonly withholdingFlow: WithholdingFlowService,
   ) {}
 
   /**
@@ -228,6 +349,37 @@ export class InvoicingService {
       throw new ForbiddenException(
         'La facturación electrónica de esta tienda aún no está habilitada en producción ante la DIAN, así que no puede emitir facturas que consuman la numeración de la resolución. Completa el set de pruebas y activa producción.',
       );
+    }
+  }
+
+  /**
+   * ¿Puede esta tienda emitir un documento electrónico AHORA MISMO?
+   *
+   * Es exactamente la compuerta de `assertInvoicingAreaActive` —área fiscal
+   * activa + habilitación DIAN viva en producción— pero preguntada en vez de
+   * impuesta. Existe para el carril del POS: allí la venta ya está cobrada, así
+   * que hay que saber si vale la pena intentar la emisión ANTES de consumir un
+   * consecutivo, y una excepción no es forma de preguntar.
+   *
+   * NO reimplementa el criterio: llama al mismo método privado. Una segunda
+   * copia de la regla se desincroniza el primer día y dejaría al POS emitiendo
+   * donde el carril fiscal bloquea, o al revés.
+   */
+  async getElectronicEmissionEligibility(): Promise<{
+    eligible: boolean;
+    reason: string | null;
+  }> {
+    try {
+      await this.assertInvoicingAreaActive(this.getContext());
+      return { eligible: true, reason: null };
+    } catch (error) {
+      return {
+        eligible: false,
+        reason:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Esta tienda no puede emitir documentos electrónicos todavía.',
+      };
     }
   }
 
@@ -531,6 +683,20 @@ export class InvoicingService {
     };
   }
 
+  /**
+   * El detalle devuelve `retry_status` con el MISMO criterio que `findAll`.
+   *
+   * No es simetría por gusto: el panel de reintentos del detalle nacía leyendo
+   * el `retry_status` que venía en la fila del listado, así que sólo aparecía si
+   * el usuario había pasado por la tabla. Abrir la factura por enlace directo
+   * —o recargar con el detalle abierto— la dejaba sin panel, y una factura en
+   * cola de reintento se veía igual que una abandonada. El dato existía; lo que
+   * faltaba era que este endpoint lo publicara.
+   *
+   * Se reutiliza `getRetryStatusByInvoiceIds` en vez de escribir una consulta
+   * por id para que las dos superficies no puedan divergir: si mañana cambia qué
+   * cuenta como «en cola», cambia en un solo sitio.
+   */
   async findOne(id: number) {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id },
@@ -541,7 +707,22 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     }
 
-    return invoice;
+    const retry_eligible =
+      RETRY_ELIGIBLE_SEND_STATUSES.includes((invoice as any).send_status) ||
+      RETRY_ELIGIBLE_TRANSMISSION_STATUSES.includes(
+        (invoice as any).transmission_status,
+      );
+
+    // Una factura que no está en estado de error ni pendiente de envío no se
+    // consulta contra la cola: sería una consulta garantizada a vacío en el
+    // camino más transitado del módulo.
+    const retry_status = retry_eligible
+      ? ((
+          await this.retry_queue.getRetryStatusByInvoiceIds([invoice.id])
+        ).get(invoice.id) ?? null)
+      : null;
+
+    return { ...invoice, retry_status };
   }
 
   async create(dto: CreateInvoiceDto) {
@@ -588,6 +769,54 @@ export class InvoicingService {
       );
     }
 
+    // ORDEN DELIBERADO: recalcular ANTES de tomar el consecutivo.
+    //
+    // `recalculateDocument` puede rechazar el documento, y `generateNextNumber`
+    // consume un número del rango autorizado por la DIAN que no se recupera ni
+    // se reutiliza. Calcular después dejaba un hueco en la numeración cada vez
+    // que la aritmética no cuadraba. Todo lo que pueda fallar por datos del
+    // request tiene que fallar por encima de esta línea.
+    const line_snapshots = await this.resolveLinePricingSnapshots(dto.items);
+    // Régimen de AIU y validación del objeto del contrato. Por encima del
+    // consecutivo por la misma razón que el recálculo: puede rechazar.
+    const aiu_context = await this.resolveAiuContext(
+      dto.operation_type,
+      dto.items,
+    );
+    const calculated = this.recalculateDocument(
+      dto.items,
+      line_snapshots,
+      'invoice:create',
+      aiu_context.aiu,
+    );
+
+    // Tasa de cambio: sólo cuando el documento declara divisa y no trae tasa.
+    // Nunca bloquea — ver `resolveExchangeRateForDocument`.
+    const exchange_rate = await this.resolveExchangeRateForDocument({
+      foreign_currency: dto.foreign_currency,
+      exchange_rate: dto.exchange_rate,
+      exchange_rate_date: dto.exchange_rate_date,
+      issue_date: dto.issue_date,
+    });
+
+    // Retención resuelta desde la configuración fiscal de las dos partes.
+    // Sólo para documentos de VENTA: en el documento soporte el tenant es el
+    // comprador y el rol es `practiced`, que `InvoiceFlowService` ya resuelve
+    // al aceptar. `null` ⇒ manda lo que declaró el cliente.
+    const is_purchase_side =
+      dto.invoice_type === 'support_document' ||
+      dto.invoice_type === 'support_adjustment_note';
+    const resolved_withholding = is_purchase_side
+      ? null
+      : await this.resolveWithholdingAmount({
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          customer_id: resolved_customer_id,
+          base: calculated.totals.total_before_tax,
+          iva_amount: calculated.totals.tax_amount,
+          issue_date,
+        });
+
     // Generate invoice number from resolution
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({
@@ -596,12 +825,14 @@ export class InvoicingService {
         accounting_entity_id,
       });
 
-    // Calculate amounts from items. QUI-690: per-line `taxes[]` with
-    // `is_inclusive` is the new authoritative shape; the legacy single
-    // `tax_amount` per line + header `dto.taxes[]` are still honored for
-    // backward compatibility (see `calculateAmounts`).
-    const { subtotal, discount, tax, total, header_taxes } =
-      this.calculateAmounts(dto.items);
+    // Documento con DOS O MÁS tributos distintos: sus filas de `invoice_taxes`
+    // se escriben APARTE, una por (línea × tributo) y apuntando a la línea. No
+    // pueden ir en este `create` anidado porque los `invoice_items.id` a los que
+    // apuntan todavía no existen. Ver `needsPersistedLineTaxes` para por qué el
+    // documento de un solo tributo NO se parte.
+    const split_line_taxes = this.needsPersistedLineTaxes(
+      calculated.header_taxes,
+    );
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -617,93 +848,149 @@ export class InvoicingService {
         customer_name: dto.customer_name ?? support_supplier?.name,
         customer_tax_id: dto.customer_tax_id ?? support_supplier?.tax_id,
         customer_address: dto.customer_address ?? support_supplier?.addresses,
+        // Identidad fiscal del adquiriente — SNAPSHOT de la emisión.
+        //
+        // Hasta la migración `20260815120000_dian_invoice_contract` estos datos
+        // no tenían columna: se resolvían desde la ficha viva del cliente en
+        // CADA envío a la DIAN. Eso rompe dos cosas. Una, el reenvío de un
+        // documento antiguo recalculaba su CUFE con los datos de hoy y ya no
+        // reproducía el hash que la DIAN validó. Dos, `customer_document_type`
+        // decide si al número se le recorta el dígito de verificación
+        // (`dianPartyId()`), así que perderlo es perder la capacidad de
+        // recalcular la huella correcta.
+        //
+        // Persistirlos aquí congela lo que valió al emitir, igual que
+        // `customer_address`, que ya seguía este patrón.
+        customer_email: dto.customer_email,
+        customer_phone: dto.customer_phone,
+        customer_document_type: dto.customer_document_type,
+        customer_verification_digit: dto.customer_verification_digit,
+        customer_tax_regime: dto.customer_tax_regime,
+        customer_fiscal_responsibilities:
+          dto.customer_fiscal_responsibilities ?? undefined,
+        // Forma ('1' contado / '2' crédito) y medio de pago DIAN.
+        payment_form: dto.payment_form,
+        payment_means_code: dto.payment_means_code,
+        // `cbc:CustomizationID`. Se persiste crudo: NULL equivale a '10'
+        // (estándar) y esa equivalencia vive en un solo sitio, el builder UBL.
+        // Escribir '10' aquí crearía dos representaciones del mismo valor.
+        operation_type: dto.operation_type,
+        // Divisa extranjera: SOLO declara la conversión. El documento se emite
+        // siempre en COP (Res. DIAN 000042/2020 art. 73) y el importe legal
+        // sigue siendo `total_amount`.
+        foreign_currency: dto.foreign_currency,
+        foreign_total_amount:
+          dto.foreign_total_amount != null
+            ? new Prisma.Decimal(dto.foreign_total_amount)
+            : null,
+        // Tasa manual si la hay; si no, la TRM oficial del día de la operación.
+        // `null` cuando ninguna de las dos existe: el builder omite entonces
+        // `cac:PaymentExchangeRate`, que es preferible a declararlo con una
+        // tasa inventada.
+        exchange_rate: exchange_rate ?? null,
+        // La fecha de la tasa se congela aunque el usuario no la mande: sin
+        // ella, un reenvío no sabría contra qué TRM se convirtió.
+        exchange_rate_date: dto.exchange_rate_date
+          ? new Date(dto.exchange_rate_date)
+          : dto.foreign_currency
+            ? issue_date
+            : null,
         related_invoice_id: support_adjustment_original?.id,
         resolution_id,
-        subtotal_amount: new Prisma.Decimal(subtotal),
-        discount_amount: new Prisma.Decimal(discount),
-        tax_amount: new Prisma.Decimal(tax),
-        withholding_amount: new Prisma.Decimal(dto.withholding_amount || 0),
-        total_amount: new Prisma.Decimal(total),
+        // `subtotal_amount` es la BASE GRAVABLE, no el bruto capturado.
+        //
+        // Antes se persistía `Σ quantity × unit_price`, que en una línea con el
+        // impuesto incluido en el precio lleva el IVA dentro: la factura
+        // declaraba una base inflada y el asiento contable arrancaba
+        // descuadrado. `total_before_tax` es la Σ de los
+        // `cbc:LineExtensionAmount` que salen al XML — el mismo valor que la
+        // DIAN recomputa como `ValFac` del CUFE.
+        subtotal_amount: new Prisma.Decimal(calculated.totals.total_before_tax),
+        discount_amount: new Prisma.Decimal(calculated.totals.discount_amount),
+        tax_amount: new Prisma.Decimal(calculated.totals.tax_amount),
+        // Retención resuelta por configuración fiscal; el valor del cliente
+        // sólo sobrevive cuando no hay nada que resolver. NO se resta de
+        // `total_amount` (§11.9.1).
+        withholding_amount:
+          resolved_withholding ?? new Prisma.Decimal(dto.withholding_amount || 0),
+        // `PayableAmount`. NO resta la retención (Anexo 1.9 §11.9.1: la DIAN
+        // valida el total sin mirar `cac:WithholdingTaxTotal`) ni el anticipo.
+        total_amount: new Prisma.Decimal(calculated.totals.total_amount),
         currency: dto.currency || 'COP',
         issue_date,
-        due_date: dto.due_date ? new Date(dto.due_date) : null,
+        due_date: this.resolveDueDate(dto, issue_date),
         created_by_user_id: context.user_id,
         notes: dto.notes,
         invoice_items: {
-          create: dto.items.map((item) => {
-            // QUI-690 — per-line tax snapshot. If the line has typed
-            // `taxes[]`, persist their aggregate as the line `tax_amount`
-            // and `is_inclusive` so the UBL builder can read either path.
-            const line_tax_amount = item.taxes
-              ? item.taxes.reduce((acc, t) => acc + (t.tax_amount || 0), 0)
-              : item.tax_amount || 0;
-            const line_is_inclusive =
-              item.is_inclusive ??
-              (item.taxes?.some((t) => t.is_inclusive) ?? false);
-            const item_total =
-              item.quantity * item.unit_price -
-              (item.discount_amount || 0) +
-              line_tax_amount;
-            return {
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              description: item.description,
-              quantity: new Prisma.Decimal(item.quantity),
-              unit_price: new Prisma.Decimal(item.unit_price),
-              discount_amount: new Prisma.Decimal(item.discount_amount || 0),
-              tax_amount: new Prisma.Decimal(line_tax_amount),
-              is_inclusive: line_is_inclusive,
-              total_amount: new Prisma.Decimal(item_total),
-            };
-          }),
+          create: dto.items.map((item, index) =>
+            this.buildInvoiceItemCreateInput(
+              item,
+              calculated.lines[index],
+              line_snapshots[index],
+            ),
+          ),
         },
-        // QUI-690 — Prefer header_taxes aggregated from per-line
-        // `items[].taxes[]` over the legacy `dto.taxes[]`. If both are
-        // present, per-line wins (more granular source of truth). If only
-        // `dto.taxes[]` is present, keep backward-compatible path.
-        ...((header_taxes.length > 0
-          ? {
-              invoice_taxes: {
-                create: header_taxes.map((t) => ({
-                  tax_rate_id: t.tax_rate_id,
-                  tax_name: t.tax_name,
-                  tax_rate: new Prisma.Decimal(t.tax_rate),
-                  taxable_amount: new Prisma.Decimal(t.taxable_amount),
-                  tax_amount: new Prisma.Decimal(t.tax_amount),
-                  tax_type: (t.tax_type ?? 'iva') as any,
-                  is_inclusive: t.is_inclusive ?? false,
-                })),
-              },
-            }
-          : dto.taxes && dto.taxes.length > 0
+        // Filas de `invoice_taxes` agregadas por el motor desde los impuestos
+        // de línea. El `dto.taxes[]` de cabecera sólo sobrevive como camino
+        // legacy para documentos sin impuestos tipados por línea: es la única
+        // fuente que no se puede recalcular, porque no está atada a ninguna
+        // base concreta.
+        //
+        // `split_line_taxes` corta acá a propósito: ese documento escribe sus
+        // tributos después, ya vinculados a la línea. Escribirlos también aquí
+        // los DUPLICARÍA —agregado + desglose en la misma tabla— y todo
+        // consumidor suma sin filtrar, así que el impuesto del documento saldría
+        // al doble.
+        ...(split_line_taxes
+          ? {}
+          : calculated.header_taxes.length > 0
             ? {
                 invoice_taxes: {
-                  create: dto.taxes.map((tax_item) => ({
-                    tax_rate_id: tax_item.tax_rate_id,
-                    tax_name: tax_item.tax_name,
-                    tax_rate: new Prisma.Decimal(tax_item.tax_rate),
-                    taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-                    tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                    tax_type: (tax_item.tax_type ?? 'iva') as any,
-                    is_inclusive: tax_item.is_inclusive ?? false,
-                  })),
+                  create: calculated.header_taxes.map((t) =>
+                    this.buildInvoiceTaxCreateInput(t),
+                  ),
                 },
               }
-            : {})),
+            : dto.taxes && dto.taxes.length > 0
+              ? {
+                  invoice_taxes: {
+                    create: this.buildDocumentLevelTaxRows(dto.taxes),
+                  },
+                }
+              : {}),
       },
       include: INVOICE_INCLUDE,
     });
 
+    // Segunda escritura: el desglose por línea. Sólo para el documento
+    // multi-tributo, y sólo porque los ids de las líneas no existían antes.
+    let created = invoice;
+    if (split_line_taxes) {
+      await this.persistLineTaxes(
+        invoice.id,
+        calculated.lines.map((line) => line.taxes),
+        calculated.header_taxes,
+      );
+      // Se recarga para que el documento devuelto incluya las filas de impuesto
+      // recién escritas: sin esto el llamador vería `invoice_taxes: []` y
+      // concluiría que la factura nació sin tributos.
+      created =
+        (await this.prisma.invoices.findFirst({
+          where: { id: invoice.id },
+          include: INVOICE_INCLUDE,
+        })) ?? invoice;
+    }
+
     this.event_emitter.emit('invoice.created', {
-      invoice_id: invoice.id,
-      invoice_number: invoice.invoice_number,
-      invoice_type: invoice.invoice_type,
+      invoice_id: created.id,
+      invoice_number: created.invoice_number,
+      invoice_type: created.invoice_type,
     });
 
     this.logger.log(
-      `Invoice ${invoice.invoice_number} created (ID: ${invoice.id})`,
+      `Invoice ${created.invoice_number} created (ID: ${created.id})`,
     );
-    return invoice;
+    return created;
   }
 
   /**
@@ -961,8 +1248,20 @@ export class InvoicingService {
         tax_amount: number;
       }
     >();
+    /**
+     * El MISMO desglose, pero sin agregar: `orderLineTaxes[i]` son los tributos
+     * de la i-ésima línea de producto. Es el caso que motiva toda esta columna —
+     * una cuenta de restaurante donde unos platos llevan INC y otros IVA nace
+     * justamente por acá, desde `order_item_taxes`.
+     *
+     * La línea de ENVÍO, cuando existe, se añade al final de `items` y no lleva
+     * tributos: se representa como un arreglo vacío para que el alineamiento por
+     * posición contra `invoice_items` siga siendo cierto.
+     */
+    const orderLineTaxes: DocumentLineTaxes = [];
     for (const item of order.order_items || []) {
       const lineNet = Number(item.total_price || 0);
+      const lineTaxes: InvoiceTaxRowInput[] = [];
       for (const t of (item as any).order_item_taxes || []) {
         const ratePct = round2(Number(t.tax_rate || 0) * 100);
         const type = (t.tax_type as string) || 'iva';
@@ -978,16 +1277,45 @@ export class InvoicingService {
         group.taxable_amount += lineNet;
         group.tax_amount += Number(t.tax_amount || 0);
         taxGroups.set(key, group);
+
+        // La fila POR LÍNEA lleva la base de SU línea, no la acumulada. Sumadas
+        // reproducen exactamente el agregado de arriba, que es lo que permite
+        // que el `cac:TaxTotal` de cabecera no se mueva un centavo.
+        lineTaxes.push({
+          tax_rate_id: t.tax_rate_id ?? null,
+          tax_name: t.tax_name,
+          tax_rate: ratePct,
+          taxable_amount: round2(lineNet),
+          tax_amount: round2(Number(t.tax_amount || 0)),
+          tax_type: type,
+        });
       }
+      orderLineTaxes.push(lineTaxes);
     }
-    const invoiceTaxes = Array.from(taxGroups.values()).map((g) => ({
+    if (shippingCost > 0) orderLineTaxes.push([]);
+
+    const invoiceTaxRows: InvoiceTaxRowInput[] = Array.from(
+      taxGroups.values(),
+    ).map((g) => ({
       tax_rate_id: g.tax_rate_id,
       tax_name: g.tax_name,
-      tax_rate: new Prisma.Decimal(g.tax_rate),
-      taxable_amount: new Prisma.Decimal(round2(g.taxable_amount)),
-      tax_amount: new Prisma.Decimal(round2(g.tax_amount)),
-      tax_type: g.tax_type as any,
+      tax_rate: g.tax_rate,
+      taxable_amount: round2(g.taxable_amount),
+      tax_amount: round2(g.tax_amount),
+      tax_type: g.tax_type,
     }));
+    // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
+    // único que garantiza que `tax_type` —la clave con la que el CUFE arma
+    // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
+    const invoiceTaxes = invoiceTaxRows.map((tax_item) =>
+      this.buildInvoiceTaxCreateInput(tax_item),
+    );
+
+    // Mismo criterio que `create()`: sólo el documento MULTI-TRIBUTO parte sus
+    // filas por línea. Con un solo tributo el emisor ya produce el mismo XML
+    // heredándolo, así que partirlo sería ruido puro. Ver
+    // `needsPersistedLineTaxes`.
+    const split_order_line_taxes = taxGroups.size >= 2;
 
     const invoiceDataRequest = order.invoice_data_requests?.[0];
     const guest_customer_name = invoiceDataRequest
@@ -1033,25 +1361,38 @@ export class InvoicingService {
         invoice_items: {
           create: items,
         },
-        ...(invoiceTaxes.length > 0
-          ? { invoice_taxes: { create: invoiceTaxes } }
-          : {}),
+        // Igual que en `create()`: el documento multi-tributo escribe sus
+        // tributos DESPUÉS, ya vinculados a la línea. Dejarlos también acá los
+        // duplicaría y el impuesto del documento saldría al doble.
+        ...(split_order_line_taxes || invoiceTaxes.length === 0
+          ? {}
+          : { invoice_taxes: { create: invoiceTaxes } }),
       },
       include: INVOICE_INCLUDE,
     });
 
+    let created = invoice;
+    if (split_order_line_taxes) {
+      await this.persistLineTaxes(invoice.id, orderLineTaxes, invoiceTaxRows);
+      created =
+        (await this.prisma.invoices.findFirst({
+          where: { id: invoice.id },
+          include: INVOICE_INCLUDE,
+        })) ?? invoice;
+    }
+
     this.event_emitter.emit('invoice.created', {
-      invoice_id: invoice.id,
-      invoice_number: invoice.invoice_number,
+      invoice_id: created.id,
+      invoice_number: created.invoice_number,
       invoice_type: 'sales_invoice',
       source: 'order',
       order_id,
     });
 
     this.logger.log(
-      `Invoice ${invoice.invoice_number} created from order #${order_id}`,
+      `Invoice ${created.invoice_number} created from order #${order_id}`,
     );
-    return invoice;
+    return created;
   }
 
   async createFromSalesOrder(sales_order_id: number) {
@@ -1234,6 +1575,50 @@ export class InvoicingService {
       ...(dto.customer_address !== undefined && {
         customer_address: dto.customer_address,
       }),
+      // Identidad fiscal del adquiriente. Se mapea campo a campo y no con un
+      // spread del DTO a propósito: un spread arrastraría cualquier clave que
+      // el DTO gane mañana hacia un `prisma.update`, y una clave que no sea
+      // columna revienta en runtime — que es justo el modo de fallo que esta
+      // fase viene a cerrar.
+      ...(dto.customer_email !== undefined && {
+        customer_email: dto.customer_email,
+      }),
+      ...(dto.customer_phone !== undefined && {
+        customer_phone: dto.customer_phone,
+      }),
+      ...(dto.customer_document_type !== undefined && {
+        customer_document_type: dto.customer_document_type,
+      }),
+      ...(dto.customer_verification_digit !== undefined && {
+        customer_verification_digit: dto.customer_verification_digit,
+      }),
+      ...(dto.customer_tax_regime !== undefined && {
+        customer_tax_regime: dto.customer_tax_regime,
+      }),
+      ...(dto.customer_fiscal_responsibilities !== undefined && {
+        customer_fiscal_responsibilities: dto.customer_fiscal_responsibilities,
+      }),
+      ...(dto.payment_form !== undefined && {
+        payment_form: dto.payment_form,
+      }),
+      ...(dto.payment_means_code !== undefined && {
+        payment_means_code: dto.payment_means_code,
+      }),
+      ...(dto.operation_type !== undefined && {
+        operation_type: dto.operation_type,
+      }),
+      ...(dto.foreign_currency !== undefined && {
+        foreign_currency: dto.foreign_currency,
+      }),
+      ...(dto.foreign_total_amount !== undefined && {
+        foreign_total_amount: new Prisma.Decimal(dto.foreign_total_amount),
+      }),
+      ...(dto.exchange_rate !== undefined && {
+        exchange_rate: new Prisma.Decimal(dto.exchange_rate),
+      }),
+      ...(dto.exchange_rate_date !== undefined && {
+        exchange_rate_date: new Date(dto.exchange_rate_date),
+      }),
       ...(dto.related_invoice_id !== undefined && {
         related_invoice_id: dto.related_invoice_id,
       }),
@@ -1241,59 +1626,123 @@ export class InvoicingService {
         withholding_amount: new Prisma.Decimal(dto.withholding_amount),
       }),
       ...(dto.issue_date && { issue_date: new Date(dto.issue_date) }),
-      ...(dto.due_date && { due_date: new Date(dto.due_date) }),
+      // Se pasa por el mismo resolutor que la creación en vez de escribir la
+      // fecha cruda: editar un borrador no puede dejarlo con un vencimiento
+      // anterior a su emisión, ni marcarlo a crédito sin plazo. La emisión de
+      // referencia es la nueva si el PATCH la cambia, y la vigente si no.
+      ...(dto.due_date !== undefined || dto.payment_form !== undefined
+        ? {
+            due_date: this.resolveDueDate(
+              {
+                due_date: dto.due_date,
+                payment_form: dto.payment_form ?? invoice.payment_form ?? undefined,
+              },
+              dto.issue_date ? new Date(dto.issue_date) : invoice.issue_date,
+            ),
+          }
+        : {}),
       ...(dto.currency && { currency: dto.currency }),
       ...(dto.notes !== undefined && { notes: dto.notes }),
     };
 
+    /**
+     * Cabecera de impuestos recalculada desde las líneas nuevas. Se resuelve
+     * junto con los ítems porque `invoice_taxes` es un AGREGADO de
+     * `invoice_items`: reemplazar las líneas y dejar la cabecera vieja produce
+     * exactamente el descuadre que la DIAN rechaza.
+     */
+    let recalculated_header_taxes: InvoiceCalculatorResult['header_taxes'] = [];
+
+    /**
+     * Desglose por línea del documento reeditado, en el mismo orden en que se
+     * van a recrear las líneas. Vacío = este PATCH no parte los tributos por
+     * línea (documento de un solo tributo, o edición que no toca las líneas).
+     * Ver `needsPersistedLineTaxes`.
+     */
+    let recalculated_line_taxes: DocumentLineTaxes = [];
+
     if (dto.items && dto.items.length > 0) {
-      const { subtotal, discount, tax, total } = this.calculateAmounts(
+      // Mismo motor y misma política que `create()`. Editar un borrador no
+      // puede ser una vía para persistir aritmética que la creación rechaza.
+      const line_snapshots = await this.resolveLinePricingSnapshots(dto.items);
+      // Mismo régimen de AIU que la creación. El tipo de operación es el que
+      // trae el PATCH si lo cambia, y el persistido si no: editar un borrador
+      // no puede convertir un contrato AIU en una venta estándar por omisión.
+      const aiu_context = await this.resolveAiuContext(
+        dto.operation_type ?? invoice.operation_type,
         dto.items,
       );
-      update_data.subtotal_amount = new Prisma.Decimal(subtotal);
-      update_data.discount_amount = new Prisma.Decimal(discount);
-      update_data.tax_amount = new Prisma.Decimal(tax);
-      update_data.total_amount = new Prisma.Decimal(total);
+      const calculated = this.recalculateDocument(
+        dto.items,
+        line_snapshots,
+        `invoice:update:${id}`,
+        aiu_context.aiu,
+      );
+      recalculated_header_taxes = calculated.header_taxes;
+      recalculated_line_taxes = this.needsPersistedLineTaxes(
+        calculated.header_taxes,
+      )
+        ? calculated.lines.map((line) => line.taxes)
+        : [];
+
+      update_data.subtotal_amount = new Prisma.Decimal(
+        calculated.totals.total_before_tax,
+      );
+      update_data.discount_amount = new Prisma.Decimal(
+        calculated.totals.discount_amount,
+      );
+      update_data.tax_amount = new Prisma.Decimal(calculated.totals.tax_amount);
+      update_data.total_amount = new Prisma.Decimal(
+        calculated.totals.total_amount,
+      );
 
       // Delete existing items and create new ones
       await this.prisma.invoice_items.deleteMany({
         where: { invoice_id: id },
       });
 
+      // Mismo mapeo que `create()`, a propósito: ver la nota de
+      // `buildInvoiceItemCreateInput`. Aquí se perdían `is_inclusive` y el
+      // agregado de `taxes[]` por línea al editar un borrador.
       update_data.invoice_items = {
-        create: dto.items.map((item) => {
-          const item_total =
-            item.quantity * item.unit_price -
-            (item.discount_amount || 0) +
-            (item.tax_amount || 0);
-          return {
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            description: item.description,
-            quantity: new Prisma.Decimal(item.quantity),
-            unit_price: new Prisma.Decimal(item.unit_price),
-            discount_amount: new Prisma.Decimal(item.discount_amount || 0),
-            tax_amount: new Prisma.Decimal(item.tax_amount || 0),
-            total_amount: new Prisma.Decimal(item_total),
-          };
-        }),
+        create: dto.items.map((item, index) =>
+          this.buildInvoiceItemCreateInput(
+            item,
+            calculated.lines[index],
+            line_snapshots[index],
+          ),
+        ),
       };
     }
 
-    if (dto.taxes) {
+    // La cabecera se reescribe cuando la recalculó el motor O cuando el cliente
+    // mandó `dto.taxes` explícitamente. El primer caso es nuevo y necesario:
+    // antes, editar las líneas dejaba intacta la cabecera de impuestos vieja.
+    if (recalculated_header_taxes.length > 0 || dto.taxes) {
       await this.prisma.invoice_taxes.deleteMany({
         where: { invoice_id: id },
       });
 
-      if (dto.taxes.length > 0) {
+      // `recalculated_line_taxes` no vacío = documento multi-tributo: sus filas
+      // se escriben DESPUÉS del update, cuando las líneas recreadas ya tienen
+      // id. Acá no se escribe nada a propósito — hacerlo dejaría el agregado Y
+      // el desglose en la misma tabla, y todo consumidor suma sin filtrar.
+      const write_header_rows = recalculated_line_taxes.length === 0;
+
+      if (write_header_rows && recalculated_header_taxes.length > 0) {
         update_data.invoice_taxes = {
-          create: dto.taxes.map((tax_item) => ({
-            tax_rate_id: tax_item.tax_rate_id,
-            tax_name: tax_item.tax_name,
-            tax_rate: new Prisma.Decimal(tax_item.tax_rate),
-            taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-            tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-          })),
+          create: recalculated_header_taxes.map((tax_item) =>
+            this.buildInvoiceTaxCreateInput(tax_item),
+          ),
+        };
+      } else if (write_header_rows && dto.taxes && dto.taxes.length > 0) {
+        // Aquí se perdía `tax_type`, con el que el CUFE arma ValImp1/2/3: una
+        // factura editada y luego emitida producía una huella distinta de la
+        // misma factura emitida sin editar.
+        update_data.invoice_taxes = {
+          create: dto.taxes.map((tax_item) =>
+            this.buildInvoiceTaxCreateInput(tax_item),
+          ),
         };
       }
     }
@@ -1304,8 +1753,27 @@ export class InvoicingService {
       include: INVOICE_INCLUDE,
     });
 
-    this.logger.log(`Invoice #${id} (${updated.invoice_number}) updated`);
-    return updated;
+    // Desglose por línea del documento reeditado. Va después del update porque
+    // las líneas se borraron y se recrearon dentro de él: los ids anteriores ya
+    // no existen. El borrado previo no choca contra la FK porque es
+    // `ON DELETE SET NULL` — con RESTRICT, borrar las líneas antes que los
+    // tributos habría devuelto P2003 en TODA edición de borrador.
+    let refreshed = updated;
+    if (recalculated_line_taxes.length > 0) {
+      await this.persistLineTaxes(
+        id,
+        recalculated_line_taxes,
+        recalculated_header_taxes,
+      );
+      refreshed =
+        (await this.prisma.invoices.findFirst({
+          where: { id },
+          include: INVOICE_INCLUDE,
+        })) ?? updated;
+    }
+
+    this.logger.log(`Invoice #${id} (${refreshed.invoice_number}) updated`);
+    return refreshed;
   }
 
   async remove(id: number) {
@@ -1408,79 +1876,805 @@ export class InvoicingService {
    * `is_inclusive` flag travels with each bucket so the UBL builder can emit
    * `TaxInclusiveIndicator` correctly.
    */
-  private calculateAmounts(
-    items: {
-      quantity: number;
-      unit_price: number;
-      discount_amount?: number;
-      tax_amount?: number;
-      taxes?: {
-        tax_rate_id?: number;
-        tax_name: string;
-        tax_rate: number;
-        taxable_amount: number;
-        tax_amount: number;
-        tax_type?: any;
-        is_inclusive?: boolean;
-      }[];
-      is_inclusive?: boolean;
-    }[],
+  /**
+   * Mapeadores de persistencia compartidos por `create()` y `update()`.
+   *
+   * POR QUÉ EXISTEN
+   * ---------------
+   * Las dos rutas escriben las MISMAS tablas y habían divergido en tres puntos,
+   * todos silenciosos:
+   *
+   *   1. `invoice_items.is_inclusive` — la creación lo persistía, la
+   *      actualización no. Editar un borrador borraba la marca de precio con
+   *      IVA incluido y la línea pasaba a facturarse como si el impuesto fuera
+   *      adicional.
+   *   2. Los `taxes[]` por línea — la creación los agregaba en
+   *      `line_tax_amount`, la actualización sólo miraba el `tax_amount` plano.
+   *      Un borrador con impuestos tipados perdía su importe al editarse.
+   *   3. `invoice_taxes.tax_type` — la creación escribía el tipo fiscal, la
+   *      actualización lo dejaba en NULL. **Éste es el peor**: el CUFE clasifica
+   *      los impuestos por `tax_type` para armar `ValImp1/2/3` (IVA/INC/ICA del
+   *      Anexo Técnico 1.9 §11.2). Con el tipo en NULL, la misma factura emitida
+   *      tras editarse producía una huella distinta de la que producía sin
+   *      editarse — y la DIAN rechaza por CUFE incorrecto habiendo gastado ya el
+   *      consecutivo.
+   *
+   * Ninguna de las tres daba error al guardar. Por eso el mapeo vive en un solo
+   * sitio: no es limpieza, es la única forma de que no vuelvan a separarse.
+   *
+   * LOS IMPORTES YA NO SE LEEN DEL DTO
+   * ----------------------------------
+   * Este mapeador recibe la línea YA RECALCULADA por `InvoiceCalculatorService`
+   * y la escribe tal cual. Antes derivaba el impuesto de línea sumando lo que
+   * mandara el cliente, y el formulario del panel manda literalmente
+   * `tax_amount: 0` confiando en que el backend recalcula. No recalculaba: la
+   * factura se persistía con IVA cero, el asiento salía descuadrado y el
+   * `ValImp1` del hash CUFE —que la DIAN recomputa desde el XML recibido—
+   * quedaba mal, con el consecutivo ya gastado.
+   */
+  private buildInvoiceItemCreateInput(
+    item: CreateInvoiceItemDto,
+    line: CalculatedLine,
+    snapshot: InvoiceLinePricingSnapshot,
   ) {
-    let subtotal = 0;
-    let discount = 0;
-    let tax = 0;
+    return {
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id,
+      description: item.description,
+      quantity: new Prisma.Decimal(item.quantity),
+      unit_price: new Prisma.Decimal(item.unit_price),
+      // Los cuatro importes salen del MOTOR, no del cliente. `line.*` ya viene
+      // truncado a 2 decimales (Anexo 1.9 §11.2) y con la base despejada
+      // cuando el precio lleva el impuesto dentro.
+      discount_amount: new Prisma.Decimal(line.discount_amount),
+      tax_amount: new Prisma.Decimal(line.tax_amount),
+      is_inclusive: line.is_inclusive,
+      total_amount: new Prisma.Decimal(line.total_amount),
+      // A cuántas unidades de `quantity` corresponde `unit_price`. NO se acepta
+      // del cliente —no está en el DTO a propósito—: es un atributo del
+      // producto, y dejarlo entrar por el request permitiría facturar un queso
+      // de $28.000/kg como $28.000/gramo. Snapshot para que un reenvío años
+      // después reproduzca el mismo importe de línea.
+      price_unit_quantity: snapshot.price_unit_quantity,
+      // Unidad de medida UN/ECE rec. 20 (`@unitCode`). Se resolvía en cada
+      // envío y, al fallar, caía a 'EA' EN SILENCIO: tres metros declarados
+      // como 'EA' le dicen a la DIAN "tres unidades". NULL conserva ese
+      // comportamiento histórico; un valor explícito lo congela para que un
+      // reenvío emita la misma unidad.
+      unit_code: snapshot.unit_code,
+      // Snapshot de la cuenta PUC de ingreso, ya resuelto por la cascada
+      // línea → variante → producto (ver `resolveLinePricingSnapshots`). Se
+      // congela acá y no al contabilizar porque entre crear y aceptar la factura
+      // el producto puede remaparse: el asiento cuadraría igual, contra otra
+      // subcuenta, y nada lo delataría. NULL ⇒ mapping por defecto.
+      account_code: snapshot.account_code,
+      // Componente AIU. NULL = línea normal, que es el 100% del histórico. El
+      // régimen que decide la base gravable (E.T. art. 462-1 vs Decreto
+      // 1372/1992) es configuración de la tienda, no se deduce de esta columna.
+      aiu_component: item.aiu_component as aiu_component_enum | undefined,
+    };
+  }
 
-    const bucketMap = new Map<
-      string,
-      {
-        tax_rate_id?: number;
-        tax_name: string;
-        tax_rate: number;
-        taxable_amount: number;
-        tax_amount: number;
-        tax_type?: any;
-        is_inclusive: boolean;
+  /**
+   * Impuestos declarados A NIVEL DE DOCUMENTO (`dto.taxes`), y sólo cuando el
+   * calculador no produjo ninguno de línea. Es el carril heredado: aquí no hay
+   * base de la que derivar nada, así que los importes que manda el cliente son
+   * la única fuente que existe.
+   *
+   * Por eso ESTE es el punto donde `taxable_amount` y `tax_amount` vuelven a ser
+   * obligatorios, aunque el DTO los declare opcionales: en el carril normal —el
+   * de impuestos por línea— los deriva `InvoiceCalculatorService` a partir de
+   * precio, cantidad, descuento e `is_inclusive`; aquí no hay línea a la que
+   * mirar.
+   *
+   * Falla en vez de rellenar con cero. Un cero inventado aquí no se nota: se
+   * persiste, viaja al XML como `cbc:TaxAmount`, entra en el `ValImp1` del CUFE
+   * y sale a la DIAN como la afirmación de que la operación no causó impuesto.
+   * El descuadre aparece cuando la DIAN recalcula, y para entonces el
+   * consecutivo autorizado ya está gastado.
+   */
+  private buildDocumentLevelTaxRows(taxes: CreateInvoiceTaxDto[]) {
+    return taxes.map((tax_item, index) => {
+      const missing = [
+        tax_item.taxable_amount === undefined || tax_item.taxable_amount === null
+          ? 'taxable_amount'
+          : null,
+        tax_item.tax_amount === undefined || tax_item.tax_amount === null
+          ? 'tax_amount'
+          : null,
+      ].filter((field): field is string => field !== null);
+
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `El impuesto «${tax_item.tax_name}» se declaró a nivel de documento sin ${missing.join(' ni ')}. ` +
+            'Los impuestos de documento no tienen línea de la que derivar la base, así que hay que enviarlos ' +
+            'calculados. Si lo que quieres es que el servidor los calcule, declara el impuesto dentro de la ' +
+            'línea (`items[].taxes[]`) en vez de en `taxes[]` del documento.',
+          { tax_index: index, tax_name: tax_item.tax_name, missing },
+        );
       }
-    >();
 
-    for (const item of items) {
-      const line_subtotal = item.quantity * item.unit_price;
-      const line_discount = item.discount_amount || 0;
-      subtotal += line_subtotal;
-      discount += line_discount;
+      return this.buildInvoiceTaxCreateInput({
+        ...tax_item,
+        taxable_amount: tax_item.taxable_amount as number,
+        tax_amount: tax_item.tax_amount as number,
+      });
+    });
+  }
 
-      if (item.taxes && item.taxes.length > 0) {
-        for (const t of item.taxes) {
-          tax += t.tax_amount || 0;
-          const key = `${t.tax_name}|${t.tax_rate}|${t.tax_type ?? 'iva'}|${t.is_inclusive ? '1' : '0'}`;
-          const existing = bucketMap.get(key);
-          if (existing) {
-            existing.taxable_amount += t.taxable_amount || 0;
-            existing.tax_amount += t.tax_amount || 0;
-          } else {
-            bucketMap.set(key, {
-              tax_rate_id: t.tax_rate_id,
-              tax_name: t.tax_name,
-              tax_rate: t.tax_rate,
-              taxable_amount: t.taxable_amount || 0,
-              tax_amount: t.tax_amount || 0,
-              tax_type: t.tax_type ?? 'iva',
-              is_inclusive: t.is_inclusive ?? false,
-            });
-          }
-        }
-      } else {
-        // Legacy path: single `tax_amount` per line, no per-line is_inclusive.
-        const legacy_tax = item.tax_amount || 0;
-        tax += legacy_tax;
-        // No bucket emitted — legacy `dto.taxes[]` (if present) becomes the
-        // authoritative header aggregate in `create()`.
-      }
+  private buildInvoiceTaxCreateInput(tax: InvoiceTaxRowInput) {
+    return {
+      // `?? undefined`: la columna es opcional, y un `null` explícito y un
+      // campo ausente no son lo mismo para el input de Prisma.
+      tax_rate_id: tax.tax_rate_id ?? undefined,
+      tax_name: tax.tax_name,
+      tax_rate: new Prisma.Decimal(tax.tax_rate),
+      taxable_amount: new Prisma.Decimal(tax.taxable_amount),
+      tax_amount: new Prisma.Decimal(tax.tax_amount),
+      // El default 'iva' es el histórico y se mantiene, pero NUNCA puede
+      // quedar ausente: es la clave con la que el CUFE arma ValImp1/2/3.
+      //
+      // El puente entre los dos enums es por VALOR, no por tipo: `TaxFiscalType`
+      // (enum nominal de TS) y `tax_type_enum` (unión de literales de Prisma)
+      // declaran exactamente los mismos seis — iva, inc, ica, withholding,
+      // reteiva, reteica— pero TS los trata como incompatibles. Si alguien
+      // añade un valor a uno solo, este cast lo deja pasar y revienta en el
+      // INSERT: mantenerlos en paridad es responsabilidad de quien los edite.
+      tax_type: (tax.tax_type ?? 'iva') as unknown as tax_type_enum,
+      is_inclusive: tax.is_inclusive ?? false,
+    };
+  }
+
+  /**
+   * ¿Este documento tiene que persistir su desglose de tributos POR LÍNEA?
+   *
+   * ## El problema que resuelve
+   *
+   * El emisor UBL escribe un `cac:TaxSubtotal` por cada tributo DE LA LÍNEA.
+   * `invoice_taxes` guardaba los tributos AGREGADOS por cabecera, así que el
+   * emisor no tenía de dónde sacar ese desglose y caía al camino histórico:
+   * heredarle a TODA línea el PRIMER tributo del documento. En una cuenta mixta
+   * IVA + INC eso hace que todas las líneas declaren el esquema de la primera —
+   * la cuenta de restaurante sale entera como IVA 19 % o entera como INC 8 %— y
+   * la DIAN recompone los impuestos desde lo que recibe.
+   *
+   * ## La decisión de modelado, y por qué NO es "siempre por línea"
+   *
+   * Un documento usa UNA sola forma, nunca las dos:
+   *
+   * · **Un solo tributo ⇒ fila agregada de cabecera** (`invoice_item_id` NULL),
+   *   exactamente como hasta hoy. Con un único tributo el camino histórico del
+   *   emisor produce EXACTAMENTE el mismo XML —misma base, mismo importe, mismo
+   *   esquema—, así que partirlo por línea no cambiaría un byte del documento y
+   *   sí multiplicaría por N las filas que leen el PDF (`invoice-pdf.builder`
+   *   imprime una línea por fila), el detalle del panel y los reportes. Cero
+   *   beneficio a cambio de ruido en todo lo demás.
+   *
+   * · **Dos o más tributos ⇒ una fila por (línea × tributo)** y ninguna fila
+   *   agregada. La cabecera no desaparece: se DERIVA sumando, que es
+   *   literalmente lo que ya hacen todos los consumidores de esta tabla
+   *   (`buildTaxTotals` agrupa por esquema DIAN y suma; el prevalidador suma;
+   *   la exógena, el ICA y las declaraciones de IVA/INC suman). Como se suman
+   *   valores YA truncados —los mismos que `aggregateHeaderTaxes` sumaba— el
+   *   `cac:TaxTotal` de cabecera sale idéntico al centavo y la regla FAS01b
+   *   sigue cuadrando.
+   *
+   * ## Lo que se descartó
+   *
+   * Conservar las filas agregadas Y añadir además las de línea. Ningún
+   * consumidor filtra por `invoice_item_id`, así que el impuesto del documento
+   * saldría al DOBLE: `cac:TaxTotal` duplicado (rechazo DIAN inmediato),
+   * `HEADER_TAX_TOTAL_MISMATCH` en el prevalidador y declaraciones fiscales
+   * infladas. No es una opción "más segura", es la única que rompe todo.
+   */
+  private needsPersistedLineTaxes(header_taxes: CalculatedTax[]): boolean {
+    return header_taxes.length >= 2;
+  }
+
+  /**
+   * Escribe las filas de `invoice_taxes` DESPUÉS de que existan los ids de las
+   * líneas, que es la única forma de poder apuntarles.
+   *
+   * ## Por qué esto no va dentro del `create` anidado
+   *
+   * `invoices.create({ data: { invoice_items: { create: [...] } } })` no
+   * devuelve los ids de las líneas hasta que el INSERT termina, y
+   * `invoice_taxes.invoice_item_id` los necesita. De ahí la segunda escritura.
+   *
+   * NO se envuelve en `$transaction`: el cliente de Prisma que entrega
+   * `$transaction` es el BASE, sin la extensión de scoping, y `invoices` es un
+   * modelo store-scoped cuyo `store_id` inyecta precisamente esa extensión.
+   * Meter la creación del documento en una transacción lo escribiría sin
+   * tenant. El riesgo que queda —fallar entre las dos escrituras y dejar un
+   * BORRADOR sin filas de impuesto— es acotado y recuperable: el documento
+   * todavía no tiene CUFE ni se transmitió, y volver a guardarlo recalcula y
+   * reescribe los tributos por completo.
+   *
+   * ## El alineamiento por posición
+   *
+   * `orderBy: { id: 'asc' }` reproduce el orden en que Prisma insertó las
+   * líneas del `create` anidado, que es el orden de `dto.items`. Si los conteos
+   * no coinciden —única forma de que el alineamiento sea mentira— NO se
+   * inventa un vínculo: se escriben las filas agregadas de cabecera, que es el
+   * comportamiento histórico y deja el documento fiscalmente correcto aunque
+   * pierda el desglose.
+   */
+  private async persistLineTaxes(
+    invoice_id: number,
+    line_taxes: DocumentLineTaxes,
+    fallback_header_taxes: InvoiceTaxRowInput[],
+  ): Promise<void> {
+    const items = await this.prisma.invoice_items.findMany({
+      where: { invoice_id },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+
+    const aligned = items.length === line_taxes.length;
+
+    if (!aligned) {
+      this.logger.warn(
+        `Invoice #${invoice_id}: persisted ${items.length} items for ${line_taxes.length} calculated lines; ` +
+          `falling back to header-aggregated invoice_taxes (the emitter will reconstruct the per-line breakdown)`,
+      );
     }
 
-    const total = subtotal - discount + tax;
-    const header_taxes = Array.from(bucketMap.values());
+    // Una sola forma de fila para los dos caminos: `invoice_item_id: undefined`
+    // es exactamente "columna no informada" para Prisma, o sea la fila de
+    // cabecera de siempre.
+    const rows = aligned
+      ? line_taxes.flatMap((taxes, index) =>
+          taxes.map((tax) => ({
+            ...this.buildInvoiceTaxCreateInput(tax),
+            invoice_id,
+            invoice_item_id: items[index].id as number | undefined,
+          })),
+        )
+      : fallback_header_taxes.map((tax) => ({
+          ...this.buildInvoiceTaxCreateInput(tax),
+          invoice_id,
+          invoice_item_id: undefined as number | undefined,
+        }));
 
-    return { subtotal, discount, tax, total, header_taxes };
+    if (rows.length === 0) return;
+
+    // `createMany` y no `create` anidado: `invoice_taxes` es un modelo
+    // RELACIONAL en el scoping de tienda (se filtra por `invoice.store_id` en
+    // lectura), así que el create pasa sin que la extensión le inyecte nada.
+    await this.prisma.invoice_taxes.createMany({ data: rows });
   }
+
+  /**
+   * Fecha de vencimiento del documento.
+   *
+   * Dejaba de existir cuando el usuario no la escribía (`due_date: null`), y en
+   * una factura de contado eso no es "sin vencimiento": es que vence el mismo
+   * día en que se emite. La columna en NULL rompe dos cosas aguas abajo — el
+   * cálculo de cartera vencida no tiene contra qué comparar, y
+   * `cac:PaymentMeans/cbc:PaymentDueDate` queda sin valor que emitir.
+   *
+   * Tres casos:
+   * · Fecha explícita ⇒ se respeta, venga de donde venga.
+   * · Crédito (`payment_form = '2'`) sin fecha ⇒ **error**. Una venta a crédito
+   *   sin plazo no es una omisión de captura, es una contradicción: el plazo es
+   *   precisamente lo que la distingue de una de contado.
+   * · Todo lo demás (contado, o forma de pago sin declarar) ⇒ `issue_date`.
+   *   El default DIAN de la forma de pago es contado, así que un documento que
+   *   no dice nada vence al emitirse.
+   */
+  private resolveDueDate(
+    dto: { due_date?: string; payment_form?: string },
+    issue_date: Date,
+  ): Date {
+    const is_credit = dto.payment_form === '2';
+
+    if (!dto.due_date) {
+      if (is_credit) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'La factura está marcada como venta a crédito pero no tiene fecha de vencimiento. Indica el plazo de pago o cambia la forma de pago a contado.',
+        );
+      }
+      return issue_date;
+    }
+
+    const due_date = new Date(dto.due_date);
+    if (due_date < issue_date) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `La fecha de vencimiento (${dto.due_date}) es anterior a la fecha de emisión. Corrige una de las dos.`,
+      );
+    }
+    return due_date;
+  }
+
+  /**
+   * Lee `store_settings.invoicing.aiu` de la tienda en contexto.
+   *
+   * Devuelve `{}` cuando la tienda no tiene la sección: los defaults viven en
+   * `resolveAiuContext`, no acá, para que exista un solo sitio donde consultar
+   * qué se asume cuando el comerciante no ha configurado nada.
+   *
+   * La sección se escribe por `PATCH /store/settings`: está registrada en
+   * `KNOWN_SECTIONS` (`settings.service.ts`) **y** declarada como
+   * `InvoicingSettingsDto` en `UpdateSettingsDto`. Hacen falta las dos — el
+   * sanitizador descarta lo que no esté en la lista respondiendo 200 igual, y el
+   * `ValidationPipe` corre con `whitelist: true` y borra lo que el DTO no
+   * declare. Si alguien quita cualquiera de las dos, el régimen AIU vuelve a ser
+   * inescribible sin que ningún error lo delate.
+   */
+  private async loadAiuSettings(store_id?: number): Promise<AiuSettings> {
+    if (typeof store_id !== 'number') return {};
+
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+
+    const settings = row?.settings as Record<string, any> | null;
+    const aiu = settings?.invoicing?.aiu;
+    return aiu && typeof aiu === 'object' ? (aiu as AiuSettings) : {};
+  }
+
+  /**
+   * Resuelve TODO lo que el AIU cambia en un documento: el régimen de base
+   * gravable que usa el motor y la nota legal que va en la línea de
+   * Administración.
+   *
+   * ## Por qué el régimen es configuración y no una constante
+   *
+   * Hay dos bases gravables incompatibles y NINGUNA se puede deducir del
+   * producto facturado:
+   *
+   * · **E.T. art. 462-1** (aseo y cafetería, vigilancia, servicios temporales
+   *   de empleo): la base es el AIU COMPLETO (A+I+U) y no puede ser menor al
+   *   10 % del valor del contrato.
+   * · **Decreto 1372/1992 art. 3** (construcción de bien inmueble): la base es
+   *   SÓLO la Utilidad.
+   *
+   * La misma empresa de servicios puede tener contratos de los dos tipos. Elegir
+   * el equivocado no produce ningún error visible: la DIAN acepta el documento
+   * y la factura declara menos IVA del debido, corregible sólo con nota crédito
+   * y ya con la sanción corriendo. Por eso la elección es explícita del
+   * comerciante, con default `et_462_1` — el que declara MÁS IVA, porque
+   * sobre-declarar se recupera y sub-declarar se sanciona.
+   *
+   * ## Y por qué se valida el objeto del contrato acá
+   *
+   * La regla CAV03 exige que la nota de la línea de Administración empiece por
+   * el literal `DIAN_AIU_NOTE_PREFIX` y mida entre 20 y 5.000 caracteres. Es un
+   * dato de negocio que no está en el documento sino en el contrato, así que
+   * vive en la configuración de la tienda y se valida antes de tomar el
+   * consecutivo.
+   *
+   * ## Qué devuelve, y qué hace cada cosa
+   *
+   * · `aiu` — entra al motor y decide qué líneas gravan.
+   * · `note` — la cadena YA COMPUESTA que la línea de Administración debe
+   *   llevar en `cbc:Note`. Acá sólo se VALIDA (fallar temprano es lo que
+   *   ahorra el consecutivo); quien la escribe en el XML es la capa de emisión,
+   *   que la recompone con la misma `buildAiuNote` desde la misma
+   *   configuración, así que las dos no pueden divergir.
+   */
+  private async resolveAiuContext(
+    operation_type: string | null | undefined,
+    items: Array<{ aiu_component?: string | null }>,
+  ): Promise<{ aiu?: InvoiceCalculatorAiuInput; note?: string }> {
+    const is_aiu =
+      (operation_type || '').trim() === DIAN_INVOICE_OPERATION_TYPES.AIU;
+
+    if (!is_aiu) {
+      // Un componente AIU en un documento que no es AIU no es inofensivo: la
+      // columna se persistiría, nadie la leería, y la línea saldría gravada
+      // como una venta normal. Quien la marcó cree que está facturando un
+      // contrato AIU. Se corta explícito en vez de ignorarla.
+      const marked = items.findIndex((item) => item.aiu_component);
+      if (marked >= 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_003,
+          `La línea ${marked + 1} está marcada como componente AIU pero el documento no es un contrato AIU. ` +
+            `Cambia el tipo de operación a AIU (código ${DIAN_INVOICE_OPERATION_TYPES.AIU}) o quita la marca de la línea.`,
+          { line_index: marked, operation_type: operation_type ?? null },
+        );
+      }
+      return {};
+    }
+
+    const context = this.getContext();
+    const settings = await this.loadAiuSettings(context.store_id);
+
+    // MISMA función que usa la emisión: lo que se valida acá es exactamente la
+    // cadena que va a viajar en `cbc:Note`. Ver `buildAiuNote`.
+    const contract_object = (settings.contract_object || '').trim();
+    const note = buildAiuNote(contract_object);
+
+    if (
+      note.length < DIAN_AIU_NOTE_MIN_LENGTH ||
+      note.length > DIAN_AIU_NOTE_MAX_LENGTH
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_002,
+        `El objeto del contrato AIU falta o no tiene la longitud que exige la DIAN: la nota de la ` +
+          `línea de Administración debe medir entre ${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} ` +
+          `caracteres contando el prefijo obligatorio «${DIAN_AIU_NOTE_PREFIX}». ` +
+          `Descríbelo en la configuración de facturación de la tienda.`,
+        { note_length: note.length, has_contract_object: !!contract_object },
+      );
+    }
+
+    return {
+      note,
+      aiu: {
+        // Default explícito y conservador: bajo `et_462_1` tributa el AIU
+        // completo. Una tienda que no configuró nada declara de más, no de
+        // menos.
+        regime: settings.regime ?? 'et_462_1',
+        enforce_minimum_base: settings.enforce_minimum_base,
+        minimum_base_percent: settings.minimum_base_percent,
+      },
+    };
+  }
+
+  /**
+   * Retención total del documento, resuelta automáticamente desde la
+   * configuración fiscal de LAS DOS PARTES al crear la factura.
+   *
+   * ## Qué se evalúa
+   *
+   * · **suffered** — el adquiriente, si es agente retenedor, retiene al emisor.
+   *   Depende del cliente (`users.is_withholding_agent`, régimen, tipo de
+   *   persona) Y del emisor (un autorretenedor no se deja retener).
+   * · **self** — AUTORRETENCIÓN. Nace de una calidad del EMISOR
+   *   (`is_self_withholder`, Decreto 2201/2016), así que aplica igual en una
+   *   venta anónima de mostrador. No es un caso de `practiced`: no hay menor
+   *   salida de caja hacia nadie — el cliente paga el 100 % del documento y la
+   *   tienda reconoce a la vez un gasto y un pasivo propios.
+   *
+   * Las dos son mutuamente excluyentes por construcción: ambas leen
+   * `tenant.is_self_withholder` con signo opuesto, así que un concepto no puede
+   * salir por los dos caminos.
+   *
+   * ## Por qué acá NO se persiste `withholding_calculations`
+   *
+   * Esas filas ya las escribe `InvoiceFlowService.resolveWithholdingForInvoice`
+   * al ACEPTAR el documento, y `persistWithholdingLines` no es idempotente
+   * («Idempotency is the caller's responsibility»). Escribirlas también acá
+   * duplicaría cada retención de toda factura que se cree y se acepte, que es
+   * el camino normal. Este método sólo CALCULA el agregado que va en
+   * `invoices.withholding_amount` —el dato que la factura necesita mostrar y
+   * declarar antes de ser aceptada—.
+   *
+   * ## Degrada siempre
+   *
+   * Cualquier fallo devuelve `null` y la creación continúa con el
+   * `withholding_amount` que mandó el cliente. Una factura no se cae porque el
+   * catálogo de conceptos esté incompleto.
+   *
+   * ⚠️ La retención NO se resta de `total_amount` (Anexo 1.9 §11.9.1): la DIAN
+   * valida `cbc:PayableAmount` sin mirar `cac:WithholdingTaxTotal`, y restarla
+   * descuadra el documento. Vale para los tres roles.
+   */
+  private async resolveWithholdingAmount(params: {
+    organization_id?: number;
+    store_id?: number;
+    customer_id?: number | null;
+    base: string;
+    iva_amount: string;
+    issue_date: Date;
+  }): Promise<Prisma.Decimal | null> {
+    if (typeof params.organization_id !== 'number') return null;
+
+    try {
+      const base = Number(params.base);
+      const ivaAmount = Number(params.iva_amount);
+      const year = params.issue_date.getFullYear();
+
+      const [suffered, self] = await Promise.all([
+        this.withholdingFlow.resolveSuffered({
+          organization_id: params.organization_id,
+          store_id: params.store_id ?? null,
+          customer_id: params.customer_id ?? null,
+          base,
+          ivaAmount,
+          year,
+        }),
+        this.withholdingFlow.resolveSelf({
+          organization_id: params.organization_id,
+          store_id: params.store_id ?? null,
+          base,
+          year,
+        }),
+      ]);
+
+      const lines = [...suffered.lines, ...self.lines];
+      if (lines.length === 0) return null;
+
+      return lines.reduce(
+        (total, line) => total.plus(new Prisma.Decimal(line.amount)),
+        new Prisma.Decimal(0),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Resolución automática de retenciones falló al crear la factura; se conserva el valor declarado: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Completa la tasa de cambio cuando el documento declara divisa y no trae
+   * tasa, consultando la TRM oficial.
+   *
+   * DEGRADA SIEMPRE. Si la fuente externa no responde, `resolveExchangeRate`
+   * devuelve `null` y este método devuelve `undefined`: la emisión continúa con
+   * lo que el usuario haya escrito. Una factura NO se cae por una llamada HTTP
+   * a un portal de datos abiertos; el error sólo lo lanza quien necesite la
+   * tasa para emitir (el builder omite `cac:PaymentExchangeRate` sin ella).
+   *
+   * La divisa NO cambia la moneda del documento: la factura se emite siempre en
+   * COP (Res. DIAN 000042/2020 art. 73; Oficios 901544 y 903436 de 2020;
+   * Concepto 1509 de 2024).
+   */
+  private async resolveExchangeRateForDocument(dto: {
+    foreign_currency?: string;
+    exchange_rate?: number;
+    exchange_rate_date?: string;
+    issue_date: string;
+  }): Promise<Prisma.Decimal | undefined> {
+    if (dto.exchange_rate != null) return new Prisma.Decimal(dto.exchange_rate);
+    if (!dto.foreign_currency) return undefined;
+
+    const resolved = await this.trm.resolveExchangeRate({
+      currency: dto.foreign_currency,
+      // La fecha de la tasa es la de la operación cuando no se declara otra:
+      // la TRM del día en que se causó, no la de hoy.
+      date: dto.exchange_rate_date || dto.issue_date,
+    });
+
+    return resolved?.rate;
+  }
+
+  /**
+   * Recalcula el documento entero y decide qué divergencias bloquean.
+   *
+   * Sustituye al viejo `calculateAmounts`, que sumaba en coma flotante y
+   * persistía el impuesto que mandara el cliente. Toda la aritmética vive ahora
+   * en `InvoiceCalculatorService` —`Prisma.Decimal`, truncado hoja por hoja,
+   * base despejada en precios inclusivos— y acá sólo queda la POLÍTICA: qué se
+   * hace con la diferencia entre lo que afirmó el cliente y lo que calculó el
+   * servidor.
+   *
+   * ## La política, en tres niveles
+   *
+   * · `untaxed_line_with_amount` ⇒ **bloquea**. Es el único caso irrecuperable:
+   *   la línea declara importe de impuesto y ninguna tarifa de la que
+   *   derivarlo. No hay nada que recalcular, y un importe suelto no puede
+   *   producir un `cac:TaxSubtotal` válido (la DIAN exige `cbc:Percent`). Se
+   *   corta acá, antes de que se gaste numeración autorizada.
+   *
+   * · `line_tax` ⇒ **gana el servidor, sin bloquear**. El contrato declara el
+   *   `tax_amount` del cliente como informativo, y el formulario del panel manda
+   *   `tax_amount: 0` a propósito esperando el recálculo: bloquear haría fallar
+   *   toda factura del módulo. Se registra en el log con la línea y ambos
+   *   valores, que es lo que hace auditable el recálculo.
+   *
+   * · `withholding_as_tax` / `withholding_amount` ⇒ **se registran**. La
+   *   retención llegó infiltrada en `items[].taxes[]`; el motor ya la sacó del
+   *   cálculo del documento para que un "ReteICA" no contamine el `ValImp3` del
+   *   CUFE clasificándose como ICA.
+   */
+  private recalculateDocument(
+    items: CreateInvoiceItemDto[],
+    snapshots: InvoiceLinePricingSnapshot[],
+    label: string,
+    /**
+     * Régimen de base gravable del AIU, resuelto por `resolveAiuContext` desde
+     * la configuración de la tienda. Ausente ⇒ documento normal: el motor no
+     * mira `aiu_component` y toda línea tributa como siempre.
+     */
+    aiu?: InvoiceCalculatorAiuInput,
+  ): InvoiceCalculatorResult {
+    const result = this.calculator.calculate({
+      ...(aiu ? { aiu } : {}),
+      items: items.map((item, index) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        aiu_component: item.aiu_component,
+        // La *price unit* entra al cálculo, no sólo al snapshot. Si el motor
+        // ignorara el divisor, `invoices.total_amount` saldría N veces mayor
+        // que el `cbc:PayableAmount` que emite el XML —que sí divide— y la
+        // diferencia viajaría además dentro del `ValTot` del CUFE.
+        price_unit_quantity: snapshots[index]?.price_unit_quantity,
+        is_inclusive: item.is_inclusive,
+        tax_amount: item.tax_amount,
+        taxes: item.taxes?.map((tax) => ({
+          tax_rate_id: tax.tax_rate_id,
+          tax_name: tax.tax_name,
+          tax_rate: tax.tax_rate,
+          tax_type: tax.tax_type,
+          taxable_amount: tax.taxable_amount,
+          tax_amount: tax.tax_amount,
+          is_inclusive: tax.is_inclusive,
+        })),
+      })),
+    });
+
+    const orphan = result.divergences.find(
+      (divergence) => divergence.scope === 'untaxed_line_with_amount',
+    );
+    if (orphan) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `La línea ${orphan.line_index + 1}${
+          orphan.line_description ? ` («${orphan.line_description}»)` : ''
+        } declara un impuesto de ${orphan.received} pero no declara ninguna tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero: sin tarifa la DIAN no puede validar el documento.`,
+        { line_index: orphan.line_index, received: orphan.received },
+      );
+    }
+
+    // AIU por debajo del piso legal ⇒ **bloquea**.
+    //
+    // No se infla la base en silencio: el AIU es un valor PACTADO en el
+    // contrato, y subirlo por cuenta propia cambiaría la cifra que el cliente
+    // firmó. Tampoco se deja pasar: bajo el art. 462-1 del E.T. el AIU no puede
+    // ser menor al 10 % del valor del contrato, y una factura que lo incumple la
+    // DIAN la ACEPTA —declara menos IVA del debido y el faltante aparece
+    // después, con sanción e intereses—. El único desenlace correcto es parar
+    // acá, antes de gastar numeración, y decir cuál de las dos cosas corregir.
+    const aiu_floor = result.divergences.find(
+      (divergence) => divergence.scope === 'aiu_base_below_minimum',
+    );
+    if (aiu_floor) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_001,
+        `El AIU declarado (${aiu_floor.received}) es menor al mínimo legal de ${aiu_floor.expected}, ` +
+          `que es el 10% del valor del contrato exigido por el artículo 462-1 del Estatuto Tributario ` +
+          `para aseo y cafetería, vigilancia y servicios temporales de empleo. Sube el AIU o, si el ` +
+          `contrato es de construcción de bien inmueble, cambia el régimen de AIU en la configuración ` +
+          `de facturación de la tienda: ahí la base gravable es sólo la utilidad y este piso no aplica.`,
+        {
+          aiu_value: aiu_floor.received,
+          minimum_base: aiu_floor.expected,
+          difference: aiu_floor.difference,
+        },
+      );
+    }
+
+    for (const divergence of result.divergences) {
+      this.logger.warn(
+        `[${label}] Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
+          `cliente=${divergence.received} servidor=${divergence.expected} (gana el servidor)`,
+      );
+    }
+
+    return result;
+  }
+
+  /**
+   * Resuelve, por línea, los atributos que describen QUÉ se vendió, en qué
+   * escala y contra qué cuenta se contabiliza: la *price unit*, el código de
+   * unidad UN/ECE y la cuenta PUC de ingreso.
+   *
+   * Los dos primeros no se aceptan del request. `price_unit_quantity` no está
+   * siquiera en el DTO: es un atributo del producto, y permitir que entre por el
+   * cuerpo del request dejaría facturar un producto de $28.000 el kilo como
+   * $28.000 el gramo. `unit_code` sí está en el DTO —hay casos legítimos de
+   * override— pero sólo se respeta si el cliente lo declaró explícitamente; si
+   * no, se deriva de la unidad de stock del producto.
+   *
+   * ## Por qué la cuenta se CONGELA acá y no se resuelve al contabilizar
+   *
+   * `AutoEntryService.resolveInvoiceRevenueLines` sabe resolver la cascada
+   * `línea → variante → producto → mapping`, así que dejar la columna en NULL
+   * «funciona». Lo que no funciona es la promesa: entre CREAR la factura y
+   * ACEPTARLA (que es cuando nace el asiento) el producto puede remaparse, y el
+   * asiento saldría contra una cuenta distinta de la que el operador vio al
+   * facturar, sin que nada lo delate — el asiento cuadra igual, sólo que el
+   * ingreso quedó en otra subcuenta. Congelarla acá cierra esa ventana.
+   *
+   * La cascada de `resolveInvoiceRevenueLines` NO cambia: para las filas
+   * históricas —donde la columna es NULL— sigue resolviendo en vivo, que es
+   * exactamente lo que documenta el schema.
+   *
+   * Una sola consulta por tabla para toda la factura. Sin producto (líneas
+   * libres, que el módulo permite) los tres quedan en `undefined`, que es el
+   * comportamiento histórico: divisor 1, `EA` al emitir y mapping por defecto.
+   */
+  private async resolveLinePricingSnapshots(
+    items: CreateInvoiceItemDto[],
+  ): Promise<InvoiceLinePricingSnapshot[]> {
+    const product_ids = Array.from(
+      new Set(
+        items
+          .map((item) => item.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    const variant_ids = Array.from(
+      new Set(
+        items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+
+    const products = product_ids.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: product_ids } },
+          select: {
+            id: true,
+            price_unit_quantity: true,
+            account_code: true,
+            stock_uom: { select: { code: true } },
+          },
+        })
+      : [];
+    const product_by_id = new Map(products.map((p) => [p.id, p]));
+
+    // La variante es la unidad realmente vendida, así que su cuenta gana sobre
+    // la del producto. Consulta aparte y sólo si alguna línea la usa: la
+    // mayoría de facturas no lleva variantes.
+    const variants = variant_ids.length
+      ? await this.prisma.product_variants.findMany({
+          where: { id: { in: variant_ids } },
+          select: { id: true, account_code: true },
+        })
+      : [];
+    const variant_by_id = new Map(variants.map((v) => [v.id, v]));
+
+    return items.map((item) => {
+      const product =
+        item.product_id != null
+          ? product_by_id.get(item.product_id)
+          : undefined;
+      const variant =
+        item.product_variant_id != null
+          ? variant_by_id.get(item.product_variant_id)
+          : undefined;
+
+      // `1` es el default de la columna y significa "precio por unidad": no
+      // aporta nada guardarlo y NULL ya es esa misma semántica en el snapshot.
+      const price_unit = product?.price_unit_quantity ?? null;
+
+      // Misma precedencia que aplica `resolveInvoiceRevenueLines`, en el mismo
+      // orden y a propósito: si las dos difirieran, congelar acá cambiaría la
+      // cuenta en vez de sólo fijarla. El override explícito de la línea manda
+      // sobre el catálogo — es el único de los tres que el usuario declaró para
+      // ESTA factura.
+      const account_code = (
+        item.account_code ??
+        variant?.account_code ??
+        product?.account_code ??
+        ''
+      ).trim();
+
+      return {
+        price_unit_quantity:
+          price_unit != null && price_unit > 1 ? price_unit : undefined,
+        unit_code:
+          item.unit_code ??
+          (product?.stock_uom?.code
+            ? resolveUneceUnitCode(product.stock_uom.code)
+            : undefined),
+        account_code: account_code || undefined,
+      };
+    });
+  }
+}
+
+/**
+ * Lo que se congela de cada línea: la escala del precio, la unidad vendida y la
+ * cuenta PUC de ingreso. Se resuelve del catálogo al facturar —`account_code`
+ * admite además el override explícito de la línea—, nunca del request a secas.
+ */
+interface InvoiceLinePricingSnapshot {
+  price_unit_quantity?: number;
+  unit_code?: string;
+  /** Cuenta ya resuelta: línea → variante → producto. `undefined` ⇒ mapping. */
+  account_code?: string;
 }

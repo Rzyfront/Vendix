@@ -306,6 +306,116 @@ export interface ModuleFlowsSettings {
   invoicing: InvoicingModuleFlows;
 }
 
+// ============================================================================
+// INVOICING - Parámetros fiscales de emisión que la LEY deja al contribuyente
+// ============================================================================
+
+/**
+ * Régimen de IVA aplicable a un contrato facturado bajo la modalidad AIU
+ * (Administración, Imprevistos y Utilidad), `cbc:CustomizationID = '09'`.
+ *
+ * SON DOS RÉGIMENES CON BASES GRAVABLES DISTINTAS, Y CONFUNDIRLOS NO PRODUCE
+ * NINGÚN ERROR VISIBLE. La DIAN acepta el documento en los dos casos: lo único
+ * que cambia es cuánto IVA declara, y una factura que declaró de menos sólo se
+ * corrige con nota crédito y reemisión. Por eso esto es una decisión EXPLÍCITA
+ * del contribuyente y no algo que el motor deduzca de las líneas.
+ *
+ * · `et_462_1` — E.T. art. 462-1. Servicios de aseo y cafetería, vigilancia
+ *   autorizada por la Supervigilancia, servicios temporales de empleo prestados
+ *   por EST autorizadas, y cooperativas de trabajo asociado. La base gravable
+ *   es el AIU **COMPLETO** (A + I + U) y, por mandato del mismo artículo, **no
+ *   puede ser inferior al 10 % del valor del contrato**.
+ *
+ * · `decreto_1372_1992` — Decreto 1372/1992 art. 3. Contratos de construcción
+ *   de bien inmueble. La base gravable es **ÚNICAMENTE la Utilidad** del
+ *   constructor; administración e imprevistos quedan fuera del IVA.
+ *
+ * Cuál aplica depende del CONTRATO, no del producto ni del cliente: la misma
+ * tienda podría, en teoría, tener contratos de los dos tipos. Por eso el valor
+ * vive en la configuración de la tienda y el default es el conservador.
+ */
+export type AiuVatRegime = 'et_462_1' | 'decreto_1372_1992';
+
+export interface AiuSettings {
+  /**
+   * Régimen aplicable. Default `et_462_1`, que es el CONSERVADOR: grava el AIU
+   * completo, o sea declara MÁS IVA que el otro. Si el default estuviera
+   * equivocado, el contribuyente pagó de más —recuperable— en vez de haber
+   * declarado de menos ante la DIAN, que es sanción e intereses.
+   */
+  regime?: AiuVatRegime;
+  /**
+   * Objeto del contrato que se concatena al literal obligatorio
+   * «Contrato de servicios AIU por concepto de: » en el `cbc:Note` de la línea
+   * de ADMINISTRACIÓN (Anexo Técnico 1.9, regla CAV03).
+   *
+   * La regla exige entre 20 y 5000 caracteres CONTANDO el prefijo literal, así
+   * que un objeto vacío no sirve: hay que describir el contrato.
+   */
+  contract_object?: string;
+  /**
+   * Aplica el piso legal del 10 % del valor del contrato sobre la base gravable
+   * (E.T. art. 462-1). Default `true`. Sólo tiene sentido bajo `et_462_1`: el
+   * Decreto 1372/1992 no fija piso alguno sobre la utilidad.
+   *
+   * No corrige la base en silencio — cuando el AIU declarado queda por debajo
+   * del piso, la emisión se RECHAZA y se le dice al usuario cuánto falta.
+   * Inflar la base automáticamente cambiaría el importe que el cliente firmó.
+   */
+  enforce_minimum_base?: boolean;
+  /** Porcentaje del piso legal. Default 10. Configurable sólo por si la ley cambia. */
+  minimum_base_percent?: number;
+}
+
+/**
+ * Parámetros de emisión fiscal de la tienda.
+ *
+ * Escribible por `PATCH /store/settings`. Para que siga siéndolo, la sección
+ * tiene que estar en LOS DOS sitios: `KNOWN_SECTIONS` (`settings.service.ts`) y
+ * la propiedad `invoicing` de `UpdateSettingsDto` (tipada como
+ * `InvoicingSettingsDto`). `sanitizeAndValidate` descarta toda clave de primer
+ * nivel ausente de la lista y responde 200 igual, y el `ValidationPipe` corre
+ * con `whitelist: true` y borra lo que el DTO no declare — así que quitar
+ * cualquiera de las dos devuelve la sección al fallo silencioso que ya sufrieron
+ * `vexi`, `availability` y `receipts.printing`.
+ */
+/**
+ * Comportamiento fiscal del carril del POS.
+ *
+ * Lo único que separa la superficie del cajero de la del contador: qué pasa al
+ * cerrar una venta de mostrador. Las reglas de validación y el documento que se
+ * emite son los mismos en ambas — duplicarlas por superficie es cómo se llegó a
+ * que el CUFE y el XML clasificaran impuestos distinto.
+ */
+export interface PosInvoicingSettings {
+  /**
+   * Emitir el documento electrónico automáticamente al cerrar la venta.
+   *
+   * Default `true` (ver `DEFAULT_POS_AUTO_EMIT`). La emisión ocurre SIEMPRE
+   * fuera de la transacción del cobro, así que apagarlo no hace la caja más
+   * rápida: sólo obliga a pedir el documento a mano desde el POS.
+   */
+  auto_emit?: boolean;
+}
+
+export interface InvoicingSettings {
+  /** Régimen de IVA para contratos AIU (`operation_type = '09'`). */
+  aiu?: AiuSettings;
+  /** Comportamiento fiscal de la venta de mostrador. */
+  pos?: PosInvoicingSettings;
+}
+
+/**
+ * Emisión automática al cerrar la venta, activa salvo que la tienda la apague.
+ *
+ * El default es `true` porque una tienda habilitada ante la DIAN debe soportar
+ * cada venta con un documento: dejarlo apagado por defecto convertiría la
+ * obligación en un clic que alguien tiene que acordarse de dar. No hay riesgo
+ * para quien no factura electrónicamente — la compuerta de habilitación corta
+ * antes de crear nada y la venta ni se entera.
+ */
+export const DEFAULT_POS_AUTO_EMIT = true;
+
 export interface StoreSettings {
   /**
    * Internal schema version for migrations. See `SettingsMigratorService`.
@@ -333,6 +443,9 @@ export interface StoreSettings {
 
   // Fiscal data - legal/tax identity (NIT, regime, address, responsibilities)
   fiscal_data?: FiscalDataSettings;
+
+  // Invoicing - parámetros de emisión que la ley deja al contribuyente (AIU).
+  invoicing?: InvoicingSettings;
 
   // Services - where the service is performed (home vs shop) + shop address
   services?: ServicesSettings;

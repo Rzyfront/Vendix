@@ -10,11 +10,23 @@ import {
   CreateDebitNoteDto,
 } from './dto/create-credit-note.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
+import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 
+/**
+ * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
+ * el emisor cuando la nota se transmite. Por eso la resolución se carga con
+ * `RESOLUTION_PUBLIC_SELECT`, la lista blanca que deja las tres columnas de
+ * clave técnica fuera de la respuesta (el porqué completo está en su docblock,
+ * en `utils/technical-key.util.ts`).
+ *
+ * Con `resolution: true` la ClTec del rango de notas viajaba al navegador en
+ * cada nota crédito o débito creada, exactamente igual que pasaba en las
+ * facturas. Es el mismo defecto, en el archivo de al lado.
+ */
 const INVOICE_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
-  resolution: true,
+  resolution: { select: RESOLUTION_PUBLIC_SELECT },
   related_invoice: {
     select: { id: true, invoice_number: true, invoice_type: true },
   },
@@ -171,14 +183,40 @@ export class CreditNotesService {
         ...(dto.taxes &&
           dto.taxes.length > 0 && {
             invoice_taxes: {
-              create: dto.taxes.map((tax_item) => ({
-                tax_rate_id: tax_item.tax_rate_id,
-                tax_name: tax_item.tax_name,
-                tax_rate: new Prisma.Decimal(tax_item.tax_rate),
-                taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-                tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                tax_type: ((tax_item as any).tax_type ?? 'iva') as any,
-              })),
+              create: dto.taxes.map((tax_item, index) => {
+                // `taxable_amount` y `tax_amount` son opcionales en
+                // `CreateInvoiceTaxDto` porque en las FACTURAS los deriva
+                // `InvoiceCalculatorService` a partir de la línea. Este servicio
+                // no pasa por ese calculador —la nota copia los importes del
+                // documento que corrige—, así que aquí no hay nada de donde
+                // derivarlos y sí hay que exigirlos.
+                //
+                // Sin esta comprobación, `new Prisma.Decimal(undefined)` lanza un
+                // `TypeError` crudo: 500 «Error interno» sobre lo que en realidad
+                // es un campo que faltó en la petición.
+                if (
+                  tax_item.taxable_amount === undefined ||
+                  tax_item.taxable_amount === null ||
+                  tax_item.tax_amount === undefined ||
+                  tax_item.tax_amount === null
+                ) {
+                  throw new VendixHttpException(
+                    ErrorCodes.INVOICING_CALC_001,
+                    `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
+                      'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
+                      'así que ambos deben venir ya calculados.',
+                    { tax_index: index, tax_name: tax_item.tax_name },
+                  );
+                }
+                return {
+                  tax_rate_id: tax_item.tax_rate_id,
+                  tax_name: tax_item.tax_name,
+                  tax_rate: new Prisma.Decimal(tax_item.tax_rate),
+                  taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
+                  tax_amount: new Prisma.Decimal(tax_item.tax_amount),
+                  tax_type: ((tax_item as any).tax_type ?? 'iva') as any,
+                };
+              }),
             },
           }),
       },

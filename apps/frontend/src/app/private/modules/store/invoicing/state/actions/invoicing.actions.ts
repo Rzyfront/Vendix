@@ -10,7 +10,24 @@ import {
   CreateResolutionDto,
   UpdateResolutionDto,
   DianConfig,
+  DianDocumentEvent,
 } from '../../interfaces/invoice.interface';
+import { DianRejection } from '../../utils/invoicing-errors.util';
+
+/**
+ * Payload de fallo de las mutaciones que un modal debe poder interpretar.
+ *
+ * `error` (mensaje UX) es lo que el reducer guarda; `errorCode` y `details`
+ * viajan para que el modal que origino la mutacion pueda mapear
+ * `SYS_VALIDATION_001` a sus `FormControl` en vez de tragarse el detalle. Son
+ * datos planos: `strictActionSerializability` esta desactivado, pero aun asi no
+ * se mete aqui el `HttpErrorResponse` crudo.
+ */
+export interface MutationFailure {
+  error: string;
+  errorCode?: string | null;
+  details?: unknown;
+}
 
 // ── Load Invoices ───────────────────────────────────────────
 
@@ -51,7 +68,7 @@ export const createInvoiceSuccess = createAction(
 );
 export const createInvoiceFailure = createAction(
   '[Invoicing] Create Invoice Failure',
-  props<{ error: string }>(),
+  props<MutationFailure>(),
 );
 
 // ── Create From Order ───────────────────────────────────────
@@ -66,7 +83,7 @@ export const createFromOrderSuccess = createAction(
 );
 export const createFromOrderFailure = createAction(
   '[Invoicing] Create From Order Failure',
-  props<{ error: string; errorCode?: string | null }>(),
+  props<MutationFailure>(),
 );
 
 // ── Create From Sales Order ─────────────────────────────────
@@ -81,7 +98,7 @@ export const createFromSalesOrderSuccess = createAction(
 );
 export const createFromSalesOrderFailure = createAction(
   '[Invoicing] Create From Sales Order Failure',
-  props<{ error: string; errorCode?: string | null }>(),
+  props<MutationFailure>(),
 );
 
 // ── Update Invoice ──────────────────────────────────────────
@@ -212,7 +229,7 @@ export const createCreditNoteSuccess = createAction(
 );
 export const createCreditNoteFailure = createAction(
   '[Invoicing] Create Credit Note Failure',
-  props<{ error: string }>(),
+  props<MutationFailure>(),
 );
 
 // ── Debit Note ──────────────────────────────────────────────
@@ -227,7 +244,67 @@ export const createDebitNoteSuccess = createAction(
 );
 export const createDebitNoteFailure = createAction(
   '[Invoicing] Create Debit Note Failure',
-  props<{ error: string }>(),
+  props<MutationFailure>(),
+);
+
+// ── Rechazo de la DIAN (INVOICING_PROVIDER_004) ─────────────
+//
+// El motivo real del rechazo llega en `details.dian_errors[]` y NO cabe en un
+// toast de dos segundos: son N reglas con codigo y texto, y son justo lo que el
+// comerciante tiene que corregir. Se guarda en el state para pintarlo, completo
+// y persistente, en el detalle de la factura que lo produjo.
+
+export const dianDocumentRejected = createAction(
+  '[Invoicing] DIAN Document Rejected',
+  props<{ rejection: DianRejection }>(),
+);
+
+export const clearDianRejection = createAction(
+  '[Invoicing] Clear DIAN Rejection',
+);
+
+// ── Eventos RADIAN (Res. 000085/2022) ───────────────────────
+//
+// `GET /store/invoicing/:id/events` existia en el backend desde siempre y NO
+// tenia un solo cliente: la pista de auditoria del titulo valor —acuse, recibo,
+// aceptacion, endoso, pago— era invisible desde el panel.
+//
+// `invoiceId` viaja en success y failure a proposito: el detalle lo compara con
+// la factura abierta antes de pintar, igual que hace con `dianRejection`. Sin
+// ese amarre, los eventos de una factura se pintarian sobre la siguiente que el
+// usuario abriera.
+
+export const loadDianEvents = createAction(
+  '[Invoicing] Load DIAN Events',
+  props<{ invoiceId: number }>(),
+);
+export const loadDianEventsSuccess = createAction(
+  '[Invoicing] Load DIAN Events Success',
+  props<{ invoiceId: number; events: DianDocumentEvent[] }>(),
+);
+export const loadDianEventsFailure = createAction(
+  '[Invoicing] Load DIAN Events Failure',
+  props<{ invoiceId: number; error: string }>(),
+);
+
+// ── Regenerar PDF ───────────────────────────────────────────
+//
+// `POST /store/invoicing/:id/pdf/regenerate` tampoco tenia cliente. Es una
+// MUTACION (reconstruye el PDF y lo sube a S3 pisando el anterior), asi que
+// pasa por accion + effect como el resto: un `subscribe` directo desde el
+// componente se saltaria el reporte de error unico de `InvoicingEffects`.
+
+export const regenerateInvoicePdf = createAction(
+  '[Invoicing] Regenerate Invoice PDF',
+  props<{ id: number }>(),
+);
+export const regenerateInvoicePdfSuccess = createAction(
+  '[Invoicing] Regenerate Invoice PDF Success',
+  props<{ id: number; url: string | null }>(),
+);
+export const regenerateInvoicePdfFailure = createAction(
+  '[Invoicing] Regenerate Invoice PDF Failure',
+  props<{ id: number; error: string }>(),
 );
 
 // ── Stats ───────────────────────────────────────────────────
