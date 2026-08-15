@@ -189,6 +189,21 @@ export function dianLineExtension(line: DianLineAmounts): string {
 }
 
 /**
+ * Importe de la línea ANTES del descuento: `cantidad × precio ÷ price unit`.
+ *
+ * Es el `cbc:BaseAmount` del `cac:AllowanceCharge` de línea — sobre qué importe
+ * se calculó el descuento. Existe como función y no como expresión suelta
+ * porque el builder la escribía sin el divisor de la *price unit*: una línea
+ * que publica su precio por N unidades de stock declaraba una base N veces
+ * mayor que su propio `cbc:LineExtensionAmount`, o sea un descuento aplicado
+ * sobre un importe que la línea nunca afirma. Derivarla del mismo helper que el
+ * importe neto hace ese desacuerdo irrepresentable.
+ */
+export function dianLineGross(line: DianLineAmounts): string {
+  return applyScale(lineGrossDecimal(line));
+}
+
+/**
  * Sum of every line's net extension amount — the value that
  * `cac:LegalMonetaryTotal/cbc:LineExtensionAmount` **must** equal (rule
  * `FAU14`).
@@ -328,10 +343,13 @@ export function toDecimal(value: DianNumericInput): Prisma.Decimal {
 // --- Private helpers ---
 
 function lineExtensionDecimal(line: DianLineAmounts): Prisma.Decimal {
+  return lineGrossDecimal(line).minus(toDecimal(line.discount_amount));
+}
+
+function lineGrossDecimal(line: DianLineAmounts): Prisma.Decimal {
   return toDecimal(line.quantity)
     .times(toDecimal(line.unit_price))
-    .dividedBy(priceUnitDivisor(line.price_unit_quantity))
-    .minus(toDecimal(line.discount_amount));
+    .dividedBy(priceUnitDivisor(line.price_unit_quantity));
 }
 
 /**

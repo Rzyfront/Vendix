@@ -18,6 +18,7 @@ import {
   dianArithmetic,
   dianLineExtension,
   dianLineExtensionTotal,
+  dianLineGross,
   dianRate,
   dianSum,
   dianUnitPrice,
@@ -1098,15 +1099,15 @@ export class UblCommonBuilder {
           .ele(UBL_NAMESPACES.CBC, 'Amount')
           .att('currencyID', currency)
           .txt(dianAmount(item.discount_amount));
-        // BaseAmount is what the allowance was computed on — the gross line.
+        // Importe sobre el que se calculó el descuento: la línea ANTES de
+        // restarlo. Se deriva del mismo helper que el importe neto para que
+        // lleve el divisor de la *price unit*; escrito a mano como
+        // `cantidad × precio` declaraba una base N veces mayor que el
+        // `cbc:LineExtensionAmount` de su propia línea.
         allowance
           .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
           .att('currencyID', currency)
-          .txt(
-            dianAmount(
-              toDecimal(item.quantity).times(toDecimal(item.unit_price)),
-            ),
-          );
+          .txt(dianLineGross(item));
       }
 
       // Tax total for line

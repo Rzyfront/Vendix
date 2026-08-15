@@ -16,12 +16,14 @@ import {
   ProviderResponse,
 } from '../providers/invoice-provider.interface';
 import {
+  clearInclusiveLine,
   dianAmount,
   dianLineExtension,
   dianRate,
   dianSum,
   toDecimal,
 } from '../utils/dian-money.util';
+import type { DianClearedLineAmounts } from '../utils/dian-money.util';
 import {
   buildAiuNote,
   DIAN_AIU_NOTE_MAX_LENGTH,
@@ -1289,6 +1291,12 @@ export class InvoiceFlowService {
      */
     technical_key: string | null,
   ): FiscalDocumentValidationInput {
+    // El validador tiene que juzgar la MISMA línea que se va a emitir. Si el
+    // emisor despeja el precio de una línea inclusiva y el validador no, el
+    // gate aprueba un documento distinto del que viaja —o bloquea uno sano— y
+    // deja de ser una puerta.
+    const inclusive_overrides = this.resolveInclusiveLineOverrides(invoice);
+
     return {
       document_type,
       invoice_number: invoice.invoice_number,
@@ -1305,14 +1313,13 @@ export class InvoiceFlowService {
         line_number: index + 1,
         description: item.description,
         quantity: item.quantity,
-        unit_price: item.unit_price,
-        discount_amount: item.discount_amount,
+        unit_price:
+          inclusive_overrides.get(item.id)?.unit_price ?? item.unit_price,
+        discount_amount:
+          inclusive_overrides.get(item.id)?.discount_amount ??
+          item.discount_amount,
         tax_amount: item.tax_amount,
-        price_unit_quantity:
-          item.stock_units_consumed == null &&
-          Number(item.price_unit_quantity) > 1
-            ? item.price_unit_quantity
-            : undefined,
+        price_unit_quantity: this.resolveEmittedPriceUnitQuantity(item),
         unit_code: item.unit_code ?? unit_code_by_item.get(item.id) ?? null,
         aiu_component: item.aiu_component ?? null,
       })),
@@ -1732,6 +1739,137 @@ export class InvoiceFlowService {
   }
 
   /**
+   * La *price unit* que el emisor VA A DECLARAR para esta línea, o `undefined`.
+   *
+   * Existe como función y no como expresión repetida porque la condición tiene
+   * dos consumidores que ya divergieron una vez —el mapeo del proveedor y el del
+   * prevalidador— y un tercero nuevo (`resolveInclusiveLineOverrides`) que
+   * DESPEJA el precio dividiendo por ella. Si los tres no usan exactamente el
+   * mismo divisor, el precio despejado no reproduce el importe de la línea y el
+   * documento se contradice a sí mismo, que es justo lo que FAV06 rechaza.
+   *
+   * La condición: `unit_price` es el precio de N unidades de stock sólo cuando
+   * la cantidad está EN unidad de stock. Si la línea se vendió por presentación
+   * (`stock_units_consumed` presente), `quantity` cuenta paquetes y `unit_price`
+   * ya es el precio del paquete: volver a dividir declararía un importe N veces
+   * menor.
+   */
+  private resolveEmittedPriceUnitQuantity(item: any): string | undefined {
+    return item?.stock_units_consumed == null &&
+      Number(item?.price_unit_quantity) > 1
+      ? String(item.price_unit_quantity)
+      : undefined;
+  }
+
+  /**
+   * Precio y descuento DESPEJADOS de cada línea cuyo precio LLEVA EL IMPUESTO
+   * DENTRO, indexados por `invoice_items.id`.
+   *
+   * ## El defecto que cierra
+   *
+   * Con `invoice_items.is_inclusive = true` el precio capturado es el que paga
+   * el cliente: $1.000 con IVA 19 % son $840,34 de base y $159,66 de cuota. El
+   * emisor escribía `cbc:LineExtensionAmount = cantidad × precio − descuento`,
+   * o sea los $1.000 BRUTOS, así que `TaxExclusiveAmount` cargaba el IVA por
+   * dentro y `PayableAmount` sobrestimaba la venta en el impuesto entero
+   * ($1.159,66 por una venta de $1.000). El prevalidador local los frenaba con
+   * `HEADER_LINE_EXTENSION_MISMATCH` —por eso ninguno alcanzó a quemar
+   * consecutivo—, pero el efecto neto es que NINGUNA tienda que venda con
+   * impuesto incluido podía facturar electrónicamente.
+   *
+   * ## Por qué no basta con corregir el importe de la línea
+   *
+   * La regla de rechazo **FAV06** (Anexo 1.9, pág. 443-444) valida
+   * `cbc:LineExtensionAmount` contra el `cbc:PriceAmount` **de su propia
+   * línea**, no contra el total de la cabecera. Bajar sólo el importe dejaría
+   * el precio unitario bruto arriba y el neto abajo: un documento internamente
+   * contradictorio, rechazado por la línea misma. Hay que despejar el PRECIO —
+   * y por eso `cac:Price/cbc:PriceAmount` se emite con `dianUnitPrice`, que usa
+   * los 0-6 decimales que ese campo admite y ningún otro importe monetario.
+   *
+   * ## De dónde sale la base gravable
+   *
+   * Se RECIBE, no se recalcula. `invoice_taxes.taxable_amount` es lo que el
+   * motor de cálculo escribió al crear la factura, y es la misma cifra que
+   * sumada da `invoices.subtotal_amount`. Despejarla acá otra vez —dividiendo
+   * por (1 + tarifa)— produciría una segunda verdad que puede diferir un
+   * centavo de la persistida, y entonces la Σ de las líneas ya no sería la
+   * cabecera que la DIAN contrasta (FAU14).
+   *
+   * Sin desglose por línea (histórico, sin `invoice_taxes.invoice_item_id`) la
+   * base se deriva del propio ítem: `bruto − impuesto de la línea`. Es exacta
+   * por construcción, porque el bruto inclusivo ES base + impuesto.
+   *
+   * Una línea con dos filas de tributo que declaran BASES DISTINTAS se deja
+   * fuera: no hay un precio único que reproduzca dos bases, y elegir una sería
+   * inventar. Cae al comportamiento anterior, que el prevalidador seguirá
+   * frenando — visible, no silencioso.
+   */
+  private resolveInclusiveLineOverrides(
+    invoice: any,
+  ): Map<number, DianClearedLineAmounts> {
+    const overrides = new Map<number, DianClearedLineAmounts>();
+    const items: any[] = invoice?.invoice_items || [];
+    // El 100 % del histórico y de las tiendas con precio sin impuesto entra
+    // por acá: sin una sola línea inclusiva no se recorre nada.
+    if (!items.some((item) => item?.is_inclusive === true)) return overrides;
+
+    /** `invoice_items.id` → base persistida, o `null` si sus filas discrepan. */
+    const base_by_item = new Map<number, string | null>();
+    for (const tax of invoice?.invoice_taxes || []) {
+      if (tax?.invoice_item_id == null) continue;
+      const item_id = Number(tax.invoice_item_id);
+      const base = dianAmount(tax.taxable_amount);
+      if (!base_by_item.has(item_id)) {
+        base_by_item.set(item_id, base);
+        continue;
+      }
+      const seen = base_by_item.get(item_id);
+      if (seen !== null && seen !== base) base_by_item.set(item_id, null);
+    }
+
+    for (const item of items) {
+      if (item?.is_inclusive !== true) continue;
+
+      const line = {
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        price_unit_quantity: this.resolveEmittedPriceUnitQuantity(item),
+      };
+
+      const persisted = base_by_item.has(Number(item.id))
+        ? base_by_item.get(Number(item.id))
+        : undefined;
+      if (persisted === null) {
+        this.logger.warn(
+          `Line ${item.id} prices tax-inclusive but its persisted taxes declare different taxable bases; ` +
+            `the line keeps its gross amount rather than clearing it against a base that is not unique`,
+        );
+        continue;
+      }
+
+      const taxable_base =
+        persisted ??
+        toDecimal(dianLineExtension(line)).minus(toDecimal(item.tax_amount));
+
+      const cleared = clearInclusiveLine({ ...line, taxable_base });
+      if (!cleared) {
+        this.logger.warn(
+          `Line ${item.id} prices tax-inclusive but its taxable base ${dianAmount(taxable_base)} is not ` +
+            `usable against its gross ${dianLineExtension(line)}; the line is emitted unchanged and the ` +
+            `pre-validator will stop the document before it spends a consecutive`,
+        );
+        continue;
+      }
+
+      overrides.set(Number(item.id), cleared);
+    }
+
+    return overrides;
+  }
+
+  /**
    * Usa el desglose por línea PERSISTIDO, cuando el documento lo tiene.
    *
    * ## Qué cuenta como "lo tiene"
@@ -1750,9 +1888,6 @@ export class InvoiceFlowService {
    *   impuestos": el emisor la resolverá por su camino histórico, exactamente
    *   como hasta hoy. Inventarle un tributo cero con el esquema de otra línea
    *   sería peor que no decir nada.
-   * · **`invoice_items.is_inclusive`** ⇒ se salta. Ver la nota extensa al final
-   *   de este bloque: no es una limitación del vínculo, es que el emisor todavía
-   *   escribe la base SIN despejar en `cbc:LineExtensionAmount`.
    * · **La base persistida tiene que coincidir con la que el emisor va a
    *   escribir** (`dianLineExtension`), y la suma de las cuotas con el impuesto
    *   de la línea. Las dos cifras se calcularon en momentos distintos y por
@@ -1763,27 +1898,16 @@ export class InvoiceFlowService {
    *   en desacuerdo con el `cbc:LineExtensionAmount` de su propia línea, que es
    *   un XML internamente contradictorio: peor que un desglose ausente.
    *
-   * ## `is_inclusive`: por qué el vínculo NO levanta la exclusión
+   * ## `is_inclusive`: ya no hay exclusión que levantar
    *
-   * Con el desglose persistido ya no hace falta despejar la base hacia atrás
-   * para saber QUÉ tributo lleva la línea — eso era la limitación de la
-   * reconstrucción, y aquí desaparece. Pero el problema de la línea inclusiva no
-   * es de identificación sino de BASE: el emisor escribe
-   * `cbc:LineExtensionAmount = dianLineExtension(item)`, o sea
-   * `cantidad × precio − descuento` con el impuesto TODAVÍA DENTRO, mientras que
-   * la base gravable real es esa cifra despejada (`/(1 + tarifa)`). Las dos
-   * salidas posibles son malas:
-   *
-   *   · Declarar la base despejada en el `TaxSubtotal` ⇒ la línea dice una base
-   *     y su `LineExtensionAmount` dice otra. Contradicción interna.
-   *   · Declarar la base inclusiva ⇒ `TaxAmount ≠ TaxableAmount × Percent`, que
-   *     es exactamente la igualdad que la DIAN recomputa sobre el XML recibido.
-   *
-   * El arreglo de verdad es que el emisor escriba la base despejada, y eso exige
-   * persistir `line_extension_amount` en `invoice_items` (hoy no existe la
-   * columna: quantity, unit_price, discount_amount, tax_amount, total_amount, y
-   * ninguna guarda la base). Es un defecto ANTERIOR y ajeno a este vínculo: se
-   * documenta y no se agrava.
+   * Estas líneas estuvieron excluidas mientras el emisor escribía el bruto en
+   * `cbc:LineExtensionAmount`: declarar ahí la base despejada dejaba la línea
+   * diciendo una base y su importe diciendo otra. Desde
+   * `resolveInclusiveLineOverrides` la línea llega YA DESPEJADA —precio y
+   * descuento sin impuesto— así que `dianLineExtension` devuelve la base
+   * gravable y la guarda de coincidencia de abajo la valida sola, sin caso
+   * especial. Una línea inclusiva que no se pudiera despejar tampoco cuadra
+   * ahí, y cae a la reconstrucción exactamente igual que antes.
    */
   private attachPersistedLineTaxes(
     lines: UblDocumentLine[],
@@ -1833,15 +1957,6 @@ export class InvoiceFlowService {
       const row = rows[index];
       const persisted = taxes_by_item.get(Number(row?.id));
       if (!persisted || persisted.length === 0) return;
-
-      if (row?.is_inclusive === true) {
-        this.logger.warn(
-          `Line ${index + 1} has a persisted tax breakdown but its price includes tax; ` +
-            `the emitter still writes the tax-inclusive amount in cbc:LineExtensionAmount, so declaring the ` +
-            `cleared taxable base here would contradict the line itself. Falling back to the historical path.`,
-        );
-        return;
-      }
 
       // La base que el emisor VA A ESCRIBIR, no la que la fila afirma: son dos
       // cálculos distintos y sólo la primera llega a la DIAN.
@@ -1967,8 +2082,6 @@ export class InvoiceFlowService {
     const last_mask = (1 << candidates.length) - 1;
 
     lines.forEach((line, index) => {
-      if (rows[index]?.is_inclusive === true) return;
-
       const base = toDecimal(dianLineExtension(line));
       if (!base.greaterThan(0)) return;
 
@@ -2194,14 +2307,27 @@ export class InvoiceFlowService {
     // en vez de la línea ya construida permitiría que la base con la que se
     // calcula el impuesto y la que viaja en `cbc:LineExtensionAmount` no fueran
     // la misma cifra.
+    // Líneas con precio impuesto-incluido: se despejan ANTES de armarlas, para
+    // que `dianLineExtension` —y con él el `cbc:LineExtensionAmount` que viaja,
+    // el `ValFac` del CUFE y la base de los tributos por línea— hablen de la
+    // base gravable y no del bruto. Ver `resolveInclusiveLineOverrides`.
+    const inclusive_overrides = this.resolveInclusiveLineOverrides(invoice);
+
     const provider_items: UblDocumentLine[] = (invoice.invoice_items || []).map(
       (item: any) => ({
         description: item.description,
         // Quantity keeps its own scale: UBL InvoicedQuantity is not a monetary
         // value and fractional units (1.5 kg) must survive.
         quantity: item.quantity.toString(),
-        unit_price: dianAmount(item.unit_price),
-        discount_amount: dianAmount(item.discount_amount),
+        // El precio despejado conserva SUS decimales (hasta 6): es el único
+        // campo monetario del UBL que los admite, y truncarlo a 2 devolvería el
+        // descuadre que FAV06 rechaza. Sin despeje, el precio de siempre.
+        unit_price:
+          inclusive_overrides.get(item.id)?.unit_price ??
+          dianAmount(item.unit_price),
+        discount_amount:
+          inclusive_overrides.get(item.id)?.discount_amount ??
+          dianAmount(item.discount_amount),
         tax_amount: dianAmount(item.tax_amount),
         total_amount: dianAmount(item.total_amount),
         // El SNAPSHOT manda sobre la resolución en vivo. `invoice_items.unit_code`
@@ -2212,15 +2338,10 @@ export class InvoiceFlowService {
         // eso tampoco da nada se declara `EA`: en una línea libre, sin producto,
         // "cada" es la unidad correcta, no un relleno.
         unit_code: item.unit_code ?? unitCodeByItem.get(item.id) ?? 'EA',
-        // Escala de precio de la línea. Solo viaja cuando la cantidad está en
-        // unidad mínima: si la línea se vendió por presentación, `unit_price`
-        // ya es el precio del paquete y `quantity` cuenta paquetes, así que
-        // dividir otra vez declararía un importe N veces menor.
-        price_unit_quantity:
-          item.stock_units_consumed == null &&
-          Number(item.price_unit_quantity) > 1
-            ? String(item.price_unit_quantity)
-            : undefined,
+        // Escala de precio de la línea. Misma función que usa el despeje
+        // inclusivo y el prevalidador: tres divisores distintos sobre la misma
+        // línea producen tres importes distintos.
+        price_unit_quantity: this.resolveEmittedPriceUnitQuantity(item),
       }),
     );
 
