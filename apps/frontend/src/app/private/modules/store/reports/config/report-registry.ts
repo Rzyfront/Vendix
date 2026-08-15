@@ -361,6 +361,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-551: ventas por usuario / vendedor.
+    // Wiring mínimo: cubre la planilla "Resumen por vendedor" que el
+    // service `getSalesBySellerForExport` ya retorna. Las planillas
+    // "Por marca" y "Por proveedor" que pide el ticket quedan como
+    // TODO hasta que Rafa decida el contrato (sheet shape + filtro de
+    // scope org-vs-store, mismo bloqueo que #540).
+    id: 'sales-by-seller',
+    category: 'sales',
+    title: 'Por Vendedor',
+    description: 'Ranking de vendedores por facturacion en el periodo',
+    detailedDescription:
+      'Descubre quienes son tus mejores vendedores por volumen de venta. Incluye ticket promedio por vendedor. (Las planillas adicionales por marca y proveedor llegan en un PR aparte.)',
+    icon: 'user-tie',
+    route: '/admin/reports/sales/sales-by-seller',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'seller_id',
+    columns: [
+      { key: 'seller_name', header: 'Vendedor', type: 'text' },
+      { key: 'email', header: 'Email', type: 'text' },
+      { key: 'order_count', header: 'Nº Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_revenue', header: 'Total Vendido', type: 'currency', footer: 'sum' },
+      { key: 'avg_per_order', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
+    ],
+    exportFilename: 'sales_by_seller',
+    stats: [
+      { key: 'total_revenue', label: 'Total Vendido', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Nº Órdenes', type: 'number', icon: 'shopping-cart' },
+      { key: 'avg_per_order', label: 'Ticket Promedio', type: 'currency', icon: 'calculator' },
+      { key: '_count', label: 'Vendedores', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-seller',
+  },
+
+  {
     id: 'sales-by-payment',
     category: 'sales',
     title: 'Por Metodo de Pago',
