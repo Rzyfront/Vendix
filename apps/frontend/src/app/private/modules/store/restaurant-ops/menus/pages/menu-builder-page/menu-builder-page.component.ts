@@ -43,7 +43,7 @@ import { ProductState } from '../../../../products/interfaces/product.interface'
 import {
   ProductPickerModalComponent,
   ProductPickerOption,
-} from '../../../../../../shared/components/product-picker-modal';
+} from '../../../../../../../shared/components/product-picker-modal';
 import {
   MenuWindowModalComponent,
   MenuWindowValue,

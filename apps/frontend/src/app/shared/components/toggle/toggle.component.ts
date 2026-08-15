@@ -49,6 +49,14 @@ import { FormStyleVariant } from '../../types/form.types';
     @if (label()) {
       <span [class]="labelClasses">{{ label() }}</span>
     }
+    @if (labelLeft() || labelRight()) {
+      <span class="ml-2 mr-2 text-xs text-[var(--color-text-secondary)]">
+        {{ labelLeft() }}
+      </span>
+      <span class="ml-2 text-xs text-[var(--color-text-secondary)]">
+        {{ labelRight() }}
+      </span>
+    }
   `,
 })
 export class ToggleComponent implements ControlValueAccessor {
@@ -59,6 +67,9 @@ export class ToggleComponent implements ControlValueAccessor {
   readonly label = input<string | undefined>(undefined);
   readonly ariaLabel = input<string>();
   readonly styleVariant = input<FormStyleVariant>('modern');
+  // Etiquetas opcionales a izquierda/derecha del toggle (tax-selector los usa).
+  readonly labelLeft = input<string | undefined>(undefined);
+  readonly labelRight = input<string | undefined>(undefined);
 
   readonly isOn = signal(false);
   readonly toggled = output<boolean>();

@@ -75,14 +75,19 @@ export class ProductPickerModalComponent {
   readonly loading = input<boolean>(false);
   /**
    * Modo de selección. `'multiple'` (default) emite `confirmed` con
-   * `number[]`. `'single'` emite `confirmed` con `number | null` y
+   * `number[]`. `'single'` emite `selected` con `number | null` y
    * cierra el modal al confirmar; un segundo click en el mismo
    * producto lo deselecciona y al confirmar emite `null`.
    */
   readonly mode = input<'single' | 'multiple'>('multiple');
 
-  /** Emite los ids seleccionados al confirmar (shape depende de `mode`). */
-  readonly confirmed = output<number[] | number | null>();
+  /** Emite los ids seleccionados al confirmar (solo modo `multiple`). */
+  readonly confirmed = output<number[]>();
+  /**
+   * Emite el id seleccionado al confirmar (solo modo `single`). `null` si
+   * el usuario confirmó sin selección.
+   */
+  readonly selected = output<number | null>();
   /** Emite al cancelar/cerrar sin confirmar. */
   readonly closed = output<void>();
   /**
@@ -174,7 +179,7 @@ export class ProductPickerModalComponent {
   handleConfirm(): void {
     if (this.mode() === 'single') {
       const ids = Array.from(this.selectedIds());
-      this.confirmed.emit(ids[0] ?? null);
+      this.selected.emit(ids[0] ?? null);
     } else {
       const ids = Array.from(this.selectedIds());
       if (ids.length === 0) return;

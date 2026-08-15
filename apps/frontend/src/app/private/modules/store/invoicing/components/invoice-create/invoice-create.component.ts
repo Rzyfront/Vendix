@@ -45,7 +45,7 @@ import {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
-import { CustomerModalComponent } from '../../../../customers/components/customer-modal/customer-modal.component';
+import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 /**
@@ -426,7 +426,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       [products]="availableProducts()"
       [mode]="'single'"
       [disabledIds]="pickedProductIds()"
-      (confirmed)="onProductPicked($event)"
+      (selected)="onProductPicked($event)"
       (closed)="productPickerOpen.set(false)"
     >
       <!-- Slot para acción "Crear nuevo producto" cuando el picker está vacío -->
@@ -564,7 +564,8 @@ export class InvoiceCreateComponent {
           const taxAmount = lineGross * rateFactor;
           taxInclusive += taxAmount;
         } else {
-          taxAdditional += (lineGross * sel.rate) / 100;
+          // lineGross declarado fuera del if para usarlo en el else (QUI-690 fix)
+          taxAdditional += ((q * p - d) * sel.rate) / 100;
         }
       }
     }
@@ -666,9 +667,9 @@ export class InvoiceCreateComponent {
     this.customerModalOpen.set(false);
   }
 
-  onProductPicked(productId: number | number[] | null): void {
+  onProductPicked(productId: number | null): void {
     const idx = this.pickerTargetIndex();
-    if (idx == null || productId == null || Array.isArray(productId)) return;
+    if (idx == null || productId == null) return;
     const ctrl = this.itemsArray.at(idx);
     // Map id → description (placeholder; el padre debe hidratar con el
     // universo cargado para tener nombre/precio).
