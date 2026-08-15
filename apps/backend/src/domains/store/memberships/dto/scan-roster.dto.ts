@@ -75,9 +75,11 @@ export interface ExtractedMember {
   raw_row: string | null;
   /**
    * Structured notes extracted per the `member_roster_ocr` prompt rules
-   * (EPS, estado_fisico, lesiones, …). Persisted on commit via
-   * `MembershipNotesService.bulkSet` against `membership_member_notes`.
-   * Empty / absent array is fine — the bulk importer just skips the call.
+   * (EPS, estado_fisico, lesiones, …). Currently returned to the caller
+   * for rendering in the modal; persistence via
+   * `MembershipNotesService.bulkSet` against `membership_member_notes`
+   * is deferred to a separate feature PR (QUI-558-split) so the scanner
+   * fix stays scoped. Empty / absent array is fine.
    */
   notes?: ExtractedMemberNote[] | null;
 }
@@ -348,11 +350,13 @@ export class CommitMemberDto {
   auto_renew?: boolean;
 
   /**
-   * Structured notes (EPS, estado_fisico, lesiones, …) to persist against
-   * the member via `MembershipNotesService.bulkSet`. Empty / omitted ⇒
-   * no notes call is made. The key whitelist is enforced server-side; any
-   * unknown key from the AI is dropped silently (it's a forward-compat
-   * affordance, not a feature).
+   * Structured notes (EPS, estado_fisico, lesiones, …). Currently echoed
+   * back in the commit result for the modal to render and edit. Persistence
+   * via `MembershipNotesService.bulkSet` is deferred to a separate
+   * feature PR (QUI-558-split). Empty / omitted ⇒ no notes call is made.
+   * The key whitelist is enforced server-side; any unknown key from the
+   * AI is dropped silently (it's a forward-compat affordance, not a
+   * feature).
    */
   @IsOptional()
   @IsArray()

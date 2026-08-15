@@ -39,9 +39,6 @@ function buildService() {
     /* memberProfilesService */ {
       upsert: jest.fn().mockResolvedValue(undefined),
     } as any,
-    /* membershipNotesService */ {
-      bulkSet: jest.fn().mockResolvedValue(undefined),
-    } as any,
     /* customersService */ {
       create: jest.fn().mockImplementation((payload: any) =>
         Promise.resolve({ id: 9001, ...payload }),
@@ -538,9 +535,6 @@ describe('MemberBulkScannerService.analyzeRoster (QUI-558 review #4)', () => {
       /* membershipPlansService */ {} as any,
       /* membershipsService */ {} as any,
       /* memberProfilesService */ { upsert: jest.fn().mockResolvedValue(undefined) } as any,
-      /* membershipNotesService */ {
-        bulkSet: jest.fn().mockResolvedValue(undefined),
-      } as any,
       customersService,
       /* responseService */ {} as any,
     );
@@ -654,7 +648,11 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
    *  - customersService.update              (fill-in merge write)
    *  - membershipsService.createFromImport
    *  - memberProfilesService.upsert
-   *  - membershipNotesService.bulkSet       (the QUI-558 whitelist path)
+   *
+   * NOTE: note persistence is intentionally out of scope for the QUI-558
+   * fix. The scanner RETURNS the notes in `m.notes` for the modal to
+   * render and edit; persistence via MembershipNotesService.bulkSet
+   * lives in a separate feature PR (QUI-558-split).
    */
   function buildCommitHarness() {
     // See buildAnalyzeHarness — currentContext is the cross-module
@@ -710,21 +708,12 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
       upsert: jest.fn().mockResolvedValue(undefined),
     } as any;
 
-    const membershipNotesService = {
-      bulkSet: jest.fn().mockResolvedValue({
-        upserted: 1,
-        created: 1,
-        updated: 0,
-      }),
-    } as any;
-
     const svc = new MemberBulkScannerService(
       /* aiEngine */ {} as any,
       prisma,
       /* membershipPlansService */ {} as any,
       membershipsService,
       memberProfilesService,
-      membershipNotesService,
       customersService,
       /* responseService */ {} as any,
     );
@@ -735,7 +724,6 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
       customersService,
       membershipsService,
       memberProfilesService,
-      membershipNotesService,
       runWithCtx,
     };
   }
@@ -744,12 +732,11 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
     // No-op: ALS contexts are scoped per call and self-clean on resolution.
   });
 
-  it('REUSE: links the customer, fills in missing fields, persists notes', async () => {
+  it('REUSE: links the customer, fills in missing fields', async () => {
     const {
       svc,
       customersService,
       membershipsService,
-      membershipNotesService,
       runWithCtx,
     } = buildCommitHarness();
 
@@ -818,19 +805,10 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
         period_end: '2026-06-30',
       }),
     );
-    // Notes passed through verbatim to the whitelist-enforcing service
-    expect(membershipNotesService.bulkSet).toHaveBeenCalledWith(
-      7001,
-      expect.objectContaining({
-        notes: [
-          {
-            note_key: 'eps',
-            note_value: 'Sura',
-            include_in_summary: true,
-          },
-        ],
-      }),
-    );
+    // Notes persistence is intentionally out of scope for the QUI-558 fix.
+    // The scanner RETURNS the notes in `m.notes` for the modal to render and
+    // edit; persistence via MembershipNotesService.bulkSet lives in a
+    // separate feature PR (QUI-558-split).
   });
 
   it('REUSE: skip fill-in merge when the existing customer already has the value', async () => {
@@ -876,7 +854,6 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
       {} as any,
       membershipsService,
       { upsert: jest.fn() } as any,
-      { bulkSet: jest.fn() } as any,
       customersService,
       {} as any,
     );
@@ -904,140 +881,3 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
   });
 });
 
-// ─── MembershipNotesService bulkSet whitelist (QUI-558 review #5) ────────
-
-describe('MembershipNotesService bulkSet whitelist (QUI-558 review #5)', () => {
-  // Inline-import the service so the spec stays a single file (no extra
-  // jest config changes) and exercise only bulkSet + the export.
-  const path = require('path');
-  const svcPath = path.resolve(
-    __dirname,
-    'membership-notes.service.ts',
-  );
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const mod = require(svcPath);
-  const { bulkSet } = mod.MembershipNotesService.prototype;
-  const ALLOWED_MEMBER_NOTE_KEYS = mod.ALLOWED_MEMBER_NOTE_KEYS;
-
-  it('exposes the canonical whitelist', () => {
-    expect(ALLOWED_MEMBER_NOTE_KEYS).toBeInstanceOf(Set);
-    expect(ALLOWED_MEMBER_NOTE_KEYS.has('eps')).toBe(true);
-    expect(ALLOWED_MEMBER_NOTE_KEYS.has('lesiones')).toBe(true);
-    expect(ALLOWED_MEMBER_NOTE_KEYS.has('contacto_emergencia_nombre')).toBe(
-      true,
-    );
-  });
-
-  it('drops unknown note_keys before the dedup loop', async () => {
-    const txNotes = {
-      findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue({ id: 1 }),
-    };
-    const svc: any = {
-      requireStoreId: () => 1,
-      logger: { warn: jest.fn() },
-      prisma: {
-        users: {
-          findFirst: jest.fn().mockResolvedValue({ id: 7001 }),
-        },
-        $transaction: async (cb: any) =>
-          cb({ membership_member_notes: txNotes }),
-      },
-    };
-
-    const result = await bulkSet.call(svc, 7001, {
-      notes: [
-        { note_key: 'eps', note_value: 'Sura' }, // canonical → keep
-        { note_key: '__pwn__', note_value: 'X' }, // unknown → drop
-        { note_key: 'tipo_sangre', note_value: 'O+' }, // canonical → keep
-        { note_key: 'Notas Privadas', note_value: 'Y' }, // unknown → drop
-      ] as any,
-    });
-
-    // 2 canonical kept; 2 dropped (warning logged once).
-    expect(result.upserted).toBe(2);
-    expect(result.created).toBe(2);
-    expect(txNotes.create).toHaveBeenCalledTimes(2);
-    expect(txNotes.create).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: expect.objectContaining({ note_key: 'eps' }),
-      }),
-    );
-    expect(txNotes.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: expect.objectContaining({ note_key: 'tipo_sangre' }),
-      }),
-    );
-    expect(svc.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('dropped 2 note(s) with non-canonical keys'),
-    );
-  });
-
-  it('returns 0/0/0 when all keys are non-canonical', async () => {
-    const svc: any = {
-      requireStoreId: () => 1,
-      logger: { warn: jest.fn() },
-      prisma: {
-        users: {
-          findFirst: jest.fn().mockResolvedValue({ id: 7001 }),
-        },
-        $transaction: jest.fn(),
-      },
-    };
-
-    const result = await bulkSet.call(svc, 7001, {
-      notes: [
-        { note_key: '__pwn__', note_value: 'X' },
-        { note_key: 'Notas Privadas', note_value: 'Y' },
-      ] as any,
-    });
-
-    expect(result).toEqual({ upserted: 0, created: 0, updated: 0 });
-    expect(svc.prisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('dedups canonical keys (last occurrence wins)', async () => {
-    const txNotes = {
-      findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue({ id: 1 }),
-    };
-    const svc: any = {
-      requireStoreId: () => 1,
-      logger: { warn: jest.fn() },
-      prisma: {
-        users: { findFirst: jest.fn().mockResolvedValue({ id: 7001 }) },
-        $transaction: async (cb: any) =>
-          cb({ membership_member_notes: txNotes }),
-      },
-    };
-
-    await bulkSet.call(svc, 7001, {
-      notes: [
-        { note_key: 'eps', note_value: 'Sura' },
-        { note_key: 'eps', note_value: 'Sanitas' }, // dup, last wins
-        { note_key: 'lesiones', note_value: 'rodilla' },
-        { note_key: 'lesiones', note_value: 'tobillo' }, // dup, last wins
-      ] as any,
-    });
-
-    expect(txNotes.create).toHaveBeenCalledTimes(2);
-    expect(txNotes.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          note_key: 'eps',
-          note_value: 'Sanitas',
-        }),
-      }),
-    );
-    expect(txNotes.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          note_key: 'lesiones',
-          note_value: 'tobillo',
-        }),
-      }),
-    );
-  });
-});

@@ -27,8 +27,3 @@ export type {
 export {
   CommitMemberNoteDto,
 } from './scan-roster.dto';
-export {
-  SetMembershipNoteDto,
-  BulkSetMembershipNotesDto,
-  MembershipNoteQueryDto,
-} from './membership-note.dto';

@@ -2,11 +2,9 @@ import { Module } from '@nestjs/common';
 import { MembershipsController } from './memberships.controller';
 import { MemberProfilesController } from './member-profiles.controller';
 import { MemberBulkScannerController } from './member-bulk-scanner.controller';
-import { MembershipNotesController } from './membership-notes.controller';
 import { MembershipsService } from './memberships.service';
 import { MemberProfilesService } from './member-profiles.service';
 import { MemberBulkScannerService } from './member-bulk-scanner.service';
-import { MembershipNotesService } from './membership-notes.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { MembershipPlansModule } from '../membership-plans/membership-plans.module';
@@ -38,18 +36,15 @@ import { CustomersModule } from '../customers/customers.module';
     MembershipsController,
     MemberProfilesController,
     MemberBulkScannerController,
-    MembershipNotesController,
   ],
   providers: [
     MembershipsService,
     MemberProfilesService,
     MemberBulkScannerService,
-    MembershipNotesService,
   ],
   exports: [
     MembershipsService,
     MemberProfilesService,
-    MembershipNotesService,
   ],
 })
 export class MembershipsModule {}

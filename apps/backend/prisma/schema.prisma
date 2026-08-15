@@ -3962,20 +3962,6 @@ model membership_access_occupancy {
 // Notas estructuradas por socio: EPS, estado físico, lesiones, etc.
 // Patrón espejo de customer_consultation_notes pero sin booking.
 // Permite UPSERT real desde el bulk-scan (ver QUI-558).
-model membership_member_notes {
-  id                 Int      @id @default(autoincrement())
-  store_id           Int
-  customer_id        Int
-  note_key           String   @db.VarChar(100)
-  note_value         String   @db.Text
-  include_in_summary Boolean  @default(false)
-  created_at         DateTime @default(now()) @db.Timestamp(6)
-  updated_at         DateTime @default(now()) @db.Timestamp(6)
-
-  @@index([store_id, customer_id])
-  @@index([customer_id, note_key])
-}
-
 enum api_key_status_enum {
   active
   inactive

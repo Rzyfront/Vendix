@@ -12,7 +12,6 @@ import { MembershipPlansService } from '../membership-plans/membership-plans.ser
 import { CustomersService } from '../customers/customers.service';
 import { MembershipsService } from './memberships.service';
 import { MemberProfilesService } from './member-profiles.service';
-import { MembershipNotesService } from './membership-notes.service';
 import {
   ExtractedMember,
   ExtractedPlan,
@@ -72,7 +71,6 @@ export class MemberBulkScannerService {
     private readonly membershipPlansService: MembershipPlansService,
     private readonly membershipsService: MembershipsService,
     private readonly memberProfilesService: MemberProfilesService,
-    private readonly membershipNotesService: MembershipNotesService,
     private readonly customersService: CustomersService,
     private readonly responseService: ResponseService,
   ) {}
@@ -606,25 +604,15 @@ export class MemberBulkScannerService {
           }
         }
 
-        // Notes (EPS, estado_fisico, lesiones, …) — persist via the
-        // dedicated service. Drops unknown keys server-side (the
-        // `MembershipNotesService` doesn't filter on the key whitelist yet,
-        // so callers should pass only canonical keys; the prompt enforces
-        // this on the AI side).
+        // Notes (EPS, estado_fisico, lesiones, …) — el scanner RETURNA los
+        // notes en `m.notes` para que el modal los muestre/editables, pero
+        // la persistencia via `MembershipNotesService.bulkSet` sale del fix
+        // del escáner y vive en el PR de feature (QUI-558-split). Cuando el
+        // PR de feature se mergee, este bloque se reactiva.
         if (Array.isArray(m.notes) && m.notes.length > 0) {
-          try {
-            await this.membershipNotesService.bulkSet(customerId, {
-              notes: m.notes.map((n) => ({
-                note_key: n.note_key,
-                note_value: n.note_value,
-                include_in_summary: n.include_in_summary ?? false,
-              })),
-            });
-          } catch (err: any) {
-            this.logger.warn(
-              `[MemberRosterCommit] notes persistence failed for customer ${customerId}: ${err?.message}`,
-            );
-          }
+          this.logger.debug?.(
+            `[MemberRosterCommit] ${m.notes.length} notes capturadas para customer ${customerId} — persistencia deferida al PR de feature`,
+          );
         }
 
         results.push({
