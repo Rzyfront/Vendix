@@ -208,6 +208,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_VALIDATE_002:
     'Debes configurar un SKU para el producto antes de activar las variantes.',
   PROD_VALIDATE_003: 'El SKU de la variante no puede estar vacío.',
+  // Cuenta contable propia del producto (override del PUC). Los tres mensajes
+  // del backend nombran la cuenta concreta y la pantalla donde se corrige, así
+  // que las superficies que puedan anclarlo al campo deben mostrar `message`
+  // tal cual; estos textos son el respaldo genérico.
+  PROD_ACCOUNT_CODE_NOT_FOUND_001:
+    'La cuenta contable indicada no existe en el plan de cuentas (PUC) de esta organización. Créala en Contabilidad → Plan de Cuentas, elige una existente, o deja el campo vacío para usar la cuenta de ingreso por defecto.',
+  PROD_ACCOUNT_CODE_INACTIVE_001:
+    'La cuenta contable indicada está inactiva y no admite movimientos nuevos. Actívala en Contabilidad → Plan de Cuentas o elige otra.',
+  // Distinguir "no existe" de "es de agrupación" importa: la segunda SÍ aparece
+  // en el plan de cuentas, así que sin este matiz el usuario la vuelve a elegir.
+  PROD_ACCOUNT_CODE_NOT_POSTABLE_001:
+    'La cuenta contable indicada es de agrupación y no admite movimientos: un asiento no se puede registrar sobre ella. Elige una de sus subcuentas en Contabilidad → Plan de Cuentas.',
 
   // Product/Service & Variants Validation
   PROD_SVC_VARIANTS_001:
@@ -755,6 +767,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La DIAN rechazó el documento. Revisa los motivos que reporta y corrígelos antes de reintentar.',
   INVOICING_CUFE_001:
     'Los valores con los que se calculó la clave del documento no coinciden con los del XML. No se transmitió nada y no se gastó numeración. Reporta este caso: es un fallo interno, no un dato tuyo.',
+  // La DIAN valida la coherencia entre cantidad y unidad: 3 metros declarados
+  // como `EA` afirman "3 unidades". Antes se emitía `EA` de relleno ante
+  // cualquier fallo de resolución, así que el documento salía aceptado y falso.
+  // El backend nombra las líneas y los productos en `details`.
+  DIAN_UNIT_CODE_001:
+    'No se puede determinar la unidad de medida de una o más líneas del documento, y no se emite con una unidad de relleno. Revisa en Productos que esos artículos existan en esta tienda y tengan una unidad de stock válida.',
+  DIAN_UNIT_CODE_002:
+    'No se pudo leer el catálogo de unidades de medida para armar el documento. Es un fallo temporal: vuelve a intentar en unos segundos. No se gastó numeración.',
   // Gemelo de CUFE_001: estructura, no contenido. Un elemento fuera del orden
   // que fija el `xsd:sequence` de UBL produce un documento con TODOS los datos
   // correctos que la DIAN rechaza igual. Se corta antes de firmar, así que lo
