@@ -246,8 +246,26 @@ export interface CommitMemberDto {
    * OCR and edited by the user in the modal. Persisted via
    * `MembershipNotesService.bulkSet` on commit. Empty / omitted ⇒ no
    * notes call is made.
+   *
+   * Wire shape mirrors the backend `CommitMemberNoteDto` (`note_key` /
+   * `note_value` / `include_in_summary`) — not the in-app `ExtractedMemberNote`
+   * (`key` / `value`), because the modal renames the keys before emitting.
+   * The AOT template type checker would otherwise reject this assignment
+   * (`TS2322: missing properties from ExtractedMemberNote: key, value`).
    */
-  notes?: ExtractedMemberNote[] | null;
+  notes?: CommitMemberNoteDto[] | null;
+}
+
+/**
+ * Wire shape of a single member note on the commit payload. Mirrors the
+ * backend `CommitMemberNoteDto` (apps/backend/src/domains/store/memberships/dto/scan-roster.dto.ts)
+ * so the modal can map `ExtractedMemberNote.key`/`value` → `note_key`/`note_value`
+ * without tripping the strict AOT template type check.
+ */
+export interface CommitMemberNoteDto {
+  note_key: string;
+  note_value: string;
+  include_in_summary?: boolean | null;
 }
 
 /** Top-level commit payload. */
