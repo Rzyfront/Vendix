@@ -25,6 +25,7 @@ import {
 import {
   sendXlsxReport,
   buildReportFilename,
+  paginatedOrAll,
 } from '@common/reports/report-response.util';
 import type {
   ReportColumn,
