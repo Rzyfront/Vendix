@@ -3869,24 +3869,24 @@ model membership_plans {
 }
 
 model memberships {
-  id                 Int                    @id @default(autoincrement())
-  store_id           Int
-  customer_id        Int
-  plan_id            Int
-  kind               membership_kind_enum   @default(generic)
-  status             membership_status_enum @default(pending_payment)
-  period_start       DateTime?
-  period_end         DateTime?
-  auto_renew         Boolean                @default(false)
-  source_order_id    Int?
-  notes              String?
+  id                Int                    @id @default(autoincrement())
+  store_id          Int
+  customer_id       Int
+  plan_id           Int
+  kind              membership_kind_enum   @default(generic)
+  status            membership_status_enum @default(pending_payment)
+  period_start      DateTime?
+  period_end        DateTime?
+  auto_renew        Boolean                @default(false)
+  source_order_id   Int?
+  notes             String?
   // Bug 10: soft-delete audit. Solo terminales ({expired, suspended, cancelled})
   // se pueden eliminar. El listado filtra deleted_at IS NULL por default.
-  deleted_at         DateTime?
+  deleted_at        DateTime?
   deleted_by_user_id Int?
-  deletion_reason    String?
-  created_at         DateTime               @default(now())
-  updated_at         DateTime               @updatedAt
+  deletion_reason   String?
+  created_at        DateTime               @default(now())
+  updated_at        DateTime               @updatedAt
 
   @@index([store_id, customer_id])
   @@index([store_id, status])
