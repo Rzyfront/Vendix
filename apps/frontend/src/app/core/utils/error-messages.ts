@@ -11,6 +11,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+  // Red de seguridad del filtro global: la peticion llego mal formada y el
+  // backend lo detecto en la capa de datos. Antes salian como 500, asi que el
+  // usuario leia «error inesperado» ante algo que si puede corregir.
+  SYS_VALUE_OUT_OF_RANGE_001:
+    'El identificador solicitado no es válido. Vuelve a la lista y abre el registro desde ahí.',
+  SYS_INVALID_FIELD_VALUE_001:
+    'Uno de los datos enviados no tiene el formato esperado. Revisa los campos numéricos y vuelve a intentarlo.',
 
   // Alcance y asignación de roles (QUI-72). Compartidos por los tres niveles
   // (super-admin, organización y tienda): el mismo código debe leerse igual en
@@ -579,6 +586,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta venta supera 5 UVT y requiere factura electrónica: identifica al comprador (documento y nombre) antes de cerrarla. El tiquete POS solo cubre ventas por debajo del tope.',
   FISCAL_CONFIG_INCOMPLETE:
     'La configuracion fiscal de esta entidad esta incompleta.',
+  // Identidad fiscal del EMISOR: razon social, municipio DIAN o departamento.
+  // El backend manda en `details.missing` la lista completa de huecos y el
+  // `cta` al wizard, asi que este texto no enumera campos — la superficie que
+  // lo muestre debe leer `details` y pedirlos todos de una vez, en vez de
+  // hacer que el operador los descubra de a uno por reintento.
+  FISCAL_IDENTITY_INCOMPLETE:
+    'Falta completar la identidad fiscal de tu empresa antes de emitir. Ve al manejo fiscal y llena los datos que aparecen pendientes.',
   FISCAL_STATUS_INCOMPLETE:
     'No se puede activar: faltan pasos por completar. Revisa los datos marcados como pendientes.',
   FISCAL_SCOPE_INVALID:
