@@ -428,8 +428,13 @@ describe('AuditController', () => {
     });
 
     it('should have correct route prefix', () => {
+      // AuditController is mounted under `superadmin/admin/audit` (see
+      // the `@Controller('superadmin/admin/audit')` decorator on the
+      // source). The assertion was written against the old path
+      // `admin/audit` before the prefix was namespaced into the
+      // super-admin segment.
       const controllerMetadata = Reflect.getMetadata('path', AuditController);
-      expect(controllerMetadata).toBe('admin/audit');
+      expect(controllerMetadata).toBe('superadmin/admin/audit');
     });
   });
 

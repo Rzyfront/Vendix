@@ -112,6 +112,7 @@
     "@nestjs/testing": "^11.0.1",
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.15.24",
+    "@swc/jest": "^0.2.39",
     "@types/adm-zip": "^0.5.7",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
@@ -152,7 +153,27 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "@swc/jest",
+        {
+          "jsc": {
+            "target": "es2022",
+            "parser": {
+              "syntax": "typescript",
+              "decorators": true,
+              "dynamicImport": false
+            },
+            "transform": {
+              "legacyDecorator": true,
+              "decoratorMetadata": true
+            },
+            "keepClassNames": true
+          },
+          "module": {
+            "type": "commonjs"
+          }
+        }
+      ]
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
