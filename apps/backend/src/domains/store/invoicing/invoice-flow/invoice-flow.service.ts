@@ -326,6 +326,7 @@ export class InvoiceFlowService {
     private readonly withholdingFlow: WithholdingFlowService,
     private readonly acquirerIdentity: CustomerFiscalIdentityValidator,
     private readonly fiscalDocument: FiscalDocumentValidator,
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   /**
