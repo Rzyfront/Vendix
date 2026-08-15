@@ -943,4 +943,14 @@ export class CustomersAnalyticsService {
       };
     });
   }
+
+  // -------------------------------------------------------------------------
+  // STUB for the resubmit's analytics.controller.ts (QUI-542 batch). See
+  // the comment on the matching sales stubs for context.
+  // -------------------------------------------------------------------------
+  async getTopCustomersForExport(
+    _query: AnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
 }
