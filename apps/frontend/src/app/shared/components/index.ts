@@ -37,6 +37,15 @@ export { InputButtonsComponent } from './input-buttons/input-buttons.component';
 export { PasswordRequirementsComponent } from './password-requirements/password-requirements.component';
 export { SpinnerComponent } from './spinner/spinner.component';
 export { ModalComponent } from './modal/modal.component';
+export {
+  ProductPickerModalComponent,
+  ProductPickerOption,
+} from './product-picker-modal';
+export {
+  TaxSelectorComponent,
+  TaxOption,
+  TaxSelection,
+} from './tax-selector';
 export { ToggleComponent } from './toggle/toggle.component';
 export { SettingToggleComponent } from './setting-toggle/setting-toggle.component';
 export { PanelUiModulesEditorComponent } from './panel-ui-modules-editor/panel-ui-modules-editor.component';

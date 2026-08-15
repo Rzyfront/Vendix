@@ -1,8 +1,8 @@
 <app-modal
   [isOpen]="open()"
   size="lg"
-  title="Agregar productos"
-  subtitle="Selecciona los productos para esta sección"
+  title="Seleccionar producto"
+  subtitle="Busca un producto existente o crea uno nuevo"
   (cancel)="handleClose()"
 >
   <div class="flex flex-col gap-3">
@@ -31,9 +31,9 @@
         <span class="text-sm">Cargando productos...</span>
       </div>
     } @else if (visibleProducts().length === 0) {
-      <!-- Estado vacío -->
+      <!-- Estado vacío — el padre inyecta la acción "Crear nuevo" vía slot -->
       <div
-        class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[var(--color-text-secondary)]"
+        class="flex flex-col items-center justify-center gap-3 py-12 text-center text-[var(--color-text-secondary)]"
       >
         <app-icon name="package" [size]="28" />
         <span class="text-sm">
@@ -43,9 +43,10 @@
               : 'No se encontraron productos'
           }}
         </span>
+        <ng-content select="[slot=empty-action]" />
       </div>
     } @else {
-      <!-- Grilla multi-select -->
+      <!-- Grilla multi/single-select -->
       <div
         class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1"
       >
@@ -53,13 +54,13 @@
           <button
             type="button"
             (click)="toggle(product.id)"
-            [disabled]="isInMenu(product.id)"
+            [disabled]="isDisabled(product.id)"
             class="flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors hover:border-primary-600 disabled:cursor-not-allowed"
             [class.border-primary-600]="isSelected(product.id)"
             [class.bg-primary-50]="isSelected(product.id)"
-            [class.border-border]="!isSelected(product.id) && !isInMenu(product.id)"
-            [style.borderColor]="isInMenu(product.id) ? 'var(--color-success)' : null"
-            [style.backgroundColor]="isInMenu(product.id) ? 'var(--color-success-light)' : null"
+            [class.border-border]="!isSelected(product.id) && !isDisabled(product.id)"
+            [style.borderColor]="isDisabled(product.id) ? 'var(--color-success)' : null"
+            [style.backgroundColor]="isDisabled(product.id) ? 'var(--color-success-light)' : null"
           >
             <!-- Miniatura -->
             <div
@@ -100,12 +101,12 @@
                     No vendible
                   </span>
                 }
-                @if (isInMenu(product.id)) {
+                @if (isDisabled(product.id)) {
                   <span
                     class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--color-success)] text-white"
                   >
                     <app-icon name="check" [size]="10" />
-                    En la carta
+                    Seleccionado
                   </span>
                 }
               </div>
@@ -118,11 +119,11 @@
               }
             </div>
 
-            <!-- Check de selección / marca "ya en la carta" -->
-            @if (isInMenu(product.id)) {
+            <!-- Check de selección / marca "ya seleccionado" -->
+            @if (isDisabled(product.id)) {
               <div
                 class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 border-[var(--color-success)] bg-[var(--color-success)]"
-                title="Ya está en la carta"
+                title="Ya seleccionado"
               >
                 <app-icon name="check" [size]="12" class="text-white" />
               </div>
@@ -146,9 +147,13 @@
 
   <!-- Footer -->
   <div slot="footer" class="flex items-center justify-between gap-3">
-    <span class="text-sm text-[var(--color-text-secondary)]">
-      {{ selectedCount() }} seleccionado(s)
-    </span>
+    @if (mode() === 'multiple') {
+      <span class="text-sm text-[var(--color-text-secondary)]">
+        {{ selectedCount() }} seleccionado(s)
+      </span>
+    } @else {
+      <span></span>
+    }
     <div class="flex items-center gap-2">
       <app-button variant="ghost" (clicked)="handleClose()">Cancelar</app-button>
       <app-button
@@ -156,7 +161,11 @@
         [disabled]="selectedCount() === 0"
         (clicked)="handleConfirm()"
       >
-        Agregar ({{ selectedCount() }})
+        @if (mode() === 'single') {
+          Seleccionar
+        } @else {
+          Agregar ({{ selectedCount() }})
+        }
       </app-button>
     </div>
   </div>
