@@ -798,19 +798,19 @@ export class CustomersAnalyticsService {
   // -------------------------------------------------------------------------
   async getTopCustomersForExport(
     _query: AnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 
   async getAccountsReceivableForExport(
     _query: AnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 
   async getCustomersAgingForExport(
     _query: AnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 }

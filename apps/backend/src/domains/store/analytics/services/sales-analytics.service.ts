@@ -1266,13 +1266,13 @@ export class SalesAnalyticsService {
   // -------------------------------------------------------------------------
   async getSalesByChannelForExport(
     _query: SalesAnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 
   async getSalesBySellerForExport(
     _query: SalesAnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 }

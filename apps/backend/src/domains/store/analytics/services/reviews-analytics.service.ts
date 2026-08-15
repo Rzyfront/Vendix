@@ -129,7 +129,7 @@ export class ReviewsAnalyticsService {
   // -------------------------------------------------------------------------
   async getReviewsByProduct(
     _query: AnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 }
