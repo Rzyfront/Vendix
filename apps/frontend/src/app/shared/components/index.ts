@@ -102,6 +102,7 @@ export { DomainResolutionErrorComponent } from './domain-resolution-error/domain
 export type { DomainResolutionErrorKind } from './domain-resolution-error/domain-resolution-error.component';
 export { MapViewComponent } from './map-view/map-view.component';
 export type { LatLng, MapMarker } from './map-view/map-view.component';
+export { DianMunicipalitySelectComponent } from './dian-municipality-select/dian-municipality-select.component';
 export { AddressFormFieldsComponent } from './address-form-fields/address-form-fields.component';
 export type {
   LatLng as AddressLatLng,

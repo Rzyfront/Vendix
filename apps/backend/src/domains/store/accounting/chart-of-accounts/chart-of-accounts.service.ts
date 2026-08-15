@@ -75,11 +75,12 @@ export class ChartOfAccountsService {
   /**
    * Flat list of accounts.
    *
-   * Kept array-returning on purpose: `OrgChartOfAccountsService` delegates to
-   * this method for `fiscal_scope=STORE` and returns the value straight to the
-   * org controller, which wraps it with `responseService.success()`. The
-   * paginated envelope lives in {@link findAllPaginated}, consumed only by the
-   * store controller.
+   * Kept array-returning on purpose, but no longer for the reason it used to
+   * be: `OrgChartOfAccountsService` delegated here and now delegates to
+   * {@link findAllPaginated}, so both HTTP lanes answer the same paginated
+   * envelope. Its remaining consumer is the AI tool at
+   * `ai-engine/tools/domains/accounting.tools.ts:894`, which wants the plain
+   * array and has no page footer to fill.
    */
   async findAll(query: QueryAccountDto) {
     const accountingEntity = await this.resolveEntity();

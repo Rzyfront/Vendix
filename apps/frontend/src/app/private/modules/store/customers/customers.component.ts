@@ -400,6 +400,9 @@ export class CustomersComponent {
       customer_id: customerId,
       latitude: payload.latitude != null ? String(payload.latitude) : undefined,
       longitude: payload.longitude != null ? String(payload.longitude) : undefined,
+      // Código DANE del municipio: sin él la factura electrónica de este
+      // cliente queda bloqueada por `CITY_CODE_REQUIRED`.
+      municipality_code: payload.municipality_code || undefined,
     };
     this.customersService
       .createCustomerAddress(dto)

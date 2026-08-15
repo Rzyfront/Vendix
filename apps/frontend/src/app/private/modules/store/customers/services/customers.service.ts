@@ -29,6 +29,12 @@ export interface CustomerAddressPayload {
     customer_id?: number;
     latitude?: string;
     longitude?: string;
+    /**
+     * Código DANE (Divipola) del municipio → `addresses.municipality_code`.
+     * Es lo que la facturación electrónica lee para `customer_address.city_code`;
+     * sin él el validador fiscal bloquea la emisión con `CITY_CODE_REQUIRED`.
+     */
+    municipality_code?: string;
 }
 
 export interface PaginatedResponse<T> {

@@ -47,6 +47,12 @@ export interface CustomerAddress {
     phone_number?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    /**
+     * Código DANE (Divipola) del municipio → `addresses.municipality_code`.
+     * Opcional: toda dirección anterior a su captura lo tiene en NULL. Es el
+     * dato que la facturación electrónica exige del adquiriente.
+     */
+    municipality_code?: string | null;
     type?: string;
     is_primary?: boolean;
 }

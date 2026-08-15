@@ -4,6 +4,7 @@ import {
   IsInt,
   IsBoolean,
   IsNumber,
+  Matches,
   MaxLength,
   Min,
   IsEnum,
@@ -13,6 +14,8 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
+
+export * from './dian-municipality.dto';
 
 // Enums
 export enum AddressStatus {
@@ -71,6 +74,37 @@ export class CreateAddressDto {
   @IsString()
   @MaxLength(100)
   country: string;
+
+  /**
+   * Código DANE (Divipola) del municipio. Persiste en
+   * `addresses.municipality_code` y es lo que
+   * `invoice-flow.service.ts` lee para poblar `customer_address.city_code` del
+   * documento electrónico.
+   *
+   * OPCIONAL a propósito: la captura general de direcciones (envío, despacho,
+   * checkout) no lo exige y las direcciones históricas lo tienen en NULL. Quien
+   * lo exige es el camino de facturación, que ya lanza `CITY_CODE_REQUIRED`
+   * cuando falta. Hacerlo obligatorio aquí rompería toda alta de dirección no
+   * fiscal.
+   *
+   * Cadena vacía se normaliza a `undefined` para que un formulario que envía
+   * `''` no choque contra el regex ni escriba basura en la columna.
+   */
+  @ApiPropertyOptional({
+    example: '05001',
+    description:
+      'Código DANE (Divipola) de 5 dígitos del municipio: 05001 = Medellín, 11001 = Bogotá. Obligatorio solo para emitir factura electrónica a este adquiriente.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  @IsString()
+  @Matches(/^\d{5}$/, {
+    message:
+      'municipality_code debe ser el código DANE de municipio de 5 dígitos (ej. "05001" = Medellín).',
+  })
+  municipality_code?: string;
 
   @ApiPropertyOptional({
     example: 'shipping',

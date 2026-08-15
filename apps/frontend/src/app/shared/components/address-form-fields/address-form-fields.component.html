@@ -59,6 +59,30 @@
       [control]="form.get('address_line2')!"
     ></app-input>
 
+    @if (showMunicipality()) {
+      <!--
+        Municipio DANE (Divipola). Es el dato que la facturación electrónica
+        exige del adquiriente: sin él el documento declararía 11001 (Bogotá)
+        para cualquier cliente del país. Al elegirlo, ciudad y departamento se
+        completan solos desde el catálogo y quedan en solo-lectura, así que no
+        pueden discrepar del código.
+      -->
+      <div class="field-block">
+        <label class="municipality-label" for="municipality-select">
+          Municipio (DANE)
+        </label>
+        <app-dian-municipality-select
+          id="municipality-select"
+          formControlName="municipality_code"
+          (municipalitySelected)="onMunicipalitySelected($event)"
+        />
+        <p class="field-hint">
+          Requerido para emitir factura electrónica a este cliente. Al elegirlo
+          se completan ciudad y departamento.
+        </p>
+      </div>
+    }
+
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div class="field-block">
         <app-input
@@ -67,6 +91,7 @@
           placeholder="Ciudad"
           [control]="form.get('city')!"
           [required]="true"
+          [readonly]="cityLockedByMunicipality()"
         ></app-input>
         @if (showErrors() && cityInvalid()) {
           <p class="field-error" role="alert">
@@ -83,6 +108,7 @@
           placeholder="Departamento o estado"
           [control]="form.get('state_province')!"
           [required]="true"
+          [readonly]="cityLockedByMunicipality()"
         ></app-input>
         @if (showErrors() && stateInvalid()) {
           <p class="field-error" role="alert">

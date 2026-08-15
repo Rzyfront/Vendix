@@ -59,6 +59,8 @@ interface CustomerAddress {
   phone_number: string | null;
   latitude: number | null;
   longitude: number | null;
+  /** Código DANE del municipio; NULL en toda dirección anterior a su captura. */
+  municipality_code?: string | null;
   type?: string;
   is_primary?: boolean;
 }
@@ -76,6 +78,13 @@ interface AddressDtoPayload {
   customer_id?: number;
   latitude?: string;
   longitude?: string;
+  /**
+   * Código DANE del municipio. Es el dato que desbloquea la facturación
+   * electrónica: `invoice-flow.service.ts` lee `addresses.municipality_code`
+   * para poblar `customer_address.city_code`, y sin él el validador de
+   * identidad fiscal lanza `CITY_CODE_REQUIRED` (bloqueante).
+   */
+  municipality_code?: string;
 }
 
 @Component({
@@ -478,6 +487,7 @@ export class CustomerModalComponent {
       phone_number: addr.phone_number ?? null,
       latitude: lat,
       longitude: lng,
+      municipality_code: addr.municipality_code ?? null,
     };
   });
 
@@ -838,6 +848,7 @@ export class CustomerModalComponent {
     if (p.postal_code) dto.postal_code = p.postal_code;
     if (p.latitude != null) dto.latitude = String(p.latitude);
     if (p.longitude != null) dto.longitude = String(p.longitude);
+    if (p.municipality_code) dto.municipality_code = p.municipality_code;
     if (customerId != null) dto.customer_id = customerId;
     return dto;
   }
