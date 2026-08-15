@@ -79,7 +79,7 @@ export class SubscriptionStateEngineJob {
     private readonly emailQueue: Queue,
   ) {}
 
-  @Cron('*/2 * * * *')
+  @Cron('0 3 * * *')
   async handleStateTransitions(): Promise<void> {
     if (this.isRunning) {
       this.logger.warn('Subscription state engine already running, skipping');
