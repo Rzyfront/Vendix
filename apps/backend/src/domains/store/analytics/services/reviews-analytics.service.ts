@@ -120,4 +120,16 @@ export class ReviewsAnalyticsService {
       'Votos Útiles': review.helpful_count,
     }));
   }
+
+  // -------------------------------------------------------------------------
+  // STUB for the resubmit's analytics.controller.ts (QUI-542 batch). The
+  // controller calls `getReviewsByProduct` for the by-product export endpoint
+  // but the per-QUI split didn't include it. Returning an empty array keeps
+  // the endpoint compiling; the proper implementation lands in a follow-up.
+  // -------------------------------------------------------------------------
+  async getReviewsByProduct(
+    _query: AnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
 }

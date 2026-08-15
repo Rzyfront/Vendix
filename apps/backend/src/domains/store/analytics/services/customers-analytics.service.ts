@@ -789,4 +789,28 @@ export class CustomersAnalyticsService {
       };
     });
   }
+
+  // -------------------------------------------------------------------------
+  // STUBS for the resubmit's analytics.controller.ts (QUI-542 batch). The
+  // controller references these *ForExport / aging variants but the per-QUI
+  // split left them out of scope. Returning empty arrays keeps the JSON
+  // endpoints compiling; proper implementations land in a follow-up.
+  // -------------------------------------------------------------------------
+  async getTopCustomersForExport(
+    _query: AnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
+
+  async getAccountsReceivableForExport(
+    _query: AnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
+
+  async getCustomersAgingForExport(
+    _query: AnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
 }
