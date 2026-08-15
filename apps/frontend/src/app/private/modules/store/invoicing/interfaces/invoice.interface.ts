@@ -171,6 +171,49 @@ export interface InvoiceResolution {
   updated_at: string;
 }
 
+/**
+ * QUI-690 — Payload del selector de impuestos `app-tax-selector`. La forma
+ * viaje hasta `CreateInvoiceItemDto.taxes[]` y al backend `CreateInvoiceDto`.
+ */
+export interface CreateInvoiceTaxDto {
+  tax_rate_id?: number;
+  tax_name: string;
+  tax_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  /** Fiscal classification (iva/inc/ica/...). Defaults to iva when omitted. */
+  tax_type?: string;
+  /**
+   * INCLUDED in `unit_price` (true) o ADDITIONAL on top (false). Defaults to
+   * false (additional) when omitted. Drives the UBL DIAN builder's
+   * `TaxInclusiveIndicator` XML attribute.
+   */
+  is_inclusive?: boolean;
+}
+
+/**
+ * QUI-690 — Mirror frontend del `CreateCustomerDto` del backend (DIAN
+ * completo). El backend acepta `inline_customer?: CreateCustomerDto` en
+ * `CreateInvoiceDto`; cuando el usuario hace click en "Crear cliente" en
+ * el modal XXL, este envelope viaja con la factura para que el server
+ * materialice el row `users.role='customer'` y devuelva el `customer_id`.
+ */
+export interface CreateCustomerRequest {
+  email?: string | null;
+  first_name: string;
+  last_name: string;
+  legal_name?: string | null;
+  document_number?: string | null;
+  document_type?: string | null;
+  verification_digit?: string | null;
+  phone?: string | null;
+  tax_regime?: string | null;
+  person_type?: string | null;
+  fiscal_responsibilities?: string[];
+  ciiu_code?: string | null;
+  is_withholding_agent?: boolean;
+}
+
 export interface CreateInvoiceDto {
   invoice_type: InvoiceType;
   customer_name?: string;
@@ -179,22 +222,38 @@ export interface CreateInvoiceDto {
   customer_phone?: string;
   customer_address?: string;
   customer_id?: number;
+  /** QUI-690 — Inline customer creation. See `CreateCustomerRequest`. */
+  inline_customer?: CreateCustomerRequest;
   supplier_id?: number;
   issue_date: string;
   due_date?: string;
   notes?: string;
   resolution_id?: number;
   items: CreateInvoiceItemDto[];
+  /**
+   * Header-aggregated taxes (legacy). New flows use per-line `items[].taxes[]`.
+   */
+  taxes?: CreateInvoiceTaxDto[];
 }
 
 export interface CreateInvoiceItemDto {
   product_id?: number;
-  product_name: string;
-  description?: string;
+  /**
+   * QUI-690 — Inline product creation payload. Backend AÚN NO lo implementa
+   * (responde SYS_VALIDATION_001); el picker lo expone pero la creación
+   * real se hace vía el módulo de productos.
+   */
+  inline_product?: any;
+  description: string;
   quantity: number;
   unit_price: number;
   discount_amount?: number;
+  /** Legacy single tax rate (still honored for backward compat). */
   tax_rate?: number;
+  /** QUI-690 — Per-line typed taxes with inclusive/additional flag. */
+  taxes?: CreateInvoiceTaxDto[];
+  /** QUI-690 — Per-line INCLUDED / ADDITIONAL shortcut. */
+  is_inclusive?: boolean;
 }
 
 export interface UpdateInvoiceDto {
