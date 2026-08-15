@@ -22,8 +22,20 @@ import {
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { ToastService } from '../../toast/toast.service';
 
-// Canonical mapping keys (mirrors DEFAULT_ACCOUNT_MAPPINGS in the backend).
-const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
+/**
+ * RESPALDO — no es la fuente de verdad.
+ *
+ * La lista canónica de claves de mapeo vive en el backend
+ * (`AccountMappingService`) y se descarga al abrir el paso; en cuanto llega,
+ * `mappingKeys` se reemplaza entera. Esta copia sólo cubre los dos huecos en que
+ * la pantalla quedaría vacía: el instante previo a que responda el HTTP, y una
+ * respuesta sin elementos.
+ *
+ * Se llama RESPALDO y no «por defecto» a propósito: mientras se llamó
+ * `DEFAULT_`, invitaba a editar una etiqueta acá creyendo que surtía efecto en
+ * la pantalla, cuando el backend la pisa un instante después.
+ */
+const MAPPING_KEYS_FALLBACK: MappingKeyDef[] = [
   { key: 'invoice.validated.accounts_receivable', label: 'Factura validada · Cuentas por Cobrar' },
   { key: 'invoice.validated.revenue', label: 'Factura validada · Ingresos' },
   { key: 'invoice.validated.vat_payable', label: 'Factura validada · IVA por Pagar' },

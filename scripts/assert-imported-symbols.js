@@ -167,7 +167,119 @@ function resolveModule(from, specifier) {
   return null;
 }
 
+/**
+ * Nombres globales que un archivo usa sin declarar y sin importar, legítimamente.
+ * La lista es corta a propósito: sólo hace falta cubrir los que se escriben en
+ * CONSTANT_CASE, que es el alfabeto del barrido de abajo.
+ */
+const AMBIENT_GLOBALS = new Set(['NaN', 'Infinity', 'JSON', 'Math', 'Intl']);
+
+/** `FOO_BAR`, `MAX_RETRIES_2`: mayúsculas con al menos un guion bajo. */
+const CONSTANT_CASE = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/;
+
+/**
+ * SEGUNDA COMPUERTA — un identificador CONSTANT_CASE usado y nunca declarado.
+ *
+ * POR QUÉ NO BASTA CON LA PRIMERA. La compuerta de imports sólo mira símbolos
+ * que alguien pidió a otro módulo. Un identificador **libre** —escrito en el
+ * cuerpo del archivo sin importarlo ni declararlo— se le escapa entera.
+ *
+ * Eso fue lo que pasó con `MAPPING_KEYS_FALLBACK` en
+ * `fiscal-accounting-mappings-step.component.ts`: la constante declarada se
+ * llamaba `DEFAULT_MAPPING_KEYS` y el componente inicializaba su signal con un
+ * nombre que no existía en ningún archivo del repo. Es un `TS2304` — el
+ * frontend NO compilaba — y estuvo commiteado sin que nada lo señalara, porque
+ * el flujo de este repo prohíbe correr builds en la máquina de desarrollo.
+ *
+ * ALCANCE DELIBERADAMENTE ESTRECHO. Sólo CONSTANT_CASE, y sólo dentro del
+ * archivo: un nombre en mayúsculas es siempre una constante de módulo o de
+ * clase, nunca un global del navegador ni de Node, así que el ruido es cero
+ * (verificado sobre los 4.140 archivos del repo). Un barrido general de
+ * identificadores exigiría resolver ámbitos y tipos, que es justamente lo que
+ * este script existe para NO hacer.
+ */
+function collectFreeIdentifiers(source, file, out) {
+  const declared = new Set();
+  const used = new Map();
+
+  const declareBinding = (name) => {
+    if (!name) return;
+    if (ts.isIdentifier(name)) {
+      declared.add(name.text);
+    } else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (!ts.isOmittedExpression(element)) declareBinding(element.name);
+      }
+    }
+  };
+
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) && node.importClause) {
+      const clause = node.importClause;
+      if (clause.name) declared.add(clause.name.text);
+      if (clause.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings)) {
+          declared.add(clause.namedBindings.name.text);
+        } else {
+          for (const element of clause.namedBindings.elements) {
+            declared.add(element.name.text);
+          }
+        }
+      }
+    }
+    if (
+      ts.isVariableDeclaration(node) ||
+      ts.isParameter(node) ||
+      ts.isBindingElement(node)
+    ) {
+      declareBinding(node.name);
+    }
+    if (
+      (ts.isFunctionDeclaration(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isInterfaceDeclaration(node) ||
+        ts.isTypeAliasDeclaration(node) ||
+        ts.isModuleDeclaration(node)) &&
+      node.name &&
+      ts.isIdentifier(node.name)
+    ) {
+      declared.add(node.name.text);
+    }
+
+    if (ts.isIdentifier(node) && CONSTANT_CASE.test(node.text)) {
+      const parent = node.parent;
+      // Se descarta todo lo que NO es una lectura del identificador: el nombre
+      // de cualquier declaración (incluida una propiedad de clase, que fue la
+      // fuente de ruido al calibrar esto), el lado derecho de un nombre
+      // calificado, y el `propertyName` de un import/export con alias.
+      const is_declaration_name = parent && parent.name === node;
+      const is_qualified =
+        parent && ts.isQualifiedName(parent) && parent.right === node;
+      const is_specifier =
+        parent && (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent));
+      if (!is_declaration_name && !is_qualified && !is_specifier) {
+        if (!used.has(node.text)) {
+          used.set(
+            node.text,
+            source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          );
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(source, visit);
+
+  for (const [name, line] of used) {
+    if (!declared.has(name) && !AMBIENT_GLOBALS.has(name)) {
+      out.push({ file, name, line });
+    }
+  }
+}
+
 const findings = [];
+const freeFindings = [];
 const files = roots.flatMap((root) => {
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) {
@@ -184,6 +296,8 @@ for (const file of files) {
   } catch {
     continue;
   }
+  collectFreeIdentifiers(source, file, freeFindings);
+
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement) || !statement.importClause) continue;
     const target = resolveModule(file, statement.moduleSpecifier.text);
@@ -210,12 +324,30 @@ for (const file of files) {
 
 const rel = (file) => path.relative(process.cwd(), file);
 
-if (findings.length === 0) {
+if (freeFindings.length > 0) {
+  console.error(
+    `\n❌ ${freeFindings.length} identificador(es) CONSTANT_CASE usados y nunca ` +
+      `declarados ni importados:\n`,
+  );
+  for (const finding of freeFindings) {
+    console.error(`  ${rel(finding.file)}:${finding.line}  ${finding.name}`);
+  }
+  console.error(
+    `\nEs un TS2304: ese archivo NO compila. Causa habitual: la constante existe\n` +
+      `con otro nombre en el mismo archivo (se renombró la declaración o el uso,\n` +
+      `pero no ambos).\n`,
+  );
+}
+
+if (findings.length === 0 && freeFindings.length === 0) {
   console.log(
-    `✅ ${files.length} archivos revisados: todo símbolo importado existe en su módulo.`,
+    `✅ ${files.length} archivos revisados: todo símbolo importado existe en su ` +
+      `módulo y no hay constantes usadas sin declarar.`,
   );
   process.exit(0);
 }
+
+if (findings.length === 0) process.exit(1);
 
 // El informe se agrupa por MÓDULO DESTINO, no por consumidor: cuando un archivo
 // pierde exports, el arreglo está en él y no en los diez que lo importan.
