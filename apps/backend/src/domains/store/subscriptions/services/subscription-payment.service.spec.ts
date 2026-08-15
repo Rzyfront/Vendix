@@ -47,7 +47,11 @@ describe('SubscriptionPaymentService', () => {
         updateMany: jest.fn(),
       },
       subscription_events: {
-        create: jest.fn(),
+        // disableAutoRenewForMissingCredential reads event.id after create;
+        // a default value here keeps the top-level charge tests reaching
+        // the success path. The disableAutoRenewForMissingCredential
+        // describe block overrides this with its own tracked mock.
+        create: jest.fn().mockResolvedValue({ id: 9991 }),
       },
       partner_commissions: {
         create: jest.fn(),
@@ -61,6 +65,12 @@ describe('SubscriptionPaymentService', () => {
       },
       store_subscriptions: {
         findUnique: jest.fn().mockResolvedValue({ state: 'pending_payment' }),
+        // The charge() path passes through `disableAutoRenewForMissingCredential`
+        // which calls `tx.store_subscriptions.updateMany` (production
+        // service line 2129). The mock must expose it; this was a pre-existing
+        // gap that was hidden by the 16-min jest timeout in CI and surfaced
+        // by the isolatedModules fix on the jest transform.
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
     };
