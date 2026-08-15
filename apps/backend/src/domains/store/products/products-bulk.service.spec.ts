@@ -61,6 +61,13 @@ describe('ProductsBulkService', () => {
     tax_categories: {
       findMany: jest.fn(),
     },
+    units_of_measure: {
+      // loadUomCatalogByCode (service.ts:442) reads the UoM catalog at the
+      // start of every uploadProducts call. The mock must expose it; this
+      // was a pre-existing gap hidden by the 16-min jest timeout in CI and
+      // surfaced by the isolatedModules fix on the jest transform.
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const mockProductsService = {
