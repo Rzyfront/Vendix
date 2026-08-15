@@ -57,11 +57,31 @@ const UNECE_BY_CODE: Record<string, string> = {
   yd: 'YRD',
 };
 
-/** Código UN/ECE de una unidad del catálogo. `EA` cuando no hay equivalencia. */
-export function resolveUneceUnitCode(uomCode?: string | null): string {
-  if (!uomCode) return 'EA';
+/**
+ * Código UN/ECE de una unidad del catálogo, o `null` cuando NO hay equivalencia.
+ *
+ * Es la variante que distingue «se cuenta por unidades» de «no sé traducir esta
+ * unidad», dos casos que `resolveUneceUnitCode` colapsa en el mismo `'EA'`.
+ *
+ * La distinción sólo importa donde el valor viaja a la DIAN: emitir `EA` por una
+ * unidad de masa que esta tabla no cubre declara piezas donde hubo kilos, y el
+ * documento queda aceptado y falso. Quien emite usa ESTA función y rechaza el
+ * `null` (ver `DIAN_UNIT_CODE_001`); quien sólo persiste un snapshot o muestra
+ * un valor puede seguir usando la versión tolerante.
+ *
+ * `uomCode` vacío/`null` devuelve `null` también: la ausencia de unidad la
+ * interpreta quien llama, no esta tabla.
+ */
+export function resolveUneceUnitCodeStrict(
+  uomCode?: string | null,
+): string | null {
+  if (!uomCode) return null;
   const exact = UNECE_BY_CODE[uomCode];
   if (exact) return exact;
-  const lower = UNECE_BY_CODE[String(uomCode).toLowerCase()];
-  return lower ?? 'EA';
+  return UNECE_BY_CODE[String(uomCode).toLowerCase()] ?? null;
+}
+
+/** Código UN/ECE de una unidad del catálogo. `EA` cuando no hay equivalencia. */
+export function resolveUneceUnitCode(uomCode?: string | null): string {
+  return resolveUneceUnitCodeStrict(uomCode) ?? 'EA';
 }

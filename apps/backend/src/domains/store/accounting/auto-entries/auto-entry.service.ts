@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
@@ -337,45 +337,106 @@ export class AutoEntryService {
    * y todavía puede corregirla, en vez de dejarlo pasar y descubrirlo semanas
    * después con un asiento roto o mal clasificado.
    *
-   * Distingue los dos fallos porque exigen acciones distintas:
+   * Distingue los tres fallos porque exigen acciones distintas:
    *   · la cuenta no existe            → hay que crearla en el PUC
+   *   · existe pero está INACTIVA      → hay que activarla
    *   · existe pero es de AGRUPACIÓN   → hay que bajar a una subcuenta hija
    *
    * `code` vacío/`null` ⇒ no hay nada que validar (limpiar el override es
    * legítimo: devuelve el producto al ingreso por defecto).
+   *
+   * QUIÉN LO LLAMA (antes: NADIE — la validación existía y no se ejecutaba):
+   *   · `ProductsService.create()` / `.update()`     ← producto + sus variantes
+   *   · `ProductVariantService.createVariant()` / `.updateVariant()`
+   *
+   * Los dos últimos NO validan cuando reciben una `tx`: en ese caso quien abrió
+   * la transacción es `ProductsService`, que ya validó el lote entero ANTES de
+   * abrirla. Repetir la lectura dentro de la transacción sería una consulta por
+   * variante contra el pool ya comprometido.
+   *
+   * Conserva la firma de un solo código por compatibilidad; la lectura real la
+   * hace `validateProductAccountCodes`, que es la que se debe usar cuando hay
+   * más de un código en juego.
    */
   async validateProductAccountCode(
     organization_id: number,
     code?: string | null,
   ): Promise<void> {
-    const trimmed = (code ?? '').trim();
-    if (!trimmed) return;
+    await this.validateProductAccountCodes(organization_id, [code]);
+  }
 
-    const account = await this.prisma.chart_of_accounts.findFirst({
-      where: { organization_id, code: trimmed },
-      select: { id: true, name: true, is_active: true, accepts_entries: true },
+  /**
+   * Versión POR LOTE de `validateProductAccountCode`, y la única que consulta la
+   * base: valida TODOS los códigos de un guardado (producto + sus variantes) con
+   * UNA sola query sobre `chart_of_accounts`.
+   *
+   * Existe por rendimiento, no por estética. Un producto con 50 variantes que
+   * declaran su propia subcuenta haría 50 lecturas idénticas si se validara
+   * código a código, dentro del camino caliente de guardar un producto. El
+   * `Set` deduplica antes de consultar, así que 50 variantes con la misma
+   * subcuenta cuestan exactamente una fila leída.
+   *
+   * `null` / `undefined` / cadena vacía se descartan en silencio: limpiar el
+   * override es legítimo y devuelve el producto al ingreso por defecto.
+   *
+   * El ORDEN del reporte es el de entrada, para que el mensaje señale siempre el
+   * primer código que el usuario escribió mal y no uno arbitrario del `Set`.
+   */
+  async validateProductAccountCodes(
+    organization_id: number,
+    codes: ReadonlyArray<string | null | undefined>,
+  ): Promise<void> {
+    const wanted: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of codes) {
+      const trimmed = (raw ?? '').trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      wanted.push(trimmed);
+    }
+    if (wanted.length === 0) return;
+
+    const rows = await this.prisma.chart_of_accounts.findMany({
+      where: { organization_id, code: { in: wanted } },
+      select: { code: true, name: true, is_active: true, accepts_entries: true },
     });
+    const by_code = new Map(rows.map((r) => [r.code, r]));
 
-    if (!account) {
-      throw new BadRequestException(
-        `La cuenta contable '${trimmed}' no existe en el plan de cuentas (PUC) de esta organización. ` +
-          `Créala primero en Contabilidad → Plan de Cuentas, o elige una cuenta existente.`,
-      );
-    }
+    for (const code of wanted) {
+      const account = by_code.get(code);
 
-    if (!account.is_active) {
-      throw new BadRequestException(
-        `La cuenta contable '${trimmed}' (${account.name}) está inactiva y no puede recibir movimientos. ` +
-          `Actívala en Contabilidad → Plan de Cuentas, o elige otra cuenta.`,
-      );
-    }
+      if (!account) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_ACCOUNT_CODE_NOT_FOUND_001,
+          `La cuenta contable '${code}' no existe en el plan de cuentas (PUC) de esta organización. ` +
+            `Créala en Contabilidad → Plan de Cuentas, elige una cuenta existente, o deja el campo vacío ` +
+            `para que el producto use la cuenta de ingreso por defecto.`,
+          { account_code: code, reason: 'not_found' },
+        );
+      }
 
-    if (!account.accepts_entries) {
-      throw new BadRequestException(
-        `La cuenta contable '${trimmed}' (${account.name}) es una cuenta de agrupación y no admite movimientos: ` +
-          `un asiento no se puede registrar sobre ella. Elige una de sus subcuentas ` +
-          `(las subcuentas tienen 6 dígitos o más, por ejemplo '${trimmed}05').`,
-      );
+      if (!account.is_active) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_ACCOUNT_CODE_INACTIVE_001,
+          `La cuenta contable '${code}' (${account.name}) está inactiva y no puede recibir movimientos. ` +
+            `Actívala en Contabilidad → Plan de Cuentas, o elige otra cuenta.`,
+          { account_code: code, account_name: account.name, reason: 'inactive' },
+        );
+      }
+
+      if (!account.accepts_entries) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_ACCOUNT_CODE_NOT_POSTABLE_001,
+          `La cuenta contable '${code}' (${account.name}) es una cuenta de agrupación y no admite movimientos: ` +
+            `un asiento no se puede registrar sobre ella. Elige en Contabilidad → Plan de Cuentas una de sus ` +
+            `subcuentas (tienen 6 dígitos o más, por ejemplo '${code}05').`,
+          {
+            account_code: code,
+            account_name: account.name,
+            reason: 'not_postable',
+          },
+        );
+      }
     }
   }
 

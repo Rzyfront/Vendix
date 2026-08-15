@@ -792,6 +792,42 @@ export const ErrorCodes = {
     devMessage: 'track_inventory_override inválido',
   },
 
+  /**
+   * `products.account_code` / `product_variants.account_code` — subcuenta PUC de
+   * ingreso escrita a mano sobre el catálogo.
+   *
+   * Hasta aquí sólo se validaba la FORMA (`PUC_ACCOUNT_CODE_REGEX`: 4-20
+   * dígitos). Un código con forma válida pero que no existe en el
+   * `chart_of_accounts` de la organización se guardaba sin queja y, al facturar,
+   * `AutoEntryService.resolveInvoiceRevenueLines()` lo descartaba y acreditaba
+   * la cuenta de ingreso POR DEFECTO dejando sólo un `logger.warn`. El
+   * comerciante creía tener su venta separada en una subcuenta y su contabilidad
+   * decía otra cosa, sin ningún síntoma visible.
+   *
+   * Los tres casos van separados porque exigen acciones distintas del usuario:
+   * crear la cuenta, activarla, o bajar a una subcuenta hija. 400 y no 422 para
+   * alinear con el resto del bloque `PROD_*`: el frontend discrimina por
+   * `error_code`, no por status.
+   */
+  PROD_ACCOUNT_CODE_NOT_FOUND_001: {
+    code: 'PROD_ACCOUNT_CODE_NOT_FOUND_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada no existe en el plan de cuentas (PUC) de esta organización',
+  },
+  PROD_ACCOUNT_CODE_INACTIVE_001: {
+    code: 'PROD_ACCOUNT_CODE_INACTIVE_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada está inactiva y no puede recibir movimientos',
+  },
+  PROD_ACCOUNT_CODE_NOT_POSTABLE_001: {
+    code: 'PROD_ACCOUNT_CODE_NOT_POSTABLE_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada es de agrupación y no admite movimientos; se requiere una subcuenta',
+  },
+
   // Quotations
   QUOTE_CONVERT_STATUS_001: {
     code: 'QUOTE_CONVERT_STATUS_001',
@@ -2345,6 +2381,44 @@ export const ErrorCodes = {
     code: 'DIAN_SEND_002',
     httpStatus: 504,
     devMessage: 'DIAN request timed out',
+  },
+  /**
+   * `cbc:InvoicedQuantity/@unitCode` — la unidad de medida de una línea no se
+   * pudo resolver contra el catálogo, y NO se inventa.
+   *
+   * La DIAN valida `@unitCode` contra su lista de códigos UN/ECE y valida además
+   * la coherencia entre la cantidad y su unidad. Rellenar con `'EA'` una línea
+   * cuya unidad real es kilos o metros produce un documento que declara piezas
+   * donde hubo kilos: aceptado por el validador, falso ante la DIAN, e
+   * irreversible una vez emitido. Se rechaza ANTES de gastar el consecutivo.
+   *
+   * `'EA'` sigue siendo legítimo —y se sigue emitiendo sin error— en los dos
+   * casos donde SIGNIFICA algo: la línea libre sin producto, y el producto sin
+   * unidad de stock declarada (se cuenta por unidades). Este código sólo aparece
+   * cuando la unidad EXISTE pero no se pudo traducir: producto ilegible desde el
+   * documento, o unidad del catálogo sin equivalencia UN/ECE en
+   * `uom-uncefact.util.ts`.
+   */
+  DIAN_UNIT_CODE_001: {
+    code: 'DIAN_UNIT_CODE_001',
+    httpStatus: 422,
+    devMessage:
+      'No se pudo resolver la unidad de medida (unitCode) de una o más líneas del documento',
+  },
+  /**
+   * La lectura del catálogo de unidades falló (base de datos). Es infraestructura
+   * transitoria, no un dato mal capturado: 503 para que el cliente reintente en
+   * vez de mandar al comerciante a corregir algo que está bien.
+   *
+   * Antes esto era un `catch {}` MUDO que devolvía el mapa a medias y hacía que
+   * toda la factura se emitiera con `'EA'`. Tragarse el error no sólo emitía un
+   * documento falso: impedía siquiera diagnosticarlo.
+   */
+  DIAN_UNIT_CODE_002: {
+    code: 'DIAN_UNIT_CODE_002',
+    httpStatus: 503,
+    devMessage:
+      'Fallo al leer el catálogo de unidades de medida para resolver los unitCode del documento',
   },
   // Coupons
   CPN_FIND_001: {

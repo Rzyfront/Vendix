@@ -56,9 +56,16 @@ export * from './product-enums';
  * (`VarChar(20)`, mismo que el precedente `withholding_concepts.account_code`).
  *
  * OJO — esto valida la FORMA, no la EXISTENCIA. Que el código exista en el
- * `chart_of_accounts` de la organización y que acepte movimientos
- * (`accepts_entries = true`) es una validación contra la base que no cabe en un
- * DTO: vive en `AutoEntryService.validateProductAccountCode()`.
+ * `chart_of_accounts` de la organización, que esté activo y que acepte
+ * movimientos (`accepts_entries = true`) es una validación contra la base que no
+ * cabe en un DTO: vive en `AutoEntryService.validateProductAccountCodes()`.
+ *
+ * Esa validación SÍ está cableada (no siempre lo estuvo): la invocan
+ * `ProductsService.create()` / `.update()` para el producto y todas sus
+ * variantes en una sola consulta, y `ProductVariantService.createVariant()` /
+ * `.updateVariant()` para el endpoint suelto de variante. Falla con
+ * `PROD_ACCOUNT_CODE_NOT_FOUND_001`, `PROD_ACCOUNT_CODE_INACTIVE_001` o
+ * `PROD_ACCOUNT_CODE_NOT_POSTABLE_001`.
  */
 export const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
 

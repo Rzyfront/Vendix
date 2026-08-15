@@ -62,7 +62,10 @@ import {
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
-import { resolveUneceUnitCode } from '../../products/services/uom-uncefact.util';
+// `Strict`, no la tolerante: acá el valor viaja a la DIAN y un `EA` de relleno
+// declara piezas donde hubo kilos. La versión que devuelve `null` permite
+// rechazar el documento en vez de emitirlo con una unidad inventada.
+import { resolveUneceUnitCodeStrict } from '../../products/services/uom-uncefact.util';
 import { toCustomerInvoiceData } from '../utils/customer-invoice-data.adapter';
 import {
   AcquirerIdentificationMode,
@@ -1475,10 +1478,34 @@ export class InvoiceFlowService {
    *    ningún código de longitud describe eso sin mentir.
    * 2. Sin presentación: la cantidad ya está en la unidad mínima, así que la
    *    unidad de stock es coherente (`3000` + `MMT`).
-   * 3. Sin producto o sin unidad declarada: `EA`, el comportamiento histórico.
+   * 3. Producto sin unidad de stock declarada: `EA`, y es CORRECTO — el producto
+   *    se cuenta por unidades. Se escribe en el mapa EXPLÍCITAMENTE, no se deja
+   *    ausente: es la diferencia entre "resolví que son unidades" y "no pude
+   *    resolverlo", que es justo lo que el emisor necesita distinguir.
    *
    * Dos consultas para toda la factura —productos y catálogo— en vez de una
    * por línea.
+   *
+   * ═══ QUÉ SIGNIFICA UNA LÍNEA AUSENTE DEL MAPA ═══
+   * Que NO se pudo resolver, y entonces el emisor rechaza el documento
+   * (`DIAN_UNIT_CODE_001`) en vez de rellenar con `EA`. Sólo ocurre en dos
+   * casos, ambos anómalos:
+   *   · el producto de la línea no es legible desde el documento (fila ausente
+   *     o fuera del alcance del tenant), luego su unidad es desconocida;
+   *   · la unidad SÍ existe en `units_of_measure` pero no tiene equivalencia
+   *     UN/ECE en `uom-uncefact.util.ts` — un catálogo que creció sin actualizar
+   *     la tabla. Antes eso se emitía como `EA` en silencio.
+   * La línea SIN producto (texto libre) ni siquiera entra aquí: el emisor le
+   * pone `EA`, que para ella es la unidad correcta.
+   *
+   * ═══ POR QUÉ YA NO HAY `catch {}` ═══
+   * Había uno, vacío, con el argumento de que "la factura se emite con `EA` en
+   * vez de no emitirse". Pero `@unitCode` es un campo que la DIAN valida contra
+   * catálogo y contra la cantidad: un fallo de lectura convertía TODA la factura
+   * en un documento que declara piezas donde hubo kilos, aceptado e
+   * irreversible. Y al tragarse el error, impedía siquiera diagnosticarlo. Ahora
+   * se registra con `logger.error` y se lanza `DIAN_UNIT_CODE_002` (503): la
+   * emisión es reintentable, un documento falso ante la DIAN no.
    */
   private async resolveLineUnitCodes(
     items: Array<{
@@ -1503,6 +1530,20 @@ export class InvoiceFlowService {
         where: { id: { in: productIds } },
         select: { id: true, stock_uom_id: true },
       });
+
+      /**
+       * Productos LEÍDOS que no declaran unidad de stock. Se cuentan por
+       * unidades, así que su `EA` está resuelto, no inventado. El conjunto se
+       * construye antes de cualquier otra lectura porque es la respuesta
+       * completa cuando NINGÚN producto de la factura tiene unidad — el caso de
+       * la inmensa mayoría del histórico.
+       */
+      const productsWithoutUnit = new Set<number>(
+        products
+          .filter((p: any) => p.stock_uom_id == null)
+          .map((p: any) => Number(p.id)),
+      );
+
       const uomIds: number[] = Array.from(
         new Set(
           products
@@ -1510,7 +1551,13 @@ export class InvoiceFlowService {
             .filter((id: any): id is number => typeof id === 'number'),
         ),
       );
-      if (uomIds.length === 0) return out;
+      if (uomIds.length === 0) {
+        for (const item of items) {
+          if (item.product_id == null) continue;
+          if (productsWithoutUnit.has(item.product_id)) out.set(item.id, 'EA');
+        }
+        return out;
+      }
 
       const stockUnits = await this.prisma.units_of_measure.findMany({
         where: { id: { in: uomIds } },
@@ -1563,7 +1610,19 @@ export class InvoiceFlowService {
 
       for (const item of items) {
         if (item.product_id == null) continue;
+
+        // Producto legible pero SIN unidad de stock: se cuenta por unidades y
+        // `EA` es la declaración correcta. Se escribe en el mapa para que el
+        // emisor sepa que está resuelto y no lo confunda con un fallo.
+        if (productsWithoutUnit.has(item.product_id)) {
+          out.set(item.id, 'EA');
+          continue;
+        }
+
         const stockUnit = stockUnitByProduct.get(item.product_id);
+        // Ausente ⇒ el producto no se pudo leer, o su unidad no tiene código
+        // UN/ECE. No se inventa: la línea queda fuera del mapa y el emisor
+        // rechaza el documento nombrándola.
         if (!stockUnit) continue;
 
         const quantity = Number(item.quantity ?? 0);
@@ -1578,20 +1637,112 @@ export class InvoiceFlowService {
           // tiene factor 100, y la línea caía a `EA` — "3 unidades" donde se
           // vendieron 3 metros, justo el error que este resolutor evita.
           const scale = (Number(consumed) / quantity) * stockUnit.factor;
-          const scaleCode = codeByScale.get(
-            `${stockUnit.dimension}|${scale}`,
-          );
-          out.set(item.id, scaleCode ? resolveUneceUnitCode(scaleCode) : 'EA');
+          const scaleCode = codeByScale.get(`${stockUnit.dimension}|${scale}`);
+          if (!scaleCode) {
+            // La escala no corresponde a ninguna unidad del catálogo: son N
+            // paquetes ("Caja x12", "Rollo 20 m") y `EA` los describe sin
+            // mentir. Resuelto, no inventado.
+            out.set(item.id, 'EA');
+            continue;
+          }
+          // `Strict`: si la unidad del catálogo no tiene equivalencia UN/ECE se
+          // deja la línea SIN resolver en vez de degradarla a `EA`.
+          const scaleUnece = resolveUneceUnitCodeStrict(scaleCode);
+          if (scaleUnece) out.set(item.id, scaleUnece);
           continue;
         }
-        out.set(item.id, resolveUneceUnitCode(stockUnit.code));
+        const unece = resolveUneceUnitCodeStrict(stockUnit.code);
+        if (unece) out.set(item.id, unece);
       }
-    } catch {
-      // La unidad es un detalle de presentación fiscal: si su lectura falla,
-      // la factura se emite con `EA` en vez de no emitirse.
-      return out;
+    } catch (error) {
+      // Ya NO se traga el error. Ver el bloque "POR QUÉ YA NO HAY `catch {}`"
+      // de la cabecera: emitir toda la factura con `EA` porque falló una
+      // lectura produce un documento falso ante la DIAN, e irreversible.
+      this.logger.error(
+        `resolveLineUnitCodes: fallo al leer el catálogo de unidades para ${productIds.length} producto(s) ` +
+          `de ${items.length} línea(s). El documento NO se emite con unidades inventadas.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_UNIT_CODE_002,
+        'No se pudo consultar el catálogo de unidades de medida para determinar la unidad (unitCode) de las líneas del documento. ' +
+          'Es un fallo temporal de lectura, no un dato mal capturado: vuelve a intentar el envío en unos segundos. ' +
+          'Si persiste, repórtalo — el documento no se emite con unidades inventadas.',
+        { product_count: productIds.length, item_count: items.length },
+      );
     }
     return out;
+  }
+
+  /**
+   * PUERTA: ninguna línea con producto puede llegar al XML con una unidad
+   * inventada.
+   *
+   * Es la contraparte de `resolveLineUnitCodes`. Aquella devuelve un mapa donde
+   * la AUSENCIA significa "no se pudo resolver"; ésta convierte esa ausencia en
+   * un rechazo con nombre y apellido en vez de dejar que el `?? 'EA'` del
+   * armador la tape.
+   *
+   * TRES fuentes se consideran resueltas, en este orden:
+   *   1. `invoice_items.unit_code` — el SNAPSHOT persistido al crear el
+   *      documento. Manda sobre todo lo demás y cubre el histórico reciente.
+   *   2. la resolución en vivo contra el catálogo (el mapa).
+   *   3. la línea SIN `product_id` — texto libre, flete, ajuste: `EA` es su
+   *      unidad correcta, no un relleno.
+   *
+   * ═══ POR QUÉ ESTO NO ROMPE FACTURAS HISTÓRICAS LEGÍTIMAS ═══
+   * Se pensó como alternativa a fallar siempre, y es deliberadamente estrecha.
+   * Una factura anterior al snapshot sigue emitiéndose sin fricción: su producto
+   * se lee, y tenga unidad de stock o no (la mayoría del histórico no la tiene)
+   * el resolutor le escribe un valor. Sólo se rechaza lo que de verdad no se
+   * puede declarar sin mentir:
+   *   · el producto de la línea no es legible desde el documento;
+   *   · su unidad de catálogo no tiene equivalencia UN/ECE.
+   * Ambas son anomalías de datos que exigen intervención humana, y ninguna se
+   * arregla emitiendo `EA`.
+   *
+   * El error nombra las líneas afectadas —no "una línea"— porque el operador
+   * necesita saber cuál producto revisar.
+   */
+  private assertLineUnitCodesResolved(
+    invoice: { id: number; invoice_items?: any[] | null },
+    unitCodeByItem: Map<number, string>,
+  ): void {
+    const unresolved = (invoice.invoice_items || []).filter(
+      (item: any) =>
+        item?.product_id != null &&
+        !item?.unit_code &&
+        !unitCodeByItem.has(item.id),
+    );
+    if (unresolved.length === 0) return;
+
+    const labels = unresolved
+      .slice(0, 5)
+      .map(
+        (item: any) =>
+          `"${item.description ?? `línea #${item.id}`}" (producto #${item.product_id})`,
+      )
+      .join(', ');
+    const overflow =
+      unresolved.length > 5 ? ` y ${unresolved.length - 5} más` : '';
+
+    this.logger.error(
+      `Invoice #${invoice.id}: ${unresolved.length} línea(s) sin unidad de medida resoluble ` +
+        `(ids ${unresolved.map((i: any) => i.id).join(', ')}). Emisión bloqueada.`,
+    );
+
+    throw new VendixHttpException(
+      ErrorCodes.DIAN_UNIT_CODE_001,
+      `No se puede determinar la unidad de medida (unitCode) de ${unresolved.length} línea(s) del documento: ` +
+        `${labels}${overflow}. La DIAN valida esa unidad contra su catálogo y contra la cantidad, así que el ` +
+        `documento no se emite con una unidad de relleno. Revisa en Productos que cada uno de esos artículos ` +
+        `exista en esta tienda y tenga una unidad de stock válida, y vuelve a enviar.`,
+      {
+        invoice_id: invoice.id,
+        unresolved_item_ids: unresolved.map((item: any) => item.id),
+        unresolved_product_ids: unresolved.map((item: any) => item.product_id),
+      },
+    );
   }
 
   /**
@@ -1785,8 +1936,12 @@ export class InvoiceFlowService {
    * línea**, no contra el total de la cabecera. Bajar sólo el importe dejaría
    * el precio unitario bruto arriba y el neto abajo: un documento internamente
    * contradictorio, rechazado por la línea misma. Hay que despejar el PRECIO —
-   * y por eso `cac:Price/cbc:PriceAmount` se emite con `dianUnitPrice`, que usa
-   * los 0-6 decimales que ese campo admite y ningún otro importe monetario.
+   * y por eso `cac:Price/cbc:PriceAmount` se emite con `dianPriceAmount`, que
+   * deriva el precio del importe ya neto (`importe ÷ cantidad`) y usa los 0-6
+   * decimales que ese campo admite y ningún otro importe monetario. La igualdad
+   * que cierra es `PriceAmount × BaseQuantity − descuentos = LineExtensionAmount`,
+   * donde `BaseQuantity` es la CANTIDAD facturada; la evidencia completa está en
+   * `UblCommonBuilder.resolveBaseQuantity`.
    *
    * ## De dónde sale la base gravable
    *
@@ -2224,6 +2379,12 @@ export class InvoiceFlowService {
       invoice.invoice_items || [],
     );
 
+    // PUERTA: ninguna línea con producto viaja con una unidad inventada. Se
+    // corre en el primer punto posible del envío —antes de resolver AIU,
+    // retenciones o el consecutivo— porque rechazar acá es recuperable y
+    // rectificar ante la DIAN un documento ya aceptado no lo es.
+    this.assertLineUnitCodesResolved(invoice, unitCodeByItem);
+
     // Contrato AIU: régimen de base gravable + nota legal de la línea de
     // Administración. `null` en todo documento que no sea AIU, que es el 100 %
     // del histórico y no cuesta ninguna lectura.
@@ -2335,9 +2496,12 @@ export class InvoiceFlowService {
         // congela la unidad que se emitió, así que un reenvío años después
         // declara lo mismo aunque el producto haya cambiado de unidad de stock
         // entretanto — y la DIAN recomputa el documento sobre lo que recibe, no
-        // sobre el catálogo de hoy. Sin snapshot se resuelve en vivo, y sólo si
-        // eso tampoco da nada se declara `EA`: en una línea libre, sin producto,
-        // "cada" es la unidad correcta, no un relleno.
+        // sobre el catálogo de hoy.
+        //
+        // El `?? 'EA'` final ya NO es un relleno: `assertLineUnitCodesResolved`
+        // acaba de garantizar que sólo llega hasta aquí la línea SIN producto —
+        // texto libre, flete, ajuste— donde "cada" es la unidad correcta. Toda
+        // línea con producto o llega resuelta, o el documento no se emite.
         unit_code: item.unit_code ?? unitCodeByItem.get(item.id) ?? 'EA',
         // Escala de precio de la línea. Misma función que usa el despeje
         // inclusivo y el prevalidador: tres divisores distintos sobre la misma
