@@ -5,6 +5,7 @@ import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { REVIEW_APPROVED_STATES } from '../analytics-metrics.contract';
 
 @Injectable()
 export class ReviewsAnalyticsService {
