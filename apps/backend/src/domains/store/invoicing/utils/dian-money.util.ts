@@ -204,6 +204,61 @@ export function dianLineGross(line: DianLineAmounts): string {
 }
 
 /**
+ * `cac:Price/cbc:PriceAmount` — el precio de UNA unidad de las facturadas.
+ *
+ * ## Qué es `cbc:BaseQuantity` en el perfil colombiano
+ *
+ * En el perfil DIAN, `cbc:BaseQuantity` **es la cantidad facturada**, no un
+ * divisor de escala. La regla de rechazo FAV06 es una multiplicación, sin
+ * división en ninguna parte:
+ *
+ *   cbc:LineExtensionAmount = PriceAmount × BaseQuantity
+ *                             − Σ AllowanceCharge[ChargeIndicator=false]
+ *                             + Σ AllowanceCharge[ChargeIndicator=true]
+ *
+ * Verificado sobre los 27 renglones de los XMLs oficiales de la Caja de
+ * Herramientas: los 27 reconcilian con esta lectura y ninguno con la de
+ * divisor. Los dos únicos ejemplos con cantidad ≠ 1 lo fijan sin ambigüedad —
+ * `Transporte de Carga.xml` factura 10 KGM a 200.000 y declara
+ * `BaseQuantity=10` con `LineExtensionAmount=2.000.000`; bajo la lectura de
+ * divisor ese renglón valdría 200.000. (`Consumidor Final.xml` aporta además el
+ * término de recargos: 1.410.000 = 1.400.000 × 1 + 10.000.)
+ *
+ * Es la lectura contraria a la de PEPPOL EN16931-R120, donde `BaseQuantity` sí
+ * escala el precio. Esa regla no es de la DIAN y no aplica acá.
+ *
+ * ## Por qué existe esta función
+ *
+ * Porque `price_unit_quantity` (QUI-648) **no es representable** en este perfil:
+ * el campo que serviría para declarar "este precio es por N unidades" está
+ * ocupado por la cantidad. Así que la escala se consume ANTES del XML, en el
+ * precio: se emite el precio por unidad facturada, y `BaseQuantity` lleva la
+ * cantidad. El queso a $28.000 el kilo con la venta en gramos sale como 500 GRM
+ * a $28 el gramo — mismo importe, y ahora sí derivable de sus propios campos.
+ *
+ * El valor se deriva de {@link dianLineExtension} dividido por la cantidad, no
+ * de una expresión aparte, para que la igualdad de FAV06 se cumpla por
+ * construcción. El redondeo sube en la sexta cifra por el mismo motivo que en
+ * {@link clearInclusiveLine}: un precio periódico truncado deja el producto un
+ * centavo por debajo del importe que la línea declara.
+ */
+export function dianPriceAmount(line: DianLineAmounts): string {
+  const quantity = toDecimal(line.quantity);
+  // Cantidad cero o inválida: no hay de qué derivar, y dividir sería NaN. Se
+  // cae al precio ya escalado, que es lo que declaraba el emisor histórico.
+  const per_unit = quantity.greaterThan(0)
+    ? lineGrossDecimal(line).dividedBy(quantity)
+    : toDecimal(line.unit_price).dividedBy(
+        priceUnitDivisor(line.price_unit_quantity),
+      );
+
+  const two_decimals = applyScale(per_unit, DIAN_SCALE);
+  return toDecimal(two_decimals).equals(per_unit)
+    ? two_decimals
+    : per_unit.toFixed(DIAN_PRICE_SCALE, Prisma.Decimal.ROUND_UP);
+}
+
+/**
  * Sum of every line's net extension amount — the value that
  * `cac:LegalMonetaryTotal/cbc:LineExtensionAmount` **must** equal (rule
  * `FAU14`).

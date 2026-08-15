@@ -5,6 +5,7 @@ import {
   dianArithmetic,
   dianLineExtension,
   dianLineGross,
+  dianPriceAmount,
   dianRate,
   dianSum,
   dianUnitPrice,
@@ -141,8 +142,14 @@ describe('dian-money.util', () => {
    * Recompone la regla de rechazo FAV06 (Anexo 1.9, pág. 443-444) sobre los
    * MISMOS strings que viajan en el XML:
    *
-   *   cbc:LineExtensionAmount == PriceAmount × InvoicedQuantity ÷ BaseQuantity
+   *   cbc:LineExtensionAmount == PriceAmount × BaseQuantity
    *                              − Σ AllowanceCharge[ChargeIndicator=false]
+   *                              + Σ AllowanceCharge[ChargeIndicator=true]
+   *
+   * `cbc:BaseQuantity` ES la cantidad facturada en el perfil DIAN — no un
+   * divisor de escala de precio, que es lo que dice PEPPOL EN16931-R120 y NO
+   * aplica acá. Ver la nota de {@link dianPriceAmount} para la evidencia sobre
+   * los XMLs oficiales.
    *
    * Se recalcula desde el precio ya formateado, no desde el `Decimal` original,
    * porque es exactamente lo que hace la DIAN: recomputa el documento sobre los
@@ -161,12 +168,29 @@ describe('dian-money.util', () => {
       price_unit_quantity: line.price_unit_quantity,
     };
     return {
-      price_amount: emitted.unit_price,
+      price_amount: dianPriceAmount(emitted),
+      base_quantity: dianAmount(emitted.quantity),
       allowance_amount: emitted.discount_amount,
       allowance_base: dianLineGross(emitted),
       line_extension: dianLineExtension(emitted),
     };
   };
+
+  /**
+   * Aplica FAV06 tal como la evalúa la DIAN: sobre los strings emitidos, con la
+   * multiplicación —nunca una división— y truncando a 2 al final. Devuelve el
+   * importe que la regla EXIGE, para compararlo contra el que la línea declara.
+   */
+  const fav06Expected = (emitted: ReturnType<typeof emitFav06>) =>
+    dianArithmetic([
+      {
+        value: toDecimal(emitted.price_amount).times(
+          toDecimal(emitted.base_quantity),
+        ),
+        sign: 1,
+      },
+      { value: emitted.allowance_amount, sign: -1 },
+    ]);
 
   describe('clearInclusiveLine — FAV06 sobre precios impuesto-incluido', () => {
     it('despeja el caso de una unidad a $1.000 con IVA 19 % dentro', () => {
@@ -258,6 +282,110 @@ describe('dian-money.util', () => {
       };
       expect(dianLineGross(line)).toBe('70000.00');
       expect(dianLineExtension(line)).toBe('69900.00');
+    });
+  });
+
+  /**
+   * FAV06 con la semántica REAL de `cbc:BaseQuantity`: la cantidad facturada,
+   * multiplicada — nunca dividida — por `cbc:PriceAmount`.
+   *
+   * El emisor declaraba `BaseQuantity = price_unit_quantity`, que es la lectura
+   * de PEPPOL EN16931-R120 y NO la de la DIAN. Bajo la regla real eso rompía
+   * TODA línea con cantidad ≠ 1, no sólo las de productos con escala de precio:
+   * una venta de 10 unidades a $200.000 declaraba `BaseQuantity=1` y afirmaba
+   * un renglón de $200.000 sobre un importe de $2.000.000.
+   */
+  describe('dianPriceAmount — FAV06 = PriceAmount × BaseQuantity', () => {
+    const cases: {
+      name: string;
+      line: Parameters<typeof dianLineExtension>[0];
+      taxable_base?: string;
+      price_amount: string;
+      line_extension: string;
+    }[] = [
+      {
+        // Ejemplo oficial `Transporte de Carga.xml`: 10 KGM a 200.000.
+        name: 'el ejemplo oficial con cantidad 10',
+        line: { quantity: 10, unit_price: 200000, discount_amount: 0 },
+        price_amount: '200000.00',
+        line_extension: '2000000.00',
+      },
+      {
+        // Ejemplo oficial `FacturaVenta_moneda_extranjera.xml`.
+        name: 'el ejemplo oficial de moneda extranjera',
+        line: { quantity: 10, unit_price: 1000, discount_amount: 0 },
+        price_amount: '1000.00',
+        line_extension: '10000.00',
+      },
+      {
+        // QUI-648. Antes: PriceAmount 28.000 × BaseQuantity 1.000 = 28.000.000
+        // contra un renglón de 70.000. Ahora el precio se expresa por gramo,
+        // que es la unidad que la línea factura.
+        name: 'la price unit consumida en el precio, no en BaseQuantity',
+        line: {
+          quantity: 2500,
+          unit_price: 28000,
+          discount_amount: 0,
+          price_unit_quantity: '1000',
+        },
+        price_amount: '28.00',
+        line_extension: '70000.00',
+      },
+      {
+        name: 'una línea con descuento',
+        line: { quantity: 4, unit_price: 25000, discount_amount: 10000 },
+        price_amount: '25000.00',
+        line_extension: '90000.00',
+      },
+      {
+        name: 'el precio despejado de impuesto incluido, a 6 decimales',
+        line: { quantity: 3, unit_price: 1000, discount_amount: 0 },
+        taxable_base: '2521.01',
+        price_amount: '840.336667',
+        line_extension: '2521.01',
+      },
+    ];
+
+    for (const testCase of cases) {
+      it(`cuadra ${testCase.name}`, () => {
+        const cleared = testCase.taxable_base
+          ? clearInclusiveLine({
+              ...testCase.line,
+              taxable_base: testCase.taxable_base,
+            })
+          : null;
+        const emitted = emitFav06(testCase.line, cleared);
+
+        expect(emitted.price_amount).toBe(testCase.price_amount);
+        expect(emitted.line_extension).toBe(testCase.line_extension);
+        // La regla al pie de la letra, sobre los strings que viajan en el XML.
+        expect(fav06Expected(emitted)).toBe(emitted.line_extension);
+      });
+    }
+
+    it('emite el precio por unidad facturada, no por unidad de publicación', () => {
+      // La distinción completa en un solo caso: el catálogo publica $28.000 el
+      // kilo y la línea factura gramos. `BaseQuantity` lleva los gramos.
+      const line = {
+        quantity: 2500,
+        unit_price: 28000,
+        price_unit_quantity: '1000',
+      };
+      expect(dianPriceAmount(line)).toBe('28.00');
+      expect(dianAmount(line.quantity)).toBe('2500.00');
+    });
+
+    it('no divide por cero cuando la cantidad es inválida', () => {
+      // Una línea así no debe emitirse, pero el formateador no puede ser quien
+      // meta un `NaN` en el XML — eso produce una huella inválida en silencio.
+      expect(dianPriceAmount({ quantity: 0, unit_price: 1000 })).toBe('1000.00');
+      expect(
+        dianPriceAmount({
+          quantity: 0,
+          unit_price: 28000,
+          price_unit_quantity: '1000',
+        }),
+      ).toBe('28.00');
     });
   });
 });
