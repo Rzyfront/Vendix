@@ -2,6 +2,11 @@ import { AbstractControl } from '@angular/forms';
 
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import {
+  DEFAULT_ERROR_MESSAGE,
+  ERROR_MESSAGES,
+} from '../../../../../core/utils/error-messages';
+import type { Invoice } from '../interfaces/invoice.interface';
 
 /**
  * COMO SE LEE UN FALLO DE FACTURACION.
@@ -15,7 +20,11 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
  *  1. `describeApiFailure`  — mensaje UX + codigo + details, en un objeto plano
  *     que puede viajar dentro de una accion NgRx.
  *  2. `readDianRejection`   — los motivos REALES del rechazo de la DIAN que
- *     `INVOICING_PROVIDER_004` trae en `details.dian_errors[]`.
+ *     `INVOICING_PROVIDER_004` trae en `details.dian_errors[]`. EN VIVO: sólo
+ *     existe mientras dura el error de la peticion.
+ *  2b. `readPersistedDianRejection` — esos MISMOS motivos, leidos de lo que el
+ *     backend ya guardo en `invoices.provider_response`. Es el respaldo que
+ *     hace que el rechazo sobreviva a una recarga.
  *  3. `applyBackendValidationErrors` — los `details.validationErrors` de
  *     `SYS_VALIDATION_001` puestos sobre el `FormControl` que les corresponde.
  */
@@ -102,21 +111,7 @@ export function readDianRejection(failure: ApiFailure): DianRejection | null {
     return null;
   }
 
-  const raw = Array.isArray(details['dian_errors']) ? details['dian_errors'] : [];
-  const reasons = raw.reduce<DianRejectionReason[]>((acc, entry) => {
-    const row = asRecord(entry);
-    if (!row) return acc;
-    const message = readString(row['message']);
-    // Un motivo sin texto no le dice nada a nadie; el codigo solo no basta.
-    if (!message) return acc;
-    const reason: DianRejectionReason = { message };
-    const code = readString(row['code']);
-    if (code) reason.code = code;
-    const severity = readString(row['severity']);
-    if (severity) reason.severity = severity;
-    acc.push(reason);
-    return acc;
-  }, []);
+  const reasons = normalizeDianReasons(details['dian_errors']);
 
   const statusDescription = readString(details['dian_status_description']);
   if (reasons.length === 0 && !statusDescription) {
@@ -131,6 +126,148 @@ export function readDianRejection(failure: ApiFailure): DianRejection | null {
     statusDescription: statusDescription ?? undefined,
     trackingId: readString(details['tracking_id']) ?? undefined,
   };
+}
+
+/**
+ * Encabezado del panel de rechazo. Sale del MISMO catalogo del que sale el del
+ * error en vivo (`parseApiError` -> `ERROR_MESSAGES[error_code]`), asi que las
+ * dos fuentes se leen identicas: cambiar el copy en un sitio las cambia en los
+ * dos, que es justo lo que evita que el panel persistido se desvie del vivo.
+ */
+const DIAN_REJECTION_HEADLINE =
+  ERROR_MESSAGES['INVOICING_PROVIDER_004'] ?? DEFAULT_ERROR_MESSAGE;
+
+/**
+ * EL MISMO RECHAZO, LEIDO DE LO QUE QUEDO GUARDADO.
+ *
+ * POR QUE EXISTE. `readDianRejection` sólo sabe leer el error TRANSITORIO de la
+ * peticion que produjo el rechazo, y ese error vive en el store hasta que el
+ * reducer lo limpia — cuatro veces, `loadInvoice` incluido. Recargar la pagina,
+ * o abrir una factura rechazada de ayer, dejaba el badge «Rechazado por la
+ * DIAN» sin UNA sola regla: el «Valor del CUFE no esta calculado
+ * correctamente» del incidente real seguia escrito en la fila y nadie lo veia.
+ * El backend ya persiste esa evidencia en `invoices.provider_response` y la
+ * devuelve entera en `GET :id`; esto es sólo leerla.
+ *
+ * SOLO SOBRE UN RECHAZO. `provider_response` se escribe TAMBIEN al aceptar
+ * (`success: true`, sin motivos), al expedir en contingencia y cuando la
+ * respuesta llega sin CUFE. Ninguno de esos es un rechazo, y este panel afirma
+ * literalmente que «la DIAN rechazo el documento»:
+ *
+ *   · contingencia -> `transmission_status: 'contingency'`, `dian_status:
+ *     'pending'`. El documento es VALIDO y esta entregado; ya tiene su propio
+ *     aviso con el plazo de 48 h. Pintarlo como rechazo seria mentir.
+ *   · `error`      -> la transmision no llego a la DIAN, que es lo que dice la
+ *     celda de estado fiscal («no es un rechazo: el documento no fue
+ *     juzgado»). Contradecirla desde el panel de al lado seria peor que callar.
+ *
+ * Por eso el disparador son los estados de RECHAZO de la propia fila, los tres
+ * que el backend escribe juntos en esa rama (`status`, `dian_status`,
+ * `transmission_status`): basta con que uno lo declare.
+ *
+ * Devuelve `null` cuando no hay nada legible que mostrar — un panel vacio no
+ * vale la pena, igual que en el camino en vivo.
+ */
+export function readPersistedDianRejection(
+  invoice: Invoice | null | undefined,
+): DianRejection | null {
+  if (!invoice || !wasRejectedByDian(invoice)) {
+    return null;
+  }
+
+  // Se declara tipado (`InvoiceProviderResponse`) para documentar el contrato,
+  // pero se LEE como JSON de un tercero: la columna es un `Json?` sin validar y
+  // en la base conviven filas con otra forma entera (`{ date, status,
+  // tracking_id }`, del seed). Un `.message` sobre eso no existe.
+  const evidence = asRecord(invoice.provider_response);
+  if (!evidence) {
+    return null;
+  }
+
+  const data = asRecord(evidence['provider_data']);
+  const reasons = normalizeDianReasons(data?.['dian_errors']);
+  const statusCode = readString(data?.['dian_status_code']);
+  const statusDescription = readString(data?.['dian_status_description']);
+  // `message` del proveedor: en un rechazo del proveedor DIAN ya trae los
+  // motivos concatenados, asi que solo se usa como encabezado cuando NO hay
+  // viñetas — de lo contrario diria dos veces lo mismo.
+  const providerMessage = readString(evidence['message']);
+
+  if (reasons.length === 0 && !statusDescription && !providerMessage) {
+    return null;
+  }
+
+  return {
+    invoiceId: invoice.id,
+    // Con viñetas, el encabezado es el copy curado —el mismo del camino en
+    // vivo—. Sin ellas, el mensaje del proveedor es lo unico que queda y vale
+    // mas que una frase generica. `statusDescription` NUNCA sube acá: ya se
+    // pinta en su propia linea («Estado DIAN: …») y repetirlo seria decir dos
+    // veces lo mismo en el mismo recuadro.
+    headline: reasons.length
+      ? DIAN_REJECTION_HEADLINE
+      : (providerMessage ?? DIAN_REJECTION_HEADLINE),
+    reasons,
+    statusCode: statusCode ?? undefined,
+    statusDescription: statusDescription ?? undefined,
+    trackingId: readString(evidence['tracking_id']) ?? undefined,
+  };
+}
+
+/**
+ * La fila declara que la DIAN RECHAZO el documento.
+ *
+ * Los tres estados se escriben JUNTOS en la rama de rechazo del backend, asi
+ * que en la practica coinciden; se leen los tres porque el detalle tambien se
+ * pinta con la fila de la lista y una respuesta vieja podria traer sólo alguno.
+ */
+function wasRejectedByDian(invoice: Invoice): boolean {
+  return (
+    invoice.status === 'rejected' ||
+    invoice.dian_status === 'rejected' ||
+    invoice.transmission_status === 'rejected'
+  );
+}
+
+/**
+ * Normaliza una lista cruda de `dian_errors[]`, venga del `details` de la
+ * excepcion o de `provider_response`. UNA sola lectura para las dos fuentes:
+ * lo que se filtre acá se filtra en las dos, y lo que se pinte se pinta igual.
+ */
+function normalizeDianReasons(raw: unknown): DianRejectionReason[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.reduce<DianRejectionReason[]>((acc, entry) => {
+    const row = asRecord(entry);
+    if (!row) return acc;
+    const message = readReasonText(row['message']);
+    // Un motivo sin texto no le dice nada a nadie; el codigo solo no basta.
+    if (!message) return acc;
+    const reason: DianRejectionReason = { message };
+    const code = readString(row['code']);
+    if (code) reason.code = code;
+    const severity = readString(row['severity']);
+    if (severity) reason.severity = severity;
+    acc.push(reason);
+    return acc;
+  }, []);
+}
+
+/**
+ * Texto de un motivo, DESCARTANDO EL RUIDO.
+ *
+ * `extractErrors` (backend, `dian-response-parser.service.ts`) barre el XML con
+ * dos expresiones regulares, y la segunda se lleva CADA `<cbc:Description>` del
+ * documento — no todas son reglas. En el incidente real eso metio un motivo
+ * cuyo `message` era literalmente `"0"`. Una viñeta que solo dice «0» no le
+ * dice nada al comerciante y ensucia la unica lista que si le dice que
+ * corregir, asi que un texto sin una sola letra se descarta igual que uno
+ * vacio.
+ */
+function readReasonText(value: unknown): string | null {
+  const text = readString(value);
+  return text && /\p{L}/u.test(text) ? text : null;
 }
 
 /**

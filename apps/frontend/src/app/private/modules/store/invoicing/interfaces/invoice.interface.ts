@@ -119,6 +119,23 @@ export interface Invoice {
   xml_document?: string | null;
 
   /**
+   * EVIDENCIA PERSISTIDA DE LO QUE DIJO EL PROVEEDOR / LA DIAN.
+   *
+   * Es la columna `invoices.provider_response` (Json?), y viaja entera en el
+   * payload porque `INVOICE_INCLUDE` no lleva `select` a nivel de factura —
+   * verificado por `curl` sobre `GET /store/invoicing/:id` y sobre la lista: la
+   * clave llega siempre, con `null` cuando el documento nunca se transmitió.
+   *
+   * POR QUÉ IMPORTA QUE ESTÉ DECLARADA. El motivo real del rechazo («Valor del
+   * CUFE no está calculado correctamente») vive acá dentro, en
+   * `provider_data.dian_errors[]`. Mientras el frontend no la declaró, el panel
+   * de reglas sólo se alimentaba del error EN VIVO de la petición: recargar la
+   * página, o abrir una factura rechazada de ayer, dejaba el badge «Rechazado
+   * por la DIAN» sin una sola regla que corregir.
+   */
+  provider_response?: InvoiceProviderResponse | null;
+
+  /**
    * DIAN retry-queue state attached by the backend list endpoint.
    * Only present for invoices whose send/transmission status is in an
    * error or pending-send state; `null` for the rest.
@@ -128,6 +145,78 @@ export interface Invoice {
    * así que el detalle lo conserva de la fila de la lista con la que se abrió.
    */
   retry_status?: InvoiceRetryStatus | null;
+}
+
+/**
+ * `invoices.provider_response` — la evidencia que el backend guarda de CADA
+ * transmisión (rechazo, aceptación, contingencia y respuesta sin CUFE).
+ *
+ * FORMA REAL, NO SUPUESTA. La escribe un único constructor,
+ * `toProviderEvidence()` en `invoice-flow.service.ts` (gemelo exacto de
+ * `providerEvidence()` en `fiscal-transmission-ledger.service.ts`), que aplana
+ * `ProviderResponse` con `?? null` campo por campo. Por eso los escalares se
+ * declaran `| null` y no opcionales: cuando ese constructor corre, las claves
+ * SIEMPRE están, y su ausencia sólo puede venir de una fila escrita por otra
+ * cosa.
+ *
+ * TODO SE DECLARA OPCIONAL DE TODAS FORMAS porque la columna es un `Json?` sin
+ * validación: en la base de desarrollo conviven filas con una forma
+ * completamente distinta (`{ date, status, tracking_id }`, sembradas por el
+ * seed). El tipo documenta el contrato; el lector
+ * (`readPersistedDianRejection`) no se fía de él y valida en runtime.
+ */
+export interface InvoiceProviderResponse {
+  success?: boolean;
+  tracking_id?: string | null;
+  cufe?: string | null;
+  cude?: string | null;
+  cuds?: string | null;
+  cune?: string | null;
+  qr_code?: string | null;
+  xml_document?: string | null;
+  pdf_url?: string | null;
+  /**
+   * Mensaje compuesto por el proveedor. En un rechazo del `DianDirectProvider`
+   * ya viene con los motivos concatenados («Documento rechazado: …»), así que
+   * NO se pinta junto a las viñetas: sería la misma información dos veces.
+   */
+  message?: string | null;
+  provider_data?: InvoiceProviderData | null;
+}
+
+/**
+ * `provider_response.provider_data` — la bolsa libre del proveedor.
+ *
+ * Las cuatro claves nombradas son las que pone `DianDirectProvider` en sus siete
+ * puntos de emisión. NO son un contrato firme: `sendCreditNote` omite
+ * `dian_status_description` y otro proveedor podría no poner ninguna. De ahí el
+ * índice `unknown` (nunca `any`): lo que no reconocemos se deja pasar sin
+ * pretender saber qué es.
+ */
+export interface InvoiceProviderData {
+  /** Código de estado de la DIAN («00» = aceptado). */
+  dian_status_code?: string | null;
+  dian_status_description?: string | null;
+  /** Las reglas violadas. Es EL dato que el comerciante necesita corregir. */
+  dian_errors?: DianProviderError[] | null;
+  /** `'test'` | `'production'`, tal como lo guarda el proveedor. */
+  environment?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * Un motivo tal como lo deja `DianResponseParserService.extractErrors()`:
+ * `{ code, message, severity }` con `severity: 'error' | 'warning'`.
+ *
+ * Todo opcional a propósito. Ese parser barre el XML con dos expresiones
+ * regulares —una por `Regla: …` y otra por CADA `<cbc:Description>`— y la
+ * segunda arrastra ruido: en el incidente real llegó un elemento cuyo `message`
+ * era literalmente `"0"`. El tipo admite la basura; el lector la descarta.
+ */
+export interface DianProviderError {
+  code?: string | null;
+  message?: string | null;
+  severity?: string | null;
 }
 
 /** Espejo de `fiscal_transmission_status_enum` (schema.prisma). */

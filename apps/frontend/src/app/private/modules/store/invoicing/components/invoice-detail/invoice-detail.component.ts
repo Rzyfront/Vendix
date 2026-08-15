@@ -32,9 +32,11 @@ import {
   selectPdfRegenerating,
 } from '../../state/selectors/invoicing.selectors';
 import {
+  DianRejection,
   DianRejectionReason,
   describeApiFailure,
   formatReason,
+  readPersistedDianRejection,
 } from '../../utils/invoicing-errors.util';
 import {
   ContingencyWindow,
@@ -75,6 +77,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                dos segundos las tira a la basura igual que el catchError vacio
                que este trabajo vino a arreglar. El panel vive junto al boton
                "Enviar" que produjo el rechazo y sobrevive hasta el reintento.
+
+               Y SOBREVIVE A LA RECARGA: rejection() cae a la evidencia
+               persistida en provider_response cuando el error en vivo ya no
+               esta. Antes, recargar borraba los motivos y dejaba el badge de
+               rechazo solo, sin nada que corregir.
           -->
           @if (rejection(); as rej) {
             <div
@@ -766,17 +773,38 @@ export class InvoiceDetailComponent {
   });
 
   /**
-   * El rechazo solo se pinta sobre la factura que lo produjo. `details.invoice_id`
-   * es el amarre; si el backend no lo mandara, un rechazo se mostraria encima de
-   * cualquier otra factura que el usuario abriera despues.
+   * EL MOTIVO DEL RECHAZO, VENGA DE DONDE VENGA.
+   *
+   * Dos fuentes, un solo panel:
+   *
+   *  1. EL ERROR EN VIVO (`dianRejection` del store). Manda porque es el mas
+   *     reciente: es la respuesta del intento que el usuario acaba de hacer, y
+   *     puede ser mas nueva que la fila que se cargo al abrir el modal.
+   *  2. LO PERSISTIDO (`invoice.provider_response`). El respaldo, y el que
+   *     resuelve el fallo real: el error en vivo es transitorio —el reducer lo
+   *     limpia en cuatro puntos, `loadInvoice` incluido— asi que al recargar la
+   *     pagina, o al abrir una factura rechazada de ayer, el panel quedaba
+   *     vacio y el badge «Rechazado por la DIAN» no venia con una sola regla.
+   *     El backend ya guardaba esa evidencia; nadie la leia.
+   *
+   * El error en vivo solo se pinta sobre la factura que lo produjo:
+   * `details.invoice_id` es el amarre. Sin ese filtro, el rechazo de una
+   * factura se mostraria encima de cualquier otra que el usuario abriera
+   * despues — y ahora, ademas, taparia el motivo persistido de esa otra.
+   *
+   * Las dos fuentes producen el MISMO `DianRejection`, asi que el template no
+   * distingue de cual salio: un solo camino de render, un solo copy.
    */
-  readonly rejection = computed(() => {
-    const rej = this.storeRejection();
+  readonly rejection = computed<DianRejection | null>(() => {
     const inv = this.detail();
-    if (!rej || !inv) {
+    if (!inv) {
       return null;
     }
-    return rej.invoiceId == null || rej.invoiceId === inv.id ? rej : null;
+    const live = this.storeRejection();
+    if (live && (live.invoiceId == null || live.invoiceId === inv.id)) {
+      return live;
+    }
+    return readPersistedDianRejection(inv);
   });
 
   /** Los tres estados fiscales + el de envío, ya traducidos. */
