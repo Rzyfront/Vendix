@@ -397,6 +397,66 @@ describe('CreateInvoiceDto — campos DIAN nuevos', () => {
     },
   );
 
+  /**
+   * La forma no basta. El validador anterior era `/^[A-Z]{3}$/`, que sólo
+   * comprobaba «tres mayúsculas»: "ABC" y "ZZZ" pasaban y viajaban al XML como
+   * el `@currencyID` de todos los importes.
+   */
+  it.each(['ABC', 'ZZZ', 'QQQ'])(
+    'rechaza un código de 3 letras que no es moneda (%s)',
+    async (currency) => {
+      const errors = await validateAsPipe({ ...baseInvoice(), currency });
+      expect(failedPaths(errors)).toContain('currency');
+    },
+  );
+
+  /**
+   * Estos SÍ están en ISO 4217, así que `@IsISO4217CurrencyCode()` por sí solo
+   * los aceptaría — pero no son dinero y no pueden denominar un importe
+   * facturado.
+   */
+  it.each(['XXX', 'XTS', 'XAU', 'XDR'])(
+    'rechaza el código ISO 4217 no monetario %s',
+    async (currency) => {
+      const errors = await validateAsPipe({ ...baseInvoice(), currency });
+      expect(failedPaths(errors)).toContain('currency');
+    },
+  );
+
+  /** Empiezan por X pero son monedas en circulación: no deben caer con XXX. */
+  it.each(['XCD', 'XOF', 'XAF', 'XPF'])(
+    'acepta la moneda real %s pese a empezar por X',
+    async (currency) => {
+      const errors = await validateAsPipe({ ...baseInvoice(), currency });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it.each(['ABC', 'ZZZ', 'XXX', 'XAU'])(
+    'aplica la misma exigencia a foreign_currency (%s)',
+    async (foreign_currency) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        foreign_currency,
+      });
+      expect(failedPaths(errors)).toContain('foreign_currency');
+    },
+  );
+
+  /**
+   * `foreign_currency: 'COP'` NO es un error de contrato: la emisión
+   * (`InvoiceFlowService.buildExchangeRateDeclaration`) ya lo interpreta como
+   * «sin divisa extranjera» y omite `cac:PaymentExchangeRate`. Rechazarlo aquí
+   * convertiría en 400 algo que hoy se resuelve solo.
+   */
+  it('acepta foreign_currency COP y deja que el flujo lo neutralice', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      foreign_currency: 'COP',
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
   it('normaliza la divisa a mayúsculas en vez de rechazarla', async () => {
     const dto = plainToInstance(
       CreateInvoiceDto,

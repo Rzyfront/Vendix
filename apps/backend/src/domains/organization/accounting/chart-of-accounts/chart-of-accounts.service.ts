@@ -32,14 +32,77 @@ export class OrgChartOfAccountsService {
     private readonly storeChartOfAccounts: StoreChartOfAccountsService,
   ) {}
 
-  async findAll(query: QueryAccountDto, store_id_filter?: number) {
+  /**
+   * Tenant-scoped `where` for the consolidated ORG read.
+   *
+   * Deliberately a copy of `ChartOfAccountsService.buildWhere` (store lane):
+   * the two lanes must select the SAME rows for the same query string, and the
+   * only reason this one exists separately is that it filters by the ORG
+   * accounting entity instead of the store one.
+   *
+   * `ids` is the hydration path for server-search selectors. Omitting it here
+   * was the defect: `AccountSelectComponent.writeValue` asks for `?ids=…` to
+   * paint the account already stored in the form, and this branch answered
+   * with the first N accounts by `code asc` instead. Every preloaded row then
+   * rendered «Cuenta no encontrada» — an edit screen that looks like it lost
+   * its data. When `ids` is present it pins the result set and `search` is
+   * ignored, exactly as in the store lane (a selector never sends both).
+   */
+  private buildWhere(
+    accountingEntityId: number,
+    query: QueryAccountDto,
+  ): Prisma.chart_of_accountsWhereInput {
+    const {
+      search,
+      ids,
+      account_type,
+      parent_id,
+      level,
+      accepts_entries,
+      is_active,
+    } = query;
+
+    return {
+      accounting_entity_id: accountingEntityId,
+      ...(ids?.length
+        ? { id: { in: ids } }
+        : search
+          ? {
+              OR: [
+                { code: { contains: search, mode: 'insensitive' as const } },
+                { name: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      ...(account_type && { account_type: account_type as any }),
+      ...(parent_id !== undefined && { parent_id }),
+      ...(level !== undefined && { level }),
+      ...(accepts_entries !== undefined && { accepts_entries }),
+      ...(is_active !== undefined && { is_active }),
+    };
+  }
+
+  /**
+   * Paginated listing, same envelope as the store lane
+   * (`{ data, meta: { total, page, limit, total_pages } }`), so the controller
+   * can hand it to `ResponseService.paginated()`.
+   *
+   * `data` stays the plain row array, so consumers that read `res.data` are
+   * unaffected; `meta.total` is purely additive and is what lets a
+   * server-search selector render an honest «Mostrando X de Y» instead of
+   * repeating the page length as if it were the total.
+   *
+   * `?tree=true` is not a page and never reaches here — the controller routes
+   * it to {@link getTree}, mirroring `ChartOfAccountsController.findAll`.
+   */
+  async findAllPaginated(query: QueryAccountDto, store_id_filter?: number) {
     const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
     if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
-        this.storeChartOfAccounts.findAll(query),
+        this.storeChartOfAccounts.findAllPaginated(query),
       );
     }
 
@@ -50,49 +113,46 @@ export class OrgChartOfAccountsService {
         store_id: null,
       });
 
-    const where: Prisma.chart_of_accountsWhereInput = {
-      accounting_entity_id: accountingEntity.id,
-      ...(query.search && {
-        OR: [
-          { code: { contains: query.search, mode: 'insensitive' as const } },
-          { name: { contains: query.search, mode: 'insensitive' as const } },
-        ],
-      }),
-      ...(query.account_type && { account_type: query.account_type as any }),
-      ...(query.parent_id !== undefined && { parent_id: query.parent_id }),
-      ...(query.level !== undefined && { level: query.level }),
-      ...(query.accepts_entries !== undefined && {
-        accepts_entries: query.accepts_entries,
-      }),
-      ...(query.is_active !== undefined && { is_active: query.is_active }),
-    };
+    const where = this.buildWhere(accountingEntity.id, query);
 
-    if (query.tree) {
-      return this.getTree(store_id_filter);
-    }
+    const limit = query.limit ?? 100;
+    // `offset` is the selector-facing cursor; `page` stays supported for the
+    // table-style consumers. Whichever arrives, both are reported back.
+    const skip = query.offset ?? (query.page ? (query.page - 1) * limit : 0);
+    const page = query.page ?? Math.floor(skip / limit) + 1;
 
-    const take = query.limit ?? 100;
-    const skip = query.offset ?? 0;
-
-    return this.orgPrisma.chart_of_accounts.findMany({
-      where,
-      orderBy: { code: 'asc' },
-      take,
-      skip,
-      include: {
-        parent: { select: { id: true, code: true, name: true } },
-        children: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            account_type: true,
-            level: true,
+    const [data, total] = await Promise.all([
+      this.orgPrisma.chart_of_accounts.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        take: limit,
+        skip,
+        include: {
+          parent: { select: { id: true, code: true, name: true } },
+          children: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              account_type: true,
+              level: true,
+            },
+            orderBy: { code: 'asc' },
           },
-          orderBy: { code: 'asc' },
         },
+      }),
+      this.orgPrisma.chart_of_accounts.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   async getTree(store_id_filter?: number) {

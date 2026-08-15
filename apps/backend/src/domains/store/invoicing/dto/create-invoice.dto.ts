@@ -7,7 +7,9 @@ import {
   IsEmail,
   IsEnum,
   IsIn,
+  IsISO4217CurrencyCode,
   IsNotEmpty,
+  IsNotIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -53,6 +55,43 @@ const blankToUndefined = ({ value }: TransformFnParams): unknown =>
 /** Normaliza códigos que el estándar exige en mayúsculas (ISO 4217, 3166-1). */
 const upperCodeOrUndefined = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim().toUpperCase() || undefined : value;
+
+/**
+ * Códigos que ISO 4217 asigna a unidades que NO son dinero.
+ *
+ * Están en la norma, así que `@IsISO4217CurrencyCode()` los acepta, pero
+ * ninguno puede denominar el importe de una factura:
+ *
+ * - `XXX` — la operación no involucra divisa alguna.
+ * - `XTS` — reservado para pruebas.
+ * - `XAU` `XAG` `XPT` `XPD` — oro, plata, platino y paladio (onza troy).
+ * - `XDR` — Derechos Especiales de Giro del FMI.
+ * - `XUA` — unidad de cuenta del Banco Africano de Desarrollo.
+ * - `XBA` `XBB` `XBC` `XBD` — unidades de cuenta del mercado de bonos europeo.
+ * - `XSU` — Sucre, unidad de cuenta regional.
+ *
+ * Se excluyen a mano porque `cbc:DocumentCurrencyCode` gobierna el
+ * `@currencyID` de TODOS los importes del UBL: un `@currencyID="XXX"` afirma
+ * que la factura está expresada en "ninguna divisa", y la DIAN la devuelve.
+ *
+ * NO se excluyen `XCD`, `XOF`, `XAF` ni `XPF`: empiezan por X pero son monedas
+ * en circulación (Caribe Oriental, francos CFA y CFP).
+ */
+const NON_MONETARY_ISO_4217_CODES: readonly string[] = [
+  'XXX',
+  'XTS',
+  'XAU',
+  'XAG',
+  'XPT',
+  'XPD',
+  'XDR',
+  'XUA',
+  'XBA',
+  'XBB',
+  'XBC',
+  'XBD',
+  'XSU',
+];
 
 export class CreateInvoiceItemDto {
   @IsOptional()
@@ -491,16 +530,34 @@ export class CreateInvoiceDto {
   due_date?: string;
 
   /**
-   * Divisa ISO 4217. La columna es `VarChar(10)` por historia, pero el valor
-   * legal son 3 letras — el `cbc:DocumentCurrencyCode` no admite otra cosa.
-   * Se normaliza a mayúsculas para que "cop" no se convierta en un 400.
+   * Divisa del documento (`cbc:DocumentCurrencyCode`). La columna es
+   * `VarChar(10)` por historia, pero el valor legal son 3 letras. Se normaliza
+   * a mayúsculas para que "cop" no se convierta en un 400.
+   *
+   * Se valida contra el catálogo ISO 4217 REAL, no contra `/^[A-Z]{3}$/`: ese
+   * patrón sólo comprobaba la FORMA, así que dejaba pasar "ABC", "ZZZ" o
+   * "XXX". Un código inventado no se detiene aquí: viaja al XML como el
+   * `@currencyID` de todos los importes y lo devuelve la DIAN.
+   *
+   * OJO — que la divisa exista NO la habilita para facturar. La factura
+   * electrónica colombiana se emite SIEMPRE en COP (Res. DIAN 000042/2020
+   * art. 73); la divisa extranjera se declara aparte como conversión
+   * (`foreign_currency` + `cac:PaymentExchangeRate`). Esa regla de negocio la
+   * impone `FiscalDocumentValidator.checkCurrency` en el momento de emitir
+   * (hallazgo `CURRENCY_NOT_COP`, severidad blocker, con su pantalla y su
+   * explicación) y NO se duplica aquí: este DTO valida el contrato de datos
+   * —«esto es una moneda»—, no la política fiscal.
    */
   @IsOptional()
   @Transform(upperCodeOrUndefined)
   @IsString()
-  @Matches(/^[A-Z]{3}$/, {
+  @IsISO4217CurrencyCode({
     message:
-      'currency debe ser un código ISO 4217 de 3 letras (ej. "COP", "USD"). No uses el símbolo ni el nombre de la moneda.',
+      'currency debe ser un código de moneda ISO 4217 (ej. "COP", "USD"). No uses el símbolo ni el nombre de la moneda.',
+  })
+  @IsNotIn(NON_MONETARY_ISO_4217_CODES, {
+    message:
+      'currency no puede ser un código ISO 4217 no monetario (XXX "sin divisa", XAU oro, XDR derechos de giro, XTS pruebas…): el cbc:DocumentCurrencyCode denomina todos los importes de la factura, y esos códigos no representan dinero. Usa "COP".',
   })
   currency?: string;
 
@@ -565,13 +622,29 @@ export class CreateInvoiceDto {
    * Divisa extranjera de la operación, ISO 4217. Acompaña a
    * `foreign_total_amount`, `exchange_rate` y `exchange_rate_date` en el bloque
    * `cac:PaymentAlternativeExchangeRate` de las facturas de exportación.
+   *
+   * Mismo endurecimiento que `currency` y por la misma razón: el valor termina
+   * en `cbc:TargetCurrencyCode` del bloque de conversión, y una divisa
+   * inventada hace que la DIAN devuelva el documento. Un código no monetario
+   * es todavía peor aquí, porque `exchange_rate` declara cuántos pesos vale
+   * UNA UNIDAD de esta divisa: no existe una TRM de "XXX".
+   *
+   * Este campo NO cambia la moneda del documento —eso lo dice `currency`—,
+   * sólo declara la conversión. Se admite deliberadamente "COP": el flujo de
+   * emisión (`InvoiceFlowService.buildExchangeRateDeclaration`) ya lo
+   * interpreta como "sin divisa extranjera" y omite el bloque, así que
+   * rechazarlo aquí convertiría en 400 algo que hoy se resuelve solo.
    */
   @IsOptional()
   @Transform(upperCodeOrUndefined)
   @IsString()
-  @Matches(/^[A-Z]{3}$/, {
+  @IsISO4217CurrencyCode({
     message:
-      'foreign_currency debe ser un código ISO 4217 de 3 letras (ej. "USD", "EUR").',
+      'foreign_currency debe ser un código de moneda ISO 4217 (ej. "USD", "EUR").',
+  })
+  @IsNotIn(NON_MONETARY_ISO_4217_CODES, {
+    message:
+      'foreign_currency no puede ser un código ISO 4217 no monetario (XXX "sin divisa", XAU oro, XDR derechos de giro, XTS pruebas…): es la divisa de la conversión y exige una tasa de cambio real frente al peso.',
   })
   foreign_currency?: string;
 
