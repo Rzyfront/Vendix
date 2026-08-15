@@ -1,8 +1,9 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 
 export type UomDimension = 'mass' | 'volume' | 'length' | 'count';
 
@@ -55,8 +56,20 @@ export interface UomApiResponse<T> {
 export class UomService {
   private readonly baseUrl = `${environment.apiUrl}/store/uom`;
   private catalog$: Observable<UomApiResponse<UnitOfMeasure[]>> | null = null;
+  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // QUI-563 Fase 2: aunque el catálogo de UoM es global en diseño, el
+    // endpoint `/store/uom` corre bajo el scope del RequestContextService,
+    // así que si dos tiendas tienen un override de UoM distinto, el cache
+    // a nivel de app mostraría la respuesta de la tienda anterior. Mejor
+    // evictar en cada switch.
+    this.tenantCacheRegistry.register(
+      'store-uom-catalog',
+      () => this.invalidate(),
+      'UomService',
+    );
+  }
 
   getCatalog(forceReload = false): Observable<UomApiResponse<UnitOfMeasure[]>> {
     if (!this.catalog$ || forceReload) {
