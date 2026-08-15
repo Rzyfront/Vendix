@@ -339,6 +339,31 @@ if [ "$TARGET_FE" -eq 1 ]; then
 fi
 
 if [ "$TARGET_TEST" -eq 1 ]; then
+  # Autodetección de specs cambiados (PRs enfocados vs suite completa):
+  # Si NO se pasó un filtro explícito y existe un merge-base accesible, leemos
+  # los specs cambiados en el PR. Si el conjunto es pequeño (< 10) y todos viven
+  # en apps/backend/src, los pasamos como filtro para que jest corra con
+  # --runInBand (1536 MB) en vez de la suite completa (2 workers × 1 GB cada
+  # uno, OOM garantizado con >170 specs).
+  # Si la lista es grande (> 10) o vacía, conservamos la suite completa.
+  if [ -z "$PASSTHRU" ]; then
+    MB="$(git -C "$ROOT" merge-base HEAD origin/dev 2>/dev/null || true)"
+    if [ -n "$MB" ]; then
+      CHANGED_SPECS="$(git -C "$ROOT" diff --name-only "$MB"...HEAD -- 'apps/backend/src/**/*.spec.ts' 2>/dev/null \
+        | sed 's|^apps/backend/||' \
+        | grep -E '\.spec\.ts$' \
+        | head -20)"
+      CHANGED_COUNT=0
+      if [ -n "$CHANGED_SPECS" ]; then
+        CHANGED_COUNT=$(printf '%s\n' "$CHANGED_SPECS" | wc -l | tr -d ' ')
+      fi
+      if [ "$CHANGED_COUNT" -gt 0 ] && [ "$CHANGED_COUNT" -le 10 ]; then
+        PASSTHRU="$(printf ' %s' $CHANGED_SPECS)"
+        echo "buildcheck:test — autodetección: $CHANGED_COUNT spec(s) tocado(s) en el PR → filtro --runInBand"
+      fi
+    fi
+  fi
+
   # Con filtro de path basta un proceso: --runInBand no abre pool y es lo más
   # barato para verificar el spec que se acaba de escribir. Sin filtro se corre
   # la suite completa (171 archivos), y ahí sí hacen falta los 2 workers.
