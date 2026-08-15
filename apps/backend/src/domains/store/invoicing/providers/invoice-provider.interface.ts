@@ -184,11 +184,16 @@ export interface ProviderInvoiceItem {
 
   /**
    * QUI-648 — `products.price_unit_quantity`: a cuántas unidades de `quantity`
-   * corresponde `unit_price`. Va al XML como `cac:Price/cbc:BaseQuantity`, que
-   * es el campo de UBL que declara exactamente eso, y divide el importe de la
-   * línea. Sin él, un queso a $28.000 el kilo con el stock en gramos declara
-   * "$28.000 por gramo" y un `LineExtensionAmount` mil veces mayor que el
-   * dinero cobrado. Opcional: ausente equivale a 1, la aritmética histórica.
+   * corresponde `unit_price`. Divide el importe de la línea; sin él, un queso a
+   * $28.000 el kilo con el stock en gramos produce un `LineExtensionAmount` mil
+   * veces mayor que el dinero cobrado. Opcional: ausente equivale a 1, la
+   * aritmética histórica.
+   *
+   * **No viaja al XML.** En UBL genérico `cac:Price/cbc:BaseQuantity` declararía
+   * exactamente esto, pero en el perfil de la DIAN ese campo es la CANTIDAD
+   * facturada y la regla FAV06 lo MULTIPLICA, no divide. La escala se consume
+   * antes, dentro del precio (`dianPriceAmount`): el documento sale declarando
+   * "$28,00 por gramo". Evidencia en `UblCommonBuilder.resolveBaseQuantity`.
    */
   price_unit_quantity?: string;
 }

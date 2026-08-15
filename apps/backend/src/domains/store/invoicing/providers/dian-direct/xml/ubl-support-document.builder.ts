@@ -2,8 +2,8 @@ import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
 import {
-  dianAmount,
   dianLineExtension,
+  dianPriceAmount,
 } from '../../../utils/dian-money.util';
 import {
   DIAN_DOCUMENT_TYPES,
@@ -345,14 +345,17 @@ export class UblSupportDocumentBuilder {
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        .txt(dianAmount(item.unit_price));
-      // Misma regla que la factura: si el precio se publica por N unidades de
-      // stock, `BaseQuantity` es N. El documento soporte declara compras a
-      // proveedores no obligados a facturar y comparte el contrato de línea.
+        .txt(dianPriceAmount(item));
+      // Misma regla que la factura: `BaseQuantity` ES la cantidad facturada, no
+      // una escala de precio, y la igualdad que valida la DIAN es
+      // `PriceAmount × BaseQuantity − descuentos = LineExtensionAmount`. La
+      // evidencia completa está en `UblCommonBuilder.resolveBaseQuantity`. El
+      // documento soporte declara compras a proveedores no obligados a facturar
+      // y comparte el contrato de línea, así que comparte también la fórmula.
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
         .att('unitCode', item.unit_code || 'EA')
-        .txt(dianAmount(UblCommonBuilder.resolveBaseQuantity(item)));
+        .txt(UblCommonBuilder.resolveBaseQuantity(item));
     });
   }
 
