@@ -526,6 +526,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
   DIAN_CERT_004: 'El certificado no coincide con el NIT de la entidad fiscal.',
   DIAN_ENABLEMENT_001: 'Faltan requisitos para habilitar DIAN en produccion.',
+  // En modo proveedor tecnológico la transmisión no la firma Vendix, así que no
+  // hay nada que habilitar: el mensaje nombra el modo y dónde se cambia.
+  DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED:
+    'Para emitir en producción, la configuración DIAN de esta tienda debe estar en modo "software propio". Cámbialo en Facturación → Configuración DIAN antes de pasar a producción.',
 
   // Set de pruebas de habilitación. Los mensajes distinguen "espera" de "error":
   // reenviar un lote que la DIAN aún está validando quema un segundo bloque de
@@ -542,6 +546,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'El set guardado es anterior al registro de claves por documento. Reenvíalo para poder diagnosticarlo factura por factura.',
   DIAN_TEST_SET_006:
     'El set de pruebas debe emitirse contra una resolución de habilitación. La resolución seleccionada es de producción y sus consecutivos son reales.',
+  // 404 deliberadamente ambiguo en el backend (no existe / expiró / es de otra
+  // config): distinguirlos permitiría enumerar los lotes de otros tenants. El
+  // copy no promete cuál de los tres es, solo qué hacer.
+  DIAN_TEST_SET_007:
+    'Ese envío del set de pruebas ya no está disponible: pudo expirar o pertenecer a otra configuración fiscal. Vuelve a consultar el estado desde Facturación → Configuración DIAN.',
+  // Dos resoluciones gemelas activas avanzan su consecutivo por separado, así que
+  // la que quede atrás repetirá números ya entregados a la DIAN — y un
+  // consecutivo duplicado se rechaza para siempre. Por eso el texto dice qué
+  // cuesta ignorarlo, no solo que hay un duplicado.
+  DIAN_TEST_SET_008:
+    'Hay dos resoluciones activas con el mismo número y rango, y no se puede saber cuál numera. Desactiva la duplicada en Facturación → Resoluciones antes de emitir: si ambas siguen activas, la que quede atrás repetirá consecutivos ya enviados y la DIAN rechazará todo lo que emita con ellos.',
 
   // Eventos RADIAN (Res. 000085/2022)
   DIAN_EVENT_001:
@@ -552,6 +567,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Ese evento ya fue aceptado por la DIAN para esta factura. Registrarlo otra vez sería un duplicado.',
   DIAN_EVENT_004:
     'Los eventos RADIAN requieren la integración directa con la DIAN (software propio) activa en esta tienda.',
+  // El backend NOMBRA el campo que falta en `details` (missing / allowed) porque
+  // varía por código de evento; este texto es el encabezado de esa familia. Se
+  // corta antes de transmitir: registrar el evento incompleto gastaría el
+  // consecutivo del evento y RADIAN lo rechazaría igual.
+  DIAN_EVENT_005:
+    'Al evento RADIAN le faltan datos que el anexo exige para su código: el tipo de operación, si el endoso es completo o en blanco, o los montos de la negociación. Complétalos antes de registrarlo: enviarlo incompleto gasta el consecutivo del evento y RADIAN lo rechaza igual.',
 
   // Umbral 5 UVT (Art. 616-1 ET / Res. 000165 de 2023)
   FISCAL_UVT_INVOICE_REQUIRED:
@@ -580,6 +601,39 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede cambiar el estado fiscal desde el estado actual. Refresca la pagina y vuelve a intentarlo.',
   FISCAL_SCOPE_MISSING_TAX_ID:
     'Falta el NIT de la entidad fiscal. Registralo en los datos legales antes de continuar.',
+  // Responsabilidad de IVA (RUT). Cobrar IVA sin ser responsable produce una
+  // factura que la DIAN acepta y que despues hay que corregir con nota credito,
+  // asi que el corte es previo y el texto nombra donde se declara la condicion.
+  FISCAL_VAT_NOT_RESPONSIBLE_001:
+    'Esta tienda está registrada ante la DIAN como NO responsable de IVA, así que no puede asignar ni cobrar IVA. Si tu condición cambió, actualiza la responsabilidad fiscal (RUT) en el manejo fiscal antes de facturar con impuesto.',
+  // 500 de configuracion del servidor, no del comerciante: sin la clave de
+  // cifrado, guardar el secreto lo dejaria protegido con una clave visible en el
+  // repositorio. Se corta antes de escribir, y el copy lo dice para que nadie
+  // reintente creyendo que es un dato suyo.
+  FISCAL_ENCRYPTION_KEY_MISSING:
+    'No se pudo guardar el dato protegido: falta la clave de cifrado fiscal del servidor. No se guardó nada a medias. Es una configuración del servidor, no un dato tuyo — reporta este caso a soporte.',
+
+  // Alcance fiscal (por tienda vs por organización)
+  FISCAL_SCOPE_INVALID_VALUE:
+    'El alcance fiscal indicado no es válido. Elige si la fiscalidad se maneja por tienda o por organización.',
+  FISCAL_SCOPE_INVALID_COMBINATION:
+    'Esa combinación de alcance operativo y alcance fiscal no es válida. Revisa cómo opera la organización antes de cambiar el manejo fiscal.',
+  FISCAL_SCOPE_CHANGE_BLOCKED:
+    'No se puede cambiar el alcance fiscal todavía: hay condiciones previas sin resolver. Revisa los motivos señalados y corrígelos antes de reintentar.',
+  FISCAL_SCOPE_FORCE_REASON_REQUIRED:
+    'Forzar el cambio de alcance fiscal exige escribir el motivo. Explícalo antes de continuar: queda registrado en la auditoría fiscal.',
+  FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND:
+    'Esa entidad contable no existe o no pertenece a esta organización. Elige una de las entidades fiscales de la organización.',
+
+  // Estado fiscal (asistente de activación)
+  FISCAL_STATUS_WIZARD_STEP_INVALID:
+    'Ese paso del asistente fiscal no existe. Recarga la página y retoma el asistente desde donde quedó.',
+  FISCAL_STATUS_DEACTIVATION_BLOCKED:
+    'No se puede desactivar el manejo fiscal: hay operaciones que dependen de él. Revisa los motivos señalados antes de reintentar.',
+  FISCAL_STATUS_CONCURRENT_UPDATE:
+    'Otra persona cambió el estado fiscal mientras editabas. Recarga la página para ver el estado actual y vuelve a aplicar tu cambio.',
+  FISCAL_STATUS_PERMISSION_DENIED:
+    'No tienes permiso para cambiar el estado fiscal de esta entidad. Solicítalo a un administrador de la organización.',
 
   // Fiscal seeding (plan de cuentas / impuestos / entidad contable)
   TAXES_ALREADY_SEEDED:
@@ -687,6 +741,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La DIAN rechazó el documento. Revisa los motivos que reporta y corrígelos antes de reintentar.',
   INVOICING_CUFE_001:
     'Los valores con los que se calculó la clave del documento no coinciden con los del XML. No se transmitió nada y no se gastó numeración. Reporta este caso: es un fallo interno, no un dato tuyo.',
+  // Gemelo de CUFE_001: estructura, no contenido. Un elemento fuera del orden
+  // que fija el `xsd:sequence` de UBL produce un documento con TODOS los datos
+  // correctos que la DIAN rechaza igual. Se corta antes de firmar, así que lo
+  // primero que hay que decir es que no se perdió el consecutivo — ese es el
+  // miedo real de quien ve fallar una emisión.
+  INVOICING_XSD_001:
+    'El XML generado no cumple la estructura que exige la DIAN, así que no se firmó ni se transmitió nada: el borrador conserva su número y no se gastó numeración. Es un fallo interno del generador, no un dato tuyo — reporta este caso a soporte.',
   // El backend recalcula toda la aritmética del documento, así que un importe
   // de impuesto que no cuadre se corrige solo. Este código es el único caso que
   // no se puede recalcular: importe sin tarifa. El mensaje del backend nombra la

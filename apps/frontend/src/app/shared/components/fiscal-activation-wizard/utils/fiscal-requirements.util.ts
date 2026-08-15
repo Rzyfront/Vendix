@@ -258,6 +258,15 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
   // `INVOICING_RESOLUTION_001/002` tampoco entran: no los lanza nadie en el
   // backend — la numeracion falla con `FISCAL_RESOLUTION_MISSING` /
   // `FISCAL_RESOLUTION_EXHAUSTED`, que ya estan arriba.
+  //
+  // Con el mismo criterio quedan FUERA tres codigos mas, que van por toast:
+  //  - `INVOICING_XSD_001`: fallo de coherencia interna del generador de XML.
+  //    Falla (a) y (b) — no hay dato del comerciante que lo cause ni pantalla
+  //    donde arreglarlo; el copy explica que no se gasto numeracion.
+  //  - `DIAN_EVENT_005`: el backend nombra en `details` el campo que falta del
+  //    evento RADIAN, y ese campo cambia por codigo de evento. Falla (c).
+  //  - `DIAN_TEST_SET_007`: el lote consultado no existe, expiro o es de otra
+  //    config. Falla (b): no hay nada que configurar, solo volver a consultar.
 
   // Precondicion: la tienda no tiene habilitada la configuracion DIAN de
   // software propio con la que se transmite. 412 = precondicion de config.
@@ -373,6 +382,30 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
     label: 'Habilitación DIAN incompleta',
     reason:
       'Faltan requisitos para habilitar la DIAN en producción (set de pruebas, certificado o resolución). Completa la habilitación.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la config DIAN no esta en modo software propio, que es el
+  // unico modo en el que Vendix firma y transmite. 412 = precondicion de config.
+  // CTA: cambiar el modo de operacion en la config DIAN.
+  DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED: {
+    label: 'Falta el modo software propio',
+    reason:
+      'Para emitir en producción, la configuración DIAN de esta tienda debe estar en modo "software propio". Cámbialo en la configuración DIAN antes de pasar a producción.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: dos resoluciones activas declaran el MISMO numero y rango, asi
+  // que cual numera depende del orden de las filas. Cada gemela avanza su
+  // consecutivo por separado: la que quede atras repetira numeros ya entregados
+  // a la DIAN, y un consecutivo duplicado se rechaza de forma permanente.
+  // CTA: desactivar la duplicada antes de emitir.
+  DIAN_TEST_SET_008: {
+    label: 'Resolución activa duplicada',
+    reason:
+      'Hay dos resoluciones activas con el mismo número y rango, y no se puede saber cuál numera. Desactiva la duplicada antes de emitir: si ambas siguen activas, la que quede atrás repetirá consecutivos ya enviados y la DIAN rechazará todo lo que emita con ellos.',
     area: 'invoicing',
     severity: 'required',
     action: { label: 'Volver a DIAN', navigate: 'dian_config' },
