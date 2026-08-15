@@ -93,9 +93,15 @@ export class SubscriptionStateEngineJob {
         where: {
           // RNC-39: also exclude no_plan rows (no period/plan to evaluate).
           state: { notIn: ['cancelled', 'expired', 'draft', 'no_plan'] },
+          // FIX membership 500: only pick subscriptions past their period.
+          // Without this filter, `take: 50` is meaningless: every run pays
+          // for healthy subs that will never transition, and stores
+          // beyond the first 50 (e.g. `multimarcas ever`) never reach
+          // evaluateAndTransitionForSubscription.
+          current_period_end: { lt: new Date() },
         },
         select: { id: true, state: true },
-        take: 50,
+        take: 500,
       });
 
       if (subscriptions.length === 0) {
