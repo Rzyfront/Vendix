@@ -319,11 +319,17 @@ export class RefundFlowService {
         // la tx y luego, en el `.then()` de abajo, `dispatchRefundProcessor`
         // llama al processor real (Wompi.reverse, etc.) y exige éxito antes
         // de promover a `completed`. Si el processor no está integrado
-        // (la mayoría de las tiendas hoy), el refund queda `pending` para
-        // intervención manual del operador — exactamente la semántica que
-        // el comentario en `:428-431` describía pero nunca implementó.
+        // (la mayoría de las tiendas hoy), el refund queda en estado
+        // `pending_approval` para intervención manual del operador —
+        // exactamente la semántica que el comentario en `:428-431` describía
+        // pero nunca implementó. Antes del fix el código usaba `'pending'`,
+        // que NO es un valor válido de `refunds_state_enum` (el enum declara
+        // `requested | pending_approval | approved | processing | completed`)
+        // y provocaba SYS_INTERNAL_001 en `tx.refunds.update()`.
         const finalState =
-          dto.refund_method === 'original_payment' ? 'pending' : 'completed';
+          dto.refund_method === 'original_payment'
+            ? 'pending_approval'
+            : 'completed';
         const completedRefund = await tx.refunds.update({
           where: { id: refund.id },
           data: {
@@ -469,7 +475,7 @@ export class RefundFlowService {
         // `original_payment` → el processor (Wompi/cash_on_delivery/etc.)
         // se llama a sí mismo abajo en `dispatchRefundProcessor` cuando la
         // integración existe; mientras tanto el refund queda como
-        // `state='pending'` para intervención manual del operador.
+        // `state='pending_approval'` para intervención manual del operador.
         // `store_credit` → ya se acreditó la wallet arriba.
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.

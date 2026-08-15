@@ -344,7 +344,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       mockPrisma.refunds.create.mockResolvedValue({ id: 999, state: 'pending' });
       mockPrisma.refunds.update.mockResolvedValue({
         id: 999,
-        state: 'pending',
+        state: 'pending_approval',
         refund_items: [],
       });
       mockPrisma.order_items.findMany.mockResolvedValue([]);
