@@ -27,10 +27,28 @@ model users {
   organization_id            Int
   phone                      String?                      @db.VarChar(50)
   document_number            String?                      @db.VarChar(50)
-  document_type              String?                      @db.VarChar(50)
-  tax_regime                 String?                      @db.VarChar(50)
-  person_type                String?                      @db.VarChar(20)
+  document_type              identification_type_enum?
+  // Dígito de verificación (DV) del NIT colombiano. Se almacena separado del
+  // `document_number` para que el builder UBL DIAN Anexo 19 pueda emitir
+  // `<cbc:ID schemeID="31">NIT</cbc:ID>` y DV como atributo independiente
+  // sin ambigüedad. Aplica solo cuando `document_type='NIT'`.
+  verification_digit         String?                      @db.VarChar(1)
+  // Razón social — obligatoria cuando `person_type='JURIDICA'`. Para personas
+  // naturales permanece NULL. La validación cruzada (jurídica ↔ legal_name)
+  // vive en el DTO via `JuridicaNameRule`.
+  legal_name                 String?                      @db.VarChar(255)
+  tax_regime                 tax_regime_enum?
+  person_type                persona_type_enum?
   is_withholding_agent       Boolean                      @default(false)
+  // Responsabilidades fiscales del RUT (DIAN). Persistidas como array
+  // nativo de PostgreSQL — más simple que una tabla join y consultables
+  // directamente por el builder UBL (`O-13;O-15` con `;` como separador).
+  // Catálogo canónico en `common/constants/fiscal-responsibilities.ts`.
+  fiscal_responsibilities    String[]                     @default([])
+  // Código CIIU de actividad económica del cliente (4 dígitos, RUT rev. 4
+  // AC). La descripción oficial se resuelve client-side desde un catálogo
+  // estático; aquí solo se persiste el código.
+  ciiu_code                  String?                      @db.VarChar(10)
   main_store_id              Int?
   addresses                  addresses[]                  @relation("user_addresses")
   api_keys                   api_keys[]
@@ -3851,24 +3869,24 @@ model membership_plans {
 }
 
 model memberships {
-  id                Int                    @id @default(autoincrement())
-  store_id          Int
-  customer_id       Int
-  plan_id           Int
-  kind              membership_kind_enum   @default(generic)
-  status            membership_status_enum @default(pending_payment)
-  period_start      DateTime?
-  period_end        DateTime?
-  auto_renew        Boolean                @default(false)
-  source_order_id   Int?
-  notes             String?
+  id                 Int                    @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int
+  plan_id            Int
+  kind               membership_kind_enum   @default(generic)
+  status             membership_status_enum @default(pending_payment)
+  period_start       DateTime?
+  period_end         DateTime?
+  auto_renew         Boolean                @default(false)
+  source_order_id    Int?
+  notes              String?
   // Bug 10: soft-delete audit. Solo terminales ({expired, suspended, cancelled})
   // se pueden eliminar. El listado filtra deleted_at IS NULL por default.
-  deleted_at        DateTime?
+  deleted_at         DateTime?
   deleted_by_user_id Int?
-  deletion_reason   String?
-  created_at        DateTime               @default(now())
-  updated_at        DateTime               @updatedAt
+  deletion_reason    String?
+  created_at         DateTime               @default(now())
+  updated_at         DateTime               @updatedAt
 
   @@index([store_id, customer_id])
   @@index([store_id, status])
@@ -5922,39 +5940,39 @@ enum certificate_provisioning_status_enum {
 /// all four create paths (platform upsert, vendor-support clone, store create,
 /// org create) before 2026-08-05.
 model dian_configurations {
-  id                              Int                                  @id @default(autoincrement())
-  organization_id                 Int
-  store_id                        Int?
-  accounting_entity_id            Int
-  name                            String                               @db.VarChar(100)
-  nit                             String                               @db.VarChar(20)
-  nit_type                        dian_nit_type_enum                   @default(NIT)
-  nit_dv                          String?                              @db.VarChar(1)
-  is_default                      Boolean                              @default(false)
-  configuration_type              dian_configuration_type_enum         @default(invoicing)
-  operation_mode                  dian_operation_mode_enum             @default(own_software)
-  software_id                     String                               @db.VarChar(100)
-  software_pin_encrypted          String                               @db.Text
-  certificate_s3_key              String?                              @db.Text
-  certificate_password_encrypted  String?                              @db.Text
+  id                                   Int                                  @id @default(autoincrement())
+  organization_id                      Int
+  store_id                             Int?
+  accounting_entity_id                 Int
+  name                                 String                               @db.VarChar(100)
+  nit                                  String                               @db.VarChar(20)
+  nit_type                             dian_nit_type_enum                   @default(NIT)
+  nit_dv                               String?                              @db.VarChar(1)
+  is_default                           Boolean                              @default(false)
+  configuration_type                   dian_configuration_type_enum         @default(invoicing)
+  operation_mode                       dian_operation_mode_enum             @default(own_software)
+  software_id                          String                               @db.VarChar(100)
+  software_pin_encrypted               String                               @db.Text
+  certificate_s3_key                   String?                              @db.Text
+  certificate_password_encrypted       String?                              @db.Text
   /// ARN (or key-id) of the AWS KMS asymmetric RSA key holding the certificate's
   /// private half, non-exportable inside the HSM. When set, the XAdES signature is
   /// produced by KMS and the `.p12` private key is never touched. NULL keeps the
   /// historical custody: private key read from the `.p12` in process memory.
   /// Per-entity on purpose — a platform migrates one fiscal entity at a time.
-  certificate_kms_key_id          String?                              @db.Text
-  certificate_expiry              DateTime?                            @db.Timestamp(6)
-  certificate_fingerprint         String?                              @db.VarChar(128)
-  certificate_subject             String?                              @db.Text
-  certificate_issuer              String?                              @db.Text
-  certificate_serial_number       String?                              @db.VarChar(128)
-  certificate_nit                 String?                              @db.VarChar(20)
-  certificate_source              certificate_source_enum              @default(manual_upload_validated)
+  certificate_kms_key_id               String?                              @db.Text
+  certificate_expiry                   DateTime?                            @db.Timestamp(6)
+  certificate_fingerprint              String?                              @db.VarChar(128)
+  certificate_subject                  String?                              @db.Text
+  certificate_issuer                   String?                              @db.Text
+  certificate_serial_number            String?                              @db.VarChar(128)
+  certificate_nit                      String?                              @db.VarChar(20)
+  certificate_source                   certificate_source_enum              @default(manual_upload_validated)
   /// QUI-657. Ver `certificate_provisioning_status_enum`. Ortogonal a
   /// `enablement_status`: este dice si TENEMOS el cert; aquel, si la DIAN
   /// habilitó la operación. El gate de emisión exige AMBOS.
-  certificate_provisioning_status certificate_provisioning_status_enum @default(not_required)
-  certificate_uploaded_at         DateTime?                            @db.Timestamp(6)
+  certificate_provisioning_status      certificate_provisioning_status_enum @default(not_required)
+  certificate_uploaded_at              DateTime?                            @db.Timestamp(6)
   /// QUI-679 (review fix #6): id of the sibling `dian_configurations` row whose
   /// cert this row inherited. NULL means the cert was uploaded directly into
   /// THIS row (the historical case) — `certificate_source = manual_upload_validated`
@@ -5964,27 +5982,27 @@ model dian_configurations {
   /// circular self-FK is a chicken-and-egg problem Postgres can't express in a
   /// CHECK. Nullable on purpose so every historical row stays at NULL.
   inherited_from_dian_configuration_id Int?
-  environment                     dian_environment_enum                @default(test)
-  enablement_status               dian_enablement_status_enum          @default(not_started)
-  test_set_id                     String?                              @db.VarChar(100)
-  enablement_evidence             Json?
-  enabled_at                      DateTime?                            @db.Timestamp(6)
-  last_test_result                Json?
-  created_at                      DateTime?                            @default(now()) @db.Timestamp(6)
-  updated_at                      DateTime?                            @default(now()) @db.Timestamp(6)
+  environment                          dian_environment_enum                @default(test)
+  enablement_status                    dian_enablement_status_enum          @default(not_started)
+  test_set_id                          String?                              @db.VarChar(100)
+  enablement_evidence                  Json?
+  enabled_at                           DateTime?                            @db.Timestamp(6)
+  last_test_result                     Json?
+  created_at                           DateTime?                            @default(now()) @db.Timestamp(6)
+  updated_at                           DateTime?                            @default(now()) @db.Timestamp(6)
 
-  organization         organizations                  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store                stores?                        @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  accounting_entity    accounting_entities            @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  dian_audit_logs      dian_audit_logs[]
-  fiscal_transmissions fiscal_transmissions[]
-  identity_documents   dian_configuration_documents[]
+  organization          organizations                  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                 stores?                        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity     accounting_entities            @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dian_audit_logs       dian_audit_logs[]
+  fiscal_transmissions  fiscal_transmissions[]
+  identity_documents    dian_configuration_documents[]
   /// SELF-FK with `ON DELETE SET NULL`: deleting the source row drops the
   /// pointer but NEVER deletes the inheritor (a cert copy must outlive the
   /// metadata of the row it was copied from). Cascade would be wrong — the
   /// inheritor has its OWN cert bytes in S3 and its OWN enablement_status.
   inherited_from_config dian_configurations?           @relation("dian_config_inheritance", fields: [inherited_from_dian_configuration_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  inherited_by_configs   dian_configurations[]          @relation("dian_config_inheritance")
+  inherited_by_configs  dian_configurations[]          @relation("dian_config_inheritance")
 
   @@index([store_id])
   @@index([organization_id])
@@ -9228,12 +9246,12 @@ model webhook_event_dedup {
 /// source event. period_id is informational only (NULL for the no-credential
 /// case where no SaaS period has been opened yet).
 model billing_warning_logs {
-  id              Int       @id @default(autoincrement())
+  id              Int      @id @default(autoincrement())
   store_id        Int
-  type            String    @db.VarChar(64)
+  type            String   @db.VarChar(64)
   period_id       Int?
   source_event_id Int
-  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
 
   @@unique([store_id, type, source_event_id])
   @@index([store_id, type, created_at])
@@ -9989,4 +10007,45 @@ model purchase_order_payment_schedules {
   purchase_orders purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
 
   @@index([purchase_order_id])
+}
+
+// ============================================================================
+// Customer fiscal data (QUI-728) — DIAN Anexo Técnico 19 customer party
+// ============================================================================
+//
+// These enums replace the previous free-form `String?` columns on `users`
+// (`document_type`, `tax_regime`, `person_type`) and back-fill the legacy
+// VARCHAR values in place using `USING ...::enum` — see the migration that
+// ships with this schema change. Values mirror the published DIAN catalogs:
+// `identification_type_enum` matches the 10 internal document type codes in
+// `common/constants/document-types.ts`; `tax_regime_enum` covers the 6
+// Colombian fiscal regimes; `person_type_enum` is the binary
+// natural/jurídica switch consumed by the UBL builder to branch between
+// `cac:Person` and `cac:PartyLegalEntity`.
+
+enum identification_type_enum {
+  CC
+  CE
+  NIT
+  TI
+  RC
+  PA
+  PEP
+  PPT
+  DIE
+  NUIP
+}
+
+enum persona_type_enum {
+  NATURAL
+  JURIDICA
+}
+
+enum tax_regime_enum {
+  COMUN
+  SIMPLIFICADO
+  GRAN_CONTRIBUYENTE
+  AUTORRETENEDOR
+  ESPECIAL
+  NO_APLICA
 }

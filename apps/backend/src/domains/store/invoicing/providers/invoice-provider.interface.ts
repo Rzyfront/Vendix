@@ -122,15 +122,30 @@ export interface ProviderInvoiceData {
   customer_phone?: string;
   customer_document_type?: string;
   customer_regime?: string;
-  /** DV of `customer_tax_id` — becomes CompanyID/@schemeID for the adquiriente. */
+  /** DV of `customer_tax_id` — emitted alongside the bare NIT as `<NIT>-<DV>` per Anexo 19. */
   customer_verification_digit?: string;
-  /** '1' Persona Jurídica / '2' Persona Natural (cbc:AdditionalAccountID). */
+  /**
+   * STRUCTURAL `cac:Person` vs `cac:PartyLegalEntity` selector for the
+   * adquiriente. Translates the legacy '1'/'2' `cbc:AdditionalAccountID` codes
+   * ('1'/'juridica' → 'JURIDICA', '2'/'natural' → 'NATURAL'). When absent the
+   * provider derives from `document_type` (NIT → 'JURIDICA', else 'NATURAL').
+   */
   customer_person_type?: string;
   /**
    * DIAN fiscal responsibilities of the adquiriente (cbc:TaxLevelCode), e.g.
    * ['O-13','O-15']. Absent means the builder falls back to 'R-99-PN'.
    */
   customer_tax_responsibilities?: string[];
+  /**
+   * CIIU code (RUT casilla 46, 4 digits) of the customer. Emitted as
+   * `cac:IndustryClassificationCode` under `cac:Party` per Anexo Técnico 19.
+   */
+  customer_ciiu_code?: string | null;
+  /**
+   * Marks the customer as agente de retención; the UBL builder emits an extra
+   * `cbc:AdditionalAccountID = "3"` alongside the person-type marker.
+   */
+  customer_is_withholding_agent?: boolean;
   payment_means?: string;
   payment_form?: string; // DIAN: '1' = contado, '2' = crédito
   payment_method?: string;

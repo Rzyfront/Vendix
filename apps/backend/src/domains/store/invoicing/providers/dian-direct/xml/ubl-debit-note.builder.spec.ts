@@ -44,10 +44,13 @@ describe('UblDebitNoteBuilder', () => {
   };
 
   const customer: DianCustomerData = {
-    document_type: '31',
+    document_type: 'NIT',
     document_number: '900123456',
+    verification_digit: '7',
     legal_name: 'Cliente Demo SAS',
     tax_responsibilities: ['O-13'],
+    person_type: 'JURIDICA',
+    ciiu_code: null,
   };
 
   /**
@@ -309,5 +312,67 @@ describe('UblDebitNoteBuilder', () => {
     expect(xml).toContain('<cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>');
     expect(xml).toContain('catalogo-vpfe.dian.gov.co');
     expect(xml).not.toContain('vpfe-hab');
+  });
+
+  /**
+   * Anexo Técnico 19 — debit note uses the same customer builder; the
+   * structural branch (`cac:Person` vs `cac:PartyLegalEntity`) applies
+   * identically. Both branches must coexist across invoice, the two notes,
+   * the equivalent document and the support document.
+   */
+  describe('buildCustomerParty — Anexo 19 customer branch', () => {
+    it('persona natural → cac:Person + R-99-PN; cac:PartyLegalEntity ausente', () => {
+      const xml = build({
+        customer: {
+          document_type: 'CC',
+          document_number: '12345678',
+          verification_digit: null,
+          legal_name: null,
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          tax_responsibilities: ['R-99-PN'],
+          person_type: 'NATURAL',
+          ciiu_code: null,
+        },
+      });
+      const customer_block = xml.slice(
+        xml.indexOf('<cac:AccountingCustomerParty>'),
+        xml.indexOf('</cac:AccountingCustomerParty>') +
+          '</cac:AccountingCustomerParty>'.length,
+      );
+      expect(customer_block).toContain('<cac:Person>');
+      expect(customer_block).toContain('<cbc:FirstName>Ana</cbc:FirstName>');
+      expect(customer_block).not.toContain('<cac:PartyLegalEntity>');
+      expect(customer_block).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
+      expect(customer_block).toMatch(/AdditionalAccountID>2</);
+    });
+
+    it('persona jurídica → cac:PartyLegalEntity + CompanyID@schemeID=31; cac:Person ausente', () => {
+      const xml = build({
+        customer: {
+          document_type: 'NIT',
+          document_number: '900123456',
+          verification_digit: '7',
+          legal_name: 'Acme S.A.S',
+          tax_responsibilities: ['O-13', 'O-15'],
+          person_type: 'JURIDICA',
+          ciiu_code: '4711',
+        },
+      });
+      const customer_block = xml.slice(
+        xml.indexOf('<cac:AccountingCustomerParty>'),
+        xml.indexOf('</cac:AccountingCustomerParty>') +
+          '</cac:AccountingCustomerParty>'.length,
+      );
+      expect(customer_block).toContain('<cac:PartyLegalEntity>');
+      expect(customer_block).toMatch(
+        /schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+      );
+      expect(customer_block).toContain(
+        '<cbc:IndustryClassificationCode>4711</cbc:IndustryClassificationCode>',
+      );
+      expect(customer_block).toMatch(/TaxLevelCode[^>]*>O-13;O-15</);
+      expect(customer_block).not.toContain('<cac:Person>');
+    });
   });
 });

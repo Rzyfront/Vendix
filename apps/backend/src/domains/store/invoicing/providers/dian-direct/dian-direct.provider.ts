@@ -1603,22 +1603,40 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
   /**
    * Builds customer data from invoice data.
+   *
+   * Anexo Técnico 19 alignment (see `DianCustomerData` and
+   * `UblCommonBuilder.buildCustomerParty`):
+   *
+   *   - `document_type` keeps the LITERAL ('NIT', 'CC', 'PPT', …); the builder
+   *     translates to the DIAN scheme code via `DIAN_ID_TYPES`. Storing the
+   *     literal preserves `@schemeName` and avoids a reverse-mapping table.
+   *   - `person_type` is the STRUCTURAL selector (`NATURAL`/`JURIDICA`); the
+   *     builder translates to the `cbc:AdditionalAccountID` value ('1'/'2').
+   *   - `tax_responsibilities` is the FULL list (concatenated by the builder
+   *     with `;` per Anexo 19); previously the provider took only the first.
+   *   - `verification_digit` and `ciiu_code` are persisted as-is on the data
+   *     shape so the UBL builder can decide where each lands (DV alongside the
+   *     bare NIT; CIIU as `cbc:IndustryClassificationCode`).
    */
   private buildCustomerData(
     invoice_data: ProviderInvoiceData,
   ): DianCustomerData {
     const address = this.normalizeAddress(invoice_data.customer_address);
-    const document_type = this.normalizeDocumentType(
-      invoice_data.customer_document_type,
-    );
+    // Literal from `users.document_type` — keep the source-of-truth string so
+    // `@schemeName` carries the canonical type name. Fallback to 'CC' when
+    // absent so the consumer final default keeps working.
+    const document_type_literal =
+      invoice_data.customer_document_type?.trim().toUpperCase() || 'CC';
     return {
-      document_type,
+      document_type: document_type_literal,
       document_number: invoice_data.customer_tax_id || '222222222222',
-      document_dv: invoice_data.customer_verification_digit,
-      person_type: invoice_data.customer_person_type,
-      tax_responsibilities: invoice_data.customer_tax_responsibilities?.length
-        ? invoice_data.customer_tax_responsibilities
-        : undefined,
+      verification_digit: invoice_data.customer_verification_digit ?? null,
+      person_type: this.translatePersonTypeToStructural(
+        invoice_data.customer_person_type,
+        document_type_literal,
+      ),
+      tax_responsibilities:
+        invoice_data.customer_tax_responsibilities ?? [],
       legal_name: invoice_data.customer_name || 'Consumidor Final',
       address_line: address?.address_line,
       city_code: address?.city_code,
@@ -1629,11 +1647,38 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       postal_code: address?.postal_code,
       email: invoice_data.customer_email,
       phone: invoice_data.customer_phone,
+      ciiu_code: invoice_data.customer_ciiu_code ?? null,
+      is_withholding_agent: invoice_data.customer_is_withholding_agent ?? false,
       tax_regime: this.normalizePartyAccountType(
         invoice_data.customer_regime,
-        document_type,
+        document_type_literal,
       ),
     };
+  }
+
+  /**
+   * Translates the legacy `'1'`/`'2'` person-type code carried in
+   * `ProviderInvoiceData.customer_person_type` (and the
+   * `cbc:AdditionalAccountID` value) to the STRUCTURAL selector
+   * `'NATURAL'`/`'JURIDICA'` consumed by `UblCommonBuilder.buildCustomerParty`.
+   *
+   *   '1' / 'JURIDICA' / 'juridica'  → 'JURIDICA'
+   *   '2' / 'NATURAL'  / 'natural'   → 'NATURAL'
+   *   absent                          → derive from the document type literal
+   *                                    (NIT → 'JURIDICA', else 'NATURAL');
+   *                                    mirrors the historical fallback so an
+   *                                    unset person_type still produces a
+   *                                    structurally sound customer block.
+   */
+  private translatePersonTypeToStructural(
+    raw: string | undefined,
+    document_type_literal: string,
+  ): 'NATURAL' | 'JURIDICA' | null {
+    const normalized = raw?.trim().toUpperCase();
+    if (normalized === '1' || normalized === 'JURIDICA') return 'JURIDICA';
+    if (normalized === '2' || normalized === 'NATURAL') return 'NATURAL';
+    if (normalized) return null;
+    return document_type_literal === 'NIT' ? 'JURIDICA' : 'NATURAL';
   }
 
   private normalizeDocumentType(document_type?: string): string {

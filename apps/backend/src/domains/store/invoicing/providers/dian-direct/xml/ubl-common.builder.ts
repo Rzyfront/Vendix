@@ -1,6 +1,7 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { DIAN_TAX_CODES, DIAN_TAX_NAMES } from '../constants/dian-tax-codes';
+import { DIAN_ID_TYPES } from '../constants/dian-document-types';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -419,24 +420,92 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds the customer (adquirente) party element.
+   * Builds the customer (adquirente) party element — Anexo Técnico 19 compliant.
+   *
+   * The previous implementation had three defects that DIAN rejects:
+   *
+   *   1. `@schemeID` carried the verification digit (`customer.document_dv`).
+   *      Anexo 19 fixes `@schemeID` to the DIAN document-type code (e.g.
+   *      '31' for NIT, '13' for CC) — `@schemeName` is the literal type name
+   *      ('NIT', 'CC'). The DV never belongs at `@schemeID`.
+   *
+   *   2. `cac:PartyLegalEntity` was emitted for every customer, including
+   *      personas naturales. UBL distinguishes
+   *      `cac:PartyLegalEntity`/`CompanyID` from `cac:Person`/`FirstName`+
+   *      `FamilyName` structurally; emitting the legal entity for a natural
+   *      person is a rejection (no `RegistrationName` is honest when the
+   *      taxpayer is a person).
+   *
+   *   3. `TaxLevelCode` carried only the first responsibility
+   *      (`tax_responsibilities?.[0]`). Anexo 19 accepts `;`-separated
+   *      responsibility codes — concatenating all is the conformant form.
+   *
+   * Fix:
+   *
+   *   - @schemeID  = DIAN_ID_TYPES[document_type] (DIAN code, not DV).
+   *   - @schemeName= document_type literal ('NIT', 'CC', …).
+   *   - Structural branch by `person_type`:
+   *       JURIDICA  → `cac:PartyLegalEntity` with `cbc:RegistrationName` +
+   *                   `cbc:CompanyID`.
+   *       NATURAL   → `cac:Person` with `cbc:FirstName` + `cbc:FamilyName` +
+   *                   `cbc:ID`.
+   *       null      → derive from `document_type` (NIT → JURIDICA, else NATURAL).
+   *   - Multiple `cbc:AdditionalAccountID` siblings: person-type code (1/2) +
+   *     retenedor markers (gran contribuyente=1 if O-13, autorretenedor=2 if
+   *     O-15, agente de retención=3 if is_withholding_agent).
+   *   - `cbc:IndustryClassificationCode` emitted when `ciiu_code` is present.
+   *   - The verification digit, when present, is emitted alongside the bare
+   *     document number in `cbc:CompanyID`/`cbc:ID` as `<NIT>-<DV>` (canonical
+   *     Anexo 19 form when `schemeName` already carries the type literal —
+   *     keeps the DV explicit without re-using `@schemeID`).
    */
   static buildCustomerParty(parent: any, customer: DianCustomerData): void {
     const customer_party = parent.ele(
       UBL_NAMESPACES.CAC,
       'AccountingCustomerParty',
     );
-    // AdditionalAccountID = tipo de persona ('1' Jurídica / '2' Natural), NOT
-    // the tax regime. When person_type is absent, derive it from the document
-    // type (NIT '31' → Jurídica, otherwise Natural — e.g. consumidor final CC).
-    customer_party
-      .ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID')
-      .txt(
-        customer.person_type ??
-          (customer.document_type === '31' ? '1' : '2'),
-      );
+
+    // Structural branch selector — see method JSDoc for the rule.
+    const resolved_person_type: 'NATURAL' | 'JURIDICA' =
+      customer.person_type ??
+      (customer.document_type === 'NIT' ? 'JURIDICA' : 'NATURAL');
+
+    const dian_scheme_id =
+      DIAN_ID_TYPES[customer.document_type] || customer.document_type;
+
+    // First `cbc:AdditionalAccountID` = person type ('1' Jurídica / '2'
+    // Natural). The retenedor markers follow as siblings.
+    const person_code = resolved_person_type === 'JURIDICA' ? '1' : '2';
+    customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt(person_code);
+
+    // Retenedor markers per Anexo 19 — emitted only when applicable. Each is an
+    // OWN `cbc:AdditionalAccountID` sibling; the cardinality 1..N allows this.
+    const responsibilities = customer.tax_responsibilities ?? [];
+    if (responsibilities.includes('O-13')) {
+      // Gran contribuyente
+      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('1');
+    }
+    if (responsibilities.includes('O-15')) {
+      // Autorretenedor
+      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('2');
+    }
+    if (customer.is_withholding_agent) {
+      // Agente de retención
+      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('3');
+    }
 
     const party = customer_party.ele(UBL_NAMESPACES.CAC, 'Party');
+
+    // The document-number-with-DV form for `cbc:CompanyID`/`cbc:ID` text
+    // content. Bare number when no DV; `<NIT>-<DV>` when present. Using the
+    // explicit `<NIT>-<DV>` form (vs. `@schemeName="NIT-DV"`) keeps the DV
+    // visible at the XPath DIAN validates and matches the canonical Anexo 19
+    // convention: schemeName carries the document type literal, schemeID
+    // carries the DIAN code, and the DV rides alongside the value.
+    const id_value_with_dv =
+      customer.verification_digit && customer.document_number
+        ? `${customer.document_number}-${customer.verification_digit}`
+        : customer.document_number;
 
     // `cac:PartyIdentification` es obligatorio cuando el adquiriente es
     // consumidor final, es decir cuando `AdditionalAccountID = "2"`. La DIAN
@@ -453,14 +522,20 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'ID')
       .att('schemeAgencyID', '195')
       .att('schemeAgencyName', UblCommonBuilder.DIAN_SCHEME_AGENCY_NAME)
+      .att('schemeID', dian_scheme_id)
       .att('schemeName', customer.document_type)
-      .txt(customer.document_number);
+      .txt(id_value_with_dv);
 
-    // Party name
+    // Party name (commercial name when present, else legal name / first+last).
     party
       .ele(UBL_NAMESPACES.CAC, 'PartyName')
       .ele(UBL_NAMESPACES.CBC, 'Name')
-      .txt(customer.trade_name || customer.legal_name);
+      .txt(
+        customer.trade_name ||
+          customer.legal_name ||
+          `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
+          'Consumidor Final',
+      );
 
     // Physical location
     if (customer.city_code) {
@@ -474,7 +549,7 @@ export class UblCommonBuilder {
     const tax_scheme = party.ele(UBL_NAMESPACES.CAC, 'PartyTaxScheme');
     tax_scheme
       .ele(UBL_NAMESPACES.CBC, 'RegistrationName')
-      .txt(customer.legal_name);
+      .txt(customer.legal_name || '');
     tax_scheme
       .ele(UBL_NAMESPACES.CBC, 'CompanyID')
       .att('schemeAgencyID', '195')
@@ -482,17 +557,23 @@ export class UblCommonBuilder {
         'schemeAgencyName',
         'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
       )
-      .att('schemeID', customer.document_dv || '')
+      .att('schemeID', dian_scheme_id)
       .att('schemeName', customer.document_type)
-      .txt(customer.document_number);
+      .txt(id_value_with_dv);
 
-    // cbc:TaxLevelCode — fiscal responsibilities of the acquirer (value); the
+    // cbc:TaxLevelCode — fiscal responsibilities of the acquirer; the
     // @listName is the literal 'No aplica' per the DIAN annex. A consumidor
-    // final / natural person reports 'R-99-PN'.
+    // final / natural person reports 'R-99-PN'. ALL responsibilities are
+    // concatenated with `;`; `toTaxLevelCode` enforces the closed enumeration
+    // and falls back to 'R-99-PN' when the list is empty or invalid.
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
     tax_level
       .att('listName', 'No aplica')
-      .txt(customer.tax_responsibilities?.[0] || 'R-99-PN');
+      .txt(
+        UblCommonBuilder.toTaxLevelCode(
+          responsibilities.length ? responsibilities.join(';') : 'R-99-PN',
+        ),
+      );
 
     if (customer.city_code) {
       UblCommonBuilder.buildRegistrationAddress(tax_scheme, customer);
@@ -504,19 +585,51 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'Name')
       .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
-    // Legal entity
-    const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
-    legal.ele(UBL_NAMESPACES.CBC, 'RegistrationName').txt(customer.legal_name);
-    legal
-      .ele(UBL_NAMESPACES.CBC, 'CompanyID')
-      .att('schemeAgencyID', '195')
-      .att(
-        'schemeAgencyName',
-        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
-      )
-      .att('schemeID', customer.document_dv || '')
-      .att('schemeName', customer.document_type)
-      .txt(customer.document_number);
+    // CIIU — optional per Anexo 19 (RUT casilla 46, 4 digits).
+    if (customer.ciiu_code) {
+      party
+        .ele(UBL_NAMESPACES.CBC, 'IndustryClassificationCode')
+        .txt(customer.ciiu_code);
+    }
+
+    // Structural branch — see method JSDoc for the rule.
+    if (resolved_person_type === 'JURIDICA') {
+      const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
+      legal
+        .ele(UBL_NAMESPACES.CBC, 'RegistrationName')
+        .txt(customer.legal_name || '');
+      legal
+        .ele(UBL_NAMESPACES.CBC, 'CompanyID')
+        .att('schemeAgencyID', '195')
+        .att(
+          'schemeAgencyName',
+          'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+        )
+        .att('schemeID', dian_scheme_id)
+        .att('schemeName', customer.document_type)
+        .txt(id_value_with_dv);
+    } else {
+      // NATURAL — `cac:Person` with FirstName, FamilyName, ID. The two
+      // structural siblings (`cac:Person`, `cac:PartyLegalEntity`) are
+      // mutually exclusive in UBL for the customer role.
+      const person = party.ele(UBL_NAMESPACES.CAC, 'Person');
+      person
+        .ele(UBL_NAMESPACES.CBC, 'FirstName')
+        .txt(customer.first_name || customer.legal_name || '');
+      person
+        .ele(UBL_NAMESPACES.CBC, 'FamilyName')
+        .txt(customer.last_name || '');
+      person
+        .ele(UBL_NAMESPACES.CBC, 'ID')
+        .att('schemeAgencyID', '195')
+        .att(
+          'schemeAgencyName',
+          'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+        )
+        .att('schemeID', dian_scheme_id)
+        .att('schemeName', customer.document_type)
+        .txt(id_value_with_dv);
+    }
 
     // Contact
     if (customer.email || customer.phone) {

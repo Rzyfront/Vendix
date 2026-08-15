@@ -509,7 +509,7 @@ export class MemberBulkScannerService {
             email,
             first_name: m.first_name?.trim() || ' ',
             last_name: m.last_name?.trim() || ' ',
-            document_type: m.document_type ?? null,
+            document_type: m.document_type as any ?? null,
             document_number: m.document_number ?? null,
             phone: m.phone ?? null,
           });

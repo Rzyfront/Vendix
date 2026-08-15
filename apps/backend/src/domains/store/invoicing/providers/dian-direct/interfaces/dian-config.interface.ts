@@ -70,13 +70,36 @@ export interface DianIssuerData {
 
 /**
  * Customer (adquirente) data for building UBL XML.
+ *
+ * `document_type` is the LITERAL stored in `users.document_type` ('CC', 'NIT',
+ * 'CE', 'PPT', …) — NOT the DIAN scheme code. The UBL builder translates to the
+ * DIAN code through `DIAN_ID_TYPES[document_type]`. The literal is the source
+ * of truth for `@schemeName`; the code is the value for `@schemeID`.
+ *
+ * Anexo Técnico 19 needs every field here to emit a conformant
+ * `cac:AccountingCustomerParty`: structural branch between `cac:Person` and
+ * `cac:PartyLegalEntity`, the verification digit alongside the bare NIT,
+ * every fiscal responsibility concatenated, the CIIU code, and the retenedor
+ * markers as additional `cbc:AdditionalAccountID` siblings.
  */
 export interface DianCustomerData {
-  document_type: string; // DIAN code: '13'=CC, '31'=NIT, etc.
+  /** Literal from `users.document_type` (e.g., 'CC', 'NIT', 'PPT'). */
+  document_type: string;
   document_number: string;
-  document_dv?: string;
-  legal_name: string;
+  /**
+   * Verification digit (DV) of `document_number`. Only meaningful when the
+   * document is NIT-like (NIT, NIT_EXTRANJERIA, DIE); the UBL builder emits it
+   * alongside the bare NIT per Anexo 19 (canonical form: `NIT-DV`).
+   */
+  verification_digit: string | null;
+  /**
+   * Razón social when JURIDICA; first_name+last_name concatenated when
+   * NATURAL. Kept as the registration/legal name in UBL.
+   */
+  legal_name: string | null;
   trade_name?: string;
+  first_name?: string;
+  last_name?: string;
   address_line?: string;
   city_code?: string;
   city_name?: string;
@@ -86,14 +109,42 @@ export interface DianCustomerData {
   postal_code?: string;
   phone?: string;
   email?: string;
-  tax_regime?: string;
-  tax_responsibilities?: string[];
   /**
-   * DIAN organization/person type for `cbc:AdditionalAccountID` ('1' Persona
-   * Jurídica / '2' Persona Natural). When absent it is derived from
-   * `document_type` (NIT '31' → '1', otherwise '2').
+   * DIAN party account type ('1' Persona Jurídica / '2' Persona Natural). Now
+   * derived from `person_type` and the retenedor markers in the builder; kept
+   * on the data shape for backward compatibility with the issuer side.
    */
-  person_type?: string;
+  tax_regime?: string;
+  /**
+   * Full list of fiscal responsibilities (RUT codes) for `cac:TaxScheme/
+   * cbc:TaxLevelCode`. Joined with `;` per Anexo 19. `R-99-PN` is the
+   * "ninguna de las anteriores" fallback; absent/empty maps to it via
+   * `UblCommonBuilder.toTaxLevelCode`.
+   */
+  tax_responsibilities: string[];
+  /**
+   * `cac:Person` vs `cac:PartyLegalEntity` selector for the customer.
+   *
+   *   JURIDICA  → emit `cac:PartyLegalEntity` with `cbc:RegistrationName` +
+   *               `cbc:CompanyID`.
+   *   NATURAL   → emit `cac:Person` with `cbc:FirstName` + `cbc:FamilyName` +
+   *               `cbc:ID`.
+   *   null      → derive from `document_type`: NIT → JURIDICA, else NATURAL.
+   *
+   * The branch is STRUCTURAL (not just value): emitting `cac:PartyLegalEntity`
+   * for a persona natural is the Anexo 19 defect that causes DIAN rejection.
+   */
+  person_type: 'NATURAL' | 'JURIDICA' | null;
+  /**
+   * CIIU code (4 digits, RUT casilla 46). When present, emitted as
+   * `cbc:IndustryClassificationCode` under `cac:Party`. Optional per Anexo 19.
+   */
+  ciiu_code: string | null;
+  /**
+   * Marks the customer as agente de retención — adds `cbc:AdditionalAccountID
+   * = "3"` alongside the person-type marker.
+   */
+  is_withholding_agent?: boolean;
 }
 
 /**

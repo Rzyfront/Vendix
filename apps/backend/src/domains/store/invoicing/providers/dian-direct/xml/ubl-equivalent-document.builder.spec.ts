@@ -38,10 +38,13 @@ describe('UblEquivalentDocumentBuilder', () => {
   };
 
   const customer: DianCustomerData = {
-    document_type: '13',
+    document_type: 'CC',
     document_number: '222222222222',
+    verification_digit: null,
     legal_name: 'Consumidor final',
     tax_responsibilities: ['R-99-PN'],
+    person_type: 'NATURAL',
+    ciiu_code: null,
   };
 
   const invoice_data: ProviderInvoiceData = {
@@ -175,5 +178,58 @@ describe('UblEquivalentDocumentBuilder', () => {
     expect(xml).toContain('<cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>');
     expect(xml).toContain('catalogo-vpfe.dian.gov.co');
     expect(xml).not.toContain('vpfe-hab');
+  });
+
+  /**
+   * Anexo Técnico 19 — the equivalent document (POS) is the most common path
+   * for a consumidor final (CC + R-99-PN → cac:Person + R-99-PN). It also
+   * supports the jurídica branch (NIT → cac:PartyLegalEntity) when the POS
+   * customer asks for a factura-equivalente with NIT.
+   */
+  describe('buildCustomerParty — Anexo 19 customer branch', () => {
+    it('persona natural → cac:Person + R-99-PN; cac:PartyLegalEntity ausente', () => {
+      const xml = build();
+      const customer_block = xml.slice(
+        xml.indexOf('<cac:AccountingCustomerParty>'),
+        xml.indexOf('</cac:AccountingCustomerParty>') +
+          '</cac:AccountingCustomerParty>'.length,
+      );
+      // build() uses the file-level 'CC' consumidor final fixture. first_name
+      // is unset so the builder falls back to `legal_name` ('Consumidor final').
+      expect(customer_block).toContain('<cac:Person>');
+      expect(customer_block).toContain(
+        '<cbc:FirstName>Consumidor final</cbc:FirstName>',
+      );
+      expect(customer_block).not.toContain('<cac:PartyLegalEntity>');
+      expect(customer_block).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
+      expect(customer_block).toMatch(/AdditionalAccountID>2</);
+    });
+
+    it('persona jurídica → cac:PartyLegalEntity + CompanyID@schemeID=31; cac:Person ausente', () => {
+      const xml = build({
+        customer: {
+          document_type: 'NIT',
+          document_number: '900123456',
+          verification_digit: '7',
+          legal_name: 'POS Juridica S.A',
+          tax_responsibilities: ['O-13'],
+          person_type: 'JURIDICA',
+          ciiu_code: '4711',
+        },
+      });
+      const customer_block = xml.slice(
+        xml.indexOf('<cac:AccountingCustomerParty>'),
+        xml.indexOf('</cac:AccountingCustomerParty>') +
+          '</cac:AccountingCustomerParty>'.length,
+      );
+      expect(customer_block).toContain('<cac:PartyLegalEntity>');
+      expect(customer_block).toMatch(
+        /schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+      );
+      expect(customer_block).toContain(
+        '<cbc:IndustryClassificationCode>4711</cbc:IndustryClassificationCode>',
+      );
+      expect(customer_block).not.toContain('<cac:Person>');
+    });
   });
 });

@@ -12,6 +12,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
@@ -784,8 +785,8 @@ export class InvoicingService {
         main_store_id: store_id,
         username,
         email: effectiveEmail,
-        first_name: isJuridica ? null : dto.first_name,
-        last_name: isJuridica ? null : dto.last_name,
+        first_name: (isJuridica ? null : (dto.first_name ?? '')) as string,
+        last_name: (isJuridica ? null : (dto.last_name ?? '')) as string,
         legal_name: dto.legal_name ?? null,
         document_type: (dto.document_type ?? null) as any,
         document_number: dto.document_number ?? null,
@@ -796,7 +797,7 @@ export class InvoicingService {
         fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
         ciiu_code: dto.ciiu_code ?? null,
         is_withholding_agent: dto.is_withholding_agent ?? false,
-        password_hash: hashedPassword,
+        password: hashedPassword,
         state: 'active',
         email_verified: false,
       },
@@ -831,13 +832,29 @@ export class InvoicingService {
             order_item_taxes: true,
           },
         },
+        // Step 8 — invoice-flow wiring. `legal_name`, `verification_digit`,
+        // `tax_regime`, `person_type`, `fiscal_responsibilities`, `ciiu_code`
+        // and `is_withholding_agent` were added to `users` by Steps 1-2;
+        // pulling them here lets `customer_name` use the JURIDICA razon
+        // social when applicable. The full UBL-relevant row reaches the
+        // provider at `send()` time via `INVOICE_INCLUDE` in
+        // `invoice-flow.service.ts`.
         users: {
           select: {
             id: true,
             first_name: true,
             last_name: true,
+            legal_name: true,
             email: true,
+            phone: true,
+            document_type: true,
             document_number: true,
+            verification_digit: true,
+            tax_regime: true,
+            person_type: true,
+            fiscal_responsibilities: true,
+            ciiu_code: true,
+            is_withholding_agent: true,
           },
         },
         invoice_data_requests: {
@@ -976,8 +993,13 @@ export class InvoicingService {
     const guest_customer_name = invoiceDataRequest
       ? `${invoiceDataRequest.first_name || ''} ${invoiceDataRequest.last_name || ''}`.trim()
       : '';
+    // Step 8 — for a JURIDICA the RUT razón social is the canonical name to
+    // persist on the invoice; for a persona natural (or when `person_type`
+    // is null) concatenate first/last. Falls back to the order's guest data
+    // request when there is no `users` row, then to 'Consumidor Final'.
     const customer_name = order.users
-      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      ? (order.users.legal_name?.trim() ||
+        `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim())
       : guest_customer_name || 'Consumidor Final';
 
     const invoice = await this.prisma.invoices.create({
@@ -1054,15 +1076,26 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_004);
     }
 
-    // Fetch customer info separately
+    // Fetch customer info separately. Step 8 — select now carries the
+    // JURIDICA/legal_name fields so `customer_name` resolves correctly when
+    // the sales order's customer is a `legal_name`-bearing entity.
     const customer = await this.prisma.users.findFirst({
       where: { id: sales_order.customer_id },
       select: {
         id: true,
         first_name: true,
         last_name: true,
+        legal_name: true,
         email: true,
+        phone: true,
+        document_type: true,
         document_number: true,
+        verification_digit: true,
+        tax_regime: true,
+        person_type: true,
+        fiscal_responsibilities: true,
+        ciiu_code: true,
+        is_withholding_agent: true,
       },
     });
 
@@ -1107,8 +1140,11 @@ export class InvoicingService {
     );
     const total = subtotal - discount + tax;
 
+    // Step 8 — mirror of `createFromOrder`: prefer `legal_name` for JURIDICA,
+    // concat first/last otherwise. Falls back to undefined when no row.
     const customer_name = customer
-      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+      ? (customer.legal_name?.trim() ||
+        `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
       : undefined;
 
     const invoice = await this.prisma.invoices.create({

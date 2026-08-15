@@ -80,7 +80,7 @@ export class AccountService {
         first_name: dto.first_name,
         last_name: dto.last_name,
         phone: dto.phone,
-        document_type: dto.document_type,
+        document_type: dto.document_type as any,
         document_number: dto.document_number,
         avatar_url: dto.avatar_url,
         username: dto.username,

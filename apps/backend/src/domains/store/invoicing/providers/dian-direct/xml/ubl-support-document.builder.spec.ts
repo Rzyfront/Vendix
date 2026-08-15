@@ -25,8 +25,9 @@ describe('UblSupportDocumentBuilder', () => {
     tax_scheme: 'O-48',
   };
   const seller: DianCustomerData = {
-    document_type: '13',
+    document_type: 'CC',
     document_number: '123456789',
+    verification_digit: null,
     legal_name: 'Proveedor No Obligado',
     address_line: 'Carrera 4 # 5-6',
     city_code: '11001',
@@ -36,6 +37,8 @@ describe('UblSupportDocumentBuilder', () => {
     country_code: 'CO',
     tax_regime: '2',
     tax_responsibilities: ['R-99-PN'],
+    person_type: 'NATURAL',
+    ciiu_code: null,
   };
   const software_security: DianSoftwareSecurity = {
     software_id: 'software-1',
@@ -48,7 +51,7 @@ describe('UblSupportDocumentBuilder', () => {
     issue_date: '2026-03-10',
     issue_time: '10:00:00-05:00',
     due_date: '2026-03-20',
-    customer_name: seller.legal_name,
+    customer_name: seller.legal_name || '',
     customer_tax_id: seller.document_number,
     subtotal_amount: '1000.00',
     discount_amount: '0.00',
@@ -92,7 +95,10 @@ describe('UblSupportDocumentBuilder', () => {
     expect(xml).toContain('schemeName="CUDS-SHA384"');
     expect(xml).toContain('<cbc:CompanyID schemeAgencyID="195"');
     expect(xml).toContain('>123456789</cbc:CompanyID>');
-    expect(xml).toContain('>900123456</cbc:CompanyID>');
+    // Anexo 19: when DV is present the canonical form is `<NIT>-<DV>`, so the
+    // issuer's `900123456` + `nit_dv: '7'` lands as `900123456-7` in
+    // `cac:CompanyID` text content.
+    expect(xml).toContain('>900123456-7</cbc:CompanyID>');
   });
 
   it('builds support adjustment note XML with DIAN type 95 and original CUDS reference', () => {
@@ -123,5 +129,40 @@ describe('UblSupportDocumentBuilder', () => {
     expect(xml).toContain(
       '<cbc:UUID schemeName="CUDS-SHA384">original-cuds</cbc:UUID>',
     );
+  });
+
+  /**
+   * Anexo Técnico 19 — the support document's `cac:AccountingCustomerParty`
+   * (the buyer side) follows the same structural branch as the invoice. The
+   * buyer is always JURIDICA in practice (an organization buying from a no-
+   * obligado), but the builder must accept both branches to round out the
+   * customer-side coverage.
+   */
+  describe('buildCustomerParty — Anexo 19 customer branch (buyer)', () => {
+    it('persona jurídica buyer → cac:PartyLegalEntity + CompanyID@schemeID=NIT', () => {
+      const xml = UblSupportDocumentBuilder.buildDocument({
+        support_document_data: baseDocument,
+        buyer,
+        seller,
+        software_security,
+        cuds: 'cuds-hash',
+        environment: 'test',
+      });
+      const customer_block = xml.slice(
+        xml.indexOf('<cac:AccountingCustomerParty>'),
+        xml.indexOf('</cac:AccountingCustomerParty>') +
+          '</cac:AccountingCustomerParty>'.length,
+      );
+      // The buyer's `cac:AccountingCustomerParty` is JURIDICA because the
+      // support document maps the buyer (legal entity) to the customer role;
+      // `buildCustomerParty` emits `cac:PartyLegalEntity` with CompanyID +
+      // RegistrationName.
+      expect(customer_block).toContain('<cac:PartyLegalEntity>');
+      // The buyer's NIT-DV value lands at cac:CompanyID as `<NIT>-<DV>`
+      // (canonical Anexo 19 form).
+      expect(customer_block).toMatch(
+        /schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+      );
+    });
   });
 });

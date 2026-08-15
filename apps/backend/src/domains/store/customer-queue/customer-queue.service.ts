@@ -193,7 +193,7 @@ export class CustomerQueueService {
     const customer = await this.customersService.create(storeId, {
       first_name: entry.first_name,
       last_name: entry.last_name,
-      document_type: entry.document_type,
+      document_type: entry.document_type as any,
       document_number: entry.document_number,
       email: entry.email || `queue_${entry.token}@placeholder.vendix.com`,
       phone: entry.phone || undefined,
