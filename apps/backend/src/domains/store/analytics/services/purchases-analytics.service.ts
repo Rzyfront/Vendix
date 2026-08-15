@@ -486,10 +486,9 @@ export class PurchasesAnalyticsService {
         organization_id: organizationId,
         location: { store_id: storeId },
         status: { in: PURCHASE_COMMITTED_STATES },
-        // tz-audit:date-only — `order_date` is a Prisma @db.Date business date;
-        // the gte/lte window is already TZ-resolved by parseDateRange(query, tz)
-        // before this query runs, so we feed UTC-midnight bounds here.
-        order_date: { gte: startDate, lte: endDate },
+        // The audit script requires the marker on the same line as the
+        // `order_date:` literal, so the rationale lives on the line below.
+        order_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — Prisma @db.Date business date; bounds are UTC-midnight of the local window produced by parseDateRange
       },
       select: {
         status: true,
