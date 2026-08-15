@@ -2036,6 +2036,12 @@ model tax_categories {
   name                    String                    @db.VarChar(100)
   description             String?
   tax_type                tax_type_enum?
+  // Indicates whether the rate in this category is INCLUDED in the listed
+  // price (`unit_price` already carries the tax) or ADDITIONAL on top of
+  // it. UI toggle in `app-tax-selector`. Defaults to ADDITIONAL for
+  // backward compatibility with all historical invoices. Per-line override
+  // lives on `invoice_taxes.is_inclusive` and `invoice_items.is_inclusive`.
+  is_inclusive            Boolean?                  @default(false)
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2055,6 +2061,10 @@ model tax_rates {
   name                String             @db.VarChar(100)
   is_compound         Boolean?           @default(false)
   priority            Int?               @default(0)
+  // Indicates whether THIS specific rate is INCLUDED in the listed price
+  // (`unit_price` already carries the tax) or ADDITIONAL on top of it.
+  // Per-line override on `invoice_taxes.is_inclusive` wins when present.
+  is_inclusive        Boolean?           @default(false)
   order_item_taxes    order_item_taxes[]
   stores              stores?            @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_categories      tax_categories     @relation(fields: [tax_category_id], references: [id], onUpdate: NoAction)
@@ -5248,6 +5258,12 @@ model invoice_items {
   unit_price              Decimal   @db.Decimal(12, 2)
   discount_amount         Decimal   @default(0) @db.Decimal(12, 2)
   tax_amount              Decimal   @default(0) @db.Decimal(12, 2)
+  // Snapshot of whether the line's taxes are INCLUDED in `unit_price` or
+  // ADDITIONAL on top. Drives `calculateAmounts()` desglose: if true,
+  // base gravable = total / (1 + rate); if false, base gravable =
+  // unit_price * qty - discount. Defaults to ADDITIONAL for backward
+  // compatibility with historical invoices.
+  is_inclusive            Boolean?  @default(false)
   total_amount            Decimal   @db.Decimal(12, 2)
   // Snapshot of the price tier applied on the source order line (human label),
   // and the real stock units consumed when packaging ("empaque por tarifa")
@@ -5281,6 +5297,10 @@ model invoice_taxes {
   taxable_amount Decimal        @db.Decimal(12, 2)
   tax_amount     Decimal        @db.Decimal(12, 2)
   tax_type       tax_type_enum?
+  // Per-line flag: INCLUDED in `unit_price` or ADDITIONAL on top. Drives
+  // UBL DIAN builder (`ubl-common.builder.ts`) to emit the corresponding
+  // `TaxInclusiveIndicator` XML attribute. Defaults to ADDITIONAL.
+  is_inclusive   Boolean?       @default(false)
 
   invoice   invoices   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   tax_rates tax_rates? @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
