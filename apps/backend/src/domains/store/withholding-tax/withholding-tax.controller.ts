@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseIntPipe,
   Query,
 } from '@nestjs/common';
 import { WithholdingTaxService } from './withholding-tax.service';
@@ -14,11 +15,44 @@ import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
   CalculateWithholdingDto,
+  CreateUvtValueDto,
   PreviewWithholdingDto,
   CalculationsQueryDto,
 } from './dto';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+
+/**
+ * Año gravable de un certificado, resuelto desde el query `?year=`.
+ *
+ * Se resuelve aquí y no con `ParseIntPipe` porque el contrato de estas rutas es
+ * «sin `year` explícito, el año en curso», y el pipe no distingue el parámetro
+ * ausente del vacío. Lo que sí hace falta es cortar el texto que no es un año:
+ * `?year=abc` se convertía en `NaN`, llegaba a `new Date(Date.UTC(NaN, 0, 1))`
+ * y Prisma reventaba con un 500 sobre una fecha inválida.
+ */
+const CERTIFICATE_MIN_YEAR = 2000;
+const CERTIFICATE_MAX_YEAR = 2100;
+
+function resolveCertificateYear(raw?: string): number {
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return new Date().getFullYear();
+  }
+
+  const parsed = Number(raw);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < CERTIFICATE_MIN_YEAR ||
+    parsed > CERTIFICATE_MAX_YEAR
+  ) {
+    throw new VendixHttpException(
+      ErrorCodes.WHT_CALCULATION_ERROR,
+      `year debe ser un año gravable de 4 dígitos entre ${CERTIFICATE_MIN_YEAR} y ${CERTIFICATE_MAX_YEAR}.`,
+    );
+  }
+
+  return parsed;
+}
 
 @Controller('store/withholding-tax')
 export class WithholdingTaxController {
@@ -46,13 +80,21 @@ export class WithholdingTaxController {
     );
   }
 
+  /**
+   * `ParseIntPipe` en todos los identificadores de ruta de este controlador, la
+   * misma forma que usa `DianConfigController`. Sin él, `+id` sobre un texto no
+   * numérico producía `NaN` y Prisma lo rechazaba contra la columna `Int` con un
+   * 500: la petición está mal formada, el servidor no falló. Con un id numérico
+   * inexistente la respuesta ya era el 404 correcto, así que lo único que
+   * faltaba era la puerta de entrada.
+   */
   @Put('concepts/:id')
   @Permissions('withholding:write')
   async updateConcept(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateWithholdingConceptDto,
   ) {
-    const result = await this.withholding_tax_service.updateConcept(+id, dto);
+    const result = await this.withholding_tax_service.updateConcept(id, dto);
     return this.response_service.success(
       result,
       'Withholding concept updated successfully',
@@ -61,8 +103,8 @@ export class WithholdingTaxController {
 
   @Delete('concepts/:id')
   @Permissions('withholding:delete')
-  async deactivateConcept(@Param('id') id: string) {
-    const result = await this.withholding_tax_service.deactivateConcept(+id);
+  async deactivateConcept(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.withholding_tax_service.deactivateConcept(id);
     return this.response_service.success(
       result,
       'Withholding concept deactivated successfully',
@@ -80,8 +122,8 @@ export class WithholdingTaxController {
 
   @Post('uvt-values')
   @Permissions('withholding:write')
-  async createUvt(@Body() body: { year: number; value_cop: number }) {
-    const result = await this.withholding_tax_service.createUvt(body);
+  async createUvt(@Body() dto: CreateUvtValueDto) {
+    const result = await this.withholding_tax_service.createUvt(dto);
     return this.response_service.success(
       result,
       'UVT value saved successfully',
@@ -115,11 +157,11 @@ export class WithholdingTaxController {
   @Post('apply/:invoiceId')
   @Permissions('withholding:write')
   async applyWithholding(
-    @Param('invoiceId') invoice_id: string,
+    @Param('invoiceId', ParseIntPipe) invoice_id: number,
     @Body() body: { concept_code: string; supplier_type?: string },
   ) {
     const result = await this.withholding_tax_service.applyWithholding(
-      +invoice_id,
+      invoice_id,
       body.concept_code,
       body.supplier_type,
     );
@@ -155,13 +197,13 @@ export class WithholdingTaxController {
   @Get('certificates/employee/:employeeId')
   @Permissions('withholding:read')
   async generateEmployeeCertificate(
-    @Param('employeeId') employee_id: string,
-    @Query('year') year: string,
+    @Param('employeeId', ParseIntPipe) employee_id: number,
+    @Query('year') year?: string,
   ) {
-    const certificate_year = year ? +year : new Date().getFullYear();
+    const certificate_year = resolveCertificateYear(year);
     const result =
       await this.withholding_tax_service.generateEmployeeCertificate(
-        +employee_id,
+        employee_id,
         certificate_year,
       );
     return this.response_service.success(result);
@@ -175,9 +217,11 @@ export class WithholdingTaxController {
   @Get('certificates/suffered/:counterpartyType/:counterpartyId')
   @Permissions('withholding:read')
   async generateSufferedCertificate(
+    // `counterpartyType` NO lleva `ParseIntPipe`: es un discriminante de texto
+    // ("customer" | "supplier"), y su validación es la guarda de abajo.
     @Param('counterpartyType') counterparty_type: string,
-    @Param('counterpartyId') counterparty_id: string,
-    @Query('year') year: string,
+    @Param('counterpartyId', ParseIntPipe) counterparty_id: number,
+    @Query('year') year?: string,
   ) {
     if (counterparty_type !== 'customer' && counterparty_type !== 'supplier') {
       throw new VendixHttpException(
@@ -185,11 +229,11 @@ export class WithholdingTaxController {
         'counterpartyType must be "customer" or "supplier"',
       );
     }
-    const certificate_year = year ? +year : new Date().getFullYear();
+    const certificate_year = resolveCertificateYear(year);
     const result =
       await this.withholding_tax_service.generateSufferedCertificate(
         counterparty_type,
-        +counterparty_id,
+        counterparty_id,
         certificate_year,
       );
     return this.response_service.success(result);
@@ -198,12 +242,12 @@ export class WithholdingTaxController {
   @Get('certificates/:supplierId')
   @Permissions('withholding:read')
   async generateCertificate(
-    @Param('supplierId') supplier_id: string,
-    @Query('year') year: string,
+    @Param('supplierId', ParseIntPipe) supplier_id: number,
+    @Query('year') year?: string,
   ) {
-    const certificate_year = year ? +year : new Date().getFullYear();
+    const certificate_year = resolveCertificateYear(year);
     const result = await this.withholding_tax_service.generateCertificate(
-      +supplier_id,
+      supplier_id,
       certificate_year,
     );
     return this.response_service.success(result);

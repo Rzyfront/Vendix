@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   HttpCode,
   HttpStatus,
@@ -62,11 +63,16 @@ export class PosFiscalController {
    *
    * Mismo permiso que emitir: quien puede pedir el documento puede ver en qué
    * estado quedó. Separarlos daría un cajero capaz de emitir a ciegas.
+   *
+   * `ParseIntPipe` en el `orderId`: con `+order_id` a secas, un identificador no
+   * numérico llegaba como `NaN` a la columna `Int` de Prisma y el indicador del
+   * POS —que consulta esta ruta en bucle— recibía un 500 en lugar del 400 que
+   * corresponde a una ruta mal formada.
    */
   @Get('orders/:orderId/fiscal-status')
   @Permissions('store:pos:access')
-  async getFiscalStatus(@Param('orderId') order_id: string) {
-    const result = await this.emission.getStatusForOrder(+order_id);
+  async getFiscalStatus(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.emission.getStatusForOrder(order_id);
     return this.response_service.success(result);
   }
 
@@ -87,8 +93,8 @@ export class PosFiscalController {
   @Post('orders/:orderId/emit')
   @Permissions('store:pos:access')
   @HttpCode(HttpStatus.OK)
-  async emit(@Param('orderId') order_id: string) {
-    const result = await this.emission.emitForOrder(+order_id);
+  async emit(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.emission.emitForOrder(order_id);
     return this.response_service.success(result, result.message);
   }
 }

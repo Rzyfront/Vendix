@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  ParseIntPipe,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -43,10 +44,20 @@ export class ResolutionsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * `ParseIntPipe` en todos los `:id` de este controlador, como en
+   * `DianConfigController`: sin él, `+id` sobre un identificador no numérico
+   * producía `NaN` y Prisma lo rechazaba contra la columna `Int` con un 500,
+   * cuando lo correcto es un 400 — la petición está mal formada, el servidor no
+   * falló. Con un id numérico inexistente la respuesta ya era el 404 esperado.
+   *
+   * `POST scan` no queda atrapado por el pipe aunque se declare más abajo: es
+   * otro verbo, y este `:id` solo captura GET.
+   */
   @Get(':id')
   @Permissions('invoicing:read')
-  async findOne(@Param('id') id: string) {
-    const result = await this.resolutions_service.findOne(+id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.resolutions_service.findOne(id);
     return this.response_service.success(result);
   }
 
@@ -88,10 +99,10 @@ export class ResolutionsController {
   @Patch(':id')
   @Permissions('invoicing:write')
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() update_dto: UpdateResolutionDto,
   ) {
-    const result = await this.resolutions_service.update(+id, update_dto);
+    const result = await this.resolutions_service.update(id, update_dto);
     return this.response_service.success(
       result,
       'Resolution updated successfully',
@@ -101,8 +112,8 @@ export class ResolutionsController {
   @Delete(':id')
   @Permissions('invoicing:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string) {
-    await this.resolutions_service.remove(+id);
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    await this.resolutions_service.remove(id);
     return this.response_service.success(
       null,
       'Resolution deleted successfully',

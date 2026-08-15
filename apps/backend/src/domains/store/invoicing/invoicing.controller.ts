@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  ParseIntPipe,
   UseGuards,
   Res,
 } from '@nestjs/common';
@@ -102,8 +103,8 @@ export class InvoicingController {
   @Post('from-order/:orderId')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)
-  async createFromOrder(@Param('orderId') orderId: string) {
-    const result = await this.invoicing_service.createFromOrder(+orderId);
+  async createFromOrder(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.invoicing_service.createFromOrder(order_id);
     return this.response_service.success(
       result,
       'Invoice created from order successfully',
@@ -113,9 +114,11 @@ export class InvoicingController {
   @Post('from-sales-order/:salesOrderId')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)
-  async createFromSalesOrder(@Param('salesOrderId') salesOrderId: string) {
+  async createFromSalesOrder(
+    @Param('salesOrderId', ParseIntPipe) sales_order_id: number,
+  ) {
     const result =
-      await this.invoicing_service.createFromSalesOrder(+salesOrderId);
+      await this.invoicing_service.createFromSalesOrder(sales_order_id);
     return this.response_service.success(
       result,
       'Invoice created from sales order successfully',
@@ -174,18 +177,26 @@ export class InvoicingController {
   }
 
   // --- Parameter Routes (MUST be last) ---
+  //
+  // Todos los `:id` de aquí abajo pasan por `ParseIntPipe`, igual que en
+  // `DianConfigController`. Con `+id` a secas, un identificador no numérico se
+  // convertía en `NaN` y viajaba hasta el campo `Int` de Prisma, que respondía
+  // con `PrismaClientValidationError` — un 500 sobre lo que en realidad es una
+  // petición mal formada. El mismo endpoint con un id numérico inexistente ya
+  // contestaba 404, así que lo único que faltaba era rechazar el texto en la
+  // puerta: el pipe devuelve 400 y el servicio nunca llega a verlo.
 
   @Get(':id/pdf')
   @Permissions('invoicing:read')
-  async getInvoicePdf(@Param('id') id: string) {
-    const url = await this.invoice_pdf_service.getPdf(+id);
+  async getInvoicePdf(@Param('id', ParseIntPipe) id: number) {
+    const url = await this.invoice_pdf_service.getPdf(id);
     return this.response_service.success({ url });
   }
 
   @Post(':id/pdf/regenerate')
   @Permissions('invoicing:write')
-  async regenerateInvoicePdf(@Param('id') id: string) {
-    const result = await this.invoice_pdf_service.generatePdf(+id);
+  async regenerateInvoicePdf(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_pdf_service.generatePdf(id);
     return this.response_service.success(result, 'Invoice PDF regenerated');
   }
 
@@ -195,8 +206,8 @@ export class InvoicingController {
    */
   @Get(':id/events')
   @Permissions('invoicing:read')
-  async listDianEvents(@Param('id') id: string) {
-    const result = await this.dian_events_service.findByInvoice(+id);
+  async listDianEvents(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_events_service.findByInvoice(id);
     return this.response_service.success(result);
   }
 
@@ -204,10 +215,10 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
   async registerDianEvent(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: RegisterDianEventDto,
   ) {
-    const result = await this.dian_events_service.register(+id, dto);
+    const result = await this.dian_events_service.register(id, dto);
     return this.response_service.success(
       result,
       `Evento RADIAN ${dto.event_code} procesado`,
@@ -228,22 +239,25 @@ export class InvoicingController {
    */
   @Get(':id/emit-readiness')
   @Permissions('invoicing:read')
-  async getEmitReadiness(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.getEmitReadiness(+id);
+  async getEmitReadiness(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.getEmitReadiness(id);
     return this.response_service.success(result);
   }
 
   @Get(':id')
   @Permissions('invoicing:read')
-  async findOne(@Param('id') id: string) {
-    const result = await this.invoicing_service.findOne(+id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoicing_service.findOne(id);
     return this.response_service.success(result);
   }
 
   @Patch(':id')
   @Permissions('invoicing:write')
-  async update(@Param('id') id: string, @Body() update_dto: UpdateInvoiceDto) {
-    const result = await this.invoicing_service.update(+id, update_dto);
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() update_dto: UpdateInvoiceDto,
+  ) {
+    const result = await this.invoicing_service.update(id, update_dto);
     return this.response_service.success(
       result,
       'Invoice updated successfully',
@@ -252,8 +266,8 @@ export class InvoicingController {
 
   @Patch(':id/validate')
   @Permissions('invoicing:write')
-  async validate(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.validate(+id);
+  async validate(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.validate(id);
     return this.response_service.success(
       result,
       'Invoice validated successfully',
@@ -262,15 +276,15 @@ export class InvoicingController {
 
   @Patch(':id/send')
   @Permissions('invoicing:write')
-  async send(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.send(+id);
+  async send(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.send(id);
     return this.response_service.success(result, 'Invoice sent successfully');
   }
 
   @Patch(':id/accept')
   @Permissions('invoicing:write')
-  async accept(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.accept(+id);
+  async accept(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.accept(id);
     return this.response_service.success(
       result,
       'Invoice accepted successfully',
@@ -279,8 +293,8 @@ export class InvoicingController {
 
   @Patch(':id/reject')
   @Permissions('invoicing:write')
-  async reject(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.reject(+id);
+  async reject(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.reject(id);
     return this.response_service.success(
       result,
       'Invoice rejected successfully',
@@ -289,8 +303,8 @@ export class InvoicingController {
 
   @Patch(':id/cancel')
   @Permissions('invoicing:write')
-  async cancel(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.cancel(+id);
+  async cancel(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.cancel(id);
     return this.response_service.success(
       result,
       'Invoice cancelled successfully',
@@ -299,16 +313,16 @@ export class InvoicingController {
 
   @Patch(':id/void')
   @Permissions('invoicing:write')
-  async voidInvoice(@Param('id') id: string) {
-    const result = await this.invoice_flow_service.void(+id);
+  async voidInvoice(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.void(id);
     return this.response_service.success(result, 'Invoice voided successfully');
   }
 
   @Delete(':id')
   @Permissions('invoicing:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string) {
-    await this.invoicing_service.remove(+id);
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    await this.invoicing_service.remove(id);
     return this.response_service.success(null, 'Invoice deleted successfully');
   }
 }
