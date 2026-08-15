@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'full';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
 
 @Component({
   selector: 'app-modal',
@@ -169,6 +169,11 @@ export class ModalComponent {
       lg: ['max-w-5xl', 'w-full', 'max-h-[90vh]'],
       'xl-mid': ['max-w-[85vw]', 'w-full', 'max-h-[90vh]'],
       xl: ['max-w-[95vw]', 'w-full', 'max-h-[90vh]'],
+      // QUI-690 — modal XXL para creación manual de factura con todos los
+      // detalles DIAN. Más ancho que `xl` pero conserva chrome (border,
+      // rounded, max-h). Usar con `[fullScreenOnMobile]="true"` para que en
+      // móvil pase a takeover sin padding lateral.
+      xxl: ['max-w-[98vw]', 'w-full', 'max-h-[94vh]'],
       // Takeover full-screen (estilo reporte semanal): ocupa todo el viewport.
       full: ['max-w-full', 'w-full', 'h-full', 'max-h-full'],
     };

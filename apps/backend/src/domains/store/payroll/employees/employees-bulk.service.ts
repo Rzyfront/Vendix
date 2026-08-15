@@ -478,7 +478,7 @@ export class EmployeesBulkService {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: emp.first_name || '',
         last_name: emp.last_name || '',
-        document_type: docType,
+        document_type: docType as any,
         document_number: docNumber,
         base_salary: parseFloat(emp.base_salary) || 0,
         position: emp.position || undefined,
@@ -842,7 +842,7 @@ export class EmployeesBulkService {
         const existingEmployee = await unscopedUpload.employees.findFirst({
           where: {
             organization_id: organizationId,
-            document_type: docType,
+            document_type: docType as any,
             document_number: docNumber,
           },
         });
@@ -865,7 +865,7 @@ export class EmployeesBulkService {
           const existingUser = await this.prisma.users.findFirst({
             where: {
               organization_id: organizationId,
-              document_type: docType,
+              document_type: docType as any,
               document_number: docNumber,
             },
           });
@@ -938,7 +938,7 @@ export class EmployeesBulkService {
                 username,
                 password: hashedPassword,
                 organization_id: organizationId,
-                document_type: docType,
+                document_type: docType as any,
                 document_number: docNumber,
                 phone: empData.phone || null,
                 state: 'active',
@@ -999,7 +999,7 @@ export class EmployeesBulkService {
         const createDto: CreateEmployeeDto = {
           first_name: empData.first_name.trim(),
           last_name: empData.last_name.trim(),
-          document_type: docType,
+          document_type: docType as any,
           document_number: docNumber,
           hire_date: empData.hire_date,
           contract_type:

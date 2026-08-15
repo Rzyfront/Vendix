@@ -80,16 +80,41 @@ export const DIAN_OPERATION_TYPES = {
 } as const;
 
 /**
- * Identification document types for parties.
+ * Identification document types for parties (Anexo Técnico 19).
+ *
+ * Single source of truth for the document-type → DIAN schemeID mapping
+ * used by `cbc:CompanyID@schemeID` and `cbc:ID@schemeID`. The issuer-side
+ * `DIAN_DOCUMENT_TYPE_BY_NIT_TYPE` (organization-fiscal-columns.helper.ts)
+ * MUST defer to this constant; if it diverges, that helper will need to
+ * import from here.
+ *
+ * Anexo 19 official table:
+ *   11 = Registro Civil (RC)
+ *   12 = Tarjeta de Identidad (TI)
+ *   13 = Cédula de Ciudadanía (CC)
+ *   21 = Tarjeta de Extranjería
+ *   22 = Cédula de Extranjería (CE)
+ *   31 = NIT
+ *   41 = Pasaporte
+ *   42 = Documento de Identificación Extranjero (DIE)
+ *   47 = PEP
+ *   48 = PPT (Permiso por Protección Temporal)
+ *   50 = NIT de persona natural extranjera (NIT_EXTRANJERIA)
+ *   91 = NUIP
  */
 export const DIAN_ID_TYPES: Record<string, string> = {
-  CC: '13', // Cédula de ciudadanía
-  CE: '22', // Cédula de extranjería
-  NIT: '31', // NIT
-  PASSPORT: '41', // Pasaporte
-  PEP: '47', // PEP
-  PPT: '50', // PPT
-  NUIP: '91', // NUIP
+  RC: '11',              // Registro Civil
+  TI: '12',              // Tarjeta de Identidad
+  CC: '13',              // Cédula de ciudadanía
+  PA: '21',              // Tarjeta de Extranjería
+  CE: '22',              // Cédula de extranjería
+  NIT: '31',             // NIT
+  PASSPORT: '41',        // Pasaporte
+  DIE: '42',             // Documento de Identificación Extranjero
+  PEP: '47',             // PEP (Permiso Especial de Permanencia)
+  PPT: '48',             // PPT (Permiso por Protección Temporal)
+  NIT_EXTRANJERIA: '50', // NIT de persona natural extranjera
+  NUIP: '91',            // NUIP
 };
 
 /**

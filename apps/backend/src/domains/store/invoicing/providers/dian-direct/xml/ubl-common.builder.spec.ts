@@ -2,7 +2,10 @@ import { create } from 'xmlbuilder2';
 import { DOMParser } from '@xmldom/xmldom';
 import { UblCommonBuilder } from './ubl-common.builder';
 import { UBL_NAMESPACES } from './xml-namespaces';
-import { DianIssuerData } from '../interfaces/dian-config.interface';
+import {
+  DianCustomerData,
+  DianIssuerData,
+} from '../interfaces/dian-config.interface';
 
 describe('UblCommonBuilder.buildSupplierParty', () => {
   /**
@@ -264,6 +267,152 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
         ).toBe(1);
       },
     );
+  });
+});
+
+describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural branch', () => {
+  /**
+   * Anexo Técnico 19 fixes the customer block to TWO structural siblings:
+   *
+   *   cac:PartyLegalEntity  → personas jurídicas, carries `cbc:RegistrationName`
+   *                           and `cbc:CompanyID`.
+   *   cac:Person            → personas naturales, carries `cbc:FirstName`,
+   *                           `cbc:FamilyName`, `cbc:ID`.
+   *
+   * Emitting `cac:PartyLegalEntity` for a persona natural (the previous behavior)
+   * is a DIAN rejection — `RegistrationName` is dishonest for a person and the
+   * annex does not allow the legal entity as the customer's structural anchor.
+   */
+
+  /**
+   * Creates a root UBL element with CAC/CBC/EXT namespaces registered. Lives
+   * at this scope (not the outer describe) because the outer scope's
+   * `createRoot` is hoisted into the supplier-party describe and not visible
+   * here.
+   */
+  function createRoot(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  /**
+   * Builds a minimal valid customer conforming to DianCustomerData and emits
+   * the UBL `cac:AccountingCustomerParty` block via the builder.
+   */
+  function buildCustomerPartyXml(
+    customerOverrides: Partial<DianCustomerData>,
+  ): string {
+    const customer: DianCustomerData = {
+      document_type: 'CC',
+      document_number: '12345678',
+      verification_digit: null,
+      legal_name: null,
+      trade_name: undefined,
+      first_name: undefined,
+      last_name: undefined,
+      address_line: undefined,
+      city_code: undefined,
+      city_name: undefined,
+      department_code: undefined,
+      department_name: undefined,
+      country_code: undefined,
+      postal_code: undefined,
+      phone: undefined,
+      email: undefined,
+      tax_regime: undefined,
+      tax_responsibilities: ['R-99-PN'],
+      person_type: 'NATURAL',
+      ciiu_code: null,
+      ...customerOverrides,
+    };
+    const root = createRoot();
+    UblCommonBuilder.buildCustomerParty(root, customer);
+    return root.end({ prettyPrint: true });
+  }
+
+  it('persona natural — emite cac:Person con FirstName/FamilyName y NO PartyLegalEntity', () => {
+    const xml = buildCustomerPartyXml({
+      document_type: 'CC',
+      document_number: '12345678',
+      verification_digit: null,
+      person_type: 'NATURAL',
+      first_name: 'Ana',
+      last_name: 'Pérez',
+      legal_name: null,
+      tax_responsibilities: ['R-99-PN'],
+      ciiu_code: null,
+    });
+
+    // cac:Person presente con FirstName y FamilyName correctos.
+    expect(xml).toContain('<cac:Person>');
+    expect(xml).toContain('<cbc:FirstName>Ana</cbc:FirstName>');
+    expect(xml).toContain('<cbc:FamilyName>Pérez</cbc:FamilyName>');
+    // cac:PartyLegalEntity NO debe aparecer cuando es persona natural.
+    expect(xml).not.toContain('<cac:PartyLegalEntity>');
+    // TaxLevelCode = R-99-PN para consumidor final.
+    expect(xml).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
+    // AdditionalAccountID = '2' (Persona Natural).
+    expect(xml).toMatch(/AdditionalAccountID>2</);
+  });
+
+  it('persona jurídica — emite cac:PartyLegalEntity con CompanyID@schemeID=31 y NO cac:Person', () => {
+    const xml = buildCustomerPartyXml({
+      document_type: 'NIT',
+      document_number: '900123456',
+      verification_digit: '7',
+      person_type: 'JURIDICA',
+      legal_name: 'Acme S.A.S',
+      tax_responsibilities: ['O-13', 'O-15'],
+      ciiu_code: '4711',
+    });
+
+    // cac:PartyLegalEntity presente con RegistrationName + CompanyID@schemeID=31.
+    expect(xml).toContain('<cac:PartyLegalEntity>');
+    expect(xml).toContain(
+      '<cbc:RegistrationName>Acme S.A.S</cbc:RegistrationName>',
+    );
+    expect(xml).toMatch(
+      /<cbc:CompanyID[^>]*schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+    );
+    // schemeName = 'NIT' (literal), per Anexo 19.
+    expect(xml).toMatch(/<cbc:CompanyID[^>]*schemeName="NIT"/);
+    // cac:Person NO debe aparecer.
+    expect(xml).not.toContain('<cac:Person>');
+    // TaxLevelCode concatenado: O-13;O-15.
+    expect(xml).toMatch(/TaxLevelCode[^>]*>O-13;O-15</);
+    // CIIU como cbc:IndustryClassificationCode.
+    expect(xml).toContain('<cbc:IndustryClassificationCode>4711</cbc:IndustryClassificationCode>');
+    // AdditionalAccountID: '1' (Persona Jurídica) + '1' (gran contribuyente por O-13) +
+    // '2' (autorretenedor por O-15).
+    expect(xml).toMatch(/<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/);
+    expect(xml).toContain('<cbc:AdditionalAccountID>2</cbc:AdditionalAccountID>');
+    // Conteo: al menos 3 (persona + 2 retenedores).
+    const matches = xml.match(/<cbc:AdditionalAccountID>/g) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('retenedor agente de retención — emite cbc:AdditionalAccountID=3 además del tipo de persona', () => {
+    const xml = buildCustomerPartyXml({
+      document_type: 'NIT',
+      document_number: '900123456',
+      verification_digit: '7',
+      person_type: 'JURIDICA',
+      legal_name: 'Retenedora S.A',
+      tax_responsibilities: ['O-13'],
+      ciiu_code: null,
+      is_withholding_agent: true,
+    });
+
+    // '1' (Persona Jurídica) + '1' (gran contribuyente O-13) + '3' (agente de retención).
+    expect(xml).toMatch(/<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/);
+    expect(xml).toMatch(/<cbc:AdditionalAccountID>3<\/cbc:AdditionalAccountID>/);
   });
 });
 

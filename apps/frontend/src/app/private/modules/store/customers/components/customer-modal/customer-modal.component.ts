@@ -1,5 +1,6 @@
 import {
   Component,
+  ChangeDetectionStrategy,
   DestroyRef,
   inject,
   input,
@@ -25,6 +26,13 @@ import {
   findDocumentType,
   DocumentTypeOption,
 } from '../../../../../../shared/constants/document-types';
+import { TAX_REGIMES } from '../../../../../../shared/constants/tax-regime.constants';
+import {
+  FISCAL_RESPONSIBILITIES,
+  FISCAL_RESPONSIBILITY_LABELS,
+  FiscalResponsibility,
+} from '../../../../../../shared/constants/fiscal-responsibilities.constants';
+import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
 import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 import { CustomersService } from '../../services/customers.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -73,6 +81,7 @@ interface AddressDtoPayload {
 @Component({
   selector: 'app-customer-modal',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
     ModalComponent,
@@ -88,138 +97,324 @@ interface AddressDtoPayload {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      [size]="'md'"
+      [size]="mode() === 'advanced' ? 'xl' : 'md'"
       [title]="modalTitle()"
-      subtitle="Administra la información del cliente"
+      [subtitle]="modalSubtitle()"
     >
       <form [formGroup]="form" class="space-y-4">
-        <!-- Email -->
-        <app-input
-          formControlName="email"
-          label="Correo electrónico"
-          placeholder="cliente@ejemplo.com"
-          type="email"
-          [error]="getFieldError('email')"
-          (blur)="onFieldBlur('email')"
-          customWrapperClass="mt-0"
-        ></app-input>
-
-        <!-- Names Row -->
-        <div class="grid grid-cols-2 gap-4">
-          <app-input
-            formControlName="first_name"
-            label="Nombre *"
-            placeholder="Ej. María"
-            [required]="true"
-            [error]="getFieldError('first_name')"
-            (blur)="onFieldBlur('first_name')"
-            customWrapperClass="mt-0"
-          ></app-input>
-
-          <app-input
-            formControlName="last_name"
-            label="Apellido *"
-            placeholder="Ej. Rodríguez"
-            [required]="true"
-            [error]="getFieldError('last_name')"
-            (blur)="onFieldBlur('last_name')"
-            customWrapperClass="mt-0"
-          ></app-input>
-        </div>
-
-        <!-- Phone -->
-        <app-input
-          formControlName="phone"
-          label="Teléfono *"
-          type="tel"
-          placeholder="+57 300 000 0000"
-          [required]="true"
-          [error]="getFieldError('phone')"
-          (blur)="onFieldBlur('phone')"
-          customWrapperClass="mt-0"
-        ></app-input>
-
-        <!-- Document Row -->
-        <div class="grid grid-cols-2 gap-4">
+        <!-- ============================================================ -->
+        <!-- QUICK MODE: solo datos básicos del cliente                    -->
+        <!-- ============================================================ -->
+        @if (mode() === 'quick') {
+          <!-- Tipo persona + Nombres/Apellidos o Razón social -->
           <app-selector
-            formControlName="document_type"
-            label="Tipo de documento"
+            formControlName="person_type"
+            label="Tipo de persona"
             placeholder="Selecciona un tipo"
-            [options]="documentTypeOptions"
+            [options]="personTypeOptions"
           ></app-selector>
 
-          <app-input
-            formControlName="document_number"
-            label="Número de documento"
-            [placeholder]="documentNumberPlaceholder()"
-            [error]="getFieldError('document_number')"
-            (blur)="onFieldBlur('document_number')"
-            customWrapperClass="mt-0"
-          ></app-input>
-        </div>
+          @if (person_type() !== 'JURIDICA') {
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="first_name"
+                label="Nombre *"
+                placeholder="Ej. María"
+                [required]="true"
+                [error]="getFieldError('first_name')"
+                (blur)="onFieldBlur('first_name')"
+                customWrapperClass="mt-0"
+              ></app-input>
 
-        <!-- Información fiscal -->
-        <div class="pt-2 border-t border-[var(--color-border)]">
-          <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
-            Información fiscal
-          </h3>
+              <app-input
+                formControlName="last_name"
+                label="Apellido *"
+                placeholder="Ej. Rodríguez"
+                [required]="true"
+                [error]="getFieldError('last_name')"
+                (blur)="onFieldBlur('last_name')"
+                customWrapperClass="mt-0"
+              ></app-input>
+            </div>
+          } @else {
+            <app-input
+              formControlName="legal_name"
+              label="Razón social *"
+              placeholder="Ej. Acme S.A.S"
+              [required]="true"
+              [error]="getFieldError('legal_name')"
+              (blur)="onFieldBlur('legal_name')"
+              customWrapperClass="mt-0"
+            ></app-input>
+          }
 
-          <div class="grid grid-cols-2 gap-4">
-            <app-selector
-              formControlName="tax_regime"
-              label="Régimen tributario"
-              placeholder="Selecciona un régimen"
-              [options]="taxRegimeOptions"
-            ></app-selector>
+          <!-- Email + Teléfono en 2 cols -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="email"
+              label="Correo electrónico"
+              placeholder="cliente@ejemplo.com"
+              type="email"
+              [error]="getFieldError('email')"
+              (blur)="onFieldBlur('email')"
+              customWrapperClass="mt-0"
+            ></app-input>
 
-            <app-selector
-              formControlName="person_type"
-              label="Tipo de persona"
-              placeholder="Selecciona un tipo"
-              [options]="personTypeOptions"
-            ></app-selector>
+            <app-input
+              formControlName="phone"
+              label="Teléfono *"
+              type="tel"
+              placeholder="+57 300 000 0000"
+              [required]="true"
+              [error]="getFieldError('phone')"
+              (blur)="onFieldBlur('phone')"
+              customWrapperClass="mt-0"
+            ></app-input>
           </div>
 
-          <div class="flex items-center gap-3 mt-4">
-            <app-toggle
-              formControlName="is_withholding_agent"
-              label="¿Es agente retenedor?"
-            ></app-toggle>
-          </div>
-        </div>
+          <!-- Info check place: activa creación completa DIAN -->
+          <label class="flex items-start gap-3 p-4 mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] cursor-pointer hover:border-[var(--color-primary)] transition-colors">
+            <input
+              type="checkbox"
+              class="mt-1"
+              [checked]="needsInvoicing()"
+              (change)="onInvoicingToggle($event)"
+            />
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <app-icon name="info" [size]="16"></app-icon>
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  ¿Este cliente va a facturar electrónicamente?
+                </h4>
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
+                Activa esta opción para capturar la información DIAN completa:
+                dígito de verificación (NIT y CC), régimen tributario,
+                responsabilidades fiscales del RUT, código CIIU y dirección.
+              </p>
+            </div>
+          </label>
+        }
 
-        <!-- Dirección de envío (opcional, colapsable) -->
-        <div class="pt-2 border-t border-[var(--color-border)]">
+        <!-- ============================================================ -->
+        <!-- ADVANCED MODE (xl): 3 columnas                                -->
+        <!-- Col 1: Datos del cliente                                       -->
+        <!-- Col 2: Datos fiscales                                         -->
+        <!-- Col 3: Responsabilidades tributarias                          -->
+        <!-- ============================================================ -->
+        @if (mode() === 'advanced') {
+          <!-- Link para volver al modo rápido -->
           <button
             type="button"
-            class="flex w-full items-center justify-between text-left text-sm font-semibold text-[var(--color-text-primary)]"
-            (click)="toggleAddressSection()"
+            class="flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+            (click)="switchToQuick()"
           >
-            <span>Dirección de envío (opcional)</span>
-            <app-icon
-              [name]="addressSectionOpen() ? 'chevron-down' : 'chevron-right'"
-              [size]="16"
-            ></app-icon>
+            <app-icon name="arrow-left" [size]="14"></app-icon>
+            Volver al modo rápido
           </button>
 
-          @if (addressSectionOpen()) {
-            <div class="mt-3">
-              <app-address-form-fields
-                [initialAddress]="existingAddress()"
-                (addressChange)="onAddressChange($event)"
-                (validChange)="onAddressValid($event)"
-              ></app-address-form-fields>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- ============================================================ -->
+            <!-- COLUMNA 1: Datos del cliente (comercial)                    -->
+            <!-- ============================================================ -->
+            <div class="space-y-4">
+              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
+                Datos del cliente
+              </h3>
+
+              <app-selector
+                formControlName="person_type"
+                label="Tipo de persona"
+                placeholder="Selecciona un tipo"
+                [options]="personTypeOptions"
+              ></app-selector>
+
+              @if (person_type() !== 'JURIDICA') {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <app-input
+                    formControlName="first_name"
+                    label="Nombre *"
+                    placeholder="Ej. María"
+                    [required]="true"
+                    [error]="getFieldError('first_name')"
+                    (blur)="onFieldBlur('first_name')"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+
+                  <app-input
+                    formControlName="last_name"
+                    label="Apellido *"
+                    placeholder="Ej. Rodríguez"
+                    [required]="true"
+                    [error]="getFieldError('last_name')"
+                    (blur)="onFieldBlur('last_name')"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                </div>
+              } @else {
+                <app-input
+                  formControlName="legal_name"
+                  label="Razón social *"
+                  placeholder="Ej. Acme S.A.S"
+                  [required]="true"
+                  [error]="getFieldError('legal_name')"
+                  (blur)="onFieldBlur('legal_name')"
+                  customWrapperClass="mt-0"
+                ></app-input>
+              }
+
+              <app-input
+                formControlName="email"
+                label="Correo electrónico"
+                placeholder="cliente@ejemplo.com"
+                type="email"
+                [error]="getFieldError('email')"
+                (blur)="onFieldBlur('email')"
+                customWrapperClass="mt-0"
+              ></app-input>
+
+              <app-input
+                formControlName="phone"
+                label="Teléfono *"
+                type="tel"
+                placeholder="+57 300 000 0000"
+                [required]="true"
+                [error]="getFieldError('phone')"
+                (blur)="onFieldBlur('phone')"
+                customWrapperClass="mt-0"
+              ></app-input>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <app-selector
+                  formControlName="document_type"
+                  label="Tipo doc"
+                  placeholder="Tipo"
+                  [options]="documentTypeOptions"
+                ></app-selector>
+
+                <app-input
+                  formControlName="document_number"
+                  label="Número"
+                  [placeholder]="documentNumberPlaceholder()"
+                  [error]="getFieldError('document_number')"
+                  (blur)="onFieldBlur('document_number')"
+                  customWrapperClass="mt-0"
+                ></app-input>
+
+                @if (document_type() === 'NIT' || document_type() === 'CC') {
+                  <app-input
+                    formControlName="verification_digit"
+                    label="DV"
+                    placeholder="3"
+                    type="text"
+                    [maxlength]="1"
+                    [error]="getFieldError('verification_digit') || getGroupNitDvError()"
+                    (blur)="onFieldBlur('verification_digit')"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                }
+              </div>
             </div>
-          }
-        </div>
+
+            <!-- ============================================================ -->
+            <!-- COLUMNA 2: Datos fiscales + Dirección                       -->
+            <!-- ============================================================ -->
+            <div class="space-y-4">
+              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
+                Datos fiscales
+              </h3>
+
+              <app-selector
+                formControlName="tax_regime"
+                label="Régimen tributario"
+                placeholder="Selecciona un régimen"
+                [options]="taxRegimeOptions"
+              ></app-selector>
+
+              <app-input
+                formControlName="ciiu_code"
+                label="Código CIIU"
+                placeholder="4711"
+                type="text"
+                [maxlength]="10"
+                hint="4 dígitos"
+                [error]="getFieldError('ciiu_code')"
+                (blur)="onFieldBlur('ciiu_code')"
+                customWrapperClass="mt-0"
+              ></app-input>
+
+              <div class="pt-2">
+                <app-toggle
+                  formControlName="is_withholding_agent"
+                  label="¿Es agente retenedor?"
+                ></app-toggle>
+              </div>
+
+              <!-- Dirección (se reutiliza para envío y facturación) -->
+              <div class="pt-2 border-t border-[var(--color-border)]">
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between text-left text-sm font-semibold text-[var(--color-text-primary)]"
+                  (click)="toggleAddressSection()"
+                >
+                  <span>Dirección (opcional)</span>
+                  <app-icon
+                    [name]="addressSectionOpen() ? 'chevron-down' : 'chevron-right'"
+                    [size]="16"
+                  ></app-icon>
+                </button>
+
+                @if (addressSectionOpen()) {
+                  <div class="mt-3">
+                    <app-address-form-fields
+                      [initialAddress]="existingAddress()"
+                      (addressChange)="onAddressChange($event)"
+                      (validChange)="onAddressValid($event)"
+                    ></app-address-form-fields>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <!-- ============================================================ -->
+            <!-- COLUMNA 3: Responsabilidades tributarias                    -->
+            <!-- ============================================================ -->
+            <div class="space-y-3">
+              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
+                Responsabilidades tributarias *
+              </h3>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Una o más del RUT.
+              </p>
+              <div class="flex flex-col gap-1.5">
+                @for (resp of FISCAL_RESPONSIBILITIES; track resp) {
+                  <label class="flex items-start gap-2 px-2 py-1.5 rounded border border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-bg-secondary)]">
+                    <input
+                      type="checkbox"
+                      class="mt-0.5"
+                      [checked]="fiscalResponsibilitiesValue().includes(resp)"
+                      (change)="toggleFiscalResponsibility(resp)"
+                    />
+                    <span class="text-xs text-[var(--color-text-primary)] leading-tight">{{ FISCAL_RESPONSIBILITY_LABELS[resp] }}</span>
+                  </label>
+                }
+              </div>
+              @if (getFieldError('fiscal_responsibilities')) {
+                <p class="text-xs text-[var(--color-error)] mt-1">
+                  {{ getFieldError('fiscal_responsibilities') }}
+                </p>
+              }
+            </div>
+          </div>
+        }
       </form>
 
-      <!-- Footer with slot -->
+      <!-- Footer (idéntico en ambos modos) -->
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
-          [disabled]="form.invalid || loading()"
+          [disabled]="(mode() === 'quick' ? quickFormInvalid() : form.invalid) || loading()"
           [loading]="loading()"
           (clicked)="onSubmit()"
         >
@@ -297,12 +492,27 @@ export class CustomerModalComponent {
   /** Acceso al catálogo completo si se necesita (placeholder, regex, etc). */
   readonly documentTypes: ReadonlyArray<DocumentTypeOption> = DOCUMENT_TYPES;
 
-  /** Opciones de régimen tributario (clasificación fiscal del cliente). */
-  readonly taxRegimeOptions = [
-    { value: 'COMUN', label: 'Régimen común' },
-    { value: 'SIMPLIFICADO', label: 'Régimen simplificado' },
-    { value: 'GRAN_CONTRIBUYENTE', label: 'Gran contribuyente' },
-  ];
+  /** Opciones de régimen tributario (clasificación fiscal del cliente, Anexo 19). */
+  readonly taxRegimeOptions = TAX_REGIMES.map((opt) => ({
+    value: opt.value,
+    label: opt.label,
+  }));
+
+  /** Catálogo de responsabilidades fiscales (RUT). */
+  readonly FISCAL_RESPONSIBILITIES = FISCAL_RESPONSIBILITIES;
+  readonly FISCAL_RESPONSIBILITY_LABELS = FISCAL_RESPONSIBILITY_LABELS;
+
+  /** Modo del modal: 'quick' (md) o 'advanced' (xl, 3-col DIAN). */
+  readonly mode = signal<'quick' | 'advanced'>('quick');
+
+  /** Toggle del info check place. */
+  readonly needsInvoicing = signal(false);
+
+  /** Bridge del FormControl `person_type` a signal. */
+  readonly person_type = signal<string>('');
+  readonly document_type = signal<string>('');
+  /** Bridge del FormControl `fiscal_responsibilities` (array) a signal. */
+  readonly fiscalResponsibilitiesValue = signal<string[]>([]);
 
   /** Opciones de tipo de persona. */
   readonly personTypeOptions = [
@@ -319,26 +529,63 @@ export class CustomerModalComponent {
     return type?.placeholder ?? 'Selecciona primero el tipo';
   });
 
-  /** Título del modal según modo crear/editar. */
+  /** Título del modal según modo crear/editar + nivel de detalle. */
   readonly isEditMode = computed(() => this.customer() !== null);
-  readonly modalTitle = computed(() =>
-    this.isEditMode() ? 'Editar cliente' : 'Crear cliente',
+  readonly modalTitle = computed(() => {
+    const base = this.isEditMode() ? 'Editar cliente' : 'Crear cliente';
+    const suffix = this.mode() === 'advanced' ? ' — Configuración completa' : '';
+    return base + suffix;
+  });
+  readonly modalSubtitle = computed(() =>
+    this.mode() === 'advanced'
+      ? 'Información DIAN completa para emisión electrónica'
+      : 'Datos esenciales para crear el cliente',
   );
   readonly submitLabel = computed(() =>
     this.isEditMode() ? 'Guardar cambios' : 'Crear cliente',
   );
+
+  /**
+   * Bridge `form.statusChanges` a un signal para que `quickFormInvalid` pueda
+   * re-evaluarse cuando cualquier control del form cambia de validez. Sin este
+   * puente, el computed original cacheaba el resultado y nunca reflejaba el
+   * cambio de `first_name/last_name/email/phone` porque esas propiedades no
+   * son signals. Se inicializa en `INVALID` (cualquier form inicial cae en
+   * este estado mientras el usuario no llene nada) y se actualiza vía
+   * subscription a `form.statusChanges` en el constructor.
+   */
+  private readonly formStatus = signal<string>('INVALID');
+
+  /** En modo quick, sólo validamos los campos básicos (no fiscales avanzados). */
+  quickFormInvalid(): boolean {
+    this.formStatus(); // dependencia: re-evalúa en cada cambio de validez
+    const emailCtrl = this.form.controls['email'];
+    if (emailCtrl.invalid) return true;
+    if (this.person_type() === 'JURIDICA') {
+      if (this.form.controls['legal_name'].invalid) return true;
+    } else {
+      if (this.form.controls['first_name'].invalid) return true;
+      if (this.form.controls['last_name'].invalid) return true;
+    }
+    if (this.form.controls['phone'].invalid) return true;
+    return false;
+  }
 
   constructor() {
     this.form = this.fb.group({
       email: ['', [Validators.email]],
       first_name: ['', [Validators.required, Validators.minLength(2)]],
       last_name: ['', [Validators.required, Validators.minLength(2)]],
+      legal_name: ['', [Validators.maxLength(255)]],
       phone: ['', [Validators.required, Validators.minLength(7)]],
-      document_type: [''],
+      document_type: ['CC'],
       document_number: [''],
+      verification_digit: ['', [Validators.maxLength(1), Validators.pattern(/^\d?$/)]],
+      ciiu_code: ['', [Validators.maxLength(10), Validators.pattern(/^\d{2,4}$/)]],
       tax_regime: [''],
       person_type: [''],
       is_withholding_agent: [false],
+      fiscal_responsibilities: this.fb.control<string[]>([]),
     });
 
     // Bridge document_type valueChanges -> signal (Zoneless-safe reactive read).
@@ -347,10 +594,39 @@ export class CustomerModalComponent {
       initialValue: documentTypeControl.value as string | null,
     });
 
+    // Bridge person_type valueChanges -> signal (para swap jurídica/natural).
+    const personTypeControl = this.form.controls['person_type'];
+    const personTypeValue = toSignal(personTypeControl.valueChanges, {
+      initialValue: personTypeControl.value as string | null,
+    });
+
+    // Bridge fiscal_responsibilities valueChanges -> signal.
+    const fiscalRespControl = this.form.controls['fiscal_responsibilities'];
+    const fiscalRespValue = toSignal(fiscalRespControl.valueChanges, {
+      initialValue: (fiscalRespControl.value ?? []) as string[],
+    });
+
+    // Bridge form.statusChanges -> signal (re-evalúa computed/methods cuando
+    // cualquier control cambia de validez).
+    this.form.statusChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((status) => this.formStatus.set(status));
+
     // Mantener `selectedDocumentType` sincronizado con el FormControl.
     effect(() => {
       const code = documentTypeValue();
       this.selectedDocumentType.set(findDocumentType(code));
+      this.document_type.set(code ?? '');
+    });
+
+    // Sincronizar signals derivados.
+    effect(() => {
+      this.person_type.set(personTypeValue() ?? '');
+      this.applyPersonTypeValidators();
+    });
+
+    effect(() => {
+      this.fiscalResponsibilitiesValue.set(fiscalRespValue() ?? []);
     });
 
     // Validadores dinámicos del número de documento según el tipo elegido.
@@ -374,6 +650,13 @@ export class CustomerModalComponent {
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
+    // Group-level validator: nitDvValidator solo aplica cuando document_type='NIT'.
+    effect(() => {
+      const type = this.document_type();
+      this.form.setValidators(type === 'NIT' ? [nitDvValidator] : []);
+      this.form.updateValueAndValidity({ emitEvent: false });
+    });
+
     // Reemplaza ngOnChanges para customer y isOpen.
     effect(() => {
       const customer = this.customer();
@@ -382,12 +665,16 @@ export class CustomerModalComponent {
           email: customer.email,
           first_name: customer.first_name,
           last_name: customer.last_name,
+          legal_name: customer.legal_name ?? null,
           phone: customer.phone,
           document_type: customer.document_type,
           document_number: customer.document_number,
+          verification_digit: customer.verification_digit ?? null,
+          ciiu_code: customer.ciiu_code ?? null,
           tax_regime: customer.tax_regime ?? '',
           person_type: customer.person_type ?? '',
           is_withholding_agent: customer.is_withholding_agent ?? false,
+          fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
         });
 
         // Cargar la dirección de envío existente (si la hay) para el hijo.
@@ -403,6 +690,9 @@ export class CustomerModalComponent {
         this.addressValid.set(false);
         // Abrir la sección automáticamente si ya hay dirección.
         this.addressSectionOpen.set(!!addr);
+        // Editar: arrancar en advanced para mostrar todos los campos DIAN.
+        this.mode.set('advanced');
+        this.needsInvoicing.set(true);
       }
     });
 
@@ -412,15 +702,69 @@ export class CustomerModalComponent {
         // `reset()` sin argumento pone TODOS los controles en `null`, ignorando
         // el default `[false]` del FormBuilder. `is_withholding_agent` es un
         // Boolean no-nullable en backend, así que un `null` emitido rompe el
-        // alta (500). Reseteamos preservando el booleano en `false`.
-        this.form.reset({ is_withholding_agent: false });
+        // alta (500). Reseteamos preservando el booleano en `false` y los
+        // defaults razonables (CC como tipo de documento por default, para
+        // que el campo "Número" quede habilitado desde el arranque).
+        this.form.reset({
+          document_type: 'CC',
+          is_withholding_agent: false,
+          fiscal_responsibilities: [],
+        });
         // Reset de estado de dirección en alta.
         this.existingAddressId.set(null);
         this.addressPayload.set(null);
         this.addressValid.set(false);
         this.addressSectionOpen.set(false);
+        // Crear: arrancar en modo rápido.
+        this.mode.set('quick');
+        this.needsInvoicing.set(false);
       }
     });
+  }
+
+  /**
+   * Toggle de validación required entre `first_name/last_name` y `legal_name`
+   * según el `person_type` actual. Aplica el efecto de swap jurídica↔natural.
+   */
+  private applyPersonTypeValidators(): void {
+    const isJuridica = this.person_type() === 'JURIDICA';
+    const first = this.form.controls['first_name'];
+    const last = this.form.controls['last_name'];
+    const legal = this.form.controls['legal_name'];
+
+    if (isJuridica) {
+      first.clearValidators();
+      last.clearValidators();
+      first.setValue(null, { emitEvent: false });
+      last.setValue(null, { emitEvent: false });
+      legal.setValidators([Validators.required, Validators.maxLength(255)]);
+    } else {
+      legal.clearValidators();
+      legal.setValue(null, { emitEvent: false });
+      first.setValidators([Validators.required, Validators.minLength(2)]);
+      last.setValidators([Validators.required, Validators.minLength(2)]);
+    }
+
+    first.updateValueAndValidity({ emitEvent: false });
+    last.updateValueAndValidity({ emitEvent: false });
+    legal.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /** Toggle handler para el multi-checkbox de responsabilidades fiscales. */
+  toggleFiscalResponsibility(code: FiscalResponsibility): void {
+    const current = this.fiscalResponsibilitiesValue();
+    const next = current.includes(code)
+      ? current.filter((c) => c !== code)
+      : [...current, code];
+    this.form.controls['fiscal_responsibilities'].setValue(next);
+    this.form.controls['fiscal_responsibilities'].markAsTouched();
+  }
+
+  /** Mensaje de error a nivel de grupo (nitDvValidator). */
+  getGroupNitDvError(): string {
+    const errors = this.form.errors;
+    if (!errors || !errors['nitDv']) return '';
+    return 'El dígito de verificación no corresponde al NIT';
   }
 
   onClose() {
@@ -435,6 +779,31 @@ export class CustomerModalComponent {
   /** Toggle de la sección colapsable de dirección. */
   toggleAddressSection(): void {
     this.addressSectionOpen.set(!this.addressSectionOpen());
+  }
+
+  /** Cambia del modal rápido (md) al modal avanzado (xl, 3-col DIAN). */
+  switchToAdvanced(): void {
+    this.mode.set('advanced');
+    this.needsInvoicing.set(true);
+    if (this.existingAddress() || this.addressValid()) {
+      this.addressSectionOpen.set(true);
+    }
+  }
+
+  /** Vuelve del modal avanzado al modal rápido. */
+  switchToQuick(): void {
+    this.mode.set('quick');
+    this.needsInvoicing.set(false);
+  }
+
+  /** Handler del info checkbox: alterna entre quick y advanced. */
+  onInvoicingToggle(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      this.switchToAdvanced();
+    } else {
+      this.switchToQuick();
+    }
   }
 
   /** Handler del hijo: actualiza la última dirección emitida. */
@@ -559,8 +928,12 @@ export class CustomerModalComponent {
           return 'El nombre es obligatorio';
         case 'last_name':
           return 'El apellido es obligatorio';
+        case 'legal_name':
+          return 'La razón social es obligatoria';
         case 'phone':
           return 'El teléfono es obligatorio';
+        case 'fiscal_responsibilities':
+          return 'Selecciona al menos una responsabilidad fiscal';
         default:
           return 'Este campo es obligatorio';
       }
@@ -594,6 +967,18 @@ export class CustomerModalComponent {
     if (errors['pattern'] && field === 'document_number') {
       const type = this.selectedDocumentType();
       return `Número de documento inválido para ${type?.label ?? 'el tipo seleccionado'}`;
+    }
+
+    if (errors['pattern'] && field === 'verification_digit') {
+      return 'El DV debe ser un dígito (0-9)';
+    }
+
+    if (errors['pattern'] && field === 'ciiu_code') {
+      return 'El código CIIU debe tener 2 a 4 dígitos';
+    }
+
+    if (errors['maxlength'] && field === 'legal_name') {
+      return 'La razón social no puede superar 255 caracteres';
     }
 
     return '';

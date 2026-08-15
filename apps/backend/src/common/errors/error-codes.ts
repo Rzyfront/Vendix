@@ -1131,6 +1131,26 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required for bulk upload',
   },
+  // QUI-728 — DIAN Anexo Técnico 19 customer fiscal data: reason-social,
+  // NIT DV, and RUT responsabilidad validation. Surfaced explicitly so the
+  // frontend can map these to inline form errors without leaking a Prisma
+  // P2002 / generic 400.
+  CUSTOMER_LEGAL_NAME_REQUIRED: {
+    code: 'CUSTOMER_LEGAL_NAME_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'La razón social es obligatoria cuando el tipo de persona es JURIDICA',
+  },
+  CUSTOMER_NIT_DV_MISMATCH: {
+    code: 'CUSTOMER_NIT_DV_MISMATCH',
+    httpStatus: 400,
+    devMessage: 'El dígito de verificación no corresponde al NIT digitado',
+  },
+  CUSTOMER_INVALID_FISCAL_RESPONSIBILITY: {
+    code: 'CUSTOMER_INVALID_FISCAL_RESPONSIBILITY',
+    httpStatus: 400,
+    devMessage: 'fiscal_responsibilities contiene códigos fuera del catálogo RUT',
+  },
 
   // Shipping
   SHIP_FIND_001: {

@@ -54,7 +54,7 @@ import {
       <!-- Sticky Header -->
       <app-sticky-header
         title="Detalle del Cliente"
-        [subtitle]="customer() ? (customer().first_name + ' ' + customer().last_name) : 'Cargando...'"
+        [subtitle]="customer() ? getDisplayName() : 'Cargando...'"
         icon="user"
         [showBackButton]="true"
         backRoute="/admin/customers/all"
@@ -96,8 +96,17 @@ import {
                 </div>
                 <div>
                   <h2 class="text-xl font-bold" style="color: var(--color-text-primary)">
-                    {{ customer().first_name }} {{ customer().last_name }}
+                    {{ getDisplayName() }}
                   </h2>
+                  @if (customer().person_type === 'JURIDICA') {
+                    <p class="text-xs uppercase tracking-wider mt-0.5" style="color: var(--color-text-muted)">
+                      Persona jurídica
+                    </p>
+                  } @else {
+                    <p class="text-xs uppercase tracking-wider mt-0.5" style="color: var(--color-text-muted)">
+                      Persona natural
+                    </p>
+                  }
                   <div class="flex items-center gap-2 mt-1">
                     <app-icon name="mail" [size]="14" style="color: var(--color-text-muted)"></app-icon>
                     <span class="text-sm" style="color: var(--color-text-muted)">{{ customer().email }}</span>
@@ -120,6 +129,9 @@ import {
                 <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
                   @if (customer().document_number) {
                     {{ getDocumentLabel(customer().document_type) }} {{ customer().document_number }}
+                    @if (customer().verification_digit) {
+                      <span class="text-xs ml-1" style="color: var(--color-text-muted)">DV {{ customer().verification_digit }}</span>
+                    }
                   } @else {
                     Sin documento
                   }
@@ -157,6 +169,84 @@ import {
               </div>
             </div>
           </app-card>
+
+          <!-- Fiscal / DIAN Card -->
+          @if (hasFiscalData()) {
+            <app-card>
+              <div class="flex items-center gap-2 mb-4">
+                <app-icon name="file-text" [size]="20" class="text-primary"></app-icon>
+                <h3 class="text-lg font-bold" style="color: var(--color-text-primary)">
+                  Datos fiscales y tributarios
+                </h3>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs" style="color: var(--color-text-muted)">Régimen tributario</span>
+                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                    {{ getTaxRegimeLabel() }}
+                  </span>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs" style="color: var(--color-text-muted)">Código CIIU</span>
+                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                    {{ customer().ciiu_code || '—' }}
+                  </span>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs" style="color: var(--color-text-muted)">¿Agente retenedor?</span>
+                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                    {{ customer().is_withholding_agent ? 'Sí' : 'No' }}
+                  </span>
+                </div>
+              </div>
+              @if (customer().fiscal_responsibilities && customer().fiscal_responsibilities!.length > 0) {
+                <div class="mt-4 pt-4" style="border-top: 1px solid var(--color-border)">
+                  <span class="text-xs block mb-2" style="color: var(--color-text-muted)">
+                    Responsabilidades tributarias
+                  </span>
+                  <div class="flex flex-wrap gap-2">
+                    @for (code of customer().fiscal_responsibilities!; track code) {
+                      <span
+                        class="text-xs px-2 py-1 rounded-full font-mono"
+                        style="background: var(--color-bg-secondary); color: var(--color-text-primary); border: 1px solid var(--color-border)"
+                        title="{{ getFiscalResponsibilityLabel(code) }}"
+                      >
+                        {{ code }}
+                      </span>
+                    }
+                  </div>
+                </div>
+              }
+            </app-card>
+          }
+
+          <!-- Dirección Card -->
+          @if (primaryAddress(); as addr) {
+            <app-card>
+              <div class="flex items-center gap-2 mb-4">
+                <app-icon name="map-pin" [size]="20" class="text-primary"></app-icon>
+                <h3 class="text-lg font-bold" style="color: var(--color-text-primary)">
+                  Dirección
+                </h3>
+              </div>
+              <div class="space-y-1">
+                <p class="text-sm" style="color: var(--color-text-primary)">
+                  {{ addr.address_line1 }}{{ addr.address_line2 ? ', ' + addr.address_line2 : '' }}
+                </p>
+                <p class="text-sm" style="color: var(--color-text-secondary)">
+                  {{ addr.city }}{{ addr.state_province ? ', ' + addr.state_province : '' }} · {{ addr.country_code }}
+                  @if (addr.postal_code) {
+                    · CP {{ addr.postal_code }}
+                  }
+                </p>
+                @if (addr.phone_number) {
+                  <p class="text-xs" style="color: var(--color-text-muted)">
+                    Tel: {{ addr.phone_number }}
+                  </p>
+                }
+              </div>
+            </app-card>
+          }
         }
     
         <!-- Customer Metadata Card -->
@@ -910,9 +1000,81 @@ export class CustomerDetailsComponent {
 
   getInitials(): string {
     if (!this.customer()) return '?';
-    const f = this.customer().first_name?.[0] || '';
-    const l = this.customer().last_name?.[0] || '';
+    const c = this.customer();
+    // Persona jurídica: usar iniciales de la razón social.
+    if (c.person_type === 'JURIDICA' && c.legal_name) {
+      const parts = c.legal_name.trim().split(/\s+/);
+      const first = parts[0]?.[0] || '';
+      const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return (first + last).toUpperCase();
+    }
+    const f = c.first_name?.[0] || '';
+    const l = c.last_name?.[0] || '';
     return (f + l).toUpperCase();
+  }
+
+  /** Nombre principal: legal_name si jurídica, sino first_name + last_name. */
+  getDisplayName(): string {
+    const c = this.customer();
+    if (!c) return 'Cargando...';
+    if (c.person_type === 'JURIDICA' && c.legal_name) {
+      return c.legal_name;
+    }
+    const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim();
+    return name || 'Sin nombre';
+  }
+
+  /** True si el cliente tiene al menos un campo fiscal capturado. */
+  hasFiscalData(): boolean {
+    const c = this.customer();
+    if (!c) return false;
+    return !!(
+      c.tax_regime ||
+      c.ciiu_code ||
+      c.is_withholding_agent ||
+      (c.fiscal_responsibilities && c.fiscal_responsibilities.length > 0)
+    );
+  }
+
+  /** Traduce el enum tax_regime a etiqueta legible. */
+  getTaxRegimeLabel(): string {
+    const r = this.customer()?.tax_regime;
+    const labels: Record<string, string> = {
+      COMUN: 'Régimen común',
+      SIMPLIFICADO: 'Régimen simplificado',
+      GRAN_CONTRIBUYENTE: 'Gran contribuyente',
+      AUTORRETENEDOR: 'Autorretenedor',
+      ESPECIAL: 'Régimen especial',
+      NO_APLICA: 'No aplica',
+    };
+    return r ? labels[r] || r : '—';
+  }
+
+  /** Devuelve la dirección primaria (o la primera) del cliente. */
+  primaryAddress(): any | null {
+    const addrs = this.customer()?.addresses;
+    if (!addrs || addrs.length === 0) return null;
+    return addrs.find((a: any) => a.is_primary) ?? addrs[0];
+  }
+
+  /** Etiqueta legible de un código de responsabilidad fiscal. */
+  getFiscalResponsibilityLabel(code: string): string {
+    const labels: Record<string, string> = {
+      'R-99-PN': 'No aplica - Persona natural consumidor',
+      'O-13': 'Gran contribuyente',
+      'O-14': 'Informante de precios de transferencia',
+      'O-15': 'Autorretenedor',
+      'O-16': 'Obligado a llevar libros',
+      'O-17': 'Responsable de IVA (legacy)',
+      'O-19': 'Responsable de INC',
+      'O-22': 'No responsable de IVA (legacy)',
+      'O-32': 'Responsable de ICUI (bebidas azucaradas)',
+      'O-33': 'Responsable de INC (ultraprocesados)',
+      'O-47': 'Régimen simple de tributación',
+      'O-48': 'Responsable de IVA',
+      'O-49': 'No responsable de IVA',
+    };
+    return labels[code] || code;
   }
 
   getAverageTicket(): number {

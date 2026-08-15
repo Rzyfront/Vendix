@@ -24,6 +24,7 @@ import {
 } from '../../../../common/utils/store-timezone.util';
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import { resolveUneceUnitCode } from '../../products/services/uom-uncefact.util';
+import { toCustomerInvoiceData } from '../utils/customer-invoice-data.adapter';
 
 type InvoiceStatus =
   | 'draft'
@@ -49,12 +50,31 @@ const INVOICE_INCLUDE = {
   invoice_taxes: true,
   resolution: true,
   customer: {
+    // Step 8 — Anexo 19 wiring. The customer fields here are the contract the
+    // customer-invoice-data.adapter consumes; `person_type`, `tax_regime`,
+    // `fiscal_responsibilities`, `ciiu_code`, `verification_digit`, `legal_name`
+    // and `is_withholding_agent` were added by Steps 1–2 of the plan so the
+    // UBL builder can emit the structural / catalogue fields Anexo 19 expects.
+    //
+    // `addresses` returns the primary address only — the adapter copies
+    // `addresses[0]` into `customer_address`, and pulling any more rows would
+    // be wasted scope on every `send()` / `accept()` call.
     select: {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
+      phone: true,
+      document_type: true,
       document_number: true,
+      verification_digit: true,
+      tax_regime: true,
+      person_type: true,
+      fiscal_responsibilities: true,
+      ciiu_code: true,
+      is_withholding_agent: true,
+      addresses: { take: 1, orderBy: { is_primary: 'desc' } },
     },
   },
   supplier: {
@@ -715,6 +735,46 @@ export class InvoiceFlowService {
       invoice.invoice_items || [],
     );
 
+    // Step 8 — customer-side wiring for the provider payload.
+    //
+    // The customer_* fields used to read directly from `invoice.supplier`
+    // (the EMISOR's document_type/tax_regime — see the historical bug the
+    // plan documents), so the UBL builder emitted the issuer's ID under
+    // `cac:AccountingCustomerParty` for every invoice.
+    //
+    // Today the data path is:
+    //   invoice.customer ──► toCustomerInvoiceData() ──► customer_*
+    // `INVOICE_INCLUDE` (above) loads the customer row + primary address, the
+    // adapter does the 1:1 mapping to `ProviderInvoiceData.customer_*`, and
+    // `dian-direct.provider.ts:buildCustomerData` consumes the result. Each
+    // hop is a no-op on `invoice.customer` being null: sales invoices always
+    // have a customer, support documents don't — the support-document branch
+    // below keeps the historical supplier-fallback so the existing
+    // support-document fixture (no customer row) still passes its assertions.
+    const customerFieldsFromAdapter = invoice.customer
+      ? toCustomerInvoiceData(invoice.customer)
+      : {};
+    // Documento soporte: NO tiene `customer` (la contraparte es el
+    // `supplier`). El comportamiento histórico copiaba `supplier.document_type`
+    // y `supplier.tax_regime` a los campos `customer_*` para que el builder UBL
+    // recibiera datos. Lo preservamos AQUÍ para no romper el spec del support
+    // document, pero SOLO en este branch; ventas (donde sí hay customer) ya no
+    // toca supplier.
+    const supportDocSupplierFallback =
+      !invoice.customer && invoice.supplier
+        ? {
+            customer_document_type:
+              invoice.supplier.document_type || undefined,
+            customer_regime: invoice.supplier.tax_regime || undefined,
+            customer_verification_digit:
+              invoice.supplier.verification_digit || undefined,
+          }
+        : {};
+    const customerFields = {
+      ...customerFieldsFromAdapter,
+      ...supportDocSupplierFallback,
+    };
+
     // Build provider data from invoice
     const provider_data: ProviderInvoiceData = {
       invoice_number: invoice.invoice_number,
@@ -724,12 +784,41 @@ export class InvoiceFlowService {
       due_date: invoice.due_date
         ? this.formatIssueDate(invoice.due_date, timezone)
         : undefined,
+      // Step 8 — `customer_name` / `customer_tax_id` / `customer_address`
+      // prefieren el adapter; caen al valor persistido en la invoice para
+      // facturas creadas con la API legacy (esos `invoice.customer_*` siguen
+      // siendo la fuente del nombre/ID/dirección en `invoicing.service.ts`),
+      // y por último al `supplier` cuando son documentos soporte.
       customer_name:
-        invoice.customer_name || invoice.supplier?.name || undefined,
+        customerFields.customer_name ??
+        invoice.customer_name ??
+        invoice.supplier?.name ??
+        undefined,
       customer_tax_id:
-        invoice.customer_tax_id || invoice.supplier?.tax_id || undefined,
+        customerFields.customer_tax_id ??
+        invoice.customer_tax_id ??
+        invoice.supplier?.tax_id ??
+        undefined,
       customer_address:
-        invoice.customer_address || invoice.supplier?.addresses || undefined,
+        customerFields.customer_address ??
+        invoice.customer_address ??
+        invoice.supplier?.addresses ??
+        undefined,
+      customer_email: customerFields.customer_email,
+      customer_phone: customerFields.customer_phone,
+      // Antes: `invoice.supplier?.document_type || undefined` — el bug del
+      // plan. Ahora viene del customer (o fallback de soporte).
+      customer_document_type: customerFields.customer_document_type,
+      customer_verification_digit: customerFields.customer_verification_digit,
+      customer_person_type: customerFields.customer_person_type,
+      // Antes: `invoice.supplier?.tax_regime || undefined` — el bug. Ahora
+      // viene del customer (o fallback de soporte).
+      customer_regime: customerFields.customer_regime,
+      customer_tax_responsibilities:
+        customerFields.customer_tax_responsibilities,
+      customer_ciiu_code: customerFields.customer_ciiu_code,
+      customer_is_withholding_agent:
+        customerFields.customer_is_withholding_agent,
       // Anexo §12.2: a document re-sent after contingency must keep its prefix and
       // number and declare InvoiceTypeCode 04, not 01. Absent on a first send.
       contingency_type: invoice.contingency_type ?? undefined,
@@ -773,8 +862,6 @@ export class InvoiceFlowService {
       resolution_number: invoice.resolution?.resolution_number,
       technical_key: invoice.resolution?.technical_key || undefined,
       notes: invoice.notes || undefined,
-      customer_document_type: invoice.supplier?.document_type || undefined,
-      customer_regime: invoice.supplier?.tax_regime || undefined,
       order_reference: invoice.related_invoice?.invoice_number,
       original_invoice_number: invoice.related_invoice?.invoice_number,
       original_invoice_cufe: invoice.related_invoice?.cufe || undefined,

@@ -41,9 +41,9 @@ import { MenusService } from '../../services';
 import { ProductsService } from '../../../../products/services/products.service';
 import { ProductState } from '../../../../products/interfaces/product.interface';
 import {
-  MenuProductPickerModalComponent,
-  MenuProductOption,
-} from '../../components/menu-product-picker-modal/menu-product-picker-modal.component';
+  ProductPickerModalComponent,
+  ProductPickerOption,
+} from '../../../../../../../shared/components/product-picker-modal';
 import {
   MenuWindowModalComponent,
   MenuWindowValue,
@@ -85,7 +85,7 @@ interface ProductOption {
     InputComponent,
     ModalComponent,
     BadgeComponent,
-    MenuProductPickerModalComponent,
+    ProductPickerModalComponent,
     MenuWindowModalComponent,
   ],
   templateUrl: './menu-builder-page.component.html',
@@ -177,8 +177,8 @@ export class MenuBuilderPageComponent implements OnInit {
   readonly editingSectionName = signal<string>('');
 
   /** R4 — universo de productos para el picker, mapeado a su contrato plano
-   * (`MenuProductOption`) desde la data ya cargada en `loadProducts`. */
-  readonly pickerProducts = computed<MenuProductOption[]>(() =>
+   * (`ProductPickerOption`) desde la data ya cargada en `loadProducts`. */
+  readonly pickerProducts = computed<ProductPickerOption[]>(() =>
     this.productOptions().map((p) => ({
       id: p.id,
       name: p.name,

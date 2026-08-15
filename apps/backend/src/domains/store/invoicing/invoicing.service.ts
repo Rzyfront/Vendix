@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
@@ -11,6 +12,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
@@ -557,6 +559,35 @@ export class InvoicingService {
     const support_adjustment_original =
       await this.loadSupportAdjustmentOriginal(dto, accounting_entity_id);
 
+    // QUI-690 Step 3 — Inline customer creation. When the user picks "Crear
+    // cliente desde la factura" in the XXL modal, the frontend posts
+    // `inline_customer` (full CreateCustomerDto). We materialize the
+    // `users.role='customer'` row here, in the same tenant scope as the
+    // invoice, and feed the resulting `customer_id` into the invoice. When
+    // both `customer_id` and `inline_customer` are sent, `customer_id` wins
+    // (matches the rule documented in `CreateInvoiceDto`).
+    let resolved_customer_id = dto.customer_id;
+    if (resolved_customer_id == null && dto.inline_customer) {
+      resolved_customer_id = await this.createInlineCustomer(
+        context,
+        dto.inline_customer,
+      );
+    }
+
+    // QUI-690 Step 3 — Inline product creation per line. NOT YET IMPLEMENTED:
+    // ProductsService.create is 150+ lines (variants, stock_levels, images,
+    // dedup, pricing rules) and refactoring it into a transaction-safe
+    // variant is out of scope for this QUI. We accept `inline_product` in
+    // the DTO so the frontend contract is stable, but reject at runtime with
+    // a clear error so the user knows to create the product first via the
+    // products module.
+    if (dto.items.some((it) => it.inline_product && !it.product_id)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'La creación inline de productos desde la factura aún no está implementada. Crea el producto primero en el módulo de productos y luego agrégalo por product_id.',
+      );
+    }
+
     // Generate invoice number from resolution
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({
@@ -565,8 +596,12 @@ export class InvoicingService {
         accounting_entity_id,
       });
 
-    // Calculate amounts from items
-    const { subtotal, discount, tax, total } = this.calculateAmounts(dto.items);
+    // Calculate amounts from items. QUI-690: per-line `taxes[]` with
+    // `is_inclusive` is the new authoritative shape; the legacy single
+    // `tax_amount` per line + header `dto.taxes[]` are still honored for
+    // backward compatibility (see `calculateAmounts`).
+    const { subtotal, discount, tax, total, header_taxes } =
+      this.calculateAmounts(dto.items);
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -577,7 +612,7 @@ export class InvoicingService {
         invoice_number,
         invoice_type: dto.invoice_type,
         status: 'draft',
-        customer_id: dto.customer_id,
+        customer_id: resolved_customer_id,
         supplier_id: dto.supplier_id,
         customer_name: dto.customer_name ?? support_supplier?.name,
         customer_tax_id: dto.customer_tax_id ?? support_supplier?.tax_id,
@@ -596,10 +631,19 @@ export class InvoicingService {
         notes: dto.notes,
         invoice_items: {
           create: dto.items.map((item) => {
+            // QUI-690 — per-line tax snapshot. If the line has typed
+            // `taxes[]`, persist their aggregate as the line `tax_amount`
+            // and `is_inclusive` so the UBL builder can read either path.
+            const line_tax_amount = item.taxes
+              ? item.taxes.reduce((acc, t) => acc + (t.tax_amount || 0), 0)
+              : item.tax_amount || 0;
+            const line_is_inclusive =
+              item.is_inclusive ??
+              (item.taxes?.some((t) => t.is_inclusive) ?? false);
             const item_total =
               item.quantity * item.unit_price -
               (item.discount_amount || 0) +
-              (item.tax_amount || 0);
+              line_tax_amount;
             return {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id,
@@ -607,24 +651,45 @@ export class InvoicingService {
               quantity: new Prisma.Decimal(item.quantity),
               unit_price: new Prisma.Decimal(item.unit_price),
               discount_amount: new Prisma.Decimal(item.discount_amount || 0),
-              tax_amount: new Prisma.Decimal(item.tax_amount || 0),
+              tax_amount: new Prisma.Decimal(line_tax_amount),
+              is_inclusive: line_is_inclusive,
               total_amount: new Prisma.Decimal(item_total),
             };
           }),
         },
-        ...(dto.taxes &&
-          dto.taxes.length > 0 && {
-            invoice_taxes: {
-              create: dto.taxes.map((tax_item) => ({
-                tax_rate_id: tax_item.tax_rate_id,
-                tax_name: tax_item.tax_name,
-                tax_rate: new Prisma.Decimal(tax_item.tax_rate),
-                taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-                tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                tax_type: (tax_item.tax_type ?? 'iva') as any,
-              })),
-            },
-          }),
+        // QUI-690 — Prefer header_taxes aggregated from per-line
+        // `items[].taxes[]` over the legacy `dto.taxes[]`. If both are
+        // present, per-line wins (more granular source of truth). If only
+        // `dto.taxes[]` is present, keep backward-compatible path.
+        ...((header_taxes.length > 0
+          ? {
+              invoice_taxes: {
+                create: header_taxes.map((t) => ({
+                  tax_rate_id: t.tax_rate_id,
+                  tax_name: t.tax_name,
+                  tax_rate: new Prisma.Decimal(t.tax_rate),
+                  taxable_amount: new Prisma.Decimal(t.taxable_amount),
+                  tax_amount: new Prisma.Decimal(t.tax_amount),
+                  tax_type: (t.tax_type ?? 'iva') as any,
+                  is_inclusive: t.is_inclusive ?? false,
+                })),
+              },
+            }
+          : dto.taxes && dto.taxes.length > 0
+            ? {
+                invoice_taxes: {
+                  create: dto.taxes.map((tax_item) => ({
+                    tax_rate_id: tax_item.tax_rate_id,
+                    tax_name: tax_item.tax_name,
+                    tax_rate: new Prisma.Decimal(tax_item.tax_rate),
+                    taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
+                    tax_amount: new Prisma.Decimal(tax_item.tax_amount),
+                    tax_type: (tax_item.tax_type ?? 'iva') as any,
+                    is_inclusive: tax_item.is_inclusive ?? false,
+                  })),
+                },
+              }
+            : {})),
       },
       include: INVOICE_INCLUDE,
     });
@@ -639,6 +704,116 @@ export class InvoicingService {
       `Invoice ${invoice.invoice_number} created (ID: ${invoice.id})`,
     );
     return invoice;
+  }
+
+  /**
+   * QUI-690 — Inline customer creation for the XXL invoice-create modal.
+   *
+   * Mirrors a subset of `CustomersService.create()`:
+   *   - Normalize persona (JURIDICA → first/last forced null, legal_name kept).
+   *   - Generate unique username seed + temporary password.
+   *   - Assign the `customer` system role via `user_roles`.
+   *
+   * Deliberately simpler than `CustomersService.create()`:
+   *   - Skips email/document dedup queries (DTO validators + DB unique
+   *     constraints catch duplicates and surface as P2002 → controller maps
+   *     to SYS_CONFLICT_001).
+   *   - Skips store existence check (the caller's ALS context already
+   *     guarantees a valid store; an invalid context would fail elsewhere).
+   *
+   * Trade-off: this path produces a customer row that the bulk-edit and
+   * dedup flows don't know about until the next request re-queries. For
+   * the XXL modal flow (single user, single invoice) this is acceptable.
+   */
+  private async createInlineCustomer(
+    context: {
+      organization_id?: number;
+      store_id?: number;
+    },
+    dto: CreateCustomerDto,
+  ): Promise<number> {
+    const organization_id = Number(context.organization_id);
+    const store_id = Number(context.store_id);
+
+    if (!organization_id || !store_id) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'Contexto de tienda requerido para crear cliente inline',
+      );
+    }
+
+    const customerRole = await this.prisma.roles.findFirst({
+      where: { name: 'customer', is_system_role: true },
+    });
+    if (!customerRole) {
+      throw new VendixHttpException(
+        ErrorCodes.CUST_CREATE_001,
+        'El rol de sistema "customer" no existe — seed requerido',
+      );
+    }
+
+    const isJuridica = dto.person_type === 'JURIDICA';
+    const effectiveEmail = dto.email?.trim() || null;
+
+    // Username: email → document_number → first_name → synthetic. Uniqueness
+    // enforced by a small loop with a numeric suffix. Inline-only path; the
+    // full `CustomersService.create()` uses a more robust generator.
+    const baseUsername =
+      effectiveEmail?.split('@')[0] ??
+      dto.document_number ??
+      dto.first_name ??
+      `customer-${Date.now()}`;
+    let username = baseUsername.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!username) username = `customer-${Date.now()}`;
+    let attempt = 0;
+    while (
+      await this.prisma.users.findFirst({
+        where: { username, organization_id },
+        select: { id: true },
+      })
+    ) {
+      attempt += 1;
+      username = `${baseUsername}-${attempt}`;
+    }
+
+    const tempPassword = `tmp-${Math.random().toString(36).slice(2, 12)}`;
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+    const created = await this.prisma.users.create({
+      data: {
+        organization_id,
+        main_store_id: store_id,
+        username,
+        email: effectiveEmail,
+        first_name: (isJuridica ? null : (dto.first_name ?? '')) as string,
+        last_name: (isJuridica ? null : (dto.last_name ?? '')) as string,
+        legal_name: dto.legal_name ?? null,
+        document_type: (dto.document_type ?? null) as any,
+        document_number: dto.document_number ?? null,
+        verification_digit: dto.verification_digit ?? null,
+        phone: dto.phone ?? null,
+        tax_regime: (dto.tax_regime ?? null) as any,
+        person_type: (dto.person_type ?? null) as any,
+        fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
+        ciiu_code: dto.ciiu_code ?? null,
+        is_withholding_agent: dto.is_withholding_agent ?? false,
+        password: hashedPassword,
+        state: 'active',
+        email_verified: false,
+      },
+      select: { id: true },
+    });
+
+    await this.prisma.user_roles.create({
+      data: {
+        user_id: created.id,
+        role_id: customerRole.id,
+        organization_id,
+        store_id,
+      },
+    });
+
+    return created.id;
   }
 
   async createFromOrder(order_id: number) {
@@ -657,13 +832,29 @@ export class InvoicingService {
             order_item_taxes: true,
           },
         },
+        // Step 8 — invoice-flow wiring. `legal_name`, `verification_digit`,
+        // `tax_regime`, `person_type`, `fiscal_responsibilities`, `ciiu_code`
+        // and `is_withholding_agent` were added to `users` by Steps 1-2;
+        // pulling them here lets `customer_name` use the JURIDICA razon
+        // social when applicable. The full UBL-relevant row reaches the
+        // provider at `send()` time via `INVOICE_INCLUDE` in
+        // `invoice-flow.service.ts`.
         users: {
           select: {
             id: true,
             first_name: true,
             last_name: true,
+            legal_name: true,
             email: true,
+            phone: true,
+            document_type: true,
             document_number: true,
+            verification_digit: true,
+            tax_regime: true,
+            person_type: true,
+            fiscal_responsibilities: true,
+            ciiu_code: true,
+            is_withholding_agent: true,
           },
         },
         invoice_data_requests: {
@@ -802,8 +993,13 @@ export class InvoicingService {
     const guest_customer_name = invoiceDataRequest
       ? `${invoiceDataRequest.first_name || ''} ${invoiceDataRequest.last_name || ''}`.trim()
       : '';
+    // Step 8 — for a JURIDICA the RUT razón social is the canonical name to
+    // persist on the invoice; for a persona natural (or when `person_type`
+    // is null) concatenate first/last. Falls back to the order's guest data
+    // request when there is no `users` row, then to 'Consumidor Final'.
     const customer_name = order.users
-      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      ? (order.users.legal_name?.trim() ||
+        `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim())
       : guest_customer_name || 'Consumidor Final';
 
     const invoice = await this.prisma.invoices.create({
@@ -880,15 +1076,26 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_004);
     }
 
-    // Fetch customer info separately
+    // Fetch customer info separately. Step 8 — select now carries the
+    // JURIDICA/legal_name fields so `customer_name` resolves correctly when
+    // the sales order's customer is a `legal_name`-bearing entity.
     const customer = await this.prisma.users.findFirst({
       where: { id: sales_order.customer_id },
       select: {
         id: true,
         first_name: true,
         last_name: true,
+        legal_name: true,
         email: true,
+        phone: true,
+        document_type: true,
         document_number: true,
+        verification_digit: true,
+        tax_regime: true,
+        person_type: true,
+        fiscal_responsibilities: true,
+        ciiu_code: true,
+        is_withholding_agent: true,
       },
     });
 
@@ -933,8 +1140,11 @@ export class InvoicingService {
     );
     const total = subtotal - discount + tax;
 
+    // Step 8 — mirror of `createFromOrder`: prefer `legal_name` for JURIDICA,
+    // concat first/last otherwise. Falls back to undefined when no row.
     const customer_name = customer
-      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+      ? (customer.legal_name?.trim() ||
+        `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
       : undefined;
 
     const invoice = await this.prisma.invoices.create({
@@ -1190,26 +1400,87 @@ export class InvoicingService {
     };
   }
 
+  /**
+   * QUI-690 — Aggregates per-line `taxes[]` into header `invoice_taxes` rows
+   * keyed by `(tax_name, tax_rate, tax_type, is_inclusive)`. Each unique
+   * bucket gets a single row with summed `taxable_amount` and `tax_amount`.
+   * Items without `taxes[]` fall back to legacy single `tax_amount`. The
+   * `is_inclusive` flag travels with each bucket so the UBL builder can emit
+   * `TaxInclusiveIndicator` correctly.
+   */
   private calculateAmounts(
     items: {
       quantity: number;
       unit_price: number;
       discount_amount?: number;
       tax_amount?: number;
+      taxes?: {
+        tax_rate_id?: number;
+        tax_name: string;
+        tax_rate: number;
+        taxable_amount: number;
+        tax_amount: number;
+        tax_type?: any;
+        is_inclusive?: boolean;
+      }[];
+      is_inclusive?: boolean;
     }[],
   ) {
     let subtotal = 0;
     let discount = 0;
     let tax = 0;
 
+    const bucketMap = new Map<
+      string,
+      {
+        tax_rate_id?: number;
+        tax_name: string;
+        tax_rate: number;
+        taxable_amount: number;
+        tax_amount: number;
+        tax_type?: any;
+        is_inclusive: boolean;
+      }
+    >();
+
     for (const item of items) {
-      subtotal += item.quantity * item.unit_price;
-      discount += item.discount_amount || 0;
-      tax += item.tax_amount || 0;
+      const line_subtotal = item.quantity * item.unit_price;
+      const line_discount = item.discount_amount || 0;
+      subtotal += line_subtotal;
+      discount += line_discount;
+
+      if (item.taxes && item.taxes.length > 0) {
+        for (const t of item.taxes) {
+          tax += t.tax_amount || 0;
+          const key = `${t.tax_name}|${t.tax_rate}|${t.tax_type ?? 'iva'}|${t.is_inclusive ? '1' : '0'}`;
+          const existing = bucketMap.get(key);
+          if (existing) {
+            existing.taxable_amount += t.taxable_amount || 0;
+            existing.tax_amount += t.tax_amount || 0;
+          } else {
+            bucketMap.set(key, {
+              tax_rate_id: t.tax_rate_id,
+              tax_name: t.tax_name,
+              tax_rate: t.tax_rate,
+              taxable_amount: t.taxable_amount || 0,
+              tax_amount: t.tax_amount || 0,
+              tax_type: t.tax_type ?? 'iva',
+              is_inclusive: t.is_inclusive ?? false,
+            });
+          }
+        }
+      } else {
+        // Legacy path: single `tax_amount` per line, no per-line is_inclusive.
+        const legacy_tax = item.tax_amount || 0;
+        tax += legacy_tax;
+        // No bucket emitted — legacy `dto.taxes[]` (if present) becomes the
+        // authoritative header aggregate in `create()`.
+      }
     }
 
     const total = subtotal - discount + tax;
+    const header_taxes = Array.from(bucketMap.values());
 
-    return { subtotal, discount, tax, total };
+    return { subtotal, discount, tax, total, header_taxes };
   }
 }

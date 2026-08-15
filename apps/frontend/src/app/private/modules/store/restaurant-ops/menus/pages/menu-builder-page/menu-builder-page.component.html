@@ -360,10 +360,10 @@
     </app-modal>
 
     <!-- R4: picker multi-select de productos. -->
-    <app-menu-product-picker-modal
+    <app-product-picker-modal
       [open]="pickerOpen()"
       [products]="pickerProducts()"
-      [inMenuIds]="pickerInMenuIds()"
+      [disabledIds]="pickerInMenuIds()"
       (confirmed)="onPickerConfirmed($event)"
       (closed)="onPickerClosed()"
     />

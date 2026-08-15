@@ -984,8 +984,9 @@ export class DianTestService {
     });
 
     const customer: DianCustomerData = {
-      document_type: '13',
+      document_type: 'CC',
       document_number: '222222222222',
+      verification_digit: null,
       legal_name: 'Consumidor Test DIAN',
       address_line: 'Calle Test 123',
       city_code: '11001',
@@ -995,6 +996,9 @@ export class DianTestService {
       country_code: 'CO',
       email: 'test@consumidor.com',
       tax_regime: '49',
+      tax_responsibilities: ['R-99-PN'],
+      person_type: 'NATURAL',
+      ciiu_code: null,
     };
 
     // 4. Download certificate from S3

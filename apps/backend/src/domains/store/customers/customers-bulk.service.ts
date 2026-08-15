@@ -342,7 +342,7 @@ export class CustomersBulkService {
           first_name: customerData.first_name?.trim() || '',
           last_name: customerData.last_name?.trim() || '',
           document_number: customerData.document_number?.trim() || '',
-          document_type: customerData.document_type?.trim() || 'CC',
+          document_type: (customerData.document_type?.trim() || 'CC') as any,
           phone: customerData.phone?.trim(),
         });
 

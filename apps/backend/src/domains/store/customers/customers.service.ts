@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { normalizeNit } from '../../../common/utils/nit.util';
 
 @Injectable()
 export class CustomersService {
@@ -135,7 +136,7 @@ export class CustomersService {
       first_name: args.firstName,
       last_name: args.lastName,
       phone: this.normalizeOptionalString(args.phone),
-      document_type: args.documentType,
+      document_type: args.documentType as any,
       document_number: args.documentNumber,
       username: args.username,
       email_verified: false,
@@ -604,22 +605,75 @@ export class CustomersService {
       effectiveEmail ?? normalizedDoc.number ?? dto.first_name ?? null;
     const username = await this.generateUniqueUsername(usernameSeed);
 
-    // Convertir nombres a Title Case
-    const formatted_first_name = toTitleCase(dto.first_name || '');
-    const formatted_last_name = toTitleCase(dto.last_name || '');
+    // QUI-728 — DIAN Anexo Técnico 19 customer fiscal data. The DTO layer has
+    // already validated the cross-field rules (JuridicaNameRule, NitDvMatches,
+    // FiscalResponsibilityInCatalogRule); here we only translate the validated
+    // payload into the canonical shape the UBL builder expects.
+    const isJuridica = dto.person_type === 'JURIDICA';
+
+    // Persona natural → first/last populated. Persona jurídica → both forced
+    // to null so the UBL builder emits `cac:PartyLegalEntity/RegistrationName`
+    // instead of `cac:Person/FirstName + FamilyName`.
+    const formatted_first_name = isJuridica
+      ? null
+      : toTitleCase(dto.first_name || '') || null;
+    const formatted_last_name = isJuridica
+      ? null
+      : toTitleCase(dto.last_name || '') || null;
+    const formatted_legal_name = isJuridica
+      ? (dto.legal_name?.trim() || null)
+      : null;
+
+    // NIT + verification_digit split. If the merchant typed a DV that
+    // disagrees with computeNitDv(), DIAN will reject the document after
+    // burning a fiscal consecutive; refuse BEFORE persisting. For non-NIT
+    // document types we keep the previously-normalized pair (no DV split).
+    let finalDocumentType: string | null = normalizedDoc.type;
+    let finalDocumentNumber: string | null = normalizedDoc.number;
+    let finalVerificationDigit: string | null = null;
+
+    if (
+      normalizedDoc.type === 'NIT' &&
+      normalizedDoc.number
+    ) {
+      const nitInput =
+        normalizedDoc.number +
+        (dto.verification_digit ? `-${dto.verification_digit}` : '');
+      const nitResult = normalizeNit(nitInput);
+      finalDocumentNumber = nitResult.number || null;
+      finalVerificationDigit = nitResult.dv || null;
+
+      if (
+        nitResult.provided_dv !== null &&
+        nitResult.dv_mismatch
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
+          'El dígito de verificación no corresponde al NIT digitado.',
+          { field: 'verification_digit' },
+        );
+      }
+    }
 
     // Create user
     const user = await this.prisma.users.create({
       data: {
         email: effectiveEmail,
         password: hashedPassword,
-        first_name: formatted_first_name,
-        last_name: formatted_last_name,
+        first_name: formatted_first_name ?? '',
+        last_name: formatted_last_name ?? '',
+        legal_name: formatted_legal_name,
         phone: this.normalizeOptionalString(dto.phone),
-        document_type: normalizedDoc.type,
-        document_number: normalizedDoc.number,
-        tax_regime: this.normalizeOptionalString(dto.tax_regime),
-        person_type: this.normalizeOptionalString(dto.person_type),
+        document_type: finalDocumentType as any,
+        document_number: finalDocumentNumber,
+        verification_digit: finalVerificationDigit,
+        tax_regime: this.normalizeOptionalString(dto.tax_regime) as any,
+        person_type: this.normalizeOptionalString(dto.person_type) as any,
+        fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
+        ciiu_code:
+          dto.ciiu_code !== undefined
+            ? this.normalizeOptionalString(dto.ciiu_code)
+            : null,
         ...(dto.is_withholding_agent != null
           ? { is_withholding_agent: dto.is_withholding_agent }
           : {}),
@@ -854,6 +908,10 @@ export class CustomersService {
       dto.document_number !== undefined
         ? dto.document_number
         : user.document_number;
+    const effectiveVerificationDigit =
+      dto.verification_digit !== undefined
+        ? dto.verification_digit
+        : user.verification_digit;
 
     const normalizedDoc = this.normalizeDocument({
       type: effectiveType ?? null,
@@ -884,23 +942,87 @@ export class CustomersService {
       }
     }
 
+    // QUI-728 — NIT + verification_digit split. If the merchant typed a DV
+    // that disagrees with computeNitDv(), refuse BEFORE persisting.
+    let nextDocumentNumber: string | null | undefined = undefined;
+    let nextVerificationDigit: string | null | undefined = undefined;
+    if (
+      isChangingDocument &&
+      normalizedDoc.type === 'NIT' &&
+      normalizedDoc.number
+    ) {
+      const nitInput =
+        normalizedDoc.number +
+        (effectiveVerificationDigit
+          ? `-${effectiveVerificationDigit}`
+          : '');
+      const nitResult = normalizeNit(nitInput);
+      nextDocumentNumber = nitResult.number || null;
+      nextVerificationDigit = nitResult.dv || null;
+
+      if (
+        nitResult.provided_dv !== null &&
+        nitResult.dv_mismatch
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
+          'El dígito de verificación no corresponde al NIT digitado.',
+          { field: 'verification_digit' },
+        );
+      }
+    }
+
+    // QUI-728 — jurídica ↔ legal_name swap on update. When the persona type
+    // changes JURIDICA → NATURAL we clear `legal_name`. When it switches the
+    // other way we require `legal_name` (validated at DTO layer) and clear
+    // first/last names so the UBL builder emits the right branch.
+    const effectivePersonType =
+      dto.person_type !== undefined ? dto.person_type : user.person_type;
+    const nextIsJuridica = effectivePersonType === 'JURIDICA';
+
+    // Persona switches NATURAL → JURIDICA on update: caller must include
+    // `legal_name` (DTO enforces this). We also null first/last so the
+    // existing natural name doesn't leak into the jurídica record.
+    let firstNameUpdate: string | undefined = undefined;
+    let lastNameUpdate: string | undefined = undefined;
+    if (dto.person_type !== undefined && nextIsJuridica) {
+      firstNameUpdate = '';
+      lastNameUpdate = '';
+    }
+
     return this.prisma.users.update({
       where: { id: user.id },
       data: {
-        first_name: dto.first_name,
-        last_name: dto.last_name,
+        first_name: firstNameUpdate !== undefined ? firstNameUpdate : (dto.first_name ?? ''),
+        last_name: lastNameUpdate !== undefined ? lastNameUpdate : (dto.last_name ?? ''),
+        legal_name:
+          dto.legal_name !== undefined
+            ? (dto.legal_name?.trim() || null)
+            : dto.person_type === 'NATURAL' && user.person_type === 'JURIDICA'
+              ? null
+              : undefined,
         phone: this.normalizeOptionalString(dto.phone),
         document_number:
-          dto.document_number !== undefined ? normalizedDoc.number : undefined,
+          nextDocumentNumber !== undefined ? nextDocumentNumber : undefined,
         document_type:
-          dto.document_type !== undefined ? normalizedDoc.type : undefined,
+          dto.document_type !== undefined ? (normalizedDoc.type as any) : undefined,
+        verification_digit:
+          nextVerificationDigit !== undefined ? nextVerificationDigit : undefined,
         tax_regime:
           dto.tax_regime !== undefined
-            ? this.normalizeOptionalString(dto.tax_regime)
+            ? (this.normalizeOptionalString(dto.tax_regime) as any)
             : undefined,
         person_type:
           dto.person_type !== undefined
-            ? this.normalizeOptionalString(dto.person_type)
+            ? (this.normalizeOptionalString(dto.person_type) as any)
+            : undefined,
+        fiscal_responsibilities:
+          dto.fiscal_responsibilities !== undefined
+            ? dto.fiscal_responsibilities
+            : undefined,
+        ciiu_code:
+          dto.ciiu_code !== undefined
+            ? this.normalizeOptionalString(dto.ciiu_code)
             : undefined,
         is_withholding_agent:
           dto.is_withholding_agent !== undefined

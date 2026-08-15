@@ -513,7 +513,7 @@ export class InvoiceDataRequestsService {
             first_name: request.first_name || '',
             last_name: request.last_name || '',
             phone: request.phone,
-            document_type: request.document_type,
+            document_type: request.document_type as any,
             document_number: request.document_number,
             username,
             email_verified: false,

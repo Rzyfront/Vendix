@@ -1142,7 +1142,7 @@ export class AuthService {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
         phone,
-        document_type,
+        document_type: document_type as any,
         document_number,
         username: await this.generateUniqueUsername(email),
         email_verified: false,

@@ -252,8 +252,8 @@ export class UblSupportDocumentBuilder {
     return {
       document_type: seller.document_type,
       nit: seller.document_number,
-      nit_dv: seller.document_dv || '',
-      legal_name: seller.legal_name,
+      nit_dv: seller.verification_digit || '',
+      legal_name: seller.legal_name || '',
       trade_name: seller.trade_name,
       address_line: seller.address_line || buyer.address_line,
       city_code: seller.city_code || buyer.city_code,
@@ -271,9 +271,9 @@ export class UblSupportDocumentBuilder {
 
   private static buyerAsCustomer(buyer: DianIssuerData): DianCustomerData {
     return {
-      document_type: buyer.document_type || '31',
+      document_type: buyer.document_type || 'NIT',
       document_number: buyer.nit,
-      document_dv: buyer.nit_dv,
+      verification_digit: buyer.nit_dv ?? null,
       legal_name: buyer.legal_name,
       trade_name: buyer.trade_name,
       address_line: buyer.address_line,
@@ -287,6 +287,8 @@ export class UblSupportDocumentBuilder {
       email: buyer.email,
       tax_regime: buyer.tax_regime,
       tax_responsibilities: [buyer.tax_scheme],
+      person_type: 'JURIDICA',
+      ciiu_code: null,
     };
   }
 
