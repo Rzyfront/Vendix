@@ -548,41 +548,43 @@ describe('MemberBulkScannerService.analyzeRoster (QUI-558 review #4)', () => {
 
   it('runs end-to-end: 1 plan matched + 1 member reuse (phone) + ready', async () => {
     const { svc, runWithCtx } = buildAnalyzeHarness({ phoneMatchId: 7001 });
-    const result = await runWithCtx(() => svc.analyzeRoster({
-      document_type: 'member_roster',
-      detected_plans: [{ name: 'Plan Mensual' }],
-      members: [
-        {
-          first_name: 'Ana',
-          last_name: 'Rivas',
-          document_type: null,
-          document_number: null,
-          email: null,
-          phone: '+57 300 999 1111',
-          date_of_birth: null,
-          gender: null,
-          emergency_contact_name: null,
-          emergency_contact_phone: null,
-          medical_notes: null,
-          goals: null,
-          height_cm: null,
-          weight_kg: null,
-          plan_name: 'Plan Mensual',
-          membership_start_date: '2099-06-01',
-          membership_end_date: '2099-06-30',
-          raw_row: 'Ana Rivas',
-          notes: [
-            {
-              key: 'eps',
-              value: 'Sura',
-              include_in_summary: true,
-            },
-          ],
-        },
-      ],
-      warnings: [],
-      confidence: 80,
-    });
+    const result = await runWithCtx(() =>
+      svc.analyzeRoster({
+        document_type: 'member_roster',
+        detected_plans: [{ name: 'Plan Mensual' }],
+        members: [
+          {
+            first_name: 'Ana',
+            last_name: 'Rivas',
+            document_type: null,
+            document_number: null,
+            email: null,
+            phone: '+57 300 999 1111',
+            date_of_birth: null,
+            gender: null,
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            medical_notes: null,
+            goals: null,
+            height_cm: null,
+            weight_kg: null,
+            plan_name: 'Plan Mensual',
+            membership_start_date: '2099-06-01',
+            membership_end_date: '2099-06-30',
+            raw_row: 'Ana Rivas',
+            notes: [
+              {
+                key: 'eps',
+                value: 'Sura',
+                include_in_summary: true,
+              },
+            ],
+          },
+        ],
+        warnings: [],
+        confidence: 80,
+      }),
+    );
 
     expect(result.ready_count).toBe(1);
     expect(result.with_errors_count).toBe(0);
@@ -740,36 +742,38 @@ describe('MemberBulkScannerService.commitRoster REUSE branch (QUI-558 review #4)
       runWithCtx,
     } = buildCommitHarness();
 
-    const result = await runWithCtx(() => svc.commitRoster({
-      plans: [
-        {
-          ref_index: 0,
-          status: 'existing',
-          plan_id: 50,
-        },
-      ],
-      members: [
-        {
-          row_number: 1,
-          existing_customer_id: 7001,
-          plan_ref_index: 0,
-          first_name: 'Ana',
-          last_name: 'Rivas',
-          phone: '+57 300 999 1111',
-          email: 'ana@example.com',
-          status: 'active',
-          period_start: '2026-06-01',
-          period_end: '2026-06-30',
-          notes: [
-            {
-              note_key: 'eps',
-              note_value: 'Sura',
-              include_in_summary: true,
-            },
-          ],
-        },
-      ],
-    });
+    const result = await runWithCtx(() =>
+      svc.commitRoster({
+        plans: [
+          {
+            ref_index: 0,
+            status: 'existing',
+            plan_id: 50,
+          },
+        ],
+        members: [
+          {
+            row_number: 1,
+            existing_customer_id: 7001,
+            plan_ref_index: 0,
+            first_name: 'Ana',
+            last_name: 'Rivas',
+            phone: '+57 300 999 1111',
+            email: 'ana@example.com',
+            status: 'active',
+            period_start: '2026-06-01',
+            period_end: '2026-06-30',
+            notes: [
+              {
+                note_key: 'eps',
+                note_value: 'Sura',
+                include_in_summary: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
 
     expect(result.ready).toBe(1);
     expect(result.succeeded).toBe(1);
