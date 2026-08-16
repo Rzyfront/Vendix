@@ -45,6 +45,9 @@ export class ExpensesAnalyticsService {
         state: true,
         expense_date: true,
       },
+      // Regla 4 del skill `vendix-report-xlsx`: tope explícito para que el
+      // summary no escanee 100k filas si el rango es muy amplio.
+      take: 10000,
     });
 
     const totalExpenses = expenses.reduce(
