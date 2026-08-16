@@ -42,12 +42,7 @@ import {
   CardComponent,
   BadgeComponent,
   DialogService,
-  ModalComponent,
-  InputComponent,
-  SelectorComponent,
-  TextareaComponent,
 } from '../../../../shared/components';
-import type { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   selectStoreSettings,
@@ -59,7 +54,8 @@ import {
   CartState,
   CartItem,
 } from './services/pos-cart.service';
-import { CartSummary } from './models/cart.model';
+import { AddCustomItemRequest, CartSummary } from './models/cart.model';
+import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import {
   PosCustomerService,
@@ -128,10 +124,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     FormsModule,
     ButtonComponent,
     IconComponent,
-    ModalComponent,
-    InputComponent,
-    SelectorComponent,
-    TextareaComponent,
+    PosCustomItemModalComponent,
     SpinnerComponent,
     CardComponent,
     PosStatsComponent,
@@ -482,107 +475,17 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (checkout)="onCheckoutFromModal()"
       ></app-pos-cart-modal>
 
-      <app-modal
-        [isOpen]="customItemModalOpen()"
-        title="Ítem personalizado"
-        subtitle="Agrega una línea facturable sin afectar inventario"
-        size="sm"
+      <!--
+        Ítem personalizado (camino móvil). Mismo modal compartido que usa el
+        carrito de escritorio y el carril fiscal: una sola captura, un solo
+        contrato. Ver pos-custom-item-modal.component.ts.
+      -->
+      <app-pos-custom-item-modal
+        [open]="customItemModalOpen()"
+        [taxCategories]="taxCategories()"
+        (added)="addCustomItemFromMobile($event)"
         (closed)="closeCustomItemModal()"
-      >
-        <div class="space-y-4">
-          <app-input
-            label="Nombre"
-            placeholder="Servicio de instalación"
-            [ngModel]="customItemDraft().name"
-            (ngModelChange)="updateCustomItemDraft('name', $event)"
-          ></app-input>
-
-          <app-textarea
-            label="Detalle"
-            placeholder="Alcance, materiales, condiciones o notas visibles en la orden"
-            [rows]="3"
-            [ngModel]="customItemDraft().description"
-            (ngModelChange)="updateCustomItemDraft('description', $event)"
-          ></app-textarea>
-
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <app-input
-              label="Cantidad"
-              type="number"
-              min="1"
-              [ngModel]="customItemDraft().quantity"
-              (ngModelChange)="updateCustomItemDraft('quantity', $event)"
-            ></app-input>
-
-            <app-input
-              label="Precio final"
-              placeholder="$0"
-              min="0"
-              [currency]="true"
-              [ngModel]="customItemDraft().finalPrice"
-              (ngModelChange)="updateCustomItemDraft('finalPrice', $event)"
-            ></app-input>
-          </div>
-
-          <app-selector
-            label="IVA / impuesto"
-            helpText="Usa los impuestos configurados para la tienda."
-            [options]="taxCategoryOptions()"
-            [ngModel]="customItemDraft().taxCategoryId ?? 0"
-            (ngModelChange)="updateCustomItemDraft('taxCategoryId', $event)"
-          ></app-selector>
-
-          <div
-            class="rounded-xl border border-border bg-[var(--color-background)]/60 px-3 py-2 text-xs"
-          >
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Base</span>
-              <span class="font-semibold">{{
-                formatCurrency(customItemBasePrice())
-              }}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-text-secondary">IVA / impuesto</span>
-              <span class="font-semibold">{{
-                formatCurrency(customItemTaxAmount())
-              }}</span>
-            </div>
-            <div
-              class="mt-1 flex justify-between border-t border-border/60 pt-1"
-            >
-              <span class="font-semibold text-text-primary">Total línea</span>
-              <span class="font-bold text-[var(--color-primary)]">{{
-                formatCurrency(customItemTotal())
-              }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div
-          slot="footer"
-          class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
-        >
-          <app-button
-            class="w-full sm:w-auto"
-            variant="outline"
-            size="md"
-            customClasses="min-w-[120px]"
-            (clicked)="closeCustomItemModal()"
-          >
-            Cancelar
-          </app-button>
-          <app-button
-            class="w-full sm:w-auto"
-            variant="primary"
-            size="md"
-            customClasses="min-w-[120px]"
-            [disabled]="!canSubmitCustomItem()"
-            (clicked)="addCustomItemFromMobile()"
-          >
-            Agregar
-          </app-button>
-        </div>
-      </app-modal>
+      ></app-pos-custom-item-modal>
 
       <!-- Loading Overlay -->
       @if (loading()) {
@@ -892,29 +795,7 @@ export class PosComponent {
   productRefreshCounter = signal(0);
   showCartModal = signal(false);
   customItemModalOpen = signal(false);
-  customItemDraft = signal({
-    name: '',
-    description: '',
-    quantity: 1,
-    finalPrice: 0,
-    taxCategoryId: null as number | null,
-  });
   taxCategories = signal<TaxCategory[]>([]);
-  readonly taxCategoryOptions = computed<SelectorOption[]>(() => [
-    { value: 0, label: 'Sin impuesto' },
-    ...this.taxCategories().map((tax) => ({
-      value: tax.id,
-      label: `${tax.name} (${this.formatPercentRate(tax)})`,
-    })),
-  ]);
-  readonly canSubmitCustomItem = computed(() => {
-    const draft = this.customItemDraft();
-    return (
-      draft.name.trim().length > 0 &&
-      Number(draft.quantity || 0) > 0 &&
-      Number(draft.finalPrice || 0) >= 0
-    );
-  });
 
   currentOrderId = signal<string | null>(null);
   currentOrderNumber = signal<string | null>(null);
@@ -2161,13 +2042,8 @@ export class PosComponent {
       return;
     }
 
-    this.customItemDraft.set({
-      name: '',
-      description: '',
-      quantity: 1,
-      finalPrice: 0,
-      taxCategoryId: null,
-    });
+    // Sin borrador que reiniciar: el modal compartido se hidrata en blanco cada
+    // vez que `open` pasa a `true` (ver su `effect` de apertura).
     this.customItemModalOpen.set(true);
   }
 
@@ -2175,42 +2051,14 @@ export class PosComponent {
     this.customItemModalOpen.set(false);
   }
 
-  updateCustomItemDraft(
-    field: 'name' | 'description' | 'quantity' | 'finalPrice' | 'taxCategoryId',
-    value: string | number | null,
-  ): void {
-    this.customItemDraft.update((draft) => ({
-      ...draft,
-      [field]:
-        field === 'quantity' || field === 'finalPrice'
-          ? Number(value || 0)
-          : field === 'taxCategoryId'
-            ? value === null || value === '' || Number(value) <= 0
-              ? null
-              : Number(value)
-            : String(value || ''),
-    }));
-  }
-
-  addCustomItemFromMobile(): void {
-    if (!this.canSubmitCustomItem()) {
-      this.toastService.warning(
-        'Completa el nombre y un valor válido para el ítem',
-      );
-      return;
-    }
-
-    const draft = this.customItemDraft();
-    const taxCategory = this.getSelectedTaxCategory();
-
+  /**
+   * La línea ya viene traducida al contrato del cobro por
+   * `PosCustomItemModalComponent`; acá sólo se agrega al carrito y se devuelve
+   * al cajero a la vista del carrito, que es de donde venía.
+   */
+  addCustomItemFromMobile(request: AddCustomItemRequest): void {
     this.cartService
-      .addCustomItem({
-        name: draft.name.trim(),
-        description: draft.description.trim(),
-        quantity: Number(draft.quantity || 1),
-        finalPrice: Number(draft.finalPrice || 0),
-        taxCategory,
-      })
+      .addCustomItem(request)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
@@ -2282,45 +2130,6 @@ export class PosComponent {
       ? this.canCreateCustomItems()
       : item.product.allow_pos_price_override === true &&
           this.canOverridePrices();
-  }
-
-  getTaxCategoryRate(taxCategory?: TaxCategory | null): number {
-    return (
-      taxCategory?.tax_rates?.reduce(
-        (sum, rate: any) => sum + Number(rate.rate || 0),
-        0,
-      ) || 0
-    );
-  }
-
-  formatPercentRate(taxCategory: TaxCategory): string {
-    return `${(this.getTaxCategoryRate(taxCategory) * 100).toFixed(2)}%`;
-  }
-
-  getSelectedTaxCategory(): TaxCategory | null {
-    const selectedId = this.customItemDraft().taxCategoryId;
-    if (!selectedId) return null;
-    return this.taxCategories().find((tax) => tax.id === selectedId) || null;
-  }
-
-  customItemBasePrice(): number {
-    const draft = this.customItemDraft();
-    const finalPrice = Number(draft.finalPrice || 0);
-    const rate = this.getTaxCategoryRate(this.getSelectedTaxCategory());
-    return rate > 0 ? finalPrice / (1 + rate) : finalPrice;
-  }
-
-  customItemTaxAmount(): number {
-    const draft = this.customItemDraft();
-    const quantity = Number(draft.quantity || 1);
-    return (
-      (Number(draft.finalPrice || 0) - this.customItemBasePrice()) * quantity
-    );
-  }
-
-  customItemTotal(): number {
-    const draft = this.customItemDraft();
-    return Number(draft.finalPrice || 0) * Number(draft.quantity || 1);
   }
 
   formatCurrency(amount: number): string {

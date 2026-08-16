@@ -69,6 +69,11 @@ import {
   DianCustomerData,
 } from './interfaces/dian-config.interface';
 import {
+  AcquirerAddressCandidate,
+  ResolvedAcquirerAddress,
+  resolveAcquirerAddress,
+} from './acquirer-address.resolver';
+import {
   DianDocumentEventRequest,
   DianDocumentEventResult,
 } from './interfaces/dian-event.interface';
@@ -238,7 +243,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const issuer = await this.loadIssuerData(config);
 
       // Build customer data
-      const customer = this.buildCustomerData(invoice_data);
+      const customer = await this.buildCustomerData(invoice_data, 'adquiriente', {
+        issuer,
+        config,
+      });
 
       // Generate software security code
       const software_security = {
@@ -448,6 +456,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: customer.address_source ?? null,
         },
       };
     } catch (error) {
@@ -477,7 +491,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     try {
       const issuer = await this.loadIssuerData(config);
-      const customer = this.buildCustomerData(credit_note_data);
+      const customer = await this.buildCustomerData(
+        credit_note_data,
+        'adquiriente',
+        { issuer, config },
+      );
 
       const software_security = {
         software_id: config.software_id,
@@ -601,6 +619,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_code: parsed.status_code,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: customer.address_source ?? null,
         },
       };
     } catch (error) {
@@ -628,7 +652,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     try {
       const issuer = await this.loadIssuerData(config);
-      const customer = this.buildCustomerData(debit_note_data);
+      const customer = await this.buildCustomerData(
+        debit_note_data,
+        'adquiriente',
+        { issuer, config },
+      );
       const software_security = {
         software_id: config.software_id,
         software_pin: config.software_pin,
@@ -742,6 +770,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_code: parsed.status_code,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: customer.address_source ?? null,
         },
       };
     } catch (error) {
@@ -769,7 +803,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     try {
       const buyer = await this.loadIssuerData(config);
-      const seller = this.buildCustomerData(support_document_data);
+      // SIN respaldo de dirección a propósito: la contraparte de un documento
+      // soporte es un TERCERO, y `buyer` es NUESTRA propia empresa. Ver el
+      // JSDoc de `buildCustomerData`.
+      const seller = await this.buildCustomerData(support_document_data);
       const software_security = this.buildSoftwareSecurity(
         config,
         support_document_data.invoice_number,
@@ -883,6 +920,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: seller.address_source ?? null,
         },
       };
     } catch (error) {
@@ -912,7 +955,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     try {
       const buyer = await this.loadIssuerData(config);
-      const seller = this.buildCustomerData(support_adjustment_data);
+      // SIN respaldo de dirección — misma razón que en `sendSupportDocument`.
+      const seller = await this.buildCustomerData(support_adjustment_data);
       const software_security = this.buildSoftwareSecurity(
         config,
         support_adjustment_data.invoice_number,
@@ -1021,6 +1065,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: seller.address_source ?? null,
         },
       };
     } catch (error) {
@@ -1080,7 +1130,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     try {
       const issuer = await this.loadIssuerData(config);
-      const customer = this.buildCustomerData(document_data);
+      const customer = await this.buildCustomerData(
+        document_data,
+        'adquiriente',
+        { issuer, config },
+      );
       const software_security = this.buildSoftwareSecurity(
         config,
         document_data.invoice_number,
@@ -1192,6 +1246,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
           environment: config.environment,
+          // Escalón de la cascada del que salió la dirección declarada para el
+          // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
+          // pantalla de confirmación pueda decirle al usuario CON QUÉ domicilio
+          // se emitió: un respaldo silencioso es lo que produjo el defecto que
+          // esta cascada cierra.
+          acquirer_address_source: customer.address_source ?? null,
         },
       };
     } catch (error) {
@@ -2205,11 +2265,21 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    *   - `verification_digit` and `ciiu_code` are persisted as-is on the data
    *     shape so the UBL builder can decide where each lands (DV alongside the
    *     bare NIT; CIIU as `cbc:IndustryClassificationCode`).
+   *
+   * @param fallback en los documentos con ADQUIRIENTE se pasa `{ issuer,
+   *   config }` y eso habilita la cascada de respaldo de la dirección
+   *   (`acquirer-address.resolver.ts`). En el documento soporte NO se pasa, y
+   *   esa ausencia es la que apaga el respaldo: ahí la contraparte es un
+   *   TERCERO no obligado a facturar y la dirección del emisor es la de
+   *   NUESTRA propia empresa —el comprador—. Declararla como domicilio del
+   *   vendedor sería inventar un hecho sobre otra persona, que es justo lo que
+   *   la cascada existe para eliminar.
    */
-  private buildCustomerData(
+  private async buildCustomerData(
     invoice_data: ProviderInvoiceData,
     role: DianCustomerRole = 'adquiriente',
-  ): DianCustomerData {
+    fallback?: { issuer: DianIssuerData; config: DianConfigDecrypted },
+  ): Promise<DianCustomerData> {
     const address = this.normalizeAddress(invoice_data.customer_address);
 
     const declared_type = invoice_data.customer_document_type
@@ -2278,6 +2348,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         ciiu_code: null,
         is_withholding_agent: false,
         tax_regime: '2',
+        // Sin cascada: el consumidor final NO declara dirección por definición.
+        // Marcarlo con un origen diría que hubo un respaldo donde no hubo
+        // ninguna búsqueda.
+        address_source: null,
       };
     }
 
@@ -2313,6 +2387,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     // que tiene una persona natural colombiana por defecto, y el tipo se deriva
     // —no se inventa— del hecho de que el número existe.
     const document_type_literal = declared_type || 'CC';
+
+    // CASCADA DE RESPALDO — dirección fiscal → otra del cliente → tienda.
+    const resolved_address = await this.resolveAcquirerAddressForDocument({
+      declared_address: address,
+      declared_number,
+      invoice_number: invoice_data.invoice_number,
+      fallback,
+    });
+
     return {
       document_type: document_type_literal,
       document_number: declared_number,
@@ -2324,13 +2407,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       tax_responsibilities:
         invoice_data.customer_tax_responsibilities ?? [],
       legal_name: declared_name,
-      address_line: address?.address_line,
-      city_code: address?.city_code,
-      city_name: address?.city_name,
-      department_code: address?.department_code,
-      department_name: address?.department_name,
-      country_code: address?.country_code,
-      postal_code: address?.postal_code,
+      address_line: resolved_address?.address.address_line,
+      city_code: resolved_address?.address.city_code,
+      city_name: resolved_address?.address.city_name,
+      department_code: resolved_address?.address.department_code,
+      department_name: resolved_address?.address.department_name,
+      country_code: resolved_address?.address.country_code,
+      postal_code: resolved_address?.address.postal_code,
+      address_source: resolved_address?.source ?? null,
       email: invoice_data.customer_email,
       phone: invoice_data.customer_phone,
       ciiu_code: invoice_data.customer_ciiu_code ?? null,
@@ -2340,6 +2424,159 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         document_type_literal,
       ),
     };
+  }
+
+  /**
+   * CASCADA DE RESPALDO DE LA DIRECCIÓN DEL ADQUIRIENTE — el punto de entrada
+   * desde la emisión. La POLÍTICA vive en `acquirer-address.resolver.ts`; acá
+   * sólo se reúnen los candidatos y se reporta el resultado.
+   *
+   * ## Por qué hay una consulta a base de datos en medio de la emisión
+   *
+   * El llamador (`invoice-flow.service.ts`) carga UNA sola dirección del
+   * cliente: `take: 1, orderBy: { is_primary: 'desc' }`. «Principal para el
+   * usuario» y «fiscal» son dos conceptos distintos que no siempre coinciden
+   * —es el mismo desencuentro que ya obligó a filtrar `type='billing'` en
+   * `loadIssuerData`—, así que la dirección que llega puede ser la de envío
+   * mientras existe una de facturación que nadie miró. Sin esta lectura, la
+   * cascada tendría que decidir con un único candidato y llamaría «respaldo» a
+   * lo que en realidad es el dato bueno mal elegido.
+   *
+   * Sólo corre cuando el candidato en mano NO es una dirección fiscal
+   * emitible: el camino feliz no paga ninguna consulta extra.
+   *
+   * ## Por qué la búsqueda se abandona ante la ambigüedad
+   *
+   * Se busca por `organization_id` + `document_number`, que es la identidad del
+   * cliente dentro del tenant, y **si aparece más de una fila la búsqueda se
+   * descarta entera**. `users.document_number` no tiene índice único, así que
+   * dos filas son representables; elegir una sería tomar la dirección de una
+   * persona y ponérsela a otra. Rendirse ahí deja el documento en el escalón
+   * siguiente de la cascada, que es un dato REAL de otra procedencia — nunca
+   * el domicilio equivocado de un tercero.
+   */
+  private async resolveAcquirerAddressForDocument(params: {
+    declared_address: AcquirerAddressCandidate | undefined;
+    declared_number: string;
+    invoice_number: string;
+    fallback?: { issuer: DianIssuerData; config: DianConfigDecrypted };
+  }): Promise<ResolvedAcquirerAddress | null> {
+    const { declared_address, declared_number, invoice_number, fallback } =
+      params;
+
+    const store_address = fallback
+      ? {
+          address_line: fallback.issuer.address_line,
+          city_code: fallback.issuer.city_code,
+          city_name: fallback.issuer.city_name,
+          department_code: fallback.issuer.department_code,
+          department_name: fallback.issuer.department_name,
+          country_code: fallback.issuer.country_code,
+          postal_code: fallback.issuer.postal_code,
+        }
+      : null;
+
+    const declared_candidates = declared_address ? [declared_address] : [];
+    let resolved = resolveAcquirerAddress({
+      candidates: declared_candidates,
+      store_address,
+    });
+
+    if (resolved?.source !== 'fiscal' && fallback) {
+      const stored = await this.loadCustomerAddressCandidates(
+        fallback.config,
+        declared_number,
+      );
+      if (stored.length) {
+        resolved =
+          resolveAcquirerAddress({
+            // La declarada va PRIMERO: si el llamador compuso una dirección
+            // para este documento en concreto (DTO), manda sobre la ficha.
+            candidates: [...declared_candidates, ...stored],
+            store_address,
+          }) ?? resolved;
+      }
+    }
+
+    if (!resolved) {
+      // Sin respaldo habilitado (documento soporte) se conserva el
+      // comportamiento actual: el grupo de dirección simplemente no se emite.
+      // No hay nada que reprocharle al usuario porque no se intentó ninguna
+      // cascada.
+      if (!fallback) return null;
+
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'No se puede emitir: el documento no tiene ninguna dirección que declarar para el adquiriente. ' +
+          'Se buscó, en orden, la dirección de facturación del cliente, cualquier otra dirección suya ' +
+          '(envío, casa, trabajo) y la dirección fiscal de la tienda que emite, y ninguna tiene municipio ' +
+          'de la lista DANE. Carga el municipio en Clientes → ficha del cliente → «Direcciones», o —si el ' +
+          'cliente no tiene ninguna— en Configuración → Direcciones → la dirección de tipo «Facturación» ' +
+          'de la tienda u organización que emite.',
+        {
+          document_number: invoice_number,
+          has_declared_address: !!declared_address,
+          store_address_usable: false,
+        },
+      );
+    }
+
+    if (resolved.source !== 'fiscal') {
+      // El respaldo se ANUNCIA. Un respaldo silencioso es lo que produjo el
+      // defecto original: el documento declaraba un municipio que nadie había
+      // elegido y no había forma de saberlo hasta el cruce de la DIAN.
+      this.logger.warn(
+        `[DIAN] Documento ${invoice_number}: el adquiriente no tiene dirección fiscal utilizable. ` +
+          `Se declara la dirección de origen «${resolved.source}» ` +
+          `(municipio ${resolved.address.city_code ?? 'sin código'} — ${resolved.address.city_name ?? 'sin nombre'}).`,
+      );
+    }
+
+    return resolved;
+  }
+
+  /**
+   * Direcciones del cliente que la emisión NO recibió, leídas por identidad
+   * dentro del tenant. Devuelve `[]` ante cualquier ambigüedad o fallo: es un
+   * ENRIQUECIMIENTO de la cascada, así que no puede ser el motivo por el que
+   * una factura no salga.
+   */
+  private async loadCustomerAddressCandidates(
+    config: DianConfigDecrypted,
+    document_number: string,
+  ): Promise<AcquirerAddressCandidate[]> {
+    const normalized = document_number.trim();
+    if (!normalized) return [];
+
+    try {
+      const matches = await this.prisma.withoutScope().users.findMany({
+        where: {
+          organization_id: config.organization_id,
+          document_number: normalized,
+        },
+        select: {
+          id: true,
+          addresses: {
+            orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+            take: 10,
+          },
+        },
+        // `2` y no `1`: se necesita SABER que hay más de una para descartar la
+        // búsqueda. Con `take: 1` la ambigüedad sería invisible.
+        take: 2,
+      });
+
+      if (matches.length !== 1) return [];
+
+      return (matches[0].addresses ?? [])
+        .map((row) => this.normalizeAddress(row))
+        .filter((row): row is AcquirerAddressCandidate => !!row);
+    } catch (error) {
+      this.logger.warn(
+        `[DIAN] No se pudieron leer las direcciones del cliente para la cascada de respaldo: ${error.message}`,
+      );
+      return [];
+    }
   }
 
   /**
@@ -2395,23 +2632,21 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     return '2';
   }
 
-  private normalizeAddress(address: any):
-    | {
-        address_line?: string;
-        city_code?: string;
-        city_name?: string;
-        department_code?: string;
-        department_name?: string;
-        country_code?: string;
-        postal_code?: string;
-      }
-    | undefined {
+  /**
+   * `type` se conserva porque es lo ÚNICO que distingue el primer escalón de la
+   * cascada (dirección fiscal) del segundo (cualquier otra del cliente). No
+   * viaja al XML: `resolveAcquirerAddress` lo consume y lo descarta.
+   */
+  private normalizeAddress(
+    address: any,
+  ): AcquirerAddressCandidate | undefined {
     if (!address || typeof address !== 'object') return undefined;
     const municipality_code =
       address.municipality_code ||
       address.city_code ||
       address.municipalityCode;
     return {
+      type: address.type ?? null,
       address_line:
         address.address_line ||
         address.address_line1 ||

@@ -508,6 +508,20 @@ export class InputComponent implements ControlValueAccessor {
       return `El valor máximo es ${errors['max'].max}.`;
     }
 
+    // Mensaje que el BACKEND redactó para ESTE campo.
+    //
+    // Lo pone `applyBackendValidationErrors` a partir de
+    // `details.validationErrors` del `ValidationPipe` global. Va antes del mapa
+    // DIAN y del genérico porque es el único texto que conoce el dato real: la
+    // clave técnica de 38 caracteres se rechazó con «El valor es inválido.»
+    // mientras el backend ya había escrito cuántos caracteres se capturaron y
+    // dónde está la correcta. Se lee por clave literal —y no importando la
+    // constante— para no acoplar un componente compartido a un módulo privado.
+    const backendValidation = errors['backendValidation'];
+    if (typeof backendValidation === 'string' && backendValidation.trim()) {
+      return backendValidation;
+    }
+
     // Claves de los validadores DIAN, leídas del mapa COMPARTIDO.
     //
     // Sin esto caían al genérico de abajo, y «El valor es inválido» sobre un

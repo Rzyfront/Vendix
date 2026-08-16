@@ -812,6 +812,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
    */
   INVOICING_CALC_002:
     'Uno de los impuestos del documento ya no está en el catálogo de la tienda. Vuelve a elegirlo en la línea y guarda de nuevo.',
+  /** Mismo respaldo genérico que el anterior, sobre producto y variante. */
+  INVOICING_CALC_003:
+    'Una de las líneas apunta a un artículo que no está en el catálogo de esta tienda. Vuelve a elegirlo desde el buscador de productos.',
+  /** Mismo respaldo genérico que el anterior, sobre el adquiriente. */
+  INVOICING_CALC_004:
+    'El cliente del documento no está en esta organización. Vuelve a elegirlo desde el buscador de clientes.',
   /**
    * PREVALIDACIÓN FISCAL — los cuatro mensajes siguientes son ENCABEZADOS.
    *

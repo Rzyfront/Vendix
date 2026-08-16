@@ -378,11 +378,17 @@ describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural b
     expect(xml).toContain(
       '<cbc:RegistrationName>Acme S.A.S</cbc:RegistrationName>',
     );
+    // El número va DESNUDO y el DV en `@schemeID`: `cac:PartyTaxScheme/
+    // cbc:CompanyID` es el XPath del que §11.2 toma `NumAdq`, y lo exige sin
+    // DV. Con `900123456-7` en el texto, la DIAN recomputa el CUFE sobre otro
+    // valor y rechaza.
     expect(xml).toMatch(
-      /<cbc:CompanyID[^>]*schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+      /<cbc:CompanyID[^>]*schemeID="7"[^>]*>900123456<\/cbc:CompanyID>/,
     );
-    // schemeName = 'NIT' (literal), per Anexo 19.
-    expect(xml).toMatch(/<cbc:CompanyID[^>]*schemeName="NIT"/);
+    // schemeName = código DIAN del tipo de documento, igual que el emisor.
+    expect(xml).toMatch(/<cbc:CompanyID[^>]*schemeName="31"/);
+    // El número con DV pegado no puede aparecer en NINGÚN identificador.
+    expect(xml).not.toContain('900123456-7');
     // cac:Person NO debe aparecer.
     expect(xml).not.toContain('<cac:Person>');
     // TaxLevelCode concatenado: O-13;O-15.

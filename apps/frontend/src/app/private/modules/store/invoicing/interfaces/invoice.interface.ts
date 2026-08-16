@@ -518,6 +518,14 @@ export interface InvoiceTax {
   tax_rate: number;
   tax_amount: number;
   taxable_amount: number;
+  /**
+   * Clasificación fiscal del tributo (`iva`, `inc`, `ica`…). La columna existe
+   * en `invoice_taxes` desde el contrato tipado y el backend la devuelve; el
+   * frontend no la declaraba, así que una nota crédito que copiara el desglose
+   * de la factura no tenía forma de saber que estaba corrigiendo un INC y lo
+   * habría rebautizado IVA.
+   */
+  tax_type?: string;
 }
 
 export interface InvoiceResolution {
@@ -658,6 +666,20 @@ export interface CreateInvoiceItemDto {
   discount_amount?: number;
   /** Legacy single tax rate (still honored for backward compat). */
   tax_rate?: number;
+  /**
+   * Cuota AFIRMADA de la línea. `CreateInvoiceItemDto` del backend la declara
+   * (`@IsOptional @IsNumber @Min(0)`) y el frontend no.
+   *
+   * La NECESITA la nota crédito/débito parcial: `credit-notes.service.ts` no
+   * pasa por `InvoiceCalculatorService` —una nota copia importes, no los
+   * recalcula— y suma la cabecera leyendo `item.tax_amount` (`:186`). Sin este
+   * campo, una nota parcial viajaría con impuesto cero.
+   *
+   * En una FACTURA sigue sin usarse: allá manda el calculador del servidor.
+   */
+  tax_amount?: number;
+  /** Variante del producto, cuando la línea corregida la tenía. */
+  product_variant_id?: number;
   /** QUI-690 — Per-line typed taxes with inclusive/additional flag. */
   taxes?: CreateInvoiceTaxDto[];
   /** QUI-690 — Per-line INCLUDED / ADDITIONAL shortcut. */
@@ -692,6 +714,17 @@ export interface UpdateInvoiceDto {
 export interface CreateCreditNoteDto {
   related_invoice_id: number;
   reason?: string;
+  /**
+   * Concepto de corrección DIAN — el CÓDIGO, no la prosa. Termina en
+   * `cac:DiscrepancyResponse/cbc:ResponseCode` del XML.
+   * Nota crédito: '1'…'5'. Nota débito: '1'…'4' (catálogos distintos, ver
+   * `components/invoice-note-create/dian-note-concepts.ts`).
+   *
+   * Viaja ADEMÁS del prefijo `[Concepto DIAN …]` que `reason` sigue llevando:
+   * el código es lo que un validador lee, el texto es lo que una persona lee en
+   * `cbc:Description`. No se sustituyen.
+   */
+  note_concept_code?: string;
   issue_date?: string;
   currency?: string;
   notes?: string;
@@ -703,6 +736,8 @@ export interface CreateCreditNoteDto {
 export interface CreateDebitNoteDto {
   related_invoice_id: number;
   reason?: string;
+  /** Concepto DIAN de nota DÉBITO: '1'…'4'. Ver {@link CreateCreditNoteDto}. */
+  note_concept_code?: string;
   issue_date?: string;
   currency?: string;
   notes?: string;

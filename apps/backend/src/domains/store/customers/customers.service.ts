@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { normalizeNit } from '../../../common/utils/nit.util';
+import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
 
 /**
  * Columnas de `users` que NUNCA pueden salir por la API de clientes.
@@ -73,6 +73,60 @@ export class CustomersService {
       ? input.number.trim().toUpperCase().replace(/[\s\-.]/g, '')
       : null;
     return { type, number };
+  }
+
+  /**
+   * Separa el NIT de su dígito de verificación SIN fundirlos nunca.
+   *
+   * `normalizeDocument()` borra el guion junto con puntos y espacios, y en un
+   * NIT ese guion no es ruido: es la frontera entre el número y su DV. Sobre
+   * `900123456-8` deja `9001234568`, y a partir de ahí el número y el DV son
+   * indistinguibles — se persiste un `document_number` de 10 dígitos con el DV
+   * pegado y un `verification_digit` calculado sobre ese número inflado. En el
+   * XML eso sale como `cbc:CompanyID` erróneo con un `@schemeID` que la DIAN
+   * recomputa distinto, y el documento se rechaza habiendo gastado el
+   * consecutivo.
+   *
+   * Por eso el número CRUDO (tal como lo escribió el comerciante) es la fuente:
+   * si trae guion, la frontera es explícita y manda. Si no lo trae, el número
+   * es el NIT íntegro y el DV es el del campo aparte. No se adivina: un NIT sin
+   * guion que "parezca" traer el DV pegado se rechaza con un mensaje que lo
+   * explica, en vez de recortarle un dígito por suposición.
+   */
+  private splitNitAndDv(
+    rawNumber: string | null | undefined,
+    normalizedNumber: string,
+    providedDv: string | null | undefined,
+  ): { number: string | null; dv: string | null; mismatch: boolean } {
+    const raw = (rawNumber ?? '').trim();
+    const dv = (providedDv ?? '').trim();
+    const nitInput = raw.includes('-')
+      ? raw
+      : normalizedNumber + (dv ? `-${dv}` : '');
+    const result = normalizeNit(nitInput);
+
+    // El número traía el DV pegado Y además vino un DV aparte: si no son el
+    // mismo dígito, el comerciante declaró dos verdades distintas.
+    const inlineConflict =
+      raw.includes('-') && !!dv && result.provided_dv !== null && result.provided_dv !== dv;
+
+    return {
+      number: result.number || null,
+      dv: result.dv || null,
+      mismatch:
+        inlineConflict || (result.provided_dv !== null && result.dv_mismatch),
+    };
+  }
+
+  /** Mensaje de DV que dice cuál es el correcto y por qué pudo fallar. */
+  private nitDvMismatchMessage(nit: string, provided: string | null): string {
+    const expected = computeNitDv(nit);
+    return (
+      `El dígito de verificación '${provided ?? ''}' no corresponde al NIT ` +
+      `'${nit}': el módulo 11 de la DIAN da '${expected}'. Si escribiste el ` +
+      `NIT con el DV pegado, sepáralos: el número va sin DV y el DV en su ` +
+      `propio campo.`
+    );
   }
 
   /**
@@ -665,20 +719,21 @@ export class CustomersService {
       normalizedDoc.type === 'NIT' &&
       normalizedDoc.number
     ) {
-      const nitInput =
-        normalizedDoc.number +
-        (dto.verification_digit ? `-${dto.verification_digit}` : '');
-      const nitResult = normalizeNit(nitInput);
-      finalDocumentNumber = nitResult.number || null;
-      finalVerificationDigit = nitResult.dv || null;
+      const nitResult = this.splitNitAndDv(
+        dto.document_number,
+        normalizedDoc.number,
+        dto.verification_digit,
+      );
+      finalDocumentNumber = nitResult.number;
+      finalVerificationDigit = nitResult.dv;
 
-      if (
-        nitResult.provided_dv !== null &&
-        nitResult.dv_mismatch
-      ) {
+      if (nitResult.mismatch) {
         throw new VendixHttpException(
           ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
-          'El dígito de verificación no corresponde al NIT digitado.',
+          this.nitDvMismatchMessage(
+            nitResult.number ?? normalizedDoc.number,
+            dto.verification_digit ?? null,
+          ),
           { field: 'verification_digit' },
         );
       }
@@ -984,22 +1039,21 @@ export class CustomersService {
       normalizedDoc.type === 'NIT' &&
       normalizedDoc.number
     ) {
-      const nitInput =
-        normalizedDoc.number +
-        (effectiveVerificationDigit
-          ? `-${effectiveVerificationDigit}`
-          : '');
-      const nitResult = normalizeNit(nitInput);
-      nextDocumentNumber = nitResult.number || null;
-      nextVerificationDigit = nitResult.dv || null;
+      const nitResult = this.splitNitAndDv(
+        dto.document_number ?? effectiveNumber,
+        normalizedDoc.number,
+        effectiveVerificationDigit,
+      );
+      nextDocumentNumber = nitResult.number;
+      nextVerificationDigit = nitResult.dv;
 
-      if (
-        nitResult.provided_dv !== null &&
-        nitResult.dv_mismatch
-      ) {
+      if (nitResult.mismatch) {
         throw new VendixHttpException(
           ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
-          'El dígito de verificación no corresponde al NIT digitado.',
+          this.nitDvMismatchMessage(
+            nitResult.number ?? normalizedDoc.number,
+            effectiveVerificationDigit ?? null,
+          ),
           { field: 'verification_digit' },
         );
       }

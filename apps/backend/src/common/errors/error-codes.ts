@@ -1831,6 +1831,42 @@ export const ErrorCodes = {
       'Invoice declares a tax_rate_id that does not exist in tax_rates or belongs to another tenant',
   },
   /**
+   * `product_id` / `product_variant_id` QUE NO EXISTE, O QUE ES DE OTRA TIENDA.
+   *
+   * Misma familia y mismo motivo que `INVOICING_CALC_002`, sobre las otras dos
+   * llaves foráneas que una línea puede traer. `invoice_items` tiene FK a
+   * `products(id)` y a `product_variants(id)`: sin compuerta, un id inexistente
+   * sólo se descubría cuando Postgres rechazaba el INSERT (P2003) y salía como
+   * `SYS_INTERNAL_001` / 500 — con el consecutivo autorizado ya gastado.
+   *
+   * Y lo inverso es peor: un id de OTRA tienda SÍ satisface la FK, así que
+   * entraba en silencio y quedaba escrito en la factura. Por eso la compuerta
+   * no pregunta «¿existe?» sino «¿lo devuelve el catálogo de ESTA tienda?»: el
+   * scope de `StorePrismaService` ya filtra, de modo que ausente-del-mapa cubre
+   * los dos casos con una sola comprobación.
+   */
+  INVOICING_CALC_003: {
+    code: 'INVOICING_CALC_003',
+    httpStatus: 422,
+    devMessage:
+      'Invoice line references a product or variant that does not exist or belongs to another store',
+  },
+  /**
+   * `customer_id` QUE NO EXISTE, O QUE ES DE OTRA ORGANIZACIÓN.
+   *
+   * `users` NO está scopeado en `StorePrismaService` —su getter devuelve el
+   * `baseClient`—, así que la pertenencia se comprueba a mano. Sin ella,
+   * `invoices_customer_id_fkey` producía un 500 para el id inexistente, y el id
+   * de otra organización pasaba la FK y quedaba grabado: una factura de la
+   * tienda A apuntando al cliente de la organización B.
+   */
+  INVOICING_CALC_004: {
+    code: 'INVOICING_CALC_004',
+    httpStatus: 422,
+    devMessage:
+      'Invoice references a customer that does not exist or belongs to another organization',
+  },
+  /**
    * PREVALIDACIÓN FISCAL — los cuatro códigos siguientes traducen el veredicto de
    * `FiscalDocumentValidator` (`validators/fiscal-document.validator.ts`), la
    * puerta que rechaza en LOCAL lo que la DIAN rechazaría.

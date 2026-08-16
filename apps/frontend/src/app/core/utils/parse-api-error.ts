@@ -8,8 +8,162 @@ export interface ParsedApiError {
 }
 
 /**
+ * UN BLOQUEADOR DE LA PUERTA DE EMISIÓN.
+ *
+ * Espejo mínimo de `FiscalDocumentFinding` / `FiscalIdentityFinding`
+ * (`apps/backend/src/domains/store/invoicing/validators/*`), que es lo que la
+ * prevalidación fiscal deja en `details.blockers[]` al responder 412/422.
+ *
+ * Sólo se declaran los campos que la UI necesita para contestar las tres
+ * preguntas del operador: QUÉ falta (`problem`), DÓNDE se corrige (`fix`) y a
+ * QUÉ campo apunta (`field`). El resto viaja en `raw` sin interpretar, para que
+ * añadir una clave en el backend no obligue a tocar este contrato.
+ *
+ * `code` y `category` se declaran `string` a propósito: en el backend son
+ * uniones cerradas que crecen con cada regla nueva del Anexo Técnico, y
+ * duplicarlas aquí crearía un segundo catálogo que se desactualiza en silencio.
+ */
+export interface ApiBlocker {
+  code: string | null;
+  /** Campo al que apunta (`technical_key`, `address.city_code`, `items.0.total`…). */
+  field: string | null;
+  /** QUÉ está mal ante la DIAN. Redactado por el backend, en español. */
+  problem: string;
+  /** DÓNDE se corrige. Puede faltar; nunca se inventa. */
+  fix: string | null;
+  severity: string | null;
+  category: string | null;
+  /** El objeto tal como vino, por si el consumidor necesita algo más. */
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Lee `details.blockers[]` de un cuerpo de error, ya normalizado.
+ *
+ * PARA QUÉ EXISTE. La puerta de emisión calcula exactamente qué le falta al
+ * documento y lo devuelve con `problem` y `fix` redactados; el frontend pintaba
+ * en su lugar el texto enlatado del código («La factura no cumple las
+ * validaciones. Revisa los datos.»), que no dice ni qué falta ni dónde se
+ * arregla. Este lector es el punto único para recuperarlo, y se expone desde
+ * `core/utils` —y no desde el módulo de facturación— porque lo consumen tanto
+ * el modal de creación de factura como este mismo parser.
+ *
+ * Es TOLERANTE a propósito: un cuerpo sin `blockers`, con `blockers` que no es
+ * arreglo, o con entradas sin `problem`, devuelve lista vacía en vez de lanzar.
+ * Un error mientras se lee un error deja al usuario sin ninguna explicación.
+ *
+ * @param details El `details` del cuerpo de error (o el cuerpo entero).
+ * @returns Los bloqueadores legibles, en el orden en que los mandó el backend.
+ */
+export function readApiBlockers(details: unknown): ApiBlocker[] {
+  const source = asRecord(details);
+  const raw = source?.['blockers'];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.reduce<ApiBlocker[]>((acc, entry) => {
+    const row = asRecord(entry);
+    if (!row) return acc;
+    // Sin `problem` no hay nada que contarle al usuario: una fila que sólo
+    // trae un código es ruido con forma de diagnóstico.
+    const problem = readNonEmptyString(row['problem']);
+    if (!problem) return acc;
+
+    acc.push({
+      code: readNonEmptyString(row['code']),
+      field: readNonEmptyString(row['field']),
+      problem,
+      fix: readNonEmptyString(row['fix']),
+      severity: readNonEmptyString(row['severity']),
+      category: readNonEmptyString(row['category']),
+      raw: row,
+    });
+    return acc;
+  }, []);
+}
+
+/**
+ * Palabras y signos que sólo aparecen en prosa española.
+ *
+ * SIRVEN DE ADUANA, no de traductor. `VendixHttpException` pone en `message` el
+ * `detail` que le pasaron —redactado en español para quien opera— o, cuando no
+ * le pasaron ninguno, el `devMessage` del catálogo, que es inglés técnico
+ * («Invoice declares a tax_rate_id that does not exist…»). Los dos llegan por
+ * el mismo campo y son indistinguibles por estructura, así que se distinguen
+ * por idioma: el inglés técnico no cruza, y cae al copy enlatado.
+ *
+ * Se comparan con espacios alrededor para no confundir subcadenas («…y en…» vs
+ * «…tenant…»).
+ */
+const SPANISH_MARKERS = [
+  ' la ', ' el ', ' los ', ' las ', ' de ', ' del ', ' que ', ' no ',
+  ' se ', ' en ', ' un ', ' una ', ' con ', ' para ', ' por ', ' al ',
+  ' es ', ' son ', ' su ', ' sus ', ' debe ', ' este ', ' esta ', ' sin ',
+];
+
+/** Longitud mínima para que un texto sea una frase y no un identificador. */
+const MIN_PRESENTABLE_LENGTH = 16;
+
+/**
+ * ¿Este texto del backend se le puede enseñar tal cual al usuario?
+ *
+ * Exige tres cosas: que sea una frase (longitud y espacios), que esté en
+ * español (ver {@link SPANISH_MARKERS}) y que no sea uno de los rótulos
+ * internos que el filtro de excepciones fabrica cuando no hay nada mejor
+ * («Validation failed», «Request failed»…). Esos últimos no explican nada y
+ * taparían un copy enlatado que sí lo hace.
+ */
+export function isPresentableApiMessage(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  if (text.length < MIN_PRESENTABLE_LENGTH || !text.includes(' ')) return false;
+
+  const lower = ` ${text.toLowerCase()} `;
+  if (
+    lower.includes('validation failed') ||
+    lower.includes('request failed') ||
+    lower.includes('internal server error') ||
+    lower.includes('bad request')
+  ) {
+    return false;
+  }
+
+  // Acentos, eñe y signos de apertura son prueba directa de español.
+  if (/[áéíóúñü¿¡]/i.test(text)) return true;
+
+  return SPANISH_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
  * Parsea una respuesta de error de API y retorna un mensaje UX seguro.
- * El devMessage se loguea en consola pero NUNCA se muestra al usuario.
+ *
+ * ## GANA EL MENSAJE MÁS ESPECÍFICO
+ *
+ * El copy enlatado de `ERROR_MESSAGES[error_code]` es útil cuando el servidor
+ * no dice nada mejor, y dañino cuando sí lo dice. La puerta de prevalidación
+ * fiscal calcula qué campo falta y dónde se corrige, lo devuelve en `message` y
+ * en `details.blockers[]`, y el usuario seguía leyendo «La factura no cumple
+ * las validaciones. Revisa los datos.» — que es el mismo defecto que el enlatado
+ * pretendía evitar. El orden ahora es:
+ *
+ *   1. `details.blockers[0].problem` (+ su `fix`) — el diagnóstico por campo.
+ *   2. `message` del backend, SI pasa la aduana de {@link isPresentableApiMessage}.
+ *   3. `ERROR_MESSAGES[error_code]` — el copy curado.
+ *   4. `DEFAULT_ERROR_MESSAGE`.
+ *
+ * ## LO QUE NO CAMBIA
+ *
+ * La FIRMA y los cuatro campos del retorno son los mismos: media aplicación
+ * consume esta función y ninguno de sus llamadores necesita tocarse.
+ * `devMessage` sigue siendo el `message` crudo del backend —para el log— aunque
+ * ahora, cuando es presentable, también alimente `userMessage`.
+ *
+ * `details.validationErrors` NO entra en esta cadena a propósito: son los textos
+ * de class-validator, mayoritariamente en inglés y redactados para quien
+ * programa. Quien los quiera —facturación lo hace en `describeApiFailure`, y
+ * clientes en `customer-error.translator`— los lee de `details`, que sigue
+ * viajando entero.
  */
 export function parseApiError(error: any): ParsedApiError {
   const body = error?.error ?? error;
@@ -17,12 +171,44 @@ export function parseApiError(error: any): ParsedApiError {
   const devMessage = body?.message ?? null;
   const details = body?.details ?? null;
 
+  const cannedMessage = errorCode
+    ? (ERROR_MESSAGES[errorCode] ?? DEFAULT_ERROR_MESSAGE)
+    : DEFAULT_ERROR_MESSAGE;
+
   return {
     errorCode,
-    userMessage: errorCode
-      ? (ERROR_MESSAGES[errorCode] ?? DEFAULT_ERROR_MESSAGE)
-      : DEFAULT_ERROR_MESSAGE,
+    userMessage: resolveUserMessage(devMessage, details, cannedMessage),
     devMessage,
     details,
   };
+}
+
+/** Aplica el orden documentado en {@link parseApiError}. */
+function resolveUserMessage(
+  devMessage: unknown,
+  details: unknown,
+  cannedMessage: string,
+): string {
+  const [firstBlocker] = readApiBlockers(details);
+  if (firstBlocker) {
+    return firstBlocker.fix
+      ? `${firstBlocker.problem} ${firstBlocker.fix}`
+      : firstBlocker.problem;
+  }
+
+  if (isPresentableApiMessage(devMessage)) {
+    return devMessage.trim();
+  }
+
+  return cannedMessage;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

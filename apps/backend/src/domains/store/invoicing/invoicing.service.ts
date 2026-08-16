@@ -38,6 +38,7 @@ import {
   InvoiceCalculatorAiuInput,
   InvoiceCalculatorResult,
   InvoiceCalculatorService,
+  InvoiceCalculatorTaxInput,
 } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
 import {
@@ -622,6 +623,47 @@ export class InvoicingService {
     return supplier;
   }
 
+  /**
+   * `customer_id` que no existe, o que pertenece a OTRA organización.
+   *
+   * Se comprueba a mano porque `users` es el único de los tres identificadores
+   * de una factura que `StorePrismaService` NO scopea: su getter devuelve el
+   * `baseClient` (ver el comentario «Organization-scoped models (accessible but
+   * not scoped in store service)» en `store-prisma.service.ts`), así que un
+   * `findFirst` por id a secas ve la tabla entera.
+   *
+   * Los dos modos de fallo que cierra son distintos y los dos reales:
+   *  · id inexistente ⇒ `invoices_customer_id_fkey` rechazaba el INSERT y el
+   *    filtro global lo degradaba a `SYS_INTERNAL_001` / 500, con el
+   *    consecutivo autorizado ya consumido por `generateNextNumber`.
+   *  · id de otra organización ⇒ la FK lo ACEPTA, así que entraba en silencio y
+   *    la factura quedaba apuntando al cliente de otro tenant.
+   *
+   * 422 y no 404 por la misma razón que `INVOICING_CALC_002`: no falta el
+   * recurso que se pidió (la factura), sino que el cuerpo referencia uno que no
+   * es de quien escribe.
+   */
+  private async assertCustomerResolvable(
+    customer_id: number | null | undefined,
+  ): Promise<void> {
+    if (customer_id == null) return;
+    const context = this.getContext();
+    const customer = await this.prisma.users.findFirst({
+      where: {
+        id: customer_id,
+        organization_id: Number(context.organization_id),
+      },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_004,
+        `El cliente ${customer_id} no existe en esta organización. Selecciónalo desde el buscador de clientes, o créalo antes de facturar.`,
+        { customer_id },
+      );
+    }
+  }
+
   private async loadSupportAdjustmentOriginal(
     dto: CreateInvoiceDto,
     accounting_entity_id: number,
@@ -854,6 +896,10 @@ export class InvoicingService {
         context,
         dto.inline_customer,
       );
+    } else {
+      // Sólo el id que llegó del cliente necesita puerta: el creado en línea
+      // acaba de nacer en este mismo tenant.
+      await this.assertCustomerResolvable(resolved_customer_id);
     }
 
     // QUI-690 Step 3 — Inline product creation per line. NOT YET IMPLEMENTED:
@@ -878,6 +924,10 @@ export class InvoicingService {
     // que la aritmética no cuadraba. Todo lo que pueda fallar por datos del
     // request tiene que fallar por encima de esta línea.
     const line_snapshots = await this.resolveLinePricingSnapshots(dto.items);
+    // Las tarifas referenciadas TIENEN que existir y ser de este tenant, y se
+    // resuelven ANTES del recálculo porque el catálogo es quien manda sobre la
+    // tarifa y el tipo fiscal. Ver `resolveTenantTaxRateCatalog`.
+    const tax_catalog = await this.resolveTenantTaxRateCatalog(dto.items);
     // Régimen de AIU y validación del objeto del contrato. Por encima del
     // consecutivo por la misma razón que el recálculo: puede rechazar.
     const aiu_context = await this.resolveAiuContext(
@@ -890,11 +940,8 @@ export class InvoicingService {
       line_snapshots,
       'invoice:create',
       aiu_context.aiu,
+      tax_catalog,
     );
-
-    // Las tarifas referenciadas TIENEN que existir, y antes del consecutivo.
-    // Ver `assertTaxRatesBelongToTenant`.
-    await this.assertTaxRatesBelongToTenant(calculated.header_taxes, calculated.lines);
 
     // Tasa de cambio: sólo cuando el documento declara divisa y no trae tasa.
     // Nunca bloquea — ver `resolveExchangeRateForDocument`.
@@ -1814,6 +1861,13 @@ export class InvoicingService {
       );
     }
 
+    // Misma puerta que en `create`: el PATCH escribe la MISMA columna por otra
+    // puerta, y sin esto seguía siendo la vía barata para meter en una factura
+    // el cliente de otra organización — o un id inexistente y su 500.
+    if (dto.customer_id !== undefined) {
+      await this.assertCustomerResolvable(dto.customer_id);
+    }
+
     // If items are provided, recalculate amounts and replace
     const update_data: any = {
       ...(dto.customer_id !== undefined && { customer_id: dto.customer_id }),
@@ -1920,6 +1974,9 @@ export class InvoicingService {
       // Mismo motor y misma política que `create()`. Editar un borrador no
       // puede ser una vía para persistir aritmética que la creación rechaza.
       const line_snapshots = await this.resolveLinePricingSnapshots(dto.items);
+      // Mismo catálogo y misma autoridad que en `create()`: editar un borrador
+      // no puede ser la vía para meter una tarifa que la creación corrige.
+      const tax_catalog = await this.resolveTenantTaxRateCatalog(dto.items);
       // Mismo régimen de AIU que la creación. El tipo de operación es el que
       // trae el PATCH si lo cambia, y el persistido si no: editar un borrador
       // no puede convertir un contrato AIU en una venta estándar por omisión.
@@ -1936,6 +1993,7 @@ export class InvoicingService {
         line_snapshots,
         `invoice:update:${id}`,
         aiu_context.aiu,
+        tax_catalog,
       );
       recalculated_header_taxes = calculated.header_taxes;
       recalculated_line_taxes = this.needsPersistedLineTaxes(
@@ -2495,21 +2553,39 @@ export class InvoicingService {
    * organización, o cuando la propia tarifa apunta a esta tienda: las tarifas
    * de alcance ORGANIZACIÓN viven con `store_id = NULL`, así que exigir la
    * tienda a secas dejaría fuera al catálogo compartido.
+   *
+   * ## Por qué además DEVUELVE el catálogo
+   *
+   * Validar la pertenencia y luego calcular con la tarifa que mandó el cliente
+   * deja abierta la mitad del hueco que este dominio vino a cerrar. Medido con
+   * `curl` contra la tienda 3: un cuerpo con `tax_rate_id: 1` —«IVA General»,
+   * 19 % en el catálogo— y `tax_rate: 0` persistía una factura con IVA CERO,
+   * exactamente el mismo desenlace que el `tax_amount: 0` que motivó
+   * `InvoiceCalculatorService`, sólo que un nivel más arriba: no se falsea la
+   * cuota, se falsea la tarifa de la que la cuota se deriva.
+   *
+   * Por eso, cuando la línea SEÑALA una fila del catálogo, la tarifa y la
+   * clasificación fiscal salen de esa fila y no del cuerpo del request. El
+   * identificador es la afirmación fuerte —«este es el impuesto que el
+   * comerciante creó»—; `tax_rate` y `tax_type` que lo acompañan son la copia
+   * que el formulario arrastra, y una copia sólo puede estar rancia.
+   *
+   * Sin `tax_rate_id` no hay nada que consultar y manda el cuerpo: es el camino
+   * del impuesto puntual (`curl`, importaciones, herramientas de IA), y
+   * bloquearlo obligaría a dar de alta en el catálogo cada tributo de una sola
+   * vez.
    */
-  private async assertTaxRatesBelongToTenant(
-    header_taxes: Array<{ tax_rate_id?: number | null }>,
-    lines: Array<{ taxes: Array<{ tax_rate_id?: number | null }> }>,
-  ): Promise<void> {
+  private async resolveTenantTaxRateCatalog(
+    items: CreateInvoiceItemDto[],
+  ): Promise<Map<number, TenantTaxRateSnapshot>> {
     const referenced = new Set<number>();
-    for (const tax of header_taxes) {
-      if (typeof tax.tax_rate_id === 'number') referenced.add(tax.tax_rate_id);
-    }
-    for (const line of lines) {
-      for (const tax of line.taxes) {
+    for (const item of items ?? []) {
+      for (const tax of item.taxes ?? []) {
         if (typeof tax.tax_rate_id === 'number') referenced.add(tax.tax_rate_id);
       }
     }
-    if (referenced.size === 0) return;
+    const catalog = new Map<number, TenantTaxRateSnapshot>();
+    if (referenced.size === 0) return catalog;
 
     const context = this.getContext();
     const organization_id = Number(context.organization_id);
@@ -2521,36 +2597,132 @@ export class InvoicingService {
       select: {
         id: true,
         store_id: true,
-        tax_categories: { select: { organization_id: true, store_id: true } },
+        rate: true,
+        name: true,
+        is_inclusive: true,
+        tax_categories: {
+          select: {
+            organization_id: true,
+            store_id: true,
+            tax_type: true,
+            is_inclusive: true,
+          },
+        },
       },
     });
 
-    const owned = new Set(
-      rows
-        .filter((row) => {
-          const category = row.tax_categories;
-          if (category?.organization_id === organization_id) return true;
-          if (store_id != null && row.store_id === store_id) return true;
-          return store_id != null && category?.store_id === store_id;
-        })
-        .map((row) => row.id),
+    const owned = rows.filter((row) => {
+      const category = row.tax_categories;
+      if (category?.organization_id === organization_id) return true;
+      if (store_id != null && row.store_id === store_id) return true;
+      return store_id != null && category?.store_id === store_id;
+    });
+
+    const rejected = [...referenced].filter(
+      (id) => !owned.some((row) => row.id === id),
     );
+    if (rejected.length > 0) {
+      const found = new Set(rows.map((row) => row.id));
+      const missing = rejected.filter((id) => !found.has(id));
 
-    const rejected = [...referenced].filter((id) => !owned.has(id));
-    if (rejected.length === 0) return;
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_002,
+        missing.length === rejected.length
+          ? `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no existe' : 'tarifas de impuesto que no existen'}: ` +
+              `${rejected.join(', ')}. Si tomaste el identificador del catálogo de impuestos, revisa que sea el de la TARIFA y no el de la categoría que la contiene.`
+          : `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no pertenece a esta organización' : 'tarifas de impuesto que no pertenecen a esta organización'}: ` +
+              `${rejected.join(', ')}. Selecciona el impuesto desde el catálogo de la tienda.`,
+        { rejected_tax_rate_ids: rejected, missing_tax_rate_ids: missing },
+      );
+    }
 
-    const found = new Set(rows.map((row) => row.id));
-    const missing = rejected.filter((id) => !found.has(id));
+    for (const row of owned) {
+      catalog.set(row.id, {
+        // `tax_rates.rate` es `Decimal(6,5)` y guarda una FRACCIÓN (0.19). La
+        // columna no podría siquiera representar `19`: con escala 5 su máximo
+        // es 9,99999. `CreateInvoiceTaxDto.tax_rate` y `invoice_taxes.tax_rate`
+        // hablan en PORCENTAJE, así que la conversión va acá, una sola vez, en
+        // espacio Decimal — que es donde ya se rompió una vez esta frontera.
+        tax_rate: new Prisma.Decimal(row.rate).times(100),
+        // El tipo fiscal es de la CATEGORÍA: es la columna con la que
+        // `UblCommonBuilder.resolveTaxCodeFromTax` reparte ValImp1/2/3 y los
+        // `cac:TaxSubtotal`. Tomarlo del catálogo es lo que hace que un
+        // impuesto que el comerciante llamó «Tributo municipal propio» se
+        // clasifique por lo que ES y no por cómo se llama.
+        tax_type: row.tax_categories?.tax_type ?? null,
+        tax_name: row.name,
+        is_inclusive: row.is_inclusive ?? row.tax_categories?.is_inclusive ?? null,
+      });
+    }
 
-    throw new VendixHttpException(
-      ErrorCodes.INVOICING_CALC_002,
-      missing.length === rejected.length
-        ? `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no existe' : 'tarifas de impuesto que no existen'}: ` +
-            `${rejected.join(', ')}. Si tomaste el identificador del catálogo de impuestos, revisa que sea el de la TARIFA y no el de la categoría que la contiene.`
-        : `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no pertenece a esta organización' : 'tarifas de impuesto que no pertenecen a esta organización'}: ` +
-            `${rejected.join(', ')}. Selecciona el impuesto desde el catálogo de la tienda.`,
-      { rejected_tax_rate_ids: rejected, missing_tax_rate_ids: missing },
-    );
+    return catalog;
+  }
+
+  /**
+   * Aplica el catálogo sobre los impuestos declarados en una línea.
+   *
+   * Devuelve la entrada del motor aritmético ya con la verdad del comerciante
+   * dentro. Registra —sin bloquear— cuando el cuerpo del request afirmaba otra
+   * tarifa u otro tipo: el formulario del panel arrastra una copia del catálogo
+   * y quedarse rancia es su modo normal de fallar, no un intento de fraude.
+   */
+  private applyTaxCatalogToLine(
+    taxes: CreateInvoiceTaxDto[] | undefined,
+    catalog: Map<number, TenantTaxRateSnapshot>,
+    label: string,
+    line_index: number,
+  ): InvoiceCalculatorTaxInput[] | undefined {
+    if (!taxes) return undefined;
+
+    return taxes.map((tax) => {
+      const known =
+        typeof tax.tax_rate_id === 'number'
+          ? catalog.get(tax.tax_rate_id)
+          : undefined;
+
+      if (!known) {
+        return {
+          tax_rate_id: tax.tax_rate_id,
+          tax_name: tax.tax_name,
+          tax_rate: tax.tax_rate,
+          tax_type: tax.tax_type,
+          taxable_amount: tax.taxable_amount,
+          tax_amount: tax.tax_amount,
+          is_inclusive: tax.is_inclusive,
+        };
+      }
+
+      if (!known.tax_rate.equals(new Prisma.Decimal(tax.tax_rate ?? 0))) {
+        this.logger.warn(
+          `[${label}] Tarifa divergente en línea ${line_index + 1} para tax_rate_id=${tax.tax_rate_id}: ` +
+            `cliente=${tax.tax_rate} catálogo=${known.tax_rate.toString()} (gana el catálogo)`,
+        );
+      }
+      const declared_type = (tax.tax_type ?? '').trim().toLowerCase();
+      const catalog_type = (known.tax_type ?? '').trim().toLowerCase();
+      if (catalog_type && declared_type && declared_type !== catalog_type) {
+        this.logger.warn(
+          `[${label}] Tipo fiscal divergente en línea ${line_index + 1} para tax_rate_id=${tax.tax_rate_id}: ` +
+            `cliente=${declared_type} catálogo=${catalog_type} (gana el catálogo)`,
+        );
+      }
+
+      return {
+        tax_rate_id: tax.tax_rate_id,
+        // El nombre del catálogo es el que el comerciante ve en su pantalla de
+        // impuestos; el del request es el que tenía cuando se cargó el modal.
+        tax_name: known.tax_name || tax.tax_name,
+        tax_rate: known.tax_rate,
+        tax_type: known.tax_type ?? tax.tax_type,
+        taxable_amount: tax.taxable_amount,
+        tax_amount: tax.tax_amount,
+        // `is_inclusive` SÍ admite el override explícito de la línea: el mismo
+        // impuesto se cobra por dentro o por fuera del precio según cómo se
+        // capturó la venta, y `schema.prisma` ya lo documenta así sobre
+        // `tax_rates.is_inclusive`. El catálogo sólo pone el valor por defecto.
+        is_inclusive: tax.is_inclusive ?? known.is_inclusive,
+      };
+    });
   }
 
   /**
@@ -3173,6 +3345,13 @@ export class InvoicingService {
      * mira `aiu_component` y toda línea tributa como siempre.
      */
     aiu?: InvoiceCalculatorAiuInput,
+    /**
+     * Catálogo `tax_rates` de la tienda, ya validado por
+     * `resolveTenantTaxRateCatalog`. Cuando una línea señala una de sus filas,
+     * la tarifa y el tipo fiscal salen de ahí y no del cuerpo del request.
+     * Vacío ⇒ ninguna línea referenció el catálogo y manda lo declarado.
+     */
+    tax_catalog: Map<number, TenantTaxRateSnapshot> = new Map(),
   ): InvoiceCalculatorResult {
     const result = this.calculator.calculate({
       ...(aiu ? { aiu } : {}),
@@ -3189,15 +3368,12 @@ export class InvoicingService {
         price_unit_quantity: snapshots[index]?.price_unit_quantity,
         is_inclusive: item.is_inclusive,
         tax_amount: item.tax_amount,
-        taxes: item.taxes?.map((tax) => ({
-          tax_rate_id: tax.tax_rate_id,
-          tax_name: tax.tax_name,
-          tax_rate: tax.tax_rate,
-          tax_type: tax.tax_type,
-          taxable_amount: tax.taxable_amount,
-          tax_amount: tax.tax_amount,
-          is_inclusive: tax.is_inclusive,
-        })),
+        taxes: this.applyTaxCatalogToLine(
+          item.taxes,
+          tax_catalog,
+          label,
+          index,
+        ),
       })),
     });
 
@@ -3335,6 +3511,41 @@ export class InvoicingService {
       { id: number; account_code: string | null }
     >(variants.map((v) => [v.id, v]));
 
+    // Artículo que el catálogo de ESTA tienda no devuelve ⇒ no sigue.
+    //
+    // Las dos consultas de arriba van por `this.prisma`, que scopea `products`
+    // por tienda y `product_variants` por relación, así que "no está en el
+    // mapa" significa a la vez «no existe» y «es de otra tienda». Antes de esta
+    // puerta las dos cosas se colaban por caminos distintos y ambas malas: el
+    // id inexistente reventaba en la FK de `invoice_items` como un 500 —después
+    // de que `generateNextNumber` ya hubiera gastado el consecutivo—, y el id
+    // de otra tienda satisfacía la FK y quedaba escrito en la factura.
+    //
+    // Se lanza aquí y no en el `create` porque este resolutor es el único punto
+    // por el que pasan LOS DOS carriles de escritura (`create` y `update`), que
+    // es el mismo motivo por el que `UpdateInvoiceDto` deriva de `CreateInvoiceDto`.
+    const rejected_products = product_ids.filter((id) => !product_by_id.has(id));
+    const rejected_variants = variant_ids.filter((id) => !variant_by_id.has(id));
+    if (rejected_products.length > 0 || rejected_variants.length > 0) {
+      const parts = [
+        rejected_products.length
+          ? `producto(s) ${rejected_products.join(', ')}`
+          : null,
+        rejected_variants.length
+          ? `variante(s) ${rejected_variants.join(', ')}`
+          : null,
+      ].filter(Boolean);
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_003,
+        `El documento referencia ${parts.join(' y ')} que no existen en el catálogo de esta tienda. ` +
+          'Selecciónalos desde el buscador de productos, o deja la línea sin producto si es un ítem libre.',
+        {
+          rejected_product_ids: rejected_products,
+          rejected_product_variant_ids: rejected_variants,
+        },
+      );
+    }
+
     return items.map((item) => {
       const product =
         item.product_id != null
@@ -3385,4 +3596,25 @@ interface InvoiceLinePricingSnapshot {
   unit_code?: string;
   /** Cuenta ya resuelta: línea → variante → producto. `undefined` ⇒ mapping. */
   account_code?: string;
+}
+
+/**
+ * Una fila del catálogo `tax_rates` de la tienda, ya normalizada al vocabulario
+ * del documento fiscal. Es la VERDAD del impuesto que el comerciante creó.
+ *
+ * Se construye en `resolveTenantTaxRateCatalog`, que además comprueba la
+ * pertenencia al tenant. Sólo entran filas ya validadas.
+ */
+interface TenantTaxRateSnapshot {
+  /**
+   * Tarifa en PORCENTAJE (19 = 19 %), convertida desde la fracción que guarda
+   * `tax_rates.rate`. En `Decimal` para que la conversión ×100 no herede el
+   * error de coma flotante que el resto del dominio se esmera en no tener.
+   */
+  tax_rate: Prisma.Decimal;
+  /** `tax_categories.tax_type` — la clasificación con la que se arman ValImp1/2/3. */
+  tax_type: string | null;
+  tax_name: string;
+  /** Default del catálogo; la línea puede sobrescribirlo. */
+  is_inclusive: boolean | null;
 }

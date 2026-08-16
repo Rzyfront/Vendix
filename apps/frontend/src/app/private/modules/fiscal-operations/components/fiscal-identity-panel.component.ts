@@ -141,11 +141,33 @@ const VALID_NIT_TYPES: NitType[] = [
             </app-button>
           </div>
 
+          <!--
+            showResponsibilities DEBE ir en true.
+
+            El selector de periodicidad de IVA se renderiza DENTRO del fieldset
+            de responsabilidades, colgado de la fila O-48 (ver
+            legal-data-form.component.ts). Con el fieldset apagado y
+            showVatPeriodicity encendido, la periodicidad no tenía NINGUNA forma
+            de escribirse desde la UI — y el formulario la seguía enviando en el
+            PATCH. Resultado: «Guardar cambios» fallaba por un campo que la
+            pantalla no ofrecía, justo al intentar capturar el municipio y el
+            CIIU.
+
+            El false era un resto de cuando este panel pintaba sus propios
+            toggles; la sección vive en el form desde la deduplicación (mismo
+            motivo por el que onScanConfirmed vuelca ahí tax_responsibilities) y
+            el subtítulo de la tarjeta ya promete «responsabilidades
+            tributarias».
+
+            OJO: sin acentos graves. Este comentario vive dentro del template
+            literal del decorador; un backtick aquí lo cierra y el archivo deja
+            de compilar con errores que apuntan a nombres inexistentes.
+          -->
           <app-legal-data-form
             #legalForm
             [initialValue]="formSeed()"
             [disabled]="saving()"
-            [showResponsibilities]="false"
+            [showResponsibilities]="true"
             [requireMunicipalityCode]="true"
             [showVatPeriodicity]="true"
             [showLocationHelpers]="true"

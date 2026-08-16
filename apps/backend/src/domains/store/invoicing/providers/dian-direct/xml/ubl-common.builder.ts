@@ -37,7 +37,7 @@ import {
  * común de `DianIssuerData` y `DianCustomerData`, extraído para que las dos
  * formas de dirección —envuelta en `cac:Address` y plana— compartan firma.
  */
-interface DianAddressFields {
+export interface DianAddressFields {
   address_line?: string;
   city_code?: string;
   city_name?: string;
@@ -734,8 +734,9 @@ export class UblCommonBuilder {
    *
    * Fix:
    *
-   *   - @schemeID  = DIAN_ID_TYPES[document_type] (DIAN code, not DV).
-   *   - @schemeName= document_type literal ('NIT', 'CC', …).
+   *   - @schemeID  = dígito de verificación (vacío cuando el documento no lo
+   *                  lleva). Es la MISMA convención del emisor.
+   *   - @schemeName= DIAN_ID_TYPES[document_type] (código DIAN: '31', '13', …).
    *   - Structural branch by `person_type`:
    *       JURIDICA  → `cac:PartyLegalEntity` with `cbc:RegistrationName` +
    *                   `cbc:CompanyID`.
@@ -746,10 +747,10 @@ export class UblCommonBuilder {
    *     retenedor markers (gran contribuyente=1 if O-13, autorretenedor=2 if
    *     O-15, agente de retención=3 if is_withholding_agent).
    *   - `cbc:IndustryClassificationCode` emitted when `ciiu_code` is present.
-   *   - The verification digit, when present, is emitted alongside the bare
-   *     document number in `cbc:CompanyID`/`cbc:ID` as `<NIT>-<DV>` (canonical
-   *     Anexo 19 form when `schemeName` already carries the type literal —
-   *     keeps the DV explicit without re-using `@schemeID`).
+   *   - El número de documento viaja DESNUDO en `cbc:CompanyID`/`cbc:ID`; el
+   *     DV va en `@schemeID`. La forma `<NIT>-<DV>` que se usó antes rompía el
+   *     CUFE: §11.2 toma `NumAdq` de `cac:PartyTaxScheme/cbc:CompanyID` y lo
+   *     exige sin DV, así que la DIAN recomputaba el hash sobre otro valor.
    */
   static buildCustomerParty(parent: any, customer: DianCustomerData): void {
     const customer_party = parent.ele(
@@ -788,16 +789,22 @@ export class UblCommonBuilder {
 
     const party = customer_party.ele(UBL_NAMESPACES.CAC, 'Party');
 
-    // The document-number-with-DV form for `cbc:CompanyID`/`cbc:ID` text
-    // content. Bare number when no DV; `<NIT>-<DV>` when present. Using the
-    // explicit `<NIT>-<DV>` form (vs. `@schemeName="NIT-DV"`) keeps the DV
-    // visible at the XPath DIAN validates and matches the canonical Anexo 19
-    // convention: schemeName carries the document type literal, schemeID
-    // carries the DIAN code, and the DV rides alongside the value.
-    const id_value_with_dv =
-      customer.verification_digit && customer.document_number
-        ? `${customer.document_number}-${customer.verification_digit}`
-        : customer.document_number;
+    // Identificación del adquiriente: el número DESNUDO en el texto, el DV en
+    // `@schemeID` y el código DIAN del tipo de documento en `@schemeName`.
+    //
+    // Esto NO es una preferencia de estilo: `cac:PartyTaxScheme/cbc:CompanyID`
+    // es el XPath del que el Anexo Técnico 1.9 §11.2 toma `NumAdq` para el
+    // CUFE, y lo exige «sin puntos, sin guiones, SIN dígito de verificación».
+    // Emitir aquí `<NIT>-<DV>` mientras `cufe-calculator` hashea el número
+    // desnudo hace que la DIAN recompute el hash sobre otro valor y rechace —
+    // el mismo modo de fallo que costó un consecutivo autorizado en agosto.
+    //
+    // Es además la convención que ya usa el EMISOR tres métodos más arriba
+    // (`schemeID = issuer.nit_dv`, `schemeName = '31'`, texto = `issuer.nit`).
+    // Que las dos partes del mismo documento se identificaran con convenciones
+    // opuestas era el defecto.
+    const id_value = customer.document_number;
+    const id_scheme_dv = customer.verification_digit || '';
 
     // `cac:PartyIdentification` es obligatorio cuando el adquiriente es
     // consumidor final, es decir cuando `AdditionalAccountID = "2"`. La DIAN
@@ -828,9 +835,9 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'ID')
       .att('schemeAgencyID', '195')
       .att('schemeAgencyName', UblCommonBuilder.DIAN_SCHEME_AGENCY_NAME)
-      .att('schemeID', dian_scheme_id)
-      .att('schemeName', customer.document_type)
-      .txt(id_value_with_dv);
+      .att('schemeID', id_scheme_dv)
+      .att('schemeName', dian_scheme_id)
+      .txt(id_value);
 
     // Party name (commercial name when present, else legal name / first+last).
     party
@@ -864,9 +871,9 @@ export class UblCommonBuilder {
         'schemeAgencyName',
         'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
       )
-      .att('schemeID', dian_scheme_id)
-      .att('schemeName', customer.document_type)
-      .txt(id_value_with_dv);
+      .att('schemeID', id_scheme_dv)
+      .att('schemeName', dian_scheme_id)
+      .txt(id_value);
 
     // cbc:TaxLevelCode — fiscal responsibilities of the acquirer; the
     // @listName is the literal 'No aplica' per the DIAN annex. A consumidor
@@ -917,9 +924,9 @@ export class UblCommonBuilder {
           'schemeAgencyName',
           'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
         )
-        .att('schemeID', dian_scheme_id)
-        .att('schemeName', customer.document_type)
-        .txt(id_value_with_dv);
+        .att('schemeID', id_scheme_dv)
+        .att('schemeName', dian_scheme_id)
+        .txt(id_value);
     }
 
     // Contact — posición 13, entre `cac:PartyLegalEntity` y `cac:Person`.
@@ -949,9 +956,9 @@ export class UblCommonBuilder {
           'schemeAgencyName',
           'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
         )
-        .att('schemeID', dian_scheme_id)
-        .att('schemeName', customer.document_type)
-        .txt(id_value_with_dv);
+        .att('schemeID', id_scheme_dv)
+        .att('schemeName', dian_scheme_id)
+        .txt(id_value);
       person
         .ele(UBL_NAMESPACES.CBC, 'FirstName')
         .txt(customer.first_name || customer.legal_name || '');
@@ -1100,6 +1107,39 @@ export class UblCommonBuilder {
         department_name: address.department_name ?? null,
       },
     );
+  }
+
+  /**
+   * ¿Esta dirección se puede emitir SIN inventar nada? Misma pregunta que
+   * `buildAddressFields` responde lanzando, pero contestada con un booleano y
+   * sin efectos.
+   *
+   * Existe para que la cascada de respaldo del adquiriente
+   * (`acquirer-address.resolver.ts`) pueda PROBAR un candidato antes de
+   * elegirlo. Lo importante es que delega en el MISMO
+   * `resolveAddressMunicipality` que usa la emisión: una segunda definición de
+   * «dirección utilizable» escrita aparte se desincroniza el primer día, y la
+   * forma en que se desincronizaría es la peor posible — la cascada declarando
+   * un candidato bueno que el emisor rechaza medio segundo después, ya dentro
+   * del `try` que gasta el consecutivo.
+   *
+   * `true` para una dirección extranjera de adquiriente: el resolvedor devuelve
+   * `null` sin lanzar porque los cuatro elementos Divipola son `0..1` en
+   * FAK09-FAK12, y omitirlos es válido. Eso es utilizable, no defectuoso.
+   */
+  static canEmitAddress(
+    address: DianAddressFields,
+    role: DianAddressRole,
+  ): boolean {
+    const country_code = (address.country_code || DIAN_COLOMBIA_COUNTRY_CODE)
+      .trim()
+      .toUpperCase();
+    try {
+      UblCommonBuilder.resolveAddressMunicipality(address, role, country_code);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

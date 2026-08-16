@@ -7,12 +7,19 @@ import {
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
+import { AbstractControl } from '@angular/forms';
+import { Subscription, take } from 'rxjs';
 
 import { InvoiceResolution } from '../../../interfaces/invoice.interface';
+import {
+  applyBackendValidationErrors,
+  clearBackendError,
+} from '../../../utils/invoicing-errors.util';
 import {
   createResolution,
   createResolutionFailure,
@@ -82,6 +89,7 @@ export type EditableResolution = InvoiceResolution | FiscalReadinessResolution;
              resolución anterior. -->
         @if (isOpen()) {
           <app-dian-resolution-form
+            #resolutionForm
             [configurationType]="configurationType()"
             [resolution]="formResolution()"
             [documentType]="documentType()"
@@ -123,6 +131,18 @@ export class ResolutionCreateComponent {
   readonly submitting = signal(false);
   /** Error del backend, ya redactado. Se muestra crudo dentro del formulario. */
   readonly errorText = signal<string | null>(null);
+
+  /**
+   * El formulario compartido, para poder repartir los `details.validationErrors`
+   * sobre SUS controles. Es `viewChild` opcional porque el form sólo se
+   * construye cuando el modal está abierto (`@if (isOpen())`).
+   */
+  private readonly resolutionForm =
+    viewChild<DianResolutionFormComponent>('resolutionForm');
+
+  /** Controles a los que se les colgó un error del backend, para limpiarlos. */
+  private erroredControls: { path: string; control: AbstractControl }[] = [];
+  private backendErrorSubs = new Subscription();
 
   readonly isEditing = computed(() => this.resolution() !== null);
 
@@ -177,10 +197,13 @@ export class ResolutionCreateComponent {
     // acusa a datos que ya no están en pantalla.
     effect(() => {
       if (this.isOpen()) {
+        this.clearBackendErrors();
         this.errorText.set(null);
         this.submitting.set(false);
       }
     });
+
+    this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
 
     this.actions$
       .pipe(
@@ -199,14 +222,51 @@ export class ResolutionCreateComponent {
         ofType(createResolutionFailure, updateResolutionFailure),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(({ error }) => {
+      .subscribe(({ error, details }) => {
         this.submitting.set(false);
         // El modal NO se cierra: cerrar sobre un fallo tira lo tecleado y deja
         // al usuario adivinando qué campo rechazó el backend.
         this.errorText.set(
           error || 'No se pudo guardar la resolución. Revisa los datos.',
         );
+        this.pinBackendErrorsToFields(details);
       });
+  }
+
+  /**
+   * Cuelga cada `details.validationErrors` sobre el control que nombra.
+   *
+   * El toast y el `errorText` dicen QUÉ está mal; esto dice DÓNDE. Sin ello, un
+   * rechazo de la clave técnica pintaba un párrafo al pie de nueve campos y el
+   * usuario tenía que deducir cuál corregir — que es como una ClTec de 38
+   * caracteres llegó a producción.
+   *
+   * Cada control marcado se limpia en cuanto el usuario lo edita: si el error
+   * del backend se quedara pegado, el formulario nunca volvería a ser válido.
+   */
+  private pinBackendErrorsToFields(details: unknown): void {
+    const form = this.resolutionForm()?.form;
+    if (!form) return;
+
+    const applied = applyBackendValidationErrors(form, details);
+    this.erroredControls = applied.touchedControls;
+    for (const { control } of applied.touchedControls) {
+      this.backendErrorSubs.add(
+        control.valueChanges.pipe(take(1)).subscribe(() => {
+          clearBackendError(control);
+        }),
+      );
+    }
+  }
+
+  /** Deja el formulario sin rastro del intento anterior. */
+  private clearBackendErrors(): void {
+    this.backendErrorSubs.unsubscribe();
+    this.backendErrorSubs = new Subscription();
+    for (const { control } of this.erroredControls) {
+      clearBackendError(control);
+    }
+    this.erroredControls = [];
   }
 
   /**
@@ -219,6 +279,9 @@ export class ResolutionCreateComponent {
   onSave(value: DianResolutionFormValue): void {
     this.submitting.set(true);
     this.errorText.set(null);
+    // Los errores del intento anterior se van con el intento anterior: si no,
+    // el `FormGroup` sigue inválido por un motivo que ya se corrigió.
+    this.clearBackendErrors();
 
     const payload = {
       resolution_number: value.resolution_number,

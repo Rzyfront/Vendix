@@ -309,6 +309,146 @@ describe('InvoiceCalculatorService', () => {
     });
   });
 
+  /**
+   * DESCUENTOS, de punta a punta.
+   *
+   * El descuento es el único dato de la línea que toca las TRES magnitudes que
+   * la DIAN revalida a la vez —base gravable, cuota y total— y el defecto que
+   * produce no se ve: la factura cuadra consigo misma, sólo que declara IVA
+   * sobre una base que el cliente no pagó (o menos IVA del debido, si se
+   * descuenta dos veces). Estos casos fijan el orden de las operaciones.
+   *
+   * Vendix origina el descuento SIEMPRE por línea: `CreateInvoiceDto` no expone
+   * un descuento de documento, y `invoices.discount_amount` es exactamente la Σ
+   * de los de línea (ver `totals.discount_amount`). Esa igualdad es lo que hace
+   * que `UblCommonBuilder.documentDiscount` calcule un remanente cero y no emita
+   * ningún `cac:AllowanceCharge` de cabecera que reste dos veces.
+   */
+  describe('Descuentos — el impuesto se calcula sobre la base YA descontada', () => {
+    it('el descuento de una línea INCLUSIVA se resta ANTES de despejar la base', () => {
+      const result = service.calculate(
+        oneLine({
+          description: '119.000 IVA incluido con 11.900 de descuento',
+          quantity: 1,
+          unit_price: 119000,
+          discount_amount: 11900,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      // El descuento vive en la moneda CAPTURADA, o sea con el IVA dentro.
+      expect(line.discount_amount).toBe('11900.00');
+      expect(line.net_entered_amount).toBe('107100.00');
+      // 107.100 / 1,19 = 90.000. Despejar ANTES de descontar habría dado
+      // 100.000 − 11.900 = 88.100 de base y 16.739 de cuota: la línea declararía
+      // 361 pesos menos de IVA y un total de 104.839 contra los 107.100 que el
+      // cliente efectivamente paga.
+      expect(line.line_extension_amount).toBe('90000.00');
+      expect(line.tax_amount).toBe('17100.00');
+      expect(line.total_amount).toBe('107100.00');
+    });
+
+    it('descuenta por línea y agrega: la cabecera es la Σ de lo ya descontado', () => {
+      const result = service.calculate({
+        items: [
+          {
+            description: 'Con descuento',
+            quantity: 1,
+            unit_price: 200000,
+            discount_amount: 50000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+          {
+            description: 'Sin descuento',
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      // El bruto capturado sigue disponible, pero no es la base.
+      expect(result.totals.gross_subtotal).toBe('300000.00');
+      expect(result.totals.discount_amount).toBe('50000.00');
+      // 150.000 + 100.000 — `cbc:LineExtensionAmount` de cabecera (FAU14).
+      expect(result.totals.total_before_tax).toBe('250000.00');
+      // 28.500 + 19.000, nunca 57.000 (que sería gravar el bruto).
+      expect(result.totals.tax_iva).toBe('47500.00');
+      expect(result.totals.total_amount).toBe('297500.00');
+
+      // La fila de cabecera declara la base DESCONTADA: es la que el XML emite
+      // como `cac:TaxSubtotal/cbc:TaxableAmount` y contra la que la DIAN aplica
+      // `TaxAmount = TaxableAmount × Percent / 100`.
+      expect(result.header_taxes).toHaveLength(1);
+      expect(result.header_taxes[0].taxable_amount).toBe('250000.00');
+      expect(result.header_taxes[0].tax_amount).toBe('47500.00');
+    });
+
+    it('descuenta una sola vez: `discount_amount` no vuelve a restarse del total', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          discount_amount: 30000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const { totals } = result;
+      // La identidad que la DIAN recomputa. Restar además el descuento acá —el
+      // error natural, porque `discount_amount` está en el mismo objeto— daría
+      // 53.300 y rompería `base + tributos = PayableAmount`.
+      expect(totals.total_amount).toBe('83300.00');
+      expect(totals.total_amount).toBe(totals.tax_inclusive_amount);
+      expect(
+        new Prisma.Decimal(totals.total_before_tax)
+          .plus(totals.tax_amount)
+          .toFixed(2),
+      ).toBe(totals.total_amount);
+    });
+
+    it('un descuento con centavos trunca la base antes de gravarla, no después', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          discount_amount: 33333.335,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      // 100.000 − 33.333,335 = 66.666,665 → 66.666,66 (truncado, §11.2).
+      expect(line.line_extension_amount).toBe('66666.66');
+      // 66.666,66 × 0,19 = 12.666,6654 → 12.666,66. Gravar la base en precisión
+      // plena daría 12.666,67, un centavo que la DIAN no puede reproducir desde
+      // el XML —donde la base ya viaja truncada— y que rompe la regla
+      // aritmética del `cac:TaxSubtotal`.
+      expect(line.tax_amount).toBe('12666.66');
+      expect(line.total_amount).toBe('79333.32');
+    });
+
+    it('un descuento mayor que el precio no produce base ni impuesto negativos', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 50000,
+          discount_amount: 80000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      // Es un error de captura, no una base a declarar: un importe en rojo en
+      // `cbc:LineExtensionAmount` es rechazo, y `-0.00` en el XML también.
+      expect(line.line_extension_amount).toBe('0.00');
+      expect(line.tax_amount).toBe('0.00');
+      expect(result.totals.total_amount).toBe('0.00');
+    });
+  });
+
   describe('Multi-impuesto por línea', () => {
     it('grava IVA e INC exclusivos sobre la misma base', () => {
       const result = service.calculate(

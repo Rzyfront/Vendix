@@ -138,6 +138,9 @@ export class DianTestService {
     private readonly s3_service: S3Service,
     private readonly xml_signer: DianXmlSignerService,
     private readonly secret_envelope: DianSecretEnvelopeService,
+    // El import ya estaba; el servicio no. Se usa en la precondición de ClTec
+    // del set de pruebas para leer la MISMA clave que hashea la emisión real.
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
     // Productor de la cola del set de pruebas. Consumidor: DianTestSetProcessor.
     // La cola se registra en cada módulo que expone el flujo (tienda,
     // organización y plataforma) porque las tres superficies comparten ESTE
@@ -855,7 +858,15 @@ export class DianTestService {
     // nota (`validate_kind`) emiten un CUDE con Software-PIN y no tocan la ClTec.
     let invoice_technical_key = '';
     if (composition.invoices > 0) {
-      const technical_key = normalizeTechnicalKey(resolution.technical_key);
+      // Por la BÓVEDA, igual que `invoice-flow.service.ts` al emitir de verdad.
+      // Este servicio validaba y hasheaba la columna plana; eran coherentes
+      // ENTRE SÍ, y ahí estaba la trampa: el set de pruebas se firmaba con una
+      // clave y la producción con la que `reveal()` prefiere —la cifrada—. Se
+      // consigue la habilitación con una ClTec y se emite con otra, que es el
+      // peor desenlace posible porque el fallo aparece después de certificar.
+      const technical_key = normalizeTechnicalKey(
+        this.technicalKeyVault.reveal(resolution),
+      );
       if (!isWellFormedTechnicalKey(technical_key)) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_011,

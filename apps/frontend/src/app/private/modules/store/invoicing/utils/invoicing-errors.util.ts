@@ -47,15 +47,49 @@ export interface ApiFailure {
 }
 
 /**
+ * Cuantos motivos de validacion caben en un toast antes de volverse ilegible.
+ * El resto no se pierde: se cuenta, y `applyBackendValidationErrors` los pinta
+ * sobre su campo.
+ */
+const MAX_VALIDATION_MESSAGES_IN_TOAST = 2;
+
+/**
  * Normaliza cualquier error de HTTP a `ApiFailure`.
  *
- * Con `error_code` manda `parseApiError` (copy curado, jamas el mensaje de
- * desarrollador). Sin `error_code` —error de red, 502, respuesta sin envolver—
- * `parseApiError` devolveria "Ocurrio un error. Intente de nuevo.", asi que se
- * cae a `extractApiErrorMessage`, que al menos sabe traducir el status HTTP.
+ * Tres fuentes, en orden de concrecion:
+ *
+ *  1. `details.validationErrors` — EL MOTIVO REAL. El `ValidationPipe` global
+ *     de `main.ts` mete ahi los mensajes de class-validator y deja
+ *     `message: 'Validation failed'` con `error_code: 'SYS_VALIDATION_001'`,
+ *     cuyo copy es el generico «Los datos ingresados no son validos.». Preferir
+ *     el copy sobre el detalle es exactamente como una resolucion con la clave
+ *     tecnica de 38 caracteres se rechazo SIN decir que la clave estaba mocha:
+ *     el backend ya lo habia redactado —con la longitud leida y donde encontrar
+ *     la correcta— y el frontend lo tiraba a la basura. El usuario tuvo que
+ *     abrir el network para enterarse.
+ *  2. `error_code` — copy curado de `ERROR_MESSAGES`, jamas el mensaje de
+ *     desarrollador.
+ *  3. Sin `error_code` —error de red, 502, respuesta sin envolver—
+ *     `extractApiErrorMessage`, que al menos sabe traducir el status HTTP.
+ *
+ * `details` viaja intacto en los tres casos: el toast dice lo primero que hay
+ * que corregir y `applyBackendValidationErrors` reparte TODO sobre los campos.
  */
 export function describeApiFailure(error: unknown): ApiFailure {
   const parsed = parseApiError(error);
+  const validationMessages = extractValidationMessages(parsed.details);
+
+  if (validationMessages.length > 0) {
+    const shown = validationMessages.slice(0, MAX_VALIDATION_MESSAGES_IN_TOAST);
+    const hidden = validationMessages.length - shown.length;
+    return {
+      message:
+        shown.join(' · ') + (hidden > 0 ? ` (+${hidden} más)` : ''),
+      errorCode: parsed.errorCode,
+      details: parsed.details,
+    };
+  }
+
   return {
     message: parsed.errorCode ? parsed.userMessage : extractApiErrorMessage(error),
     errorCode: parsed.errorCode,

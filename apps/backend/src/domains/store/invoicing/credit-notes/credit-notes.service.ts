@@ -108,6 +108,40 @@ export class CreditNotesService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     }
 
+    // Una nota crédito/débito (tipos DIAN 91/92) sólo corrige una FACTURA. Cada
+    // familia de documento tiene la suya y no son intercambiables:
+    //   · documento equivalente POS  → nota de ajuste 93/94
+    //     (`equivalent_adjustment_note`, Res. 000165/2023)
+    //   · documento soporte          → nota de ajuste 95 (`support_adjustment_note`)
+    //   · una nota                   → no se corrige con otra nota
+    //
+    // Sin esta puerta el servicio aceptaba cualquiera de esos, tomaba consecutivo
+    // de la resolución de notas y recién la DIAN rechazaba el tipo — con el
+    // número ya gastado. La única barrera existente era `isCorrectableType()` en
+    // la UI, que no protege a ningún otro cliente de la API.
+    const CORRECTABLE_BY_NOTE = [
+      'sales_invoice',
+      'export_invoice',
+      'purchase_invoice',
+    ];
+    if (!CORRECTABLE_BY_NOTE.includes(related_invoice.invoice_type)) {
+      const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
+      const correct_instrument =
+        related_invoice.invoice_type === 'pos_equivalent_document'
+          ? 'Un documento equivalente POS se corrige con una nota de ajuste (tipo DIAN 93/94), no con una nota crédito o débito.'
+          : related_invoice.invoice_type === 'support_document'
+            ? 'Un documento soporte se corrige con una nota de ajuste al documento soporte (tipo DIAN 95).'
+            : 'Sólo una factura puede corregirse con una nota crédito o débito.';
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        `El documento ${related_invoice.invoice_number} es de tipo «${related_invoice.invoice_type}» y no admite ${label}. ${correct_instrument}`,
+        {
+          related_invoice_id: related_invoice.id,
+          related_invoice_type: related_invoice.invoice_type,
+        },
+      );
+    }
+
     if (related_invoice.status !== 'accepted') {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_002,
@@ -128,6 +162,21 @@ export class CreditNotesService {
         },
       );
     }
+
+    // ANTES de tomar el consecutivo, no después. Una línea que referencia un
+    // artículo ajeno al catálogo de esta tienda tiene dos finales y los dos son
+    // malos: el id inexistente revienta en la FK de `invoice_items` como un 500
+    // «Error interno» —con el consecutivo autorizado ya gastado y sin manera de
+    // devolverlo—, y el id de OTRA tienda satisface la FK y queda escrito en la
+    // nota, que es una fuga de tenant que responde 201.
+    //
+    // La guarda gemela vive en `InvoicingService.resolveLinePricingSnapshots`,
+    // que es el seam por el que pasan la creación y la edición de facturas. Las
+    // notas no lo cruzan —construyen sus líneas por su cuenta—, así que la
+    // protección hay que repetirla aquí; es el precio de tener dos carriles de
+    // escritura, y se prefiere duplicar catorce líneas antes que dejar el
+    // carril de notas sin puerta.
+    await this.assertNoteLinesResolvable(dto.items);
 
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({
@@ -166,7 +215,7 @@ export class CreditNotesService {
     const taxes = dto.taxes?.length
       ? dto.taxes
       : dto.items?.length
-        ? []
+        ? deriveNoteTaxesFromLines(items, related_invoice.invoice_taxes, type)
         : related_invoice.invoice_taxes.map((t) => ({
             tax_rate_id: t.tax_rate_id ?? undefined,
             tax_name: t.tax_name,
@@ -221,6 +270,16 @@ export class CreditNotesService {
         issue_date,
         created_by_user_id: context.user_id,
         notes: dto.notes || (dto as CreateCreditNoteDto).reason,
+        // Concepto DIAN (`cac:DiscrepancyResponse/cbc:ResponseCode`). El DTO ya
+        // validó que el código pertenece al catálogo de ESTE tipo de nota —los
+        // dos catálogos son distintos—, así que aquí sólo se persiste.
+        //
+        // `?? null` explícito: ausente NO es '2'. La columna queda NULL y es el
+        // builder quien cae al literal histórico, en un solo lugar. Traducir el
+        // vacío a '2' acá dejaría indistinguibles «el usuario eligió anulación»
+        // y «esta nota nació sin concepto», que es justo lo que hay que poder
+        // separar para saber qué se declaró de verdad.
+        note_concept_code: dto.note_concept_code ?? null,
         invoice_items: {
           create: items.map((item) => {
             const item_total =
@@ -293,4 +352,149 @@ export class CreditNotesService {
     );
     return note;
   }
+
+  /**
+   * Rechaza una nota cuyas líneas referencian artículos que el catálogo de esta
+   * tienda no devuelve.
+   *
+   * Sólo mira `dto.items`. Las líneas de la nota TOTAL se copian de
+   * `related_invoice.invoice_items`, cuyos ids ya satisfacen la FK por
+   * construcción: volver a consultarlos sería una consulta por nota para
+   * confirmar algo que la base ya garantiza.
+   *
+   * Las dos consultas van por `this.prisma`, que scopea `products` por tienda y
+   * `product_variants` por relación. Por eso «no está en el mapa» significa a la
+   * vez «no existe» y «es de otra tienda», y por eso un solo control cierra los
+   * dos agujeros: el 500 por FK y la fuga de tenant que respondía 201.
+   *
+   * 422 y no 404: no falta el recurso que se pidió —la nota se está creando—,
+   * sino que el cuerpo referencia uno que no es de quien escribe.
+   */
+  private async assertNoteLinesResolvable(
+    items: CreateCreditNoteDto['items'],
+  ): Promise<void> {
+    if (!items?.length) return;
+
+    const product_ids = [
+      ...new Set(
+        items
+          .map((item) => item.product_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const variant_ids = [
+      ...new Set(
+        items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    if (!product_ids.length && !variant_ids.length) return;
+
+    const [products, variants] = await Promise.all([
+      product_ids.length
+        ? this.prisma.products.findMany({
+            where: { id: { in: product_ids } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+      variant_ids.length
+        ? this.prisma.product_variants.findMany({
+            where: { id: { in: variant_ids } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const found_products = new Set(products.map((p) => p.id));
+    const found_variants = new Set(variants.map((v) => v.id));
+    const rejected_products = product_ids.filter((id) => !found_products.has(id));
+    const rejected_variants = variant_ids.filter((id) => !found_variants.has(id));
+    if (!rejected_products.length && !rejected_variants.length) return;
+
+    const parts = [
+      rejected_products.length
+        ? `producto(s) ${rejected_products.join(', ')}`
+        : null,
+      rejected_variants.length
+        ? `variante(s) ${rejected_variants.join(', ')}`
+        : null,
+    ].filter(Boolean);
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CALC_003,
+      `La nota referencia ${parts.join(' y ')} que no existen en el catálogo de esta tienda. ` +
+        'Selecciónalos desde el buscador de productos, o deja la línea sin producto si es un ítem libre.',
+      {
+        rejected_product_ids: rejected_products,
+        rejected_product_variant_ids: rejected_variants,
+      },
+    );
+  }
+}
+
+/**
+ * Nota PARCIAL sin desglose de impuestos propio.
+ *
+ * Antes esta rama devolvía `[]`, y ahí estaba el defecto: la cabecera SÍ suma
+ * `item.tax_amount` (el bucle de totales de arriba), así que la nota quedaba
+ * con cuota declarada y CERO filas en `invoice_taxes`. Reproducido en dev con
+ * NCDEV2: `tax_amount = 28500`, `total = 178500`, ninguna fila.
+ *
+ * Al emitir, `LegalMonetaryTotal` incluye esos 28.500 mientras el documento no
+ * lleva ningún `cac:TaxTotal` que los respalde. La DIAN valida esa identidad
+ * aritméticamente y rechaza — quemando el consecutivo de la nota.
+ *
+ * Se deriva del perfil tributario del documento que se corrige, que es el único
+ * origen legítimo: una nota no inventa tributos, corrige los de su factura.
+ * Cuando la factura mezcla varios esquemas (IVA + INC, p. ej.) las líneas del
+ * DTO sólo traen un `tax_amount` agregado y NO hay forma de repartirlo sin
+ * adivinar, así que se exige el desglose explícito en vez de fabricarlo.
+ */
+function deriveNoteTaxesFromLines(
+  items: Array<{
+    quantity: number;
+    unit_price: number;
+    discount_amount?: number;
+    tax_amount?: number;
+  }>,
+  invoice_taxes: Array<{
+    tax_rate_id: number | null;
+    tax_name: string;
+    tax_rate: Prisma.Decimal;
+    tax_type: string | null;
+  }>,
+  type: 'credit_note' | 'debit_note',
+) {
+  const note_tax = items.reduce((acc, i) => acc + (i.tax_amount || 0), 0);
+  const note_base = items.reduce(
+    (acc, i) => acc + i.quantity * i.unit_price - (i.discount_amount || 0),
+    0,
+  );
+
+  // Sin cuota no hay nada que respaldar: líneas exentas o excluidas salen sin
+  // `cac:TaxTotal`, que es exactamente lo que el Anexo 1.9 pide para ellas.
+  if (note_tax === 0) return [];
+
+  if (invoice_taxes.length !== 1) {
+    const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CALC_001,
+      invoice_taxes.length === 0
+        ? `Las líneas de la ${label} declaran ${note_tax} de impuesto, pero la factura que corrigen no tiene ningún impuesto registrado del que derivarlo. Envía el desglose en «taxes».`
+        : `La factura que corrige esta ${label} mezcla ${invoice_taxes.length} impuestos (${invoice_taxes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
+      { note_tax_amount: note_tax, invoice_tax_schemes: invoice_taxes.length },
+    );
+  }
+
+  const scheme = invoice_taxes[0];
+  return [
+    {
+      tax_rate_id: scheme.tax_rate_id ?? undefined,
+      tax_name: scheme.tax_name,
+      tax_rate: Number(scheme.tax_rate),
+      taxable_amount: note_base,
+      tax_amount: note_tax,
+      tax_type: scheme.tax_type,
+    },
+  ];
 }

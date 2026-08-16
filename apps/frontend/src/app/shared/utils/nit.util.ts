@@ -45,18 +45,44 @@ export function isValidNitDv(nit: string, dv: string | number): boolean {
 }
 
 /**
+ * Fábrica del validador de GRUPO que verifica la coherencia NIT ↔ DV.
+ *
+ * El validador vive en el `FormGroup` (no en un control) porque compara dos
+ * campos hermanos. Los nombres de esos campos NO son universales en la app:
+ * los formularios fiscales usan `nit` / `nit_dv`, mientras que el formulario
+ * de clientes usa `document_number` / `verification_digit`. Enganchar el
+ * validador con los nombres equivocados no falla ni avisa — `control.get()`
+ * devuelve `null`, el validador sale por la guarda de vacío y queda como un
+ * no-op silencioso, dejando que el 400 del backend (`NitDvMatches`) sea el
+ * primer aviso. Por eso los nombres se pasan explícitamente.
+ *
+ * El error incluye el DV esperado para que la UI pueda decir cuál es el
+ * correcto en vez de limitarse a marcar el campo en rojo.
+ */
+export function nitDvGroupValidator(
+  nitKey = 'nit',
+  dvKey = 'nit_dv',
+): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const rawNit = control.get(nitKey)?.value;
+    const dv = control.get(dvKey)?.value;
+    if (!rawNit || dv === null || dv === undefined || dv === '') return null;
+    // Un NIT escrito como `900123456-7` ya trae el DV pegado: sin recortarlo,
+    // `computeNitDv` lo tomaría como parte de la base y marcaría un error
+    // falso. Mismo criterio que `normalizeNit()` en el backend.
+    const nit = String(rawNit).split('-')[0];
+    if (!nit) return null;
+    if (isValidNitDv(nit, String(dv))) return null;
+    return { nitDv: { expected: computeNitDv(nit) } };
+  };
+}
+
+/**
  * Angular validator that flags an invalid NIT+DV pair.
  *
  * Expects the control to be a `FormGroup` with two child controls:
- * `nit` and `nit_dv`. Adds `{ nitDv: true }` to the group errors when
+ * `nit` and `nit_dv`. Adds `{ nitDv: { expected } }` to the group errors when
  * the verification digit does not match. Empty values pass through
  * (use Validators.required to enforce presence).
  */
-export const nitDvValidator: ValidatorFn = (
-  control: AbstractControl,
-): ValidationErrors | null => {
-  const nit = control.get('nit')?.value;
-  const dv = control.get('nit_dv')?.value;
-  if (!nit || dv === null || dv === undefined || dv === '') return null;
-  return isValidNitDv(String(nit), String(dv)) ? null : { nitDv: true };
-};
+export const nitDvValidator: ValidatorFn = nitDvGroupValidator();

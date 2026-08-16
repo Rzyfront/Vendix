@@ -95,10 +95,10 @@ describe('UblSupportDocumentBuilder', () => {
     expect(xml).toContain('schemeName="CUDS-SHA384"');
     expect(xml).toContain('<cbc:CompanyID schemeAgencyID="195"');
     expect(xml).toContain('>123456789</cbc:CompanyID>');
-    // Anexo 19: when DV is present the canonical form is `<NIT>-<DV>`, so the
-    // issuer's `900123456` + `nit_dv: '7'` lands as `900123456-7` in
-    // `cac:CompanyID` text content.
-    expect(xml).toContain('>900123456-7</cbc:CompanyID>');
+    // El DV viaja en `@schemeID`, nunca pegado al número: §11.2 toma el
+    // identificador de este XPath para el hash y lo exige desnudo.
+    expect(xml).toContain('>900123456</cbc:CompanyID>');
+    expect(xml).not.toContain('900123456-7');
   });
 
   it('builds support adjustment note XML with DIAN type 95 and original CUDS reference', () => {
@@ -161,7 +161,7 @@ describe('UblSupportDocumentBuilder', () => {
       // The buyer's NIT-DV value lands at cac:CompanyID as `<NIT>-<DV>`
       // (canonical Anexo 19 form).
       expect(customer_block).toMatch(
-        /schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+        /schemeID="7"[^>]*>900123456<\/cbc:CompanyID>/,
       );
     });
   });

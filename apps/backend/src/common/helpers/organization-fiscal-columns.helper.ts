@@ -130,12 +130,30 @@ function readFirst(
  * fundan idéntico. Las llamadas que decían "deep-merge" en el código eran
  * incorrectas en intención y se corregían por accidente al pasar por
  * `{...previous, ...dto}`.
+ *
+ * ## `undefined` NO borra
+ *
+ * Un `{...existing, ...patch}` a secas SÍ pisa: una clave presente con valor
+ * `undefined` gana sobre el valor guardado y desaparece al serializar el JSON.
+ * Eso convierte «el formulario no traía este campo» en «bórralo», que es lo
+ * contrario de lo que promete un PATCH.
+ *
+ * Importa de verdad desde que los DTO de identidad fiscal normalizan el «no
+ * seleccionado» de un `<select>` (cadena vacía) a `undefined` para que
+ * `@IsOptional()` se lo salte: sin este filtro, guardar el municipio y el CIIU
+ * borraba en silencio la periodicidad de IVA declarada, y con ella cambiaba qué
+ * declaraciones genera `FiscalObligationService`.
+ *
+ * Para BORRAR un campo se manda `null` explícito: eso sí atraviesa la fusión.
  */
 export function mergeFiscalData<T extends Record<string, unknown>>(
   existing: T,
   patch: Record<string, unknown>,
 ): T {
-  return { ...existing, ...patch } as T;
+  const defined = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  );
+  return { ...existing, ...defined } as T;
 }
 
 /**

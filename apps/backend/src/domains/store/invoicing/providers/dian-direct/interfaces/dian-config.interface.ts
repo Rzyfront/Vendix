@@ -1,4 +1,16 @@
 /**
+ * De qué escalón de la cascada de respaldo salió la dirección que el documento
+ * declara para el adquiriente (ver `acquirer-address.resolver.ts`, dueño de la
+ * política).
+ *
+ * El TIPO vive acá y no junto a la cascada por una razón mecánica: la cascada
+ * importa el builder UBL y el builder importa este archivo. Declararlo en la
+ * cascada cerraría el ciclo interfaces → cascada → builder → interfaces. Este
+ * archivo no importa nada, así que es el único sitio donde el tipo no crea uno.
+ */
+export type DianAcquirerAddressSource = 'fiscal' | 'shipping' | 'store';
+
+/**
  * Decrypted DIAN configuration for a store.
  * Used internally after decrypting sensitive fields from the database.
  */
@@ -145,6 +157,19 @@ export interface DianCustomerData {
    * = "3"` alongside the person-type marker.
    */
   is_withholding_agent?: boolean;
+  /**
+   * ESCALÓN DE LA CASCADA DEL QUE SALIÓ LA DIRECCIÓN DE ARRIBA.
+   *
+   * `'fiscal'` la del cliente, `'shipping'` otra suya, `'store'` la del emisor
+   * (ver `acquirer-address.resolver.ts`). `null`/ausente cuando el documento no
+   * declara dirección — consumidor final, o adquiriente sin ninguna.
+   *
+   * NO viaja al XML: el documento declara la dirección, no su procedencia. Vive
+   * acá para subir hasta `ProviderResponse.provider_data` y poder decirle al
+   * usuario, en la confirmación, con qué domicilio se emitió. Un respaldo
+   * silencioso es exactamente lo que produjo el defecto que esta cascada cierra.
+   */
+  address_source?: DianAcquirerAddressSource | null;
 }
 
 /**

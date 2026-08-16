@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -41,6 +42,16 @@ export const RESOLUTION_DOCUMENT_TYPES: readonly ResolutionDocumentType[] =
     (document_type): document_type is ResolutionDocumentType =>
       document_type !== 'payroll' && document_type !== 'payroll_adjustment',
   );
+
+/**
+ * Mayor entero que aceptan `range_from` / `range_to`.
+ *
+ * No es una preferencia: es `2^31 - 1`, el techo de un `integer` de Postgres,
+ * que es el tipo con el que ambas columnas están declaradas. Se nombra aquí
+ * para que quien cambie el tipo en el schema encuentre el sitio que hay que
+ * mover con él.
+ */
+const RANGE_BOUND = 2_147_483_647;
 
 /**
  * Alta de una resolución / rango de numeración DIAN.
@@ -102,14 +113,29 @@ export class CreateResolutionDto {
    * Extremos del rango autorizado. `@IsInt` + `@Min(1)`, no `@IsNumber`: un
    * `1000.5` se guardaba tal cual y el consecutivo emitido dejaba de coincidir
    * con el rango que la DIAN autorizó.
+   *
+   * `@Max(RANGE_BOUND)` es la cota del TIPO DE COLUMNA, no un límite de
+   * negocio: `invoice_resolutions.range_from/range_to` son `Int` en Postgres
+   * (`schema.prisma:5586-5587`), o sea 32 bits con signo. `@IsInt` de
+   * class-validator solo comprueba que sea entero finito, así que un
+   * `100000000000000000000` pasaba la validación entera y reventaba dentro de
+   * Prisma: `PrismaClientValidationError` -> `SYS_INTERNAL_001`, HTTP 500 con
+   * un traza de stack como único mensaje. Reproducido por curl antes de este
+   * cambio; con `1000` el mismo cuerpo respondía 201.
+   *
+   * Un rango mal tecleado es un error de captura corriente —el operador copia
+   * mal el número del PDF de la autorización—, y merece el mismo mensaje
+   * accionable que el resto del formulario, no un error interno.
    */
   @IsInt()
   @Min(1)
+  @Max(RANGE_BOUND)
   @Type(() => Number)
   range_from: number;
 
   @IsInt()
   @Min(1)
+  @Max(RANGE_BOUND)
   @Type(() => Number)
   range_to: number;
 
@@ -164,10 +190,27 @@ export class CreateResolutionDto {
   })
   @IsString()
   @Matches(TECHNICAL_KEY_PATTERN, {
-    message:
-      `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
-      'caracteres hexadecimales (0-9, a-f), tal como la entrega la DIAN en la ' +
-      'autorización de numeración. Déjala vacía si este documento no lleva clave técnica.',
+    /**
+     * El mensaje se construye por función para poder decir CUÁNTOS caracteres
+     * se capturaron. Sin ese número, «debe tener 40» no distingue una clave a
+     * la que le faltan dos de una en la que se coló un guion, y el operador se
+     * queda mirando cuarenta caracteres que a ojo parecen correctos — que es
+     * exactamente cómo la de 38 llegó a producción.
+     *
+     * De `args.value` se lee SÓLO `.length`. La ClTec es un secreto fiscal y
+     * este texto viaja al cliente y a los logs: interpolar el valor (con
+     * `$value`, por ejemplo) lo publicaría en cada intento fallido.
+     */
+    message: (args) => {
+      const length = typeof args.value === 'string' ? args.value.length : 0;
+      return (
+        `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
+        `caracteres hexadecimales (0-9, a-f); se capturaron ${length}. ` +
+        'Cópiala completa desde el PDF de la autorización de numeración o ' +
+        'consúltala en el servicio de Rangos de Numeración de la DIAN. ' +
+        'Déjala vacía si este documento no lleva clave técnica.'
+      );
+    },
   })
   technical_key?: string | null;
 }

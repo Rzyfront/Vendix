@@ -1184,12 +1184,19 @@ export class CustomerFiscalIdentityValidator {
 
     if (!address) {
       findings.push({
+        // AVISO, no bloqueante: desde la cascada de dirección el emisor ya no
+        // inventa Bogotá. Baja por los domicilios REALES que existan —fiscal,
+        // luego envío, luego el de la tienda emisora— y declara cuál usó en
+        // `provider_data.acquirer_address_source`. Si no hay ninguno, falla él
+        // con un error tipado antes de firmar. Mantener esto en `blocker`
+        // dejaba la cascada inalcanzable: el usuario veía el modal de errores
+        // aunque el respaldo funcionara, que es justo el atasco reportado.
         code: 'ADDRESS_REQUIRED',
-        severity: 'blocker',
+        severity: 'warning',
         field: 'address',
         problem:
-          'El adquiriente no tiene dirección fiscal. Tal como está, el documento declararía municipio 11001 (Bogotá) y departamento Bogotá por defecto: una afirmación sobre dónde ocurrió la operación que nadie verificó.',
-        fix: `Agrega la dirección principal del cliente en ${SCREEN_ADDRESS}, con municipio y departamento.`,
+          'El adquiriente no tiene dirección fiscal propia. El documento se emitirá declarando la primera dirección real disponible (la de envío del cliente o, en su defecto, la de la tienda emisora), y el origen usado queda registrado en la factura.',
+        fix: `Para que el documento declare el domicilio del propio cliente, agrégalo en ${SCREEN_ADDRESS} con municipio y departamento.`,
       });
       return findings;
     }
@@ -1296,24 +1303,32 @@ export class CustomerFiscalIdentityValidator {
 
     if (city_code && !city_name) {
       findings.push({
+        // AVISO: el nombre se deriva del código por catálogo DANE
+        // (`resolveDianMunicipality`), así que el XML no puede contradecirse.
+        // Si el código no resuelve, la emisión falla nombrando el municipio
+        // rechazado — no lo rellena.
         code: 'CITY_NAME_REQUIRED',
-        severity: 'blocker',
+        severity: 'warning',
         field: 'address.city_name',
         problem:
-          'La dirección tiene código de municipio pero no nombre. El documento saldría diciendo «Bogotá» junto al código real, así que el nombre y el código se contradirían dentro del mismo XML.',
-        fix: `Vuelve a seleccionar el municipio del cliente en ${SCREEN_ADDRESS} para que nombre y código queden juntos.`,
+          'La dirección tiene código de municipio pero no nombre. El documento lo completará desde el catálogo DANE a partir del código.',
+        fix: `Si el municipio no es el correcto, vuelve a seleccionarlo en ${SCREEN_ADDRESS}.`,
         details: { city_code },
       });
     }
 
     if ((city_code || department_code) && !department_name) {
       findings.push({
+        // AVISO por la misma razón que `CITY_NAME_REQUIRED`: el departamento
+        // sale del catálogo DANE junto con el municipio. Verificado en runtime:
+        // una fila con `department_name` NULL y municipio 05001 emite
+        // «05 / Antioquia», no «Bogotá».
         code: 'DEPARTMENT_NAME_REQUIRED',
-        severity: 'blocker',
+        severity: 'warning',
         field: 'address.department_name',
         problem:
-          'La dirección no tiene nombre de departamento. El documento saldría declarando «Bogotá», que es falso para cualquier cliente fuera de Bogotá.',
-        fix: `Selecciona el departamento del cliente en ${SCREEN_ADDRESS}.`,
+          'La dirección no tiene nombre de departamento. El documento lo derivará del municipio usando el catálogo DANE.',
+        fix: `Si quieres fijarlo explícitamente, selecciona el departamento del cliente en ${SCREEN_ADDRESS}.`,
       });
     }
 

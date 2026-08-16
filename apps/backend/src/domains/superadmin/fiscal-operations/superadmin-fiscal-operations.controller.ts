@@ -22,6 +22,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { PlatformOrgService } from '@common/services/platform-org.service';
+import { mergeFiscalData } from '@common/helpers/organization-fiscal-columns.helper';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { FiscalOperationsContext } from '../../fiscal-operations/services/fiscal-context-resolver.service';
@@ -633,7 +634,11 @@ export class SuperadminFiscalOperationsController {
           const previousFiscalData =
             (currentSettings.fiscal_data as Record<string, unknown> | null) ??
             {};
-          const nextFiscalData = { ...previousFiscalData, ...dto };
+          // Vía `mergeFiscalData` y no un spread suelto: el carril plataforma
+          // comparte DTO y formulario con el de organización, así que necesita
+          // la misma regla de que un `undefined` (campo del formulario sin
+          // seleccionar) NO borre lo guardado.
+          const nextFiscalData = mergeFiscalData(previousFiscalData, dto as Record<string, unknown>);
           const nextSettings = { ...currentSettings, fiscal_data: nextFiscalData };
 
           if (existing) {

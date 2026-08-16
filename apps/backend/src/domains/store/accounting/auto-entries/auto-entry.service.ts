@@ -3340,6 +3340,24 @@ export class AutoEntryService {
    * For 'refund' type: reverse revenue + IVA, credit cash
    * For 'replacement' type: no accounting entry (only inventory movement)
    * For 'credit' type: reverse revenue + IVA, credit customer credit (future Phase 2)
+   *
+   * REFUND OVERHAUL — credit-side mapping key + label selection now driven by
+   * `effective_channel` (canal efectivo por donde sale el dinero, resuelto por
+   * RefundFlowService.resolveEffectiveRefundChannel y emitido en el evento
+   * desde el paso 4). Mantiene `refund_method` como fallback para compatibilidad
+   * con eventos emitidos antes del paso 4:
+   *
+   *   effective_channel      refund_method (legacy) → mapping key
+   *   ─────────────────────  ──────────────────────  ──────────────────────────────
+   *   cash                   cash                    refund.completed.cash           (1105)
+   *   bank_transfer          bank_transfer           refund.completed.bank_transfer  (1110)
+   *   gateway                original_payment        refund.completed.original_payment (1110)
+   *   store_credit           store_credit            refund.completed.store_credit   (2805 / 2335)
+   *   (none)                 (none)                  refund.completed.cash           (defensivo)
+   *
+   * La prioridad es siempre `effective_channel`; `refund_method` solo entra si
+   * el primero no está presente. Esto garantiza que el asiento refleje de
+   * dónde sale realmente el dinero, no la intención del operador.
    */
   async onRefundCompleted(data: {
     refund_id: number;
@@ -3350,15 +3368,21 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     return_type?: string;
     user_id?: number;
-    // REFUND OVERHAUL — included by RefundFlowService since step 3.
-    // Drives the credit-side mapping key so the journal entry reflects
-    // where the money actually moves:
+    // REFUND OVERHAUL — incluido por RefundFlowService desde el paso 4.
+    // Es el canal efectivo (de dónde sale el dinero realmente) ya pasado por
+    // resolveEffectiveRefundChannel. Toma prioridad sobre `refund_method`.
+    //   cash            → 1105 Caja
+    //   bank_transfer   → 1110 Bancos
+    //   gateway         → 1110 Bancos (mapea a la misma llave que original_payment)
+    //   store_credit    → 2335 Wallet Pasivo (customer credit liability)
+    effective_channel?: string;
+    // REFUND OVERHAUL — incluido por RefundFlowService desde el paso 3.
+    // Se conserva como fallback para eventos pre-paso-4: si `effective_channel`
+    // no viene, el handler usa este campo para decidir la cuenta de crédito.
     //   cash              → 1105 Caja
     //   original_payment  → 1110 Bancos (reversa processor)
     //   bank_transfer     → 1110 Bancos
     //   store_credit      → 2335 Wallet Pasivo (customer credit liability)
-    // Falls back to refund.completed.cash (1105) when the method is unknown
-    // or omitted — preserves backward compat for any older event producers.
     refund_method?: string;
   }) {
     // Replacements only move inventory — no financial entry needed
@@ -3398,16 +3422,25 @@ export class AutoEntryService {
       })),
     );
 
-    // REFUND OVERHAUL — credit-side mapping key per refund_method.
-    const creditKey = this.resolveRefundCreditKey(data.refund_method);
+    // REFUND OVERHAUL — el canal efectivo manda; refund_method solo entra
+    // como fallback para eventos pre-paso-4. Tanto la llave de mapeo como
+    // la etiqueta de la línea se derivan del mismo canal resuelto para que
+    // el asiento refleje de dónde sale el dinero realmente.
+    const channel = data.effective_channel ?? data.refund_method;
+    const creditKey = this.resolveRefundCreditKey({
+      effective_channel: data.effective_channel,
+      refund_method: data.refund_method,
+    });
     const creditLabel =
-      data.refund_method === 'store_credit'
+      channel === 'store_credit'
         ? 'Saldo a favor del cliente (Wallet)'
-        : data.refund_method === 'bank_transfer'
+        : channel === 'bank_transfer'
           ? 'Transferencia bancaria al cliente'
-          : data.refund_method === 'original_payment'
+          : channel === 'gateway' || channel === 'original_payment'
             ? 'Reembolso al cliente (Pago original)'
-            : 'Reembolso al cliente';
+            : channel === 'cash'
+              ? 'Reembolso al cliente (Efectivo)'
+              : 'Reembolso al cliente';
 
     lines.push(
       await this.resolveAccountLine(
@@ -3430,16 +3463,31 @@ export class AutoEntryService {
     });
   }
 
-  // REFUND OVERHAUL — pick the credit-side mapping key by refund_method.
-  // Returns the per-method mapping key when the org has it configured,
-  // otherwise falls back to the legacy refund.completed.cash (1105 Caja).
-  // This fallback is intentionally defensive: a tenant that hasn't
-  // refreshed their account_mappings since the new keys were added still
-  // gets a sensible journal entry.
-  private resolveRefundCreditKey(
-    refund_method: string | undefined,
-  ): string {
-    switch (refund_method) {
+  // REFUND OVERHAUL — selecciona la llave de mapeo del crédito a partir del
+  // canal efectivo. Prioriza `effective_channel` sobre `refund_method` para
+  // que el asiento refleje de dónde sale el dinero realmente, no la intención
+  // del operador. `refund_method` queda como fallback para eventos pre-paso-4.
+  //
+  // Tabla de mapping efectiva:
+  //   effective_channel === 'gateway'  → refund.completed.original_payment (1110)
+  //   effective_channel === 'bank_transfer' → refund.completed.bank_transfer (1110)
+  //   effective_channel === 'store_credit'  → refund.completed.store_credit  (2805 / 2335)
+  //   effective_channel === 'cash'     → refund.completed.cash (1105)
+  //
+  // Fallback legacy (refund_method):
+  //   'original_payment' → refund.completed.original_payment
+  //   'cash' / unknown   → refund.completed.cash (defensivo, legacy default)
+  //
+  // Si nada llega, devuelve refund.completed.cash (1105 Caja) — comportamiento
+  // defensivo: un tenant sin ninguno de los dos campos sigue recibiendo un
+  // asiento coherente en lugar de un fallo silencioso.
+  private resolveRefundCreditKey(input: {
+    effective_channel?: string;
+    refund_method?: string;
+  }): string {
+    const channel = input.effective_channel ?? input.refund_method;
+    switch (channel) {
+      case 'gateway':
       case 'original_payment':
         return 'refund.completed.original_payment';
       case 'bank_transfer':

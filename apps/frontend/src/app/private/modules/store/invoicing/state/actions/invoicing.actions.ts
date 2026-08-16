@@ -371,9 +371,15 @@ export const createResolutionSuccess = createAction(
   '[Invoicing] Create Resolution Success',
   props<{ resolution: InvoiceResolution }>(),
 );
+/**
+ * Lleva `MutationFailure` (no sólo `error`) porque el modal de resolución pinta
+ * cada `details.validationErrors` sobre SU campo. Sin `details`, un rechazo de
+ * la clave técnica sólo podía decirse en prosa y el usuario tenía que adivinar
+ * cuál de los nueve campos rechazó el backend.
+ */
 export const createResolutionFailure = createAction(
   '[Invoicing] Create Resolution Failure',
-  props<{ error: string }>(),
+  props<MutationFailure>(),
 );
 
 export const updateResolution = createAction(
@@ -384,9 +390,10 @@ export const updateResolutionSuccess = createAction(
   '[Invoicing] Update Resolution Success',
   props<{ resolution: InvoiceResolution }>(),
 );
+/** Mismo motivo que `createResolutionFailure`: el modal reparte por campo. */
 export const updateResolutionFailure = createAction(
   '[Invoicing] Update Resolution Failure',
-  props<{ error: string }>(),
+  props<MutationFailure>(),
 );
 
 export const deleteResolution = createAction(

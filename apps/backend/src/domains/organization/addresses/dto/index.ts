@@ -4,6 +4,7 @@ import {
   IsInt,
   IsBoolean,
   IsNumber,
+  Matches,
   MaxLength,
   Min,
   IsEnum,
@@ -63,9 +64,18 @@ export class CreateAddressDto {
   @MaxLength(20)
   postal_code: string;
 
-  @ApiProperty({ example: 'México', description: 'País' })
+  // Misma corrección que en `store/addresses/dto`: la columna destino es
+  // `country_code varchar(3)`, así que un nombre de país producía un P2000
+  // (HTTP 500) en vez de un 400 accionable. Ver el comentario extenso allí.
+  @ApiProperty({ example: 'CO', description: 'Código ISO 3166-1 del país' })
   @IsString()
-  @MaxLength(100)
+  @Matches(/^[A-Za-z]{2,3}$/, {
+    message:
+      'country debe ser el código ISO 3166-1 del país (2 o 3 letras), no su nombre. Ej.: CO.',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
   country: string;
 
   @ApiPropertyOptional({

@@ -26,9 +26,22 @@ import { ErrorCodes, VendixHttpException } from '../errors';
  * Se aceptan las dos redacciones porque Prisma cambió el texto entre mayores
  * («Got invalid value» en la 4.x, «Invalid value provided» desde la 5.x) y un
  * bump de versión no debe reabrir el 500 en silencio.
+ *
+ * LA TERCERA REDACCIÓN — «Unable to fit value N into a 64-bit signed integer»
+ * — es de la misma población 2 y por el mismo motivo: el número lo escribió el
+ * cliente. Es el hermano de P2020 un peldaño más arriba: P2020 lo rechaza
+ * Postgres cuando el valor cabe en 64 bits pero no en la columna `Int`; ÉSTE lo
+ * rechaza el serializador de Prisma cuando ni siquiera cabe en 64 bits, así que
+ * la consulta nunca llega a la base y no hay código P20xx que mapear.
+ *
+ * Sin esta rama, CUALQUIER ruta con `:id` devolvía 500 ante un identificador
+ * absurdamente largo: `ParseIntPipe` lo acepta —«99999999999999999999» es un
+ * entero sintácticamente válido— y el fallo aparecía como `SYS_INTERNAL_001`.
+ * Verificado sobre 11 rutas del dominio de facturación; el defecto no era de
+ * facturación sino de este filtro, que es donde se corrige una sola vez.
  */
 const PRISMA_VALUE_TYPE_MISMATCH =
-  /Invalid value provided\.\s*Expected|Got invalid value/i;
+  /Invalid value provided\.\s*Expected|Got invalid value|Unable to fit value .* into a 64-bit signed integer/i;
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {

@@ -70,9 +70,23 @@ export class CreateAddressDto {
   @MaxLength(20)
   postal_code?: string;
 
-  @ApiProperty({ example: 'México', description: 'País' })
+  // La columna es `country_code varchar(3)` y el servicio le asigna este campo
+  // tal cual (`addresses.service.ts:113`). Con `@MaxLength(100)` cualquier
+  // nombre de país —que es justo lo que el ejemplo «México» invitaba a mandar—
+  // pasaba la validación y reventaba en Postgres como P2000, que el filtro
+  // traduce a un 500 «Error interno» sobre lo que en realidad es un campo mal
+  // formado. Acotarlo al ancho real convierte ese 500 en un 400 que dice qué
+  // corregir. Ningún consumidor del frontend manda nombre: todos envían ya el
+  // código ISO (`country: payload.country_code`), así que no rompe contrato.
+  @ApiProperty({ example: 'CO', description: 'Código ISO 3166-1 del país' })
   @IsString()
-  @MaxLength(100)
+  @Matches(/^[A-Za-z]{2,3}$/, {
+    message:
+      'country debe ser el código ISO 3166-1 del país (2 o 3 letras), no su nombre. Ej.: CO.',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
   country: string;
 
   /**

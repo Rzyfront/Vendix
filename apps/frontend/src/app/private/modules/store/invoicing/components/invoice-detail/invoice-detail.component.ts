@@ -51,6 +51,7 @@ import {
   toneClasses,
 } from './invoice-fiscal-status.util';
 import { DianEventRegisterModalComponent } from './dian-event-register-modal.component';
+import { InvoiceNoteCreateComponent } from '../invoice-note-create/invoice-note-create.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -68,6 +69,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     ButtonComponent,
     IconComponent,
     DianEventRegisterModalComponent,
+    InvoiceNoteCreateComponent,
   ],
   template: `
     <app-modal
@@ -250,6 +252,67 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   </div>
                 }
               </div>
+            </div>
+          }
+
+          <!-- ── CORRECCIÓN FISCAL: NOTA CRÉDITO Y NOTA DÉBITO ─────────────
+               ESTE BLOQUE SE PINTA SIEMPRE que el documento sea corregible, y
+               ese «siempre» es el arreglo.
+
+               Las notas ya existían —modal, acción, effect, endpoints— y el
+               comerciante reportó que no las veía. No se equivocaba: el ÚNICO
+               punto de entrada era un botón del pie condicionado a
+               «status === 'accepted'», y en una tienda sin facturas aceptadas
+               ese botón no se pintaba jamás. Una función que solo aparece
+               cuando ya sabés que existe no está descubierta por nadie.
+
+               Ahora los dos botones se muestran siempre; cuando todavía no
+               aplican van APAGADOS y con el motivo escrito al lado. Y la regla
+               fiscal —una factura aceptada no se borra ni se edita— se dice
+               acá, que es donde el usuario llega preguntándose por qué no puede
+               borrarla.
+          -->
+          @if (isCorrectableType()) {
+            <div class="mb-4 rounded-xl border border-border p-3">
+              <div class="mb-2 flex items-center gap-2">
+                <app-icon name="file-minus" [size]="15" class="text-text-secondary" />
+                <h4 class="text-sm font-semibold text-text-primary">Corrección fiscal</h4>
+              </div>
+
+              <p class="mb-3 text-xs text-text-secondary">
+                Una factura aceptada por la DIAN no se elimina ni se edita: es un
+                documento público con CUFE. Se corrige emitiendo una
+                <strong>nota crédito</strong> (disminuir o anular) o una
+                <strong>nota débito</strong> (aumentar), que la referencian sin
+                borrarla.
+              </p>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [disabled]="!canCreateNote()"
+                  (clicked)="openNoteModal('credit')">
+                  <app-icon slot="icon" name="file-minus" [size]="14"></app-icon>
+                  Nota crédito
+                </app-button>
+
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [disabled]="!canCreateNote()"
+                  (clicked)="openNoteModal('debit')">
+                  <app-icon slot="icon" name="file-plus" [size]="14"></app-icon>
+                  Nota débito
+                </app-button>
+              </div>
+
+              @if (noteBlockedReason(); as reason) {
+                <p class="mt-2 flex items-start gap-1.5 text-xs text-text-secondary">
+                  <app-icon name="info" [size]="13" class="mt-0.5 shrink-0" />
+                  <span>{{ reason }}</span>
+                </p>
+              }
             </div>
           }
 
@@ -659,10 +722,29 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   </app-button>
                 </div>
               }
-              @if (inv.qr_code) {
+              <!--
+                Ver «qrImageSrc»: «inv.qr_code» es el CONTENIDO del QR, no una
+                imagen. Se pinta como <img> solo si de verdad lo es; si no, se
+                ofrece el enlace de verificación, que es lo que el QR abre.
+              -->
+              @if (qrImageSrc(); as qrSrc) {
                 <div class="text-center">
-                  <img [src]="inv.qr_code" alt="QR Code DIAN" class="w-32 h-32 mx-auto border border-success rounded" />
+                  <img [src]="qrSrc" alt="Código QR de verificación DIAN" class="w-32 h-32 mx-auto border border-success rounded" />
                 </div>
+              }
+              <!--
+                Sin «as» acá: Angular solo admite el alias en la rama primaria
+                de un «@if», nunca en un «@else if».
+              -->
+              @if (!qrImageSrc() && dianCatalogUrl()) {
+                <a
+                  [href]="dianCatalogUrl()"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center gap-1.5 text-xs font-medium text-success underline">
+                  <app-icon name="external-link" [size]="13"></app-icon>
+                  Verificar en el catálogo de la DIAN
+                </a>
               }
             </div>
           }
@@ -844,13 +926,25 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 Reenviar a la DIAN
               </app-button>
             }
-            @if (canCreateCreditNote()) {
+            <!-- El pie solo ofrece el atajo cuando la nota SE PUEDE crear; la
+                 explicación de por qué (y el par crédito/débito completo) vive
+                 arriba, en el bloque «Corrección fiscal», que sí se pinta
+                 siempre. Repetir acá los botones apagados llenaría de ruido una
+                 barra que ya lleva hasta seis acciones. -->
+            @if (canCreateNote()) {
               <app-button
                 variant="outline"
                 size="sm"
-                (clicked)="creditNote.emit(detail()!)">
+                (clicked)="openNoteModal('credit')">
                 <app-icon slot="icon" name="file-minus" [size]="14"></app-icon>
                 Nota Crédito
+              </app-button>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openNoteModal('debit')">
+                <app-icon slot="icon" name="file-plus" [size]="14"></app-icon>
+                Nota Débito
               </app-button>
             }
             @if (canAccept()) {
@@ -911,6 +1005,16 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         [invoiceId]="inv.id"
         [invoiceNumber]="inv.invoice_number"
       ></vendix-dian-event-register-modal>
+
+      <!-- HERMANO del detalle, igual que el modal de eventos y por el mismo
+           motivo: el desplegable del selector de concepto está posicionado
+           absoluto y dentro del cuerpo del detalle quedaría recortado por su
+           «overflow-y-auto». -->
+      <vendix-invoice-note-create
+        [(isOpen)]="noteModalOpen"
+        [(noteType)]="noteModalType"
+        [invoice]="inv"
+      ></vendix-invoice-note-create>
     }
     `
 })
@@ -923,6 +1027,22 @@ export class InvoiceDetailComponent {
    */
   readonly isOpen = model<boolean>(false);
   readonly invoice = input<Invoice | null>(null);
+
+  /**
+   * DECLARADO Y YA NO EMITIDO. No es un descuido.
+   *
+   * El detalle hospeda ahora su PROPIO modal de notas
+   * (`vendix-invoice-note-create`, hermano del modal como el de eventos
+   * RADIAN), porque solo así puede abrirlo preseleccionado en crédito o en
+   * débito. Delegar en el padre obligaba a abrir siempre en «crédito» con un
+   * conmutador dentro, que es donde se emite el documento equivocado.
+   *
+   * La salida se conserva porque `invoicing.component.ts` todavía enlaza
+   * `(creditNote)` en su template: quitarla rompería esa compilación, y ese
+   * archivo pertenece a otro frente de trabajo. Un enlace a una salida que no
+   * dispara es inerte. Cuando ese contenedor se limpie, se van juntos el
+   * enlace, esta salida y el modal antiguo `credit-note-create`.
+   */
   readonly creditNote = output<Invoice>();
 
   private store = inject(Store);
@@ -947,6 +1067,10 @@ export class InvoiceDetailComponent {
 
   /** Visibilidad del modal de registro de eventos RADIAN. */
   readonly eventModalOpen = signal(false);
+
+  /** Modal de nota crédito/débito, y con qué tipo se abre. */
+  readonly noteModalOpen = signal(false);
+  readonly noteModalType = signal<'credit' | 'debit'>('credit');
 
   /**
    * Reloj que late para la cuenta regresiva de las 48 h.
@@ -1345,11 +1469,108 @@ export class InvoiceDetailComponent {
    */
   readonly canResend = computed(() => this.detail()?.status === 'rejected');
 
-  readonly canCreateCreditNote = computed(
-    () =>
-      this.detail()?.status === 'accepted' &&
-      this.detail()?.invoice_type === 'sales_invoice',
+  /**
+   * Qué documentos admiten corrección por nota crédito o débito.
+   *
+   * NO es cosmético dejar fuera al resto. `credit-notes.service.ts` NO valida
+   * el `invoice_type` del documento referenciado (filtra por `id` a secas), así
+   * que el backend aceptaría una nota crédito contra un documento equivalente
+   * POS — y eso es un error fiscal: la Res. 000165/2023 exige para el POS una
+   * nota de ajuste de documento equivalente ('93'/'94'), no una nota crédito.
+   * Como el backend no pone la puerta, la pone la UI: es el único sitio donde
+   * hoy se puede evitar gastar un consecutivo en un documento que la DIAN va a
+   * rechazar. Ver el reporte de contratos del backend.
+   */
+  readonly isCorrectableType = computed(() => {
+    const type = this.detail()?.invoice_type;
+    return type === 'sales_invoice' || type === 'export_invoice';
+  });
+
+  /**
+   * `invoices.qr_code` NO es una imagen: es el CONTENIDO del QR.
+   *
+   * El Anexo Técnico 1.9 §11.2 define ese campo como el texto que se codifica
+   * —`NumFac`, `FecFac`, `NitFac`, `DocAdq`, `ValFac`, `ValIva`, `ValOtroIm`,
+   * `ValTolFac`, `CUFE` y, en la última línea, la URL del catálogo—, no como un
+   * PNG ni un data URI. Pasárselo a `<img [src]>` producía en cada factura
+   * aceptada un `net::ERR_UNKNOWN_URL_SCHEME` en consola y un recuadro roto en
+   * pantalla: el navegador intentaba resolver «numfac: DEV18FecFac: …» como si
+   * fuera una URL.
+   *
+   * Así que solo se pinta como imagen lo que de verdad puede serlo. El texto
+   * plano del payload —que siempre trae espacios y saltos de línea— nunca pasa
+   * este filtro. No se genera el QR acá: dibujarlo exigiría una librería nueva y
+   * una decisión de producto que no es de esta tarea; lo que sí se hace es dejar
+   * de mostrar algo roto y ofrecer el enlace, que es para lo que sirve el QR.
+   */
+  readonly qrImageSrc = computed<string | null>(() => {
+    const raw = this.detail()?.qr_code;
+    if (typeof raw !== 'string') {
+      return null;
+    }
+    const value = raw.trim();
+    if (/\s/.test(value)) {
+      return null;
+    }
+    return /^(data:image\/|https?:\/\/)/i.test(value) ? value : null;
+  });
+
+  /**
+   * La URL de verificación en el catálogo DIAN, extraída del payload del QR.
+   *
+   * Es la última línea del contenido del QR y lo único que el adquiriente hace
+   * con él: abrir el documento en el portal de la DIAN. Cuando el payload no la
+   * trae se reconstruye desde el CUFE con el mismo host que usa el backend, para
+   * que una factura aceptada nunca se quede sin forma de verificarse.
+   */
+  readonly dianCatalogUrl = computed<string | null>(() => {
+    const raw = this.detail()?.qr_code;
+    if (typeof raw === 'string') {
+      const match = raw.match(/https?:\/\/[^\s"']+searchqr[^\s"']*/i);
+      if (match) {
+        return match[0];
+      }
+    }
+    return null;
+  });
+
+  /**
+   * El backend exige la factura ACEPTADA (`INVOICING_STATUS_002`, mensaje
+   * «Invoice must be accepted by DIAN first»). Ofrecer el botón antes sería
+   * ofrecer un 400.
+   */
+  readonly canCreateNote = computed(
+    () => this.isCorrectableType() && this.detail()?.status === 'accepted',
   );
+
+  /**
+   * POR QUÉ los botones están apagados, en el idioma del comerciante.
+   *
+   * Un botón gris sin explicación es la misma pared que un botón ausente. Cada
+   * rama nombra el estado real y qué falta para salir de él.
+   */
+  readonly noteBlockedReason = computed<string | null>(() => {
+    const inv = this.detail();
+    if (!inv || this.canCreateNote()) {
+      return null;
+    }
+    switch (inv.status) {
+      case 'draft':
+        return 'La factura todavía está en borrador: valídala y envíala a la DIAN. Mientras no esté emitida se corrige editándola, o se cancela.';
+      case 'validated':
+        return 'La factura está validada pero aún no se envió a la DIAN. Envíala primero; hasta entonces todavía puedes cancelarla sin nota.';
+      case 'sent':
+        return 'La factura está en la DIAN esperando veredicto. Las notas se habilitan cuando quede aceptada.';
+      case 'rejected':
+        return 'La DIAN rechazó la factura, así que no hay nada que corregir con una nota: corrige el motivo del rechazo y reenvíala, o anúlala.';
+      case 'cancelled':
+        return 'La factura fue cancelada antes de emitirse: nunca llegó a la DIAN y no admite nota.';
+      case 'voided':
+        return 'La factura está anulada. Una nota solo corrige documentos aceptados.';
+      default:
+        return 'Las notas crédito y débito solo se emiten sobre una factura ya aceptada por la DIAN.';
+    }
+  });
 
   readonly canAccept = computed(() => this.detail()?.status === 'sent');
 
@@ -1368,9 +1589,10 @@ export class InvoiceDetailComponent {
    * (`invoice-flow.service.ts` → `void()`): el botón era un callejón sin
    * salida que además insinuaba que anular una factura ya aceptada era
    * posible. La acción correcta para ese estado ya está al lado —
-   * `canCreateCreditNote()` pinta «Nota Crédito» exactamente para
-   * `accepted`—, así que quitarlo no deja al usuario sin salida: lo deja
-   * con la única que la DIAN reconoce.
+   * `canCreateNote()` habilita «Nota crédito» y «Nota débito» exactamente
+   * para `accepted`, y el bloque «Corrección fiscal» las anuncia incluso
+   * cuando todavía no aplican—, así que quitarlo no deja al usuario sin
+   * salida: lo deja con la única que la DIAN reconoce.
    */
   readonly canVoid = computed(() => this.detail()?.status === 'rejected');
 
@@ -1534,6 +1756,23 @@ export class InvoiceDetailComponent {
 
   openEventModal(): void {
     this.eventModalOpen.set(true);
+  }
+
+  // ── Corrección fiscal ─────────────────────────────────────
+
+  /**
+   * Abre el modal de notas YA en el tipo elegido.
+   *
+   * El tipo se preselecciona en vez de dejar que el usuario lo cambie dentro:
+   * quien pulsa «Nota débito» ya decidió, y abrir en «crédito» con un conmutador
+   * es la clase de paso extra en el que se emite el documento equivocado.
+   */
+  openNoteModal(type: 'credit' | 'debit'): void {
+    if (!this.canCreateNote()) {
+      return;
+    }
+    this.noteModalType.set(type);
+    this.noteModalOpen.set(true);
   }
 
   // ── Documentos ────────────────────────────────────────────

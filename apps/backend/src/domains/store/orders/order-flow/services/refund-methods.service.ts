@@ -15,25 +15,32 @@ export interface AvailableRefundMethods {
 }
 
 /**
- * REFUND OVERHAUL — Resolves which refund methods the calling store can
- * actually execute. The frontend's order-refund-modal renders the dropdown
- * from this response (never hardcoded) so operators never select a method
- * that the backend will reject.
+ * REFUND OVERHAUL — Resuelve qué métodos de reembolso puede ejecutar la
+ * tienda. El frontend (order-refund-modal) consume este endpoint y nunca
+ * debe mostrar un método que el backend rechazaría.
  *
- * Logic per method:
- *   - `original_payment`: enabled if the order's payment has a configured
- *     processor (system_payment_method.is_active AND
- *     store_payment_methods.state = 'enabled'). Otherwise the merchant has
- *     no way to actually reverse the money at the gateway, so the method is
- *     hidden.
- *   - `cash`: enabled if the store has cash register enabled
- *     (settings.cash_register.enabled) AND the order has a customer (cash
- *     refunds pay out of the drawer — no customer means no destination).
- *   - `bank_transfer`: enabled if the store has at least one active
- *     bank_account. The modal exposes the list as `bank_accounts` so the
- *     operator picks the destination.
- *   - `store_credit`: always enabled. The wallet row is created on demand
- *     by WalletService.getOrCreateWallet().
+ * Reglas de disponibilidad (sobreescriben PR-576, que era demasiado
+ * restrictivo: 198/198 pagos reales excluidos de `original_payment`,
+ * 16/16 tiendas excluidas de `cash` por `pos.cash_register.enabled=false`,
+ * y solo 1 cuenta bancaria habilitaba `bank_transfer`):
+ *
+ *   - `original_payment`: la orden debe tener al menos un pago activo
+ *     (state in ['succeeded', 'pending']). El processor es responsabilidad
+ *     del gateway — no exigimos `is_active` ni `state='enabled'` aquí
+ *     porque ese chequeo ya lo hace `RefundFlowService` al ejecutar el
+ *     refund, y negarlo a nivel UI ocultaba el 100% de los pagos reales.
+ *
+ *   - `cash`: siempre disponible. La caja se valida al ejecutar el refund;
+ *     exigir `pos.cash_register.enabled` aquí dejaba a la tienda muda en
+ *     producción aunque tuviera caja operativa.
+ *
+ *   - `bank_transfer`: siempre disponible. La lista `bank_accounts` se
+ *     devuelve (puede venir vacía) para que el selector del modal se
+ *     renderice — la disponibilidad del método ya no depende de que
+ *     existan cuentas configuradas.
+ *
+ *   - `store_credit`: requiere `order.customer_id`. Sin cliente no hay
+ *     billetera donde depositar el saldo a favor.
  */
 @Injectable()
 export class RefundMethodsService {
@@ -47,17 +54,7 @@ export class RefundMethodsService {
         customer_id: true,
         payments: {
           where: { state: { in: ['succeeded', 'pending'] } },
-          select: {
-            store_payment_method_id: true,
-            store_payment_method: {
-              select: {
-                state: true,
-                system_payment_method: {
-                  select: { type: true, is_active: true },
-                },
-              },
-            },
-          },
+          select: { id: true },
           take: 1,
         },
       },
@@ -75,55 +72,21 @@ export class RefundMethodsService {
       };
     }
 
-    // Cash register gate
-    //
-    // Hotfix post-PR-576: la rama vieja leía `cash_register` desde la RAÍZ
-    // del JSON de settings. La clave real vive bajo `pos.cash_register.enabled`
-    // (verificado en `default-store-settings.spec.ts` y `settings-transition-guards.ts`).
-    // Antes de este fix, `readBool(... 'cash_register')` siempre devolvía
-    // undefined, así que `cashAvailable` era siempre false y la tienda nunca
-    // podía ofrecer reembolso en efectivo aunque tuviera caja habilitada.
-    const cashRegisterSetting = await this.prisma.store_settings.findFirst({
-      where: {
-        store_id: order.store_id,
-      },
-      select: { settings: true },
-    });
-    const settings = cashRegisterSetting?.settings as any;
-    const cashRegisterEnabled =
-      readBool(settings?.pos?.cash_register, 'enabled') === true;
-    const cashAvailable = cashRegisterEnabled && !!order.customer_id;
-
-    // Bank accounts
-    //
-    // Hotfix post-PR-576: el filtro exigía `store_id === order.store_id`
-    // estricto. Las cuentas creadas por la app guardan `store_id: NULL`
-    // (schema confirma `bank_accounts.store_id Int?`), así que el dropdown
-    // del modal estaba vacío en producción. Ahora aceptamos cuentas de
-    // la tienda Y cuentas globales (store_id NULL), con status active.
+    // Cuentas bancarias — siempre se devuelven (puede ser []) para que el
+    // selector del modal se renderice. La disponibilidad del método ya no
+    // depende de que existan cuentas; si el operador elige transferencia
+    // sin cuentas configuradas, el flujo `RefundFlowService` determinará
+    // si hay fallback a otra vía.
     const bankAccounts = await this.prisma.bank_accounts.findMany({
       where: {
-        OR: [
-          { store_id: order.store_id },
-          { store_id: null },
-        ],
+        OR: [{ store_id: order.store_id }, { store_id: null }],
         status: 'active',
       },
       select: { id: true, name: true, account_number: true, bank_name: true },
       orderBy: { name: 'asc' },
     });
 
-    // Original payment processor gate
-    const payment = order.payments[0];
-    const sm = payment?.store_payment_method;
-    const originalPaymentAvailable =
-      !!payment &&
-      !!sm &&
-      sm.state === 'enabled' &&
-      !!sm.system_payment_method?.is_active &&
-      sm.system_payment_method.type !== 'cash' &&
-      sm.system_payment_method.type !== 'cash_on_delivery' &&
-      sm.system_payment_method.type !== 'bank_transfer';
+    const originalPaymentAvailable = order.payments.length > 0;
 
     const methods: RefundMethodOption[] = [
       {
@@ -133,50 +96,33 @@ export class RefundMethodsService {
         available: originalPaymentAvailable,
         reason_unavailable: originalPaymentAvailable
           ? undefined
-          : !payment
-            ? 'La orden no tiene pagos registrados'
-            : !sm
-              ? 'No hay método de pago configurado para esta orden'
-              : sm.state !== 'enabled'
-                ? 'El método de pago no está habilitado en la tienda'
-                : !sm.system_payment_method?.is_active
-                  ? 'El método de pago está inactivo a nivel plataforma'
-                  : 'El método de pago original no es reversible vía processor',
+          : 'La orden no tiene pagos registrados',
       },
       {
         value: 'cash',
         label: 'Efectivo',
         icon: 'banknote',
-        available: cashAvailable,
-        reason_unavailable: cashAvailable
-          ? undefined
-          : !cashRegisterEnabled
-            ? 'Caja registradora deshabilitada — actívala en Configuración'
-            : 'La orden no tiene un cliente asociado para recibir el reembolso',
+        available: true,
+        reason_unavailable: undefined,
       },
       {
         value: 'bank_transfer',
         label: 'Transferencia',
         icon: 'landmark',
-        available: bankAccounts.length > 0,
-        reason_unavailable:
-          bankAccounts.length > 0
-            ? undefined
-            : 'No hay cuentas bancarias activas registradas',
+        available: true,
+        reason_unavailable: undefined,
       },
-      // Hotfix post-PR-576: store_credit se reportaba siempre enabled.
-      // Para que el saldo a favor quede registrado contra alguien, la
-      // orden necesita un cliente. Sin cliente, la UI debe mostrar el
-      // método deshabilitado con su razón (la modal no lo deja elegir).
+      // `store_credit` requiere cliente: la billetera pertenece al cliente
+      // y sin `customer_id` no hay destino para el saldo a favor.
       {
         value: 'store_credit',
         label: 'Billetera del cliente',
         icon: 'wallet',
         available: !!order.customer_id,
         reason_unavailable:
-          order.customer_id ?
-            undefined :
-            'La orden no tiene un cliente asociado para recibir el saldo a favor',
+          order.customer_id
+            ? undefined
+            : 'La orden no tiene un cliente asociado para recibir el saldo a favor',
       },
     ];
 
@@ -212,7 +158,7 @@ export class RefundMethodsService {
       original_payment: { label: 'Pago original', icon: 'rotate-ccw' },
       cash: { label: 'Efectivo', icon: 'banknote' },
       bank_transfer: { label: 'Transferencia', icon: 'landmark' },
-      store_credit: { label: 'Billetera', icon: 'wallet' },
+      store_credit: { label: 'Billetera del cliente', icon: 'wallet' },
     };
     return {
       value,
@@ -221,24 +167,5 @@ export class RefundMethodsService {
       available,
       reason_unavailable,
     };
-  }
-}
-
-// Settings values are stored as JSONB in store_settings.value. A missing
-// key reads as {}; the legacy "enabled" boolean is the gate we care about.
-function readBool(value: any, key: string): boolean | undefined {
-  if (value == null) return undefined;
-  const obj = typeof value === 'string' ? safeJson(value) : value;
-  if (obj && typeof obj === 'object' && key in obj) {
-    return Boolean((obj as any)[key]);
-  }
-  return undefined;
-}
-
-function safeJson(s: string): any {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
   }
 }

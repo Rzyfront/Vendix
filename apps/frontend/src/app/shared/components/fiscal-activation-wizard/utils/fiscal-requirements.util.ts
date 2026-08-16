@@ -1,5 +1,9 @@
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import {
+  ERROR_MESSAGES,
+  DEFAULT_ERROR_MESSAGE,
+} from '../../../../core/utils/error-messages';
+import {
   FISCAL_STEP_LABELS,
   FISCAL_STEP_ORDER,
   FiscalArea,
@@ -478,7 +482,13 @@ export function mapFiscalBackendErrorToRequirements(
       {
         id: parsed.errorCode,
         label: restriction.label,
-        reason: restriction.reason,
+        // GANA EL MÁS ESPECÍFICO. `restriction.reason` es texto fijo por código:
+        // explica la restricción en general, no ESTA instancia. Cuando el backend
+        // devuelve `details.blockers[]` o un `message` accionable, `parseApiError`
+        // ya lo resolvió en `userMessage`, y pintar la fila curada encima borraba
+        // justo el dato que dice qué campo falta. `label` y CTA sí se conservan:
+        // son la clasificación y el destino, que el backend no manda.
+        reason: preferBackendDiagnosis(parsed, restriction.reason),
         severity: restriction.severity ?? 'blocker',
         action: restriction.action
           ? {
@@ -504,6 +514,39 @@ export function mapFiscalBackendErrorToRequirements(
       severity: 'blocker',
     },
   ];
+}
+
+/**
+ * Decide qué texto explica mejor ESTA falla: el diagnóstico del backend o el
+ * motivo curado del catálogo.
+ *
+ * `parseApiError` ya aplica el orden «gana el más específico» y deja en
+ * `userMessage` un bloqueador (`details.blockers[]`) o el `message` del servidor
+ * cuando alguno de los dos era presentable; si no había nada mejor, deja el copy
+ * enlatado de `ERROR_MESSAGES[code]`. Por eso aquí basta con comparar: si
+ * `userMessage` ES el enlatado, el backend no aportó nada y manda el motivo
+ * curado —que suele estar mejor redactado para el modal—; si DIFIERE, es porque
+ * el servidor calculó el detalle concreto y ése es el que tiene que leerse.
+ *
+ * Se compara contra `ERROR_MESSAGES[code]` y no contra `DEFAULT_ERROR_MESSAGE`
+ * a propósito: un código sin copy enlatado cae al genérico («Ocurrió un error
+ * inesperado…»), que tampoco aporta nada y debe ceder ante el motivo curado.
+ */
+function preferBackendDiagnosis(
+  parsed: { errorCode: string | null; userMessage: string },
+  curatedReason: string,
+): string {
+  const canned = parsed.errorCode ? ERROR_MESSAGES[parsed.errorCode] : undefined;
+  const backend = parsed.userMessage?.trim();
+  if (!backend) {
+    return curatedReason;
+  }
+  // Sin copy enlatado para el código, `userMessage` sólo puede ser el genérico
+  // o un diagnóstico real; el genérico se descarta comparándolo aparte.
+  if (canned !== undefined && backend === canned.trim()) {
+    return curatedReason;
+  }
+  return backend === DEFAULT_ERROR_MESSAGE.trim() ? curatedReason : backend;
 }
 
 /** Cuenta cuantos pasos hay en un mapa area -> pasos. */
