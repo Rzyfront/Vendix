@@ -119,6 +119,57 @@ export const RESOLUTION_PUBLIC_SELECT = {
  * @param details contexto extra para el error (id de resolución, prefijo…).
  *                NUNCA metas aquí el valor de la clave: viaja al cliente.
  */
+/** Familias de caracteres que distinguen un hash hex de otra codificación. */
+export type TechnicalKeyCharset = 'hex' | 'base64' | 'alphanumeric' | 'other';
+
+export interface TechnicalKeyShape {
+  /** Longitud tras quitar el ruido de transporte. Nunca el valor. */
+  length: number;
+  charset: TechnicalKeyCharset;
+}
+
+/**
+ * Describe la FORMA de una clave sin revelar ni un carácter de ella.
+ *
+ * ── PARA QUÉ ───────────────────────────────────────────────────────────────
+ *
+ * Cuando `assertTechnicalKeyShape` rechaza un valor, la longitud sola no basta
+ * para saber QUÉ llegó. Una clave de 64 caracteres puede ser el hex de un
+ * SHA-256 —40 sería entonces la suposición equivocada— o el base64 de 48 bytes,
+ * que sería otro artefacto de la DIAN colado en el campo equivocado. Son dos
+ * diagnósticos opuestos y la longitud no los separa; la familia de caracteres
+ * sí.
+ *
+ * ── POR QUÉ NO NORMALIZA A MINÚSCULA ───────────────────────────────────────
+ *
+ * Porque `normalizeTechnicalKey` pasa a minúscula, y base64 SÍ distingue
+ * mayúsculas: clasificar sobre el valor normalizado convertiría todo base64 con
+ * mayúsculas en «alphanumeric» y borraría justo la pista que se busca. Aquí sólo
+ * se quita el espacio en blanco.
+ *
+ * Longitud y familia son metadatos, no material: con ellos no se recompone la
+ * clave ni se acorta un ataque. La misma línea que ya cruza `technical_key_length`.
+ */
+export function describeTechnicalKeyShape(
+  raw: string | null | undefined,
+): TechnicalKeyShape | null {
+  const compact = (raw ?? '').replace(/\s+/g, '');
+  if (!compact) return null;
+
+  // El hex se juzga PRIMERO: todo hexadecimal es también base64 válido por
+  // alfabeto, así que preguntar al revés clasificaría toda clave legítima
+  // como base64.
+  const charset: TechnicalKeyCharset = /^[0-9a-fA-F]+$/.test(compact)
+    ? 'hex'
+    : /^[A-Za-z0-9+/]+={0,2}$/.test(compact)
+      ? 'base64'
+      : /^[A-Za-z0-9]+$/.test(compact)
+        ? 'alphanumeric'
+        : 'other';
+
+  return { length: compact.length, charset };
+}
+
 export function assertTechnicalKeyShape(
   raw: string | null | undefined,
   details: Record<string, unknown> = {},
@@ -145,6 +196,9 @@ export function assertTechnicalKeyShape(
       // cliente. La longitud es lo único que hace falta para corregirla.
       ...details,
       technical_key_length: longitud,
+      // Sin la familia de caracteres, «64 caracteres» no distingue el hex de un
+      // SHA-256 del base64 de otro artefacto — y son diagnósticos opuestos.
+      technical_key_charset: describeTechnicalKeyShape(raw)?.charset ?? null,
       expected_length: TECHNICAL_KEY_LENGTH,
     },
   );
