@@ -284,8 +284,19 @@ interface WithholdingRowValue {
   base: number | string;
 }
 
-/** Longitud exacta de la clave técnica que emite la DIAN. */
-const DIAN_TECHNICAL_KEY_LENGTH = 40;
+/**
+ * Las DOS anchuras de clave técnica que emite la DIAN, ambas hex de un hash:
+ * 40 (SHA-1, la del Anexo Técnico 1.9 §11.2 y la de habilitación) y 64
+ * (SHA-256, la que devolvió `GetNumberingRange` el 16/08/2026 para la
+ * resolución de producción 18764113258848).
+ *
+ * Era un `40` suelto, y esa suposición pintaba «la DIAN emite exactamente 40»
+ * sobre una clave de 64 perfectamente válida — un aviso falso justo encima del
+ * botón que gasta numeración. Espeja `TECHNICAL_KEY_LENGTHS` del backend
+ * (`fiscal-document-requirements.ts`); si allá se añade una anchura, aquí
+ * también.
+ */
+const DIAN_TECHNICAL_KEY_LENGTHS = [40, 64] as const;
 
 /** Destino único al salir de la captura, se emita o no. */
 const INVOICES_LIST_ROUTE = '/admin/invoicing/invoices';
@@ -2510,8 +2521,9 @@ export class InvoiceCreatePageComponent implements OnInit {
    *    sellada en `technical_key_encrypted` y es perfectamente válida». Un falso
    *    alarmismo en la pantalla que gasta numeración autorizada es peor que el
    *    silencio.
-   *  - `> 0` y `!== 40` ⇒ **sí se avisa**. Hay una clave plana legible y no mide
-   *    lo que la DIAN emite; puede estar rancia, pero merece una mirada.
+   *  - `> 0` y fuera de {@link DIAN_TECHNICAL_KEY_LENGTHS} ⇒ **sí se avisa**. Hay
+   *    una clave plana legible y no mide ninguna de las anchuras que la DIAN
+   *    emite; puede estar rancia, pero merece una mirada.
    *
    * NO filtra ni reordena la lista, y NO apaga el botón de guardar: es una
    * sospecha sobre un dato ambiguo, no un veredicto.
@@ -2524,12 +2536,15 @@ export class InvoiceCreatePageComponent implements OnInit {
       return null;
     }
     const length = Number(resolution.technical_key_length) || 0;
-    if (length === 0 || length === DIAN_TECHNICAL_KEY_LENGTH) return null;
+    if (length === 0) return null;
+    if ((DIAN_TECHNICAL_KEY_LENGTHS as readonly number[]).includes(length)) {
+      return null;
+    }
     return (
       'La clave técnica guardada mide ' +
       length +
-      ' caracteres y la DIAN emite exactamente ' +
-      DIAN_TECHNICAL_KEY_LENGTH +
+      ' caracteres y la DIAN la emite de ' +
+      DIAN_TECHNICAL_KEY_LENGTHS.join(' o ') +
       '. Verifícala en Facturación → Resoluciones antes de emitir: con una clave equivocada la DIAN rechaza la factura por CUFE mal calculado y el consecutivo autorizado que gasta no se recupera.'
     );
   });

@@ -8,7 +8,7 @@ import {
 } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import {
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS_LABEL,
   isWellFormedTechnicalKey,
 } from '../fiscal-document-requirements';
 import sharp = require('sharp');
@@ -619,7 +619,7 @@ export class DianHabilitationScannerService {
         value: null,
         confidence,
         verified: false,
-        warning: `La clave técnica leída no tiene ${TECHNICAL_KEY_LENGTH} caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
+        warning: `La clave técnica leída no tiene ${TECHNICAL_KEY_LENGTHS_LABEL} caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
       };
     }
     return {

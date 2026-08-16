@@ -7,7 +7,8 @@ import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.s
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
 
 type FiscalDocumentType =
@@ -146,15 +147,15 @@ export class InvoiceNumberGenerator {
           throw new VendixHttpException(
             ErrorCodes.INVOICING_RESOLUTION_011,
             `La resolución ${resolution.prefix}${resolution.resolution_number} no tiene una clave técnica (ClTec) utilizable: ` +
-              `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN emite exactamente ` +
-              `${TECHNICAL_KEY_LENGTH} en hexadecimal. Corrígela en Facturación → Resoluciones copiándola del PDF de la Autorización ` +
+              `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN la emite de ` +
+              `${TECHNICAL_KEY_LENGTHS_LABEL} en hexadecimal. Corrígela en Facturación → Resoluciones copiándola del PDF de la Autorización ` +
               'de Numeración antes de emitir: con una clave equivocada la DIAN rechaza la factura por CUFE mal calculado y el ' +
               'consecutivo autorizado que gasta no se recupera. No se asignó numeración.',
             {
               resolution_id: resolution.id,
               document_type,
               technical_key_length: technical_key.length,
-              expected_length: TECHNICAL_KEY_LENGTH,
+              expected_lengths: [...TECHNICAL_KEY_LENGTHS],
             },
           );
         }

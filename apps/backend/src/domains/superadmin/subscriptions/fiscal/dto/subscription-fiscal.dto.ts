@@ -17,7 +17,7 @@ import {
   TrimTaxId,
 } from '../../../../../common/decorators/trim-string.decorator';
 import {
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS_LABEL,
   TECHNICAL_KEY_PATTERN,
   normalizeTechnicalKey,
 } from '../../../../store/invoicing/fiscal-document-requirements';
@@ -33,7 +33,7 @@ export type SubscriptionFiscalEnvironment = 'test' | 'production';
  * autorizado. Se consume el contrato compartido en vez de reescribirlo.
  */
 const TECHNICAL_KEY_MESSAGE =
-  `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} caracteres ` +
+  `La clave técnica (ClTec) debe tener ${TECHNICAL_KEY_LENGTHS_LABEL} caracteres ` +
   'hexadecimales (0-9, a-f), tal como la entrega la DIAN en la autorización de ' +
   'numeración. Déjala vacía si este documento no lleva clave técnica.';
 

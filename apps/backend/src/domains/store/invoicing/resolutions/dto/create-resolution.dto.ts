@@ -14,7 +14,7 @@ import { Transform, Type } from 'class-transformer';
 
 import {
   FISCAL_DOCUMENT_TYPES,
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS_LABEL,
   TECHNICAL_KEY_PATTERN,
   normalizeTechnicalKey,
   type FiscalDocumentType,
@@ -204,7 +204,7 @@ export class CreateResolutionDto {
     message: (args) => {
       const length = typeof args.value === 'string' ? args.value.length : 0;
       return (
-        `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
+        `La clave técnica (ClTec) debe tener ${TECHNICAL_KEY_LENGTHS_LABEL} ` +
         `caracteres hexadecimales (0-9, a-f); se capturaron ${length}. ` +
         'Cópiala completa desde el PDF de la autorización de numeración o ' +
         'consúltala en el servicio de Rangos de Numeración de la DIAN. ' +

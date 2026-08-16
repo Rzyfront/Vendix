@@ -17,7 +17,8 @@ import { CufeCalculator } from '../../utils/cufe-calculator';
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../../fiscal-document-requirements';
 import {
   buildDianXmlFileName,
@@ -308,7 +309,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_011,
           `La clave técnica (ClTec) de la resolución tiene ${technical_key.length} ` +
-            `caracteres y la DIAN la emite con exactamente ${TECHNICAL_KEY_LENGTH} ` +
+            `caracteres y la DIAN la emite con ${TECHNICAL_KEY_LENGTHS_LABEL} ` +
             `dígitos hexadecimales. No se transmite la factura ${invoice_data.invoice_number}: ` +
             `una ClTec incompleta produce un CUFE que la DIAN rechaza gastando el ` +
             `consecutivo autorizado. Corrígela en Facturación → Resoluciones, ` +
@@ -316,7 +317,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           {
             document_number: invoice_data.invoice_number,
             technical_key_length: technical_key.length,
-            expected_length: TECHNICAL_KEY_LENGTH,
+            expected_lengths: [...TECHNICAL_KEY_LENGTHS],
           },
         );
       }

@@ -72,7 +72,8 @@ import { resolveIssuerFiscalIdentity } from '../utils/fiscal-issuer.util';
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
 import {
   DianTestSetJob,
@@ -959,15 +960,15 @@ export class DianTestService {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_011,
           `La resolución ${resolution.prefix}${resolution.resolution_number} no tiene una clave técnica (ClTec) utilizable: ` +
-            `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN emite exactamente ` +
-            `${TECHNICAL_KEY_LENGTH} en hexadecimal. Cópiala completa desde la resolución de habilitación que generó el portal DIAN ` +
+            `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN la emite de ` +
+            `${TECHNICAL_KEY_LENGTHS_LABEL} en hexadecimal. Cópiala completa desde la resolución de habilitación que generó el portal DIAN ` +
             'antes de enviar el set: con una clave equivocada la DIAN rechaza los documentos por CUFE mal calculado y los ' +
             'consecutivos que gasten no se recuperan. No se reservó numeración.',
           {
             dian_configuration_id: config_id,
             resolution_id,
             technical_key_length: technical_key.length,
-            expected_length: TECHNICAL_KEY_LENGTH,
+            expected_lengths: [...TECHNICAL_KEY_LENGTHS],
           },
         );
       }
