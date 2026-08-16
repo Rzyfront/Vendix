@@ -237,6 +237,13 @@ export class InvoiceListComponent {
       label: 'Estado',
       align: 'center',
       priority: 1,
+      // `badge: true` es lo que HABILITA la píldora. `table.component.html`
+      // condiciona la rama del badge a esta bandera, no a `badgeConfig`: sin
+      // ella la celda cae al render de texto plano y toda la configuración de
+      // color de abajo queda muerta sin un solo aviso. Es lo que pasaba acá —
+      // el estado fiscal de la factura se leía como texto gris corriente,
+      // indistinguible de la descripción de al lado.
+      badge: true,
       badgeConfig: {
         type: 'custom',
         colorMap: INVOICE_STATUS_COLORS,

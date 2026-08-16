@@ -24,6 +24,11 @@ import {
  *
  * Route `data` contract (set on the shell's parent route):
  * - `moduleTitle: string`   — sticky-header title (e.g. 'Facturación').
+ * - `moduleSubtitle?: string` — second line. Sin él se usa la etiqueta de la
+ *   pestaña activa, que es lo que orienta de verdad ('Facturación' /
+ *   'Resoluciones'). Antes se pasaba `title()` a los dos, así que la cabecera
+ *   de TODO módulo con este shell decía dos veces lo mismo, en una línea
+ *   pensada para decir dónde estás dentro del módulo.
  * - `moduleIcon?: string`   — Lucide icon name (default 'box').
  * - `moduleTabs: StickyHeaderTab[]` — ordered tabs; each `route` is absolute.
  * - `moduleBackRoute?: string` — back button target (default '/admin/fiscal').
@@ -36,7 +41,7 @@ import {
     <section class="module-shell">
       <app-sticky-header
         [title]="title()"
-        [subtitle]="title()"
+        [subtitle]="subtitle()"
         [icon]="icon()"
         variant="glass"
         [showBackButton]="true"
@@ -110,6 +115,25 @@ export class ModuleTabsShellComponent {
       return route && (url === route || url.startsWith(`${route}/`));
     });
     return match?.id ?? this.tabs()[0]?.id ?? '';
+  });
+
+  /**
+   * Segunda línea de la cabecera: dónde estás DENTRO del módulo.
+   *
+   * Se declara después de `activeTabId` a propósito —la lambda de `computed`
+   * es perezosa, pero leerla en este orden es lo que hace evidente de dónde
+   * sale el valor.
+   *
+   * Cae a cadena vacía cuando el módulo no tiene pestañas: la plantilla del
+   * sticky-header ya oculta la línea con `@if (subtitle())`, así que un módulo
+   * de una sola sección queda con el título limpio en vez de repetirlo.
+   */
+  readonly subtitle = computed<string>(() => {
+    const explicit = this.data()?.['moduleSubtitle'] as string | undefined;
+    if (explicit) return explicit;
+
+    const active = this.tabs().find((tab) => tab.id === this.activeTabId());
+    return active?.label ?? '';
   });
 
   onTabChanged(tabId: string): void {

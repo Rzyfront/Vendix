@@ -617,7 +617,7 @@ export class ResolutionsService {
  * vigente llaman a `findOneInternal()`, que es privada. Un controlador nuevo no
  * puede saltarse la limpieza sin escribir su propia consulta.
  */
-function toPublicResolution<
+export function toPublicResolution<
   T extends {
     technical_key?: string | null;
     technical_key_encrypted?: string | null;

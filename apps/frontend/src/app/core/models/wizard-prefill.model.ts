@@ -84,7 +84,18 @@ export interface WizardPrefillResolution {
   current_number: number;
   valid_from: string;
   valid_to: string;
-  technical_key: string | null;
+  /**
+   * PRESENCIA de la clave técnica, nunca su valor: el backend dejó de mandarla
+   * porque es el secreto con el que se hashea el CUFE de cada factura de esta
+   * resolución y este prefill viaja al navegador.
+   *
+   * El formulario no la necesita: al guardar sólo envía `technical_key` cuando
+   * el campo trae algo, así que dejarlo vacío conserva la almacenada. Con estos
+   * dos campos la UI confirma «hay una clave guardada, de 40 caracteres» sin
+   * revelarla.
+   */
+  technical_key_set: boolean;
+  technical_key_length: number;
   /** SETP habilitación range — not valid for production invoicing. */
   is_habilitacion_range: boolean;
 }

@@ -152,7 +152,26 @@ export interface FiscalWizardPrefillResolution {
   current_number: number;
   valid_from: string;
   valid_to: string;
-  technical_key: string | null;
+  /**
+   * PRESENCIA de la clave técnica, nunca su valor.
+   *
+   * La ClTec es el secreto con el que se hashea el CUFE de cada factura: quien
+   * la tenga puede reproducir el identificador fiscal de cualquier documento
+   * de esta resolución. Este prefill viaja al navegador, así que antes salía en
+   * texto plano en la respuesta de un endpoint de configuración — visible en
+   * las herramientas de red, en cualquier proxy y en el caché del navegador.
+   *
+   * El formulario no la necesita para funcionar: al guardar sólo envía
+   * `technical_key` cuando el campo trae algo, de modo que dejarlo vacío
+   * conserva la que ya está almacenada. Con estos dos campos la UI puede decir
+   * «hay una clave guardada, de 40 caracteres» sin revelarla, que es
+   * exactamente lo que el usuario necesita saber.
+   *
+   * Misma convención que el carril de superadmin (`tenant-resolutions`) y el de
+   * tienda (`toPublicResolution` en `resolutions.service.ts`).
+   */
+  technical_key_set: boolean;
+  technical_key_length: number;
   /**
    * True when this resolution is the DIAN habilitación test range (prefix
    * SETP). Production invoicing requires a DIFFERENT resolution obtained from
