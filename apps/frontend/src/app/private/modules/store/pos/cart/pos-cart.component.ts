@@ -716,10 +716,10 @@ import {
 
     <!--
       Ítem personalizado. El modal es el MISMO del carril fiscal
-      (`vendix-invoice-custom-item-modal`, tamaño xxl con configuración
+      (vendix-invoice-custom-item-modal, tamaño xxl con configuración
       avanzada); acá sólo se le pasa el catálogo de impuestos que el POS ya
       cargó y se recibe la línea traducida al contrato del cobro. Ver
-      `pos-custom-item-modal.component.ts` para la traducción campo por campo.
+      pos-custom-item-modal.component.ts para la traducción campo por campo.
     -->
     <app-pos-custom-item-modal
       [open]="customItemModalOpen()"

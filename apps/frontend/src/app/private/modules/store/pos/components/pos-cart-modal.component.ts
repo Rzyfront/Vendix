@@ -276,12 +276,12 @@ import {
 
             <!--
               Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Es el MISMO
-              predicado del carrito de escritorio (`PosCartService.invoiceRequiredByUvt`),
-              no una segunda regla: dos umbrales calculados aparte terminan
-              discrepando. Faltaba en el camino móvil, así que el cajero de
-              tablet/teléfono sólo se enteraba del tope cuando el backend
-              rechazaba la venta al pulsar «Finalizar Venta», con el cliente
-              delante y el cierre ya hecho.
+              predicado del carrito de escritorio, reusado del servicio (ver
+              nota en la clase), no una segunda regla: dos umbrales calculados
+              aparte terminan discrepando. Faltaba en el camino móvil, así que
+              el cajero de tablet o teléfono sólo se enteraba del tope cuando el
+              backend rechazaba la venta al pulsar «Finalizar Venta», con el
+              cliente delante y el cierre ya hecho.
             -->
             @if (invoiceRequiredByUvt()) {
               <div class="uvt-warning">
@@ -925,8 +925,12 @@ export class PosCartModalComponent {
   readonly canOverridePrices = input<boolean>(false);
 
   /**
-   * Techo de 5 UVT — se REUSAN los signals del servicio del carrito, que ya son
-   * la fuente de verdad del carrito de escritorio. Nada se recalcula acá.
+   * Techo de 5 UVT (Art. 616-1 ET / Res. 000165 de 2023) — se REUSAN los
+   * signals de `PosCartService`, que ya son la fuente de verdad del carrito de
+   * escritorio (`pos-cart.component.ts`). Nada se recalcula acá: un segundo
+   * cálculo del mismo umbral discrepa a la primera corrección, y discrepar en
+   * esto significa que una de las dos pantallas deja pasar una venta que el
+   * backend va a rechazar.
    */
   readonly uvtThreshold = this.cartService.uvtThreshold;
   readonly invoiceRequiredByUvt = this.cartService.invoiceRequiredByUvt;

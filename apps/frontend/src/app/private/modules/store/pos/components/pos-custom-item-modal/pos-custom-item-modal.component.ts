@@ -240,12 +240,20 @@ function isWithholding(taxType: string | null | undefined): boolean {
   return !!taxType && WITHHOLDING_TYPES.has(taxType);
 }
 
-/** Σ de las tarifas de la categoría, en FRACCIÓN. Mismo criterio que el backend. */
+/**
+ * Σ de las tarifas de la categoría, en FRACCIÓN.
+ *
+ * Se suman las filas de `tax_rates` y NADA MÁS. El campo suelto
+ * `TaxCategory.rate` existe en la interfaz pero NO se usa a propósito: ni
+ * `PosCartService.calculateTaxCategoryRate` ni `calculateTaxCategoryTaxes` del
+ * backend lo miran, así que tomarlo aquí haría que la previsión del modal
+ * anunciara un impuesto que ni el carrito ni el documento van a declarar. Una
+ * categoría sin tarifas tiene 0% y eso es lo correcto.
+ */
 function sumRates(category: TaxCategory): number {
   const rates = (category.tax_rates ?? []) as Array<{
     rate?: string | number | null;
   }>;
-  if (rates.length === 0) return Number(category.rate ?? 0) || 0;
   return rates.reduce((sum, rate) => sum + (Number(rate?.rate) || 0), 0);
 }
 

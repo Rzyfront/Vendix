@@ -275,20 +275,8 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       ></app-invoicing-not-configured>
     }
 
-    <!-- NO HAY MODAL DE REQUISITOS FISCALES ACÁ, Y ES DELIBERADO.
-         Vivía un <app-save-requirements-modal> enlazado al SINGLETON de raíz
-         `FiscalRequirementsService`. Ningún camino del POS lo abría a
-         propósito: lo abría `invoicing.effects.ts` (`report()` →
-         `presentFiscalError`) ante CUALQUIER 4xx fiscal de cualquier efecto de
-         facturación. Como este componente se monta con el POS —no está
-         diferido, sólo su modal interno se abre con `isOpen()`—, un fallo
-         fiscal de fondo le tapaba la pantalla al cajero con la venta ya
-         cobrada. Eso es exactamente lo que el carril del POS no puede hacer:
-         acá el estado fiscal se cuenta con el indicador NO MODAL
-         (`app-pos-fiscal-status`), que ya imprime `problem` + `fix` de cada
-         bloqueante sin interrumpir la caja. El modal de requisitos es del
-         carril fiscal, donde bloquear ANTES de gastar numeración es el
-         comportamiento correcto. -->
+    <!-- Aquí NO hay modal de requisitos fiscales, y es deliberado.
+         Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
     `,
   styles: [
     `
@@ -366,6 +354,28 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       }
     `,
   ] })
+/**
+ * SIN MODAL DE REQUISITOS FISCALES — Y ES DELIBERADO.
+ *
+ * Aquí vivía un `<app-save-requirements-modal>` enlazado con `[(isOpen)]` al
+ * SINGLETON de raíz `FiscalRequirementsService`. Ningún camino del POS lo abría
+ * a propósito: lo abría `invoicing.effects.ts` (`report()` →
+ * `fiscalReq.presentFiscalError(error)`) ante CUALQUIER 4xx fiscal de CUALQUIER
+ * efecto de facturación, viniera o no de esta pantalla.
+ *
+ * Y esta pantalla se monta con el POS —no está diferida; sólo su `app-modal`
+ * interno se abre con `isOpen()`—, así que ese modal quedaba armado durante
+ * toda la sesión de caja. Un fallo fiscal de fondo le tapaba la pantalla al
+ * cajero con la venta YA COBRADA: exactamente lo que el carril del POS no puede
+ * hacer.
+ *
+ * En el POS el estado fiscal lo cuenta el indicador NO MODAL
+ * `app-pos-fiscal-status`, que ya imprime el problema y su corrección sin
+ * interrumpir la caja. El modal de requisitos sigue montado donde corresponde
+ * —`fiscal-operations.component.ts` y las pantallas de facturación—, que es el
+ * carril donde bloquear ANTES de gastar numeración es el comportamiento
+ * correcto.
+ */
 export class PosOrderConfirmationComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);

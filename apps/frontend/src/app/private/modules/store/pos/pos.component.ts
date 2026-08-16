@@ -478,7 +478,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       <!--
         Ítem personalizado (camino móvil). Mismo modal compartido que usa el
         carrito de escritorio y el carril fiscal: una sola captura, un solo
-        contrato. Ver `pos-custom-item-modal.component.ts`.
+        contrato. Ver pos-custom-item-modal.component.ts.
       -->
       <app-pos-custom-item-modal
         [open]="customItemModalOpen()"
