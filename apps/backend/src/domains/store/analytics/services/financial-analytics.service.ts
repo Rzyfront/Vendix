@@ -297,7 +297,8 @@ export class FinancialAnalyticsService {
       },
     });
 
-    // Get sessions with details
+    // Get sessions with details (incl. joined user names so we can reuse
+    // `buildCashSessionRow` and keep pantalla == archivo).
     const sessions = await this.prisma.cash_register_sessions.findMany({
       where: {
         opened_at: { gte: startDate, lte: endDate },
@@ -311,8 +312,9 @@ export class FinancialAnalyticsService {
         expected_closing_amount: true,
         actual_closing_amount: true,
         difference: true,
-        opened_by: true,
-        closed_by: true,
+        register: { select: { name: true } },
+        opened_by_user: { select: { first_name: true, last_name: true } },
+        closed_by_user: { select: { first_name: true, last_name: true } },
         movements: {
           select: {
             type: true,
@@ -325,7 +327,7 @@ export class FinancialAnalyticsService {
       take: limit,
     });
 
-    // Get session-level aggregates
+    // Get session-level aggregates (sobre el rango COMPLETO, no la página)
     const aggregates = await this.prisma.cash_register_sessions.aggregate({
       where: {
         opened_at: { gte: startDate, lte: endDate },
@@ -342,40 +344,14 @@ export class FinancialAnalyticsService {
       },
     });
 
-    // Movement totals across all sessions in range
-    const sessionIds = sessions.map((s) => s.id);
-    const movementTotals =
-      sessionIds.length > 0
-        ? await this.prisma.cash_register_movements.groupBy({
-            by: ['session_id'],
-            where: {
-              session_id: { in: sessionIds },
-              type: 'sale',
-            },
-            _sum: {
-              amount: true,
-            },
-          })
-        : [];
-
-    const movementMap = new Map<number | null, number>(
-      movementTotals.map((m) => [m.session_id, Number(m._sum.amount || 0)]),
-    );
-
+    // Filas — usan el MISMO helper que el export (regla 5 del skill:
+    // pantalla == archivo, misma fuente de agregación).
     const data = sessions.map((s) => {
-      const salesTotal = movementMap.get(s.id) || 0;
-
+      const row = this.buildCashSessionRow(s);
       return {
+        ...row,
         session_id: s.id,
-        status: s.status,
-        opened_at: s.opened_at.toISOString(),
-        closed_at: s.closed_at ? s.closed_at.toISOString() : null,
-        opening_amount: Number(s.opening_amount || 0),
-        expected_closing_amount: Number(s.expected_closing_amount || 0),
-        actual_closing_amount: Number(s.actual_closing_amount || 0),
-        difference: Number(s.difference || 0),
-        sales_total: salesTotal,
-        total_movements: s.movements.length,
+        total_movements: (s.movements ?? []).length,
       };
     });
 
@@ -880,39 +856,68 @@ export class FinancialAnalyticsService {
       take: 10000,
     });
 
-    return sessions.map((s): CashSessionExportRow => {
-      const salesMovements = s.movements.filter((m) => m.type === 'sale');
-      const expenseMovements = s.movements.filter((m) => m.type === 'expense');
-      const totalSales = salesMovements.reduce(
-        (sum, m) => sum + Number(m.amount || 0),
-        0,
-      );
-      const totalExpenses = expenseMovements.reduce(
-        (sum, m) => sum + Number(m.amount || 0),
-        0,
-      );
+    return sessions.map((s) => this.buildCashSessionRow(s));
+  }
 
-      return {
-        // RAW instants — do NOT format here (emission phase renders in TZ).
-        opened_at: s.opened_at,
-        closed_at: s.closed_at ?? null,
-        register_name: s.register?.name ?? null,
-        opened_by_name: s.opened_by_user
-          ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}`
-          : null,
-        closed_by_name: s.closed_by_user
-          ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}`
-          : null,
-        opening_amount: this.round2(Number(s.opening_amount || 0)),
-        total_sales: this.round2(totalSales),
-        total_expenses: this.round2(totalExpenses),
-        expected_closing_amount: this.round2(
-          Number(s.expected_closing_amount || 0),
-        ),
-        actual_closing_amount: this.round2(Number(s.actual_closing_amount || 0)),
-        difference: this.round2(Number(s.difference || 0)),
-        status: s.status,
-      };
-    });
+  /**
+   * Shape canónico de una fila de Arqueo de Caja (regla 5 del skill
+   * `vendix-report-xlsx`: pantalla == archivo, misma fuente de agregación).
+   *
+   * - Devuelve **RAW Date instants** en `opened_at` / `closed_at` (regla 2 del
+   *   skill: fechas en TZ de la tienda; la emisión las renderiza con `tz`).
+   * - Las agregaciones (`total_sales`, `total_expenses`) se calculan acá una
+   *   sola vez — tanto `getCashSessionsReport` (pantalla) como
+   *   `getCashSessionsForExport` (XLSX) llaman a este helper, así nunca
+   *   divergen.
+   */
+  private buildCashSessionRow(s: {
+    status: string;
+    opened_at: Date;
+    closed_at: Date | null;
+    opening_amount: any;
+    expected_closing_amount: any;
+    actual_closing_amount: any;
+    difference: any;
+    register?: { name: string } | null;
+    opened_by_user?: { first_name: string; last_name: string } | null;
+    closed_by_user?: { first_name: string; last_name: string } | null;
+    movements?: Array<{ type: string; amount: any }>;
+  }): CashSessionExportRow {
+    const salesMovements = (s.movements ?? []).filter(
+      (m) => m.type === 'sale',
+    );
+    const expenseMovements = (s.movements ?? []).filter(
+      (m) => m.type === 'expense',
+    );
+    const totalSales = salesMovements.reduce(
+      (sum, m) => sum + Number(m.amount || 0),
+      0,
+    );
+    const totalExpenses = expenseMovements.reduce(
+      (sum, m) => sum + Number(m.amount || 0),
+      0,
+    );
+
+    return {
+      // RAW instants — do NOT format here (emission phase renders in TZ).
+      opened_at: s.opened_at,
+      closed_at: s.closed_at ?? null,
+      register_name: s.register?.name ?? null,
+      opened_by_name: s.opened_by_user
+        ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}`
+        : null,
+      closed_by_name: s.closed_by_user
+        ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}`
+        : null,
+      opening_amount: this.round2(Number(s.opening_amount || 0)),
+      total_sales: this.round2(totalSales),
+      total_expenses: this.round2(totalExpenses),
+      expected_closing_amount: this.round2(
+        Number(s.expected_closing_amount || 0),
+      ),
+      actual_closing_amount: this.round2(Number(s.actual_closing_amount || 0)),
+      difference: this.round2(Number(s.difference || 0)),
+      status: s.status,
+    };
   }
 }
