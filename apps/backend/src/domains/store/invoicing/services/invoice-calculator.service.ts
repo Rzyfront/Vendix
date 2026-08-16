@@ -738,7 +738,7 @@ export class InvoiceCalculatorService {
       // Base propia si el llamador la declaró (AIU, bases disímiles); si no, la
       // base neta de la línea. El IVA y el INC de un mismo renglón comparten
       // base salvo que se diga lo contrario.
-      const taxable = this.hasValue(tax.taxable_amount)
+      const taxable = this.hasTaxableBase(tax.taxable_amount)
         ? toDecimal(dianAmount(tax.taxable_amount))
         : base;
       const amount = taxable.times(fraction);
@@ -966,7 +966,7 @@ export class InvoiceCalculatorService {
         tax.tax_rate,
         this.resolveRateBasis(tax),
       );
-      if (this.hasValue(tax.taxable_amount)) {
+      if (this.hasTaxableBase(tax.taxable_amount)) {
         // Misma base truncada que usará el bucle de impuestos, para que el
         // numerador del despeje y la cuota emitida no discrepen un centavo.
         const fixed_base = toDecimal(dianAmount(tax.taxable_amount));
@@ -1241,5 +1241,25 @@ export class InvoiceCalculatorService {
    */
   private hasValue(value: DianNumericInput): boolean {
     return value !== null && value !== undefined && value !== '';
+  }
+
+  /**
+   * ¿El impuesto trae una BASE PROPIA que respetar?
+   *
+   * No es `hasValue`, y la diferencia es la factura entera. El formulario del
+   * panel manda `taxable_amount: 0` como marcador de posición —igual que manda
+   * `tax_amount: 0`— esperando que el servidor calcule; leído como una base
+   * declarada, ese cero produce dos daños a la vez: la cuota sale cero (0 × 19 %)
+   * y el despeje del precio impuesto-incluido no ocurre, porque una base fija
+   * no entra al divisor. Una línea de $119.000 IVA incluido se persistía con
+   * base 119.000 y cuota 0 sin que nada fallara.
+   *
+   * Cero no se pierde como afirmación: una base legítimamente nula sólo ocurre
+   * en una línea de importe nulo, y ahí la base de la línea también es cero, de
+   * modo que caer a ella da el mismo resultado. Lo que se descarta es
+   * únicamente el marcador de posición.
+   */
+  private hasTaxableBase(value: DianNumericInput): boolean {
+    return this.hasValue(value) && !toDecimal(value).isZero();
   }
 }

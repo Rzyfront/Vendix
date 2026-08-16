@@ -175,6 +175,36 @@ describe('InvoiceFlowService POS equivalent document', () => {
       ...overrides.withholdingFlow,
     };
 
+    // Validador de identidad, prevalidador fiscal y bóveda de la ClTec: los
+    // tres se llaman en el camino feliz de `validate()`/`send()`, así que se
+    // declaran aprobando en vez de `{}` — un doble vacío rompería el flujo con
+    // «no es una función» y el caso mediría el error equivocado.
+    const acquirerIdentity = {
+      validate: jest
+        .fn()
+        .mockReturnValue({ emittable: true, blockers: [], warnings: [] }),
+      ...overrides.acquirerIdentity,
+    };
+    const fiscalDocument = {
+      validate: jest.fn().mockReturnValue({
+        emittable: true,
+        blockers: [],
+        warnings: [],
+        document_type: 'documento_equivalente_pos',
+        computed: {},
+      }),
+      ...overrides.fiscalDocument,
+    };
+    const technicalKeyVault = {
+      reveal: jest.fn().mockReturnValue(null),
+      sealForWrite: jest.fn().mockReturnValue({
+        technical_key: null,
+        technical_key_encrypted: null,
+        technical_key_fingerprint: null,
+      }),
+      ...overrides.technicalKeyVault,
+    };
+
     return {
       service: new InvoiceFlowService(
         prisma as any,
@@ -184,6 +214,9 @@ describe('InvoiceFlowService POS equivalent document', () => {
         fiscalLedger as any,
         fiscalGate as any,
         withholdingFlow as any,
+        acquirerIdentity as any,
+        fiscalDocument as any,
+        technicalKeyVault as any,
       ),
       prisma,
       provider,

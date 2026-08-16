@@ -809,6 +809,20 @@ export class UblCommonBuilder {
     // es información legítima en ambos casos, y condicionarlo al tipo de persona
     // reintroduciría la misma clase de defecto en cuanto el tipo se derive mal.
     // En UBL `PartyIdentification` precede a `PartyName` en la secuencia.
+    //
+    // CIIU — opcional según Anexo 19 (RUT casilla 46, 4 dígitos). Va AQUÍ, antes
+    // de `cac:PartyIdentification`: en `PartyType` el esquema ubica
+    // `cbc:IndustryClassificationCode` entre los `cbc:` de cabecera, no junto a
+    // los grupos fiscales. Emitirlo después de `cac:PartyTaxScheme` —donde
+    // estaba— produce un documento con el contenido correcto y el orden
+    // inválido, que la DIAN rechaza por esquema; y sólo se manifestaba cuando el
+    // cliente tenía CIIU cargado, así que pasaba desapercibido en pruebas.
+    if (customer.ciiu_code) {
+      party
+        .ele(UBL_NAMESPACES.CBC, 'IndustryClassificationCode')
+        .txt(customer.ciiu_code);
+    }
+
     party
       .ele(UBL_NAMESPACES.CAC, 'PartyIdentification')
       .ele(UBL_NAMESPACES.CBC, 'ID')
@@ -882,14 +896,15 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'Name')
       .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
-    // CIIU — optional per Anexo 19 (RUT casilla 46, 4 digits).
-    if (customer.ciiu_code) {
-      party
-        .ele(UBL_NAMESPACES.CBC, 'IndustryClassificationCode')
-        .txt(customer.ciiu_code);
-    }
-
-    // Structural branch — see method JSDoc for the rule.
+    // Rama estructural (ver el JSDoc del método). Sólo el lado JURÍDICO se emite
+    // aquí: `cac:PartyLegalEntity` ocupa la posición 12 de `PartyType` y
+    // `cac:Person` la 14, con `cac:Contact` en medio. Los tres se emiten en ese
+    // orden — legal entity, contacto, persona— porque UBL fija la secuencia por
+    // `xsd:sequence` y la DIAN rechaza por esquema aunque el contenido sea
+    // correcto. Antes se emitía la persona natural antes del contacto, lo que
+    // invertía las posiciones 13 y 14 en todo documento con adquiriente persona
+    // natural que además tuviera correo o teléfono — es decir, en la práctica,
+    // en todos.
     if (resolved_person_type === 'JURIDICA') {
       const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
       legal
@@ -905,17 +920,28 @@ export class UblCommonBuilder {
         .att('schemeID', dian_scheme_id)
         .att('schemeName', customer.document_type)
         .txt(id_value_with_dv);
-    } else {
-      // NATURAL — `cac:Person` with FirstName, FamilyName, ID. The two
-      // structural siblings (`cac:Person`, `cac:PartyLegalEntity`) are
-      // mutually exclusive in UBL for the customer role.
+    }
+
+    // Contact — posición 13, entre `cac:PartyLegalEntity` y `cac:Person`.
+    if (customer.email || customer.phone) {
+      const contact = party.ele(UBL_NAMESPACES.CAC, 'Contact');
+      if (customer.phone) {
+        contact.ele(UBL_NAMESPACES.CBC, 'Telephone').txt(customer.phone);
+      }
+      if (customer.email) {
+        contact.ele(UBL_NAMESPACES.CBC, 'ElectronicMail').txt(customer.email);
+      }
+    }
+
+    if (resolved_person_type !== 'JURIDICA') {
+      // NATURAL — `cac:Person`. Los dos hermanos estructurales (`cac:Person`,
+      // `cac:PartyLegalEntity`) son mutuamente excluyentes en UBL para el rol de
+      // adquiriente.
+      //
+      // Dentro de `PersonType` la secuencia es cbc:ID → cbc:FirstName →
+      // cbc:FamilyName. El identificador iba de último y el esquema lo ubica de
+      // primero.
       const person = party.ele(UBL_NAMESPACES.CAC, 'Person');
-      person
-        .ele(UBL_NAMESPACES.CBC, 'FirstName')
-        .txt(customer.first_name || customer.legal_name || '');
-      person
-        .ele(UBL_NAMESPACES.CBC, 'FamilyName')
-        .txt(customer.last_name || '');
       person
         .ele(UBL_NAMESPACES.CBC, 'ID')
         .att('schemeAgencyID', '195')
@@ -926,17 +952,12 @@ export class UblCommonBuilder {
         .att('schemeID', dian_scheme_id)
         .att('schemeName', customer.document_type)
         .txt(id_value_with_dv);
-    }
-
-    // Contact
-    if (customer.email || customer.phone) {
-      const contact = party.ele(UBL_NAMESPACES.CAC, 'Contact');
-      if (customer.phone) {
-        contact.ele(UBL_NAMESPACES.CBC, 'Telephone').txt(customer.phone);
-      }
-      if (customer.email) {
-        contact.ele(UBL_NAMESPACES.CBC, 'ElectronicMail').txt(customer.email);
-      }
+      person
+        .ele(UBL_NAMESPACES.CBC, 'FirstName')
+        .txt(customer.first_name || customer.legal_name || '');
+      person
+        .ele(UBL_NAMESPACES.CBC, 'FamilyName')
+        .txt(customer.last_name || '');
     }
   }
 
@@ -2054,6 +2075,21 @@ export class UblCommonBuilder {
    */
   static resolveTaxCode(tax_name: string): string {
     const name = tax_name.toUpperCase().trim();
+
+    // Las retenciones van PRIMERO: sus nombres contienen el del tributo que
+    // retienen («ReteIVA» contiene «IVA», «ReteICA» contiene «ICA»), así que
+    // cualquier orden que las deje de últimas las clasifica como el tributo y
+    // las suma al `cac:TaxTotal` que la DIAN contrasta. Sólo se mira por
+    // PREFIJO —«RETE»/«AUTORRETE»— porque buscarlo en cualquier posición haría
+    // que una palabra que lo contenga por dentro clasifique como retención.
+    const compact = name.replace(/[^A-Z0-9]/g, '');
+    if (compact.startsWith('RETE') || compact.startsWith('AUTORRETE')) {
+      if (compact.includes('IVA')) return DIAN_TAX_CODES.RETE_IVA;
+      if (compact.includes('ICA')) return DIAN_TAX_CODES.RETE_ICA;
+      if (compact.includes('CREE')) return DIAN_TAX_CODES.RETE_CREE;
+      return DIAN_TAX_CODES.RETE_FUENTE;
+    }
+
     if (name.includes('IVA') || name.includes('VAT')) {
       return DIAN_TAX_CODES.IVA;
     }
@@ -2070,16 +2106,36 @@ export class UblCommonBuilder {
    * Resolves the DIAN tax scheme code for a tax row, prioritizing the persisted
    * fiscal type over the tax_name heuristic. This makes IVA (01), INC (04) and
    * ICA (03) deterministic regardless of how the tax was named by the user.
+   *
+   * Las RETENCIONES resuelven su propio código —05 ReteIVA, 06 Retefuente,
+   * 07 ReteICA— y no el del tributo que retienen. Sin esa rama caían al
+   * heurístico por nombre, que es el peor camino posible para ellas: «ReteIVA»
+   * contiene «IVA» y «ReteICA» contiene «ICA», así que una retención infiltrada
+   * entre los tributos se clasificaba como el impuesto mismo. `isWithholdingTax`
+   * ya describía esa trampa y la evitaba para decidir SI la fila es retención;
+   * faltaba usarla también para decidir QUÉ código lleva.
    */
   static resolveTaxCodeFromTax(tax: ProviderInvoiceTax): string {
-    switch ((tax.tax_type || '').toLowerCase()) {
+    const tax_type = (tax.tax_type || '').toLowerCase();
+    switch (tax_type) {
       case 'iva':
         return DIAN_TAX_CODES.IVA;
       case 'inc':
         return DIAN_TAX_CODES.INC;
       case 'ica':
         return DIAN_TAX_CODES.ICA;
+      case 'reteiva':
+        return DIAN_TAX_CODES.RETE_IVA;
+      case 'retefuente':
+        return DIAN_TAX_CODES.RETE_FUENTE;
+      case 'reteica':
+        return DIAN_TAX_CODES.RETE_ICA;
+      case 'retecree':
+        return DIAN_TAX_CODES.RETE_CREE;
       default:
+        // `withholding` es el genérico de `tax_type_enum`: dice que la fila es
+        // una retención pero no cuál, así que el nombre es lo único que queda
+        // para distinguirlas — y ahí sí se busca «rete» primero.
         return UblCommonBuilder.resolveTaxCode(tax.tax_name);
     }
   }

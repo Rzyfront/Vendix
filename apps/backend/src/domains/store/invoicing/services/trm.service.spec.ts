@@ -60,10 +60,15 @@ describe('TrmService', () => {
       expect(quote?.valid_from).toBe('2026-08-14');
       expect(quote?.valid_to).toBe('2026-08-17');
 
-      const url = String(fetchMock.mock.calls[0][0]);
-      expect(url).toContain('%24where=');
-      expect(decodeURIComponent(url)).toContain('vigenciadesde <=');
-      expect(decodeURIComponent(url)).toContain('vigenciahasta >=');
+      // Se mira la URL DECODIFICADA, no su serialización: el `$` de SoQL viaja
+      // tal cual (`$where=`) y percent-encodearlo (`%24where=`) sería
+      // equivalente para Socrata. Fijar la forma cruda ataba la prueba a un
+      // detalle que no cambia el comportamiento del dataset.
+      const url = decodeURIComponent(String(fetchMock.mock.calls[0][0]));
+      expect(url).toContain('$where=');
+      expect(url).toContain('$limit=1');
+      expect(url).toContain('vigenciadesde <=');
+      expect(url).toContain('vigenciahasta >=');
     });
 
     it('cachea el acierto y no vuelve a salir a la red', async () => {

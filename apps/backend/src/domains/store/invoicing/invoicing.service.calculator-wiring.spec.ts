@@ -147,11 +147,15 @@ describe('InvoicingService · cableado del motor aritmético', () => {
     );
 
     const data = created[0];
-    expect(data.subtotal_amount.toString()).toBe('100000.00');
-    expect(data.tax_amount.toString()).toBe('19000.00');
+    // Se compara el IMPORTE, no su serialización: `Prisma.Decimal` descarta los
+    // ceros finales al imprimirse (`new Prisma.Decimal('100000.00').toString()`
+    // es `'100000'`), así que fijar la cadena con dos decimales probaba el
+    // formateo de la librería y no lo que se persiste.
+    expect(Number(data.subtotal_amount)).toBe(100000);
+    expect(Number(data.tax_amount)).toBe(19000);
     // `PayableAmount` = base + impuesto. Antes daba 119.000 + 19.000 porque el
     // bruto ya llevaba el impuesto dentro y se le volvía a sumar.
-    expect(data.total_amount.toString()).toBe('119000.00');
+    expect(Number(data.total_amount)).toBe(119000);
   });
 
   it('recalcula el impuesto que el cliente mandó en cero', async () => {
@@ -179,11 +183,11 @@ describe('InvoicingService · cableado del motor aritmético', () => {
     );
 
     const data = created[0];
-    expect(data.subtotal_amount.toString()).toBe('100000.00');
-    expect(data.tax_amount.toString()).toBe('19000.00');
+    expect(Number(data.subtotal_amount)).toBe(100000);
+    expect(Number(data.tax_amount)).toBe(19000);
     // La línea también, no sólo la cabecera: el desglose por línea es lo que
     // alimenta los `cac:TaxSubtotal` del XML.
-    expect(data.invoice_items.create[0].tax_amount.toString()).toBe('19000.00');
+    expect(Number(data.invoice_items.create[0].tax_amount)).toBe(19000);
     // Y la fila de cabecera lleva su tipo fiscal: es la clave con la que el
     // CUFE arma ValImp1/2/3.
     expect(data.invoice_taxes.create[0].tax_type).toBe('iva');

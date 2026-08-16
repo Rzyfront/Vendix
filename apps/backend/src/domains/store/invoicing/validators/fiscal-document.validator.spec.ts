@@ -1441,7 +1441,11 @@ describe('FiscalDocumentValidator', () => {
   describe('property-based: aritmética del Anexo 1.9', () => {
     // PRNG determinista (mulberry32) — sin `Math.random()` porque rompe
     // reproducibilidad entre corridas y CI.
-    const mulberry32 = (seed: number) => () => {
+    // Sobraba un nivel de flecha: `mulberry32(seed)` devolvía una función que
+    // devolvía el generador, no el generador. TypeScript lo denunciaba
+    // (`() => () => number` no es `() => number`) y la suite entera no
+    // compilaba, así que las 200 combinaciones no se ejercitaron nunca.
+    const mulberry32 = (seed: number) => {
       let s = seed >>> 0;
       return () => {
         s = (s + 0x6d2b79f5) >>> 0;
@@ -1484,19 +1488,27 @@ describe('FiscalDocumentValidator', () => {
         const discount = Math.round((subtotal * disc_pct) / 100);
         const base = subtotal - discount;
 
-        // 0..2 impuestos por línea, con tarifa 5..19%
+        // 0..2 impuestos por línea, con tarifa 5..19 %.
+        //
+        // `tax_rate` va en PORCENTAJE (19.00), que es lo que la DIAN valida
+        // como `cbc:Percent` con `TaxAmount = TaxableAmount × Percent/100`, y
+        // lo que el validador recomputa. El generador anterior emitía la
+        // FRACCIÓN (0.19) y su propio oráculo la releía como porcentaje, así
+        // que exigía un descuadre que el validador —bien— no reportaba: las
+        // 200 combinaciones fallaban por un defecto del generador, no del
+        // código bajo prueba.
         const n_taxes = Math.floor(rng() * 3);
         const item_taxes: any[] = [];
         let item_tax_cents = 0;
         for (let t = 0; t < n_taxes; t++) {
-          const rate = 0.05 + Math.floor(rng() * 14) / 100; // 5..19%
-          const tax_amt = mul_cents(base, rate);
+          const rate_pct = 5 + Math.floor(rng() * 15); // 5..19 %
+          const tax_amt = mul_cents(base, rate_pct);
           item_tax_cents += tax_amt;
           item_taxes.push({
             tax_rate_id: t + 100,
-            tax_name: rate > 0.15 ? 'IVA' : 'INC',
-            tax_rate: from_cents(cents(rate)),
-            tax_type: rate > 0.15 ? 'iva' : 'inc',
+            tax_name: rate_pct > 15 ? 'IVA' : 'INC',
+            tax_rate: rate_pct.toFixed(2),
+            tax_type: rate_pct > 15 ? 'iva' : 'inc',
             taxable_amount: from_cents(base),
             tax_amount: from_cents(tax_amt),
           });
@@ -1593,8 +1605,9 @@ describe('FiscalDocumentValidator', () => {
           for (const tax of item.taxes ?? []) {
             const declared = cents(Number(tax.tax_amount));
             const base = cents(Number(tax.taxable_amount));
-            const rate = cents(Number(tax.tax_rate));
-            const computed = mul_cents(base, rate);
+            // `tax_rate` es un PORCENTAJE; la igualdad que la DIAN recomputa es
+            // `TaxAmount = TaxableAmount × Percent/100`.
+            const computed = mul_cents(base, Number(tax.tax_rate));
             if (Math.abs(declared - computed) > 1) {
               all_line_taxes_ok = false;
               break;

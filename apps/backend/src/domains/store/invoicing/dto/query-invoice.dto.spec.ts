@@ -50,7 +50,14 @@ describe('QueryInvoiceDto', () => {
       const errors = await validate(dto);
       expect(errors).toHaveLength(1);
       expect(errors[0].property).toBe('invoice_type');
-      expect(errors[0].constraints).toHaveProperty('isEnum');
+      // `isIn`, no `isEnum`: el decorador pasó a `@IsIn([...])` porque
+      // `@IsEnum` con un array literal construye la lista de valores con
+      // `Object.keys().filter(k => isNaN(k))` y en un array las claves son
+      // índices — se filtran todas y el usuario lee «must be one of the
+      // following values: » sin un solo valor. Se afirma además que el mensaje
+      // los enumera, que es la razón del cambio.
+      expect(errors[0].constraints).toHaveProperty('isIn');
+      expect(errors[0].constraints?.isIn).toContain('sales_invoice');
     });
 
     it('acepta invoice_type vacío (filtro opcional)', async () => {

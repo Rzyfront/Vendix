@@ -155,6 +155,38 @@ describe('InvoiceFlowService support documents', () => {
       ...overrides.withholdingFlow,
     };
 
+    // Las tres piezas que el flujo ganó con la reconstrucción fiscal. Se
+    // declaran aprobando —no como `{}`— porque `validate()` y `send()` las
+    // llaman en el camino feliz: un doble vacío haría reventar el flujo con
+    // «no es una función» y el test diría «rechazó» donde el código real emite.
+    const acquirerIdentity = {
+      validate: jest
+        .fn()
+        .mockReturnValue({ emittable: true, blockers: [], warnings: [] }),
+      ...overrides.acquirerIdentity,
+    };
+    const fiscalDocument = {
+      validate: jest.fn().mockReturnValue({
+        emittable: true,
+        blockers: [],
+        warnings: [],
+        document_type: 'factura_venta',
+        computed: {},
+      }),
+      ...overrides.fiscalDocument,
+    };
+    // `reveal` devuelve `null` a propósito: estos casos no ejercen el hash del
+    // CUFE, y devolver una ClTec inventada afirmaría una clave que no existe.
+    const technicalKeyVault = {
+      reveal: jest.fn().mockReturnValue(null),
+      sealForWrite: jest.fn().mockReturnValue({
+        technical_key: null,
+        technical_key_encrypted: null,
+        technical_key_fingerprint: null,
+      }),
+      ...overrides.technicalKeyVault,
+    };
+
     return {
       service: new InvoiceFlowService(
         prisma as any,
@@ -164,6 +196,9 @@ describe('InvoiceFlowService support documents', () => {
         fiscalLedger as any,
         fiscalGate as any,
         withholdingFlow as any,
+        acquirerIdentity as any,
+        fiscalDocument as any,
+        technicalKeyVault as any,
       ),
       prisma,
       configClient,

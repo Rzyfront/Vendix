@@ -268,10 +268,20 @@ export function dianPriceAmount(line: DianLineAmounts): string {
  * carry the gross subtotal while the lines carried net amounts, so any invoice
  * with a discount violated FAU14; deriving both from here makes that divergence
  * unrepresentable.
+ *
+ * SUMA DE TRUNCADOS, no truncado de la suma. Cada línea viaja al XML por
+ * `dianLineExtension`, es decir YA truncada a 2 decimales; la DIAN recomputa el
+ * total sumando esos valores emitidos, no los originales. Acumular en crudo y
+ * truncar al final producía un total que ninguna de las dos partes declara: diez
+ * líneas de 10,555 emiten diez 10,55 —105,50— mientras la cabecera afirmaba
+ * 105,55. La diferencia crece con el número de líneas y con la precisión del
+ * precio, así que se manifiesta justo en las facturas largas, y rechaza por
+ * FAU02 quemando el consecutivo. Truncar por línea antes de sumar hace que el
+ * total sea, por construcción, el que la DIAN va a obtener.
  */
 export function dianLineExtensionTotal(lines: DianLineAmounts[]): string {
   const total = lines.reduce<Prisma.Decimal>(
-    (acc, line) => acc.plus(lineExtensionDecimal(line)),
+    (acc, line) => acc.plus(toDecimal(applyScale(lineExtensionDecimal(line)))),
     new Prisma.Decimal(0),
   );
   return applyScale(total);

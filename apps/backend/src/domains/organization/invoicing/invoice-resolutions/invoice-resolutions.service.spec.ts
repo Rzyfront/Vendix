@@ -73,6 +73,21 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
 
   type OrgPrismaMock = ReturnType<typeof createOrgPrismaMock>;
 
+  /**
+   * Doble de `TechnicalKeyVaultService`. La ClTec ya no se escribe a pelo:
+   * los dos carriles esparcen sobre el `data` de Prisma la terna que devuelve
+   * `sealForWrite` (claro, cifrado, huella). Un `jest.fn()` sin retorno
+   * esparciría `undefined` y borraría las tres columnas sin que la prueba lo
+   * note.
+   */
+  const createTechnicalKeyVaultDouble = () => ({
+    sealForWrite: jest.fn((raw: string | null | undefined) => ({
+      technical_key: raw ?? null,
+      technical_key_encrypted: raw ? `enc:${raw}` : null,
+      technical_key_fingerprint: raw ? `fp:${raw}` : null,
+    })),
+  });
+
   const createOrgService = (
     overrides: Parameters<typeof createOrgPrismaMock>[0] & {
       fiscal_scope?: 'STORE' | 'ORGANIZATION';
@@ -90,6 +105,7 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
     const service = new OrgInvoiceResolutionsService(
       prisma as any,
       fiscalScope as any,
+      createTechnicalKeyVaultDouble() as any,
     );
     return { service, prisma };
   };
@@ -121,7 +137,11 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
         .fn()
         .mockResolvedValue({ id: ACCOUNTING_ENTITY_ID }),
     };
-    return new ResolutionsService(prisma as any, fiscalScope as any);
+    return new ResolutionsService(
+      prisma as any,
+      fiscalScope as any,
+      createTechnicalKeyVaultDouble() as any,
+    );
   };
 
   /** Alta válida de factura electrónica de venta, sobre la que cada caso muta un campo. */
@@ -406,7 +426,13 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
 
       const { data } =
         prisma.__unscoped.invoice_resolutions.update.mock.calls[0][0];
-      expect(data).toEqual({ technical_key: null });
+      // Las tres columnas del vault se limpian juntas (ver el caso homónimo del
+      // carril de tienda); lo que este caso vigila es que `is_active` NO viaje.
+      expect(data).toEqual({
+        technical_key: null,
+        technical_key_encrypted: null,
+        technical_key_fingerprint: null,
+      });
       expect(data).not.toHaveProperty('is_active');
     });
 
@@ -566,7 +592,11 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
 
       const { data } =
         prisma.__unscoped.invoice_resolutions.update.mock.calls[0][0];
-      expect(data).toEqual({ technical_key: null });
+      expect(data).toEqual({
+        technical_key: null,
+        technical_key_encrypted: null,
+        technical_key_fingerprint: null,
+      });
     });
 
     it('rechaza añadirle una clave técnica al reeditarla', async () => {
