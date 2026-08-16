@@ -83,6 +83,19 @@ export interface DianNumberingRange {
    * cualquiera podría recomputar CUFEs de la tienda fuera del backend.
    */
   technical_key_matches: boolean | null;
+  /**
+   * FORMA de la ClTec que reportó la DIAN: longitud y familia de caracteres,
+   * nunca el valor. `null` cuando la DIAN no reportó clave para ese rango.
+   *
+   * Sirve para decidir quién se equivoca cuando el backend rechaza la clave de
+   * la propia DIAN: nuestra suposición de 40 caracteres, o el servicio. Con la
+   * longitud sola no se distingue (hex de 64 = SHA-256; base64 de 64 = otro
+   * artefacto); con la familia sí.
+   */
+  technical_key_shape: {
+    length: number;
+    charset: 'hex' | 'base64' | 'alphanumeric' | 'other';
+  } | null;
   status: DianNumberingRangeStatus;
   /**
    * Si este rango es la numeración de HABILITACIÓN (pruebas) que la DIAN reparte

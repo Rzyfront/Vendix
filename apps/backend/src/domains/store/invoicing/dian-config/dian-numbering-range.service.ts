@@ -5,7 +5,11 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
 import { parsePlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { normalizeTechnicalKey } from '../fiscal-document-requirements';
-import { assertTechnicalKeyShape } from '../utils/technical-key.util';
+import {
+  assertTechnicalKeyShape,
+  describeTechnicalKeyShape,
+  TechnicalKeyShape,
+} from '../utils/technical-key.util';
 import {
   DianNumberingRange,
   parseNumberingRangeResponse,
@@ -49,6 +53,18 @@ export interface NumberingRangeComparison {
    * falta es el dato del otro lado.
    */
   technical_key_matches: boolean | null;
+  /**
+   * FORMA de la ClTec que reportó la DIAN — longitud y familia de caracteres,
+   * nunca el valor. `null` cuando la DIAN no reportó clave para ese rango.
+   *
+   * Existe porque `assertTechnicalKeyShape` puede rechazar la clave de la propia
+   * DIAN, y entonces hay que decidir quién se equivoca: nuestro invariante de 40
+   * caracteres o la respuesta del servicio autoritativo. Con la longitud sola no
+   * se decide; con la familia sí (hex de 64 = SHA-256; base64 de 64 = 48 bytes
+   * de otro artefacto). Ponerlo en la consulta —que no escribe nada— evita
+   * diagnosticar a base de intentos de aplicar.
+   */
+  technical_key_shape: TechnicalKeyShape | null;
   status: 'in_sync' | 'differs' | 'missing_local';
   /**
    * `true` cuando este rango es la numeración de PRUEBA de habilitación, no una
@@ -625,6 +641,7 @@ export class DianNumberingRangeService {
       valid_from: range.valid_from,
       valid_to: range.valid_to,
       resolution_date: range.resolution_date,
+      technical_key_shape: describeTechnicalKeyShape(range.technical_key),
     };
 
     // LOS DOS LADOS, no sólo el de la DIAN.
