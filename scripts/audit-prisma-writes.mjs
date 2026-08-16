@@ -209,10 +209,13 @@ function literalKeys(src, open) {
   return null;
 }
 
-/** Índice del `{` que abre el valor de `data:` dentro del objeto de `at`. */
-function findDataObject(src, at) {
-  // `at` apunta al `(` de la llamada. El primer argumento es un objeto con
-  // `data:` en su primer nivel.
+/**
+ * Índice del `{` que abre el valor de `<key>:` dentro del objeto argumento de
+ * la llamada que empieza en `at` (el `(`). Devuelve `null` si la clave no está,
+ * o si su valor no es un literal (`data: variable` ⇒ no analizable).
+ */
+function findArgObject(src, at, key) {
+  const needle = `${key}:`;
   let depth = 0;
   let i = at;
   let inArg = false;
@@ -225,15 +228,17 @@ function findDataObject(src, at) {
     }
     if (c === '(' || c === '{' || c === '[') { depth++; if (depth === 2) inArg = true; i++; continue; }
     if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return null; i++; continue; }
-    if (inArg && depth === 2 && src.startsWith('data:', i)) {
-      let j = i + 5;
+    if (inArg && depth === 2 && src.startsWith(needle, i)) {
+      let j = i + needle.length;
       while (j < src.length && /\s/.test(src[j])) j++;
-      return src[j] === '{' ? j : null;   // `data: variable` ⇒ no analizable
+      return src[j] === '{' ? j : null;
     }
     i++;
   }
   return null;
 }
+
+const findDataObject = (src, at) => findArgObject(src, at, 'data');
 
 /* ------------------------------------------------------------------ *
  * 4. Auditoría
@@ -303,7 +308,18 @@ function run() {
   const unknownKeys = [];
   const missingRequired = [];
   let checked = 0;
+  let orderByChecked = 0;
   let abstained = 0;
+
+  const badOrderBy = [];
+  // Lecturas: `orderBy` es un mapa estricto de campo → dirección, así que sus
+  // claves de primer nivel se pueden cotejar sin ambigüedad. Es la clase que
+  // dejó `return_orders` respondiendo 500 en cuatro listados a la vez, sin
+  // filtro alguno, por un `orderBy: { return_date: 'desc' }` sobre una columna
+  // que no existe. `where` NO se coteja: admite operadores (`AND`/`OR`/`NOT`),
+  // filtros de relación y formas anidadas, y distinguir eso de un nombre mal
+  // escrito daría más ruido que señal.
+  const READ = /\b(?:this\.)?(?:prisma|tx|globalPrisma|client|db)\s*\.\s*([a-z_][\w]*)\s*\.\s*(findMany|findFirst|findUnique|count|aggregate|groupBy|updateMany|deleteMany)\s*\(/g;
 
   const CALL = /\b(?:this\.)?(?:prisma|tx|globalPrisma|client|db)\s*\.\s*([a-z_][\w]*)\s*\.\s*(create|update|updateMany|upsert|createMany)\s*\(/g;
 
@@ -343,19 +359,50 @@ function run() {
         if (missing.length) missingRequired.push({ ...where, missing });
       }
     }
+
+    READ.lastIndex = 0;
+    while ((m = READ.exec(scan))) {
+      const [, model, op] = m;
+      const shape = models.get(model);
+      if (!shape) continue;
+      const at = m.index + m[0].length - 1;
+      const open = findArgObject(src, at, 'orderBy');
+      if (open === null) continue;              // sin orderBy literal: nada que afirmar
+      const keys = literalKeys(src, open);
+      if (keys === null) { abstained++; continue; }
+      orderByChecked++;
+      // `orderBy` admite además ordenar por una relación (`{ user: { name } }`)
+      // y, en `groupBy`, por un agregado (`{ _sum: { total } }`). Ambas cuentan
+      // como válidas: las relaciones ya están en `shape.all`, los agregados van
+      // en esta lista.
+      const AGGREGATES = new Set(['_count', '_sum', '_avg', '_min', '_max']);
+      const bad = keys.filter((k) => !shape.all.has(k) && !AGGREGATES.has(k));
+      if (bad.length) {
+        badOrderBy.push({
+          file: relative(ROOT, file),
+          line: src.slice(0, m.index).split('\n').length,
+          model,
+          op,
+          unknown: bad,
+        });
+      }
+    }
   }
 
   const json = process.argv.includes('--json');
+  const total = unknownKeys.length + missingRequired.length + badOrderBy.length;
   if (json) {
-    console.log(JSON.stringify({ checked, abstained, unknownKeys, missingRequired }, null, 2));
-    return unknownKeys.length || missingRequired.length ? 1 : 0;
+    console.log(JSON.stringify({ checked, orderByChecked, abstained, unknownKeys, missingRequired, badOrderBy }, null, 2));
+    return total ? 1 : 0;
   }
 
   console.log(`modelos en schema     ${models.size}`);
   console.log(`escrituras cotejadas  ${checked}`);
+  console.log(`orderBy cotejados     ${orderByChecked}`);
   console.log(`  · abstenciones      ${abstained}   (spread / clave computada / data no literal)`);
   console.log(`  · columna inexistente ${unknownKeys.length}`);
   console.log(`  · obligatorio ausente ${missingRequired.length}`);
+  console.log(`  · orderBy inexistente ${badOrderBy.length}`);
   for (const f of unknownKeys) {
     console.log(`\n  [columna inexistente] ${f.file}:${f.line}`);
     console.log(`    ${f.model}.${f.op}  →  ${f.unknown.join(', ')}`);
@@ -364,7 +411,11 @@ function run() {
     console.log(`\n  [obligatorio ausente] ${f.file}:${f.line}`);
     console.log(`    ${f.model}.${f.op}  falta  ${f.missing.join(', ')}`);
   }
-  return unknownKeys.length || missingRequired.length ? 1 : 0;
+  for (const f of badOrderBy) {
+    console.log(`\n  [orderBy inexistente] ${f.file}:${f.line}`);
+    console.log(`    ${f.model}.${f.op}  orderBy  →  ${f.unknown.join(', ')}`);
+  }
+  return total ? 1 : 0;
 }
 
 process.exit(run());
