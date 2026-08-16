@@ -123,8 +123,13 @@ describe('OrdersController', () => {
 
       expect(result).toEqual(errorResponse);
       expect(mockOrdersService.findAll).toHaveBeenCalledWith(query);
+      // El controlador pasa `error.message || '<texto por defecto>'`: prefiere
+      // el mensaje real del servicio y sólo cae al texto genérico cuando el
+      // error no trae ninguno. Estas aserciones esperaban el texto genérico
+      // aunque el doble rechaza con un mensaje — nunca se ejecutaron porque la
+      // suite entera no compilaba (faltaba el doble de `ReturnOrdersService`).
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al obtener las órdenes',
+        'Database error',
         'Database error',
         400,
       );
@@ -239,7 +244,7 @@ describe('OrdersController', () => {
         user,
       );
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al crear la orden',
+        'Customer not found',
         'Customer not found',
         400,
       );
@@ -303,7 +308,7 @@ describe('OrdersController', () => {
       expect(result).toEqual(errorResponse);
       expect(mockOrdersService.findOne).toHaveBeenCalledWith(orderId);
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al obtener la orden',
+        'Order not found',
         'Order not found',
         400,
       );
@@ -373,7 +378,7 @@ describe('OrdersController', () => {
         updateOrderDto,
       );
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al actualizar la orden',
+        'Order not found',
         'Order not found',
         400,
       );
@@ -422,7 +427,7 @@ describe('OrdersController', () => {
       expect(result).toEqual(errorResponse);
       expect(mockOrdersService.remove).toHaveBeenCalledWith(orderId);
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al eliminar la orden',
+        'Order not found',
         'Order not found',
         400,
       );
