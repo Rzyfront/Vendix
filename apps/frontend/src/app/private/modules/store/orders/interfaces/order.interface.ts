@@ -202,6 +202,14 @@ export interface Address {
   state_province: string;
   postal_code: string;
   country_code: string;
+  /**
+   * Código DANE del municipio (5 dígitos). Se persiste en
+   * `addresses.municipality_code` y el emisor de factura electrónica lo lee
+   * para llenar `cac:Address/cac:CountrySubentity/cbc:CityName` con el nombre
+   * canónico del catálogo Divipola — sin él, el documento afirma geografía
+   * falsa y la DIAN rechaza por incoherencia (FAJ32 / FAK32).
+   */
+  municipality_code?: string | null;
   phone_number?: string;
 }
 

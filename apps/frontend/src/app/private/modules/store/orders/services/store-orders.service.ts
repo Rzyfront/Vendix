@@ -43,6 +43,12 @@ export interface CreateAddressPayload {
   state: string;
   postal_code?: string;
   country: string;
+  /**
+   * Código DANE (Divipola, 5 dígitos) del municipio. Se persiste en
+   * `addresses.municipality_code` y el emisor de factura electrónica lo lee
+   * para el bloque `cac:Address/cac:CountrySubentity/cbc:CityName`.
+   */
+  municipality_code?: string;
   type?: string;
   customer_id?: number;
   delivery_instructions?: string;
@@ -65,6 +71,7 @@ export interface UpdateAddressPayload {
   state?: string;
   postal_code?: string;
   country?: string;
+  municipality_code?: string;
   type?: string;
   is_primary?: boolean;
   latitude?: string;

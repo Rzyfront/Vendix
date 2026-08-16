@@ -1119,8 +1119,13 @@ export class CheckoutComponent implements OnInit {
       const cityId = Number(value.city);
       if (Number.isFinite(cityId)) {
         const city = this.cities().find((c) => c.id === cityId);
-        if (city) value.city = city.name;
-        else unresolved.push('city');
+        if (city) {
+          value.city = city.name;
+          // DANE 5 dígitos. Sin él el emisor cae a "Bogotá/11001" y la
+          // DIAN rechaza por incoherencia geográfica (FAJ32/FAK32).
+          // El id interno del catálogo ES el código Divipola.
+          value.municipality_code = String(cityId);
+        } else unresolved.push('city');
       }
     }
 

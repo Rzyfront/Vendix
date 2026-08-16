@@ -543,6 +543,7 @@ export class PosShippingStepComponent {
     if (p.postal_code) dto.postal_code = p.postal_code;
     if (p.latitude != null) dto.latitude = String(p.latitude);
     if (p.longitude != null) dto.longitude = String(p.longitude);
+    if (p.municipality_code) dto.municipality_code = p.municipality_code;
     return dto;
   }
 
