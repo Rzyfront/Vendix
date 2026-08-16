@@ -319,11 +319,17 @@ export class RefundFlowService {
         // la tx y luego, en el `.then()` de abajo, `dispatchRefundProcessor`
         // llama al processor real (Wompi.reverse, etc.) y exige éxito antes
         // de promover a `completed`. Si el processor no está integrado
-        // (la mayoría de las tiendas hoy), el refund queda `pending` para
-        // intervención manual del operador — exactamente la semántica que
-        // el comentario en `:428-431` describía pero nunca implementó.
+        // (la mayoría de las tiendas hoy), el refund queda en estado
+        // `pending_approval` para intervención manual del operador —
+        // exactamente la semántica que el comentario en `:428-431` describía
+        // pero nunca implementó. Antes del fix el código usaba `'pending'`,
+        // que NO es un valor válido de `refunds_state_enum` (el enum declara
+        // `requested | pending_approval | approved | processing | completed`)
+        // y provocaba SYS_INTERNAL_001 en `tx.refunds.update()`.
         const finalState =
-          dto.refund_method === 'original_payment' ? 'pending' : 'completed';
+          dto.refund_method === 'original_payment'
+            ? 'pending_approval'
+            : 'completed';
         const completedRefund = await tx.refunds.update({
           where: { id: refund.id },
           data: {
@@ -352,11 +358,24 @@ export class RefundFlowService {
         // cierra manualmente — comportamiento correcto: nunca marcamos
         // `completed` un refund que no se reversó en el gateway.
         if (dto.refund_method === 'original_payment') {
-          await this.dispatchRefundProcessor(
-            order,
-            completedRefund,
-            Number(calculation.total_refund),
-          );
+          // FIX refund 500: el processor emit + downstream listener es
+          // no-bloqueante para el refund row (que ya está committed). Si
+          // falla, NO propagamos el throw al cliente — el refund sigue
+          // válido en `pending` para intervención manual del operador, y
+          // el `SYS_INTERNAL_001` que el filtro global devolvería solo
+          // confundiría al usuario. Loggeamos el error para diagnóstico.
+          try {
+            await this.dispatchRefundProcessor(
+              order,
+              completedRefund,
+              Number(calculation.total_refund),
+            );
+          } catch (err) {
+            this.logger.error(
+              `Refund #${completedRefund.id}: processor dispatch threw — refund stays in 'pending' for manual operator intervention. ${err instanceof Error ? err.message : String(err)}`,
+              err instanceof Error ? err.stack : undefined,
+            );
+          }
         }
 
         // 8. Emit events after transaction (and processor dispatch) completes
@@ -456,7 +475,7 @@ export class RefundFlowService {
         // `original_payment` → el processor (Wompi/cash_on_delivery/etc.)
         // se llama a sí mismo abajo en `dispatchRefundProcessor` cuando la
         // integración existe; mientras tanto el refund queda como
-        // `state='pending'` para intervención manual del operador.
+        // `state='pending_approval'` para intervención manual del operador.
         // `store_credit` → ya se acreditó la wallet arriba.
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.
@@ -525,15 +544,31 @@ export class RefundFlowService {
         returnedSerialNumbers.push(serial.serial_number);
       }
 
-      // Strong link to the refund document line (skip if @@unique already has
-      // this serial against a refund_item — re-throws SERIAL_DUP_001 otherwise).
+      // Strong link to the refund document line. The unique constraint on
+      // (serial_number_id, document_item_type, document_item_id) throws
+      // P2002 if the serial was already linked to THIS refund_item (e.g., a
+      // previous attempt that rolled back the transaction but left the link
+      // behind, or a re-submit of the same wizard). Swallow P2002 to keep
+      // the refund idempotent — the serial is still correctly accounted for
+      // because `returnSerial` already mutated its state to `returned`/`in_stock`.
+      // Re-throw any other Prisma error.
       if (refund_item_id != null) {
-        await this.serialNumbers.linkToDocument(
-          link.serial_number_id,
-          'refund_item',
-          refund_item_id,
-          tx,
-        );
+        try {
+          await this.serialNumbers.linkToDocument(
+            link.serial_number_id,
+            'refund_item',
+            refund_item_id,
+            tx,
+          );
+        } catch (err: any) {
+          if (err?.code === 'P2002') {
+            this.logger.warn(
+              `Serial #${link.serial_number_id} already linked to refund_item #${refund_item_id} — skipping duplicate link (idempotent retry).`,
+            );
+          } else {
+            throw err;
+          }
+        }
       }
     }
 

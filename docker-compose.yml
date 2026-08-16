@@ -1,8 +1,8 @@
 services:
   db:
     image: pgvector/pgvector:0.8.2-pg15
-    container_name: ${COMPOSE_PROJECT_NAME}_postgres
-    restart: no
+    container_name: vendix_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: vendix_db
       POSTGRES_USER: username
@@ -21,8 +21,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: ${COMPOSE_PROJECT_NAME}_redis
-    restart: no
+    container_name: vendix_redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -40,8 +40,8 @@ services:
     build:
       context: ./apps/backend
       dockerfile: Dockerfile.dev
-    container_name: ${COMPOSE_PROJECT_NAME}_backend
-    restart: no
+    container_name: vendix_backend
+    restart: unless-stopped
     # Sin límite, el backend crecía libre (~2.3 GB observados) y empujaba a la
     # VM al OOM global, cuya víctima siempre acababa siendo `ng serve` por RSS.
     mem_limit: 2560m
@@ -55,12 +55,7 @@ services:
       # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
       # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
       NODE_OPTIONS: "--max-old-space-size=2048"
-      # CHOKIDAR_USEPOLLING=false fuerza a chokidar (que usa nest --watch) a
-      # quedarse en inotify nativo en lugar de caer al polling agresivo. En
-      # Linux + bind mount el polling pegaba el backend a ~160% CPU midiendo
-      # diffs cada 1-2s sin necesidad. Si en el futuro hace falta reactivarlo
-      # (WSL2, NFS), basta con poner "true" de nuevo.
-      CHOKIDAR_USEPOLLING: "false"
+      CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       # QUI-489: en dev el límite de 10 intentos de login estorba al probar
@@ -106,8 +101,8 @@ services:
     build:
       context: ./apps/backend
       dockerfile: Dockerfile.dev
-    container_name: ${COMPOSE_PROJECT_NAME}_backend_worker
-    restart: no
+    container_name: vendix_backend_worker
+    restart: unless-stopped
     # Presupuesto menor que el de la API: no sirve HTTP ni sostiene SSE, pero
     # carga el MISMO grafo de módulos (cliente Prisma incluido), que es el grueso
     # del heap en reposo.
@@ -144,8 +139,8 @@ services:
     build:
       context: ./apps/frontend
       dockerfile: Dockerfile.dev
-    container_name: ${COMPOSE_PROJECT_NAME}_frontend
-    restart: no
+    container_name: vendix_frontend
+    restart: unless-stopped
     # Presupuesto del contenedor en build en frío, medido en dmesg:
     #   ng serve (heap V8)  ~2.5 GB
     #   esbuild (binario Go) ~1.5 GB   <-- NO lo gobierna NODE_OPTIONS
@@ -183,7 +178,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: ${COMPOSE_PROJECT_NAME}_nginx
+    container_name: vendix_nginx
     ports:
       - "80:80"
       - "443:443"
@@ -205,8 +200,8 @@ services:
   # Docker cleanup - limpieza automática cada 24h
   docker-cleanup:
     image: docker:cli
-    container_name: ${COMPOSE_PROJECT_NAME}_cleanup
-    restart: no
+    container_name: vendix_cleanup
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["sh", "-c"]

@@ -9,9 +9,4 @@ RUN npm install --legacy-peer-deps --force && \
     fi
 COPY . .
 EXPOSE 4200
-# Sin --poll 5000: webpack-dev-server lo activa para entornos donde inotify no
-# es fiable (WSL2, VirtualBox, NFS). En Linux + Docker bind mount, inotify
-# funciona nativo y el polling agresivo (~38% CPU medido) solo se quita.
-# Si en algún dev environment se rompe la detección de cambios, reactivar
-# temporalmente con `--poll 5000` o mover el bind mount a un path nativo.
-CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--no-hmr"]
+CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--poll", "5000", "--no-hmr"]
