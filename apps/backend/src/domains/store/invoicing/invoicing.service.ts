@@ -44,11 +44,17 @@ import {
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
+  buildWithholdingAccountRole,
+  WithholdingLine,
+  WithholdingTypeValue,
+} from 'src/common/interfaces/withholding-breakdown.interface';
+import {
   buildAiuNote,
   DIAN_AIU_NOTE_MAX_LENGTH,
   DIAN_AIU_NOTE_MIN_LENGTH,
   DIAN_AIU_NOTE_PREFIX,
 } from './providers/dian-direct/xml/ubl-common.builder';
+import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -1044,6 +1050,39 @@ export class InvoicingService {
           where: { id: invoice.id },
           include: INVOICE_INCLUDE,
         })) ?? invoice;
+    }
+
+    // Retenciones declaradas por el cliente: si llegan, se validan, se
+    // persisten en `withholding_calculations` y el agregado reemplaza al
+    // auto-resuelto del tenant (que también queda disponible vía
+    // `accepted` para facturas SIN desglose). Vacío o ausente ⇒ sin cambio.
+    if (dto.withholdings && dto.withholdings.length > 0) {
+      const aggregated = await this.applyClientDeclaredWithholdings({
+        organization_id: organization_id!,
+        store_id: store_id ?? null,
+        accounting_entity_id: invoice.accounting_entity_id ?? null,
+        invoice_id: invoice.id,
+        customer_id:
+          invoice.customer_id != null ? Number(invoice.customer_id) : null,
+        declared: dto.withholdings,
+        year: new Date(issue_date).getFullYear(),
+      });
+
+      // Se actualiza `withholding_amount` con el agregado de lo declarado y se
+      // recarga el documento para que el llamador lo vea reflejado. El
+      //   recalculo automático en `accepted` queda como FALLBACK para facturas
+      //   sin desglose explícito: declarado gana sobre auto cuando coexisten.
+      if (!aggregated.isZero()) {
+        await this.prisma.invoices.update({
+          where: { id: invoice.id },
+          data: { withholding_amount: aggregated },
+        });
+        created =
+          (await this.prisma.invoices.findFirst({
+            where: { id: invoice.id },
+            include: INVOICE_INCLUDE,
+          })) ?? created;
+      }
     }
 
     this.event_emitter.emit('invoice.created', {
@@ -2467,6 +2506,192 @@ export class InvoicingService {
       );
       return null;
     }
+  }
+
+  /**
+   * Valida y persiste retenciones DECLARADAS POR EL CLIENTE al crear la factura.
+   *
+   * ## Por qué existe y no basta el cálculo automático
+   *
+   * El cálculo automático (`resolveWithholdingAmount` → `WithholdingFlowService`)
+   * corre al ACEPTAR el documento y mira la configuración del tenant: si la
+   * tienda es retenedor, retiene automáticamente lo que el catálogo del
+   * contribuyente diga. Eso es lo correcto para el 95 % de los casos, pero NO
+   * cuando el cliente ya hizo el cálculo en su sistema contable y declara
+   * explícitamente cuánto retuvo, contra qué concepto, y con qué tarifa. Esa
+   * declaración es la que este método honra.
+   *
+   * ## Por qué se valida y se persiste, no se persiste y se valida
+   *
+   * El `concept_id` que llega del cliente puede ser:
+   *   - correcto y del tenant → se persiste tal cual, con el `withholding_type`
+   *     y `concept_code` del catálogo, y el `account_role` calculado.
+   *   - de otro tenant → se rechaza con `INVOICING_WITHHOLDING_002` y nombre del
+   *     concepto, NO un 400 genérico de class-validator que lo deja sin saber
+   *     qué concepto está mal.
+   *   - inexistente → mismo error, distinto mensaje. Dos errores distintos para
+   *     dos modos de fallo distintos: el cliente depura uno y otro.
+   *
+   * ## Por qué se valida la aritmética
+   *
+   * `amount` puede venir del cliente o se recalcula server-side (mismo
+   * truncado ROUND_DOWN que `dian-money.util.ts`). Si viene y difiere más de un
+   * centavo del producto `base × rate`, se rechaza: una diferencia mayor ya no
+   * es truncado, es un dato mal capturado. Esa diferencia es la que un
+   * comerciante puede ver entre lo que su sistema de contabilidad dice y lo
+   * que el documento declara.
+   *
+   * ## Por qué NO se resta de `PayableAmount`
+   *
+   * §11.9.1 del Anexo 1.9: la DIAN valida `cbc:PayableAmount` sin mirar
+   * `cac:WithholdingTaxTotal`. Restarla descuadra el documento. Vale para los
+   * tres roles.
+   */
+  private async applyClientDeclaredWithholdings(params: {
+    organization_id: number;
+    store_id?: number | null;
+    accounting_entity_id?: number | null;
+    invoice_id: number;
+    customer_id?: number | null;
+    declared: InvoiceWithholdingInputDto[];
+    year: number;
+  }): Promise<Prisma.Decimal> {
+    if (params.declared.length === 0) {
+      return new Prisma.Decimal(0);
+    }
+
+    // Una sola lectura para todos los conceptos declarados: deduplicar por id,
+    //   pedir `with { tenant_scope }`, y fallar entero si ALGUNO no pertenece.
+    const conceptIds = [...new Set(params.declared.map((w) => w.concept_id))];
+    const concepts = await this.prisma.withholding_concepts.findMany({
+      where: {
+        id: { in: conceptIds },
+        organization_id: params.organization_id,
+        is_active: true,
+      },
+      select: {
+        id: true,
+        code: true,
+        withholding_type: true,
+        account_code: true,
+        name: true,
+      },
+    });
+    const conceptById = new Map(concepts.map((c) => [c.id, c]));
+
+    const missing = conceptIds.filter((id) => !conceptById.has(id));
+    if (missing.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_WITHHOLDING_002,
+        `Las siguientes retenciones referencian conceptos que no existen, están inactivos o pertenecen a otra tienda: ${missing.join(', ')}. Revisa la lista de conceptos en Contabilidad → Retenciones.`,
+        { missing_concept_ids: missing, invoice_id: params.invoice_id },
+      );
+    }
+
+    const lines: WithholdingLine[] = [];
+    let aggregated = new Prisma.Decimal(0);
+
+    for (const w of params.declared) {
+      const concept = conceptById.get(w.concept_id)!;
+      const rate = new Prisma.Decimal(w.rate);
+      const base = new Prisma.Decimal(w.base_amount);
+      const computed = base.times(rate).toDP(2, Prisma.Decimal.ROUND_DOWN);
+
+      if (w.amount != null) {
+        const declared = new Prisma.Decimal(w.amount);
+        if (!declared.minus(computed).abs().lessThanOrEqualTo('0.01')) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_WITHHOLDING_003,
+            `La retención del concepto «${concept.code}» (${concept.name}) declara ${declared.toFixed(2)} sobre una base de ${base.toFixed(2)} al ${rate.times(100).toFixed(2)} %, pero esa base y esa tarifa dan ${computed.toFixed(2)}. La diferencia mayor a 1 centavo ya no es truncado: revisa la captura.`,
+            {
+              invoice_id: params.invoice_id,
+              concept_id: concept.id,
+              declared: declared.toFixed(2),
+              computed: computed.toFixed(2),
+            },
+          );
+        }
+      }
+
+      const amount = computed;
+      aggregated = aggregated.plus(amount);
+
+      lines.push({
+        withholding_type: concept.withholding_type as WithholdingTypeValue,
+        concept_code: concept.code,
+        concept_id: concept.id,
+        rate: rate.toNumber(),
+        base: base.toNumber(),
+        amount: amount.toNumber(),
+        role: w.role,
+        account_role: buildWithholdingAccountRole(
+          w.role,
+          concept.withholding_type as WithholdingTypeValue,
+        ),
+        account_code: concept.account_code ?? null,
+      });
+    }
+
+    // Separar practiced y suffered en dos batches: `persistWithholdingLines`
+    // escribe UNA de las dos columnas por batch (`supplier_id` o
+    // `customer_id`), y mezclarlas en una sola llamada deja la mitad sin la
+    // contraparte.
+    const practiced = lines.filter((l) => l.role === 'practiced');
+    const suffered = lines.filter((l) => l.role === 'suffered');
+    const selfLines = lines.filter((l) => l.role === 'self');
+
+    // La factura es el documento del cliente (no documento soporte), así que
+    //   - practiced: la tienda RETUVO al CLIENTE → el cliente es la contraparte.
+    //   - suffered:  la tienda FUE RETENIDA por el cliente → el cliente es la
+    //     contraparte también, pero se anota en `customer_id` que es el camino
+    //     que el flujo de aceptación ya usa para este rol.
+    // El `client` (transacción) NO se pasa porque `prisma.invoices.create`
+    // corre fuera de `$transaction`: persistir las retenciones dentro de la
+    // misma escritura atómica exigiría refactor mayor y, sobre todo, no
+    // resuelve ningún caso real (un fallo del pool después del commit
+    // simplemente deja la retención huérfana, situación que `accepted`
+    // reintenta desde `resolveWithholdingForInvoice`).
+    if (practiced.length > 0) {
+      await this.withholdingFlow.persistWithholdingLines({
+        organization_id: params.organization_id,
+        store_id: params.store_id ?? null,
+        accounting_entity_id: params.accounting_entity_id ?? null,
+        invoice_id: params.invoice_id,
+        customer_id: params.customer_id ?? null,
+        role: 'practiced',
+        uvt_value_used: 0,
+        year: params.year,
+        lines: practiced,
+      });
+    }
+    if (suffered.length > 0) {
+      await this.withholdingFlow.persistWithholdingLines({
+        organization_id: params.organization_id,
+        store_id: params.store_id ?? null,
+        accounting_entity_id: params.accounting_entity_id ?? null,
+        invoice_id: params.invoice_id,
+        customer_id: params.customer_id ?? null,
+        role: 'suffered',
+        uvt_value_used: 0,
+        year: params.year,
+        lines: suffered,
+      });
+    }
+    // self no entra al DTO por ahora; el motor de aceptación lo cubre.
+    if (selfLines.length > 0) {
+      await this.withholdingFlow.persistWithholdingLines({
+        organization_id: params.organization_id,
+        store_id: params.store_id ?? null,
+        accounting_entity_id: params.accounting_entity_id ?? null,
+        invoice_id: params.invoice_id,
+        role: 'self',
+        uvt_value_used: 0,
+        year: params.year,
+        lines: selfLines,
+      });
+    }
+
+    return aggregated;
   }
 
   /**

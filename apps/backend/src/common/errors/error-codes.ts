@@ -1790,6 +1790,33 @@ export const ErrorCodes = {
     devMessage:
       'Document content is not emittable (currency other than COP, unit of measure outside the DIAN list, missing/invalid lines, or CustomizationID incoherent with the AIU lines)',
   },
+
+  /**
+   * Retenciones DECLARADAS POR EL CLIENTE al crear la factura.
+   *
+   * El cliente puede mandar un `withholdings[]` con `concept_id` + `base` + `rate`
+   * + `amount` cuando su sistema contable ya calculó las retenciones. La
+   * validación es una invariante de NEGOCIO (no de tipo) porque la verificación
+   * de que el concepto pertenece al tenant no la hace class-validator: un 400
+   * genérico de "id no existe" deja al cliente sin saber si el concepto está
+   * borrado, inactivo, o es de otra tienda.
+   *
+   * El 422 (no 400) sigue la convención del dominio: el cuerpo del request es
+   * sintácticamente válido —los campos son del tipo y rango correctos— y el
+   * fallo es de coherencia con el estado del tenant, no de forma.
+   */
+  INVOICING_WITHHOLDING_002: {
+    code: 'INVOICING_WITHHOLDING_002',
+    httpStatus: 422,
+    devMessage:
+      'One or more declared withholdings reference concepts that do not exist, are inactive, or belong to another tenant',
+  },
+  INVOICING_WITHHOLDING_003: {
+    code: 'INVOICING_WITHHOLDING_003',
+    httpStatus: 422,
+    devMessage:
+      'Declared withholding amount differs from base x rate by more than 1 centavo: a larger difference is not a rounding artifact, it is a data entry error',
+  },
   /**
    * AIU — los tres códigos siguientes cubren el contrato de servicios AIU
    * (`cbc:CustomizationID = '09'`), donde el error NO se manifiesta como un

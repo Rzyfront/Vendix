@@ -2677,6 +2677,31 @@ export class InvoiceCreateComponent {
     const withholding = round2(this.effectiveWithholding());
     if (withholding > 0) payload.withholding_amount = withholding;
 
+    // Si el comerciante DESGLOSÓ cada retención (no sólo el agregado), el
+    // backend valida y persiste fila a fila. Vacío u omitido ≡ sólo el
+    // agregado: la validación automática del tenant al ACEPTAR cubre ese caso.
+    const withheldRows = this.withholdingsValue()
+      .filter(
+        (row) =>
+          row.role &&
+          row.concept_id != null &&
+          Number(row.base_amount) > 0 &&
+          Number(row.rate) >= 0,
+      )
+      .map((row) => ({
+        role: row.role,
+        concept_id: Number(row.concept_id),
+        base_amount: Number(row.base_amount),
+        rate: Number(row.rate),
+        amount:
+          row.amount != null && Number(row.amount) >= 0
+            ? Number(row.amount)
+            : undefined,
+      }));
+    if (withheldRows.length > 0) {
+      payload.withholdings = withheldRows;
+    }
+
     // ── Divisa
     if (this.usesForeignCurrency()) {
       const currency = String(raw['foreign_currency'] ?? '').trim();

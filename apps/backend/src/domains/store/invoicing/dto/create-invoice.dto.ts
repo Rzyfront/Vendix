@@ -27,6 +27,7 @@ import { FiscalResponsibilityInCatalogRule } from '../../../../common/validators
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
 import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
+import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
 
 /**
  * Códigos DIAN del tipo de identificación del adquiriente (Anexo Técnico 1.9,
@@ -574,6 +575,43 @@ export class CreateInvoiceDto {
       'withholding_amount no puede ser negativo: es el valor retenido, y se resta del total automáticamente. No lo envíes con signo menos.',
   })
   withholding_amount?: number;
+
+  /**
+   * Desglose de retenciones a PERPETRAR al crear la factura.
+   *
+   * ## Por qué existe, no bastando `withholding_amount`
+   *
+   * El agregado se puede sacar de las líneas; lo que NO se recupera del agregado
+   * es a qué concepto se le retuvo, con qué tarifa, ni si la tienda PRACTICED
+   * (le retienen al cliente) o SUFFERED (la tienda retiene al proveedor). La
+   * declaración obligatoria del XML (`cac:WithholdingTaxTotal`) necesita el
+   * desglose por `cac:TaxSubtotal/cac:TaxCategory/cbc:Percent` y, lo más
+   * delicado, el asiento contable lo requiere para sentar `credit`/`debit` por
+   * cuenta PUC.
+   *
+   * ## Por qué se valida aparte
+   *
+   * Cada elemento se valida en `assertWithholdingsResolvable` del flujo, NO
+   * aquí, porque la verificación de que el concepto existe y pertenece al tenant
+   * es una invariante de NEGOCIO, no de tipo. Un class-validator que devolviera
+   * «id de concepto no existe» en 400 sería el mismo mensaje para «concepto
+   * borrado» y «concepto de otro tenant», y eso confunde al comerciante que
+   * está depurando. La puerta del flujo nombra el motivo exacto.
+   *
+   * Vacío o ausente ≡ sin retenciones. Compatibilidad: un cliente que mande el
+   * agregado pero no el desglose sigue funcionando, porque el agregado se
+   * acepta en `withholding_amount` y el desglose se rellena DESPUÉS (sólo si
+   * llega).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceWithholdingInputDto)
+  @ArrayMaxSize(20, {
+    message:
+      'Una factura no puede llevar más de 20 retenciones. Si necesitas más, divide el documento.',
+  })
+  withholdings?: InvoiceWithholdingInputDto[];
 
   /**
    * Forma de pago DIAN (`cbc:PaymentMeans/cbc:PaymentMeansCode` de nivel método):

@@ -509,6 +509,31 @@ export interface CreateInvoiceDto {
    * Header-aggregated taxes (legacy). New flows use per-line `items[].taxes[]`.
    */
   taxes?: CreateInvoiceTaxDto[];
+  /**
+   * Retenciones declaradas explícitamente. Si vienen, el backend las valida y
+   * las persiste en `withholding_calculations` AL CREAR; el agregado de
+   * `withholding_amount` se recalcula desde este array. Vacío u omitido ⇒
+   * sólo el agregado, y la validación automática del tenant corre al aceptar.
+   *
+   * Espejo de `InvoiceWithholdingInputDto` del backend.
+   */
+  withholdings?: InvoiceWithholdingInput[];
+}
+
+/**
+ * Una retención DECLARADA en el payload de creación.
+ *
+ * `amount` es opcional: si llega, el backend valida que cuadre con
+ * `base × rate` dentro de la tolerancia de 1 centavo; si no llega, se
+ * recalcula server-side con el mismo truncado que `dian-money.util.ts`.
+ */
+export interface InvoiceWithholdingInput {
+  role: 'practiced' | 'suffered';
+  concept_id: number;
+  base_amount: number;
+  rate: number;
+  amount?: number;
+  customer_id?: number;
 }
 
 export interface CreateInvoiceItemDto {

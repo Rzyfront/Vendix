@@ -815,6 +815,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'El contenido del documento no se puede emitir tal como está: revisa la moneda, las unidades de medida de las líneas y el tipo de operación. El detalle señala cada línea y qué corregir.',
 
   /**
+   * Retenciones DECLARADAS POR EL CLIENTE al crear la factura.
+   *
+   * El backend separa el "concepto que no es tuyo" del "concepto borrado /
+   * inactivo" para que el mensaje ayude al depurador a saber qué pasó, no para
+   * que parezca que se trata del mismo problema. El del backend ya nombra
+   * ambos y los detalles llevan la lista de `concept_id`s malos.
+   */
+  INVOICING_WITHHOLDING_002:
+    'Alguna retención declarada referencia conceptos que no existen, están inactivos o pertenecen a otra tienda. El detalle lista los `concept_id`s en cuestión; revisa la lista de conceptos en Contabilidad → Retenciones y reemplaza los que falten o no apliquen.',
+  INVOICING_WITHHOLDING_003:
+    'La retención declarada no cuadra con la base y la tarifa: la diferencia entre el importe y `base × rate` supera 1 centavo. Una diferencia mayor ya no es truncado, es un dato mal capturado. Revisa la base, la tarifa o el importe y vuelve a enviar.',
+
+  /**
    * AIU — el error que estos tres mensajes evitan NO se ve.
    *
    * Un contrato AIU mal clasificado produce una factura que la DIAN ACEPTA
