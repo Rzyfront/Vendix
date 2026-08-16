@@ -1807,6 +1807,30 @@ export const ErrorCodes = {
       'Invoice line declares a tax amount without any tax rate to derive it from',
   },
   /**
+   * `tax_rate_id` QUE NO EXISTE EN `tax_rates`, O QUE ES DE OTRO TENANT.
+   *
+   * `invoice_taxes.tax_rate_id` tiene FK a `tax_rates(id)`. Sin esta compuerta,
+   * un identificador equivocado sólo se descubría cuando Postgres rechazaba el
+   * INSERT — y para entonces `InvoiceNumberGenerator` YA había avanzado
+   * `current_number`, así que el error se llevaba por delante un consecutivo
+   * autorizado y devolvía un `SYS_INTERNAL_001` sin decir qué campo era.
+   *
+   * El identificador equivocado no es hipotético: `GET /store/taxes` devuelve
+   * `tax_categories` con sus `tax_rates` ANIDADAS, y las dos filas tienen `id`.
+   * Mandar el de la categoría en vez del de la tarifa es un error de una línea
+   * en cualquier integración, y el que este código nombra.
+   *
+   * Se verifica ANTES de tomar la numeración, junto con la pertenencia al
+   * tenant: una tarifa de otra organización tampoco puede entrar al documento
+   * aunque el FK la acepte.
+   */
+  INVOICING_CALC_002: {
+    code: 'INVOICING_CALC_002',
+    httpStatus: 422,
+    devMessage:
+      'Invoice declares a tax_rate_id that does not exist in tax_rates or belongs to another tenant',
+  },
+  /**
    * PREVALIDACIÓN FISCAL — los cuatro códigos siguientes traducen el veredicto de
    * `FiscalDocumentValidator` (`validators/fiscal-document.validator.ts`), la
    * puerta que rechaza en LOCAL lo que la DIAN rechazaría.

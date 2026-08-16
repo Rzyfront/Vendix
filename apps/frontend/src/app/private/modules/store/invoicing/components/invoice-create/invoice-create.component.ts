@@ -198,7 +198,8 @@ interface InvoiceCreateItemPayload {
   account_code?: string;
   aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
   taxes?: {
-    tax_rate_id: number;
+    /** Ausente cuando el impuesto elegido no tiene fila real en `tax_rates`. */
+    tax_rate_id?: number;
     tax_name: string;
     tax_rate: number;
     taxable_amount: number;
@@ -2997,7 +2998,10 @@ export class InvoiceCreateComponent {
       }
       if (taxes.length > 0) {
         payload.taxes = taxes.map((tax) => ({
-          tax_rate_id: tax.tax_rate_id,
+          // Sólo un identificador REAL de `tax_rates` viaja: el catálogo marca
+          // con negativo la categoría legada que no tiene fila de tarifa, y esa
+          // columna es una clave foránea. Ver `InvoiceTaxCatalogService`.
+          ...(tax.tax_rate_id > 0 ? { tax_rate_id: tax.tax_rate_id } : {}),
           tax_name: tax.name,
           tax_rate: Number(tax.rate) || 0,
           taxable_amount: round2(base),

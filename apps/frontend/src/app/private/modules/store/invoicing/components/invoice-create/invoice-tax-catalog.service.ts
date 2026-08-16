@@ -114,8 +114,19 @@ export class InvoiceTaxCatalogService {
         // Categoría sin tarifa: se ofrece igual con la tarifa de la categoría
         // (camino legado) o al 0%. Ocultarla haría desaparecer un impuesto que
         // el comerciante SÍ configuró.
+        //
+        // ⚠️ `id` NEGATIVO, y no `row.id`. El `id` de una opción viaja como
+        // `tax_rate_id`, y esa columna tiene FK a `tax_rates(id)`: mandar acá
+        // el id de la CATEGORÍA apunta a una fila de otra tabla que puede o no
+        // existir en `tax_rates`. Cuando no existe, Postgres rechaza el INSERT
+        // DESPUÉS de que el generador ya avanzó el consecutivo autorizado; y
+        // cuando por coincidencia existe, es peor: la factura queda apuntando
+        // a una tarifa ajena sin que nada lo señale. El negativo lo descarta
+        // `buildTaxPayload` antes de armar el payload, y la línea viaja con
+        // `tax_name` + `tax_rate`, que es todo lo que el backend necesita para
+        // recalcular.
         options.push({
-          id: row.id,
+          id: -row.id,
           name: row.name,
           rate: toPercent(row.rate),
           tax_type: row.tax_type ?? undefined,

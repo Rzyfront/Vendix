@@ -11,6 +11,35 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { normalizeNit } from '../../../common/utils/nit.util';
 
+/**
+ * Columnas de `users` que NUNCA pueden salir por la API de clientes.
+ *
+ * El módulo lee la tabla `users` completa —los clientes de una tienda SON
+ * usuarios— y ninguna de estas consultas declaraba `select` ni `omit`, así que
+ * `GET /store/customers` y `GET /store/customers/:id` devolvían la fila entera:
+ * el hash bcrypt de la contraseña y el secreto TOTP viajaban al navegador de
+ * cualquiera con permiso `customers:read`.
+ *
+ * Un hash bcrypt no es una contraseña, pero es material para atacarla sin
+ * límite de intentos y sin dejar rastro en `failed_login_attempts`; el secreto
+ * TOTP directamente permite generar el segundo factor. `locked_until` y
+ * `failed_login_attempts` se van con ellos porque describen el estado del
+ * candado de la cuenta, que es información de seguridad y no de facturación.
+ *
+ * Se aplica en el SERVICIO y no en el controlador a propósito: los mismos
+ * métodos los consumen checkout, mesas y el buscador del POS, y una limpieza
+ * puesta en la capa HTTP dejaría fuera a esos tres caminos.
+ *
+ * NO se aplica a las consultas internas de autenticación —que sí necesitan el
+ * hash— porque ésas viven en `AuthService` sobre su propio cliente Prisma.
+ */
+const CUSTOMER_PRIVATE_COLUMNS = {
+  password: true,
+  two_factor_secret: true,
+  failed_login_attempts: true,
+  locked_until: true,
+} as const;
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -706,6 +735,7 @@ export class CustomersService {
           },
         },
       },
+      omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         user_roles: true,
         store_users: true,
@@ -766,6 +796,7 @@ export class CustomersService {
         skip,
         take: limit,
         orderBy: { created_at: 'desc' },
+        omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
           addresses: {
             where: { type: 'shipping' },
@@ -845,6 +876,7 @@ export class CustomersService {
         },
         state: { not: user_state_enum.archived },
       },
+      omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         addresses: {
           where: { type: 'shipping' },
@@ -882,6 +914,7 @@ export class CustomersService {
           },
         },
       },
+      omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         addresses: {
           where: { type: 'shipping' },
@@ -1035,6 +1068,7 @@ export class CustomersService {
             ? dto.email?.trim().toLowerCase() || null
             : undefined,
       },
+      omit: CUSTOMER_PRIVATE_COLUMNS,
     });
   }
 
@@ -1059,6 +1093,7 @@ export class CustomersService {
         state: user_state_enum.archived,
         updated_at: new Date(),
       },
+      omit: CUSTOMER_PRIVATE_COLUMNS,
     });
   }
 
@@ -1100,6 +1135,7 @@ export class CustomersService {
 
     return this.prisma.users.findFirst({
       where,
+      omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         user_roles: true,
         store_users: true,

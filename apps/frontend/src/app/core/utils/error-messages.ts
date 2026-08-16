@@ -805,6 +805,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_CALC_001:
     'Una línea declara un impuesto pero no indica su tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero.',
   /**
+   * Genérico a propósito: el backend manda en `message` la lista de
+   * identificadores rechazados y si el problema es que no existen o que son de
+   * otra organización, y `parseApiError` prefiere ese texto. Este es el respaldo
+   * para cuando la respuesta llega sin cuerpo.
+   */
+  INVOICING_CALC_002:
+    'Uno de los impuestos del documento ya no está en el catálogo de la tienda. Vuelve a elegirlo en la línea y guarda de nuevo.',
+  /**
    * PREVALIDACIÓN FISCAL — los cuatro mensajes siguientes son ENCABEZADOS.
    *
    * El backend rechaza el documento ANTES de firmarlo y transmitirlo, y manda en

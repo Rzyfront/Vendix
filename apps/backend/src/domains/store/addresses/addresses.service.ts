@@ -67,12 +67,12 @@ export class AddressesService {
     // Block direct organization_id or user_id — use customer_id instead
     if (createAddressDto.organization_id) {
       throw new BadRequestException(
-        'Cannot create organization addresses in Store domain',
+        'Este endpoint crea direcciones de la TIENDA. Una dirección de la organización se registra desde Organización → Configuración → Datos generales; quita «organization_id» del envío.',
       );
     }
     if (createAddressDto.user_id) {
       throw new BadRequestException(
-        'Use customer_id instead of user_id to associate addresses with customers',
+        'Para asociar una dirección a un cliente usa «customer_id», no «user_id»: la dirección se resuelve contra los clientes de esta tienda y «user_id» apuntaría a un usuario del panel.',
       );
     }
 
@@ -87,7 +87,9 @@ export class AddressesService {
         select: { id: true },
       });
       if (!customer) {
-        throw new BadRequestException('Customer not found in this store');
+        throw new BadRequestException(
+          `El cliente #${createAddressDto.customer_id} no pertenece a esta tienda, así que no se le puede registrar una dirección aquí. Verifica el cliente en Clientes o crea primero su ficha en esta tienda.`,
+        );
       }
       resolvedUserId = customer.id;
     }

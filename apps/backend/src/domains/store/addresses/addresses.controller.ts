@@ -108,21 +108,11 @@ export class AddressesController {
     @Body() createAddressDto: CreateAddressDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.addressesService.create(
-        createAddressDto,
-        req.user,
-      );
-      return this.responseService.created(
-        result,
-        'Dirección creada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al crear la dirección',
-        error.message,
-      );
-    }
+    const result = await this.addressesService.create(
+      createAddressDto,
+      req.user,
+    );
+    return this.responseService.created(result, 'Dirección creada exitosamente');
   }
 
   @Get()
@@ -131,29 +121,21 @@ export class AddressesController {
     @Query() query: AddressQueryDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.addressesService.findAll(query, req.user);
+    const result = await this.addressesService.findAll(query, req.user);
 
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Direcciones obtenidas exitosamente',
-        );
-      } else {
-        return this.responseService.success(
-          result,
-          'Direcciones obtenidas exitosamente',
-        );
-      }
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las direcciones',
-        error.message,
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
+        'Direcciones obtenidas exitosamente',
       );
     }
+    return this.responseService.success(
+      result,
+      'Direcciones obtenidas exitosamente',
+    );
   }
 
   @Get('store/:storeId')
@@ -162,19 +144,12 @@ export class AddressesController {
     @Param('storeId', ParseIntPipe) storeId: number,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.addressesService.findByStore(storeId, req.user);
+    const result = await this.addressesService.findByStore(storeId, req.user);
 
-      return this.responseService.success(
-        result,
-        'Direcciones de la tienda obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las direcciones',
-        error.message,
-      );
-    }
+    return this.responseService.success(
+      result,
+      'Direcciones de la tienda obtenidas exitosamente',
+    );
   }
 
   @Get(':id')
@@ -183,18 +158,11 @@ export class AddressesController {
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.addressesService.findOne(id, req.user);
-      return this.responseService.success(
-        result,
-        'Dirección obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener la dirección',
-        error.message,
-      );
-    }
+    const result = await this.addressesService.findOne(id, req.user);
+    return this.responseService.success(
+      result,
+      'Dirección obtenida exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -204,22 +172,15 @@ export class AddressesController {
     @Body() updateAddressDto: UpdateAddressDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.addressesService.update(
-        id,
-        updateAddressDto,
-        req.user,
-      );
-      return this.responseService.updated(
-        result,
-        'Dirección actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al actualizar la dirección',
-        error.message,
-      );
-    }
+    const result = await this.addressesService.update(
+      id,
+      updateAddressDto,
+      req.user,
+    );
+    return this.responseService.updated(
+      result,
+      'Dirección actualizada exitosamente',
+    );
   }
 
   @Delete(':id')
@@ -229,14 +190,7 @@ export class AddressesController {
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      await this.addressesService.remove(id, req.user);
-      return this.responseService.deleted('Dirección eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al eliminar la dirección',
-        error.message,
-      );
-    }
+    await this.addressesService.remove(id, req.user);
+    return this.responseService.deleted('Dirección eliminada exitosamente');
   }
 }

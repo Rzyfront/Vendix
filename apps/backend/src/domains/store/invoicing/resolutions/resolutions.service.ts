@@ -77,12 +77,19 @@ export class ResolutionsService {
   }
 
   async findAll() {
-    return this.prisma.invoice_resolutions.findMany({
+    const rows = await this.prisma.invoice_resolutions.findMany({
       orderBy: { created_at: 'desc' },
     });
+    return rows.map(toPublicResolution);
   }
 
-  async findOne(id: number) {
+  /**
+   * La fila COMPLETA, con las tres columnas de la ClTec. Privada a propósito:
+   * la usan `update()` y `remove()`, que necesitan la clave vigente para
+   * decidir si la re-sellan o la conservan. Todo lo que sale por HTTP pasa por
+   * {@link findOne}, que la quita.
+   */
+  private async findOneInternal(id: number) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id },
     });
@@ -92,6 +99,10 @@ export class ResolutionsService {
     }
 
     return resolution;
+  }
+
+  async findOne(id: number) {
+    return toPublicResolution(await this.findOneInternal(id));
   }
 
   async create(dto: CreateResolutionDto) {
@@ -194,11 +205,11 @@ export class ResolutionsService {
     this.logger.log(
       `Resolution ${resolution.resolution_number} created (prefix: ${resolution.prefix}, range: ${resolution.range_from}-${resolution.range_to})`,
     );
-    return resolution;
+    return toPublicResolution(resolution);
   }
 
   async update(id: number, dto: UpdateResolutionDto) {
-    const current = await this.findOne(id);
+    const current = await this.findOneInternal(id);
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -357,11 +368,11 @@ export class ResolutionsService {
     });
 
     this.logger.log(`Resolution #${id} updated`);
-    return updated;
+    return toPublicResolution(updated);
   }
 
   async remove(id: number) {
-    const resolution = await this.findOne(id);
+    const resolution = await this.findOneInternal(id);
 
     // Check if resolution has been used
     const usage_count = await this.prisma.invoices.count({
@@ -569,4 +580,71 @@ export class ResolutionsService {
       );
     }
   }
+}
+
+/**
+ * ─── LA ClTec NO SALE POR HTTP ───────────────────────────────────────────────
+ *
+ * `GET /store/invoicing/resolutions` devolvía la fila entera de
+ * `invoice_resolutions`, y ahí viven TRES columnas que no pueden llegar al
+ * navegador:
+ *
+ *   - `technical_key` — la ClTec en claro. Es la 14.ª entrada del hash del CUFE
+ *     (Anexo 1.9 §11.2). Con ella y con los datos públicos del documento
+ *     —número, fecha, hora, totales, NIT de las dos partes— cualquiera recompone
+ *     el CUFE de todo lo emitido bajo esa resolución, que es exactamente lo que
+ *     la DIAN usa para probar autenticidad.
+ *   - `technical_key_encrypted` — el ciphertext. Publicarlo es peor que inútil:
+ *     regala material para atacar la llave fuera de línea, sin límite de
+ *     intentos y sin que quede rastro.
+ *   - `technical_key_fingerprint` — SHA-256 sin llave. Correlaciona resoluciones
+ *     de tenants distintos que comparten clave; es un índice ciego de uso
+ *     interno (`fiscal-production-readiness.service.ts`), no un dato de la
+ *     pantalla.
+ *
+ * Se sustituyen por lo único que la UI necesita: si la clave ESTÁ y cuántos
+ * caracteres tiene. Con eso el formulario pinta «clave guardada» sin volver a
+ * pedirla y el diagnóstico del caso de producción —una ClTec de 38 en vez de
+ * 40— se lee de un vistazo, sin exponer un solo carácter.
+ *
+ * Es la misma convención que ya aplica el carril superadmin
+ * (`tenant-resolutions.controller.ts`, `tenant-directory.service.ts`): allí se
+ * publica `technical_key_set`. Aquí se añade además la longitud porque este es
+ * el carril donde el comerciante corrige la clave.
+ *
+ * ⚠️ Se aplica en el SERVICIO y no en el controlador porque `findOne()` lo
+ * consumen también otros métodos de esta clase; los que sí necesitan la clave
+ * vigente llaman a `findOneInternal()`, que es privada. Un controlador nuevo no
+ * puede saltarse la limpieza sin escribir su propia consulta.
+ */
+function toPublicResolution<
+  T extends {
+    technical_key?: string | null;
+    technical_key_encrypted?: string | null;
+    technical_key_fingerprint?: string | null;
+  },
+>(row: T) {
+  const {
+    technical_key,
+    technical_key_encrypted: _encrypted,
+    technical_key_fingerprint: _fingerprint,
+    ...rest
+  } = row;
+
+  const stored = (technical_key ?? '').trim();
+
+  return {
+    ...rest,
+    technical_key_set: stored.length > 0,
+    /**
+     * Cuántos caracteres tiene la guardada. `0` cuando no hay.
+     *
+     * No es un dato decorativo: la DIAN emite exactamente 40 hexadecimales, y
+     * el rechazo real del 14/08/2026 fue una clave de 38 que nadie miró. Que la
+     * pantalla pueda decir «tiene 38, deben ser 40» sin revelar ni un carácter
+     * es la diferencia entre diagnosticar en un segundo y quemar otro
+     * consecutivo autorizado.
+     */
+    technical_key_length: stored.length,
+  };
 }

@@ -891,6 +891,10 @@ export class InvoicingService {
       aiu_context.aiu,
     );
 
+    // Las tarifas referenciadas TIENEN que existir, y antes del consecutivo.
+    // Ver `assertTaxRatesBelongToTenant`.
+    await this.assertTaxRatesBelongToTenant(calculated.header_taxes, calculated.lines);
+
     // Tasa de cambio: sólo cuando el documento declara divisa y no trae tasa.
     // Nunca bloquea — ver `resolveExchangeRateForDocument`.
     const exchange_rate = await this.resolveExchangeRateForDocument({
@@ -2445,6 +2449,93 @@ export class InvoicingService {
    * declare. Si alguien quita cualquiera de las dos, el régimen AIU vuelve a ser
    * inescribible sin que ningún error lo delate.
    */
+  /**
+   * Que toda tarifa referenciada EXISTA y sea de este tenant — antes de tomar
+   * el consecutivo.
+   *
+   * ## Por qué acá y no en el DTO
+   *
+   * `@IsNumber()` sólo dice que es un número. La existencia es una pregunta a
+   * la base de datos, y `invoice_taxes.tax_rate_id` tiene FK a `tax_rates(id)`:
+   * un identificador que no existe lo rechaza Postgres, pero lo rechaza en el
+   * INSERT, y para ese momento `InvoiceNumberGenerator.generateNextNumber()` ya
+   * corrió y `invoice_resolutions.current_number` ya avanzó. El resultado
+   * medido era un `SYS_INTERNAL_001` sin campo culpable, con un consecutivo
+   * autorizado gastado en una factura que nunca llegó a existir.
+   *
+   * ## Por qué el error es fácil de cometer
+   *
+   * `GET /store/taxes` devuelve `tax_categories` con sus `tax_rates` ANIDADAS.
+   * Las dos filas tienen `id`, y `89` puede ser una categoría y `72` su tarifa.
+   * Mandar el de la categoría es un error de una línea que ninguna capa de
+   * tipos ataja.
+   *
+   * ## Por qué también se comprueba la pertenencia
+   *
+   * El FK acepta cualquier `tax_rates.id` del sistema, incluido el de otra
+   * organización. Una tarifa ajena entraría al documento y a su XML sin que
+   * nada la marcara. Se acepta cuando la tarifa cuelga de una categoría de la
+   * organización, o cuando la propia tarifa apunta a esta tienda: las tarifas
+   * de alcance ORGANIZACIÓN viven con `store_id = NULL`, así que exigir la
+   * tienda a secas dejaría fuera al catálogo compartido.
+   */
+  private async assertTaxRatesBelongToTenant(
+    header_taxes: Array<{ tax_rate_id?: number | null }>,
+    lines: Array<{ taxes: Array<{ tax_rate_id?: number | null }> }>,
+  ): Promise<void> {
+    const referenced = new Set<number>();
+    for (const tax of header_taxes) {
+      if (typeof tax.tax_rate_id === 'number') referenced.add(tax.tax_rate_id);
+    }
+    for (const line of lines) {
+      for (const tax of line.taxes) {
+        if (typeof tax.tax_rate_id === 'number') referenced.add(tax.tax_rate_id);
+      }
+    }
+    if (referenced.size === 0) return;
+
+    const context = this.getContext();
+    const organization_id = Number(context.organization_id);
+    const store_id =
+      context.store_id != null ? Number(context.store_id) : null;
+
+    const rows = await this.prisma.withoutScope().tax_rates.findMany({
+      where: { id: { in: [...referenced] } },
+      select: {
+        id: true,
+        store_id: true,
+        tax_categories: { select: { organization_id: true, store_id: true } },
+      },
+    });
+
+    const owned = new Set(
+      rows
+        .filter((row) => {
+          const category = row.tax_categories;
+          if (category?.organization_id === organization_id) return true;
+          if (store_id != null && row.store_id === store_id) return true;
+          return store_id != null && category?.store_id === store_id;
+        })
+        .map((row) => row.id),
+    );
+
+    const rejected = [...referenced].filter((id) => !owned.has(id));
+    if (rejected.length === 0) return;
+
+    const found = new Set(rows.map((row) => row.id));
+    const missing = rejected.filter((id) => !found.has(id));
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CALC_002,
+      missing.length === rejected.length
+        ? `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no existe' : 'tarifas de impuesto que no existen'}: ` +
+            `${rejected.join(', ')}. Si tomaste el identificador del catálogo de impuestos, revisa que sea el de la TARIFA y no el de la categoría que la contiene.`
+        : `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no pertenece a esta organización' : 'tarifas de impuesto que no pertenecen a esta organización'}: ` +
+            `${rejected.join(', ')}. Selecciona el impuesto desde el catálogo de la tienda.`,
+      { rejected_tax_rate_ids: rejected, missing_tax_rate_ids: missing },
+    );
+  }
+
   private async loadAiuSettings(store_id?: number): Promise<AiuSettings> {
     if (typeof store_id !== 'number') return {};
 

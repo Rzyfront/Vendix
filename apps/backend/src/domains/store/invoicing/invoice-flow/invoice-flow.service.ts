@@ -69,6 +69,7 @@ import { resolveUneceUnitCodeStrict } from '../../products/services/uom-uncefact
 import { toCustomerInvoiceData } from '../utils/customer-invoice-data.adapter';
 import {
   AcquirerIdentificationMode,
+  CustomerFiscalIdentityFinding,
   CustomerFiscalIdentityInput,
   CustomerFiscalIdentityReport,
   CustomerFiscalIdentityValidator,
@@ -85,6 +86,49 @@ import {
   isFiscalDocumentType,
   toFiscalDocumentType,
 } from '../fiscal-document-requirements';
+
+/**
+ * Un hallazgo de `emit-readiness`, venga de la puerta que venga.
+ *
+ * Las dos puertas producen la MISMA forma útil para la pantalla —`code`,
+ * `severity`, `field`, `problem`, `fix`— y difieren sólo en el universo de
+ * `code` y en que el fiscal añade `category` y la regla del Anexo. La unión se
+ * declara para que las listas aplanadas de {@link EmitReadinessReport} puedan
+ * llevar los dos sin que ninguna se quede fuera por tipo.
+ */
+export type EmitReadinessFinding =
+  | CustomerFiscalIdentityFinding
+  | FiscalDocumentFinding;
+
+/**
+ * Lo que responde `GET /store/invoicing/:id/emit-readiness`.
+ *
+ * `findings`/`blockers`/`warnings` en la raíz llevan la UNIÓN de las dos
+ * puertas —identidad del adquiriente y prevalidación fiscal— porque `emittable`
+ * también es el AND de las dos: publicar un `emittable:false` cuya lista de
+ * requisitos sólo mira una de ellas deja al usuario sin nada que corregir.
+ * `identity` y `fiscal_document` conservan cada informe entero para quien
+ * necesite saber de qué puerta salió cada hallazgo.
+ */
+export type EmitReadinessReport = Omit<
+  CustomerFiscalIdentityReport,
+  'findings' | 'blockers' | 'warnings'
+> & {
+  findings: EmitReadinessFinding[];
+  blockers: EmitReadinessFinding[];
+  warnings: EmitReadinessFinding[];
+  invoice_id: number;
+  invoice_number: string;
+  status: string;
+  has_items: boolean;
+  /** El informe de identidad SIN aplanar, para leerlo sin ambigüedad. */
+  identity: CustomerFiscalIdentityReport;
+  /**
+   * El veredicto de prevalidación fiscal, o `null` cuando el `invoice_type` no
+   * se emite a la DIAN y por tanto no hay nada que prevalidar.
+   */
+  fiscal_document: FiscalDocumentReport | null;
+};
 
 type InvoiceStatus =
   | 'draft'
@@ -1064,21 +1108,7 @@ export class InvoiceFlowService {
    * `validate()`, producido por el mismo validador: una segunda lista de
    * requisitos escrita aparte se desincroniza el primer día.
    */
-  async getEmitReadiness(id: number): Promise<
-    CustomerFiscalIdentityReport & {
-      invoice_id: number;
-      invoice_number: string;
-      status: string;
-      has_items: boolean;
-      /** El informe de identidad SIN aplanar, para leerlo sin ambigüedad. */
-      identity: CustomerFiscalIdentityReport;
-      /**
-       * El veredicto de prevalidación fiscal, o `null` cuando el `invoice_type`
-       * no se emite a la DIAN y por tanto no hay nada que prevalidar.
-       */
-      fiscal_document: FiscalDocumentReport | null;
-    }
-  > {
+  async getEmitReadiness(id: number): Promise<EmitReadinessReport> {
     const invoice = await this.getInvoice(id);
     const identity = this.acquirerIdentity.validate(
       this.buildAcquirerIdentityInput(invoice),
@@ -1094,6 +1124,16 @@ export class InvoiceFlowService {
       // documento que `validate()` va a rechazar un clic después — que es
       // exactamente la desincronización que este endpoint existe para evitar.
       emittable: identity.emittable && (fiscal_document?.emittable ?? true),
+      // Y las LISTAS aplanadas se unen por la misma razón. Aplanar sólo la
+      // identidad mientras `emittable` mira las dos puertas produce el peor
+      // desenlace posible para el usuario: «no se puede emitir» con la lista de
+      // requisitos VACÍA, porque el bloqueante real (ClTec, aritmética,
+      // resolución) vive en `fiscal_document` y el modal lee la raíz. Se
+      // conservan `identity` y `fiscal_document` intactos abajo para quien
+      // necesite distinguir de qué puerta vino cada hallazgo.
+      findings: [...identity.findings, ...(fiscal_document?.findings ?? [])],
+      blockers: [...identity.blockers, ...(fiscal_document?.blockers ?? [])],
+      warnings: [...identity.warnings, ...(fiscal_document?.warnings ?? [])],
       identity,
       fiscal_document,
       invoice_id: invoice.id,
@@ -1345,7 +1385,14 @@ export class InvoiceFlowService {
             valid_from: invoice.resolution.valid_from,
             valid_to: invoice.resolution.valid_to,
             is_active: invoice.resolution.is_active,
-            technical_key: invoice.resolution.technical_key,
+            // La REVELADA por el vault, no `invoice.resolution.technical_key`:
+            // esa propiedad ya no existe en el objeto cargado —
+            // `RESOLUTION_PUBLIC_SELECT` la excluye a propósito para que el
+            // secreto no viaje en ninguna respuesta— y leerla devuelve
+            // `undefined`, con lo que la regla `technical_key` del prevalidador
+            // bloqueaba TODA factura de venta con `TECHNICAL_KEY_REQUIRED`
+            // aunque la resolución tuviera su clave de 40 hex bien guardada.
+            technical_key,
           }
         : null,
     };
@@ -2643,7 +2690,13 @@ export class InvoiceFlowService {
       // mapear — ver `toProviderWithholdings`, que es donde está el peligro.
       withholdings: this.toProviderWithholdings(withholding_lines),
       resolution_number: invoice.resolution?.resolution_number,
-      technical_key: invoice.resolution?.technical_key || undefined,
+      // La REVELADA arriba, no `invoice.resolution?.technical_key`: esa
+      // propiedad ya no viene en el objeto cargado y evaluaba a `undefined`,
+      // con lo que el proveedor hasheaba el CUFE con ClTec vacía. Es la
+      // reproducción exacta del rechazo de producción del §B.0 —hash correcto
+      // en apariencia, "Valor del CUFE no está calculado correctamente" de
+      // vuelta, y el consecutivo autorizado ya gastado.
+      technical_key: resolution_technical_key || undefined,
       notes: invoice.notes || undefined,
       order_reference: invoice.related_invoice?.invoice_number,
       original_invoice_number: invoice.related_invoice?.invoice_number,
