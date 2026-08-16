@@ -883,6 +883,7 @@ export class InvoicingService {
     const aiu_context = await this.resolveAiuContext(
       dto.operation_type,
       dto.items,
+      dto.aiu_contract_object,
     );
     const calculated = this.recalculateDocument(
       dto.items,
@@ -980,6 +981,12 @@ export class InvoicingService {
         // (estándar) y esa equivalencia vive en un solo sitio, el builder UBL.
         // Escribir '10' aquí crearía dos representaciones del mismo valor.
         operation_type: dto.operation_type,
+        // SNAPSHOT del objeto del contrato AIU con el que se validó la nota
+        // CAV03, sea el del documento o el de la tienda. Persistirlo es lo que
+        // impide que un cambio de configuración entre la captura y el envío
+        // haga que el XML describa un contrato distinto del que se facturó.
+        // `undefined` en un documento no-AIU: la columna queda NULL.
+        aiu_contract_object: aiu_context.contract_object,
         // Divisa extranjera: SOLO declara la conversión. El documento se emite
         // siempre en COP (Res. DIAN 000042/2020 art. 73) y el importe legal
         // sigue siendo `total_amount`.
@@ -1849,6 +1856,9 @@ export class InvoicingService {
       ...(dto.operation_type !== undefined && {
         operation_type: dto.operation_type,
       }),
+      ...(dto.aiu_contract_object !== undefined && {
+        aiu_contract_object: dto.aiu_contract_object,
+      }),
       ...(dto.foreign_currency !== undefined && {
         foreign_currency: dto.foreign_currency,
       }),
@@ -1913,6 +1923,10 @@ export class InvoicingService {
       const aiu_context = await this.resolveAiuContext(
         dto.operation_type ?? invoice.operation_type,
         dto.items,
+        // Mismo criterio que el tipo de operación: el del PATCH si lo trae, el
+        // persistido si no. Editar un borrador no puede borrar por omisión el
+        // objeto del contrato con el que se validó la nota CAV03.
+        dto.aiu_contract_object ?? invoice.aiu_contract_object,
       );
       const calculated = this.recalculateDocument(
         dto.items,
@@ -2655,7 +2669,18 @@ export class InvoicingService {
   private async resolveAiuContext(
     operation_type: string | null | undefined,
     items: Array<{ aiu_component?: string | null }>,
-  ): Promise<{ aiu?: InvoiceCalculatorAiuInput; note?: string }> {
+    /**
+     * Objeto del contrato declarado en ESTE documento. Gana sobre el de la
+     * tienda, que pasa a ser el valor por defecto. Una empresa de servicios
+     * tiene varios contratos AIU y hasta ahora sólo podía describir uno.
+     */
+    invoice_contract_object?: string | null,
+  ): Promise<{
+    aiu?: InvoiceCalculatorAiuInput;
+    note?: string;
+    /** El objeto que ganó, ya normalizado. Es lo que se persiste. */
+    contract_object?: string;
+  }> {
     const is_aiu =
       (operation_type || '').trim() === DIAN_INVOICE_OPERATION_TYPES.AIU;
 
@@ -2679,9 +2704,14 @@ export class InvoicingService {
     const context = this.getContext();
     const settings = await this.loadAiuSettings(context.store_id);
 
+    // Precedencia documento → tienda. El objeto de la tienda no desaparece: es
+    // el DEFAULT, para que quien factura un solo contrato no tenga que
+    // reescribirlo en cada documento.
+    const contract_object =
+      (invoice_contract_object || '').trim() ||
+      (settings.contract_object || '').trim();
     // MISMA función que usa la emisión: lo que se valida acá es exactamente la
     // cadena que va a viajar en `cbc:Note`. Ver `buildAiuNote`.
-    const contract_object = (settings.contract_object || '').trim();
     const note = buildAiuNote(contract_object);
 
     if (
@@ -2693,13 +2723,15 @@ export class InvoicingService {
         `El objeto del contrato AIU falta o no tiene la longitud que exige la DIAN: la nota de la ` +
           `línea de Administración debe medir entre ${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} ` +
           `caracteres contando el prefijo obligatorio «${DIAN_AIU_NOTE_PREFIX}». ` +
-          `Descríbelo en la configuración de facturación de la tienda.`,
+          `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
+          `en la configuración de facturación de la tienda.`,
         { note_length: note.length, has_contract_object: !!contract_object },
       );
     }
 
     return {
       note,
+      contract_object,
       aiu: {
         // Default explícito y conservador: bajo `et_462_1` tributa el AIU
         // completo. Una tienda que no configuró nada declara de más, no de

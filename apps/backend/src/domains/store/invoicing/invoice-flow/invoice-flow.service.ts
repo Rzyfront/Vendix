@@ -1830,12 +1830,26 @@ export class InvoiceFlowService {
     id: number;
     store_id: number | bigint | null;
     operation_type?: string | null;
+    aiu_contract_object?: string | null;
   }): Promise<AiuEmissionContext | null> {
     const operation_type = (invoice.operation_type || '').trim();
     if (operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) return null;
 
     const settings = await this.loadAiuSettings(invoice.store_id);
-    const contract_object = (settings.contract_object || '').trim();
+    // EL SNAPSHOT DEL DOCUMENTO MANDA.
+    //
+    // `invoices.aiu_contract_object` guarda el objeto con el que se validó la
+    // nota al capturar. Leer sólo la configuración de la tienda hacía que un
+    // cambio de configuración entre la captura y el envío emitiera un documento
+    // describiendo un contrato distinto del que se facturó — y con varios
+    // contratos AIU vivos, que es el caso normal de una empresa de servicios,
+    // TODOS salían con la misma descripción.
+    //
+    // La configuración sigue siendo el respaldo: cubre las facturas anteriores
+    // a la columna y a quien factura un único contrato.
+    const contract_object =
+      (invoice.aiu_contract_object || '').trim() ||
+      (settings.contract_object || '').trim();
     // MISMA función que usó la creación: las dos cadenas no pueden divergir.
     const note = buildAiuNote(contract_object);
 
@@ -1848,7 +1862,8 @@ export class InvoiceFlowService {
         `No se puede emitir el contrato AIU: el objeto del contrato falta o no tiene la longitud que ` +
           `exige la DIAN. La nota de la línea de Administración debe medir entre ` +
           `${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} caracteres contando el prefijo ` +
-          `obligatorio «${DIAN_AIU_NOTE_PREFIX}». Descríbelo en la configuración de facturación de la tienda.`,
+          `obligatorio «${DIAN_AIU_NOTE_PREFIX}». Descríbelo en el campo «Objeto del contrato» de la ` +
+          `factura o, si es siempre el mismo, en la configuración de facturación de la tienda.`,
         {
           invoice_id: invoice.id,
           note_length: note.length,

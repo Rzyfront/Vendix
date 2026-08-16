@@ -118,7 +118,16 @@ export class ModuleTabsShellComponent {
   });
 
   /**
-   * Segunda línea de la cabecera: dónde estás DENTRO del módulo.
+   * Segunda línea de la cabecera: QUÉ se administra en la sección abierta.
+   *
+   * Precedencia: `moduleSubtitle` de la ruta → `description` de la pestaña
+   * activa → su etiqueta.
+   *
+   * La etiqueta es el último recurso, no el primero, y la diferencia se ve en
+   * pantalla: el nombre de la sección ya aparece en la migaja, en el título del
+   * layout y en la pestaña seleccionada. Escribirlo una cuarta vez convertía
+   * esta línea en decoración. Con `description` la cabecera dice algo que no
+   * está en ningún otro sitio.
    *
    * Se declara después de `activeTabId` a propósito —la lambda de `computed`
    * es perezosa, pero leerla en este orden es lo que hace evidente de dónde
@@ -133,7 +142,7 @@ export class ModuleTabsShellComponent {
     if (explicit) return explicit;
 
     const active = this.tabs().find((tab) => tab.id === this.activeTabId());
-    return active?.label ?? '';
+    return active?.description ?? active?.label ?? '';
   });
 
   onTabChanged(tabId: string): void {

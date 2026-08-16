@@ -373,6 +373,24 @@ export type InvoiceCalculatorDivergenceScope =
    */
   | 'aiu_untaxable_line_declares_tax'
   /**
+   * Documento AIU: la línea SÍ hace parte de la base gravable del régimen
+   * vigente y salió sin un solo impuesto.
+   *
+   * Es la simétrica de la anterior y hasta ahora no existía, así que el hueco
+   * sólo se abría en un sentido: quitar un impuesto de más se reportaba, y
+   * dejar de cobrar uno obligatorio pasaba en silencio. Bajo `et_462_1` la base
+   * es el AIU COMPLETO —A, I y U—, de modo que una factura con IVA sólo en
+   * Administración sub-declara el impuesto de las otras dos líneas. La DIAN la
+   * acepta sin chistar: el XML cuadra consigo mismo, y el error sólo aparece en
+   * una fiscalización, cuando ya sólo se corrige con nota crédito.
+   *
+   * NO bloquea, y la razón es la asimetría del daño: exigir impuesto en una
+   * línea AIU tumbaría la captura legítima de un componente exento o excluido,
+   * que existe. Se reporta para que la superficie de alistamiento lo muestre y
+   * el usuario decida — el mismo trato que `aiu_untaxable_line_declares_tax`.
+   */
+  | 'aiu_taxable_line_without_tax'
+  /**
    * Documento AIU bajo E.T. art. 462-1: la base gravable (A+I+U) quedó por
    * DEBAJO del piso legal del 10 % del valor del contrato.
    *
@@ -671,6 +689,28 @@ export class InvoiceCalculatorService {
         expected: dianAmount(0),
         received,
         difference: received,
+      });
+    }
+
+    // La simétrica: la línea SÍ entra a la base y no trae impuesto alguno.
+    //
+    // Se comprueba sobre `document_taxes` y no sobre `item.taxes`, a propósito:
+    // una línea que sólo trajo retenciones ya quedó vacía de impuestos del
+    // documento arriba, y es exactamente el caso que hay que reportar. Bajo
+    // `et_462_1` la base es el AIU completo, así que Imprevistos y Utilidad sin
+    // IVA sub-declaran el impuesto sin que nada en pantalla lo diga.
+    if (aiu && aiu_component !== null && !omit_tax_total && document_taxes.length === 0) {
+      divergences.push({
+        scope: 'aiu_taxable_line_without_tax',
+        line_index: index,
+        line_description: item.description,
+        tax_type: aiu_component,
+        // No se puede afirmar CUÁNTO debía: la tarifa depende del bien o
+        // servicio y este servicio no la conoce. Los tres importes van en cero
+        // —el contrato del tipo los exige— y lo que informa es el hecho.
+        expected: dianAmount(0),
+        received: dianAmount(0),
+        difference: dianAmount(0),
       });
     }
 

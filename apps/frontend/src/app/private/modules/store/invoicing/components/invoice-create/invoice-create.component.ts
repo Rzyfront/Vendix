@@ -176,6 +176,14 @@ interface InvoiceCreatePayload {
   payment_form?: string;
   payment_means_code?: string;
   operation_type?: string;
+  /**
+   * Objeto del contrato AIU de ESTE documento (regla CAV03).
+   *
+   * Omitido ⇒ el backend hereda el de `store_settings.invoicing.aiu`. Se manda
+   * sólo cuando el usuario lo escribió, nunca vacío: una cadena vacía persiste
+   * un override y rompe la herencia.
+   */
+  aiu_contract_object?: string;
   foreign_currency?: string;
   foreign_total_amount?: number;
   exchange_rate?: number;
@@ -293,7 +301,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   ],
   lineas: ['items'],
   impuestos: [],
-  aiu: [],
+  aiu: ['aiu_contract_object'],
   retenciones: ['withholding_amount'],
   divisa: [
     'foreign_currency',
@@ -1022,6 +1030,94 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   ></div>
                 }
 
+                <!-- Objeto del contrato de ESTE documento (regla CAV03) -->
+                @if (aiuEffectiveNote(); as note) {
+                  <div
+                    class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-4 py-3.5"
+                  >
+                    <div
+                      class="flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <app-icon
+                          name="file-text"
+                          [size]="15"
+                          class="text-[var(--color-text-secondary)]"
+                        />
+                        <span class="text-sm font-medium text-text-primary">
+                          Objeto del contrato
+                        </span>
+                      </div>
+                      <span
+                        class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ring-1"
+                        [ngClass]="
+                          note.source === 'invoice'
+                            ? 'bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)] text-[var(--color-primary)] ring-[var(--color-primary)]/25'
+                            : note.source === 'store'
+                              ? 'bg-[var(--color-background)] text-[var(--color-text-secondary)] ring-border'
+                              : 'bg-error/5 text-error ring-error/30'
+                        "
+                      >
+                        {{
+                          note.source === 'invoice'
+                            ? 'Propio de esta factura'
+                            : note.source === 'store'
+                              ? 'Heredado de la tienda'
+                              : 'Sin definir'
+                        }}
+                      </span>
+                    </div>
+
+                    <app-textarea
+                      class="mt-2.5 block"
+                      formControlName="aiu_contract_object"
+                      [control]="control('aiu_contract_object')"
+                      [error]="fieldError('aiu_contract_object')"
+                      [rows]="2"
+                      [placeholder]="
+                        note.source === 'store'
+                          ? 'Heredado: ' + note.object
+                          : 'Ej.: aseo y cafetería para la sede norte, contrato 2026-014'
+                      "
+                    ></app-textarea>
+
+                    <p
+                      class="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                    >
+                      Se guarda con la factura, así que el documento conserva el
+                      contrato que describía aunque la tienda cambie el suyo
+                      después. Déjalo vacío para heredar el de
+                      <strong class="text-text-primary"
+                        >Ajustes → Facturación → AIU</strong
+                      >.
+                    </p>
+
+                    <!-- Vista previa de la cadena que viaja en cbc:Note -->
+                    @if (note.note) {
+                      <div
+                        class="mt-2.5 rounded-lg border border-border bg-[var(--color-background)] px-3 py-2"
+                      >
+                        <div
+                          class="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                        >
+                          <span>Nota que viaja al XML</span>
+                          <span
+                            class="tabular-nums font-semibold"
+                            [ngClass]="note.valid ? 'text-success' : 'text-error'"
+                          >
+                            {{ note.length }} / {{ note.max }}
+                          </span>
+                        </div>
+                        <p
+                          class="mt-1 break-words text-[11px] leading-relaxed text-text-primary"
+                        >
+                          {{ note.note }}
+                        </p>
+                      </div>
+                    }
+                  </div>
+                }
+
                 <!-- Desglose por componente -->
                 <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   @for (row of aiuBreakdown(); track row.key) {
@@ -1061,30 +1157,74 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   </div>
                 }
 
-                @if (aiuNoteBlocked()) {
+                @if (aiuTaxableWithoutTax().length > 0) {
                   <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
                   >
                     <app-icon
                       name="alert-triangle"
                       [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-error"
+                      class="mt-0.5 flex-shrink-0 text-warning"
                     />
                     <div class="min-w-0">
-                      <p class="text-xs font-semibold text-error">
-                        Falta el objeto del contrato AIU
+                      <p class="text-xs font-semibold text-warning">
+                        {{ aiuTaxableWithoutTax().length }} línea(s) de la base
+                        gravable no declaran impuesto
                       </p>
-                      <p class="mt-0.5 text-xs leading-relaxed text-error">
-                        La regla CAV03 exige que la línea de Administración lleve
-                        una nota que empiece por «{{ aiuSettings()?.note_prefix
-                        }}» y mida al menos
-                        {{ aiuSettings()?.note_min_length }} caracteres.
-                        Descríbelo en Ajustes → Facturación → AIU: sin eso la
-                        emisión se rechaza y el documento no llega a tomar
-                        consecutivo.
+                      <p class="mt-0.5 text-xs leading-relaxed text-warning">
+                        Bajo {{ aiuGuidance()?.regimeLabel }} la base gravable es
+                        {{ aiuGuidance()?.taxableLabel }}, así que
+                        @for (
+                          row of aiuTaxableWithoutTax();
+                          track row.index;
+                          let last = $last
+                        ) {
+                          <strong>{{ row.label }}</strong
+                          >{{ last ? '' : ', ' }}
+                        }
+                        también debería(n) llevarlo. La DIAN acepta el documento
+                        igual —el XML cuadra consigo mismo—, y el faltante sólo
+                        aparece en una fiscalización, cuando ya sólo se corrige
+                        con nota crédito. Déjalas sin impuesto únicamente si el
+                        concepto está exento o excluido.
                       </p>
                     </div>
                   </div>
+                }
+
+                @if (aiuEffectiveNote(); as note) {
+                  @if (!note.valid) {
+                    <div
+                      class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                    >
+                      <app-icon
+                        name="alert-triangle"
+                        [size]="15"
+                        class="mt-0.5 flex-shrink-0 text-error"
+                      />
+                      <div class="min-w-0">
+                        <p class="text-xs font-semibold text-error">
+                          @if (note.length > note.max) {
+                            El objeto del contrato AIU es demasiado largo
+                          } @else {
+                            Falta el objeto del contrato AIU
+                          }
+                        </p>
+                        <p class="mt-0.5 text-xs leading-relaxed text-error">
+                          La regla CAV03 exige que la línea de Administración
+                          lleve una nota que empiece por «{{
+                            aiuSettings()?.note_prefix
+                          }}» y mida entre {{ note.min }} y
+                          {{ note.max }} caracteres; la actual mide
+                          {{ note.length }}. Descríbelo arriba, en
+                          <strong>Objeto del contrato</strong>, o —si es siempre
+                          el mismo— en Ajustes → Facturación → AIU. Sin eso la
+                          emisión se rechaza y el documento no llega a tomar
+                          consecutivo.
+                        </p>
+                      </div>
+                    </div>
+                  }
                 }
               }
             </vendix-invoice-form-section>
@@ -1706,6 +1846,11 @@ export class InvoiceCreateComponent {
     operation_type: [OPERATION_TYPE_STANDARD],
     notes: [''],
 
+    // AIU. Vacío ⇒ hereda el objeto del contrato de la tienda. Es un campo por
+    // documento y no sólo de configuración porque una constructora factura
+    // varias obras a la vez y la nota CAV03 describe UNA de ellas.
+    aiu_contract_object: [''],
+
     // Adquiriente
     customer_id: [null],
     customer_name: ['', [Validators.required, Validators.minLength(2)]],
@@ -2145,18 +2290,123 @@ export class InvoiceCreateComponent {
   });
 
   /**
+   * Líneas AIU que SÍ entran a la base gravable del régimen y salieron sin un
+   * solo impuesto.
+   *
+   * Es la simétrica del aviso de arriba, y hasta ahora el hueco sólo se cerraba
+   * en un sentido: poner impuesto donde no va se corregía server-side y se
+   * reportaba, mientras que dejar de ponerlo donde sí va pasaba en silencio.
+   * Bajo `et_462_1` la base es el AIU COMPLETO, así que una factura con IVA
+   * sólo en Administración sub-declara el de Imprevistos y Utilidad — y la DIAN
+   * la acepta, porque el XML cuadra consigo mismo.
+   *
+   * AVISO, no bloqueo: un componente exento o excluido es un caso legítimo y
+   * bloquear impediría capturarlo. Mismo criterio que aplica el calculador del
+   * backend con la divergencia `aiu_taxable_line_without_tax`.
+   *
+   * Se cuenta `taxes.length` de la línea: las retenciones se capturan en su
+   * propia sección de este modal, no dentro de la línea, así que lo que hay en
+   * `taxes` son impuestos del documento.
+   */
+  readonly aiuTaxableWithoutTax = computed<
+    Array<{ index: number; label: string }>
+  >(() => {
+    const settings = this.aiuSettings();
+    if (!settings) return [];
+
+    // Bajo el Decreto 1372/1992 sólo la utilidad grava; bajo el 462-1, los tres
+    // componentes. Es la misma pregunta que responde `isAiuTaxable` en el
+    // backend, y se escribe igual para que no puedan divergir.
+    const isTaxable = (component: string): boolean =>
+      settings.regime === 'et_462_1' ? true : component === 'utilidad';
+
+    const labels = new Map(
+      AIU_COMPONENT_OPTIONS.map((option) => [
+        String(option.value),
+        option.label,
+      ]),
+    );
+
+    return this.itemsValue()
+      .map((item, index) => ({ item, index }))
+      .filter(
+        ({ item }) =>
+          !!item.aiu_component &&
+          isTaxable(item.aiu_component) &&
+          (item.taxes ?? []).length === 0,
+      )
+      .map(({ item, index }) => ({
+        index,
+        label: labels.get(item.aiu_component) ?? item.aiu_component,
+      }));
+  });
+
+  /** Lo tecleado en este documento, ya recortado como lo recorta el backend. */
+  readonly aiuContractObject = computed<string>(() =>
+    String(this.rawValue()['aiu_contract_object'] ?? '').trim(),
+  );
+
+  /**
+   * La nota `cbc:Note` que REALMENTE saldría al XML, con la precedencia del
+   * backend: objeto del documento primero, objeto de la tienda como respaldo.
+   *
+   * Se recompone acá con la misma fórmula de `buildAiuNote` —prefijo + UN
+   * espacio + objeto— porque el contador y el veredicto tienen que medir la
+   * cadena que viaja, no el texto suelto. La cota de CAV03 es sobre la nota
+   * completa; contar sólo lo tecleado diría «cumple» 42 caracteres antes de que
+   * sea cierto.
+   *
+   * `null` mientras la configuración se resuelve: media instrucción es peor que
+   * ninguna.
+   */
+  readonly aiuEffectiveNote = computed<{
+    source: 'invoice' | 'store' | 'none';
+    object: string;
+    note: string;
+    length: number;
+    valid: boolean;
+    min: number;
+    max: number;
+    remaining: number;
+  } | null>(() => {
+    const settings = this.aiuSettings();
+    if (!settings) return null;
+
+    const own = this.aiuContractObject();
+    const inherited = (settings.contract_object ?? '').trim();
+    const object = own || inherited;
+    const note = object ? `${settings.note_prefix} ${object}` : '';
+
+    return {
+      source: own ? 'invoice' : inherited ? 'store' : 'none',
+      object,
+      note,
+      length: note.length,
+      valid:
+        note.length >= settings.note_min_length &&
+        note.length <= settings.note_max_length,
+      min: settings.note_min_length,
+      max: settings.note_max_length,
+      remaining: settings.note_max_length - note.length,
+    };
+  });
+
+  /**
    * Objeto del contrato faltante o demasiado corto.
    *
    * La regla CAV03 exige que la nota de la línea de Administración —incluido el
-   * prefijo obligatorio— mida entre 20 y 5.000 caracteres. Es el único
-   * bloqueante de la emisión AIU que el usuario no puede ni adivinar ni
-   * arreglar desde este modal: el objeto del contrato vive en la configuración
-   * de la tienda. Sin este aviso captura la factura entera y sólo descubre el
-   * problema al validar.
+   * prefijo obligatorio— mida entre 20 y 5.000 caracteres. Es el bloqueante de
+   * la emisión AIU que más caro sale descubrir tarde: sin él la factura se
+   * captura entera y revienta al validar.
+   *
+   * Se mide contra la nota EFECTIVA, no contra `settings.note_valid`: desde que
+   * el documento puede traer su propio objeto de contrato, una tienda sin objeto
+   * configurado ya no implica una emisión rota — implica que este documento
+   * tiene que traerlo.
    */
   readonly aiuNoteBlocked = computed<boolean>(() => {
-    const settings = this.aiuSettings();
-    return !!settings && !settings.note_valid;
+    const note = this.aiuEffectiveNote();
+    return !!note && !note.valid;
   });
 
   /** Retención efectiva: la calculada por conceptos, o la escrita a mano. */
@@ -2314,6 +2564,12 @@ export class InvoiceCreateComponent {
       }
     }
     if (this.isAiu() && this.aiuUnassigned() > 0) {
+      counts.aiu += 1;
+    }
+    // La nota CAV03 es bloqueante de emisión, así que la cabecera plegada de la
+    // sección tiene que delatarla: si no, el usuario cierra AIU convencido de
+    // que quedó completa y descubre el faltante recién al enviar.
+    if (this.isAiu() && this.aiuNoteBlocked()) {
       counts.aiu += 1;
     }
     return counts;
@@ -3110,6 +3366,19 @@ export class InvoiceCreateComponent {
         'La operación es AIU (09) y hay líneas sin componente. La DIAN valida la coherencia entre el CustomizationID y el desglose de las líneas.',
       );
     }
+    // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de
+    // tomar consecutivo. Se repite acá para que el usuario lo lea con la factura
+    // todavía en pantalla, no en un error de servidor.
+    if (this.isAiu()) {
+      const note = this.aiuEffectiveNote();
+      if (note && !note.valid) {
+        blockers.push(
+          note.length > note.max
+            ? `El objeto del contrato AIU deja la nota CAV03 en ${note.length} caracteres y el máximo es ${note.max}. Recórtalo.`
+            : 'La operación es AIU (09) y no hay objeto del contrato. La regla CAV03 exige la nota en la línea de Administración: descríbelo en la sección AIU o en Ajustes → Facturación.',
+        );
+      }
+    }
     if (this.usesForeignCurrency()) {
       if (!raw['foreign_currency']) {
         blockers.push('Declaraste conversión a divisa pero no elegiste cuál.');
@@ -3242,6 +3511,14 @@ export class InvoiceCreateComponent {
     }
     if (raw['operation_type']) {
       payload.operation_type = String(raw['operation_type']);
+    }
+    // Sólo si la operación es AIU y el usuario efectivamente escribió algo: en
+    // cualquier otro caso se omite para que el backend herede el de la tienda,
+    // que es la precedencia que aplica `resolveAiuContext`. Mandar cadena vacía
+    // persistiría un override vacío y rompería la herencia.
+    const aiuContractObject = this.aiuContractObject();
+    if (this.isAiu() && aiuContractObject) {
+      payload.aiu_contract_object = aiuContractObject;
     }
     const notes = String(raw['notes'] ?? '').trim();
     if (notes) payload.notes = notes;
@@ -3570,6 +3847,7 @@ export class InvoiceCreateComponent {
       payment_means_code: '10',
       operation_type: OPERATION_TYPE_STANDARD,
       notes: '',
+      aiu_contract_object: '',
       customer_id: null,
       customer_name: '',
       customer_document_type: DOCUMENT_TYPE_NIT_CODE,

@@ -644,9 +644,16 @@ export class CreateInvoiceDto {
    * Tipo de operación (`cbc:CustomizationID` del UBL): '10' estándar, '09' AIU,
    * '11' mandatos, '12' transporte.
    *
-   * No es cosmético: '09' cambia la base gravable del IVA a solo la utilidad, y
-   * la DIAN valida la coherencia entre este código y el desglose de las líneas
-   * (ver `aiu_component` en `CreateInvoiceItemDto`).
+   * No es cosmético: '09' cambia la base gravable del IVA y la DIAN valida la
+   * coherencia entre este código y el desglose de las líneas (ver
+   * `aiu_component` en `CreateInvoiceItemDto`).
+   *
+   * CUÁL es esa base depende del RÉGIMEN configurado en la tienda, no del
+   * código: bajo E.T. art. 462-1 —aseo y cafetería, vigilancia, servicios
+   * temporales— grava el AIU COMPLETO; bajo el Decreto 1372/1992 —construcción
+   * de bien inmueble— grava sólo la utilidad. Afirmar acá que siempre es la
+   * utilidad instruía a sub-declarar IVA a toda tienda del 462-1, que es el
+   * régimen por defecto.
    */
   @IsOptional()
   @Transform(blankToUndefined)
@@ -655,6 +662,30 @@ export class CreateInvoiceDto {
       "operation_type debe ser '10' (estándar), '09' (AIU), '11' (mandatos) o '12' (transporte). Es el CustomizationID del UBL y determina cómo la DIAN calcula la base gravable.",
   })
   operation_type?: string;
+
+  /**
+   * Objeto del contrato AIU de ESTA factura (regla CAV03).
+   *
+   * Opcional: sin él se usa el de la tienda
+   * (`store_settings.invoicing.aiu.contract_object`), que sigue siendo el valor
+   * por defecto y no hay que repetirlo en cada documento. Se declara acá porque
+   * una empresa de servicios tiene VARIOS contratos AIU —es su negocio— y hasta
+   * ahora sólo podía describir uno para todos.
+   *
+   * La cota no se valida sólo por longitud de este campo: lo que la DIAN mide
+   * es la nota COMPLETA, con el prefijo obligatorio delante. De eso se encarga
+   * `resolveAiuContext`, que compone la cadena real con `buildAiuNote` y falla
+   * antes de tomar consecutivo. Acá sólo se ataja lo que ni siquiera puede
+   * caber.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsString()
+  @MaxLength(4900, {
+    message:
+      'aiu_contract_object no puede superar 4900 caracteres: la regla CAV03 limita la nota completa a 5000 y el prefijo obligatorio «Contrato de servicios AIU por concepto de:» ya ocupa parte.',
+  })
+  aiu_contract_object?: string;
 
   /**
    * Divisa extranjera de la operación, ISO 4217. Acompaña a

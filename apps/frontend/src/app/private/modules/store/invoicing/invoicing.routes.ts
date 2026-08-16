@@ -19,12 +19,16 @@ export const invoicingRoutes: Routes = [
                 {
                     id: 'invoices',
                     label: 'Facturas',
+                    description:
+                        'Facturas de venta, notas crédito y débito emitidas por la tienda, con su estado ante la DIAN.',
                     icon: 'receipt',
                     route: '/admin/invoicing/invoices',
                 },
                 {
                     id: 'support-documents',
                     label: 'Documentos soporte',
+                    description:
+                        'Documentos que respaldan compras a proveedores no obligados a facturar electrónicamente.',
                     icon: 'file-text',
                     route: '/admin/invoicing/support-documents',
                 },
@@ -37,12 +41,16 @@ export const invoicingRoutes: Routes = [
                     id: 'invoice-data-requests',
                     label: 'Solicitudes de factura',
                     shortLabel: 'Solicitudes',
+                    description:
+                        'Ventas a consumidor final que el cliente pidió convertir en factura a su nombre.',
                     icon: 'user-plus',
                     route: '/admin/invoicing/invoice-data-requests',
                 },
                 {
                     id: 'resolutions',
                     label: 'Resoluciones',
+                    description:
+                        'Rangos de numeración autorizados por la DIAN: prefijo, consecutivo disponible y vigencia.',
                     icon: 'file-check',
                     route: '/admin/invoicing/resolutions',
                 },
@@ -50,6 +58,8 @@ export const invoicingRoutes: Routes = [
                     id: 'dian-config',
                     label: 'Configuración DIAN',
                     shortLabel: 'DIAN',
+                    description:
+                        'Certificado de firma, software habilitado y ambiente con el que se transmite cada documento.',
                     icon: 'shield',
                     route: '/admin/invoicing/dian-config',
                 },
