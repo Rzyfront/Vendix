@@ -163,6 +163,21 @@ export class CreditNotesService {
       );
     }
 
+    // ANTES de tomar el consecutivo, no después. Una línea que referencia un
+    // artículo ajeno al catálogo de esta tienda tiene dos finales y los dos son
+    // malos: el id inexistente revienta en la FK de `invoice_items` como un 500
+    // «Error interno» —con el consecutivo autorizado ya gastado y sin manera de
+    // devolverlo—, y el id de OTRA tienda satisface la FK y queda escrito en la
+    // nota, que es una fuga de tenant que responde 201.
+    //
+    // La guarda gemela vive en `InvoicingService.resolveLinePricingSnapshots`,
+    // que es el seam por el que pasan la creación y la edición de facturas. Las
+    // notas no lo cruzan —construyen sus líneas por su cuenta—, así que la
+    // protección hay que repetirla aquí; es el precio de tener dos carriles de
+    // escritura, y se prefiere duplicar catorce líneas antes que dejar el
+    // carril de notas sin puerta.
+    await this.assertNoteLinesResolvable(dto.items);
+
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({
         document_type: type,
@@ -255,6 +270,16 @@ export class CreditNotesService {
         issue_date,
         created_by_user_id: context.user_id,
         notes: dto.notes || (dto as CreateCreditNoteDto).reason,
+        // Concepto DIAN (`cac:DiscrepancyResponse/cbc:ResponseCode`). El DTO ya
+        // validó que el código pertenece al catálogo de ESTE tipo de nota —los
+        // dos catálogos son distintos—, así que aquí sólo se persiste.
+        //
+        // `?? null` explícito: ausente NO es '2'. La columna queda NULL y es el
+        // builder quien cae al literal histórico, en un solo lugar. Traducir el
+        // vacío a '2' acá dejaría indistinguibles «el usuario eligió anulación»
+        // y «esta nota nació sin concepto», que es justo lo que hay que poder
+        // separar para saber qué se declaró de verdad.
+        note_concept_code: dto.note_concept_code ?? null,
         invoice_items: {
           create: items.map((item) => {
             const item_total =
@@ -326,6 +351,84 @@ export class CreditNotesService {
       `${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`,
     );
     return note;
+  }
+
+  /**
+   * Rechaza una nota cuyas líneas referencian artículos que el catálogo de esta
+   * tienda no devuelve.
+   *
+   * Sólo mira `dto.items`. Las líneas de la nota TOTAL se copian de
+   * `related_invoice.invoice_items`, cuyos ids ya satisfacen la FK por
+   * construcción: volver a consultarlos sería una consulta por nota para
+   * confirmar algo que la base ya garantiza.
+   *
+   * Las dos consultas van por `this.prisma`, que scopea `products` por tienda y
+   * `product_variants` por relación. Por eso «no está en el mapa» significa a la
+   * vez «no existe» y «es de otra tienda», y por eso un solo control cierra los
+   * dos agujeros: el 500 por FK y la fuga de tenant que respondía 201.
+   *
+   * 422 y no 404: no falta el recurso que se pidió —la nota se está creando—,
+   * sino que el cuerpo referencia uno que no es de quien escribe.
+   */
+  private async assertNoteLinesResolvable(
+    items: CreateCreditNoteDto['items'],
+  ): Promise<void> {
+    if (!items?.length) return;
+
+    const product_ids = [
+      ...new Set(
+        items
+          .map((item) => item.product_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const variant_ids = [
+      ...new Set(
+        items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    if (!product_ids.length && !variant_ids.length) return;
+
+    const [products, variants] = await Promise.all([
+      product_ids.length
+        ? this.prisma.products.findMany({
+            where: { id: { in: product_ids } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+      variant_ids.length
+        ? this.prisma.product_variants.findMany({
+            where: { id: { in: variant_ids } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const found_products = new Set(products.map((p) => p.id));
+    const found_variants = new Set(variants.map((v) => v.id));
+    const rejected_products = product_ids.filter((id) => !found_products.has(id));
+    const rejected_variants = variant_ids.filter((id) => !found_variants.has(id));
+    if (!rejected_products.length && !rejected_variants.length) return;
+
+    const parts = [
+      rejected_products.length
+        ? `producto(s) ${rejected_products.join(', ')}`
+        : null,
+      rejected_variants.length
+        ? `variante(s) ${rejected_variants.join(', ')}`
+        : null,
+    ].filter(Boolean);
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CALC_003,
+      `La nota referencia ${parts.join(' y ')} que no existen en el catálogo de esta tienda. ` +
+        'Selecciónalos desde el buscador de productos, o deja la línea sin producto si es un ítem libre.',
+      {
+        rejected_product_ids: rejected_products,
+        rejected_product_variant_ids: rejected_variants,
+      },
+    );
   }
 }
 
