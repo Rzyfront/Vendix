@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -21,7 +22,6 @@ import { Invoice } from './interfaces/invoice.interface';
 
 import { InvoiceStatsComponent } from './components/invoice-stats/invoice-stats.component';
 import { InvoiceListComponent } from './components/invoice-list/invoice-list.component';
-import { InvoiceCreateComponent } from './components/invoice-create/invoice-create.component';
 import { InvoiceDetailComponent } from './components/invoice-detail/invoice-detail.component';
 import { CreditNoteCreateComponent } from './components/credit-note-create/credit-note-create.component';
 import { InvoicingNotConfiguredComponent } from './components/invoicing-not-configured/invoicing-not-configured.component';
@@ -35,7 +35,6 @@ import { FiscalRequirementsService } from '../../../../shared/services/fiscal-re
   imports: [
     InvoiceStatsComponent,
     InvoiceListComponent,
-    InvoiceCreateComponent,
     InvoiceDetailComponent,
     CreditNoteCreateComponent,
     InvoicingNotConfiguredComponent,
@@ -58,12 +57,6 @@ import { FiscalRequirementsService } from '../../../../shared/services/fiscal-re
         (view)="viewInvoice($event)"
         (refresh)="refreshInvoices()"
       ></app-invoice-list>
-
-      @defer (when isCreateModalOpen()) {
-        <vendix-invoice-create
-          [(isOpen)]="isCreateModalOpen"
-        ></vendix-invoice-create>
-      }
 
       @defer (when isDetailModalOpen()) {
         <vendix-invoice-detail
@@ -102,6 +95,7 @@ import { FiscalRequirementsService } from '../../../../shared/services/fiscal-re
 export class InvoicingComponent {
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
+  private router = inject(Router);
   /** Modal compartido de requisitos fiscales (accedido desde el template). */
   readonly fiscalReq = inject(FiscalRequirementsService);
 
@@ -128,7 +122,6 @@ export class InvoicingComponent {
   );
 
   // Modal states
-  readonly isCreateModalOpen = signal(false);
   readonly isDetailModalOpen = signal(false);
   readonly isCreditNoteModalOpen = signal(false);
   readonly isNotConfiguredModalOpen = signal(false);
@@ -148,7 +141,15 @@ export class InvoicingComponent {
     this.store.dispatch(loadDianConfigs());
   }
 
-  // Modal handlers
+  /**
+   * Entrada ÚNICA a la captura de una factura.
+   *
+   * Era un modal en este mismo componente y ahora es una ruta propia
+   * (`/admin/invoicing/invoices/new`). Lo que NO cambia es la guarda: sin
+   * configuración DIAN no se entra, porque la pantalla de captura gasta
+   * numeración autorizada y entrar a llenarla para descubrirlo al final es el
+   * peor sitio donde dar la noticia.
+   */
   openCreateModal(): void {
     // Block until DIAN configs finish loading — avoid showing "missing" prematurely.
     if (this.dianConfigsLoading()) return;
@@ -159,7 +160,7 @@ export class InvoicingComponent {
       this.isNotConfiguredModalOpen.set(true);
       return;
     }
-    this.isCreateModalOpen.set(true);
+    void this.router.navigate(['/admin/invoicing/invoices/new']);
   }
 
   viewInvoice(invoice: Invoice): void {

@@ -541,6 +541,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
   DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',
   DIAN_CONN_001: 'No se pudo conectar con la DIAN. Intenta de nuevo.',
+  // Consulta de rangos de numeración (GetNumberingRange). Es una LECTURA: no
+  // gasta consecutivos, así que reintentar es gratis y el mensaje lo dice —
+  // sin eso el comerciante teme repetirla y vuelve a teclear la clave a mano,
+  // que es justo el camino que produjo el rechazo por CUFE del 14/08/2026.
+  DIAN_NUMBERING_RANGE_001:
+    'No se pudo consultar los rangos de numeración ante la DIAN. La consulta no gasta numeración, puedes reintentarla.',
   DIAN_SEND_001: 'La DIAN rechazo el documento.',
   DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
   DIAN_CERT_004: 'El certificado no coincide con el NIT de la entidad fiscal.',

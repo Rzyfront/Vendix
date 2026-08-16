@@ -2591,6 +2591,24 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'DIAN connection test failed',
   },
+  /**
+   * `GetNumberingRange` no contestó: caída de red, timeout, o SOAP Fault (por
+   * ejemplo `InvalidSecurity` cuando el certificado no firma el sobre).
+   *
+   * 502 y no 422: la consulta es READ-ONLY —no emite documentos ni reserva
+   * numeración—, así que un fallo aquí nunca es culpa del payload del tenant;
+   * es el servicio de la DIAN el que no respondió. Distinguirlo importa porque
+   * esta consulta es la fuente autoritativa de la ClTec ligada a cada
+   * resolución, y confundir «la DIAN no contestó» con «la DIAN dice que no
+   * tienes ese rango» llevaría a teclear la clave a mano otra vez — que es
+   * exactamente el defecto que produce el rechazo FAD06.
+   */
+  DIAN_NUMBERING_RANGE_001: {
+    code: 'DIAN_NUMBERING_RANGE_001',
+    httpStatus: 502,
+    devMessage:
+      'No se pudo consultar los rangos de numeración ante la DIAN (GetNumberingRange)',
+  },
   DIAN_SEND_001: {
     code: 'DIAN_SEND_001',
     httpStatus: 422,

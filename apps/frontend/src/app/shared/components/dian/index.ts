@@ -64,5 +64,6 @@ export type { ReadinessSummary } from './readiness-summary.util';
 export { DianDocumentTypeCardComponent } from './dian-document-type-card/dian-document-type-card.component';
 export { DianCertificatePanelComponent } from './dian-certificate-panel/dian-certificate-panel.component';
 export { DianTestSetPanelComponent } from './dian-test-set-panel/dian-test-set-panel.component';
+export { DianNumberingRangePanelComponent } from './dian-numbering-range-panel/dian-numbering-range-panel.component';
 export { DianResolutionFormComponent } from './dian-resolution-form/dian-resolution-form.component';
 export type { DianResolutionFormValue } from './dian-resolution-form/dian-resolution-form.component';

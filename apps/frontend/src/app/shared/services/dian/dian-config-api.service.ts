@@ -39,6 +39,148 @@ export interface DianApiContext {
   capabilities: () => DianApiCapabilities;
 }
 
+// ── Rangos de numeración: la verdad de la DIAN vs. lo guardado ────────────
+
+/** Fila local con la que se compara un rango que la DIAN reporta. */
+export interface DianNumberingRangeLocal {
+  id: number;
+  prefix: string;
+  resolution_number: string;
+  range_from: number;
+  range_to: number;
+  valid_from: string;
+  valid_to: string;
+  current_number: number;
+  is_active: boolean;
+  document_type: string;
+}
+
+export type DianNumberingRangeStatus = 'in_sync' | 'differs' | 'missing_local';
+
+/**
+ * Un rango tal como la DIAN lo tiene registrado, con la fila local enfrentada.
+ *
+ * Los campos de la DIAN llegan anulables porque `GetNumberingRange` no garantiza
+ * ninguno: un elemento ausente en su XML se traduce a `null` y no a un valor
+ * inventado, que es lo que haría creer que la resolución dice algo que no dice.
+ */
+export interface DianNumberingRange {
+  resolution_number: string | null;
+  prefix: string | null;
+  range_from: number | null;
+  range_to: number | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  resolution_date: string | null;
+  local: DianNumberingRangeLocal | null;
+  /** Nombres de campo que difieren. Puede incluir `technical_key`. */
+  differences: string[];
+  /**
+   * Si la ClTec guardada es la que la DIAN tiene ligada a ESTA resolución.
+   * `null` cuando no hay fila local con la que comparar.
+   *
+   * Es un booleano y NUNCA la clave: la ClTec no viaja al navegador. Con ella
+   * cualquiera podría recomputar CUFEs de la tienda fuera del backend.
+   */
+  technical_key_matches: boolean | null;
+  status: DianNumberingRangeStatus;
+  /**
+   * Si este rango es la numeración de HABILITACIÓN (pruebas) que la DIAN reparte
+   * idéntica a todo contribuyente: prefijo `SETP`, resolución `18760000001`,
+   * rango 990000000-995000000 y la MISMA clave técnica para todos.
+   *
+   * Importa más de lo que parece: `invoice_resolutions` no tiene columna de
+   * entorno, así que nada en la base distingue una resolución de prueba de una
+   * real. Si una de habilitación se guarda sin que nadie lo note, la pantalla de
+   * crear factura puede ofrecerla y saldría una factura REAL numerada con un
+   * rango de pruebas y con la clave técnica que la DIAN le da a todo el mundo.
+   * Esta bandera es la única señal que existe para distinguirlas.
+   */
+  is_habilitation_numbering: boolean;
+}
+
+/** Resolución guardada que la DIAN no reporta. Nunca se borra: se señala. */
+export interface DianNumberingRangeLocalOnly {
+  id: number;
+  prefix: string;
+  resolution_number: string;
+  range_from: number;
+  range_to: number;
+  valid_from: string;
+  valid_to: string;
+  is_active: boolean;
+}
+
+export interface DianNumberingRangesResponse {
+  dian_configuration_id: number;
+  nit: string;
+  software_id: string;
+  environment: 'production' | 'test';
+  /** ISO. Marca de cuándo se le preguntó a la DIAN, no de cuándo se pintó. */
+  queried_at: string;
+  ranges: DianNumberingRange[];
+  local_only: DianNumberingRangeLocalOnly[];
+  /**
+   * Sólo llega cuando no se pudo interpretar NINGÚN rango. Lista los elementos
+   * que sí venían en la respuesta: es lo único que hace depurable un cambio de
+   * contrato de la DIAN sin acceso al XML crudo.
+   */
+  unparsed?: { element_names: string[] };
+}
+
+/**
+ * Un elemento del lote que se pide aplicar.
+ *
+ * La identidad es `resolution_number` + `prefix`, nunca el id local: el rango
+ * puede no existir todavía de este lado, y ese par es lo que la DIAN considera
+ * la identidad de la autorización.
+ */
+export interface DianNumberingRangeApplyItem {
+  resolution_number: string;
+  prefix: string;
+}
+
+/**
+ * Resultado de UN elemento del lote.
+ *
+ * Cada elemento se resuelve por su cuenta: un lote donde unos entran y otros no
+ * es un resultado legítimo, no un fallo del lote. Por eso el `ok` y el `error`
+ * viven aquí y no en el sobre.
+ */
+export interface DianNumberingRangeApplyResult {
+  /** Se repiten los dos identificadores para poder casar el resultado con su fila. */
+  resolution_number: string;
+  prefix: string;
+  ok: boolean;
+  /** `null` cuando no se llegó a escribir nada. */
+  resolution_id: number | null;
+  created: boolean;
+  /** Campos que el backend sí escribió. */
+  applied_fields: string[];
+  /** Campos que NO escribió (inmutables porque la resolución ya numeró). */
+  skipped_fields: string[];
+  /** Presente sólo cuando `ok` es `false`. */
+  error: { code: string; message: string } | null;
+  /** Si lo aplicado era numeración de habilitación (pruebas). Ver `DianNumberingRange`. */
+  is_habilitation_numbering: boolean;
+}
+
+/**
+ * Sobre del lote completo.
+ *
+ * `applied` y `failed` son un resumen para el encabezado; la verdad de qué pasó
+ * está en `results`, elemento a elemento. Resumir el lote como «se aplicó» o
+ * «falló» sería mentir en el caso normal, que es el parcial.
+ */
+export interface DianNumberingRangeApplyReport {
+  applied: number;
+  failed: number;
+  results: DianNumberingRangeApplyResult[];
+}
+
+/** Tope que acepta el backend en una sola petición. */
+export const DIAN_NUMBERING_RANGE_APPLY_MAX = 50;
+
 /**
  * El default apunta al panel de tienda, que es lo que hace que POS, Ajustes y
  * los effects de facturación —todos inyectando desde el injector RAÍZ— sigan
@@ -249,6 +391,53 @@ export class DianConfigApiService {
     return this.http.post(
       this.getApiUrl(`dian-config/${config_id}/promote-to-production`),
       {},
+    );
+  }
+
+  // ── Rangos de numeración ────────────────────────────────
+
+  /**
+   * Le pregunta a la DIAN qué numeración tiene registrada para este NIT.
+   *
+   * Es una LECTURA del web service `GetNumberingRange`: no consume consecutivos
+   * ni toca nada guardado. Existe porque la clave técnica que el portal MUISCA
+   * muestra como «vigente» no siempre es la que la DIAN tiene ligada a cada
+   * resolución, y es esta última la que usa para recomputar el CUFE. Con la
+   * clave equivocada cada factura vuelve rechazada por FAD06 y desde la pantalla
+   * no había forma de verlo, porque la clave se teclea de un PDF y nadie la
+   * puede contrastar.
+   */
+  getNumberingRanges(
+    config_id: number,
+  ): Observable<ApiResponse<DianNumberingRangesResponse>> {
+    return this.http.get<ApiResponse<DianNumberingRangesResponse>>(
+      this.getApiUrl(`dian-config/${config_id}/numbering-ranges`),
+    );
+  }
+
+  /**
+   * Copia a las resoluciones locales lo que la DIAN reporta para cada prefijo.
+   *
+   * Es un LOTE (de 1 a 50) y no una llamada por fila: un contribuyente con
+   * varias resoluciones registradas en el mismo software tiene que poder
+   * corregirlas de una vez, y encadenar N peticiones desde el navegador dejaría
+   * la mitad escrita si una falla a medio camino.
+   *
+   * Cada elemento se resuelve por separado, así que la respuesta puede traer
+   * unos `ok: true` y otros `ok: false` a la vez. No es un error del lote: es el
+   * caso normal, y quien la consuma tiene que pintarlo elemento a elemento.
+   *
+   * El backend decide qué campos son escribibles: una resolución que ya consumió
+   * consecutivos no puede mover su rango sin romper la trazabilidad de lo ya
+   * emitido, así que devuelve por separado lo aplicado y lo omitido.
+   */
+  applyNumberingRanges(
+    config_id: number,
+    payload: { ranges: DianNumberingRangeApplyItem[] },
+  ): Observable<ApiResponse<DianNumberingRangeApplyReport>> {
+    return this.http.post<ApiResponse<DianNumberingRangeApplyReport>>(
+      this.getApiUrl(`dian-config/${config_id}/numbering-ranges/apply`),
+      payload,
     );
   }
 

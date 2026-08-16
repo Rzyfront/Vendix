@@ -63,6 +63,21 @@ import {
   ],
   template: `
     <div class="relative">
+      <!--
+        Etiqueta propia, con el mismo estilo que la de app-input. Sin ella el
+        control se leía como un enlace suelto al lado del selector de producto y
+        no como el campo que es.
+
+        Sin comillas invertidas en TODO este comentario: vive dentro del template
+        literal del componente y una sola lo cerraría en seco, con un error de
+        parseo que apunta a otra línea y no explica nada.
+      -->
+      <label
+        class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1"
+      >
+        Impuestos
+      </label>
+
       <div class="flex flex-wrap items-center gap-1.5">
         @for (tax of value(); track tax.tax_rate_id) {
           <span
@@ -98,24 +113,55 @@ import {
           </span>
         }
 
+        <!--
+          Disparador con altura y borde de control, no una píldora punteada.
+          Se alinea con los app-input vecinos (min-h-[38px], text-sm) para que la
+          rejilla lo lea como un campo más.
+
+          VACÍO = ADVERTENCIA, no neutro. En una factura colombiana una línea sin
+          impuesto es una AFIRMACIÓN fiscal —excluida o exenta—, no un campo por
+          llenar; pintarla gris la hace invisible justo cuando más hay que
+          mirarla. Sin impuestos ocupa el ancho completo, porque es lo único que
+          hay que ver en la fila.
+        -->
         <button
           type="button"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-dashed border-border text-[11px] text-[var(--color-text-secondary)] hover:border-primary-600 hover:text-primary transition-colors disabled:opacity-50"
+          class="inline-flex items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-lg border text-sm transition-colors hover:opacity-80 disabled:opacity-50"
+          [class.w-full]="value().length === 0"
+          [class.border-warning]="value().length === 0"
+          [class.text-warning]="value().length === 0"
+          [class.border-border]="value().length > 0"
+          [class.text-text-primary]="value().length > 0"
           [disabled]="isDisabled()"
+          [title]="triggerHint()"
           (click)="togglePanel($event)"
         >
-          <app-icon name="plus" [size]="12" />
           @if (value().length === 0) {
+            <app-icon name="alert-triangle" [size]="14" />
             Sin impuesto
           } @else {
-            Agregar
+            <app-icon name="plus" [size]="14" />
+            Agregar impuesto
           }
         </button>
       </div>
 
+      @if (value().length === 0) {
+        <p class="mt-1 text-[11px] leading-snug text-warning">
+          Esta línea declara una operación excluida o exenta. Si no lo es, la
+          factura sub-declara impuesto y el faltante sólo aparece en una
+          fiscalización.
+        </p>
+      }
+
       @if (panelOpen()) {
+        <!--
+          El panel se alinea al campo («w-full») en vez de a un ancho fijo de
+          16 rem, con ese mismo ancho como piso para que siga siendo legible en
+          una columna estrecha.
+        -->
         <div
-          class="absolute z-[10000] top-full left-0 mt-1 w-64 max-h-64 overflow-y-auto rounded-lg border border-border bg-[var(--color-surface)] shadow-lg"
+          class="absolute z-[10000] top-full left-0 mt-1 w-full min-w-[16rem] max-h-64 overflow-y-auto rounded-lg border border-border bg-[var(--color-surface)] shadow-lg"
         >
           <div class="p-2 border-b border-border">
             <input
@@ -194,6 +240,13 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
   private readonly disabledState = signal(false);
 
   readonly catalogEmpty = computed(() => this.taxes().length === 0);
+
+  /** Qué significa el estado actual del campo, en el tooltip del disparador. */
+  readonly triggerHint = computed(() =>
+    this.value().length === 0
+      ? 'Esta línea no declara ningún impuesto: sale al XML como operación excluida o exenta. Sólo es correcto si realmente lo es.'
+      : 'Agregar otro impuesto a esta línea. Una línea colombiana puede llevar varios (IVA + INC).',
+  );
 
   readonly visibleTaxes = computed<TaxOption[]>(() => {
     const term = this.query().trim().toLowerCase();

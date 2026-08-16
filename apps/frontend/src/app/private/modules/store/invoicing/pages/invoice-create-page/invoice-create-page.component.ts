@@ -2,9 +2,10 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  OnInit,
   computed,
+  effect,
   inject,
-  model,
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
@@ -38,6 +39,7 @@ import {
   createInvoice,
   createInvoiceFailure,
   createInvoiceSuccess,
+  loadResolutions,
 } from '../../state/actions/invoicing.actions';
 import { selectActiveResolutions } from '../../state/selectors/invoicing.selectors';
 import {
@@ -61,8 +63,8 @@ import {
   InvoiceEmitReadinessService,
 } from '../../services/invoice-emit-readiness.service';
 import { toEmitRequirements } from '../../utils/invoice-emit-requirements';
+import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
 
-import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import {
@@ -77,12 +79,18 @@ import {
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
 import {
+  DialogService,
   SaveRequirement,
   SaveRequirementsModalComponent,
+  StickyHeaderActionButton,
+  StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import {
+  formatDateOnlyUTC,
+  toLocalDateString,
+} from '../../../../../../shared/utils/date.util';
 import {
   computeNitDv,
   isValidNitDv,
@@ -99,24 +107,27 @@ import { Customer } from '../../../customers/models/customer.model';
 
 import { InvoiceProductOption } from '../../services/invoice-product-lookup.service';
 
-import { InvoiceFormSectionComponent } from './invoice-form-section.component';
-import { InvoiceResolutionBannerComponent } from './invoice-resolution-banner.component';
-import { InvoiceLineTaxesComponent } from './invoice-line-taxes.component';
-import { InvoiceItemPickerModalComponent } from './invoice-item-picker-modal.component';
+// Los satélites de la captura (secciones, banner, sub-modales y catálogos)
+// siguen viviendo en `components/invoice-create/`: son piezas del formulario,
+// no de la página, y el POS u otra superficie podría montarlas sin esta vista.
+import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
+import { InvoiceResolutionBannerComponent } from '../../components/invoice-create/invoice-resolution-banner.component';
+import { InvoiceLineTaxesComponent } from '../../components/invoice-create/invoice-line-taxes.component';
+import { InvoiceItemPickerModalComponent } from '../../components/invoice-create/invoice-item-picker-modal.component';
 import {
   InvoiceCustomItemDraft,
   InvoiceCustomItemModalComponent,
-} from './invoice-custom-item-modal.component';
-import { InvoiceOrderSelectComponent } from './invoice-order-select.component';
-import { InvoiceTaxCatalogService } from './invoice-tax-catalog.service';
+} from '../../components/invoice-create/invoice-custom-item-modal.component';
+import { InvoiceOrderSelectComponent } from '../../components/invoice-create/invoice-order-select.component';
+import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
   InvoiceAiuSettingsService,
-} from './invoice-aiu-settings.service';
+} from '../../components/invoice-create/invoice-aiu-settings.service';
 import {
   InvoiceWithholdingCatalogService,
   WithholdingConceptOption,
-} from './invoice-withholding-catalog.service';
+} from '../../components/invoice-create/invoice-withholding-catalog.service';
 import {
   ExchangeRateQuote,
   ExchangeRateService,
@@ -140,7 +151,7 @@ import {
   invoiceTypeLabel,
   safeTaxType,
   toFiscalDocumentType,
-} from './invoice-dian-catalogs';
+} from '../../components/invoice-create/invoice-dian-catalogs';
 
 // ─────────────────────────────────────────────────────────────
 // Contrato de salida
@@ -161,6 +172,15 @@ import {
  */
 interface InvoiceCreatePayload {
   invoice_type: 'sales_invoice' | 'export_invoice';
+  /**
+   * Rango de numeración con el que se emite ESTE documento.
+   *
+   * Vuelve a viajar desde que la pantalla ofrece elegirlo. Omitirlo sigue siendo
+   * válido —el backend cae a su propia búsqueda por tipo de documento—, pero la
+   * vista siempre manda uno explícito para que lo numerado coincida con lo que
+   * el usuario leyó en el banner antes de emitir.
+   */
+  resolution_id?: number;
   customer_id?: number;
   customer_name?: string;
   customer_tax_id?: string;
@@ -264,6 +284,12 @@ interface WithholdingRowValue {
   base: number | string;
 }
 
+/** Longitud exacta de la clave técnica que emite la DIAN. */
+const DIAN_TECHNICAL_KEY_LENGTH = 40;
+
+/** Destino único al salir de la captura, se emita o no. */
+const INVOICES_LIST_ROUTE = '/admin/invoicing/invoices';
+
 type SectionId =
   | 'documento'
   | 'adquiriente'
@@ -310,7 +336,28 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 };
 
 /**
- * MODAL DE FACTURA AVANZADA (superficie fiscal).
+ * VISTA DE FACTURA AVANZADA (superficie fiscal).
+ *
+ * ─── POR QUÉ ES UNA RUTA Y NO UN MODAL ──────────────────────────────────────
+ *
+ * Fue un `app-modal` durante toda su vida y era la decisión equivocada para
+ * ocho secciones plegables, tres sub-modales y un formulario que puede tardar
+ * varios minutos en llenarse. Tres consecuencias concretas se cerraron al
+ * convertirla en vista:
+ *
+ *  1. **El cuerpo del modal era `overflow-y-auto`**, y eso RECORTA todo panel
+ *     absoluto que se despliegue cerca del borde. El desplegable de impuestos
+ *     de una línea se cortaba aunque saliera con `z-[10000]`: `z-index` no
+ *     vence a `overflow`.
+ *  2. **La captura no era enlazable ni recuperable.** Un refresco accidental
+ *     con veinte líneas escritas no dejaba ni URL a la que volver.
+ *  3. **Había dos maneras de llegar a lo mismo.** Ahora hay una sola:
+ *     `/admin/invoicing/invoices/new`.
+ *
+ * La ruta vive FUERA del `ModuleTabsShellComponent` a propósito: ese shell pinta
+ * su propio `app-sticky-header` con las pestañas del módulo, y anidarla dentro
+ * apilaría dos cabeceras. Por eso la ruta replica los providers de NgRx, igual
+ * que hace el POS.
  *
  * ─── LAS DOS SUPERFICIES ────────────────────────────────────────────────────
  *
@@ -320,13 +367,25 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
  * vencimiento— y BLOQUEA explicando, porque cada factura que sale mal consume un
  * consecutivo autorizado que no se recupera.
  *
- * ─── LO QUE ESTA PANTALLA YA NO HACE ────────────────────────────────────────
+ * ─── LA RESOLUCIÓN SE ELIGE, PERO SÓLO ENTRE LAS QUE NO PUEDEN FALLAR ───────
  *
- * **No deja elegir la resolución.** Era un `app-selector` sobre
- * `resolution_id`. Elegir mal no da error: da una factura numerada con el rango
- * equivocado. El backend siempre supo cuál usar (`toFiscalDocumentType`), así
- * que ahora la resolución se INFORMA en un banner y no se envía. Ver
- * `vendix-invoice-resolution-banner`.
+ * Durante un tiempo esta pantalla NO dejó elegir la resolución, y el motivo era
+ * bueno: elegir mal no da error, da una factura numerada con el rango
+ * equivocado, y del otro lado queda un hueco de numeración que hay que
+ * explicarle a la DIAN. Se informaba en un banner y `resolution_id` no viajaba.
+ *
+ * El selector vuelve porque un comerciante con varios rangos autorizados a la
+ * vez necesita decidir con cuál factura, y quitarle la decisión no elimina el
+ * problema: lo mueve a un lugar donde no puede verlo. Lo que cambia es que
+ * **la equivocación ya no es alcanzable desde la lista**: sólo se ofrecen
+ * resoluciones del tipo de documento correcto, activas, vigentes HOY y con
+ * numeración disponible. Una vencida o agotada no aparece, y si no queda
+ * ninguna el selector dice POR QUÉ en vez de quedarse mudo.
+ *
+ * El banner NO desaparece: el selector elige y el banner sigue informando
+ * prefijo, consecutivo disponible y vigencia de lo elegido.
+ *
+ * ─── LO QUE ESTA PANTALLA SIGUE SIN HACER ───────────────────────────────────
  *
  * **No inventa el catálogo de impuestos.** Eran cuatro tarifas escritas a mano.
  * Ahora se carga el catálogo COMPLETO de la tienda y cada línea admite VARIOS
@@ -355,13 +414,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
  * paralelo que se desincroniza al borrar una fila).
  */
 @Component({
-  selector: 'vendix-invoice-create',
+  selector: 'vendix-invoice-create-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     NgClass,
     ReactiveFormsModule,
-    ModalComponent,
+    StickyHeaderComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
@@ -378,15 +437,28 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceOrderSelectComponent,
   ],
   template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      (cancel)="onClose()"
-      (opened)="onOpened()"
-      title="Nueva factura"
-      subtitle="Captura fiscal completa — DIAN"
-      size="xxl"
-      [fullScreenOnMobile]="true"
-    >
+    <div class="w-full max-w-[1400px] mx-auto">
+      <!--
+        El sticky header va en la RAÍZ de la página, no dentro del contenedor
+        con padding: «sticky top-0» se ancla al contenedor padre y desde dentro
+        de uno acolchado se queda pegado con salto.
+
+        Sin botón de retroceso a propósito. El de la cabecera es un RouterLink
+        puro y saldría sin preguntar; en un formulario que puede llevar veinte
+        líneas capturadas, la única salida es «Cancelar», que sí confirma el
+        descarte cuando hay algo escrito.
+      -->
+      <app-sticky-header
+        title="Nueva factura"
+        subtitle="Captura fiscal completa — DIAN"
+        icon="receipt"
+        variant="glass"
+        [showBackButton]="false"
+        [metadataContent]="submitHint()"
+        [actions]="headerActions()"
+        (actionClicked)="onHeaderAction($event)"
+      />
+
       <!--
         SEPARACIÓN ENTRE SECCIONES. Estaban a «space-y-2» (0,5 rem) sobre
         tarjetas con borde propio, y el resultado se lee como un bloque
@@ -395,7 +467,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         («space-y-4» = 1 rem, la misma que usan los formularios de producto y
         ajustes), sin valores sueltos.
       -->
-      <div class="p-4 space-y-4">
+      <div class="px-2 md:px-4 pb-6 space-y-4">
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
@@ -455,11 +527,83 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         }
 
         @if (mode() === 'manual') {
-          <!-- La resolución NO se elige: se informa. -->
-          <vendix-invoice-resolution-banner
-            [resolution]="activeResolution()"
-            [documentLabel]="documentLabel()"
-          />
+          <!--
+            LA RESOLUCIÓN SE ELIGE ARRIBA Y SE EXPLICA DEBAJO.
+
+            El selector va FUERA del «form» del documento, así que se enlaza con
+            «[formControl]» y no con «formControlName»: sin un «formGroup»
+            ancestro, el nombre no resolvería contra nada.
+          -->
+          <div class="space-y-2">
+            <app-selector
+              label="Resolución de numeración"
+              [formControl]="resolutionControl"
+              [options]="resolutionOptions()"
+              [errorText]="fieldError('resolution_id') ?? ''"
+              [disabled]="resolutionOptions().length === 0"
+              placeholder="Elige el rango autorizado"
+              size="sm"
+            ></app-selector>
+
+            @if (resolutionEmptyReason(); as reason) {
+              <!--
+                Una lista vacía y muda en la pantalla que gasta numeración
+                autorizada es un callejón sin salida: hay que decir si están
+                vencidas, agotadas o si no hay ninguna.
+              -->
+              <div
+                role="alert"
+                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  [size]="14"
+                  class="mt-0.5 shrink-0 text-error"
+                />
+                <p class="text-xs leading-relaxed text-error">{{ reason }}</p>
+              </div>
+            }
+
+            @if (habilitationWarning(); as warning) {
+              <!--
+                Va ANTES del aviso de clave técnica: el aviso de clave es una
+                sospecha sobre un dato ambiguo, y este es un hecho. Una factura
+                emitida contra el rango de habilitación no es una factura.
+              -->
+              <div
+                role="alert"
+                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  [size]="14"
+                  class="mt-0.5 shrink-0 text-error"
+                />
+                <p class="text-xs leading-relaxed text-error">{{ warning }}</p>
+              </div>
+            }
+
+            @if (technicalKeyWarning(); as warning) {
+              <div
+                class="flex items-start gap-2 rounded-lg border border-warning bg-warning-light px-3 py-2.5"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  [size]="14"
+                  class="mt-0.5 shrink-0 text-warning"
+                />
+                <p class="text-xs leading-relaxed text-warning">
+                  {{ warning }}
+                </p>
+              </div>
+            }
+
+            <!-- El selector elige; el banner sigue informando qué se eligió. -->
+            <vendix-invoice-resolution-banner
+              [resolution]="activeResolution()"
+              [documentLabel]="documentLabel()"
+            />
+          </div>
 
           <form [formGroup]="invoiceForm" class="space-y-4">
             <!-- ── 1. DOCUMENTO ─────────────────────────────────────── -->
@@ -811,7 +955,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     </div>
 
                     <div class="grid grid-cols-12 gap-2 items-center">
-                      <div class="col-span-12 md:col-span-3">
+                      <div class="col-span-12 md:col-span-5">
                         <button
                           type="button"
                           class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
@@ -824,15 +968,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </button>
                       </div>
 
-                      <div class="col-span-12 md:col-span-4">
-                        <vendix-invoice-line-taxes
-                          formControlName="taxes"
-                          [taxes]="availableTaxes()"
-                        />
-                      </div>
-
                       @if (isAiu()) {
-                        <div class="col-span-8 md:col-span-3">
+                        <div class="col-span-8 md:col-span-5">
                           <app-selector
                             formControlName="aiu_component"
                             [options]="aiuComponentOptions"
@@ -842,7 +979,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                           ></app-selector>
                         </div>
                       } @else {
-                        <div class="col-span-8 md:col-span-3">
+                        <div class="col-span-8 md:col-span-5">
                           <span
                             class="text-xs text-[var(--color-text-secondary)]"
                           >
@@ -878,6 +1015,19 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </button>
                       </div>
                     </div>
+
+                    <!--
+                      LOS IMPUESTOS OCUPAN SU PROPIA FILA, a ancho completo.
+                      Compartían celda con el selector de producto en cuatro de
+                      doce columnas, y con dos o tres impuestos declarados las
+                      píldoras empujaban el disparador a otro renglón. No es un
+                      adorno al lado del producto: es la afirmación fiscal de la
+                      línea, y necesita el sitio de un campo.
+                    -->
+                    <vendix-invoice-line-taxes
+                      formControlName="taxes"
+                      [taxes]="availableTaxes()"
+                    />
                   </div>
                 }
               </div>
@@ -1739,25 +1889,29 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             </p>
           </div>
         }
-      </div>
 
-      <div slot="footer">
+        <!--
+          El pie se conserva aunque la cabecera ya lleve las mismas acciones: la
+          página mide ocho secciones y quien acaba de escribir la última línea
+          está al final, no arriba. La frase de la izquierda es la misma que la
+          cabecera enseña como metadato — un botón apagado sin motivo a la vista
+          es un callejón sin salida.
+        -->
         <div
-          class="flex items-center justify-between gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
+          class="flex flex-col gap-3 rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 sm:flex-row sm:items-center sm:justify-between"
         >
-          <span class="text-xs text-[var(--color-text-secondary)] min-w-0 truncate">
+          <span class="min-w-0 truncate text-xs text-[var(--color-text-secondary)]">
             {{ submitHint() }}
           </span>
-          <div class="flex items-center gap-3 shrink-0">
-            <app-button variant="outline" (clicked)="onClose()">
+          <div class="flex shrink-0 items-center gap-3">
+            <!-- Nunca se apaga por «submitting»: salir siempre tiene que poder. -->
+            <app-button variant="outline" (clicked)="cancel()">
               Cancelar
             </app-button>
             <!--
-              Se apaga también con el borrador ya creado: en ese estado el modal
-              sigue abierto sólo para enseñar lo que la puerta de emisión
-              encontró, y pulsar de nuevo crearía una factura gemela. El pie de
-              la izquierda explica por qué está apagado — un botón mudo sin
-              motivo es un callejón sin salida.
+              Se apaga también con el borrador ya creado: en ese estado la vista
+              sigue en pie sólo para enseñar lo que la puerta de emisión
+              encontró, y pulsar de nuevo crearía una factura gemela.
             -->
             <app-button
               variant="primary"
@@ -1772,7 +1926,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
           </div>
         </div>
       </div>
-    </app-modal>
+    </div>
 
     <app-customer-modal
       [isOpen]="customerModalOpen()"
@@ -1812,11 +1966,11 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     <!--
       LA PUERTA DE EMISIÓN, ANTES DE «VALIDAR».
 
-      Va DESPUÉS del modal de captura en el orden del DOM a propósito: los dos
-      son app-modal y comparten z-index, así que el último declarado es el que
-      queda encima. Se pinta sobre el formulario todavía abierto para que los
-      CTA de «Ir al campo» enfoquen el dato REAL que la DIAN va a rechazar, y no
-      un formulario ya limpiado.
+      Va DESPUÉS de los sub-modales en el orden del DOM a propósito: todos son
+      app-modal y comparten z-index, así que el último declarado es el que queda
+      encima. Se pinta sobre el formulario todavía en pantalla para que los CTA
+      de «Ir al campo» enfoquen el dato REAL que la DIAN va a rechazar, y no un
+      formulario ya limpiado.
     -->
     <app-save-requirements-modal
       [(isOpen)]="emitRequirementsOpen"
@@ -1825,19 +1979,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     />
   `,
 })
-export class InvoiceCreateComponent {
-  /**
-   * Visibilidad. `model()` publica su propio `isOpenChange`: declarar un
-   * `output()` con ese nombre al lado crearía DOS canales para un mismo estado
-   * y dejaría el modelo interno desincronizado (ver `vendix-frontend-modal`).
-   */
-  readonly isOpen = model<boolean>(false);
-
+export class InvoiceCreatePageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly store = inject(Store);
   private readonly router = inject(Router);
   private readonly actions$ = inject(Actions);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly customersService = inject(CustomersService);
@@ -1922,6 +2070,14 @@ export class InvoiceCreateComponent {
   readonly invoiceForm: FormGroup = this.fb.group({
     // Documento
     invoice_type: ['sales_invoice', [Validators.required]],
+    /**
+     * Rango de numeración elegido. SIN `Validators.required`: cuando no hay ni
+     * una resolución elegible, exigirlo dejaría el formulario inválido con un
+     * mensaje genérico, y el motivo real —vencidas, agotadas o inexistentes— ya
+     * lo dice `resolutionEmptyReason()` junto al selector. El bloqueo de verdad
+     * lo pone `collectBlockers()`, que nombra el problema.
+     */
+    resolution_id: [null as number | null],
     issue_date: [toLocalDateString(), [Validators.required]],
     due_date: [{ value: toLocalDateString(), disabled: true }],
     payment_form: [PAYMENT_FORM_CASH],
@@ -2073,7 +2229,7 @@ export class InvoiceCreateComponent {
     return Array.isArray(value) ? value : [];
   });
 
-  // ── Resolución activa (banner) ──────────────────────────────
+  // ── Resolución: selección, elegibilidad y banner ────────────
 
   private readonly activeResolutions = toSignal(
     this.store.select(selectActiveResolutions),
@@ -2081,24 +2237,301 @@ export class InvoiceCreateComponent {
   );
 
   /**
-   * La MISMA fila que `InvoiceNumberGenerator` va a consumir: activa y del tipo
-   * de documento que corresponde a `invoice_type`. Filas antiguas sin
-   * `document_type` se aceptan como factura de venta, igual que hace el backend
-   * (la columna es NOT NULL, pero el tipo del frontend la declara opcional para
-   * los consumidores que la ensanchan).
+   * El control vive en `invoiceForm` pero se pinta FUERA de él, así que se
+   * expone tipado para enlazarlo con `[formControl]`. `form.get(...)` en la
+   * plantilla queda prohibido por `vendix-angular-forms`.
+   */
+  get resolutionControl(): FormControl<number | null> {
+    return this.invoiceForm.get('resolution_id') as FormControl<number | null>;
+  }
+
+  /**
+   * Las resoluciones entre las que se PUEDE elegir sin equivocarse.
+   *
+   * Aquí está la mitigación del riesgo por el que esta pantalla llegó a esconder
+   * el selector: elegir mal no da error, da una factura con el rango equivocado.
+   * Filtrando por los cuatro criterios que deciden si el rango sirve —tipo de
+   * documento, activa, vigente HOY y con numeración disponible—, una resolución
+   * vencida o agotada sencillamente no aparece, y la equivocación deja de ser
+   * alcanzable desde la lista.
+   *
+   * Las filas antiguas sin `document_type` cuentan como factura de venta, igual
+   * que hace el backend.
+   *
+   * La clave técnica NO entra en este filtro. Ver `technicalKeyWarning()`.
+   *
+   * La numeración de HABILITACIÓN tampoco lo hace: no se esconde, se manda al
+   * final. Ver `autoSelectableResolutions()`.
+   */
+  readonly eligibleResolutions = computed<InvoiceResolution[]>(() => {
+    const target = toFiscalDocumentType(this.invoiceType());
+    const today = toLocalDateString();
+    return this.activeResolutions()
+      .filter(
+        (res) =>
+          (res.document_type ?? 'sales_invoice') === target &&
+          res.is_active === true &&
+          isWithinValidity(res, today) &&
+          Number(res.current_number) < Number(res.range_to),
+      )
+      .sort(compareResolutionsForSelection);
+  });
+
+  /**
+   * Las que la pantalla puede elegir SOLA: las de producción.
+   *
+   * La numeración de habilitación sigue en la lista y se puede marcar a mano
+   * —durante la habilitación es justo lo que hace falta—, pero nunca la escoge
+   * la pantalla. La diferencia importa porque elegir mal aquí no da error: da
+   * una factura real numerada con un rango de pruebas y firmada con la clave
+   * técnica que la DIAN le entrega idéntica a todo contribuyente.
+   */
+  private readonly autoSelectableResolutions = computed<InvoiceResolution[]>(
+    () => this.eligibleResolutions().filter((res) => !isHabilitationNumbering(res)),
+  );
+
+  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+    this.eligibleResolutions().map((res) => ({
+      value: res.id,
+      label:
+        (isHabilitationNumbering(res) ? 'PRUEBAS · ' : '') +
+        (res.prefix || 'sin prefijo') +
+        ' · ' +
+        res.resolution_number,
+      description:
+        // El aviso va DELANTE del consecutivo, no en vez de él: en el set de
+        // pruebas hace falta saber por qué número va, y una descripción que
+        // solo regaña obliga a salir de la pantalla a buscarlo.
+        (isHabilitationNumbering(res)
+          ? 'Numeración de habilitación, idéntica para todos los contribuyentes · '
+          : '') +
+        'Consecutivo ' +
+        (Math.max(Number(res.current_number) || 0, (Number(res.range_from) || 0) - 1) + 1) +
+        ' de ' +
+        res.range_to +
+        ' · vence ' +
+        (res.valid_to ? formatDateOnlyUTC(res.valid_to) : 'sin vigencia declarada'),
+    })),
+  );
+
+  /**
+   * Por qué la lista está vacía, con el motivo REAL.
+   *
+   * Un selector vacío y mudo en la pantalla que gasta numeración autorizada no
+   * dice si hay que renovar la resolución, activar una que existe o registrar la
+   * primera. Son tres acciones distintas y el usuario no puede adivinar cuál.
+   */
+  readonly resolutionEmptyReason = computed<string | null>(() => {
+    if (this.eligibleResolutions().length > 0) return null;
+
+    const target = toFiscalDocumentType(this.invoiceType());
+    const label = this.documentLabel().toLowerCase();
+    const sameType = this.activeResolutions().filter(
+      (res) => (res.document_type ?? 'sales_invoice') === target,
+    );
+
+    if (sameType.length === 0) {
+      return (
+        'No hay ninguna resolución activa para ' +
+        label +
+        '. Regístrala o actívala en Facturación → Resoluciones: sin rango autorizado el servidor no tiene de dónde tomar el consecutivo.'
+      );
+    }
+
+    const today = toLocalDateString();
+    const expired = sameType.filter((res) => !isWithinValidity(res, today));
+    const exhausted = sameType.filter(
+      (res) => Number(res.current_number) >= Number(res.range_to),
+    );
+
+    const reasons: string[] = [];
+    if (expired.length > 0) {
+      reasons.push(
+        expired.length === 1
+          ? '1 está fuera de vigencia'
+          : expired.length + ' están fuera de vigencia',
+      );
+    }
+    if (exhausted.length > 0) {
+      reasons.push(
+        exhausted.length === 1
+          ? '1 agotó su rango'
+          : exhausted.length + ' agotaron su rango',
+      );
+    }
+
+    return (
+      'Ninguna resolución de ' +
+      label +
+      ' puede numerar hoy: ' +
+      (reasons.length > 0 ? reasons.join(' y ') : 'ninguna cumple los requisitos') +
+      '. Solicita el rango nuevo a la DIAN y regístralo en Facturación → Resoluciones antes de emitir.'
+    );
+  });
+
+  /**
+   * PRESELECCIÓN: la resolución elegible MÁS ANTIGUA.
+   *
+   * Se agota primero el rango más viejo, que es lo que evita dejar vencer
+   * numeración sin usar.
+   *
+   * ⚠️ ESTO REVIERTE EL CRITERIO EFECTIVO ANTERIOR. Mientras la pantalla no
+   * mandaba `resolution_id`, quien elegía era `InvoiceNumberGenerator`, y ése
+   * ordena por `created_at: 'desc'` — o sea, tomaba la MÁS RECIENTE. Desde que
+   * la vista manda siempre un id explícito, el criterio que manda es el de esta
+   * pantalla. Es intencional: la de la DIAN que primero vence es la que primero
+   * hay que gastar.
+   *
+   * El desempate (`valid_from`, luego `created_at`, luego `id`) no es cosmético:
+   * en datos reales conviven dos resoluciones con la MISMA `resolution_date`, y
+   * sin un criterio total la preselección dependería del orden en que el store
+   * devuelva el arreglo — es decir, cambiaría sola entre recargas.
+   */
+  private readonly preselectEligibleResolution = effect(() => {
+    const eligible = this.eligibleResolutions();
+    const control = this.invoiceForm.get('resolution_id');
+    if (!control) return;
+
+    const current = Number(control.value) || null;
+    // Lo ya elegido manda mientras siga siendo elegible. Si dejó de serlo
+    // (cambió el tipo de documento, se agotó el rango), se rehace: dejarlo
+    // puesto mandaría al backend un id que la pantalla ya no ofrece.
+    //
+    // Se contrasta contra `eligible`, no contra las auto-elegibles: una fila de
+    // habilitación marcada A MANO es una elección legítima y no se le puede
+    // deshacer bajo los dedos al usuario.
+    if (current && eligible.some((res) => res.id === current)) return;
+
+    // Pero elegir SOLA solo elige producción. Si no hay ninguna, se queda vacío
+    // y lo dice `habilitationWarning()`: preseleccionar el rango de pruebas
+    // porque es lo único que quedaba convierte un descuido en una factura real
+    // con numeración que no es de nadie.
+    const next = this.autoSelectableResolutions()[0]?.id ?? null;
+    if ((control.value ?? null) === next) return;
+    control.setValue(next);
+  });
+
+  /**
+   * En modo manual `resolution_id` es OBLIGATORIO. Y no es cosmética.
+   *
+   * Sin él, `buildPayload()` no manda el campo y quien elige es
+   * `InvoiceNumberGenerator`, que toma la resolución más reciente por
+   * `created_at`. Ahí se cuela justo lo que la preselección acaba de evitar: si
+   * la única resolución activa es la de habilitación, la pantalla se niega a
+   * preseleccionarla pero el servidor la escoge igual, y la factura sale con
+   * numeración de pruebas sin que nadie lo haya decidido. Exigir la elección
+   * cierra esa puerta trasera.
+   *
+   * Desde pedido no aplica: ese modo no pinta el selector, y un control
+   * obligatorio invisible dejaría el botón de guardar apagado sin explicación.
+   *
+   * `updateValueAndValidity()` va CON evento a propósito: el botón de guardar
+   * cuelga de `formStatus`, que es un puente sobre `statusChanges`. Silenciarlo
+   * dejaría el formulario válido y el botón apagado, o al revés.
+   */
+  private readonly syncResolutionRequirement = effect(() => {
+    const isManual = this.mode() === 'manual';
+    const control = this.invoiceForm.get('resolution_id');
+    if (!control) return;
+
+    if (isManual) {
+      control.setValidators([Validators.required]);
+    } else {
+      control.clearValidators();
+    }
+    control.updateValueAndValidity();
+  });
+
+  /**
+   * La fila que el banner describe y que el backend va a consumir.
+   *
+   * Deriva del control, no de una inferencia paralela: dos criterios distintos
+   * para el mismo dato acabarían enseñando una resolución y numerando con otra.
+   * El respaldo a la primera elegible sólo cubre el instante entre que llegan
+   * las resoluciones y corre la preselección.
    */
   readonly activeResolution = computed<InvoiceResolution | null>(() => {
-    const target = toFiscalDocumentType(this.invoiceType());
-    const candidates = this.activeResolutions().filter((res) => {
-      const documentType = res.document_type ?? 'sales_invoice';
-      return documentType === target;
-    });
-    if (candidates.length === 0) return null;
-    // Con varias activas, la que aún tiene numeración disponible manda.
-    const usable = candidates.find(
-      (res) => Number(res.current_number) < Number(res.range_to),
+    const chosen = Number(this.rawValue()['resolution_id']) || null;
+    if (chosen) {
+      const match = this.activeResolutions().find((res) => res.id === chosen);
+      if (match) return match;
+    }
+    // El respaldo usa las mismas que la preselección, no las elegibles a secas:
+    // si difirieran, el banner enseñaría durante un instante una resolución que
+    // la pantalla nunca va a elegir.
+    return this.autoSelectableResolutions()[0] ?? null;
+  });
+
+  /**
+   * Aviso BLOQUEANTE de intención cuando lo elegido es numeración de pruebas.
+   *
+   * A diferencia de `technicalKeyWarning()` —que es una sospecha sobre un dato
+   * ambiguo— aquí no hay ambigüedad: el rango de habilitación es el mismo para
+   * todo contribuyente y la clave técnica también. Una factura emitida contra él
+   * no es una factura. No se apaga el botón porque durante la habilitación este
+   * es el camino correcto, pero el usuario tiene que estar eligiéndolo, no
+   * encontrárselo puesto.
+   */
+  readonly habilitationWarning = computed<string | null>(() => {
+    const chosen = Number(this.rawValue()['resolution_id']) || null;
+    if (chosen) {
+      const match = this.activeResolutions().find((res) => res.id === chosen);
+      if (match && isHabilitationNumbering(match)) {
+        return (
+          'Esta es numeración de HABILITACIÓN (pruebas). La DIAN la asigna idéntica a todos los contribuyentes, con la misma clave técnica, y no sirve para facturar de verdad. Úsala solo para el set de pruebas.'
+        );
+      }
+      return null;
+    }
+
+    // Sin elegir: si lo único disponible es de pruebas, hay que decirlo, porque
+    // el selector NO está vacío y `resolutionEmptyReason()` guarda silencio.
+    if (
+      this.autoSelectableResolutions().length === 0 &&
+      this.eligibleResolutions().length > 0
+    ) {
+      return (
+        'Las únicas resoluciones disponibles son de habilitación (pruebas), así que no se preseleccionó ninguna. Registra la resolución de producción en Facturación → Resoluciones, o sincronízala desde la DIAN en la configuración del eje.'
+      );
+    }
+    return null;
+  });
+
+  /**
+   * Aviso NO bloqueante sobre la clave técnica de la resolución elegida.
+   *
+   * ─── POR QUÉ EL AVISO ES ASIMÉTRICO ─────────────────────────────────────
+   *
+   * `technical_key_length` se deriva SÓLO de la columna plana `technical_key`,
+   * mientras que el emisor lee por bóveda y PREFIERE la columna cifrada. Por eso
+   * los dos casos no significan lo mismo:
+   *
+   *  - `0` ⇒ **no se pinta nada**. No distingue «no hay clave» de «la clave está
+   *    sellada en `technical_key_encrypted` y es perfectamente válida». Un falso
+   *    alarmismo en la pantalla que gasta numeración autorizada es peor que el
+   *    silencio.
+   *  - `> 0` y `!== 40` ⇒ **sí se avisa**. Hay una clave plana legible y no mide
+   *    lo que la DIAN emite; puede estar rancia, pero merece una mirada.
+   *
+   * NO filtra ni reordena la lista, y NO apaga el botón de guardar: es una
+   * sospecha sobre un dato ambiguo, no un veredicto.
+   */
+  readonly technicalKeyWarning = computed<string | null>(() => {
+    const resolution = this.activeResolution();
+    if (!resolution) return null;
+    // Sólo la factura de venta lleva clave técnica en el CUFE.
+    if ((resolution.document_type ?? 'sales_invoice') !== 'sales_invoice') {
+      return null;
+    }
+    const length = Number(resolution.technical_key_length) || 0;
+    if (length === 0 || length === DIAN_TECHNICAL_KEY_LENGTH) return null;
+    return (
+      'La clave técnica guardada mide ' +
+      length +
+      ' caracteres y la DIAN emite exactamente ' +
+      DIAN_TECHNICAL_KEY_LENGTH +
+      '. Verifícala en Facturación → Resoluciones antes de emitir: con una clave equivocada la DIAN rechaza la factura por CUFE mal calculado y el consecutivo autorizado que gasta no se recupera.'
     );
-    return usable ?? candidates[0];
   });
 
   // ── Catálogos cargados ──────────────────────────────────────
@@ -2678,6 +3111,38 @@ export class InvoiceCreateComponent {
     return 'Todo listo para emitir.';
   });
 
+  /**
+   * Acciones de la cabecera.
+   *
+   * `computed` y no un arreglo fijo: dependen de `submitting()`,
+   * `checkingEmitReadiness()` y `draftCreated()`, y un arreglo plano en zoneless
+   * dejaría el botón congelado en su estado inicial.
+   *
+   * Guardar NO se apaga por `formStatus()`. Es una decisión de esta pantalla:
+   * un botón mudo con ocho secciones plegadas no dice dónde está el problema,
+   * así que el envío arranca siempre y `collectBlockers()` enumera qué falta.
+   * Cancelar NUNCA se deshabilita: salir siempre tiene que poder.
+   */
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'cancel',
+      label: 'Cancelar',
+      variant: 'outline',
+      icon: 'x',
+    },
+    {
+      id: 'save',
+      label:
+        this.mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura',
+      variant: 'primary',
+      icon: 'save',
+      loading: this.submitting() || this.checkingEmitReadiness(),
+      disabled:
+        this.submitting() || this.checkingEmitReadiness() || this.draftCreated(),
+      title: this.submitHint(),
+    },
+  ]);
+
   /** Suscripciones que limpian el error del backend cuando el usuario corrige. */
   private backendErrorSubs = new Subscription();
   private erroredControls: { path: string; control: AbstractControl }[] = [];
@@ -2736,13 +3201,28 @@ export class InvoiceCreateComponent {
     return this.invoiceForm.get('withholdings') as FormArray;
   }
 
-  // ── Ciclo de vida del modal ─────────────────────────────────
+  // ── Ciclo de vida de la página ──────────────────────────────
 
-  /** Los catálogos se cargan al ABRIR, no al construir: el modal vive montado. */
-  onOpened(): void {
-    // Red de seguridad: si el padre bajó `isOpen` sin pasar por `onClose()`, el
-    // id del borrador anterior seguiría cerrando el envío para siempre. Abrir
-    // es siempre el comienzo de una factura nueva.
+  ngOnInit(): void {
+    // LAS RESOLUCIONES SE PIDEN AQUÍ. En el modal las traía el contenedor del
+    // listado, que vive bajo el shell del módulo; esta vista cuelga FUERA de ese
+    // shell, así que nadie más las despacha y el selector llegaría vacío — con
+    // el efecto de que la factura se numeraría a ciegas.
+    this.store.dispatch(loadResolutions());
+    this.initializeCapture();
+  }
+
+  /**
+   * Arranque de una captura nueva.
+   *
+   * Antes era `onOpened()`, el gancho del modal. Se conserva como método propio
+   * porque hace dos cosas distintas —limpiar el veredicto de la sesión anterior
+   * y cargar los catálogos— y ambas son también lo que hay que hacer al reusar
+   * la vista sin destruirla.
+   */
+  private initializeCapture(): void {
+    // Red de seguridad: un id de borrador colgado cerraría el envío para
+    // siempre. Entrar a la vista es siempre el comienzo de una factura nueva.
     this.createdInvoiceId.set(null);
     this.emitRequirements.set([]);
     this.emitRequirementsOpen.set(false);
@@ -3510,11 +3990,15 @@ export class InvoiceCreateComponent {
     if (this.itemsArray.length === 0) {
       blockers.push('La factura necesita al menos una línea.');
     }
+    // Se prefiere el motivo REAL de la lista vacía (vencidas / agotadas /
+    // ninguna) al genérico: son tres arreglos distintos y el usuario no puede
+    // adivinar cuál le toca.
     if (!this.activeResolution()) {
       blockers.push(
-        'No hay resolución activa para ' +
-          this.documentLabel().toLowerCase() +
-          '. El servidor no tendría de dónde tomar el consecutivo.',
+        this.resolutionEmptyReason() ??
+          'No hay resolución activa para ' +
+            this.documentLabel().toLowerCase() +
+            '. El servidor no tendría de dónde tomar el consecutivo.',
       );
     }
     if (this.isCredit() && !raw['due_date']) {
@@ -3663,8 +4147,13 @@ export class InvoiceCreateComponent {
    * de esta pantalla, y mandarlos devolvería un 400 por `forbidNonWhitelisted`
    * nombrando campos que el usuario nunca vio.
    *
-   * `resolution_id` tampoco viaja: el backend elige la resolución por tipo de
-   * documento y esta pantalla ya no ofrece contradecirlo.
+   * `resolution_id` SÍ viaja desde que el selector volvió. No es un cambio de
+   * contrato: `CreateInvoiceDto` ya lo declaraba opcional y el servicio ya lo
+   * pasaba a `generateNextNumber`. Lo que cambia es quién decide — antes el
+   * backend caía a su búsqueda por tipo de documento (que ordena por
+   * `created_at desc`, o sea la MÁS RECIENTE); ahora manda lo que el usuario
+   * leyó en el banner. Sólo se omite si no hay ninguna elegible, y en ese caso
+   * `collectBlockers()` ya frenó el envío.
    *
    * `currency` tampoco: el backend lo fija en COP y declararlo aquí crearía una
    * segunda representación del mismo valor legal.
@@ -3731,6 +4220,13 @@ export class InvoiceCreateComponent {
     };
 
     // ── Documento
+    // El id sólo viaja si es un entero positivo real: un `null` colado se
+    // convertiría en `NaN` y `forbidNonWhitelisted` devolvería un 400 nombrando
+    // un campo que el usuario sí vio, pero por un motivo que no entendería.
+    const resolutionId = Number(raw['resolution_id']);
+    if (Number.isFinite(resolutionId) && resolutionId > 0) {
+      payload.resolution_id = resolutionId;
+    }
     if (raw['due_date']) payload.due_date = String(raw['due_date']);
     if (raw['payment_form']) payload.payment_form = String(raw['payment_form']);
     if (raw['payment_means_code']) {
@@ -3924,11 +4420,18 @@ export class InvoiceCreateComponent {
     return true;
   }
 
-  /** Cierre limpio: el borrador ya no se puede tocar desde este formulario. */
+  /**
+   * Salida limpia: el borrador ya no se puede tocar desde este formulario, así
+   * que se vuelve al listado, que es donde sí se corrige.
+   *
+   * `resetForm()` antes de navegar no es decorativo: deja el formulario limpio
+   * —`dirty` en falso incluido—, de modo que ninguna guarda de descarte se
+   * dispare sobre una factura que YA se creó.
+   */
   private finishAndClose(): void {
     this.resetForm();
     this.createdInvoiceId.set(null);
-    this.isOpen.set(false);
+    void this.router.navigate([INVOICES_LIST_ROUTE]);
   }
 
   /**
@@ -4093,6 +4596,10 @@ export class InvoiceCreateComponent {
     this.withholdingsArray.clear();
     this.invoiceForm.reset({
       invoice_type: 'sales_invoice',
+      // A `null` a propósito: el efecto de preselección vuelve a elegir la
+      // resolución elegible más antigua en cuanto el formulario se estabiliza.
+      // Conservar la anterior podría dejar puesta una que ya se agotó.
+      resolution_id: null,
       issue_date: toLocalDateString(),
       due_date: toLocalDateString(),
       payment_form: PAYMENT_FORM_CASH,
@@ -4136,18 +4643,59 @@ export class InvoiceCreateComponent {
     );
   }
 
-  onClose(): void {
+  /** Reparto de las acciones de la cabecera. */
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'cancel') {
+      this.cancel();
+      return;
+    }
+    if (actionId === 'save') {
+      this.onSubmit();
+    }
+  }
+
+  /**
+   * Salir sin emitir.
+   *
+   * Con captura escrita PIDE CONFIRMACIÓN: en un modal, cerrar sin querer era
+   * recuperable porque el componente quedaba montado con los datos dentro; en
+   * una vista, navegar lo destruye y las veinte líneas se pierden de verdad.
+   *
+   * `submitting()` sí frena la salida —hay una petición en vuelo cuyo desenlace
+   * decide si existe una factura—, pero el botón NUNCA se pinta deshabilitado
+   * por ello: un botón de salida apagado es la definición de callejón sin salida.
+   */
+  cancel(): void {
     if (this.submitting()) return;
     this.clearSubmitError();
 
-    // Si el borrador ya existe, cerrar TIENE que limpiar: el formulario dejó de
-    // describir algo editable, y reabrirlo con esos datos invitaría a crear la
-    // misma factura dos veces.
+    // Si el borrador ya existe, salir TIENE que limpiar: el formulario dejó de
+    // describir algo editable, y conservarlo invitaría a crear la misma factura
+    // dos veces. No se pregunta nada: no hay cambios que descartar.
     if (this.createdInvoiceId() !== null) {
       this.finishAndClose();
       return;
     }
-    this.isOpen.set(false);
+
+    if (!this.invoiceForm.dirty && !this.itemsArray.dirty) {
+      void this.router.navigate([INVOICES_LIST_ROUTE]);
+      return;
+    }
+
+    void this.dialogService
+      .confirm({
+        title: 'Descartar la factura',
+        message:
+          'Tienes captura sin emitir. Si sales ahora se pierde: la factura todavía no existe y no queda borrador al que volver.',
+        confirmText: 'Salir sin guardar',
+        cancelText: 'Continuar editando',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.resetForm();
+        void this.router.navigate([INVOICES_LIST_ROUTE]);
+      });
   }
 }
 
@@ -4197,4 +4745,74 @@ function withholdingTypeLabel(type: string): string {
 /** Dos decimales. Evita que el artefacto de coma flotante viaje al backend. */
 function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Recorta un valor de fecha a su parte `YYYY-MM-DD`.
+ *
+ * `valid_from` / `valid_to` / `resolution_date` son fechas-sola guardadas en
+ * columnas de marca de tiempo: llegan como `2026-01-01T00:00:00.000Z` y hay que
+ * leerlas por su componente UTC. Convertirlas a `Date` local haría que una
+ * vigencia que termina el día 31 se declarara vencida la tarde del 30 en
+ * cualquier huso al oeste de Greenwich.
+ */
+function toDateOnly(value: string | null | undefined): string {
+  return value ? String(value).slice(0, 10) : '';
+}
+
+/** `true` cuando `today` (YYYY-MM-DD local) cae dentro de la vigencia declarada. */
+function isWithinValidity(res: InvoiceResolution, today: string): boolean {
+  const from = toDateOnly(res.valid_from);
+  const to = toDateOnly(res.valid_to);
+  // Una vigencia sin declarar no descalifica: la resolución existe y el backend
+  // la acepta. Lo que descalifica es una vigencia declarada que ya no cubre hoy.
+  if (from && today < from) return false;
+  if (to && today > to) return false;
+  return true;
+}
+
+/**
+ * Orden TOTAL de las resoluciones, de la más antigua a la más nueva.
+ *
+ * El desempate encadenado existe porque el empate es un caso real, no teórico:
+ * dos resoluciones de factura de venta pueden compartir `resolution_date`. Sin
+ * un criterio que llegue hasta el `id`, `Array.sort` conservaría el orden en que
+ * llegó el arreglo y la preselección cambiaría sola entre recargas.
+ */
+function compareResolutionsByAge(
+  a: InvoiceResolution,
+  b: InvoiceResolution,
+): number {
+  const aDate = toDateOnly(a.resolution_date) || toDateOnly(a.valid_from);
+  const bDate = toDateOnly(b.resolution_date) || toDateOnly(b.valid_from);
+  if (aDate !== bDate) return aDate < bDate ? -1 : 1;
+
+  const aFrom = toDateOnly(a.valid_from);
+  const bFrom = toDateOnly(b.valid_from);
+  if (aFrom !== bFrom) return aFrom < bFrom ? -1 : 1;
+
+  const aCreated = String(a.created_at ?? '');
+  const bCreated = String(b.created_at ?? '');
+  if (aCreated !== bCreated) return aCreated < bCreated ? -1 : 1;
+
+  return (Number(a.id) || 0) - (Number(b.id) || 0);
+}
+
+/**
+ * El orden con el que se PINTA el selector: producción primero, pruebas al
+ * final, y dentro de cada grupo de la más antigua a la más nueva.
+ *
+ * El grupo va ANTES que la antigüedad a propósito. La numeración de habilitación
+ * es de 2019 en la mayoría de los tenants, así que ordenar solo por antigüedad
+ * la dejaría siempre primera — encabezando la lista y quedando preseleccionada
+ * justo el rango que jamás debe emitir una factura real.
+ */
+function compareResolutionsForSelection(
+  a: InvoiceResolution,
+  b: InvoiceResolution,
+): number {
+  const aTest = isHabilitationNumbering(a) ? 1 : 0;
+  const bTest = isHabilitationNumbering(b) ? 1 : 0;
+  if (aTest !== bTest) return aTest - bTest;
+  return compareResolutionsByAge(a, b);
 }

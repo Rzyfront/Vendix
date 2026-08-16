@@ -223,6 +223,96 @@ export class DianTestService {
   }
 
   /**
+   * Pregunta a la DIAN qué rangos de numeración tiene AUTORIZADOS esta
+   * configuración, y devuelve la respuesta CRUDA para que el llamador la lea.
+   *
+   * ── POR QUÉ ES PÚBLICO Y VIVE AQUÍ ─────────────────────────────────────────
+   *
+   * Porque la carga de credenciales WS-Security (`loadWsCredentials`) es
+   * privada y no trivial: descifra la contraseña, baja el `.p12` de S3 y decide
+   * entre custodia en proceso y HSM. `DianNumberingRangeService` sólo necesita
+   * el XML; duplicar esa carga allí crearía una segunda forma de abrir el
+   * certificado, que es justo el tipo de divergencia que hizo que el set de
+   * pruebas se firmara con una ClTec y la producción con otra.
+   *
+   * ── POR QUÉ NO PASA POR `enqueueTestSet` ───────────────────────────────────
+   *
+   * Esta consulta no emite nada, no reserva un solo consecutivo y no toca el set
+   * de pruebas. Las guardas de la cola —exigir `test_set_id`, exigir
+   * `environment === 'test'`, bloquear si hay un lote pendiente de veredicto—
+   * existen para proteger numeración autorizada; aplicarlas aquí dejaría
+   * inalcanzable el diagnóstico precisamente cuando más se necesita: con una
+   * habilitación atascada, o ya en producción, que es donde vive el defecto
+   * FAD06 que esta consulta resuelve.
+   *
+   * ⚠️ `raw_response` TRAE LA ClTec EN CLARO. No devolver este objeto por HTTP
+   * ni escribirlo en un `job.returnvalue`: quien tenga la clave recomputa el
+   * CUFE de todo lo emitido bajo ese rango. La superficie HTTP es
+   * `GET /store/invoicing/dian-config/:id/numbering-ranges`, que compara la
+   * clave en el servidor y publica sólo un booleano.
+   */
+  async queryNumberingRange(config_id: number): Promise<{
+    dian_configuration_id: number;
+    nit: string;
+    software_id: string;
+    environment: 'production' | 'test';
+    accounting_entity_id: number | null;
+    queried_at: string;
+    raw_response: string;
+  }> {
+    const config = await this.getConfigById(config_id);
+    const credentials = await this.loadWsCredentials(config);
+    const nit = String(config.nit ?? '').replace(/\D/g, '');
+    const environment = config.environment === 'production' ? 'production' : 'test';
+
+    // `accountCodeT` es el NIT del proveedor tecnológico. En software propio el
+    // obligado ES su propio proveedor, así que va el mismo NIT.
+    const response = await this.soap_client.getNumberingRange(
+      nit,
+      nit,
+      String(config.software_id ?? ''),
+      environment,
+      credentials,
+    );
+
+    // `success` NO sirve de criterio: `parseSoapResponse` sólo conoce el
+    // vocabulario de SendBill/GetStatus, así que una consulta de rangos
+    // perfectamente exitosa vuelve con `status_code: 'NO_VERDICT'` y
+    // `success: false`. Lo que sí distingue un fallo real es la ausencia de
+    // sobre —los tres modos de fallo de transporte devuelven `raw_response`
+    // vacío— o un SOAP Fault, que es la DIAN rechazando la petición.
+    const transport_failed =
+      !response.raw_response?.trim() ||
+      response.is_soap_fault === true ||
+      response.status_code === 'TIMEOUT' ||
+      response.status_code === 'NETWORK_ERROR' ||
+      response.status_code === 'DIAN_UNAVAILABLE';
+
+    if (transport_failed) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_NUMBERING_RANGE_001,
+        `La DIAN no respondió la consulta de rangos de numeración: ${response.status_message}`,
+        {
+          dian_configuration_id: config_id,
+          // El mensaje de la DIAN, nunca su cuerpo: el XML trae la ClTec.
+          dian_status_code: response.status_code,
+          environment,
+        },
+      );
+    }
+
+    return {
+      dian_configuration_id: config.id,
+      nit,
+      software_id: String(config.software_id ?? ''),
+      environment,
+      accounting_entity_id: config.accounting_entity_id ?? null,
+      queried_at: new Date().toISOString(),
+      raw_response: response.raw_response,
+    };
+  }
+
+  /**
    * Tests connectivity to DIAN web services for a specific configuration.
    */
   async testConnection(config_id: number) {
@@ -560,30 +650,28 @@ export class DianTestService {
     // DIAN qué resolución, prefijo, rango, VIGENCIA y clave técnica tiene
     // registrados para este OFE. Es la fuente autoritativa de esos datos.
     //
-    // Existe porque transcribirlos del portal a mano ya produjo dos defectos: un
-    // municipio de otro pueblo (44847 Uribia por 44001 Riohacha) y unas fechas de
-    // vigencia que la DIAN rechaza con FAB07b/FAB08b. La respuesta se devuelve
-    // CRUDA a propósito — los nombres de campo se leen de lo que la DIAN contesta.
+    // Existe porque transcribirlos del portal a mano ya produjo tres defectos: un
+    // municipio de otro pueblo (44847 Uribia por 44001 Riohacha), unas fechas de
+    // vigencia que la DIAN rechaza con FAB07b/FAB08b, y —el caro— una ClTec que
+    // no es la ligada a la resolución, que rechaza cada factura con FAD06.
+    //
+    // LA RESPUESTA CRUDA YA NO SALE DE AQUÍ. Este retorno se persiste en
+    // `job.returnvalue` (Redis) y se sirve por `GET :id/run-test-set/:jobId`, y
+    // el XML de `GetNumberingRange` trae la ClTec EN CLARO: publicarlo entrega
+    // la llave con la que se recomputa el CUFE de todo el rango. Para leer los
+    // rangos está `GET :id/numbering-ranges`, que compara la clave en el
+    // servidor y devuelve sólo un booleano.
     if (options.numbering_range === true) {
-      const cfg = await this.getConfigById(config_id);
-      const credentials = await this.loadWsCredentials(cfg);
-      const nit = String(cfg.nit ?? '').replace(/\D/g, '');
-      // `accountCodeT` es el NIT del proveedor tecnológico. En software propio el
-      // obligado ES su propio proveedor, así que va el mismo NIT.
-      const response = await this.soap_client.getNumberingRange(
-        nit,
-        nit,
-        String(cfg.software_id ?? ''),
-        cfg.environment === 'production' ? 'production' : 'test',
-        credentials,
-      );
+      const query = await this.queryNumberingRange(config_id);
       return {
         numbering_range_query: true,
-        dian_configuration_id: config_id,
-        nit,
-        software_id: cfg.software_id,
-        environment: cfg.environment,
-        raw: response,
+        dian_configuration_id: query.dian_configuration_id,
+        nit: query.nit,
+        software_id: query.software_id,
+        environment: query.environment,
+        queried_at: query.queried_at,
+        ranges_endpoint:
+          'GET /store/invoicing/dian-config/:id/numbering-ranges',
       };
     }
 

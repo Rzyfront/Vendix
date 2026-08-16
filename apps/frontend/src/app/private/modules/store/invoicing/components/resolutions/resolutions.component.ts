@@ -13,6 +13,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { ResolutionCreateComponent } from './resolution-create/resolution-create.component';
+import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
 
 /**
  * Lista reusable de resoluciones de facturación.
@@ -75,6 +76,17 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
                   >
                     {{ resolution.is_active ? 'Activa' : 'Inactiva' }}
                   </app-badge>
+                  @if (isTestNumbering(resolution)) {
+                    <!--
+                      «invoice_resolutions» no guarda el entorno, así que sin
+                      esta marca una resolución de pruebas se administra igual
+                      que una autorizada. Se declara donde se administran, no
+                      sólo donde se eligen.
+                    -->
+                    <app-badge variant="warning" size="xs">
+                      Pruebas
+                    </app-badge>
+                  }
                 </div>
                 <div class="text-xs text-text-secondary space-y-0.5">
                   <div>
@@ -155,6 +167,14 @@ export class ResolutionsComponent {
 
   readonly isCreateModalOpen = signal(false);
   readonly selectedResolution = signal<InvoiceResolution | null>(null);
+
+  /**
+   * El MISMO predicado que usan el selector de crear factura y el panel de
+   * sincronización con la DIAN. Se expone como campo, no como método propio,
+   * para que no haya una tercera lectura de qué cuenta como numeración de
+   * pruebas.
+   */
+  readonly isTestNumbering = isHabilitationNumbering;
 
   constructor() {
     this.store.dispatch(InvoicingActions.loadResolutions());

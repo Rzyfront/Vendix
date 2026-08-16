@@ -7,6 +7,30 @@ import { ModuleTabsShellComponent } from '../../../../shared/components/module-t
 
 export const invoicingRoutes: Routes = [
     {
+        // CAPTURA DE FACTURA: ruta propia, y HERMANA del shell — no hija.
+        //
+        // Va PRIMERO porque Angular resuelve por orden y la ruta del shell
+        // capturaría el segmento antes de llegar aquí.
+        //
+        // Fuera del shell a propósito: `ModuleTabsShellComponent` pinta su
+        // propio `app-sticky-header` con las pestañas del módulo y lee
+        // `route.data` de SU ruta, no de la hija activa. Un hijo no puede
+        // suprimir esa cabecera por `data`, así que anidada aquí dentro
+        // quedarían dos cabeceras sticky apiladas. Por eso replica los
+        // providers de NgRx — el mismo patrón que ya usa el POS en
+        // `store_admin.routes.ts`. La URL no cambia:
+        // `/admin/invoicing/invoices/new`.
+        path: 'invoices/new',
+        providers: [
+            provideState({ name: 'invoicing', reducer: invoicingReducer }),
+            provideEffects(InvoicingEffects),
+        ],
+        loadComponent: () =>
+            import('./pages/invoice-create-page/invoice-create-page.component').then(
+                (m) => m.InvoiceCreatePageComponent,
+            ),
+    },
+    {
         path: '',
         component: ModuleTabsShellComponent,
         // Centralized module: sub-sections render as internal sticky-header
