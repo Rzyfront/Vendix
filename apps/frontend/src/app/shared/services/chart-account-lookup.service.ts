@@ -1,6 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, map, of, switchMap, timer } from 'rxjs';
+import {
+  Observable,
+  catchError,
+  map,
+  of,
+  switchMap,
+  throwError,
+  timer,
+} from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
@@ -163,7 +171,21 @@ export class ChartAccountLookupService {
       return cached;
     }
 
+    // `shareReplay` con `refCount: false` cachea PARA SIEMPRE lo que el
+    // observable emitió — y un `shareReplay` también replica el ERROR. Sin el
+    // `catchError` de abajo, un solo 500, 403 o corte de red al abrir el
+    // selector envenenaba la caché durante toda la sesión: cada apertura
+    // posterior replicaba el mismo fallo sin volver a pedir nada, y la única
+    // salida era recargar la página.
+    //
+    // Se desaloja la entrada ANTES de re-lanzar, así que el siguiente
+    // `firstPage()` hace una petición nueva. El error sigue llegando al
+    // llamador —el selector debe poder avisar—, pero deja de ser permanente.
     const request$ = this.fetchPage(opts).pipe(
+      catchError((error) => {
+        this.firstPages.delete(key);
+        return throwError(() => error);
+      }),
       shareReplay({ bufferSize: 1, refCount: false }),
     );
     this.firstPages.set(key, request$);
