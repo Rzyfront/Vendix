@@ -1018,8 +1018,28 @@ export class InvoiceFlowService {
    * La fecha civil se lee por sus componentes UTC, que es como el resto de la
    * app trata esta columna (`dateOnlyPeriodSql`). Corregir en cambio lo que se
    * ESCRIBE movería los cubos de analítica de toda factura creada de noche.
+   *
+   * PERO LA COLUMNA NO ES HOMOGÉNEA. En dev, 22 de 80 facturas SÍ guardan una
+   * hora real, y una de ellas (id 81, `2026-08-16 00:01:09`) cae en la ventana
+   * en que el día UTC y el civil de Bogotá difieren: ese instante son las 19:01
+   * del día 15. Leerla por componentes UTC declararía el 16 mientras
+   * `formatIssueTime` —que para ese caso sí convierte a hora local— declararía
+   * las 19:01-05:00. El par quedaría contradiciéndose a sí mismo dentro del
+   * mismo documento, y ambos campos entran al CUFE.
+   *
+   * Por eso la bifurcación es la MISMA que la de `formatIssueTime`, y tiene que
+   * seguir siéndolo: si el valor trae hora real es un instante y se convierte a
+   * la fecha civil de la zona; si es medianoche UTC es una fecha de calendario
+   * y se lee tal cual. Sin `timezone` no hay conversión posible, así que la
+   * ausencia del parámetro mantiene la lectura UTC.
    */
-  private formatIssueDate(value: Date): string {
+  private formatIssueDate(value: Date, timezone?: string): string {
+    const has_real_time =
+      value.getUTCHours() !== 0 ||
+      value.getUTCMinutes() !== 0 ||
+      value.getUTCSeconds() !== 0;
+    if (has_real_time && timezone) return localDateString(value, timezone);
+
     return [
       String(value.getUTCFullYear()).padStart(4, '0'),
       String(value.getUTCMonth() + 1).padStart(2, '0'),
@@ -2786,14 +2806,14 @@ export class InvoiceFlowService {
     const provider_data: DianProviderInvoiceData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
-      issue_date: this.formatIssueDate(invoice.issue_date),
+      issue_date: this.formatIssueDate(invoice.issue_date, timezone),
       issue_time: this.formatIssueTime(
         invoice.issue_date,
         timezone,
         invoice.created_at,
       ),
       due_date: invoice.due_date
-        ? this.formatIssueDate(invoice.due_date)
+        ? this.formatIssueDate(invoice.due_date, timezone)
         : undefined,
       // Step 8 — `customer_name` / `customer_tax_id` / `customer_address`
       // prefieren el adapter; caen al valor persistido en la invoice para
@@ -2892,7 +2912,7 @@ export class InvoiceFlowService {
       original_invoice_number: invoice.related_invoice?.invoice_number,
       original_invoice_cufe: invoice.related_invoice?.cufe || undefined,
       original_invoice_issue_date: invoice.related_invoice?.issue_date
-        ? this.formatIssueDate(invoice.related_invoice.issue_date)
+        ? this.formatIssueDate(invoice.related_invoice.issue_date, timezone)
         : undefined,
       // Concepto DIAN de la nota (`cbc:ResponseCode`). Sólo las notas lo tienen;
       // en cualquier otro documento la columna es NULL y el builder ni lo mira.
