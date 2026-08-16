@@ -32,6 +32,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
+import { QueryExchangeRateDto } from './dto/query-exchange-rate.dto';
 import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
@@ -72,6 +73,24 @@ export class InvoicingController {
     @Query('date_to') date_to?: string,
   ) {
     const result = await this.invoicing_service.getStats(date_from, date_to);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Tasa de cambio oficial para el grupo `cac:PaymentExchangeRate` (FAR02-FAR07).
+   *
+   * SÓLO LEE. `invoicing:read` y no `:write` porque el formulario la consulta
+   * mientras el usuario todavía está capturando: exigir permiso de escritura
+   * dejaría el campo vacío para quien puede mirar una factura pero no crearla.
+   *
+   * Responde `rate: null` sin error en los tres casos legítimos en que no hay
+   * tasa que declarar (COP, divisa ≠ USD sin cotización cruzada, `datos.gov.co`
+   * caído). Ver `InvoicingService.getExchangeRateQuote`.
+   */
+  @Get('exchange-rate')
+  @Permissions('invoicing:read')
+  async getExchangeRate(@Query() query: QueryExchangeRateDto) {
+    const result = await this.invoicing_service.getExchangeRateQuote(query);
     return this.response_service.success(result);
   }
 

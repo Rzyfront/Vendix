@@ -40,6 +40,11 @@ import {
   InvoiceCalculatorService,
 } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
+import {
+  localDateString,
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
+} from '../../../common/utils/store-timezone.util';
 import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
 import {
   AiuSettings,
@@ -2866,6 +2871,78 @@ export class InvoicingService {
     });
 
     return resolved?.rate;
+  }
+
+  /**
+   * Tasa de cambio para la UI — la MISMA resolución que usa la creación.
+   *
+   * ## Por qué existe
+   *
+   * `TrmService` resolvía la TRM oficial desde el primer día, pero ningún
+   * controlador lo exponía: el formulario de factura pedía la tasa a mano, así
+   * que el comerciante tenía que ir a buscarla a `datos.gov.co` y transcribirla.
+   * Una tasa transcrita mal produce una `cbc:CalculationRate` (FAR06) mal
+   * declarada, y la DIAN valida el grupo `cac:PaymentExchangeRate` completo.
+   *
+   * ## Por qué devuelve `null` en vez de lanzar
+   *
+   * Tres casos legítimos responden «no hay tasa» y ninguno es un error del
+   * request: divisa COP (no hay conversión que declarar, y la DIAN RECHAZA un
+   * `SourceCurrencyBaseRate` de 1,00 — FAR03), divisa distinta de USD sin
+   * cotización cruzada, y una caída momentánea de `datos.gov.co`. El formulario
+   * necesita distinguirlos de un fallo suyo: con `null` ofrece el campo
+   * editable y explica por qué está vacío; con una excepción pintaría un toast
+   * rojo sobre una consulta auxiliar que no bloquea nada.
+   *
+   * NO se cachea aquí: `TrmService` ya cachea por día y sin TTL, porque la TRM
+   * de una fecha publicada es inmutable.
+   */
+  async getExchangeRateQuote(query: {
+    currency: string;
+    date?: string;
+    usd_cross_rate?: number;
+  }): Promise<{
+    currency: string;
+    date: string;
+    rate: string | null;
+    source: string | null;
+    trm: { value: string; valid_from: string; valid_to: string } | null;
+  }> {
+    const currency = (query.currency || '').trim().toUpperCase();
+    // Sin fecha, la de hoy EN LA ZONA DE LA TIENDA: la TRM es un dato con
+    // calendario colombiano, y resolverla en UTC adelanta el día a partir de
+    // las 19:00 hora local, pidiendo la tasa de mañana —que aún no existe—.
+    const context = this.getContext();
+    const timezone =
+      context.store_id != null
+        ? await resolveStoreTimezone(this.prisma, Number(context.store_id))
+        : await resolveOrganizationTimezone(
+            this.prisma.withoutScope(),
+            Number(context.organization_id),
+          );
+    const date = query.date || localDateString(new Date(), timezone);
+
+    const resolved = await this.trm.resolveExchangeRate({
+      currency,
+      date,
+      ...(query.usd_cross_rate != null
+        ? { usd_cross_rate: query.usd_cross_rate }
+        : {}),
+    });
+
+    return {
+      currency,
+      date,
+      rate: resolved ? resolved.rate.toString() : null,
+      source: resolved?.source ?? null,
+      trm: resolved?.trm
+        ? {
+            value: resolved.trm.value.toString(),
+            valid_from: resolved.trm.valid_from,
+            valid_to: resolved.trm.valid_to,
+          }
+        : null,
+    };
   }
 
   /**

@@ -106,6 +106,10 @@ import {
   WithholdingConceptOption,
 } from './invoice-withholding-catalog.service';
 import {
+  ExchangeRateQuote,
+  ExchangeRateService,
+} from '../../services/exchange-rate.service';
+import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
   DOCUMENT_TYPE_OPTIONS,
@@ -996,7 +1000,10 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               </p>
 
               <label class="flex items-center gap-2 mb-3 cursor-pointer">
-                <app-toggle formControlName="manual_withholding" />
+                <app-toggle
+                  formControlName="manual_withholding"
+                  (toggled)="onManualWithholdingChange()"
+                />
                 <span class="text-xs text-text-primary">
                   Escribir el importe a mano en vez de calcularlo por concepto
                 </span>
@@ -1107,10 +1114,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </div>
                       </div>
 
-                      @if (!row.get('concept_id')?.value) {
-                        <p class="mt-2 text-[11px] text-warning">
-                          Elige un concepto: sin él esta línea no se envía con la
-                          factura.
+                      @if (incompleteWithholdingRow() === i + 1) {
+                        <p
+                          class="mt-2 flex items-center gap-1.5 text-[11px] text-warning"
+                        >
+                          <app-icon name="alert-circle" [size]="12" />
+                          Falta concepto, tarifa o base. La factura no se envía
+                          con una retención a medias.
                         </p>
                       }
                     </div>
@@ -1193,6 +1203,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     [errorText]="fieldError('foreign_currency') ?? ''"
                     [required]="true"
                     size="sm"
+                    (valueChange)="onExchangeRateInputsChanged()"
                   ></app-selector>
                   <app-input
                     label="Tasa del día (COP por unidad)"
@@ -1212,7 +1223,62 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     [control]="control('exchange_rate_date')"
                     [error]="fieldError('exchange_rate_date')"
                     size="sm"
+                    (inputChange)="onExchangeRateInputsChanged()"
                   ></app-input>
+                </div>
+
+                <!--
+                  Estado de la consulta a la TRM oficial. Se pinta SIEMPRE que
+                  haya divisa: el silencio sobre de donde salio la tasa es lo
+                  que hacia que un valor tecleado a ojo pareciera verificado.
+                -->
+                <div class="mt-2 min-h-[20px]">
+                  @if (loadingExchangeRate()) {
+                    <p
+                      class="flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]"
+                    >
+                      <app-icon name="loader" [size]="12" class="animate-spin" />
+                      Consultando la TRM oficial…
+                    </p>
+                  } @else if (exchangeRateQuote(); as quote) {
+                    @if (quote.rate) {
+                      <p
+                        class="flex flex-wrap items-center gap-1.5 text-[11px] text-success"
+                      >
+                        <app-icon name="check-circle" [size]="12" />
+                        TRM oficial del {{ quote.date }}:
+                        <span class="font-semibold">{{
+                          formatCurrency(+quote.rate)
+                        }}</span>
+                        @if (quote.trm) {
+                          <span class="text-[var(--color-text-secondary)]">
+                            (rige del {{ quote.trm.valid_from }} al
+                            {{ quote.trm.valid_to }})
+                          </span>
+                        }
+                        @if (exchangeRateOverridden()) {
+                          <button
+                            type="button"
+                            class="underline underline-offset-2 hover:no-underline"
+                            (click)="applyOfficialExchangeRate()"
+                          >
+                            Usar la oficial
+                          </button>
+                        }
+                      </p>
+                    } @else {
+                      <p
+                        class="flex items-start gap-1.5 text-[11px] text-warning"
+                      >
+                        <app-icon
+                          name="alert-circle"
+                          [size]="12"
+                          class="mt-0.5 shrink-0"
+                        />
+                        {{ exchangeRateUnavailableReason() }}
+                      </p>
+                    }
+                  }
                 </div>
 
                 <div
@@ -1456,6 +1522,7 @@ export class InvoiceCreateComponent {
   private readonly customersService = inject(CustomersService);
   private readonly taxCatalog = inject(InvoiceTaxCatalogService);
   private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
+  private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
@@ -1705,6 +1772,36 @@ export class InvoiceCreateComponent {
 
   /** Conceptos de `withholding_concepts` del tenant, con tarifa en PORCENTAJE. */
   readonly withholdingConcepts = signal<WithholdingConceptOption[]>([]);
+
+  /** Última consulta a la TRM oficial, o `null` si aún no se ha pedido. */
+  readonly exchangeRateQuote = signal<ExchangeRateQuote | null>(null);
+  readonly loadingExchangeRate = signal(false);
+
+  /** `true` si la tasa del formulario difiere de la oficial resuelta. */
+  readonly exchangeRateOverridden = computed<boolean>(() => {
+    const quote = this.exchangeRateQuote();
+    if (!quote?.rate) return false;
+    const current = Number(this.rawValue()['exchange_rate']);
+    if (!(current > 0)) return false;
+    // Un centavo de tolerancia: el `Decimal` del backend llega como string con
+    // más escala de la que el `number` del input puede sostener, y marcar como
+    // «override» una diferencia de redondeo confundiría en vez de avisar.
+    return Math.abs(current - Number(quote.rate)) > 0.01;
+  });
+
+  /** Por qué no hay tasa oficial, en la frase que corresponda al caso. */
+  readonly exchangeRateUnavailableReason = computed<string>(() => {
+    const code = String(this.rawValue()['foreign_currency'] ?? '')
+      .trim()
+      .toUpperCase();
+    if (code === 'COP') {
+      return 'El peso colombiano no lleva conversión: la DIAN rechaza declarar una tasa de 1,00 (FAR03).';
+    }
+    if (code && code !== 'USD') {
+      return `No hay TRM directa para ${code}. La TRM es la única tasa con fuente oficial colombiana y sólo cotiza el dólar: escribe la tasa pactada y la fecha en que se fijó.`;
+    }
+    return 'No se pudo consultar la TRM oficial en este momento. Escribe la tasa a mano; la factura se puede emitir igual.';
+  });
 
   /** Opciones del selector de concepto: código + nombre + tarifa a la vista. */
   readonly withholdingConceptOptions = computed<SelectorOption[]>(() =>
@@ -2000,9 +2097,23 @@ export class InvoiceCreateComponent {
     }
 
     // Las líneas se cuentan aparte: sus errores viven en `items.<i>.<campo>`.
+    // Las retenciones, igual: `withholdings.<i>.<campo>`.
     for (const path of Object.keys(backend)) {
       if (path.startsWith('items.')) {
         counts[path.endsWith('.account_code') ? 'contabilidad' : 'lineas'] += 1;
+      } else if (path.startsWith('withholdings.')) {
+        counts.retenciones += 1;
+      }
+    }
+    // Sin esto, una fila de retención incompleta deja el formulario inválido y
+    // la pestaña de Retenciones no muestra ni un solo error: el usuario ve el
+    // botón deshabilitado sin saber dónde mirar.
+    for (const group of this.withholdingControls()) {
+      for (const name of ['concept_id', 'rate', 'base']) {
+        const control = group.get(name);
+        if (control && control.invalid && control.touched) {
+          counts.retenciones += 1;
+        }
       }
     }
     for (const group of this.itemControls()) {
@@ -2017,6 +2128,28 @@ export class InvoiceCreateComponent {
       counts.aiu += 1;
     }
     return counts;
+  });
+
+  /**
+   * Número (1-based) de la primera fila de retención incompleta, o 0 si no hay.
+   *
+   * 1-based porque el número se le muestra al usuario, y la sección enumera las
+   * retenciones tal como las ve, no como las indexa el `FormArray`.
+   */
+  readonly incompleteWithholdingRow = computed<number>(() => {
+    if (this.isManualWithholding()) return 0;
+    const rows = this.withholdingsValue();
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      if (
+        row.concept_id == null ||
+        !(Number(row.rate) > 0) ||
+        !(Number(row.base) > 0)
+      ) {
+        return i + 1;
+      }
+    }
+    return 0;
   });
 
   /** Lo que falta para poder emitir, en una frase. */
@@ -2038,6 +2171,12 @@ export class InvoiceCreateComponent {
     }
     if (this.isCredit() && !this.rawValue()['due_date']) {
       return 'Venta a crédito: declara la fecha de vencimiento.';
+    }
+    // Se nombra antes del genérico porque la sección de retenciones va plegada:
+    // «revisa los campos marcados» manda a buscar una marca que no está a la
+    // vista, y era la queja más fácil de evitar.
+    if (this.incompleteWithholdingRow() > 0) {
+      return `La retención #${this.incompleteWithholdingRow()} está incompleta: elige concepto, tarifa y base.`;
     }
     if (this.formStatus() !== 'VALID') return 'Revisa los campos marcados.';
     return 'Todo listo para emitir.';
@@ -2128,6 +2267,61 @@ export class InvoiceCreateComponent {
       .load()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((taxes) => this.availableTaxes.set(taxes));
+  }
+
+  // ── Tasa de cambio oficial ──────────────────────────────────
+
+  /**
+   * Pide la TRM y la propone como valor del campo.
+   *
+   * Se dispara al cambiar la divisa o la fecha, no en cada tecla del importe:
+   * la tasa depende de esos dos y de nada más.
+   *
+   * NO pisa un valor que el usuario ya escribió. La tasa pactada en un contrato
+   * puede diferir legítimamente de la TRM del día y quien responde por ella ante
+   * la DIAN es el emisor: el endpoint propone, el formulario no impone. Cuando
+   * difieren, el aviso ofrece «Usar la oficial» en vez de decidir por él.
+   */
+  onExchangeRateInputsChanged(): void {
+    const raw = this.invoiceForm.getRawValue() as Record<string, unknown>;
+    const currency = String(raw['foreign_currency'] ?? '').trim().toUpperCase();
+    if (!currency) {
+      this.exchangeRateQuote.set(null);
+      return;
+    }
+
+    const date = String(raw['exchange_rate_date'] ?? '').trim();
+    this.loadingExchangeRate.set(true);
+    this.exchangeRateService
+      .quote({ currency, ...(date ? { date } : {}) })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((quote) => {
+        this.loadingExchangeRate.set(false);
+        this.exchangeRateQuote.set(quote);
+        if (!quote?.rate) return;
+
+        // La fecha efectiva la fija el backend cuando el formulario no la
+        // declara. Reflejarla evita que el documento diga «TRM» sin decir de
+        // qué día, que es justo lo que exige `cbc:Date` (FAR07).
+        if (!date) {
+          this.invoiceForm
+            .get('exchange_rate_date')
+            ?.setValue(quote.date, { emitEvent: true });
+        }
+
+        const current = Number(this.invoiceForm.get('exchange_rate')?.value);
+        if (!(current > 0)) {
+          this.invoiceForm.get('exchange_rate')?.setValue(Number(quote.rate));
+        }
+      });
+  }
+
+  /** Sustituye la tasa tecleada por la oficial, a petición del usuario. */
+  applyOfficialExchangeRate(): void {
+    const quote = this.exchangeRateQuote();
+    if (!quote?.rate) return;
+    this.invoiceForm.get('exchange_rate')?.setValue(Number(quote.rate));
+    this.invoiceForm.get('exchange_rate_date')?.setValue(quote.date);
   }
 
   private loadWithholdingConcepts(): void {
@@ -2382,20 +2576,62 @@ export class InvoiceCreateComponent {
         row_uid: ['wh-' + this.nextWithholdingUid],
         // `concept_id` es lo que el backend exige (`InvoiceWithholdingInputDto`);
         // `concept` es sólo la etiqueta que se muestra y que viaja a ningún lado.
-        // Sin el id, la fila NO se manda: el filtro de `onSubmit` la descarta.
-        concept_id: [null as number | null],
+        // Sin el id la fila no se puede resolver, así que es OBLIGATORIO y no
+        // un filtro silencioso: una fila descartada al enviar desalinearía los
+        // índices con los que el backend reporta sus errores
+        // (`withholdings.0.rate`) y el mensaje se pintaría sobre otra fila.
+        concept_id: [
+          null as number | null,
+          { validators: [Validators.required] },
+        ],
         concept: [''],
         // 'practiced' = la tienda retiene al cliente (lo normal al facturar).
         // 'suffered'  = al cliente le corresponde retener a la tienda.
-        role: ['practiced' as 'practiced' | 'suffered'],
-        /** PORCENTAJE. La conversión a fracción se hace en el payload. */
-        rate: [0],
+        role: [
+          'practiced' as 'practiced' | 'suffered',
+          { validators: [Validators.required] },
+        ],
+        /**
+         * PORCENTAJE. La conversión a fracción se hace en el payload.
+         * `max: 100` acompaña al `@Max(1)` del backend sobre la fracción: son
+         * la misma cota expresada en cada escala.
+         */
+        rate: [
+          0,
+          {
+            validators: [
+              Validators.required,
+              Validators.min(0.0001),
+              Validators.max(100),
+            ],
+          },
+        ],
         // La base por defecto es la base gravable del documento, que es sobre
         // lo que se retiene en la práctica. Editable porque hay conceptos que
         // retienen sobre otra base.
-        base: [Math.round(this.totals().base)],
+        base: [
+          Math.round(this.totals().base),
+          { validators: [Validators.required, Validators.min(0.01)] },
+        ],
       }),
     );
+  }
+
+  /**
+   * El toggle de importe manual VACÍA la rama contraria.
+   *
+   * Las dos ramas son excluyentes en el payload (ver `buildPayload`), y dejarlas
+   * pobladas a la vez tiene dos consecuencias concretas: el formulario queda
+   * inválido para siempre por filas que ya no se ven —los validadores de la fila
+   * siguen corriendo aunque la sección pinte el input manual—, y el usuario
+   * puede terminar declarando dos verdades distintas sobre la misma retención.
+   */
+  onManualWithholdingChange(): void {
+    if (this.isManualWithholding()) {
+      this.withholdingsArray.clear();
+      return;
+    }
+    this.invoiceForm.get('withholding_amount')?.setValue(null);
   }
 
   /**
@@ -2843,14 +3079,15 @@ export class InvoiceCreateComponent {
     // El importe manual y el desglose son las dos ramas EXCLUYENTES del toggle
     // de la sección: mandar filas mientras el usuario escribió un agregado a
     // mano declararía dos verdades distintas sobre la misma retención.
+    //
+    // SIN `filter`, a propósito. Los tres campos que harían descartar una fila
+    // (`concept_id`, `rate`, `base`) son `Validators.required` del grupo, así
+    // que una fila incompleta bloquea el envío en vez de desaparecer de él. Y
+    // el mapeo 1:1 es lo que mantiene alineados los índices con los que el
+    // backend reporta sus errores (`withholdings.0.rate`): filtrar aquí haría
+    // que `applyBackendValidationErrors` pintara el mensaje sobre otra fila.
     if (!this.isManualWithholding()) {
       const withheldRows = this.withholdingsValue()
-        .filter(
-          (row) =>
-            row.concept_id != null &&
-            Number(row.base) > 0 &&
-            Number(row.rate) > 0,
-        )
         .map((row) => ({
           role: (row.role ?? 'practiced') as 'practiced' | 'suffered',
           concept_id: Number(row.concept_id),
