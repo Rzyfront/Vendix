@@ -33,6 +33,46 @@ function sanitizeFilename(filename: string): string {
 }
 
 /**
+ * Dual-mode response helper for analytics list endpoints that may be consumed
+ * either by an export-XLSX flow (the caller passes the full array and uses
+ * `rows` for the sheet) or by an in-browser paginator (the caller slices
+ * server-side using `page` / `limit`).
+ *
+ * If `query.page` AND `query.limit` are present, returns a paginated
+ * envelope; otherwise returns a success envelope with the full array.
+ *
+ * Centralized here (QUI-573 transversal) so every analytics controller uses
+ * the same shape — no copy/pasted `if (Array.isArray)` branches per route.
+ */
+export function paginatedOrAll<T = unknown>(
+  responseService: {
+    success: (rows: T[]) => unknown;
+    paginated: (
+      data: T[],
+      total: number,
+      page: number,
+      limit: number,
+    ) => unknown;
+  },
+  query: { page?: number; limit?: number } | undefined,
+  rows: T[],
+): unknown {
+  const page = query?.page;
+  const limit = query?.limit;
+  if (!page || !limit) {
+    return responseService.success(rows);
+  }
+  const total = rows.length;
+  const offset = (page - 1) * limit;
+  return responseService.paginated(
+    rows.slice(offset, offset + limit),
+    total,
+    page,
+    limit,
+  );
+}
+
+/**
  * Builds a report filename with a store-LOCAL date suffix, e.g.
  * `ventas_2026-01-31.xlsx`. Uses the store timezone (not UTC) so the suffix
  * matches the business day the user sees — reusing the same TZ fix as the cells.
