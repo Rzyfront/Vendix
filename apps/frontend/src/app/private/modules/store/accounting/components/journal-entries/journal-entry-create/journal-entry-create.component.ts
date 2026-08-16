@@ -6,16 +6,13 @@ import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
 import {
-  ChartAccount,
   FiscalPeriod,
   CreateJournalEntryDto,
 } from '../../../interfaces/accounting.interface';
 import { createEntry } from '../../../state/actions/accounting.actions';
+import { selectOpenFiscalPeriods } from '../../../state/selectors/accounting.selectors';
 import {
-  selectLeafAccounts,
-  selectOpenFiscalPeriods,
-} from '../../../state/selectors/accounting.selectors';
-import {
+  AccountSelectComponent,
   ModalComponent,
   ButtonComponent,
   InputComponent,
@@ -31,6 +28,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   imports: [
     DecimalPipe,
     ReactiveFormsModule,
+    AccountSelectComponent,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -104,17 +102,23 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
             <!-- Lines -->
             <div formArrayName="lines" class="border-x border-b border-border rounded-b-lg divide-y divide-border">
-              @for (line of lines.controls; track $index; let i = $index) {
+              <!-- track by the FormGroup itself, not by index: each row owns an
+                   app-account-select with its own search state, and index-tracking
+                   would re-bind that state onto a different line when one is
+                   removed from the middle. -->
+              @for (line of lines.controls; track line; let i = $index) {
                 <div [formGroupName]="i" class="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 items-start">
                   <!-- Mobile labels -->
                   <div class="md:hidden text-xs font-medium text-text-secondary mb-1">Cuenta *</div>
                   <div class="col-span-1 md:col-span-4">
-                    <app-selector
+                    <!-- Server-side search: only the first 5 accounts load, the rest
+                         arrive by typing. Each row instantiates its own selector, so
+                         its query never leaks into a neighbouring line. -->
+                    <app-account-select
                       formControlName="account_id"
-                      [options]="account_options"
                       placeholder="Seleccionar cuenta..."
-                      [required]="true"
-                    ></app-selector>
+                      [acceptsEntriesOnly]="true"
+                    ></app-account-select>
                   </div>
 
                   <div class="md:hidden text-xs font-medium text-text-secondary mb-1 mt-2">Descripción</div>
@@ -221,11 +225,13 @@ export class JournalEntryCreateComponent {
   private fb = inject(FormBuilder);
   private store = inject(Store);
 
-  leaf_accounts$: Observable<ChartAccount[]> = this.store.select(selectLeafAccounts);
+  // No `leaf_accounts$` here any more: the account cell of every line is an
+  // `app-account-select`, which searches the chart of accounts server-side and
+  // loads only its first page. The old markup materialised the entire leaf PUC
+  // (~600 rows per organization) as <option>s inside every line of the entry.
   open_periods$: Observable<FiscalPeriod[]> = this.store.select(selectOpenFiscalPeriods);
 
   is_submitting = signal(false);
-  account_options: { value: any; label: string }[] = [];
   fiscal_period_options: { value: any; label: string }[] = [];
 
   entry_type_options = [
@@ -271,13 +277,6 @@ export class JournalEntryCreateComponent {
   }
 
   constructor() {
-    this.leaf_accounts$.pipe(takeUntilDestroyed()).subscribe((accounts) => {
-      this.account_options = accounts.map((a) => ({
-        value: a.id,
-        label: `${a.code} - ${a.name}`,
-      }));
-    });
-
     this.open_periods$.pipe(takeUntilDestroyed()).subscribe((periods) => {
       this.fiscal_period_options = periods.map((p) => ({
         value: p.id,
