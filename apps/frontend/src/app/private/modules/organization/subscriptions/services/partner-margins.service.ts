@@ -25,8 +25,10 @@ export class PartnerMarginsService {
     return this.http.post<ApiResponse<PartnerPlanOverride>>(this.getApiUrl(''), dto);
   }
 
+  // PATCH, no PUT: `partner-plans.controller.ts` declara `@Patch(':id')`. Editar
+  // el margen de un socio contestaba 404 y el margen anterior seguía cobrándose.
   updatePlanOverride(id: string, dto: UpdatePlanOverrideDto): Observable<ApiResponse<PartnerPlanOverride>> {
-    return this.http.put<ApiResponse<PartnerPlanOverride>>(this.getApiUrl(id), dto);
+    return this.http.patch<ApiResponse<PartnerPlanOverride>>(this.getApiUrl(id), dto);
   }
 
   deletePlanOverride(id: string): Observable<ApiResponse<null>> {
