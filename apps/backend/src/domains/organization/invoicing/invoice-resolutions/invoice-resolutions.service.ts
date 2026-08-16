@@ -9,6 +9,7 @@ import {
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.service';
 import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import {
@@ -81,6 +82,14 @@ export class OrgInvoiceResolutionsService {
   constructor(
     private readonly prisma: OrganizationPrismaService,
     private readonly fiscalScope: FiscalScopeService,
+    // `EncryptionModule` es `@Global()`, así que inyectarlo no pide un solo
+    // cambio de módulo. Este carril escribía SÓLO `technical_key` en claro
+    // mientras el de tienda ya sellaba las tres columnas: una resolución dada de
+    // alta por organización nacía sin copia cifrada y sin huella, y la huella es
+    // con lo que se detecta la ClTec repetida entre rangos. Dos escrituras del
+    // mismo dato con distinto contrato es cómo un control de seguridad se apaga
+    // por el lado que nadie mira.
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   private requireOrganizationId(): number {
@@ -217,7 +226,10 @@ export class OrgInvoiceResolutionsService {
         valid_from,
         valid_to,
         is_active: dto.is_active ?? true,
-        technical_key,
+        // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
+        // la misma función que usa el carril de tienda. Escribir una sin las
+        // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
+        ...this.technicalKeyVault.sealForWrite(technical_key),
       },
       include: {
         store: { select: { id: true, name: true, slug: true } },
@@ -389,9 +401,18 @@ export class OrgInvoiceResolutionsService {
       // Normalizada y validada, igual que en el alta. Mandar `null` para borrar
       // la clave sigue siendo válido —lo juzga `assertFiscalRequirements` según
       // el tipo de documento—; lo que ya no pasa es una clave presente y rota.
-      update_data.technical_key = assertTechnicalKeyShape(dto.technical_key, {
-        resolution_id: id,
-      });
+      // Las TRES columnas juntas, igual que en el alta: `sealForWrite` devuelve
+      // siempre las tres —incluso en `null`— porque un `undefined` haría que
+      // Prisma dejara la columna como estaba, y en un cambio de clave eso
+      // conservaría el cifrado y la huella de la ANTERIOR. La fila apuntaría a
+      // dos claves a la vez y la que mandaría al recomputar el CUFE sería la
+      // vieja.
+      Object.assign(
+        update_data,
+        this.technicalKeyVault.sealForWrite(
+          assertTechnicalKeyShape(dto.technical_key, { resolution_id: id }),
+        ),
+      );
     }
 
     let next_accounting_entity_id = current.accounting_entity_id;

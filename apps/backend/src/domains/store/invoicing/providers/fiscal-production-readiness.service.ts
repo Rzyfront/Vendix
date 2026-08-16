@@ -1041,15 +1041,42 @@ export class FiscalProductionReadinessService {
         select: {
           id: true,
           technical_key: true,
+          technical_key_fingerprint: true,
           accounting_entity: { select: { tax_id: true } },
         },
       });
-    if (!own?.technical_key) return null;
+
+    // HUELLA PRIMERO, TEXTO PLANO DESPUÉS — y el orden es el que decide si este
+    // control sobrevive.
+    //
+    // La comparación es ENTRE FILAS, así que no puede hacerse sobre
+    // `technical_key_encrypted`: el cifrado usa salt e IV frescos por registro y
+    // dos filas con la misma clave dan ciphertexts distintos. La igualdad jamás
+    // coincidiría y —peor— su resultado vacío se lee idéntico a «no hay
+    // contaminación». Por eso existe `technical_key_fingerprint`, un SHA-256
+    // determinista de la clave.
+    //
+    // Buscar por AMBAS columnas cubre las filas históricas que todavía no tienen
+    // huella persistida (la columna se llenó por lectura, no por backfill: la
+    // llave de cifrado no está disponible para el runner de migraciones). Y deja
+    // el detector funcionando el día que se anule la columna en claro — que es
+    // un paso de DATOS pendiente de aprobación, no algo que este servicio pueda
+    // dar por hecho.
+    if (!own) return null;
+
+    const own_fingerprint = (own.technical_key_fingerprint ?? '').trim();
+    const own_plain = (own.technical_key ?? '').trim();
+    if (!own_fingerprint && !own_plain) return null;
+
+    const match_clauses: Array<Record<string, string>> = [];
+    if (own_fingerprint)
+      match_clauses.push({ technical_key_fingerprint: own_fingerprint });
+    if (own_plain) match_clauses.push({ technical_key: own_plain });
 
     const others = await this.prisma
       .withoutScope()
       .invoice_resolutions.findMany({
-        where: { technical_key: own.technical_key, id: { not: own.id } },
+        where: { OR: match_clauses, id: { not: own.id } },
         select: {
           id: true,
           accounting_entity: { select: { tax_id: true } },
