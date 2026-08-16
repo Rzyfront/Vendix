@@ -5,6 +5,7 @@ import { UblCommonBuilder } from './ubl-common.builder';
 // published through `cbc:CustomizationID` (operation type 30/32), never through
 // a `DebitNoteTypeCode` element — see the note where that element used to be.
 import { DIAN_OPERATION_TYPES } from '../constants/dian-document-types';
+import { DIAN_DEBIT_NOTE_CONCEPTS } from '../constants/dian-note-concepts';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -149,7 +150,23 @@ export class UblDebitNoteBuilder {
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'ReferenceID')
       .txt(original_invoice_number || '');
-    discrepancy.ele(UBL_NAMESPACES.CBC, 'ResponseCode').txt('2'); // 1=Intereses, 2=Gastos por cobrar, 3=Cambio del valor, 4=Otros
+    // Concepto de corrección (tabla 13.2.5 del Anexo Técnico 1.9): '1'
+    // intereses, '2' gastos por cobrar, '3' cambio del valor, '4' otro. Es un
+    // catálogo DISTINTO del de la nota crédito y tiene cuatro filas, no cinco:
+    // el '5' («Otros») que sí existe allá no existe acá. El catálogo tipado
+    // está en `constants/dian-note-concepts.ts`.
+    //
+    // '2' es el DEFAULT DE COMPATIBILIDAD, no una preferencia: hasta que
+    // `invoices.note_concept_code` existió, este elemento salía SIEMPRE con ese
+    // literal, así que una nota por intereses de mora le declaraba a la DIAN
+    // gastos por cobrar. Las notas creadas antes de la columna la tienen NULL y
+    // se siguen transmitiendo igual que siempre.
+    discrepancy
+      .ele(UBL_NAMESPACES.CBC, 'ResponseCode')
+      .txt(
+        debit_note_data.note_concept_code ||
+          DIAN_DEBIT_NOTE_CONCEPTS.CHARGES_RECEIVABLE,
+      );
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'Description')
       .txt(debit_note_data.notes || 'Nota débito');

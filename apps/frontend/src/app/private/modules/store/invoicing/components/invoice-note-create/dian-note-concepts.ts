@@ -11,32 +11,29 @@
  * y es lo que los builders del backend emiten. Manda el dígito simple.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * POR QUÉ ESTE CATÁLOGO NO VIAJA AL BACKEND (leer antes de "arreglarlo")
+ * CÓMO VIAJA EL CONCEPTO (y por qué viaja por DOS caminos)
  * ─────────────────────────────────────────────────────────────────────────────
- * Hoy el concepto NO se puede transmitir desde el panel, y no por falta de UI:
+ * El código elegido sale del selector, va en `note_concept_code` del cuerpo de
+ * la petición, lo valida `@IsIn` contra el catálogo del tipo de nota
+ * correspondiente, se persiste en `invoices.note_concept_code` y los builders
+ * lo emiten en `cac:DiscrepancyResponse/cbc:ResponseCode`.
  *
- *  1. `CreateCreditNoteDto` / `CreateDebitNoteDto` no tienen campo de concepto.
- *  2. `invoices` no tiene columna donde guardarlo (no existe
- *     `discrepancy_response_code` ni equivalente en `schema.prisma`).
- *  3. `ubl-credit-note.builder.ts:131` y `ubl-debit-note.builder.ts:152`
- *     emiten `cac:DiscrepancyResponse/cbc:ResponseCode` con el literal `'2'`,
- *     HARDCODEADO.
+ * En paralelo, `buildNoteReason` antepone «[Concepto DIAN N — etiqueta]» al
+ * motivo; ese texto acaba en `invoices.notes` y en el `cbc:Description` del
+ * MISMO grupo UBL. Los dos caminos no compiten: el código lo lee un validador,
+ * la descripción la lee una persona.
  *
- * Y el `ValidationPipe` global corre con `forbidNonWhitelisted: true`
- * (`main.ts:205-206`), así que mandar `concept_code` no lo ignoraría en
- * silencio: devolvería 400 y la nota no se crearía.
+ * HISTORIA, porque explica el default del backend: hasta agosto de 2026 no
+ * existía ni el campo del DTO ni la columna, y los builders emitían el literal
+ * `'2'` pasara lo que pasara — una nota por «Rebaja o descuento» le declaraba a
+ * la DIAN «Anulación de factura electrónica». Por eso hoy una nota SIN concepto
+ * (las creadas antes de la columna, o cualquier cliente de la API que no lo
+ * mande) sigue saliendo con `'2'`: es compatibilidad, no preferencia.
  *
- * Entonces, ¿por qué existe el selector? Porque el concepto SÍ llega a la DIAN
- * por la otra puerta, la legible: el backend escribe `reason` en
- * `invoices.notes` (`credit-notes.service.ts:223`) y el builder publica ese
- * texto en `cbc:Description` del mismo `cac:DiscrepancyResponse`
- * (`ubl-credit-note.builder.ts:132-134`). Declarar el concepto ahí es lo único
- * que hoy queda registrado; esconder el catálogo dejaría al comerciante sin
- * saber siquiera que la elección existe.
- *
- * Lo que NO se hace es fingir: cuando el concepto elegido no coincide con el
- * que el backend va a emitir, el modal lo dice con todas sus letras en vez de
- * dar por hecho que se transmitió.
+ * OJO al `ValidationPipe` global con `forbidNonWhitelisted: true`
+ * (`main.ts:205-206`): cualquier campo que no esté declarado en el DTO produce
+ * un 400. Renombrar `note_concept_code` en un solo lado rompe la creación de
+ * notas por completo.
  */
 
 /** Código de concepto tal y como viaja en `cbc:ResponseCode`. */
@@ -103,14 +100,20 @@ export const DIAN_DEBIT_NOTE_CONCEPTS: readonly DianNoteConcept[] = [
 ] as const;
 
 /**
- * El concepto que el backend REALMENTE emite hoy en el XML, por tipo de nota.
+ * El concepto que el backend emite cuando la nota NO trae ninguno.
  *
- * No es una preferencia ni un default configurable: es el literal que hay
- * escrito en los builders. Vive acá para que el modal pueda contrastar lo que
- * el usuario eligió contra lo que de verdad va a viajar, en vez de suponer que
- * coinciden.
+ * Es el literal de compatibilidad de `ubl-credit-note.builder.ts` y
+ * `ubl-debit-note.builder.ts`: lo que emitían SIEMPRE antes de que existiera
+ * `invoices.note_concept_code`, y lo que siguen emitiendo para las notas que
+ * nacieron con la columna en NULL. El modal ya no lo necesita —siempre manda un
+ * concepto, el selector es `required`—, pero queda documentado acá porque es la
+ * respuesta a «¿qué se declaró en las notas viejas?»: un '2'.
+ *
+ * Coincidencia engañosa: en nota crédito '2' es «Anulación de factura
+ * electrónica» y en nota débito es «Gastos por cobrar». Mismo dígito,
+ * significados sin relación.
  */
-export const DIAN_HARDCODED_NOTE_CONCEPT: Readonly<
+export const DIAN_FALLBACK_NOTE_CONCEPT: Readonly<
   Record<'credit' | 'debit', DianNoteConceptCode>
 > = {
   credit: '2',

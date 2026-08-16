@@ -307,6 +307,32 @@ describe('UblDebitNoteBuilder', () => {
     expect(ref).toContain('<cbc:IssueDate>2026-08-08</cbc:IssueDate>');
   });
 
+  /**
+   * Same defect as the credit note, different catalog: `cbc:ResponseCode` was
+   * the literal `'2'`, so a debit note for interest on arrears DECLARED
+   * «Gastos por cobrar». Table 13.2.5 has FOUR concepts, not the five of the
+   * credit note — the `'5'` that is valid there does not exist here.
+   */
+  it('declares the note concept it was given, not a fixed code', () => {
+    const xml = build({
+      debit_note_data: { ...debit_note_data, note_concept_code: '1' },
+    });
+    const discrepancy = xml.slice(
+      xml.indexOf('<cac:DiscrepancyResponse>'),
+      xml.indexOf('</cac:DiscrepancyResponse>'),
+    );
+    expect(discrepancy).toContain('<cbc:ResponseCode>1</cbc:ResponseCode>');
+  });
+
+  it('falls back to 2 when the note carries no concept (pre-column notes)', () => {
+    const xml = build();
+    const discrepancy = xml.slice(
+      xml.indexOf('<cac:DiscrepancyResponse>'),
+      xml.indexOf('</cac:DiscrepancyResponse>'),
+    );
+    expect(discrepancy).toContain('<cbc:ResponseCode>2</cbc:ResponseCode>');
+  });
+
   it('uses the production execution id and catalog in production', () => {
     const xml = build({ environment: 'production' });
     expect(xml).toContain('<cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>');

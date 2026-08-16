@@ -714,6 +714,17 @@ export interface UpdateInvoiceDto {
 export interface CreateCreditNoteDto {
   related_invoice_id: number;
   reason?: string;
+  /**
+   * Concepto de corrección DIAN — el CÓDIGO, no la prosa. Termina en
+   * `cac:DiscrepancyResponse/cbc:ResponseCode` del XML.
+   * Nota crédito: '1'…'5'. Nota débito: '1'…'4' (catálogos distintos, ver
+   * `components/invoice-note-create/dian-note-concepts.ts`).
+   *
+   * Viaja ADEMÁS del prefijo `[Concepto DIAN …]` que `reason` sigue llevando:
+   * el código es lo que un validador lee, el texto es lo que una persona lee en
+   * `cbc:Description`. No se sustituyen.
+   */
+  note_concept_code?: string;
   issue_date?: string;
   currency?: string;
   notes?: string;
@@ -725,6 +736,8 @@ export interface CreateCreditNoteDto {
 export interface CreateDebitNoteDto {
   related_invoice_id: number;
   reason?: string;
+  /** Concepto DIAN de nota DÉBITO: '1'…'4'. Ver {@link CreateCreditNoteDto}. */
+  note_concept_code?: string;
   issue_date?: string;
   currency?: string;
   notes?: string;

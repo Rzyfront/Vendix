@@ -5,6 +5,7 @@ import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
 } from '../constants/dian-document-types';
+import { DIAN_CREDIT_NOTE_CONCEPTS } from '../constants/dian-note-concepts';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -128,7 +129,23 @@ export class UblCreditNoteBuilder {
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'ReferenceID')
       .txt(original_invoice_number || '');
-    discrepancy.ele(UBL_NAMESPACES.CBC, 'ResponseCode').txt('2'); // 1=Devolución, 2=Anulación, 3=Rebaja, 4=Ajuste, 5=Otros
+    // Concepto de corrección (tabla 13.2.4 del Anexo Técnico 1.9): '1'
+    // devolución parcial, '2' anulación, '3' rebaja o descuento, '4' ajuste de
+    // precio, '5' otros. El catálogo tipado está en
+    // `constants/dian-note-concepts.ts`.
+    //
+    // '2' es el DEFAULT DE COMPATIBILIDAD, no una preferencia: hasta que
+    // `invoices.note_concept_code` existió, este elemento salía SIEMPRE con ese
+    // literal, así que una nota por descuento le declaraba a la DIAN una
+    // anulación. Las notas creadas antes de la columna la tienen NULL y se
+    // siguen transmitiendo igual que siempre; las nuevas declaran lo que el
+    // usuario eligió.
+    discrepancy
+      .ele(UBL_NAMESPACES.CBC, 'ResponseCode')
+      .txt(
+        credit_note_data.note_concept_code ||
+          DIAN_CREDIT_NOTE_CONCEPTS.INVOICE_VOID,
+      );
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'Description')
       .txt(credit_note_data.notes || 'Nota crédito');

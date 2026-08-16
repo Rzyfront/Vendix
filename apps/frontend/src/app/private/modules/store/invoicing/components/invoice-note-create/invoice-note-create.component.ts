@@ -27,11 +27,7 @@ import {
   MutationFailure,
 } from '../../state/actions/invoicing.actions';
 import { extractValidationMessages } from '../../utils/invoicing-errors.util';
-import {
-  DIAN_HARDCODED_NOTE_CONCEPT,
-  findNoteConcept,
-  noteConcepts,
-} from './dian-note-concepts';
+import { findNoteConcept, noteConcepts } from './dian-note-concepts';
 import {
   NoteLineSelection,
   buildNotePayload,
@@ -72,11 +68,16 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
  *
  * **1. El concepto de corrección de la DIAN.** Hay un catálogo —cinco conceptos
  * para nota crédito, cuatro para nota débito— y elegir el equivocado cambia lo
- * que el documento AFIRMA. Ver `dian-note-concepts.ts` para el detalle
- * incómodo: hoy el backend emite el `cbc:ResponseCode` con un literal fijo, así
- * que la elección se registra en el texto del motivo (que sí llega al XML, en
- * `cbc:Description`) y el modal AVISA cuando el código transmitido no va a
- * coincidir. Fingir que se transmitió sería peor que no ofrecerlo.
+ * que el documento AFIRMA. El código elegido viaja al backend en
+ * `note_concept_code`, se persiste en `invoices.note_concept_code` y sale en
+ * `cac:DiscrepancyResponse/cbc:ResponseCode`; el motivo, con el concepto
+ * anotado delante, sale en el `cbc:Description` de ese mismo grupo.
+ *
+ * Hubo una etapa en que sólo viajaba la prosa: los builders emitían el
+ * `cbc:ResponseCode` con el literal '2' pasara lo que pasara, así que una nota
+ * por descuento le declaraba a la DIAN una anulación, y este modal tenía que
+ * AVISAR del desacuerdo en vez de taparlo. Ese aviso ya no existe porque ya no
+ * hay desacuerdo que avisar — si vuelve a haberlo, el aviso vuelve.
  *
  * **2. Las líneas.** El backend acepta notas parciales desde siempre
  * (`CreateCreditNoteDto.items`) y ninguna pantalla las ofrecía: la única nota
@@ -245,25 +246,6 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             placeholder="¿Por qué se corrige la factura?"
             [helpText]="conceptHelp()"
           ></app-selector>
-
-          @if (conceptWarning(); as warning) {
-            <div
-              role="status"
-              class="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning-light p-3"
-            >
-              <app-icon
-                name="alert-triangle"
-                [size]="16"
-                class="mt-0.5 shrink-0 text-warning"
-              />
-              <div class="min-w-0">
-                <p class="text-xs font-semibold text-warning">
-                  El código que se transmite no coincide con el concepto elegido
-                </p>
-                <p class="mt-0.5 text-xs text-text-secondary">{{ warning }}</p>
-              </div>
-            </div>
-          }
 
           <app-textarea
             label="Motivo"
@@ -569,34 +551,6 @@ export class InvoiceNoteCreateComponent {
   private readonly concept = computed(() =>
     findNoteConcept(this.noteType(), this.conceptCode()),
   );
-
-  /**
-   * El aviso que impide que el modal mienta.
-   *
-   * El backend emite `cbc:ResponseCode` con un literal fijo (ver
-   * `dian-note-concepts.ts`). Cuando el concepto elegido no es ese, el XML dirá
-   * una cosa y el comerciante habrá querido otra — y como la DIAN acepta el
-   * documento, el desacuerdo solo aparecería en una fiscalización.
-   */
-  readonly conceptWarning = computed<string | null>(() => {
-    const chosen = this.concept();
-    if (!chosen) {
-      return null;
-    }
-    const emitted = DIAN_HARDCODED_NOTE_CONCEPT[this.noteType()];
-    if (chosen.code === emitted) {
-      return null;
-    }
-    const emittedConcept = findNoteConcept(this.noteType(), emitted);
-    return (
-      'El backend todavía no acepta el concepto como dato: transmitirá el código ' +
-      emitted +
-      ' (' +
-      (emittedConcept?.label ?? 'concepto fijo') +
-      ') en cbc:ResponseCode. Tu elección queda escrita en el motivo, que sí ' +
-      'viaja a la DIAN, pero el código de la nota no la reflejará.'
-    );
-  });
 
   readonly reasonPreview = computed<string | null>(() => {
     const chosen = this.concept();

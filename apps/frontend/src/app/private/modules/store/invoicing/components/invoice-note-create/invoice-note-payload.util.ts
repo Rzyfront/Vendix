@@ -228,12 +228,16 @@ export function buildNoteTaxes(
 /**
  * El texto que queda registrado como motivo de la corrección.
  *
- * El concepto va DELANTE y entre corchetes por una razón concreta: ese texto
- * termina en `cbc:Description` del `cac:DiscrepancyResponse`
- * (`ubl-credit-note.builder.ts:132-134`), que es el único lugar del XML donde
- * hoy se puede leer qué corrección se hizo — el `cbc:ResponseCode` de al lado
- * viaja con un literal fijo. Sin el prefijo, el concepto elegido no queda por
- * ninguna parte.
+ * El concepto va DELANTE y entre corchetes porque ese texto termina en
+ * `cbc:Description` del `cac:DiscrepancyResponse`, que es el lado LEGIBLE del
+ * mismo grupo: quien abra el XML o el detalle de la nota lee ahí, en español,
+ * qué corrección se hizo.
+ *
+ * El prefijo sigue puesto AUNQUE el código ya viaje aparte en
+ * `note_concept_code` → `cbc:ResponseCode`. No es redundancia inútil: son las
+ * dos mitades del mismo grupo UBL —el código lo lee un validador, la
+ * descripción la lee una persona— y quitar el prefijo dejaría la descripción
+ * sin decir de qué concepto habla.
  */
 export function buildNoteReason(
   conceptCode: string,
@@ -267,6 +271,14 @@ export function buildNotePayload(params: {
 
   const base: CreateCreditNoteDto = {
     related_invoice_id: invoice.id,
+    // El CÓDIGO, estructurado. Es lo que el backend persiste en
+    // `invoices.note_concept_code` y el builder emite en `cbc:ResponseCode`.
+    // Antes de que este campo existiera el XML salía siempre con '2'
+    // («Anulación de factura electrónica» / «Gastos por cobrar»), así que una
+    // nota por descuento declaraba una anulación.
+    note_concept_code: conceptCode,
+    // Y la PROSA, que sigue viajando: alimenta `cbc:Description` del mismo
+    // `cac:DiscrepancyResponse` y el detalle de la nota en el panel.
     reason: buildNoteReason(conceptCode, conceptLabel, reason),
   };
 

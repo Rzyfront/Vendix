@@ -153,6 +153,20 @@ export interface ProviderInvoiceData {
   original_invoice_number?: string;
   original_invoice_cufe?: string;
   original_invoice_issue_date?: string;
+  /**
+   * Concepto de corrección de una NOTA CRÉDITO o DÉBITO —
+   * `cac:DiscrepancyResponse/cbc:ResponseCode`. Sólo lo leen
+   * `UblCreditNoteBuilder` y `UblDebitNoteBuilder`.
+   *
+   * Catálogos DISTINTOS por tipo de nota (Anexo Técnico 1.9, tablas 13.2.4 y
+   * 13.2.5): crédito '1'…'5', débito '1'…'4'. El dominio lo cierra el DTO con
+   * `@IsIn`; acá llega ya validado y persistido en `invoices.note_concept_code`.
+   *
+   * Opcional a propósito: ausente ⇒ el builder emite '2', que es el literal que
+   * emitía SIEMPRE antes de que este campo existiera. Así las notas creadas
+   * antes de la columna se transmiten exactamente igual que antes.
+   */
+  note_concept_code?: string;
 }
 
 export interface ProviderInvoiceItem {

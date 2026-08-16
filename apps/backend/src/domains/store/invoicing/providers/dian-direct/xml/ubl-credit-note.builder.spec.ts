@@ -195,6 +195,37 @@ describe('UblCreditNoteBuilder', () => {
     expect(ref).toContain('<cbc:IssueDate>2026-08-08</cbc:IssueDate>');
   });
 
+  /**
+   * `cbc:ResponseCode` used to be the literal `'2'`, so a credit note issued
+   * for a discount DECLARED an invoice void. The DIAN accepts either code, so
+   * nothing failed loudly — the document simply said something that did not
+   * happen, and would only surface in an audit. These two cases pin the fix.
+   */
+  it('declares the note concept it was given, not a fixed code', () => {
+    const xml = build({
+      credit_note_data: { ...credit_note_data, note_concept_code: '3' },
+    });
+    const discrepancy = xml.slice(
+      xml.indexOf('<cac:DiscrepancyResponse>'),
+      xml.indexOf('</cac:DiscrepancyResponse>'),
+    );
+    expect(discrepancy).toContain('<cbc:ResponseCode>3</cbc:ResponseCode>');
+    // La prosa sigue viajando en el MISMO grupo: código y descripción son las
+    // dos mitades de `cac:DiscrepancyResponse`, no alternativas.
+    expect(discrepancy).toContain(
+      '<cbc:Description>Devolución de mercancía</cbc:Description>',
+    );
+  });
+
+  it('falls back to 2 when the note carries no concept (pre-column notes)', () => {
+    const xml = build();
+    const discrepancy = xml.slice(
+      xml.indexOf('<cac:DiscrepancyResponse>'),
+      xml.indexOf('</cac:DiscrepancyResponse>'),
+    );
+    expect(discrepancy).toContain('<cbc:ResponseCode>2</cbc:ResponseCode>');
+  });
+
   it('carries a line-level TaxTotal — the line body is shared, not duplicated', () => {
     const xml = build();
     const line = xml.slice(
