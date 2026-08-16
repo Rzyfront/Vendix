@@ -17,7 +17,6 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import {
   BadgeComponent,
   ButtonComponent,
-  InputComponent,
   TooltipComponent,
 } from '../../../../../shared/components';
 import type { BadgeVariant } from '../../../../../shared/components';
@@ -51,7 +50,6 @@ import {
     ModalComponent,
     BadgeComponent,
     ButtonComponent,
-    InputComponent,
     TooltipComponent,
     QuantityControlComponent,
     PriceTierSelectorComponent,
