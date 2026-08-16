@@ -494,6 +494,10 @@ export class PurchasesAnalyticsService {
         total_amount: true,
         order_date: true,
       },
+      // Regla 4 del skill `vendix-report-xlsx`: tope explícito para que el
+      // bucketing JS no escanee >100k POs. La doc señala migrar a SQL si
+      // algún store cruza ese umbral, pero por ahora cortamos acá.
+      take: 10000,
     });
 
     // Bucketing en JS. Usamos UTC porque la conversión a TZ ya se hizo
