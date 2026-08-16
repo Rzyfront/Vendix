@@ -1234,16 +1234,54 @@
             >
               Factura Electrónica
             </h2>
-            @if (hasSalesInvoice()) {
-              <p class="text-xs sm:text-sm text-gray-700">
-                Esta orden ya tiene una factura de venta emitida.
-              </p>
+            @if (acceptedInvoice(); as invoice) {
+              <!--
+                La factura ya existe: lo que el operador necesita acá no es que
+                se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
+                CUFE, que es lo que el adquiriente usa para verificarla en el
+                portal de la DIAN. Un párrafo que dice «ya tiene factura» y no
+                dice cuál obliga a salir de la pantalla a averiguarlo.
+              -->
+              <div
+                class="rounded-lg border border-success/30 bg-success-light p-3"
+              >
+                <div class="flex items-start gap-2.5">
+                  <app-icon
+                    name="check-circle"
+                    [size]="16"
+                    class="text-success shrink-0 mt-0.5"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <p
+                      class="text-[11px] font-semibold text-success uppercase tracking-wide"
+                    >
+                      Validada por la DIAN
+                    </p>
+                    <p
+                      class="text-sm sm:text-base font-bold text-gray-900 mt-1 break-all"
+                    >
+                      {{ invoice.invoice_number }}
+                    </p>
+                    @if (invoice.cufe) {
+                      <p
+                        class="text-[10px] font-mono text-gray-500 mt-1.5 break-all leading-snug"
+                        [title]="invoice.cufe"
+                      >
+                        <span class="font-sans font-semibold text-gray-600"
+                          >CUFE</span
+                        >
+                        {{ invoice.cufe }}
+                      </p>
+                    }
+                  </div>
+                </div>
+              </div>
             } @else {
               <p class="text-xs sm:text-sm text-gray-700 mb-3">
                 Emite la factura electrónica de venta con los datos de esta
-                orden. Cada intento reserva un consecutivo autorizado ante la
-                DIAN, así que el botón sólo aparece mientras la orden no
-                tenga ya una factura aceptada.
+                orden. Cada emisión consume un consecutivo autorizado ante la
+                DIAN que no se recupera, así que el botón desaparece en cuanto
+                la orden tenga su factura aceptada.
               </p>
               <app-button
                 variant="primary"

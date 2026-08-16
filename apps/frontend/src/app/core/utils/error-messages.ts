@@ -598,6 +598,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta venta supera 5 UVT y requiere factura electrónica: identifica al comprador (documento y nombre) antes de cerrarla. El tiquete POS solo cubre ventas por debajo del tope.',
   FISCAL_CONFIG_INCOMPLETE:
     'La configuracion fiscal de esta entidad esta incompleta.',
+  // Sin nombrar el area: `parseApiError` mapea por codigo y no lee el `message`
+  // del backend, que si la nombra. Quien quiera decir cual —y enlazar la
+  // seccion del asistente— la toma de `details.area`.
+  FISCAL_AREA_INACTIVE:
+    'Este modulo fiscal no esta activo para tu tienda. Activalo en el asistente fiscal antes de usarlo.',
   // Identidad fiscal del EMISOR: razon social, municipio DIAN o departamento.
   // El backend manda en `details.missing` la lista completa de huecos y el
   // `cta` al wizard, asi que este texto no enumera campos — la superficie que
@@ -678,6 +683,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_FIND_004: 'No se encontro la orden de venta asociada.',
   INVOICING_CREATE_001:
     'No se pudo crear la factura. Revisa los datos e intenta de nuevo.',
+  // Sin el numero de la factura existente: `parseApiError` mapea por codigo y
+  // nunca usa el `message` del backend. Quien quiera nombrarla —el detalle de
+  // la orden lo hace— lo toma de `details.invoice_number`.
+  INVOICING_CREATE_002:
+    'Este documento ya tiene una factura emitida. Anulala antes de emitir otra.',
+  INVOICING_CREATE_003:
+    'Los pedidos de venta no registran impuestos, asi que no se pueden facturar. Emite la factura desde la orden.',
+  INVOICING_AREA_001:
+    'La facturacion electronica no esta activa para esta tienda. Activala en Configuracion fiscal.',
+  INVOICING_ENABLEMENT_001:
+    'Tu habilitacion ante la DIAN aun no esta viva. Completa el set de pruebas y activa produccion antes de emitir.',
   INVOICING_VALIDATE_001:
     'La factura no cumple las validaciones. Revisa los datos.',
   INVOICING_STATUS_001:

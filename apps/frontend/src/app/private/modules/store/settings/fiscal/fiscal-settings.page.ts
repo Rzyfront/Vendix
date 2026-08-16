@@ -1,4 +1,6 @@
-import { Component, signal } from '@angular/core';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import {
@@ -51,7 +53,7 @@ type FiscalTab = 'aiu' | 'pos';
       </div>
 
       <app-scrollable-tabs
-        [tabs]="tabs()"
+        [tabs]="tabs"
         [activeTab]="active()"
         size="md"
         ariaLabel="Configuración fiscal"
@@ -80,26 +82,55 @@ type FiscalTab = 'aiu' | 'pos';
   ],
 })
 export class FiscalSettingsPage {
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+
   readonly active = signal<FiscalTab>('aiu');
 
-  readonly tabs = signal<ScrollableTab[]>([
+  readonly tabs: ScrollableTab[] = [
     { id: 'aiu', label: 'Régimen AIU', icon: 'scale' },
     { id: 'pos', label: 'Caja', icon: 'monitor' },
-  ]);
+  ];
 
-  ngOnInit(): void {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get('tab');
-    if (tab === 'pos') this.active.set('pos');
+  /**
+   * EL TAB SE LEE Y SE ESCRIBE POR EL ROUTER, NO POR `window`.
+   *
+   * La versión anterior leía `window.location.search` en `ngOnInit` y escribía
+   * con `window.history.replaceState`. Las dos mitades se saltan el Router de
+   * Angular, y eso rompe dos cosas concretas:
+   *
+   * 1. `replaceState` a pelo NO actualiza `ActivatedRoute.queryParams`. La URL
+   *    de la barra decía `?tab=pos` y el árbol de rutas seguía creyendo que no
+   *    había query: cualquier guard, resolver o hermano que leyera la ruta veía
+   *    el estado viejo, y un `router.navigate` posterior con `queryParamsHandling`
+   *    resucitaba el tab anterior.
+   * 2. Leer una sola vez en `ngOnInit` ignora los cambios de query posteriores,
+   *    así que llegar por deep-link desde otra pantalla del panel —navegación
+   *    interna, sin recarga— aterrizaba siempre en AIU.
+   *
+   * La suscripción cubre además la carga inicial: `queryParams` emite el valor
+   * vigente al suscribirse.
+   */
+  constructor() {
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const tab = params.get('tab');
+        this.active.set(tab === 'pos' ? 'pos' : 'aiu');
+      });
   }
 
   onTabChange(id: string): void {
     if (id !== 'aiu' && id !== 'pos') return;
-    this.active.set(id);
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', id);
-    window.history.replaceState({}, '', url.toString());
+    // `active` no se fija acá: lo hace la suscripción de arriba cuando el Router
+    // confirma la navegación. Fijarlo también en este punto abriría la puerta a
+    // que la pantalla muestre un tab que la URL no llegó a tomar.
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: id },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 }

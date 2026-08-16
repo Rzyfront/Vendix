@@ -82,7 +82,16 @@ import {
       [subtitle]="subtitle()"
       size="md"
     >
-      <form [formGroup]="form" class="p-4 space-y-4">
+      <!--
+        NINGÚN ACENTO GRAVE DENTRO DE ESTE LITERAL: uno solo cierra el template
+        string de TypeScript y produce una cascada de errores falsos.
+
+        Sin p-4 propio: app-modal ya envuelve el cuerpo en px-4 py-3 md:px-5
+        md:py-4 y el footer en px-4 py-3. Repetir el padding acá dejaba el
+        formulario metido hacia adentro y el aire descuadrado contra el resto
+        de los modales del panel.
+      -->
+      <form [formGroup]="form" class="space-y-4">
         <app-selector
           label="Evento"
           formControlName="eventCode"
@@ -95,12 +104,19 @@ import {
 
         @if (unsupportedReason(); as reason) {
           <div
-            class="flex gap-2 p-3 rounded-lg border border-warning bg-[var(--color-surface-secondary)]"
+            class="flex items-start gap-2.5 p-3 rounded-lg border border-warning/30 bg-warning-light"
           >
-            <app-icon name="alert-triangle" [size]="14" class="text-warning shrink-0 mt-0.5" />
-            <p class="text-xs text-text-secondary">
-              Este evento no se puede registrar desde acá todavía: {{ reason }}
-            </p>
+            <app-icon
+              name="alert-triangle"
+              [size]="16"
+              class="text-warning shrink-0 mt-0.5"
+            />
+            <div class="min-w-0">
+              <p class="text-xs font-semibold text-warning">
+                Este evento todavía no se registra desde el panel
+              </p>
+              <p class="text-xs text-text-secondary mt-0.5">{{ reason }}</p>
+            </div>
           </div>
         }
 
@@ -125,14 +141,33 @@ import {
           placeholder="Opcional. Viaja a RADIAN dentro del evento."
         ></app-textarea>
 
-        <p class="text-xs text-text-secondary">
-          El evento se firma y se transmite en el momento. Gasta un consecutivo
-          propio aunque RADIAN lo rechace, así que revisa el acto antes de
-          enviarlo.
-        </p>
+        <!--
+          Esto NO es una nota al pie: es el único hecho irreversible del modal.
+          Va como aviso con jerarquía propia porque un párrafo gris del tamaño
+          del texto de ayuda se lee como relleno legal y nadie lo mira.
+        -->
+        <div
+          class="flex items-start gap-2.5 p-3 rounded-lg border border-amber-300/40 bg-amber-50/60 dark:bg-amber-500/10"
+        >
+          <app-icon
+            name="zap"
+            [size]="16"
+            class="text-amber-600 shrink-0 mt-0.5"
+          />
+          <div class="min-w-0">
+            <p class="text-xs font-semibold text-amber-700 dark:text-amber-400">
+              El envío es inmediato y no se deshace
+            </p>
+            <p class="text-xs text-text-secondary mt-0.5">
+              El evento se firma y se transmite al recibirlo, y gasta un
+              consecutivo propio aunque RADIAN lo rechace. Revisa el acto antes
+              de enviarlo.
+            </p>
+          </div>
+        </div>
       </form>
 
-      <div slot="footer" class="flex justify-end gap-2 p-4">
+      <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onClose()">Cancelar</app-button>
         <app-button
           variant="primary"

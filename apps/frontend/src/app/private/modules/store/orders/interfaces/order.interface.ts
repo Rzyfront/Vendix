@@ -102,11 +102,24 @@ export interface Order {
 
 /**
  * Minimal invoice projection needed to print a ticket as an informative copy.
+ *
+ * ESTOS DOS CAMPOS Y NINGUNO MÁS. `OrdersService.findOne` proyecta
+ * `select: { invoice_number: true, cufe: true }` (`orders.service.ts:574-579`);
+ * no hay `id` ni `invoice_type` en la respuesta.
+ *
+ * Declararlos igual no era documentación optimista, era un bug: el detalle de
+ * la orden escondía el botón «Emitir factura electrónica» con
+ * `invoices.some(i => i.invoice_type === 'sales_invoice')`, un predicado que
+ * sobre esta proyección es SIEMPRE falso. El botón nunca se escondía, y cada
+ * clic quemaba un consecutivo autorizado de la DIAN.
+ *
+ * La pertenencia al tipo ya está garantizada por el `where` del backend
+ * (`dian_status: 'accepted'`, `take: 1`): la sola presencia de un elemento
+ * significa «esta orden tiene factura aceptada». No hace falta re-derivarlo, y
+ * re-derivarlo desde campos ausentes es cómo se llegó acá.
  */
 export interface OrderInvoiceSnapshot {
-  id: number;
   invoice_number: string;
-  invoice_type: 'sales_invoice' | 'purchase_invoice' | 'credit_note' | 'debit_note' | 'export_invoice';
   cufe?: string | null;
 }
 

@@ -198,9 +198,21 @@ interface FailurePolicyOption {
         cursor: not-allowed;
       }
 
+      /*
+       * NINGÚN ACENTO GRAVE ACÁ DENTRO: esto vive en un template string de
+       * TypeScript y un solo acento grave lo cierra, con cascada de errores
+       * falsos en todo el archivo.
+       *
+       * El activo se tiñe con el primario, no se aclara. Con background
+       * var(--color-surface) la tarjeta elegida quedaba del mismo color que el
+       * panel que la contiene y la única señal de selección era el borde: en la
+       * lista de dos, con ambas del mismo tono, había que mirar el icono para
+       * saber cuál estaba puesta.
+       */
       .policy-card--active {
         border-color: var(--color-primary);
-        background: var(--color-surface);
+        background: rgba(var(--color-primary-rgb), 0.07);
+        box-shadow: 0 0 0 1px var(--color-primary) inset;
       }
 
       .policy-card__mark {

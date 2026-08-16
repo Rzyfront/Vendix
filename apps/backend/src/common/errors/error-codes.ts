@@ -1536,6 +1536,77 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Error creating invoice',
   },
+  /**
+   * El documento de origen YA TIENE una factura viva.
+   *
+   * 409 y no 400: la petición está bien formada, lo que está mal es el estado
+   * del recurso. El cliente no tiene nada que corregir en el cuerpo — tiene que
+   * mirar la factura que ya existe.
+   *
+   * Existe porque `createFromOrder` / `createFromSalesOrder` NO tenían guarda:
+   * iban derecho a `generateNextNumber()`, que toma el consecutivo autorizado
+   * bajo `pg_advisory_xact_lock` e incrementa `current_number` en el acto. Dos
+   * clics en «Emitir factura electrónica» —o un botón que nunca se esconde
+   * porque su predicado leía un campo que la proyección no trae— quemaban
+   * numeración autorizada de la DIAN por cada intento, y esa numeración no se
+   * recupera.
+   *
+   * `details.invoice_id` / `details.invoice_number` viajan para que la UI pueda
+   * enlazar la factura existente en vez de dejar al usuario en un callejón.
+   */
+  INVOICING_CREATE_002: {
+    code: 'INVOICING_CREATE_002',
+    httpStatus: 409,
+    devMessage: 'Source document already has a live invoice',
+  },
+  /**
+   * El pedido de venta no puede facturarse porque no lleva desglose de
+   * impuestos.
+   *
+   * `sales_order_items` no tiene columna de impuesto ni tabla hermana
+   * equivalente a `order_item_taxes`, y `products` no enlaza una `tax_rates`.
+   * La ruta emitía todas las líneas con `tax = 0`: una factura con IVA cero,
+   * `ValImp1` incorrecto DENTRO del hash CUFE —que la DIAN recomputa desde el
+   * XML— y rechazo por la regla aritmética, después de haber quemado el
+   * consecutivo.
+   *
+   * Se rechaza ANTES de tomar numeración. Cuando exista el módulo de pedidos de
+   * venta con su desglose tributario, esta guarda se retira.
+   */
+  INVOICING_CREATE_003: {
+    code: 'INVOICING_CREATE_003',
+    httpStatus: 422,
+    devMessage: 'Sales orders carry no tax breakdown; cannot be invoiced',
+  },
+  /**
+   * El área fiscal «invoicing» está inactiva para el tenant.
+   *
+   * Las dos compuertas de abajo lanzaban `ForbiddenException` a secas. Un 403
+   * sin `error_code` deja a `parseApiError` sin nada que mapear —devuelve
+   * `DEFAULT_ERROR_MESSAGE`— y el mensaje en español que el backend ya había
+   * escrito no llegaba nunca a la pantalla: el comerciante veía «Ocurrió un
+   * error» en lugar de «completa el set de pruebas y activa producción».
+   *
+   * Es el defecto §C.1 #6 del plan, aplicado a la puerta que MÁS se dispara.
+   */
+  INVOICING_AREA_001: {
+    code: 'INVOICING_AREA_001',
+    httpStatus: 403,
+    devMessage: 'Fiscal area "invoicing" is inactive for this tenant',
+  },
+  /**
+   * El tenant configuró facturación electrónica pero su habilitación no está
+   * viva (ambiente ≠ producción o `enablement_status` ≠ `enabled`).
+   *
+   * Separado de `INVOICING_AREA_001` porque la acción correctiva es distinta:
+   * allá se activa el área fiscal, acá se termina el set de pruebas ante la
+   * DIAN. Un solo código obligaría a un mensaje que no sirve para ninguno.
+   */
+  INVOICING_ENABLEMENT_001: {
+    code: 'INVOICING_ENABLEMENT_001',
+    httpStatus: 403,
+    devMessage: 'DIAN enablement is not live (production + enabled) yet',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,
@@ -1946,6 +2017,23 @@ export const ErrorCodes = {
     code: 'FISCAL_CONFIG_INCOMPLETE',
     httpStatus: 412,
     devMessage: 'Fiscal configuration is incomplete for this accounting entity',
+  },
+  /**
+   * `ModuleFlowGuard` cerró la petición: el área fiscal que gobierna el módulo
+   * (`invoicing`, `accounting`, `payroll`…) está inactiva para el tenant.
+   *
+   * Es la PRIMERA puerta que atraviesa cualquier llamada al módulo, y lanzaba
+   * `ForbiddenException` con un texto en inglés dirigido al desarrollador. Sin
+   * `error_code`, `parseApiError` caía en `DEFAULT_ERROR_MESSAGE` y el operador
+   * leía «Ocurrió un error» ante una situación que tiene una corrección
+   * concreta y de un solo clic: activar el área en el wizard fiscal.
+   *
+   * `details.area` viaja para que el frontend pueda enlazar la sección correcta.
+   */
+  FISCAL_AREA_INACTIVE: {
+    code: 'FISCAL_AREA_INACTIVE',
+    httpStatus: 403,
+    devMessage: 'Fiscal area is inactive for this tenant',
   },
   FISCAL_SCOPE_INVALID: {
     code: 'FISCAL_SCOPE_INVALID',

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, tax_type_enum } from '@prisma/client';
 
 /**
@@ -313,8 +313,10 @@ export class InvoicingService {
       'invoicing',
     );
     if (!enabled) {
-      throw new ForbiddenException(
-        'Fiscal area "invoicing" is inactive for this tenant',
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AREA_001,
+        'La facturación electrónica no está activa para esta tienda. ' +
+          'Actívala en Configuración fiscal antes de emitir documentos.',
       );
     }
 
@@ -372,8 +374,16 @@ export class InvoicingService {
       config.enablement_status === 'enabled';
 
     if (!is_live) {
-      throw new ForbiddenException(
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_ENABLEMENT_001,
         'La facturación electrónica de esta tienda aún no está habilitada en producción ante la DIAN, así que no puede emitir facturas que consuman la numeración de la resolución. Completa el set de pruebas y activa producción.',
+        // El ambiente sí es público —el comerciante lo eligió— y saber si está
+        // en habilitación o en producción es justo lo que le dice qué paso le
+        // falta. `enablement_status` viaja por el mismo motivo.
+        {
+          environment: config.environment,
+          enablement_status: config.enablement_status,
+        },
       );
     }
   }
@@ -1230,6 +1240,56 @@ export class InvoicingService {
     return created.id;
   }
 
+  /**
+   * NINGÚN DOCUMENTO DE ORIGEN SE FACTURA DOS VECES.
+   *
+   * Va **antes** de `generateNextNumber()`, y el orden no es estilístico: ese
+   * generador toma el consecutivo bajo `pg_advisory_xact_lock` e incrementa
+   * `invoice_resolutions.current_number` en el acto. Un consecutivo tomado y no
+   * usado es un hueco en la numeración autorizada de la DIAN, y los huecos no
+   * se recuperan. Validar después de numerar sería validar tarde.
+   *
+   * ## Qué cuenta como «ya facturado»
+   *
+   * Todo lo que no esté `voided` ni `cancelled`. Una factura anulada libera el
+   * documento de origen —esa es exactamente la razón de ser de la anulación—,
+   * pero un `draft` NO: el draft ya consumió su consecutivo, así que permitir
+   * una segunda emisión sobre una orden con draft pendiente quemaría un segundo
+   * número para el mismo hecho económico.
+   *
+   * El `where` NO filtra por tenant a mano: `this.prisma` es el cliente scoped
+   * y ya inyecta `organization_id`/`store_id` (ver `vendix-prisma-scopes`).
+   */
+  private async assertNotAlreadyInvoiced(
+    where: { order_id: number } | { sales_order_id: number },
+  ): Promise<void> {
+    const existing = await this.prisma.invoices.findFirst({
+      where: {
+        ...where,
+        invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, invoice_number: true, status: true },
+      orderBy: { id: 'desc' },
+    });
+
+    if (!existing) {
+      return;
+    }
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CREATE_002,
+      `Este documento ya tiene la factura ${existing.invoice_number}. ` +
+        'Anúlala antes de emitir una nueva: cada emisión consume un ' +
+        'consecutivo autorizado por la DIAN que no se puede recuperar.',
+      {
+        invoice_id: existing.id,
+        invoice_number: existing.invoice_number,
+        invoice_status: existing.status,
+      },
+    );
+  }
+
   async createFromOrder(order_id: number) {
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
@@ -1281,6 +1341,8 @@ export class InvoicingService {
     if (!order) {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003);
     }
+
+    await this.assertNotAlreadyInvoiced({ order_id: order.id });
 
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({
@@ -1544,6 +1606,45 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_004);
     }
 
+    await this.assertNotAlreadyInvoiced({ sales_order_id: sales_order.id });
+
+    /**
+     * EL PEDIDO DE VENTA NO LLEVA IMPUESTOS, Y ESO NO SE PUEDE FACTURAR.
+     *
+     * Abajo, la construcción de líneas fijaba `const tax = 0` con el comentario
+     * «sales_order_items don't have tax_amount». Es cierto —la tabla no tiene
+     * columna de impuesto, no existe una `sales_order_item_taxes` hermana de
+     * `order_item_taxes`, y `products` tampoco enlaza una `tax_rates`—, pero la
+     * conclusión que se sacaba de ese hecho era emitir con IVA cero.
+     *
+     * Una factura con IVA cero sobre líneas gravadas no es un número feo en
+     * pantalla: el `ValImp1` incorrecto entra en el hash del CUFE, la DIAN lo
+     * recomputa desde el XML recibido, los hashes difieren y el documento se
+     * rechaza — después de haber quemado el consecutivo. Es el mismo modo de
+     * fallo que costó la factura FVJL1.
+     *
+     * Se rechaza acá, antes de tomar numeración. La ruta no tiene clientes hoy
+     * (no hay controlador que cree `sales_orders` ni módulo que las muestre;
+     * ver el docblock de `createFromSalesOrder` en el servicio del frontend),
+     * así que la guarda no le quita capacidad a nadie: le quita la capacidad de
+     * emitir en silencio un documento fiscalmente inválido. El día que exista
+     * el módulo de pedidos de venta con su desglose tributario, se retira.
+     */
+    // `boolean` anotado a mano y no el literal `false`: con el tipo literal
+    // TypeScript daría por inalcanzable todo el resto del método, y el cuerpo
+    // que sigue es precisamente lo que se quiere conservar intacto para el día
+    // que los pedidos de venta sí traigan tributos.
+    const salesOrdersCarryTaxBreakdown: boolean = false;
+    if (!salesOrdersCarryTaxBreakdown) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CREATE_003,
+        'Los pedidos de venta no registran el desglose de impuestos, así que ' +
+          'la factura saldría con IVA en cero y la DIAN la rechazaría. Crea ' +
+          'la factura desde la orden o captúrala manualmente.',
+        { sales_order_id: sales_order.id },
+      );
+    }
+
     // Fetch customer info separately. Step 8 — select now carries the
     // JURIDICA/legal_name fields so `customer_name` resolves correctly when
     // the sales order's customer is a `legal_name`-bearing entity.
@@ -1579,7 +1680,12 @@ export class InvoicingService {
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount || 0);
-      const tax = 0; // sales_order_items don't have tax_amount
+      // Cero porque `sales_order_items` no tiene columna de impuesto. NO es un
+      // valor aceptable para facturar: la guarda `INVOICING_CREATE_003` de
+      // arriba corta el método antes de llegar acá. Si algún día se retira esa
+      // guarda, esta línea debe reemplazarse por el desglose real, nunca
+      // dejarse como está.
+      const tax = 0;
       const total_amount = quantity * unit_price - discount + tax;
       return {
         product_id: item.product_id,
