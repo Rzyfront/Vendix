@@ -854,6 +854,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_CURRENCY_001:
     'Para una divisa distinta del dólar hay que indicar la tasa de cambio a mano. La TRM oficial sólo cotiza dólar-peso, así que Vendix no puede derivar la equivalencia de otra moneda por su cuenta.',
 
+  // Solicitudes de factura a nombre del cliente. El 001 lo ve el comerciante en
+  // el panel; el 002/003/004 los ve el CLIENTE FINAL en el formulario público
+  // post-venta, y por eso su copy habla de «la tienda» y no de «el cliente».
+  INVOICING_DATA_REQUEST_001:
+    'La solicitud ya no está pendiente de procesar: puede que el proceso automático la haya tomado primero. Actualiza la lista para ver en qué estado quedó.',
+  INVOICING_DATA_REQUEST_002:
+    'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+  INVOICING_DATA_REQUEST_003:
+    'El enlace para solicitar tu factura venció. Pídele a la tienda uno nuevo.',
+  INVOICING_DATA_REQUEST_004:
+    'Este enlace ya recibió tus datos y sólo se puede usar una vez. La tienda está emitiendo tu factura.',
+
   // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
   KITCHEN_TICKET_NOT_READY:
     'No se puede marcar como entregado: el plato aun esta pendiente en cocina. Espera a que el KDS lo marque como listo.',

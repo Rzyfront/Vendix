@@ -60,3 +60,34 @@ export interface InvoiceDataRequestRow {
   updated_at: string;
   order?: InvoiceDataRequestOrder | null;
 }
+
+/** Filtros aceptados por `GET /store/invoice-data-requests`. */
+export interface InvoiceDataRequestQuery {
+  status?: InvoiceDataRequestStatus | '';
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+/** Sobre paginado del listado — espejo de `ResponseService.paginated`. */
+export interface InvoiceDataRequestListResponse {
+  data: InvoiceDataRequestRow[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+/**
+ * Conteo por estado de `GET /store/invoice-data-requests/summary`.
+ *
+ * Los seis estados llegan SIEMPRE, incluso en cero: el backend los siembra
+ * antes del `groupBy` para que las tarjetas no aparezcan y desaparezcan según
+ * lo que haya en la tienda. `total` es la suma, no un séptimo estado.
+ */
+export type InvoiceDataRequestSummary = Record<
+  InvoiceDataRequestStatus,
+  number
+> & { total: number };

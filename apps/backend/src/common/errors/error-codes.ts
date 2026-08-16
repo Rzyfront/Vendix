@@ -1872,6 +1872,50 @@ export const ErrorCodes = {
       'Non-USD currency requires either a manual exchange rate or the USD cross rate for the date: the TRM only quotes USD/COP, so any other currency needs a second leg Vendix does not source',
   },
   /**
+   * SOLICITUD DE FACTURA NOMINATIVA INEXISTENTE O YA RECLAMADA.
+   *
+   * `processRequest` era el único controlador de la familia que lanzaba
+   * `NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND_OR_NOT_SUBMITTED')` —un
+   * identificador en mayúsculas, no un mensaje—. Sin `error_code` el frontend no
+   * tenía catálogo al que ir y le pintaba al comerciante el nombre literal de la
+   * constante. Un solo código cubre los dos casos porque la acción del usuario
+   * es la misma en ambos: refrescar la lista y mirar en qué estado quedó.
+   */
+  INVOICING_DATA_REQUEST_001: {
+    code: 'INVOICING_DATA_REQUEST_001',
+    httpStatus: 404,
+    devMessage:
+      'Invoice data request not found for this store, or it is no longer in the submitted state',
+  },
+  /**
+   * ENLACE PÚBLICO INVÁLIDO. El token no corresponde a ninguna solicitud.
+   *
+   * Los tres códigos que siguen viajan al CLIENTE FINAL, no al comerciante: son
+   * los del formulario público post-venta donde el comprador escribe sus datos
+   * fiscales. Por eso se separan por causa —enlace inválido, enlace vencido,
+   * enlace ya usado—: las tres tienen salidas distintas y decirle «error» a las
+   * tres deja al comprador sin saber si debe pedir un enlace nuevo o si su
+   * factura ya está emitida.
+   */
+  INVOICING_DATA_REQUEST_002: {
+    code: 'INVOICING_DATA_REQUEST_002',
+    httpStatus: 404,
+    devMessage: 'Invoice data request link is invalid or no longer exists',
+  },
+  /** Enlace vencido: `expires_at` en el pasado, o estado `expired`. */
+  INVOICING_DATA_REQUEST_003: {
+    code: 'INVOICING_DATA_REQUEST_003',
+    httpStatus: 410,
+    devMessage: 'Invoice data request link has expired',
+  },
+  /** Enlace ya usado: los datos se enviaron o la factura ya se emitió. */
+  INVOICING_DATA_REQUEST_004: {
+    code: 'INVOICING_DATA_REQUEST_004',
+    httpStatus: 409,
+    devMessage:
+      'Invoice data request has already been submitted or completed; the link accepts data only once',
+  },
+  /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
    * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
    * `municipality_code` o `department`.

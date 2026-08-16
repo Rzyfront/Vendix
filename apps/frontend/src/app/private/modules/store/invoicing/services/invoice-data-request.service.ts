@@ -4,8 +4,10 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import type { ApiResponse } from '../interfaces/invoice.interface';
 import type {
+  InvoiceDataRequestListResponse,
+  InvoiceDataRequestQuery,
   InvoiceDataRequestRow,
-  InvoiceDataRequestStatus,
+  InvoiceDataRequestSummary,
 } from '../interfaces/invoice-data-request.interface';
 
 /**
@@ -30,20 +32,47 @@ export class InvoiceDataRequestService {
   }
 
   /**
-   * `GET /store/invoice-data-requests`. `status` vacío = todas.
+   * `GET /store/invoice-data-requests` — sobre paginado.
    *
-   * `params` se ANOTA como `Record<string, string>` a propósito. Sin la
-   * anotación, `status ? { status } : {}` infiere la unión `{status} | {}`, y con
-   * `{}` TypeScript elige la sobrecarga de `HttpClient.get` que devuelve
+   * Los parámetros vacíos se OMITEN, no se mandan en blanco: el backend valida
+   * el query con `QueryInvoiceDataRequestsDto` bajo el
+   * `forbidNonWhitelisted: true` global, y un `?status=` vacío no es miembro del
+   * enum. (El DTO además lo normaliza del otro lado; acá se evita el viaje.)
+   *
+   * `params` se ANOTA como `Record<string, string | number>` a propósito. Sin la
+   * anotación, un literal que puede quedar vacío infiere la unión con `{}`, y
+   * con `{}` TypeScript elige la sobrecarga de `HttpClient.get` que devuelve
    * `Observable<ArrayBuffer>` en lugar de la genérica — el error viaja hasta el
    * tipo de retorno y sólo lo caza el compilador AOT, nunca el parser.
    */
   list(
-    status?: InvoiceDataRequestStatus | '',
-  ): Observable<ApiResponse<InvoiceDataRequestRow[]>> {
-    const params: Record<string, string> = status ? { status } : {};
-    return this.http.get<ApiResponse<InvoiceDataRequestRow[]>>(
-      this.getApiUrl(),
+    query: InvoiceDataRequestQuery = {},
+  ): Observable<InvoiceDataRequestListResponse> {
+    const params: Record<string, string | number> = {};
+    if (query.status) params['status'] = query.status;
+    if (query.search?.trim()) params['search'] = query.search.trim();
+    if (query.page) params['page'] = query.page;
+    if (query.limit) params['limit'] = query.limit;
+
+    return this.http.get<InvoiceDataRequestListResponse>(this.getApiUrl(), {
+      params,
+    });
+  }
+
+  /**
+   * `GET /store/invoice-data-requests/summary` — conteo por estado.
+   *
+   * Deliberadamente NO recibe `status`: las tarjetas son el mapa completo de la
+   * pestaña y a la vez el atajo para filtrar por cada estado. Si el conteo
+   * siguiera el filtro activo, al elegir un estado las otras cinco tarjetas
+   * caerían a cero y dejarían de servir para navegar.
+   */
+  summary(search?: string): Observable<ApiResponse<InvoiceDataRequestSummary>> {
+    const params: Record<string, string> = {};
+    if (search?.trim()) params['search'] = search.trim();
+
+    return this.http.get<ApiResponse<InvoiceDataRequestSummary>>(
+      this.getApiUrl('summary'),
       { params },
     );
   }
