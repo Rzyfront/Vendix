@@ -223,7 +223,7 @@ jobs:
     name: Backend Tests (jest)
     runs-on: ubuntu-latest
     needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' }}
+    if: needs.changes.outputs.backend == 'true'
     timeout-minutes: 25
     env:
       # QUI-563: el default TEST_MEM=2048 + 2 workers OOM-eaba los specs de
