@@ -3145,8 +3145,17 @@ export class PosComponent {
     }
 
     this.posSettingsHydrationRequested = true;
+    // QUI-563 Fase 5: dropped `forceRefresh: true`. Before Fases 1+2 this
+    // call forced a network hit because the StoreSettingsService cache
+    // could serve settings from a previous tenant after a switch — the
+    // POS needed fresh data even though it asked for the same call site
+    // as every other consumer. The StoreScopedCache helper now returns
+    // null on tenant mismatch, so a plain getSettings() correctly hits
+    // the network only when the cache cannot serve the active tenant.
+    // Keeping forceRefresh here would hide future regressions in the
+    // cache invalidation chain (Fase 2 bus, manual invalidateCache()).
     this.settingsService
-      .getSettings({ forceRefresh: true })
+      .getSettings()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {

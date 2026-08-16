@@ -3,6 +3,7 @@ import { firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { PriceTier, ProductPriceTierOverride } from '../interfaces';
 import { PriceTiersService } from './price-tiers.service';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 
 /**
  * Light cache around `PriceTiersService` for sale flows (POS, orders create,
@@ -23,12 +24,25 @@ import { PriceTiersService } from './price-tiers.service';
 @Injectable({ providedIn: 'root' })
 export class PriceTierCacheService {
   private readonly priceTiersService = inject(PriceTiersService);
+  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
 
   private activeTiers$: Observable<PriceTier[]> | null = null;
   private readonly overridesCache = new Map<
     number,
     Observable<ProductPriceTierOverride[]>
   >();
+
+  constructor() {
+    // QUI-563 Fase 2: la lista de tiers activos y los overrides por
+    // producto son estrictamente por tienda. Si el usuario cambia de
+    // entorno, el POS no debe seguir mostrando los tiers/overrides de la
+    // tienda anterior — los carts y cotizaciones leen de aquí.
+    this.tenantCacheRegistry.register(
+      'store-price-tier-cache',
+      () => this.invalidate(),
+      'PriceTierCacheService',
+    );
+  }
 
   /**
    * Active tiers for the current store. First subscriber triggers the HTTP

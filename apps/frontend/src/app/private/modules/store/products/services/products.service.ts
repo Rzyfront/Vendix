@@ -1,8 +1,9 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, from, map, switchMap } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   Product,
   ProductVariant,
@@ -65,9 +66,18 @@ const storeProductsStatsCache = new Map<
 })
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // QUI-563 Fase 2: register with the bus so the switch service
+    // evicts us proactively on store change.
+    this.tenantCacheRegistry.register(
+      'store-products-stats',
+      () => this.invalidateCache(),
+      'ProductsService',
+    );
+  }
 
   // CRUD Básico
   getProducts(

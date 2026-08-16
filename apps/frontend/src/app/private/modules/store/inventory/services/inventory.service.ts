@@ -1,9 +1,10 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   InventoryLocation,
   CreateLocationDto,
@@ -39,8 +40,19 @@ let inventoryStatsCache: CacheEntry<Observable<ApiResponse<InventoryStats>>> | n
 export class InventoryService {
   private readonly base_url = `${environment.apiUrl}/store/inventory`;
   private readonly CACHE_TTL = 30000; // 30 segundos
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // QUI-563 Fase 2: register the module-level cache so the switch
+    // service evicts it on store change.
+    this.tenantCacheRegistry.register(
+      'store-inventory-stats',
+      () => {
+        inventoryStatsCache = null;
+      },
+      'InventoryService',
+    );
+  }
 
   // ============================================================
   // LOCATIONS

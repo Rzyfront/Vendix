@@ -213,6 +213,25 @@ export class SettingsService {
    * the sanitized DTO. Known-section validation errors are surfaced via
    * SYS_VALIDATION_001; deprecated keys are dropped and logged.
    */
+  /**
+   * QUI-563 Fase 3: reads `expected_store_id` from the raw body BEFORE
+   * `sanitizeAndValidate` drops it (sanitize keeps only known sections).
+   * Returns `undefined` if absent — the guard only fires when the client
+   * opts in. The check is a sanity belt on the legitimate flow, not an
+   * authorization boundary: the token already restricts which store the
+   * user can write to.
+   */
+  private readExpectedStoreId(raw: unknown): number | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const value = (raw as Record<string, unknown>)['expected_store_id'];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  }
+
   private sanitizeAndValidate(
     raw: Record<string, unknown>,
     storeId: number,
@@ -413,6 +432,27 @@ export class SettingsService {
 
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // QUI-563 Fase 3: write integrity guard. The client remembers which
+    // `store_id` it loaded the form from; if it tries to save under a
+    // different active tenant (the exact bug — store A's form being sent
+    // with store B's token), refuse with 409. The header is preferred over
+    // a body field because the body is a `Record<string, unknown>` and
+    // unknown keys are sanitized away before reaching this point.
+    const expected_store_id = this.readExpectedStoreId(raw);
+    if (
+      expected_store_id !== undefined &&
+      expected_store_id !== store_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_SETTINGS_STORE_MISMATCH_001,
+        `Settings payload was loaded for store ${expected_store_id} but the active tenant is ${store_id}`,
+        {
+          expected_store_id,
+          active_store_id: store_id,
+        },
+      );
     }
 
     // Sanitize unknown top-level keys and validate retained sections.

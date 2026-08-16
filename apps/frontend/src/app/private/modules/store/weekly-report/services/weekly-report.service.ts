@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError, tap, catchError } from 'rxjs';
 import { shareReplay, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
@@ -27,6 +28,20 @@ export class WeeklyReportService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 min
+  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
+
+  constructor() {
+    // QUI-563 Fase 2: drop the cached observable + signals on switch.
+    this.tenantCacheRegistry.register(
+      'store-weekly-report',
+      () => {
+        this.latestCache$ = null;
+        this._latest.set(null);
+        this._lastFetchedAt.set(0);
+      },
+      'WeeklyReportService',
+    );
+  }
 
   // ─── Reactive state (Angular 20 signals) ─────────────────────────────────
   private readonly _latest = signal<WeeklyReportSnapshot | null>(null);

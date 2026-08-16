@@ -5,6 +5,7 @@ import { environment } from '../../../../../../environments/environment';
 import { DateRangeFilter as DateRange } from '../../analytics/interfaces/analytics.interface';
 import { ReportDataAdapterService } from './report-data-adapter.service';
 import { ReportDefinition, ReportAdaptedData } from '../interfaces/report.interface';
+import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 
 interface CacheEntry<T> {
   observable: T;
@@ -19,7 +20,20 @@ const reportsCache = new Map<string, CacheEntry<Observable<any>>>();
 export class ReportsDataService {
   private http = inject(HttpClient);
   private adapter = inject(ReportDataAdapterService);
+  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
   private readonly CACHE_TTL = 60000;
+
+  constructor() {
+    // QUI-563 Fase 2: el cache es por `${reportId}-${endpoint}-${options}`,
+    // por lo que si dos tiendas generan el mismo report con el mismo
+    // rango, sus entradas colisionan. Evictar en cada switch garantiza
+    // que la próxima lectura golpee el backend de la tienda activa.
+    this.tenantCacheRegistry.register(
+      'store-reports-data',
+      () => reportsCache.clear(),
+      'ReportsDataService',
+    );
+  }
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
@@ -11,7 +11,11 @@ import {
   CompleteTransferItem,
   TransferableProduct,
 } from '../interfaces';
+import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 
+// QUI-563 Fase 2: module-level cache. Survives even the destruction of the
+// service singleton (a HMR reload, a route teardown in some module
+// strategies) — exactly the cross-tenant window the bus must close.
 let transferStatsCache: { observable: Observable<TransferStats>; lastFetch: number } | null = null;
 
 @Injectable({
@@ -20,8 +24,19 @@ let transferStatsCache: { observable: Observable<TransferStats>; lastFetch: numb
 export class TransfersService {
   private readonly apiUrl = `${environment.apiUrl}/store/stock-transfers`;
   private readonly CACHE_TTL = 30000;
+  private tenantCacheRegistry = inject(TenantCacheRegistry);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // QUI-563 Fase 2: register the module-level cache so the switch
+    // service can evict it on store change.
+    this.tenantCacheRegistry.register(
+      'store-transfers-stats',
+      () => {
+        transferStatsCache = null;
+      },
+      'TransfersService',
+    );
+  }
 
   getAll(query: TransferQuery = {}): Observable<StockTransfer[]> {
     const params = new URLSearchParams();
