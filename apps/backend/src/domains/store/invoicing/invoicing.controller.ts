@@ -31,7 +31,10 @@ import { ResponseService } from '../../../common/responses/response.service';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
-import { QueryInvoiceDto } from './dto/query-invoice.dto';
+import {
+  QueryInvoiceDto,
+  QueryInvoiceStatsDto,
+} from './dto/query-invoice.dto';
 import { QueryExchangeRateDto } from './dto/query-exchange-rate.dto';
 import {
   CreateCreditNoteDto,
@@ -68,11 +71,11 @@ export class InvoicingController {
 
   @Get('stats')
   @Permissions('invoicing:read')
-  async getStats(
-    @Query('date_from') date_from?: string,
-    @Query('date_to') date_to?: string,
-  ) {
-    const result = await this.invoicing_service.getStats(date_from, date_to);
+  async getStats(@Query() query: QueryInvoiceStatsDto) {
+    const result = await this.invoicing_service.getStats(
+      query.date_from,
+      query.date_to,
+    );
     return this.response_service.success(result);
   }
 
