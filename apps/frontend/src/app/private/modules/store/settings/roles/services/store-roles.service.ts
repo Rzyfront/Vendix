@@ -10,7 +10,6 @@ import {
 import { tap, shareReplay } from 'rxjs/operators';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../../core/services/tenant-cache-registry.service';
 import {
   StoreRole,
   StoreRoleStats,
@@ -51,19 +50,6 @@ export class StoreRolesService {
   private http = inject(HttpClient);
   private baseUrl = `${environment.apiUrl}/store/roles`;
   private readonly CACHE_TTL = 30000; // 30 segundos
-  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
-
-  constructor() {
-    // QUI-563 Fase 2: register the module-level stats cache so the switch
-    // service evicts it on store change.
-    this.tenantCacheRegistry.register(
-      'store-roles-stats',
-      () => {
-        storeRolesStatsCache = null;
-      },
-      'StoreRolesService',
-    );
-  }
 
   // Estado de carga — Signals (Angular 20 Zoneless)
   readonly isLoading = signal(false);

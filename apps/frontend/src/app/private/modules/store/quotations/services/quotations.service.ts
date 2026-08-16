@@ -1,9 +1,8 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, concatMap, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   Quotation,
@@ -20,20 +19,9 @@ let quotationStatsCache: { observable: Observable<any>; lastFetch: number } | nu
 })
 export class QuotationsService {
   private readonly apiUrl = environment.apiUrl;
-  private tenantCacheRegistry = inject(TenantCacheRegistry);
   private readonly CACHE_TTL = 30000;
 
-  constructor(private http: HttpClient) {
-    // QUI-563 Fase 2: register the module-level stats cache so the switch
-    // service evicts it on store change.
-    this.tenantCacheRegistry.register(
-      'store-quotations-stats',
-      () => {
-        quotationStatsCache = null;
-      },
-      'QuotationsService',
-    );
-  }
+  constructor(private http: HttpClient) {}
 
   getQuotations(query: QuotationQuery = {}): Observable<PaginatedQuotationsResponse> {
     const params = new URLSearchParams();

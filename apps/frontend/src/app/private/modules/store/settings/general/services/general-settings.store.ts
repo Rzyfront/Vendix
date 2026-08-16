@@ -23,7 +23,6 @@ import type {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../../core/store/config';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 /**
@@ -52,7 +51,6 @@ export class GeneralSettingsStore {
   private readonly configFacade = inject(ConfigFacade);
   private readonly authFacade = inject(AuthFacade);
   private readonly invoicingService = inject(InvoicingService);
-  private readonly tenantFacade = inject(TenantFacade);
 
   // ─── Estado base ────────────────────────────────────────
 
@@ -62,16 +60,6 @@ export class GeneralSettingsStore {
   readonly isSaving = signal(false);
   readonly hasUnsavedChanges = signal(false);
   readonly lastSaved = signal<Date | null>(null);
-
-  /**
-   * QUI-563 Fase 3: tenant the form was loaded from. Set every time
-   * `loadSettings()` succeeds and verified on every save. If the active
-   * tenant changed underneath the form (the exact bug window), the save
-   * is refused locally AND the backend `expected_store_id` guard catches
-   * any client that tries to bypass the local check. `null` means the
-   * form has never been loaded — saves in that state are rejected.
-   */
-  readonly loadedStoreId = signal<number | null>(null);
 
   readonly storeAppUrl = signal<string | null>(null);
 
@@ -303,13 +291,6 @@ export class GeneralSettingsStore {
           this.hasUnsavedChanges.set(false);
           this.settingsLoaded.set(true);
 
-          // QUI-563 Fase 3: stamp the form with the tenant that just
-          // populated it. The save path verifies this against the active
-          // tenant — if they differ, the form belongs to a previous store
-          // and persisting it would silently overwrite that other store's
-          // config with the active token.
-          this.loadedStoreId.set(this.tenantFacade.getCurrentStoreId());
-
           // El payload persistido es la semilla de `services`: garantiza que la
           // dirección viaje en el próximo guardado aunque el usuario nunca abra
           // la pestaña Negocio.
@@ -540,50 +521,13 @@ export class GeneralSettingsStore {
         (sanitizedSettings as any).services = servicesValue;
       }
 
-      // QUI-563 Fase 3: write integrity guard. Before sending the PATCH,
-      // verify the form belongs to the active tenant. If the user switched
-      // stores while the form was open (the exact bug), the in-memory
-      // payload is from another store and persisting it would silently
-      // overwrite that other store's config with the active token.
-      const loadedStoreId = this.loadedStoreId();
-      const activeStoreId = this.tenantFacade.getCurrentStoreId();
-      if (loadedStoreId === null) {
-        // Form was never loaded — refuse rather than send an empty patch
-        // derived from `{} as StoreSettings`. Reload to recover.
-        this.isSaving.set(false);
-        this.toastService.error(
-          'Configuración aún no cargada. Recargando…',
-        );
-        this.loadSettings({ forceRefresh: true });
-        return;
-      }
-      if (loadedStoreId !== activeStoreId) {
-        this.isSaving.set(false);
-        this.hasUnsavedChanges.set(false);
-        this.toastService.error(
-          'La configuración cargada pertenece a otra tienda. Se descartó para evitar escritura cruzada.',
-        );
-        // Drop the stale payload and re-load against the active tenant.
-        this.settings.set({} as StoreSettings);
-        this.loadSettings({ forceRefresh: true });
-        return;
-      }
-
-      // The backend `expected_store_id` check (Fase 3) is the second
-      // layer: even if a future caller bypasses this local guard, the
-      // server refuses to apply settings loaded under a different tenant.
-      const payloadWithExpectedStore = {
-        ...sanitizedSettings,
-        expected_store_id: loadedStoreId,
-      };
-
       // Guardar todo. Tras el éxito, re-leer los settings del backend para que
       // la señal `settings` refleje el estado canónico — incluidos los defaults
       // que el backend pueda aplicar a campos que el frontend no envió. Sin esa
       // re-lectura, salir y volver re-montaría el GeneralSettingsForm con el
       // valor en memoria, que puede estar rancio si el backend normalizó algo.
       this.settingsService
-        .saveSettingsNow(payloadWithExpectedStore)
+        .saveSettingsNow(sanitizedSettings)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {

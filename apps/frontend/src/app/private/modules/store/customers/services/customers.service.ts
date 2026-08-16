@@ -1,9 +1,8 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
     Customer,
     CreateCustomerRequest,
@@ -62,17 +61,8 @@ const storeCustomersStatsCache = new Map<number, CacheEntry<Observable<CustomerS
 export class CustomersService {
     private apiUrl = `${environment.apiUrl}/store/customers`;
     private readonly CACHE_TTL = 30000; // 30 segundos
-    private tenantCacheRegistry = inject(TenantCacheRegistry);
 
-    constructor(private http: HttpClient) {
-      // QUI-563 Fase 2: register with the bus so the switch service
-      // evicts us proactively on store change.
-      this.tenantCacheRegistry.register(
-        'store-customers-stats',
-        () => this.invalidateCache(),
-        'CustomersService',
-      );
-    }
+    constructor(private http: HttpClient) { }
 
     getStats(storeId: number): Observable<CustomerStats> {
         const now = Date.now();

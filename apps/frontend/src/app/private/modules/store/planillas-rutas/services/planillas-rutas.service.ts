@@ -3,7 +3,6 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { TenantCacheRegistry } from '../../../../../core/services/tenant-cache-registry.service';
 import {
   AddStopDto,
   CloseDispatchRouteDto,
@@ -34,20 +33,6 @@ const CACHE_TTL = 30_000;
 export class PlanillasRutasService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
-  private readonly tenantCacheRegistry = inject(TenantCacheRegistry);
-
-  constructor() {
-    // QUI-563 Fase 2: register the module-level stats cache so the switch
-    // service evicts it on store change.
-    this.tenantCacheRegistry.register(
-      'store-planillas-rutas-stats',
-      () => {
-        statsCache$ = null;
-        statsCacheTime = 0;
-      },
-      'PlanillasRutasService',
-    );
-  }
 
   list(query: DispatchRouteQuery = {}): Observable<PaginatedDispatchRoutesResponse> {
     const params = new URLSearchParams();

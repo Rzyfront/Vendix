@@ -57,11 +57,7 @@ export const authReducer = createReducer(
         user,
         user_settings,
         store_settings,
-        // QUI-563 Fase 0: el fallback `state.default_panel_ui` puede mantener
-        // datos del panel_ui de OTRO tenant durante una rehidratación
-        // cruzada. Forzamos `null` si el backend no lo manda para que la
-        // falla sea ruidosa (sidebar vacío = visible) en vez de silenciosa.
-        default_panel_ui: default_panel_ui ?? null,
+        default_panel_ui: default_panel_ui || state.default_panel_ui,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -214,11 +210,7 @@ export const authReducer = createReducer(
         user,
         user_settings,
         store_settings,
-        // QUI-563 Fase 0: NUNCA heredar `default_panel_ui` de OTRO tenant.
-        // Si el backend no envía el de la tienda destino, dejamos `null`
-        // para que la UI rompa visible (módulos del sidebar ocultos) en
-        // vez de mostrar el panel_ui de la tienda anterior.
-        default_panel_ui: default_panel_ui ?? null,
+        default_panel_ui: default_panel_ui || state.default_panel_ui,
         tokens,
         permissions: permissions || [],
         roles: roles || [],

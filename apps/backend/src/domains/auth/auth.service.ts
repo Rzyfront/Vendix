@@ -3987,17 +3987,6 @@ export class AuthService {
       throw new UnauthorizedException('Usuario no encontrado');
     }
 
-    // QUI-563 Fase 0: cargar `user_settings` con query separado (mismo patrón
-    // que el login en auth.service.ts:~1703). Si falta, abortamos — el switch
-    // sin user_settings es un estado inválido por definición.
-    const userSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: user.id },
-    });
-
-    if (!userSettings) {
-      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
-    }
-
     // Validar el entorno objetivo
     if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
       throw new BadRequestException(
@@ -4029,9 +4018,6 @@ export class AuthService {
       }
 
       // Verificar que la tienda exista y el usuario tenga acceso
-      // QUI-563 Fase 0: incluir `store_settings` en la query para alimentar
-      // `mergeStoreSettingsWithDefaults` en el return — sin esto el frontend
-      // persiste `undefined` en `selectStoreSettings` tras el switch.
       store = await this.prismaService.stores.findFirst({
         where: {
           slug: storeSlug,
@@ -4054,7 +4040,6 @@ export class AuthService {
               status: 'active',
             },
           },
-          store_settings: true,
         },
       });
 
@@ -4171,40 +4156,11 @@ export class AuthService {
       organizations: organizations, // Organization con domain_settings incluido
     };
 
-    // QUI-563 Fase 0: armar el trío de contexto operativo equivalente al del
-    // login (user_settings, store_settings, default_panel_ui). Sin esto el
-    // frontend persiste `undefined` en NgRx tras el switch y el reducer
-    // hereda el `default_panel_ui` de la tienda anterior.
-    //
-    // NOTA DE SCOPE: la duplicación con login queda como tech debt. Extraer
-    // un helper compartido rompería el `Promise.all` del login que paraleliza
-    // createUserSession + logLoginAttempt + audit + last_login + signUrl +
-    // generatePanelUI — reordenar eso merece un PR de refactor dedicado.
-    const defaults = await this.defaultPanelUIService.generatePanelUI('');
-
-    const active_store_settings = activeStore
-      ? mergeStoreSettingsWithDefaults(activeStore.store_settings?.settings)
-      : null;
-
-    const userSettingsForResponse = {
-      id: userSettings.id,
-      user_id: userSettings.user_id,
-      app_type: userSettings.app_type,
-      config: mergeUserConfigPanelUi(
-        userSettings.config as any,
-        defaults.panel_ui,
-        roles,
-      ),
-    };
-
     return {
       user: userWithEnvironment,
       tokens,
       permissions,
       roles,
-      user_settings: userSettingsForResponse,
-      store_settings: active_store_settings,
-      default_panel_ui: defaults.panel_ui,
       updatedEnvironment: targetEnvironment,
     };
   }
