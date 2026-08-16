@@ -2324,9 +2324,13 @@ export class InvoiceFlowService {
     if (!foreign_currency || foreign_currency === 'COP') return undefined;
 
     const rate = toDecimal(invoice.exchange_rate);
-    // `equals(1)` también se rechaza: FAR03 rechaza `SourceCurrencyBaseRate` en
-    // 1.00, así que una tasa de 1 no es "sin conversión", es un documento que la
-    // DIAN va a devolver.
+    // `equals(1)` también se rechaza, pero NO por FAR03 —esa regla gobierna
+    // `cbc:SourceCurrencyBaseRate`, que este emisor omite deliberadamente (ver
+    // `UblCommonBuilder.buildPaymentExchangeRate`)—. Se rechaza porque una tasa
+    // de 1 peso por unidad de divisa no es una conversión: es un documento que
+    // declara moneda extranjera y a la vez afirma que no hay diferencia con el
+    // peso. Se contradice a sí mismo, y el error es casi siempre una tasa que
+    // nunca se cargó.
     if (!rate.greaterThan(0) || rate.equals(1)) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_TRM_001,
@@ -2342,26 +2346,30 @@ export class InvoiceFlowService {
       );
     }
 
+    // Los valores FIJOS del grupo —FAR02 `SourceCurrencyCode=COP`, FAR05
+    // `TargetCurrencyBaseRate=1.00` y la ausencia deliberada de FAR03— NO se
+    // declaran acá: los emite `UblCommonBuilder.buildPaymentExchangeRate`, que
+    // es donde vive la regla. Un productor que los repita es un productor que
+    // puede equivocarlos, y FAR03 en particular RECHAZA el valor `1.00`, que es
+    // exactamente el que invita a escribir un campo llamado «base rate».
     return {
-      // FAR02: la fuente SIEMPRE es COP. La factura no cambia de moneda, sólo
-      // declara la conversión.
-      source_currency: 'COP',
-      // FAR03: 1.00 — el valor que la DIAN exige en este campo.
-      source_base_rate: '1.00',
-      // La divisa destino es la que el operador eligió al crear la factura.
-      target_currency: foreign_currency,
-      // FAR05: 1.00 — la DIAN lo exige así.
-      target_base_rate: '1.00',
-      // FAR06: PESOS POR UNA UNIDAD de la divisa — el sentido que fija FAR03,
-      // y el opuesto al que uno escribiría espontáneamente.
-      calculation_rate: dianAmount(rate),
-      // `exchange_rate_date` es `@db.Date`: Prisma la devuelve a medianoche UTC
-      // y es una fecha-sólo, no un instante. Convertirla a la zona de la tienda
-      // la correría al día anterior — el off-by-one clásico—, así que se lee por
-      // sus componentes UTC, que es donde el valor realmente está. FAR07.
+      // FAR04 — la divisa destino es la que el operador eligió al crear la
+      // factura, ya normalizada a mayúsculas arriba.
+      foreign_currency,
+      // FAR06 — PESOS POR UNA UNIDAD de la divisa. El sentido es el opuesto al
+      // que uno escribiría espontáneamente: invertirlo declara una operación
+      // miles de veces menor sin que ninguna regla lo note.
+      rate: dianAmount(rate),
+      // FAR07 — `exchange_rate_date` es `@db.Date`: Prisma la devuelve a
+      // medianoche UTC y es una fecha-sólo, no un instante. Convertirla a la
+      // zona de la tienda la correría al día anterior —el off-by-one clásico—,
+      // así que se lee por sus componentes UTC, que es donde el valor
+      // realmente está. Ausente se deja `undefined`, no cadena vacía: el
+      // builder omite el elemento, y un `<cbc:Date/>` vacío no es un
+      // `xsd:date` válido —fallo de esquema, antes de cualquier regla.
       date: invoice.exchange_rate_date
         ? new Date(invoice.exchange_rate_date).toISOString().slice(0, 10)
-        : '',
+        : undefined,
     };
   }
 

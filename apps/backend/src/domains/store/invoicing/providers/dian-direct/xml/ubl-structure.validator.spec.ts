@@ -201,18 +201,25 @@ describe('UblStructureValidator', () => {
           invoice_data: invoiceData({
             operation_type: '09',
             discount_amount: '50.00',
+            // Las claves TIENEN que ser las de `DianExchangeRateDeclaration` y
+            // `ProviderInvoiceWithholding`. `invoiceData()` devuelve `any`, así
+            // que una clave mal escrita no la atrapa el compilador: el builder
+            // lee `undefined`, omite la retención entera y emite la divisa con
+            // elementos vacíos, y el test sigue en verde afirmando que validó
+            // «AIU, divisa declarada y retenciones» cuando dos de las tres no
+            // llegaron al documento.
             exchange_rate: {
-              target_currency: 'USD',
-              calculation_rate: '4100.50',
-              rate_date: '2026-08-14',
+              foreign_currency: 'USD',
+              rate: '4100.50',
+              date: '2026-08-14',
             },
             withholdings: [
               {
-                tax_name: 'Retefuente',
-                tax_type: 'retefuente',
-                tax_rate: '2.50',
-                taxable_amount: '840.34',
-                tax_amount: '21.01',
+                withholding_type: 'retefuente',
+                concept_code: 'servicios',
+                rate: '2.50',
+                base: '840.34',
+                amount: '21.01',
               },
             ],
           }),
