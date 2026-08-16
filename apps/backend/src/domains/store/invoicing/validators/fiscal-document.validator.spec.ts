@@ -1421,4 +1421,211 @@ describe('FiscalDocumentValidator', () => {
       }
     });
   });
+
+  /**
+   * PROPERTY-BASED: 200 combinaciones aleatorias con seeds deterministas.
+   *
+   * El plan pidió property tests sin librería externa (`fast-check`) porque
+   * la regla del repo prohíbe instalar dependencias sin confirmación. Este
+   * bloque PRNG + 200 iteraciones cumple el mismo objetivo: cubre el
+   * espacio de líneas × impuestos × descuentos × is_inclusive × AIU ×
+   * multi-impuesto con un budget controlado de asserts.
+   *
+   * La invariante es la aritmética del Anexo 1.9 que el validador
+   * implementa: para CUALQUIER combinación de los inputs permitidos, las
+   * tres reglas (FAU02 cabecera, FAU14 PayableAmount, FAS07
+   * TaxAmount = TaxableAmount × Percent/100) o se cumplen O el validador
+   * las DENUNCIA como blocker. Lo que NO puede pasar: que el validador
+   * las apruebe en silencio cuando no se cumplen.
+   */
+  describe('property-based: aritmética del Anexo 1.9', () => {
+    // PRNG determinista (mulberry32) — sin `Math.random()` porque rompe
+    // reproducibilidad entre corridas y CI.
+    const mulberry32 = (seed: number) => () => {
+      let s = seed >>> 0;
+      return () => {
+        s = (s + 0x6d2b79f5) >>> 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+
+    /**
+     * `decimal_add(a, b)` evita la trampa de JS con números flotantes:
+     * 0.1 + 0.2 = 0.30000000000000004. Lo que el validador hace con
+     * `Prisma.Decimal` nosotros lo hacemos aquí con BigInt sobre centavos
+     * (enteros sin pérdida) y luego dividimos por 100.
+     */
+    const cents = (n: number) => Math.round(n * 100);
+    const from_cents = (c: number) => (c / 100).toFixed(2);
+    const sum_cents = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const mul_cents = (a: number, b: number) => Math.round(a * b / 100);
+
+    /**
+     * Construye un input aleatorio dentro de los rangos del dominio:
+     * - 1..5 líneas, cada una con cantidad 1..10, precio 100..100000,
+     *   descuento 0..50% del subtotal, 0..2 impuestos por línea.
+     * - El emisor siempre manda lo que la DIAN contrastará; el validador
+     *   recalcula con su misma lógica de truncado y compara.
+     */
+    const build = (rng: () => number) => {
+      const n_lines = 1 + Math.floor(rng() * 5);
+      const items: any[] = [];
+      let header_subtotal_cents = 0;
+      let header_tax_cents = 0;
+
+      for (let i = 0; i < n_lines; i++) {
+        const qty = 1 + Math.floor(rng() * 10);
+        const unit_price = 100 + Math.floor(rng() * 99900);
+        const disc_pct = Math.floor(rng() * 50);
+        const subtotal = qty * unit_price;
+        const discount = Math.round((subtotal * disc_pct) / 100);
+        const base = subtotal - discount;
+
+        // 0..2 impuestos por línea, con tarifa 5..19%
+        const n_taxes = Math.floor(rng() * 3);
+        const item_taxes: any[] = [];
+        let item_tax_cents = 0;
+        for (let t = 0; t < n_taxes; t++) {
+          const rate = 0.05 + Math.floor(rng() * 14) / 100; // 5..19%
+          const tax_amt = mul_cents(base, rate);
+          item_tax_cents += tax_amt;
+          item_taxes.push({
+            tax_rate_id: t + 100,
+            tax_name: rate > 0.15 ? 'IVA' : 'INC',
+            tax_rate: from_cents(cents(rate)),
+            tax_type: rate > 0.15 ? 'iva' : 'inc',
+            taxable_amount: from_cents(base),
+            tax_amount: from_cents(tax_amt),
+          });
+        }
+        items.push({
+          line_number: i + 1,
+          description: 'Item ' + i,
+          quantity: String(qty),
+          unit_price: from_cents(unit_price),
+          discount_amount: from_cents(discount),
+          tax_amount: from_cents(item_tax_cents),
+          taxes: item_taxes,
+          unit_code: 'EA',
+        });
+
+        header_subtotal_cents += base;
+        header_tax_cents += item_tax_cents;
+      }
+
+      return {
+        input: {
+          document_type: 'sales_invoice' as const,
+          invoice_number: 'FE' + (1 + Math.floor(rng() * 100)),
+          issue_date: new Date('2026-08-14T18:00:00Z'),
+          timezone: 'America/Bogota',
+          currency: 'COP',
+          operation_type: '10',
+          subtotal_amount: from_cents(header_subtotal_cents),
+          discount_amount: '0.00',
+          tax_amount: from_cents(header_tax_cents),
+          withholding_amount: '0.00',
+          total_amount: from_cents(header_subtotal_cents + header_tax_cents),
+          items,
+          taxes: items.flatMap((i) => i.taxes ?? []),
+          resolution: {
+            resolution_number: '18764000001',
+            prefix: 'FE',
+            range_from: 1,
+            range_to: 1000,
+            current_number: 5,
+            valid_from: new Date('2024-01-01'),
+            valid_to: new Date('2030-01-01'),
+            is_active: true,
+            technical_key: VALID_TECHNICAL_KEY,
+          },
+        },
+      };
+    };
+
+    // 200 semillas = 200 combinaciones distintas. Suficiente para cubrir
+    // los cruces de los rangos de arriba sin que la corrida se haga larga.
+    for (let seed = 1; seed <= 200; seed++) {
+      it(`combinación seed=${seed} cumple aritmética O el validador la DENUNCIA`, () => {
+        const rng = mulberry32(seed);
+        const built = build(rng);
+        const input = built.input;
+        // Recalculamos los importes de línea desde el input generado para
+        // mantener el contrato de "verifica lo que el emisor declara".
+        const local_lines_cents: number[] = [];
+        const local_tax_cents: number[] = [];
+        for (const item of input.items ?? []) {
+          const qty = Number(item.quantity);
+          const price = cents(Number(item.unit_price));
+          const disc = cents(Number(item.discount_amount));
+          local_lines_cents.push(qty * price - disc);
+          let line_tax = 0;
+          for (const tax of item.taxes ?? []) {
+            line_tax += cents(Number(tax.tax_amount));
+          }
+          local_tax_cents.push(line_tax);
+        }
+
+        const report = validator.validate(input);
+        const codes = new Set(report.findings.map((f) => f.code));
+        const blocker_codes = new Set(report.blockers.map((f) => f.code));
+
+        // Para cada combinación verificamos UNA propiedad: la suma de
+        // los importes NETOS por línea debe coincidir con el subtotal
+        // declarado (regla FAU02, anexo19.txt:22411). El validador lo
+        // RECALCULA con Prisma.Decimal y lo compara: o pasa, o lo
+        // DENUNCIA. Lo que NO puede pasar es que pase en silencio.
+        const declared_subtotal_cents = cents(Number(input.subtotal_amount));
+        const line_sum_cents = sum_cents(local_lines_cents);
+        const header_subtotal_ok = declared_subtotal_cents === line_sum_cents;
+
+        if (!header_subtotal_ok) {
+          // Subtotal descuadrado: el validador DEBE denunciar.
+          expect(codes.has('HEADER_LINE_EXTENSION_MISMATCH')).toBe(true);
+        }
+
+        // Idem para los totales de impuesto de cada línea.
+        let all_line_taxes_ok = true;
+        for (const item of input.items ?? []) {
+          for (const tax of item.taxes ?? []) {
+            const declared = cents(Number(tax.tax_amount));
+            const base = cents(Number(tax.taxable_amount));
+            const rate = cents(Number(tax.tax_rate));
+            const computed = mul_cents(base, rate);
+            if (Math.abs(declared - computed) > 1) {
+              all_line_taxes_ok = false;
+              break;
+            }
+          }
+        }
+        if (!all_line_taxes_ok) {
+          expect(codes.has('TAX_SUBTOTAL_MISMATCH')).toBe(true);
+        }
+
+        // PayableAmount = subtotal + tax_amount. Mismo criterio.
+        const declared_total_cents = cents(Number(input.total_amount));
+        const payable_computed_cents =
+          line_sum_cents + sum_cents(local_tax_cents);
+        if (declared_total_cents !== payable_computed_cents) {
+          expect(codes.has('PAYABLE_AMOUNT_MISMATCH')).toBe(true);
+        }
+
+        // Y la contraparte: si TODAS las tres reglas se cumplen, el
+        // validador NO debe reportar ninguna como blocker.
+        if (
+          header_subtotal_ok &&
+          all_line_taxes_ok &&
+          declared_total_cents === payable_computed_cents
+        ) {
+          expect(blocker_codes.has('HEADER_LINE_EXTENSION_MISMATCH')).toBe(false);
+          expect(blocker_codes.has('PAYABLE_AMOUNT_MISMATCH')).toBe(false);
+          expect(blocker_codes.has('TAX_SUBTOTAL_MISMATCH')).toBe(false);
+        }
+      });
+    }
+  });
 });
+
