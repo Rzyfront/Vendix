@@ -481,15 +481,54 @@ export const DIAN_DOCUMENT_CURRENCY = 'COP';
 // escribirla es la última oportunidad barata de detectarlo.
 // -----------------------------------------------------------------------------
 
-/** La ClTec es el hex de un SHA-1: 40 caracteres, ni uno más ni uno menos. */
-export const TECHNICAL_KEY_LENGTH = 40;
+/**
+ * Las DOS anchuras que emite la DIAN, ambas hexadecimal de un hash:
+ *
+ *   · 40 — hex de un SHA-1. Es la del vector oficial del Anexo Técnico 1.9
+ *     §11.2 (`693ff6f2a553c3646a063436fd4dd9ded0311471`) y la de la clave de
+ *     habilitación que la DIAN reparte idéntica a todo contribuyente.
+ *   · 64 — hex de un SHA-256. Observada el 16/08/2026 en la respuesta de
+ *     `GetNumberingRange` para la resolución de producción 18764113258848 del
+ *     NIT 902075738, ligada al prefijo FVJL.
+ *
+ * ── POR QUÉ DOS Y NO «LA QUE DIGA LA DIAN» ─────────────────────────────────
+ *
+ * Porque una lista de dos anchuras exactas sigue atrapando lo que este
+ * invariante existe para atrapar. El mismo contribuyente reportó haber tecleado
+ * claves de 36, 38, 39 y 40 caracteres: un hash NO tiene longitud variable, así
+ * que tres de esas cuatro eran la MISMA clave con caracteres perdidos al
+ * copiarla de un PDF. Aceptar «cualquier longitud» las readmitiría todas y
+ * reabriría el incidente del 14/08. Con 40 ó 64, un 39 y un 63 siguen siendo
+ * errores, que es justo lo que hace falta.
+ *
+ * La de 64 NO entró por transcripción: llegó por `GetNumberingRange`, máquina a
+ * máquina, atada a su resolución. Ésa es la diferencia que la hace creíble.
+ */
+export const TECHNICAL_KEY_LENGTHS = [40, 64] as const;
+
+/**
+ * Etiqueta para los mensajes de error («40 o 64»). Se declara junto a las
+ * anchuras para que no queden textos citando un «exactamente 40» que ya no es
+ * cierto.
+ *
+ * Sustituye a la antigua constante `TECHNICAL_KEY_LENGTH = 40`, que se eliminó a
+ * propósito en vez de marcarse `@deprecated`: mientras siguiera existiendo, el
+ * siguiente sitio que la comparara volvería a rechazar las claves de 64 que la
+ * DIAN sí emite.
+ */
+export const TECHNICAL_KEY_LENGTHS_LABEL = TECHNICAL_KEY_LENGTHS.join(' o ');
+
+/** `true` si la longitud es una de las que emite la DIAN, sea cual sea el resto. */
+export function isValidTechnicalKeyLength(length: number): boolean {
+  return (TECHNICAL_KEY_LENGTHS as readonly number[]).includes(length);
+}
 
 /**
  * Forma exacta que emite la DIAN. Se aceptan mayúsculas porque el valor viaja
  * copiado a mano desde un PDF; el vector oficial del Anexo Técnico 1.9 §11.2
  * (`693ff6f2a553c3646a063436fd4dd9ded0311471`) es minúscula.
  */
-export const TECHNICAL_KEY_PATTERN = /^[0-9a-fA-F]{40}$/;
+export const TECHNICAL_KEY_PATTERN = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 
 /**
  * Quita el ruido de transporte de un valor pegado: espacios, tabuladores y

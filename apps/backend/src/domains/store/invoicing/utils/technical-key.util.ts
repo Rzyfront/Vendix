@@ -1,6 +1,8 @@
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
+  isValidTechnicalKeyLength,
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
 } from '../fiscal-document-requirements';
@@ -135,10 +137,15 @@ export interface TechnicalKeyShape {
  *
  * Cuando `assertTechnicalKeyShape` rechaza un valor, la longitud sola no basta
  * para saber QUÉ llegó. Una clave de 64 caracteres puede ser el hex de un
- * SHA-256 —40 sería entonces la suposición equivocada— o el base64 de 48 bytes,
- * que sería otro artefacto de la DIAN colado en el campo equivocado. Son dos
- * diagnósticos opuestos y la longitud no los separa; la familia de caracteres
- * sí.
+ * SHA-256 —legítima— o el base64 de 48 bytes, que sería otro artefacto de la
+ * DIAN colado en el campo equivocado. Son dos diagnósticos opuestos y la
+ * longitud no los separa; la familia de caracteres sí.
+ *
+ * Ya sirvió para eso: el 16/08/2026 devolvió `{length: 64, charset: 'hex'}` para
+ * la resolución 18764113258848 del NIT 902075738, y eso fue lo que decidió que
+ * el defecto estaba en NUESTRO tope de 40 y no en el parser SOAP. Sin este
+ * instrumento la elección entre las dos hipótesis habría sido a ciegas, y
+ * acertar la equivocada escribe una clave falsa y quema consecutivos.
  *
  * ── POR QUÉ NO NORMALIZA A MINÚSCULA ───────────────────────────────────────
  *
@@ -179,10 +186,9 @@ export function assertTechnicalKeyShape(
   if (isWellFormedTechnicalKey(technical_key)) return technical_key;
 
   const longitud = technical_key.length;
-  const diagnostico =
-    longitud === TECHNICAL_KEY_LENGTH
-      ? `tiene los ${TECHNICAL_KEY_LENGTH} caracteres pero incluye alguno que no es hexadecimal (solo valen 0-9 y a-f: revisa las «o» por ceros y las «l» por unos)`
-      : `tiene ${longitud} ${longitud === 1 ? 'carácter' : 'caracteres'} y la DIAN emite exactamente ${TECHNICAL_KEY_LENGTH}`;
+  const diagnostico = isValidTechnicalKeyLength(longitud)
+    ? `tiene los ${longitud} caracteres pero incluye alguno que no es hexadecimal (solo valen 0-9 y a-f: revisa las «o» por ceros y las «l» por unos)`
+    : `tiene ${longitud} ${longitud === 1 ? 'carácter' : 'caracteres'} y la DIAN la emite de ${TECHNICAL_KEY_LENGTHS_LABEL}`;
 
   throw new VendixHttpException(
     ErrorCodes.INVOICING_RESOLUTION_011,
@@ -199,7 +205,7 @@ export function assertTechnicalKeyShape(
       // Sin la familia de caracteres, «64 caracteres» no distingue el hex de un
       // SHA-256 del base64 de otro artefacto — y son diagnósticos opuestos.
       technical_key_charset: describeTechnicalKeyShape(raw)?.charset ?? null,
-      expected_length: TECHNICAL_KEY_LENGTH,
+      expected_lengths: [...TECHNICAL_KEY_LENGTHS],
     },
   );
 }

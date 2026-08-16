@@ -253,12 +253,11 @@ export class DianNumberingRangeService {
       query.accounting_entity_id,
     );
     const matched_ids = new Set<number>();
+    const pairing = this.pairRanges(ranges, local_rows, matched_ids);
 
-    const comparisons = ranges.map((range) => {
-      const local = this.matchLocal(range, local_rows, matched_ids);
-      if (local) matched_ids.add(local.id);
-      return this.compare(range, local);
-    });
+    const comparisons = ranges.map((range, index) =>
+      this.compare(range, pairing[index]),
+    );
 
     // PRODUCCIÓN PRIMERO, y el orden se decide AQUÍ y no en la pantalla.
     //
@@ -598,12 +597,80 @@ export class DianNumberingRangeService {
   }
 
   /**
-   * Empareja por número de resolución y, en su defecto, por prefijo.
+   * Reparte las filas locales entre los rangos de la DIAN, EN TRES PASADAS.
    *
-   * El número es la identidad que la DIAN autoriza; el prefijo es el respaldo
-   * para las filas guardadas antes de que el número se exigiera (y para las
-   * notas, que se rotulan `INTERNA-<prefijo>`). `taken` evita que dos rangos de
-   * la DIAN reclamen la misma fila local por comparten prefijo.
+   * ── POR QUÉ NO BASTA CON DECIDIR RANGO POR RANGO ───────────────────────────
+   *
+   * Porque un mismo número de resolución puede amparar VARIOS prefijos, y ese
+   * caso rompe cualquier emparejamiento codicioso. Ocurrió en producción el
+   * 16/08/2026 con el NIT 902075738: la DIAN devolvió dos rangos bajo la
+   * resolución `18764113258848` —`DSJL`, sin clave técnica, y `FVJL`, con la
+   * clave de 64 hex que había que aplicar—. Con la decisión tomada por rango y
+   * en orden de llegada, `DSJL` llegó primero, no encontró par exacto, cayó al
+   * criterio por número y se quedó con la fila local `FVJL` (id 13). El rango
+   * `FVJL` —el único con clave— acabó `missing_local`, con
+   * `technical_key_matches: null` y `differences: []`.
+   *
+   * Es decir: la pantalla construida para diagnosticar el FAD06 no llegó a
+   * comparar la clave ni una vez, y encima reportó una diferencia de `prefix`
+   * inventada por el emparejamiento equivocado. Nadie lo habría notado leyendo
+   * la respuesta: se veía como un caso perfectamente normal.
+   *
+   * Repartir por pasadas lo arregla porque el par EXACTO se reclama antes de
+   * que exista cualquier candidato laxo. Ningún criterio flojo puede quedarse
+   * con una fila que otro rango reclama de manera precisa.
+   *
+   *   1. número Y prefijo — la identidad completa que autoriza la DIAN.
+   *   2. sólo número — para filas guardadas sin prefijo o con uno corregido.
+   *   3. sólo prefijo — respaldo para las anteriores a que el número se
+   *      exigiera, y para las notas, rotuladas `INTERNA-<prefijo>`.
+   *
+   * @param taken se rellena con los ids reclamados; el llamador lo usa para
+   *              calcular `local_only`.
+   * @returns un arreglo paralelo a `ranges`: la fila de cada uno, o `null`.
+   */
+  private pairRanges(
+    ranges: DianNumberingRange[],
+    rows: StoredResolution[],
+    taken: Set<number>,
+  ): (StoredResolution | null)[] {
+    const paired: (StoredResolution | null)[] = ranges.map(() => null);
+
+    const claim = (
+      matches: (range: DianNumberingRange, row: StoredResolution) => boolean,
+    ): void => {
+      ranges.forEach((range, index) => {
+        if (paired[index]) return;
+        const row = rows.find(
+          (candidate) => !taken.has(candidate.id) && matches(range, candidate),
+        );
+        if (!row) return;
+        paired[index] = row;
+        taken.add(row.id);
+      });
+    };
+
+    const sameNumber = (range: DianNumberingRange, row: StoredResolution) =>
+      !!range.resolution_number &&
+      normalizeText(row.resolution_number) ===
+        normalizeText(range.resolution_number);
+
+    const samePrefix = (range: DianNumberingRange, row: StoredResolution) =>
+      !!range.prefix && normalizeText(row.prefix) === normalizeText(range.prefix);
+
+    claim((range, row) => sameNumber(range, row) && samePrefix(range, row));
+    claim(sameNumber);
+    claim(samePrefix);
+
+    return paired;
+  }
+
+  /**
+   * La versión de un solo rango, para el carril de escritura.
+   *
+   * `applyRanges` resuelve un rango a la vez contra la lista local completa, así
+   * que no hay competencia entre rangos que resolver: basta con preferir el par
+   * exacto antes que los laxos, por el mismo motivo que {@link pairRanges}.
    */
   private matchLocal(
     range: DianNumberingRange,
@@ -612,21 +679,20 @@ export class DianNumberingRangeService {
   ): StoredResolution | null {
     const available = rows.filter((row) => !taken.has(row.id));
 
-    const by_number = range.resolution_number
-      ? available.find(
-          (row) =>
-            normalizeText(row.resolution_number) ===
-            normalizeText(range.resolution_number),
-        )
-      : undefined;
-    if (by_number) return by_number;
+    const same_number = (row: StoredResolution) =>
+      !!range.resolution_number &&
+      normalizeText(row.resolution_number) ===
+        normalizeText(range.resolution_number);
 
-    const by_prefix = range.prefix
-      ? available.find(
-          (row) => normalizeText(row.prefix) === normalizeText(range.prefix),
-        )
-      : undefined;
-    return by_prefix ?? null;
+    const same_prefix = (row: StoredResolution) =>
+      !!range.prefix && normalizeText(row.prefix) === normalizeText(range.prefix);
+
+    return (
+      available.find((row) => same_number(row) && same_prefix(row)) ??
+      available.find(same_number) ??
+      available.find(same_prefix) ??
+      null
+    );
   }
 
   private compare(

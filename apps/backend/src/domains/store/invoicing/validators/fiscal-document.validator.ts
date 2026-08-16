@@ -9,7 +9,8 @@ import {
   FiscalDocumentType,
   RESOLUTION_PREFIX_MAX_LENGTH,
   RESOLUTION_RANGE_MAX_DIGITS,
-  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
   acceptsTechnicalKey,
   dianRuleFor,
   emitsDocumentAllowanceCharge,
@@ -2056,7 +2057,7 @@ export class FiscalDocumentValidator {
           category: 'technical_key',
           field: 'resolution.technical_key',
           problem: `${requirements.label} arma su ${requirements.key_algorithm} con la clave técnica (ClTec) del rango, y la resolución no la tiene. Firmar con el Software-PIN en su lugar produce una clave que la DIAN rechaza, gastando el consecutivo.`,
-          fix: `Copia la clave técnica completa del PDF de la autorización de numeración de la DIAN en ${SCREEN_RESOLUTIONS}. Son ${TECHNICAL_KEY_LENGTH} caracteres hexadecimales.`,
+          fix: `Copia la clave técnica completa del PDF de la autorización de numeración de la DIAN en ${SCREEN_RESOLUTIONS}. Son ${TECHNICAL_KEY_LENGTHS_LABEL} caracteres hexadecimales.`,
         },
       ];
     }
@@ -2069,12 +2070,12 @@ export class FiscalDocumentValidator {
         severity: 'blocker',
         category: 'technical_key',
         field: 'resolution.technical_key',
-        problem: `La clave técnica (ClTec) de la resolución tiene ${normalized.length} caracteres y la DIAN emite exactamente ${TECHNICAL_KEY_LENGTH} hexadecimales. La ClTec es el único dato del ${requirements.key_algorithm} que NO viaja en el XML: la DIAN recomputa la huella con la clave verdadera, no coincide, y rechaza el documento con el consecutivo ya gastado.`,
-        fix: `Vuelve a copiar la clave técnica COMPLETA del PDF de la autorización de numeración en ${SCREEN_RESOLUTIONS}. Verifica que sean ${TECHNICAL_KEY_LENGTH} caracteres y que no se haya perdido ninguno al copiar.`,
+        problem: `La clave técnica (ClTec) de la resolución tiene ${normalized.length} caracteres y la DIAN la emite de ${TECHNICAL_KEY_LENGTHS_LABEL} hexadecimales. La ClTec es el único dato del ${requirements.key_algorithm} que NO viaja en el XML: la DIAN recomputa la huella con la clave verdadera, no coincide, y rechaza el documento con el consecutivo ya gastado.`,
+        fix: `Vuelve a copiar la clave técnica COMPLETA del PDF de la autorización de numeración en ${SCREEN_RESOLUTIONS}. Verifica que sean ${TECHNICAL_KEY_LENGTHS_LABEL} caracteres y que no se haya perdido ninguno al copiar.`,
         // Solo la longitud. El valor es un secreto fiscal y no sale de acá.
         details: {
           technical_key_length: normalized.length,
-          expected_length: TECHNICAL_KEY_LENGTH,
+          expected_lengths: [...TECHNICAL_KEY_LENGTHS],
         },
       },
     ];
