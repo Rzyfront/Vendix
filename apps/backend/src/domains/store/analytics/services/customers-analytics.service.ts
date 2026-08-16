@@ -944,13 +944,103 @@ export class CustomersAnalyticsService {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // STUB for the resubmit's analytics.controller.ts (QUI-542 batch). See
-  // the comment on the matching sales stubs for context.
-  // -------------------------------------------------------------------------
-  async getTopCustomersForExport(
-    _query: AnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
-    return [];
+  /**
+   * QUI-539: cartera de clientes por días SIN comprar. Para cada
+   * cliente con al menos una orden completada, calcula los días
+   * desde su última orden hasta ahora, y bucket:
+   *   - '0-30' (activo reciente)
+   *   - '31-60' (enfriándose)
+   *   - '61-90' (dormido)
+   *   - '90+' (riesgo de churn)
+   *
+   * Sirve para campañas de reactivación: target los 90+ con
+   * descuento, los 31-60 con email, etc.
+   *
+   * NO filtra por el rango de fechas de `query`: la métrica es «cuánto
+   * lleva sin comprar», que sólo tiene sentido contra el histórico
+   * completo. Acotarla al período convertiría a todo cliente anterior
+   * al rango en un falso «sin-orden».
+   */
+  async getCustomersAgingForExport(_query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    // Última orden completada por cliente
+    const orders = await this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        customer_id: { not: null },
+        stores: { id: storeId }, // filtro de scope del store
+      },
+      _max: { created_at: true },
+      _sum: { grand_total: true },
+      _count: { id: true },
+    });
+
+    const customerIds = orders
+      .map((o) => o.customer_id)
+      .filter(Boolean) as number[];
+
+    const customers = await this.prisma.users.findMany({
+      where: { id: { in: customerIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        document_number: true,
+        created_at: true,
+      },
+    });
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+    const now = new Date();
+
+    return orders
+      .map((o) => {
+        const customerId = o.customer_id as number;
+        const customer = customerMap.get(customerId);
+        const customerName = customer
+          ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+          : '';
+        const lastOrder = o._max.created_at;
+        const days = lastOrder
+          ? Math.floor((now.getTime() - lastOrder.getTime()) / 86400000)
+          : null;
+        const bucket =
+          days === null
+            ? 'sin-orden'
+            : days <= 30
+              ? '0-30'
+              : days <= 60
+                ? '31-60'
+                : days <= 90
+                  ? '61-90'
+                  : '90+';
+        return {
+          customer_id: customerId,
+          customer_name: customerName,
+          customer_email: customer?.email ?? '',
+          customer_document: customer?.document_number ?? '',
+          // RAW Date — el emitter la formatea con la TZ de la tienda.
+          customer_since: customer?.created_at ?? null,
+          last_order_date: lastOrder,
+          days_since_last_order: days,
+          aging_bucket: bucket,
+          total_orders: o._count.id ?? 0,
+          lifetime_value:
+            o._sum.grand_total != null
+              ? Math.round(Number(o._sum.grand_total) * 100) / 100
+              : 0,
+        };
+      })
+      .sort(
+        (a, b) =>
+          (b.days_since_last_order ?? 0) - (a.days_since_last_order ?? 0),
+      );
   }
 }
