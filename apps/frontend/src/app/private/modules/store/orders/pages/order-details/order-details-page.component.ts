@@ -59,6 +59,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
+import { InvoicingService } from '../../../invoicing/services/invoicing.service';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -1056,6 +1057,12 @@ export class OrderDetailsPageComponent {
   private ticketService = inject(PosTicketService);
   private orderTicketService = inject(OrderTicketService);
   private posShippingService = inject(PosShippingService);
+  // Plan F5 — `POST /store/invoicing/from-sales-order/:id` existe en el backend
+  // y no tenía botón en el frontend: la tienda creaba el pedido pero nunca
+  // emitía la factura de venta. Sale sólo si la orden NO tiene ya una
+  // `sales_invoice` aceptada — reintentar una emisión gastaría un consecutivo
+  // autorizado ante la DIAN.
+  private invoicingService = inject(InvoicingService);
   // Plan KDS fire-flows (F3): manual selective fire for online orders
   // with `prepared` items that were never auto-fired (the auto-fire
   // runs in the payment $transaction; for orders paid before this
@@ -2876,6 +2883,42 @@ export class OrderDetailsPageComponent {
       },
       error: (err: any) => {
         this.toastService.error(err?.message || 'No se pudo finalizar la orden');
+      },
+    });
+  }
+
+  /**
+   * Plan F5 — emite la `sales_invoice` de venta desde la orden.
+   *
+   * Sólo se muestra el botón cuando la orden NO tiene ya una factura de venta
+   * aceptada: reintentar una emisión gastaría un consecutivo autorizado
+   * ante la DIAN, que es irrecuperable. El backend hace su propia guarda,
+   * pero el botón desaparece del UI para que el operador no descubra el
+   * rechazo con un mensaje genérico.
+   */
+  hasSalesInvoice = computed(() => {
+    const order = this.order();
+    return !!order?.invoices?.some((i) => i.invoice_type === 'sales_invoice');
+  });
+
+  isEmittingInvoice = signal(false);
+
+  createInvoiceFromOrder(): void {
+    if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
+    this.isEmittingInvoice.set(true);
+    this.invoicingService.createFromSalesOrder(this.orderId).subscribe({
+      next: (response) => {
+        this.isEmittingInvoice.set(false);
+        if (response?.success) {
+          this.toastService.success('Factura de venta emitida');
+          this.loadData();
+        }
+      },
+      error: (err: any) => {
+        this.isEmittingInvoice.set(false);
+        this.toastService.error(
+          err?.message || 'No se pudo emitir la factura de venta',
+        );
       },
     });
   }

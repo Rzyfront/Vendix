@@ -1227,7 +1227,38 @@
             />
           </app-card>
 
-          <!-- 5. FLOW METADATA CARDS -->
+          <!-- 5. FACTURA ELECTRÓNICA -->
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Factura Electrónica
+            </h2>
+            @if (hasSalesInvoice()) {
+              <p class="text-xs sm:text-sm text-gray-700">
+                Esta orden ya tiene una factura de venta emitida.
+              </p>
+            } @else {
+              <p class="text-xs sm:text-sm text-gray-700 mb-3">
+                Emite la factura electrónica de venta con los datos de esta
+                orden. Cada intento reserva un consecutivo autorizado ante la
+                DIAN, así que el botón sólo aparece mientras la orden no
+                tenga ya una factura aceptada.
+              </p>
+              <app-button
+                variant="primary"
+                size="md"
+                [loading]="isEmittingInvoice()"
+                [disabled]="isEmittingInvoice()"
+                (clicked)="createInvoiceFromOrder()"
+              >
+                <app-icon slot="icon" name="receipt" [size]="14" />
+                Emitir factura electrónica
+              </app-button>
+            }
+          </app-card>
+
+          <!-- 6. FLOW METADATA CARDS -->
 
           <!-- Shipping Info Card -->
           @if (
