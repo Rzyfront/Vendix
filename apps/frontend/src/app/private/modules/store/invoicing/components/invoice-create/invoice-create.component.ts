@@ -102,6 +102,10 @@ import { InvoiceResolutionBannerComponent } from './invoice-resolution-banner.co
 import { InvoiceLineTaxesComponent } from './invoice-line-taxes.component';
 import { InvoiceTaxCatalogService } from './invoice-tax-catalog.service';
 import {
+  InvoiceAiuSettings,
+  InvoiceAiuSettingsService,
+} from './invoice-aiu-settings.service';
+import {
   InvoiceWithholdingCatalogService,
   WithholdingConceptOption,
 } from './invoice-withholding-catalog.service';
@@ -944,22 +948,94 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               (expandedChange)="setSection('aiu', $event)"
             >
               @if (!isAiu()) {
-                <p class="text-sm text-[var(--color-text-secondary)]">
-                  El documento no está declarado como AIU. Cambia el tipo de
-                  operación a <strong>AIU (09)</strong> en la sección Documento
-                  para marcar cada línea como administración, imprevistos o
-                  utilidad.
-                </p>
+                <div
+                  class="flex items-start gap-3 rounded-xl border border-dashed border-border bg-[var(--color-surface)] px-4 py-3.5"
+                >
+                  <div
+                    class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-background)] text-[var(--color-text-secondary)]"
+                  >
+                    <app-icon name="calculator" [size]="18" />
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-text-primary">
+                      El documento no está declarado como AIU
+                    </p>
+                    <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+                      Cambia el tipo de operación a
+                      <strong class="text-text-primary">AIU (09)</strong> en la
+                      sección Documento para marcar cada línea como
+                      administración, imprevistos o utilidad.
+                    </p>
+                  </div>
+                </div>
               } @else {
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                @if (aiuGuidance(); as guide) {
+                  <!-- Régimen efectivo de la tienda: qué se grava y por qué -->
+                  <div
+                    class="rounded-xl border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-4 py-3.5"
+                  >
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        class="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-primary)]/12 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-primary)]"
+                      >
+                        <app-icon name="scale" [size]="12" />
+                        {{ guide.regimeLabel }}
+                      </span>
+                      <span
+                        class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] font-medium text-text-primary ring-1 ring-border"
+                      >
+                        Base gravable: {{ guide.taxableLabel }}
+                      </span>
+                      @if (guide.isDefault) {
+                        <span
+                          class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] ring-1 ring-border"
+                          title="La tienda nunca eligió régimen. Se aplica el default conservador, que declara MÁS IVA."
+                        >
+                          Valor por defecto
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                      {{ guide.regimeCitation }}
+                    </p>
+                    <p class="mt-2 text-xs leading-relaxed text-text-primary">
+                      {{ guide.instruction }}
+                    </p>
+                    @if (guide.minimumBase) {
+                      <p
+                        class="mt-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                      >
+                        {{ guide.minimumBase }}
+                      </p>
+                    }
+                    <p
+                      class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
+                    >
+                      El régimen se elige en Ajustes → Facturación → AIU. Cuál
+                      aplica lo decide el objeto del contrato, no una preferencia
+                      del negocio.
+                    </p>
+                  </div>
+                } @else {
+                  <div
+                    class="h-20 animate-pulse rounded-xl bg-[var(--color-surface)]"
+                  ></div>
+                }
+
+                <!-- Desglose por componente -->
+                <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   @for (row of aiuBreakdown(); track row.key) {
                     <div
-                      class="rounded-lg border border-border p-2 bg-[var(--color-surface)]"
+                      class="rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
                     >
-                      <p class="text-xs text-[var(--color-text-secondary)]">
+                      <p
+                        class="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                      >
                         {{ row.label }}
                       </p>
-                      <p class="text-sm font-semibold text-text-primary">
+                      <p
+                        class="mt-0.5 text-sm font-semibold text-text-primary tabular-nums"
+                      >
                         {{ formatCurrency(row.amount) }}
                       </p>
                     </div>
@@ -967,18 +1043,49 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </div>
 
                 @if (aiuUnassigned() > 0) {
-                  <p class="mt-2 text-xs text-error">
-                    Hay {{ aiuUnassigned() }} línea(s) sin componente AIU. La
-                    DIAN valida la coherencia entre el
-                    <code>CustomizationID</code> 09 y el desglose de las líneas:
-                    una línea sin marcar hace que rechace el documento entero.
-                  </p>
+                  <div
+                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="15"
+                      class="mt-0.5 flex-shrink-0 text-error"
+                    />
+                    <p class="text-xs leading-relaxed text-error">
+                      Hay {{ aiuUnassigned() }} línea(s) sin componente AIU. La
+                      DIAN valida la coherencia entre el
+                      <code>CustomizationID</code> 09 y el desglose de las
+                      líneas: una línea sin marcar hace que rechace el documento
+                      entero.
+                    </p>
+                  </div>
                 }
-                <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
-                  En el régimen AIU la base gravable del IVA es únicamente la
-                  utilidad. Declara el impuesto sobre las líneas de utilidad y
-                  deja sin impuesto las de administración e imprevistos.
-                </p>
+
+                @if (aiuNoteBlocked()) {
+                  <div
+                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="15"
+                      class="mt-0.5 flex-shrink-0 text-error"
+                    />
+                    <div class="min-w-0">
+                      <p class="text-xs font-semibold text-error">
+                        Falta el objeto del contrato AIU
+                      </p>
+                      <p class="mt-0.5 text-xs leading-relaxed text-error">
+                        La regla CAV03 exige que la línea de Administración lleve
+                        una nota que empiece por «{{ aiuSettings()?.note_prefix
+                        }}» y mida al menos
+                        {{ aiuSettings()?.note_min_length }} caracteres.
+                        Descríbelo en Ajustes → Facturación → AIU: sin eso la
+                        emisión se rechaza y el documento no llega a tomar
+                        consecutivo.
+                      </p>
+                    </div>
+                  </div>
+                }
               }
             </vendix-invoice-form-section>
 
@@ -1522,6 +1629,7 @@ export class InvoiceCreateComponent {
   private readonly productsService = inject(ProductsService);
   private readonly customersService = inject(CustomersService);
   private readonly taxCatalog = inject(InvoiceTaxCatalogService);
+  private readonly aiuSettingsService = inject(InvoiceAiuSettingsService);
   private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
   private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
@@ -1774,6 +1882,16 @@ export class InvoiceCreateComponent {
   /** Conceptos de `withholding_concepts` del tenant, con tarifa en PORCENTAJE. */
   readonly withholdingConcepts = signal<WithholdingConceptOption[]>([]);
 
+  /**
+   * Régimen AIU EFECTIVO de la tienda, o `null` mientras se resuelve.
+   *
+   * Nunca se asume un valor por defecto acá: el instructivo del régimen
+   * equivocado hace que el comerciante grave mal, y con la DIAN aceptando el
+   * documento el error no da síntoma. Mientras es `null` la sección muestra
+   * «resolviendo» en vez de arriesgar una instrucción.
+   */
+  readonly aiuSettings = signal<InvoiceAiuSettings | null>(null);
+
   /** Última consulta a la TRM oficial, o `null` si aún no se ha pedido. */
   readonly exchangeRateQuote = signal<ExchangeRateQuote | null>(null);
   readonly loadingExchangeRate = signal(false);
@@ -1827,6 +1945,7 @@ export class InvoiceCreateComponent {
   private readonly productsById = new Map<number, Product>();
   private productsLoaded = false;
   private taxesLoaded = false;
+  private aiuSettingsLoaded = false;
   private withholdingConceptsLoaded = false;
 
   readonly pickedProductIds = computed<number[]>(() =>
@@ -1970,6 +2089,75 @@ export class InvoiceCreateComponent {
   readonly aiuUnassigned = computed(
     () => this.itemsValue().filter((item) => !item.aiu_component).length,
   );
+
+  /**
+   * Instructivo del régimen AIU, derivado de la configuración REAL de la
+   * tienda.
+   *
+   * Antes esta guía era un texto fijo que afirmaba «la base gravable es
+   * únicamente la utilidad». Eso es la regla del Decreto 1372/1992, que aplica
+   * a contratos de construcción de inmueble; bajo E.T. art. 462-1 —el default
+   * del sistema, y el régimen de aseo, vigilancia y servicios temporales— la
+   * base es el AIU COMPLETO. El texto fijo instruía activamente a sub-declarar
+   * IVA a toda tienda del 462-1, y como la DIAN acepta el documento el error
+   * no producía ningún síntoma hasta la fiscalización.
+   *
+   * `null` mientras la configuración se resuelve: media instrucción es peor
+   * que ninguna.
+   */
+  readonly aiuGuidance = computed<{
+    regimeLabel: string;
+    regimeCitation: string;
+    taxableLabel: string;
+    instruction: string;
+    minimumBase: string | null;
+    isDefault: boolean;
+  } | null>(() => {
+    const settings = this.aiuSettings();
+    if (!settings) return null;
+
+    if (settings.regime === 'decreto_1372_1992') {
+      return {
+        regimeLabel: 'Decreto 1372/1992',
+        regimeCitation: 'art. 3 — contratos de construcción de inmueble',
+        taxableLabel: 'Sólo Utilidad',
+        instruction:
+          'Declara el impuesto ÚNICAMENTE sobre las líneas de utilidad y deja sin impuesto las de administración e imprevistos: la DIAN rechaza el bloque cac:TaxTotal en las líneas que no hacen parte de la base gravable.',
+        // El piso del 10 % es del 462-1; bajo el decreto no existe, y
+        // mencionarlo acá haría que el comerciante infle una base que la ley
+        // no le exige.
+        minimumBase: null,
+        isDefault: settings.is_default,
+      };
+    }
+
+    return {
+      regimeLabel: 'E.T. art. 462-1',
+      regimeCitation: 'aseo y cafetería, vigilancia, servicios temporales',
+      taxableLabel: 'AIU completo',
+      instruction:
+        'Declara el impuesto sobre las TRES líneas: bajo este régimen la base gravable es el AIU completo (administración + imprevistos + utilidad), no sólo la utilidad.',
+      minimumBase: settings.enforce_minimum_base
+        ? `La base no puede quedar por debajo del ${settings.minimum_base_percent}% del valor del contrato. Si queda por debajo, la emisión se rechaza indicando cuánto falta — el sistema no infla la base en silencio porque eso cambiaría el importe que el cliente firmó.`
+        : null,
+      isDefault: settings.is_default,
+    };
+  });
+
+  /**
+   * Objeto del contrato faltante o demasiado corto.
+   *
+   * La regla CAV03 exige que la nota de la línea de Administración —incluido el
+   * prefijo obligatorio— mida entre 20 y 5.000 caracteres. Es el único
+   * bloqueante de la emisión AIU que el usuario no puede ni adivinar ni
+   * arreglar desde este modal: el objeto del contrato vive en la configuración
+   * de la tienda. Sin este aviso captura la factura entera y sólo descubre el
+   * problema al validar.
+   */
+  readonly aiuNoteBlocked = computed<boolean>(() => {
+    const settings = this.aiuSettings();
+    return !!settings && !settings.note_valid;
+  });
 
   /** Retención efectiva: la calculada por conceptos, o la escrita a mano. */
   readonly effectiveWithholding = computed<number>(() => {
@@ -2254,6 +2442,7 @@ export class InvoiceCreateComponent {
     this.checkingEmitReadiness.set(false);
 
     this.loadTaxCatalog();
+    this.loadAiuSettings();
     this.loadWithholdingConcepts();
     this.loadProducts();
     if (this.itemsArray.length === 0) {
@@ -2268,6 +2457,23 @@ export class InvoiceCreateComponent {
       .load()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((taxes) => this.availableTaxes.set(taxes));
+  }
+
+  /**
+   * Configuración AIU de la tienda.
+   *
+   * Se pide SIEMPRE al abrir, no sólo cuando el documento ya está marcado como
+   * AIU: el usuario puede cambiar el tipo de operación en cualquier momento y
+   * el instructivo tiene que estar listo cuando lo haga, no una petición
+   * después.
+   */
+  private loadAiuSettings(): void {
+    if (this.aiuSettingsLoaded) return;
+    this.aiuSettingsLoaded = true;
+    this.aiuSettingsService
+      .load()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((settings) => this.aiuSettings.set(settings));
   }
 
   // ── Tasa de cambio oficial ──────────────────────────────────

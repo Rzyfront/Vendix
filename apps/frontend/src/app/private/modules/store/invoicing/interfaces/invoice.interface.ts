@@ -43,7 +43,23 @@ export interface Invoice {
   customer_tax_id?: string;
   customer_email?: string;
   customer_phone?: string;
-  customer_address?: string;
+  /**
+   * JSONB. El histórico guardó aquí tanto un objeto con municipio y país como
+   * una cadena suelta con la línea de dirección, así que se declara ancho y se
+   * aplana en el borde — leer `.city` de un `string` devuelve `undefined` sin
+   * un solo error.
+   */
+  customer_address?: string | Record<string, unknown> | null;
+
+  /**
+   * Identidad fiscal CONGELADA al emitir (Fase 1.1 del plan). Es un snapshot:
+   * lo que viajó a la DIAN, no lo que dice hoy la ficha del cliente.
+   */
+  customer_document_type?: string | null;
+  customer_verification_digit?: string | number | null;
+  customer_tax_regime?: string | null;
+  customer_fiscal_responsibilities?: string | string[] | null;
+
   subtotal_amount: number;
   discount_amount: number;
   tax_amount: number;
@@ -75,6 +91,25 @@ export interface Invoice {
   items?: InvoiceItem[];
   taxes?: InvoiceTax[];
   resolution?: InvoiceResolution;
+
+  /**
+   * FICHA VIVA del adquiriente, distinta del SNAPSHOT (`customer_name`,
+   * `customer_tax_id`…) que congela la factura al emitirse.
+   *
+   * Las dos conviven a propósito y hay que leerlas en ese orden: el snapshot es
+   * lo que viajó a la DIAN y manda para cualquier cosa fiscal; la ficha viva es
+   * la que sabe cómo se llama hoy el cliente. Una factura creada desde el modal
+   * sin escribir el nombre a mano tiene el snapshot en `null` y el cliente
+   * asociado por `customer_id`: leer sólo el snapshot pinta una factura «Sin
+   * cliente» que sí tiene cliente.
+   */
+  customer?: {
+    id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 
   // DIAN fields
   cufe?: string;
@@ -152,6 +187,41 @@ export interface Invoice {
    * sobre la presencia de la clave.
    */
   retry_status?: InvoiceRetryStatus | null;
+
+  /**
+   * Moneda del documento. SIEMPRE `COP`: el Art. 73 de la Res. 000042/2020
+   * exige peso colombiano, y `DocumentCurrencyCode` distinto de COP es rechazo
+   * directo. Una operación pactada en divisa se declara aparte, con los cuatro
+   * campos de abajo.
+   */
+  currency?: string;
+
+  /** Divisa en que se pactó la operación (ISO 4217), si no fue COP. */
+  foreign_currency?: string | null;
+
+  /** El total en esa divisa, el que ve el cliente en su contrato. */
+  foreign_total_amount?: number | string | null;
+
+  /**
+   * Cuántos pesos vale UNA unidad de la divisa (la TRM). Va al XML como
+   * `cbc:CalculationRate`, y el anexo RECHAZA el valor `1.00`: si la tasa fuera
+   * uno, la operación no sería en divisa.
+   */
+  exchange_rate?: number | string | null;
+
+  /** El día al que corresponde esa tasa (`cbc:Date` del grupo de cambio). */
+  exchange_rate_date?: string | null;
+
+  /**
+   * `CustomizationID` — tipo de operación DIAN. `'10'` estándar, `'09'` AIU,
+   * `'11'` mandatos, `'12'` transporte. Tiene que ser coherente con el
+   * contenido: declarar `'10'` sobre líneas con `aiu_component` es un documento
+   * que la DIAN rechaza.
+   */
+  operation_type?: string | null;
+
+  /** Flete facturado, ya incluido en `total_amount`. */
+  shipping_amount?: number | string | null;
 }
 
 /**
@@ -401,7 +471,45 @@ export interface InvoiceItem {
   // stock units consumed when packaging expands the sold quantity.
   applied_price_tier_name?: string | null;
   stock_units_consumed?: number | null;
+
+  /**
+   * Componente AIU de la línea (Anexo 1.9 §CAV03/§CAX01). `null` en toda línea
+   * que no participa de un contrato AIU.
+   *
+   * NO es decorativo: gobierna qué se grava. Bajo el Art. 462-1 ET la base es
+   * el AIU completo; bajo el Decreto 1372/1992 sólo la Utilidad. Las líneas
+   * fuera de base gravable se emiten SIN `cac:TaxTotal`, así que una línea
+   * marcada como `imprevistos` con impuesto sería un documento que la DIAN
+   * rechaza — y sin pintar la marca en pantalla nadie puede verlo.
+   */
+  aiu_component?: AiuComponent | null;
+
+  /**
+   * Unidad de medida UN/ECE del `@unitCode` (`EA`, `KGM`, `MTR`…). `null`
+   * cuando la línea no la declaró: el emisor cae a `EA`, que en una línea por
+   * pieza es correcto y en una línea por metros no.
+   */
+  unit_code?: string | null;
+
+  /**
+   * Subcuenta PUC congelada al facturar. Es un SNAPSHOT a propósito: que el
+   * producto cambie de cuenta mañana no puede reescribir un asiento ya
+   * contabilizado. `null` ⇒ la línea cae a la cuenta de ingreso por defecto.
+   */
+  account_code?: string | null;
+
+  /**
+   * Cuántas unidades de stock representa una unidad de precio. Lo que evita la
+   * sobrefacturación de QUI-648 (queso a $28.000/kg con stock en gramos).
+   */
+  price_unit_quantity?: number | string | null;
+
+  /** El precio de la línea ya trae el impuesto dentro. */
+  is_inclusive?: boolean | null;
 }
+
+/** Los tres componentes de un contrato AIU. */
+export type AiuComponent = 'administracion' | 'imprevistos' | 'utilidad';
 
 export interface InvoiceTax {
   id: number;

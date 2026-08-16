@@ -46,6 +46,51 @@ import {
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
+/**
+ * COLOR DEL ESTADO DE LA FACTURA, en hexadecimal de 7 caracteres.
+ *
+ * ─── POR QUÉ HEX Y POR QUÉ `type: 'custom'` ─────────────────────────────────
+ *
+ * Antes esta tabla declaraba `type: 'status'` con nombres semánticos
+ * (`'info'`, `'success'`, `'danger'`). Las dos superficies lo ignoraban, cada
+ * una a su manera y sin un solo error:
+ *
+ * · **Escritorio** (`table.component.ts`) sólo mira `colorMap` cuando el tipo
+ *   es `'custom'`. Con `'status'` resuelve la clase contra un diccionario
+ *   interno fijo que NO conoce `validated`, `sent` ni `accepted` — es decir,
+ *   los tres estados más frecuentes de una factura caían en `status-default` y
+ *   se pintaban grises, indistinguibles de un borrador.
+ * · **Móvil** (`item-list.component.ts`) sí lee el `colorMap`, pero escribe el
+ *   valor crudo en `background-color` y `color`. `'success'` no es un color
+ *   CSS válido: el navegador descarta la declaración y el badge queda sin
+ *   pintar. Además la variante suave sólo se compone cuando el valor es un hex
+ *   de 7 caracteres (`#RRGGBB` + alfa `26`/`40`).
+ *
+ * De ahí las dos reglas: `type: 'custom'` y hex de 7 caracteres. Un color en
+ * `#RGB`, `rgb()` o un nombre CSS válido pintaría el texto pero dejaría el
+ * fondo transparente.
+ *
+ * ─── POR QUÉ ESTOS COLORES ──────────────────────────────────────────────────
+ *
+ * El estado de una factura electrónica es información fiscal, no decoración:
+ * `accepted` es el único que significa que la DIAN validó el documento, y
+ * `rejected` el único que significa que hay un consecutivo autorizado quemado.
+ * Se separan en verde y rojo sin ambigüedad. `validated` y `sent` son etapas
+ * intermedias —el documento existe y aún no hay veredicto— y comparten el azul.
+ * `voided` y `cancelled` no son lo mismo: anular es un acto fiscal con nota
+ * crédito de por medio, cancelar es descartar un borrador, así que el primero
+ * va en ámbar y el segundo en gris.
+ */
+const INVOICE_STATUS_COLORS: Record<string, string> = {
+  draft: '#6b7280',
+  validated: '#3b82f6',
+  sent: '#3b82f6',
+  accepted: '#22c55e',
+  rejected: '#ef4444',
+  voided: '#f59e0b',
+  cancelled: '#9ca3af',
+};
+
 @Component({
   selector: 'app-invoice-list',
   standalone: true,
@@ -193,16 +238,8 @@ export class InvoiceListComponent {
       align: 'center',
       priority: 1,
       badgeConfig: {
-        type: 'status',
-        colorMap: {
-          draft: 'default',
-          validated: 'info',
-          sent: 'info',
-          accepted: 'success',
-          rejected: 'danger',
-          cancelled: 'warn',
-          voided: 'default',
-        },
+        type: 'custom',
+        colorMap: INVOICE_STATUS_COLORS,
       },
       transform: (val: any) => this.getStatusLabel(val),
     },
@@ -223,16 +260,8 @@ export class InvoiceListComponent {
     subtitleTransform: (item: any) => item?.customer_name || 'Sin cliente',
     badgeKey: 'status',
     badgeConfig: {
-      type: 'status',
-      colorMap: {
-        draft: 'default',
-        validated: 'info',
-        sent: 'info',
-        accepted: 'success',
-        rejected: 'danger',
-        cancelled: 'warn',
-        voided: 'default',
-      },
+      type: 'custom',
+      colorMap: INVOICE_STATUS_COLORS,
     },
     badgeTransform: (val: any) => this.getStatusLabel(val),
     footerKey: 'total_amount',

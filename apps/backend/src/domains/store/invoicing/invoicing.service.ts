@@ -2536,6 +2536,69 @@ export class InvoicingService {
     );
   }
 
+  /**
+   * Vista de SÓLO LECTURA de la configuración AIU efectiva, para que el
+   * formulario instruya al comerciante con la regla que de verdad se le va a
+   * aplicar.
+   *
+   * Devuelve los valores YA RESUELTOS con los mismos defaults del motor
+   * (`resolveAiuContext` + `InvoiceCalculatorService`), no lo crudo del JSON:
+   * una tienda que nunca tocó la sección debe ver `et_462_1` con piso del 10 %,
+   * que es lo que efectivamente va a calcular, y no tres campos vacíos que
+   * sugieren que el AIU no está configurado.
+   *
+   * `note_valid` anticipa la única validación que hoy bloquea la emisión sin
+   * que el usuario pueda adivinarla desde el modal: la regla CAV03 exige que la
+   * nota de la línea de Administración —prefijo obligatorio incluido— mida
+   * entre 20 y 5.000 caracteres, y el objeto del contrato vive en la
+   * configuración de la tienda, no en el documento. Sin este dato el usuario
+   * captura la factura completa y sólo descubre el problema al validar.
+   *
+   * No expone nada sensible: el objeto del contrato es un texto que viaja en el
+   * XML público de la factura.
+   */
+  async getAiuSettingsView(): Promise<{
+    regime: 'et_462_1' | 'decreto_1372_1992';
+    contract_object: string;
+    enforce_minimum_base: boolean;
+    minimum_base_percent: number;
+    /** Cadena exacta que iría en `cbc:Note` de la línea de Administración. */
+    note: string;
+    note_length: number;
+    note_valid: boolean;
+    note_min_length: number;
+    note_max_length: number;
+    note_prefix: string;
+    /** `true` cuando la tienda nunca guardó la sección `invoicing.aiu`. */
+    is_default: boolean;
+  }> {
+    const context = this.getContext();
+    const settings = await this.loadAiuSettings(context.store_id);
+
+    const regime = settings.regime ?? 'et_462_1';
+    const contract_object = (settings.contract_object || '').trim();
+    const note = buildAiuNote(contract_object);
+
+    return {
+      regime,
+      contract_object,
+      // `!== false` y no `?? true`: replica literalmente la condición del
+      // calculador (`aiu.enforce_minimum_base !== false`), donde cualquier
+      // valor distinto de `false` explícito activa el piso.
+      enforce_minimum_base: settings.enforce_minimum_base !== false,
+      minimum_base_percent: Number(settings.minimum_base_percent ?? 10),
+      note,
+      note_length: note.length,
+      note_valid:
+        note.length >= DIAN_AIU_NOTE_MIN_LENGTH &&
+        note.length <= DIAN_AIU_NOTE_MAX_LENGTH,
+      note_min_length: DIAN_AIU_NOTE_MIN_LENGTH,
+      note_max_length: DIAN_AIU_NOTE_MAX_LENGTH,
+      note_prefix: DIAN_AIU_NOTE_PREFIX,
+      is_default: settings.regime === undefined,
+    };
+  }
+
   private async loadAiuSettings(store_id?: number): Promise<AiuSettings> {
     if (typeof store_id !== 'number') return {};
 

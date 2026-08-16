@@ -108,6 +108,29 @@ export class InvoicingController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Configuración AIU EFECTIVA de la tienda, resuelta con los mismos defaults
+   * que aplica el motor de cálculo.
+   *
+   * Existe porque la base gravable AIU es indeducible desde el documento: bajo
+   * E.T. art. 462-1 grava el AIU completo y bajo Decreto 1372/1992 grava sólo
+   * la Utilidad, y el formulario no puede instruir al comerciante sin saber
+   * cuál rige. Un texto fijo en la UI —cualquiera de los dos— le dice a la
+   * mitad de las tiendas que graven mal, y como la DIAN acepta el documento el
+   * error sólo aparece en una fiscalización.
+   *
+   * `invoicing:read` y NO `store:settings:read` a propósito: quien captura una
+   * factura no necesariamente administra la tienda, y colgar esta lectura del
+   * permiso de configuración dejaría el aviso en blanco justo para el perfil
+   * que más lo necesita.
+   */
+  @Get('aiu-settings')
+  @Permissions('invoicing:read')
+  async getAiuSettings() {
+    const result = await this.invoicing_service.getAiuSettingsView();
+    return this.response_service.success(result);
+  }
+
   @Post()
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)

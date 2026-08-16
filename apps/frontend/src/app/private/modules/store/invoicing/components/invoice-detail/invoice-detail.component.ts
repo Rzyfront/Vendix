@@ -292,53 +292,191 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             </div>
           }
 
-          <!-- Customer Info -->
-          <div class="mb-4 space-y-2">
-            <h4 class="text-sm font-semibold text-text-primary">Datos del Cliente</h4>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-              <div>
-                <span class="text-text-secondary">Nombre:</span>
-                <span class="ml-1 text-text-primary">{{ inv.customer_name || '-' }}</span>
+          <!-- ── ADQUIRIENTE ────────────────────────────────────────────────
+               Ficha en tarjeta, no cuatro «Etiqueta: valor» sueltos. Y con
+               estado vacío REAL: antes, una factura cuyo snapshot estaba en
+               null pintaba cuatro guiones seguidos aunque tuviera cliente
+               asociado — se veía rota y no decía nada. Ahora o hay ficha, o hay
+               una frase que explica que es una venta de mostrador.
+          -->
+          <section class="mb-4">
+            <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
+              <app-icon name="user" [size]="15" class="text-text-secondary" />
+              Adquiriente
+            </h4>
+
+            @if (hasAcquirer()) {
+              <div class="rounded-xl border border-border bg-surface-secondary/40 p-4">
+                <div class="flex items-start gap-3">
+                  <div
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full
+                           bg-primary/10 text-sm font-semibold text-primary"
+                  >
+                    {{ acquirerInitials() }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-semibold text-text-primary">
+                      {{ acquirerName() }}
+                    </p>
+                    @if (acquirerDocument(); as doc) {
+                      <p class="text-xs text-text-secondary">{{ doc }}</p>
+                    }
+                  </div>
+                </div>
+
+                @if (acquirerEmail() || acquirerPhone() || inv.customer_address) {
+                  <dl class="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 border-t border-border pt-3 sm:grid-cols-2">
+                    @if (acquirerEmail(); as mail) {
+                      <div class="min-w-0">
+                        <dt class="text-[11px] uppercase tracking-wide text-text-secondary">Correo</dt>
+                        <dd class="truncate text-sm text-text-primary">{{ mail }}</dd>
+                      </div>
+                    }
+                    @if (acquirerPhone(); as phone) {
+                      <div class="min-w-0">
+                        <dt class="text-[11px] uppercase tracking-wide text-text-secondary">Teléfono</dt>
+                        <dd class="truncate text-sm text-text-primary">{{ phone }}</dd>
+                      </div>
+                    }
+                    @if (acquirerAddress(); as addr) {
+                      <div class="min-w-0 sm:col-span-2">
+                        <dt class="text-[11px] uppercase tracking-wide text-text-secondary">Dirección</dt>
+                        <dd class="text-sm text-text-primary">{{ addr }}</dd>
+                      </div>
+                    }
+                  </dl>
+                }
               </div>
-              <div>
-                <span class="text-text-secondary">NIT/Cédula:</span>
-                <span class="ml-1 text-text-primary">{{ inv.customer_tax_id || '-' }}</span>
+            } @else {
+              <div
+                class="flex items-start gap-2 rounded-xl border border-dashed border-border
+                       bg-surface-secondary/30 p-4"
+              >
+                <app-icon name="users" [size]="16" class="mt-0.5 text-text-secondary" />
+                <div>
+                  <p class="text-sm font-medium text-text-primary">Venta a consumidor final</p>
+                  <p class="text-xs text-text-secondary">
+                    El documento no identifica adquiriente, así que viaja con el
+                    <code class="rounded bg-surface px-1">222222222222</code> que la DIAN reserva
+                    para el mostrador. Es válido en caja; una factura nominativa sí tiene que
+                    identificarlo.
+                  </p>
+                </div>
               </div>
-              <div>
-                <span class="text-text-secondary">Correo Electrónico:</span>
-                <span class="ml-1 text-text-primary">{{ inv.customer_email || '-' }}</span>
-              </div>
-              <div>
-                <span class="text-text-secondary">Teléfono:</span>
-                <span class="ml-1 text-text-primary">{{ inv.customer_phone || '-' }}</span>
-              </div>
+            }
+          </section>
+
+          <!-- ── FECHAS, MONEDA Y TIPO DE OPERACIÓN ─────────────────────────
+               La divisa se pinta aquí y no en los totales porque no es un
+               importe: es una DECLARACIÓN sobre el documento. El total siempre
+               va en pesos (Art. 73 Res. 000042/2020); lo que la operación
+               pactó en otra moneda se dice al lado, con su TRM y su fecha.
+          -->
+          <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="rounded-lg border border-border px-3 py-2">
+              <p class="text-[11px] uppercase tracking-wide text-text-secondary">Emisión</p>
+              <p class="text-sm font-medium text-text-primary">
+                {{ inv.issue_date | date:'dd/MM/yyyy':'UTC' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-border px-3 py-2">
+              <p class="text-[11px] uppercase tracking-wide text-text-secondary">Vencimiento</p>
+              <p class="text-sm font-medium text-text-primary">
+                {{ inv.due_date ? (inv.due_date | date:'dd/MM/yyyy':'UTC') : 'Contado' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-border px-3 py-2">
+              <p class="text-[11px] uppercase tracking-wide text-text-secondary">Moneda</p>
+              <p class="text-sm font-medium text-text-primary">{{ inv.currency || 'COP' }}</p>
+            </div>
+            <div class="rounded-lg border border-border px-3 py-2">
+              <p class="text-[11px] uppercase tracking-wide text-text-secondary">Operación</p>
+              <p class="text-sm font-medium text-text-primary">{{ operationTypeLabel() }}</p>
             </div>
           </div>
-          <!-- Dates -->
-          <div class="mb-4 grid grid-cols-2 gap-2 text-sm">
-            <div>
-              <span class="text-text-secondary">Fecha Emisión:</span>
-              <span class="ml-1 text-text-primary">{{ inv.issue_date | date:'dd/MM/yyyy':'UTC' }}</span>
+
+          @if (exchangeDeclaration(); as fx) {
+            <div
+              class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border
+                     border-[var(--color-info)]/30 bg-[var(--color-info-light)] px-3 py-2"
+            >
+              <div class="flex items-center gap-2">
+                <app-icon name="refresh-cw" [size]="14" class="text-[var(--color-info)]" />
+                <span class="text-xs font-semibold text-[var(--color-info)]">
+                  Operación pactada en {{ fx.currency }}
+                </span>
+              </div>
+              @if (fx.foreignTotal) {
+                <span class="text-xs text-[var(--color-info)]">Valor: {{ fx.foreignTotal }}</span>
+              }
+              @if (fx.rate) {
+                <span class="text-xs text-[var(--color-info)]">TRM: {{ fx.rate }}</span>
+              }
+              @if (fx.date) {
+                <span class="text-xs text-[var(--color-info)]">
+                  del {{ fx.date | date:'dd/MM/yyyy':'UTC' }}
+                </span>
+              }
             </div>
-            <div>
-              <span class="text-text-secondary">Fecha Vencimiento:</span>
-              <span class="ml-1 text-text-primary">{{ inv.due_date ? (inv.due_date | date:'dd/MM/yyyy':'UTC') : '-' }}</span>
-            </div>
-          </div>
-          <!-- Resolution.
-               Se pintan prefijo, numero y rango — NUNCA «technical_key«. La
-               ClTec es el secreto con el que se calcula el CUFE: el backend la
-               manda dentro de «resolution« porque hace «include« sin «select«,
-               pero mostrarla en pantalla la publica a cualquiera que abra una
-               factura. -->
-          @if (inv.resolution) {
-            <div class="mb-4 text-sm p-2 bg-[var(--color-info-light)] rounded-lg">
-              <span class="text-[var(--color-info)] font-medium">Resolución:</span>
-              <span class="ml-1 text-[var(--color-info)]">
-                {{ inv.resolution?.prefix }} {{ inv.resolution?.resolution_number }}
-                ({{ inv.resolution?.range_from }} - {{ inv.resolution?.range_to }})
-              </span>
-            </div>
+          }
+
+          <!-- ── RESOLUCIÓN — INFORMATIVA, NUNCA UN SELECTOR ────────────────
+               Se pintan prefijo, número, rango, consecutivo consumido y
+               vigencia — NUNCA «technical_key». La ClTec es el secreto con el
+               que se calcula el CUFE; el backend ya la excluye del payload
+               (RESOLUTION_PUBLIC_SELECT) y aquí no se reintroduce.
+
+               El rango y la vigencia se pintan con su estado: una resolución al
+               95% de su numeración o a tres semanas de vencer es una emisión
+               que va a fallar pronto, y el sitio donde el comerciante lo puede
+               ver es esta factura.
+          -->
+          @if (resolutionBanner(); as res) {
+            <section
+              class="mb-4 rounded-xl border border-[var(--color-info)]/30
+                     bg-[var(--color-info-light)] p-4"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-info)]">
+                    <app-icon name="file-text" [size]="14" />
+                    Resolución DIAN
+                  </p>
+                  <p class="mt-1 text-sm font-semibold text-text-primary">
+                    {{ res.number }}
+                  </p>
+                  <p class="text-xs text-text-secondary">
+                    Prefijo <span class="font-medium text-text-primary">{{ res.prefix }}</span>
+                    · rango {{ res.rangeFrom }}–{{ res.rangeTo }}
+                  </p>
+                </div>
+
+                <div class="flex flex-wrap gap-2">
+                  <span
+                    class="rounded-full px-2.5 py-1 text-xs font-medium"
+                    [ngClass]="res.usageTone"
+                  >
+                    {{ res.usageLabel }}
+                  </span>
+                  <span
+                    class="rounded-full px-2.5 py-1 text-xs font-medium"
+                    [ngClass]="res.validityTone"
+                  >
+                    {{ res.validityLabel }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Barra de consumo: el número autorizado que queda es lo que de
+                   verdad limita cuántas facturas más se pueden emitir. -->
+              <div class="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface">
+                <div
+                  class="h-full rounded-full transition-[width] duration-300"
+                  [ngClass]="res.barTone"
+                  [style.width.%]="res.usedPercent"
+                ></div>
+              </div>
+            </section>
           }
           <!-- Items Table -->
           <div class="mb-4">
@@ -351,7 +489,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     <th class="text-center py-2 px-2 text-text-secondary font-medium">Cant.</th>
                     <th class="text-right py-2 px-2 text-text-secondary font-medium">Precio</th>
                     <th class="text-right py-2 px-2 text-text-secondary font-medium">Desc.</th>
-                    <th class="text-right py-2 px-2 text-text-secondary font-medium">IVA</th>
+                    <!-- «Impuestos», no «IVA»: la columna suma TODO lo que grava
+                         la línea. Rotularla IVA sobre una línea con INC o ICA
+                         hace que el número no cuadre con nada y que nadie sepa
+                         qué impuesto está mirando. -->
+                    <th class="text-right py-2 px-2 text-text-secondary font-medium">Impuestos</th>
                     <th class="text-right py-2 px-2 text-text-secondary font-medium">Total</th>
                   </tr>
                 </thead>
@@ -359,7 +501,29 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   @for (item of lines(); track item.id) {
                     <tr class="border-b border-border">
                       <td class="py-2 px-2 text-text-primary">
-                        <span>{{ item.product_name || item.description }}</span>
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          <span>{{ item.product_name || item.description }}</span>
+                          <!-- La marca AIU decide si la línea se grava y si sale
+                               con «cac:TaxTotal». Sin pintarla, un documento AIU
+                               es indistinguible de uno estándar en pantalla. -->
+                          @if (aiuLabel(item); as aiu) {
+                            <span
+                              class="rounded-full bg-primary/10 px-2 py-0.5 text-[11px]
+                                     font-medium text-primary"
+                              [title]="aiu.hint"
+                            >
+                              {{ aiu.label }}
+                            </span>
+                          }
+                          @if (item.is_inclusive) {
+                            <span
+                              class="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text-secondary"
+                              title="El precio de la línea ya trae el impuesto dentro."
+                            >
+                              IVA incluido
+                            </span>
+                          }
+                        </div>
                         @if (item.applied_price_tier_name) {
                           <span class="block text-xs text-text-secondary">Tarifa: {{ item.applied_price_tier_name }}</span>
                         }
@@ -367,6 +531,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                           <span class="block text-xs text-text-secondary">
                             {{ item.quantity }} paq. = {{ item.stock_units_consumed }} u. (×{{ packagePerUnit(item) }})
                           </span>
+                        }
+                        @if (lineFiscalNote(item); as note) {
+                          <span class="block text-xs text-text-secondary">{{ note }}</span>
                         }
                       </td>
                       <td class="py-2 px-2 text-center text-text-primary">{{ item.quantity }}</td>
@@ -398,32 +565,79 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               </div>
             </div>
           }
-          <!-- Totals -->
-          <div class="border-t border-border pt-3 space-y-1">
-            <div class="flex justify-between text-sm">
-              <span class="text-text-secondary">Subtotal</span>
-              <span class="text-text-primary">{{ formatCurrency(inv.subtotal_amount) }}</span>
-            </div>
-            @if (inv.discount_amount > 0) {
+          <!-- ── TOTALES ────────────────────────────────────────────────────
+               LA RETENCIÓN NO RESTA DEL TOTAL, y esta columna tenía que
+               dejarlo de decir. El Anexo 1.9 §11.9.1 es literal: la validación
+               previa de la DIAN «no incluye en el fragmento
+               <cac:LegalMonetaryTotal/> operaciones con el elemento
+               <cac:WithholdingTaxTotal/>». El backend ya lo respeta —
+               total_amount NO descuenta la retención— pero la pantalla la
+               pintaba con signo menos justo encima del total, de modo que la
+               columna no cuadraba: 1.500.000 + 190.000 − 37.500 ≠ 1.690.000. El
+               comerciante veía una suma rota en el documento que va a la DIAN.
+
+               Ahora el total del documento cierra con lo que suma, y la
+               retención va DEBAJO, separada, con el neto que efectivamente se
+               recauda — que es un dato de tesorería, no del documento fiscal.
+          -->
+          <div class="rounded-xl border border-border bg-surface-secondary/40 p-4">
+            <div class="space-y-1.5">
               <div class="flex justify-between text-sm">
-                <span class="text-text-secondary">Descuentos</span>
-                <span class="text-error">-{{ formatCurrency(inv.discount_amount) }}</span>
+                <span class="text-text-secondary">Subtotal</span>
+                <span class="text-text-primary">{{ formatCurrency(inv.subtotal_amount) }}</span>
+              </div>
+              @if (inv.discount_amount > 0) {
+                <div class="flex justify-between text-sm">
+                  <span class="text-text-secondary">Descuentos</span>
+                  <span class="text-error">−{{ formatCurrency(inv.discount_amount) }}</span>
+                </div>
+              }
+              @if (shippingAmount() > 0) {
+                <div class="flex justify-between text-sm">
+                  <span class="text-text-secondary">Envío</span>
+                  <span class="text-text-primary">{{ formatCurrency(shippingAmount()) }}</span>
+                </div>
+              }
+              <div class="flex justify-between text-sm">
+                <span class="text-text-secondary">Impuestos</span>
+                <span class="text-text-primary">{{ formatCurrency(inv.tax_amount) }}</span>
+              </div>
+            </div>
+
+            <div
+              class="mt-2 flex items-baseline justify-between border-t border-border pt-2"
+            >
+              <span class="text-base font-semibold text-text-primary">Total del documento</span>
+              <span class="text-lg font-bold text-primary">
+                {{ formatCurrency(inv.total_amount) }}
+              </span>
+            </div>
+
+            @if (withholdingAmount() > 0) {
+              <div class="mt-3 space-y-1.5 rounded-lg bg-surface px-3 py-2.5">
+                <div class="flex items-start gap-2">
+                  <app-icon name="info" [size]="14" class="mt-0.5 text-text-secondary" />
+                  <p class="text-xs text-text-secondary">
+                    La retención no descuenta del total facturado: la DIAN valida
+                    <code class="rounded bg-surface-secondary px-1">PayableAmount</code> sin ella
+                    (Anexo 1.9 §11.9.1). Se declara aparte y afecta lo que se recauda, no lo que
+                    se factura.
+                  </p>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-text-secondary">Retenciones declaradas</span>
+                  <span class="font-medium text-warning">
+                    {{ formatCurrency(withholdingAmount()) }}
+                  </span>
+                </div>
+                <div class="flex justify-between border-t border-border pt-1.5 text-sm">
+                  <span class="font-medium text-text-primary">Neto a recaudar</span>
+                  <span class="font-semibold text-text-primary">
+                    {{ formatCurrency(netCollectable()) }}
+                  </span>
+                </div>
               </div>
             }
-            <div class="flex justify-between text-sm">
-              <span class="text-text-secondary">Impuestos</span>
-              <span class="text-text-primary">{{ formatCurrency(inv.tax_amount) }}</span>
-            </div>
-            @if (inv.withholding_amount > 0) {
-              <div class="flex justify-between text-sm">
-                <span class="text-text-secondary">Retenciones</span>
-                <span class="text-error">-{{ formatCurrency(inv.withholding_amount) }}</span>
-              </div>
-            }
-            <div class="flex justify-between text-base font-semibold pt-2 border-t border-border">
-              <span class="text-text-primary">Total</span>
-              <span class="text-primary">{{ formatCurrency(inv.total_amount) }}</span>
-            </div>
           </div>
           <!-- Notes -->
           @if (inv.notes) {
@@ -902,6 +1116,213 @@ export class InvoiceDetailComponent {
     return inv?.invoice_taxes ?? inv?.taxes ?? [];
   });
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // ADQUIRIENTE — snapshot primero, ficha viva después.
+  //
+  // El orden no es capricho: `customer_name` / `customer_tax_id` son lo que
+  // VIAJÓ a la DIAN y lo que hay que mostrar sobre un documento ya emitido,
+  // aunque el cliente se haya renombrado después. La ficha viva sólo rellena lo
+  // que el snapshot dejó en null — que es el caso normal de una factura creada
+  // desde el modal, donde el nombre no se teclea a mano.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  readonly acquirerName = computed(() => {
+    const inv = this.detail();
+    const snapshot = (inv?.customer_name ?? '').trim();
+    if (snapshot) return snapshot;
+    const live = [inv?.customer?.first_name, inv?.customer?.last_name]
+      .map((part) => (part ?? '').trim())
+      .filter(Boolean)
+      .join(' ');
+    return live || '';
+  });
+
+  readonly acquirerDocument = computed(() => {
+    const inv = this.detail();
+    const id = (inv?.customer_tax_id ?? '').trim();
+    if (!id) return '';
+    const dv = (inv?.customer_verification_digit ?? '').toString().trim();
+    const type = (inv?.customer_document_type ?? '').toString().trim();
+    const number = dv ? `${id}-${dv}` : id;
+    return type ? `${type} ${number}` : number;
+  });
+
+  readonly acquirerEmail = computed(() => {
+    const inv = this.detail();
+    return (inv?.customer_email ?? inv?.customer?.email ?? '').trim();
+  });
+
+  readonly acquirerPhone = computed(() => {
+    const inv = this.detail();
+    return (inv?.customer_phone ?? inv?.customer?.phone ?? '').trim();
+  });
+
+  /**
+   * `invoices.customer_address` es JSONB y el histórico guardó ahí tanto un
+   * objeto como una cadena suelta. Se aplana a una línea legible sin leer
+   * propiedades de un `string`, que devolvería `undefined` en silencio.
+   */
+  readonly acquirerAddress = computed(() => {
+    const raw = this.detail()?.customer_address as unknown;
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw.trim();
+    if (typeof raw !== 'object') return '';
+    const addr = raw as Record<string, unknown>;
+    const parts = [
+      addr['address_line'] ?? addr['address_line_1'] ?? addr['address_line1'],
+      addr['city_name'] ?? addr['city'],
+      addr['department_name'] ?? addr['state'],
+    ]
+      .map((part) => (typeof part === 'string' ? part.trim() : ''))
+      .filter(Boolean);
+    return parts.join(', ');
+  });
+
+  readonly hasAcquirer = computed(
+    () =>
+      !!(
+        this.acquirerName() ||
+        this.acquirerDocument() ||
+        this.acquirerEmail() ||
+        this.acquirerPhone()
+      ),
+  );
+
+  readonly acquirerInitials = computed(() => {
+    const name = this.acquirerName();
+    if (!name) return '—';
+    const initials = name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0]?.toUpperCase() ?? '')
+      .join('');
+    return initials || '—';
+  });
+
+  /**
+   * `CustomizationID` en palabras. Un código de dos dígitos en pantalla no le
+   * dice nada a nadie, y este en concreto tiene que ser COHERENTE con las
+   * líneas: `'09'` sobre líneas sin AIU, o `'10'` sobre líneas con AIU, es un
+   * documento que la DIAN rechaza.
+   */
+  readonly operationTypeLabel = computed(() => {
+    const code = (this.detail()?.operation_type ?? '').toString().trim();
+    return InvoiceDetailComponent.OPERATION_TYPES[code] ?? (code || 'Estándar');
+  });
+
+  /**
+   * La declaración de divisa, o `null` cuando la operación fue en pesos.
+   *
+   * Se exige la MONEDA para pintar el bloque: una `exchange_rate` suelta sobre
+   * una operación en COP es ruido histórico, no una operación en divisa.
+   */
+  readonly exchangeDeclaration = computed(() => {
+    const inv = this.detail();
+    const currency = (inv?.foreign_currency ?? '').toString().trim();
+    if (!currency) return null;
+
+    const rate = this.toNumber(inv?.exchange_rate);
+    const foreignTotal = this.toNumber(inv?.foreign_total_amount);
+
+    return {
+      currency,
+      rate: rate > 0 ? this.currencyService.format(rate) : '',
+      foreignTotal:
+        foreignTotal > 0
+          ? `${foreignTotal.toLocaleString('es-CO', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })} ${currency}`
+          : '',
+      date: inv?.exchange_rate_date ?? null,
+    };
+  });
+
+  /**
+   * Estado de la resolución que respalda ESTE documento, con su consumo y su
+   * vigencia ya juzgados.
+   *
+   * Es informativo por diseño (nunca un selector): la resolución de una factura
+   * la elige el generador de consecutivos, no el usuario. Lo que sí necesita
+   * ver es cuánto rango le queda y cuándo vence, porque las dos cosas hacen
+   * fallar la PRÓXIMA emisión y este es el sitio donde las está mirando.
+   */
+  readonly resolutionBanner = computed(() => {
+    const res = this.detail()?.resolution;
+    if (!res) return null;
+
+    const from = Number(res.range_from) || 0;
+    const to = Number(res.range_to) || 0;
+    const current = Number(res.current_number) || 0;
+    const total = Math.max(0, to - from + 1);
+    // `current_number` arranca en `range_from - 1`: hasta que la DIAN no vio un
+    // consecutivo, lo consumido es cero y no puede pintarse como uno.
+    const used = total > 0 ? Math.min(total, Math.max(0, current - from + 1)) : 0;
+    const remaining = Math.max(0, total - used);
+    const usedPercent = total > 0 ? Math.round((used / total) * 100) : 0;
+
+    const exhausted = total > 0 && remaining === 0;
+    const running_low = !exhausted && total > 0 && remaining <= Math.ceil(total * 0.1);
+
+    const valid_to = res.valid_to ? new Date(res.valid_to) : null;
+    const days_left =
+      valid_to && !Number.isNaN(valid_to.getTime())
+        ? Math.floor((valid_to.getTime() - this.nowMs()) / 86_400_000)
+        : null;
+    const expired = days_left !== null && days_left < 0;
+    const expiring = !expired && days_left !== null && days_left <= 30;
+
+    const tone = (state: 'ok' | 'warn' | 'bad') =>
+      state === 'bad'
+        ? 'bg-error-light text-error'
+        : state === 'warn'
+          ? 'bg-warning-light text-warning'
+          : 'bg-success-light text-success';
+
+    return {
+      number: `Resolución ${res.resolution_number}`,
+      prefix: res.prefix,
+      rangeFrom: from,
+      rangeTo: to,
+      usedPercent,
+      usageLabel: exhausted
+        ? 'Rango agotado'
+        : `Consecutivo ${current} · quedan ${remaining} de ${total}`,
+      usageTone: tone(exhausted ? 'bad' : running_low ? 'warn' : 'ok'),
+      barTone: exhausted
+        ? 'bg-error'
+        : running_low
+          ? 'bg-warning'
+          : 'bg-success',
+      validityLabel: expired
+        ? 'Vigencia vencida'
+        : days_left === null
+          ? 'Sin vigencia registrada'
+          : expiring
+            ? `Vence en ${days_left} día${days_left === 1 ? '' : 's'}`
+            : `Vigente hasta ${new Date(res.valid_to!).toLocaleDateString('es-CO')}`,
+      validityTone: tone(expired ? 'bad' : expiring || days_left === null ? 'warn' : 'ok'),
+    };
+  });
+
+  readonly withholdingAmount = computed(() =>
+    this.toNumber(this.detail()?.withholding_amount),
+  );
+
+  readonly shippingAmount = computed(() =>
+    this.toNumber(this.detail()?.shipping_amount),
+  );
+
+  /**
+   * Lo que de verdad entra a caja: el total facturado MENOS la retención que el
+   * adquiriente practica. No es el total del documento —ese no la resta, §11.9.1—
+   * y por eso vive en su propio bloque y con su propio rótulo.
+   */
+  readonly netCollectable = computed(() =>
+    Math.max(0, this.toNumber(this.detail()?.total_amount) - this.withholdingAmount()),
+  );
+
   readonly canValidate = computed(() => this.detail()?.status === 'draft');
 
   readonly canSend = computed(() => this.detail()?.status === 'validated');
@@ -985,6 +1406,77 @@ export class InvoiceDetailComponent {
     const consumed = item.stock_units_consumed ?? 0;
     const qty = item.quantity || 1;
     return Math.round((consumed / qty) * 100) / 100;
+  }
+
+  /**
+   * `CustomizationID` → rótulo. Tabla estática porque es un catálogo cerrado de
+   * la DIAN, no una configuración de la tienda.
+   */
+  private static readonly OPERATION_TYPES: Record<string, string> = {
+    '09': 'AIU',
+    '10': 'Estándar',
+    '11': 'Mandatos',
+    '12': 'Transporte',
+    '20': 'Nota crédito que referencia factura',
+    '22': 'Nota crédito sin referencia a factura',
+    '30': 'Nota débito que referencia factura',
+    '32': 'Nota débito sin referencia a factura',
+  };
+
+  /**
+   * Cómo se rotula la marca AIU de una línea, y qué explica al pasar el cursor.
+   *
+   * El texto de ayuda no es adorno: bajo el Art. 462-1 ET se grava el AIU
+   * completo y bajo el Decreto 1372/1992 sólo la utilidad, así que la MISMA
+   * línea de «Imprevistos» lleva impuesto o no según el régimen configurado. Lo
+   * que la pantalla puede afirmar sin conocer el régimen es qué componente es;
+   * lo demás lo dice la línea misma con su columna de impuestos.
+   */
+  aiuLabel(item: InvoiceItem): { label: string; hint: string } | null {
+    switch (item.aiu_component) {
+      case 'administracion':
+        return {
+          label: 'AIU · Administración',
+          hint: 'Componente de Administración del contrato AIU. Es la línea que lleva la nota «Contrato de servicios AIU por concepto de:» exigida por el Anexo 1.9 §CAV03.',
+        };
+      case 'imprevistos':
+        return {
+          label: 'AIU · Imprevistos',
+          hint: 'Componente de Imprevistos. Grava sólo bajo el Art. 462-1 ET; bajo el Decreto 1372/1992 queda fuera de la base gravable y se emite sin bloque de impuestos.',
+        };
+      case 'utilidad':
+        return {
+          label: 'AIU · Utilidad',
+          hint: 'Componente de Utilidad. Es base gravable en los dos regímenes.',
+        };
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * La segunda línea fiscal de un ítem: unidad declarada y subcuenta PUC.
+   *
+   * Cadena vacía cuando no hay nada que decir — `null` obligaría al template a
+   * distinguir dos formas de ausencia sin ganar nada.
+   */
+  lineFiscalNote(item: InvoiceItem): string {
+    const parts: string[] = [];
+    if (item.unit_code) parts.push(`Unidad ${item.unit_code}`);
+    if (item.account_code) parts.push(`Cuenta ${item.account_code}`);
+    return parts.join(' · ');
+  }
+
+  /**
+   * Prisma serializa `Decimal` como STRING. `value > 0` sobre `"37500"` es una
+   * comparación entre string y number que TypeScript no deja pasar y que en
+   * JavaScript daría el resultado correcto por coerción — pero `"0.00" > 0` es
+   * `false` y `"" > 0` también, de modo que el único camino honesto es
+   * normalizar una vez y comparar números.
+   */
+  private toNumber(value: number | string | null | undefined): number {
+    const parsed = typeof value === 'string' ? Number(value) : (value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   // ── Transiciones de estado ────────────────────────────────
