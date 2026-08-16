@@ -24,6 +24,21 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
  * Aquí el cuerpo NUNCA se desmonta: se oculta. Cuesta un poco de DOM y ahorra
  * una clase entera de bugs de estado fantasma.
  *
+ * ─── POR QUÉ LA SECCIÓN NO LLEVA `overflow-hidden` ───────────────────────────
+ *
+ * Lo llevó, y sólo estaba ahí para que el fondo de la cabecera no desbordara las
+ * esquinas redondeadas. El precio era desproporcionado: `overflow-hidden`
+ * RECORTA cualquier desplegable absoluto de la sección justo en su borde
+ * inferior, y `z-index` no vence a `overflow` —el panel de impuestos de una
+ * línea salía con `z-[10000]` y se cortaba igual.
+ *
+ * El redondeo se devuelve por partes: la cabecera lo lleva completo cuando la
+ * sección está plegada (es el único hijo visible) y sólo arriba cuando está
+ * desplegada; el cuerpo lo lleva abajo. Mismo resultado visual, sin recorte.
+ *
+ * Las clases del redondeo van por `[class.x]` con nombres SIN corchetes
+ * arbitrarios: un valor tipo `bg-[var(--x)]` cerraría el binding antes de tiempo.
+ *
  * ─── POR QUÉ LA CABECERA LLEVA CONTADOR DE ERRORES ───────────────────────────
  *
  * Ocho secciones plegadas pueden esconder el campo que el backend rechazó. Un
@@ -38,13 +53,15 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
   imports: [IconComponent],
   template: `
     <section
-      class="border rounded-lg overflow-hidden transition-colors"
+      class="border rounded-lg transition-colors"
       [class.border-error]="errorCount() > 0"
       [class.border-border]="errorCount() === 0"
     >
       <button
         type="button"
         class="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-[var(--color-surface-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors min-h-[44px]"
+        [class.rounded-t-lg]="expanded()"
+        [class.rounded-lg]="!expanded()"
         [attr.aria-expanded]="expanded()"
         (click)="toggle()"
       >
@@ -109,7 +126,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         selección visible de impuestos de cada línea.
       -->
       <div
-        class="p-3 border-t border-border"
+        class="p-3 border-t border-border rounded-b-lg"
         [class.hidden]="!expanded()"
         [attr.aria-hidden]="!expanded()"
       >

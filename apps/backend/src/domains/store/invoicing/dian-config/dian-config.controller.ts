@@ -18,6 +18,7 @@ import {
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { DianConfigService } from './dian-config.service';
 import { DianTestService } from './dian-test.service';
+import { DianNumberingRangeService } from './dian-numbering-range.service';
 import {
   DianHabilitationScannerService,
   MAX_HABILITATION_SCAN_FILES,
@@ -31,6 +32,7 @@ import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { UserRole } from '../../../auth/enums/user-role.enum';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
+import { ApplyNumberingRangesDto } from './dto/apply-numbering-range.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
 import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.util';
@@ -42,6 +44,7 @@ export class DianConfigController {
   constructor(
     private readonly dian_config_service: DianConfigService,
     private readonly dian_test_service: DianTestService,
+    private readonly dian_numbering_range_service: DianNumberingRangeService,
     private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
@@ -269,6 +272,58 @@ export class DianConfigController {
   async testConnection(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dian_test_service.testConnection(id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Rangos de numeración que la DIAN tiene AUTORIZADOS, cruzados con lo guardado.
+   *
+   * `invoicing:read` y no `:write` porque no escribe nada: no emite documentos,
+   * no reserva un solo consecutivo y no toca el set de pruebas. Es una consulta
+   * al web service `GetNumberingRange`.
+   *
+   * LA ClTec NO VIAJA. La respuesta de la DIAN la trae en claro; la comparación
+   * contra la almacenada ocurre en el servidor y de ella sólo sale
+   * `technical_key_matches`. Es el mismo criterio que ya aplican
+   * `RESOLUTION_PUBLIC_SELECT` y el prefill del asistente fiscal.
+   */
+  @Get(':id/numbering-ranges')
+  @Permissions('invoicing:read')
+  async getNumberingRanges(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_numbering_range_service.queryRanges(id);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Trae de la DIAN a `invoice_resolutions` los rangos SELECCIONADOS.
+   *
+   * El cuerpo sólo SELECCIONA los rangos por su par `(resolution_number,
+   * prefix)`: el servicio consulta a la DIAN y escribe lo que ella conteste. La
+   * ClTec no se acepta del cliente en ninguna circunstancia, ni sale en la
+   * respuesta.
+   *
+   * ── POR QUÉ 200 AUNQUE ALGÚN ELEMENTO FALLE ────────────────────────────────
+   *
+   * Porque el estado HTTP describe la PETICIÓN, y la petición se atendió: la
+   * consulta a la DIAN se hizo y cada rango marcado obtuvo un desenlace. Ese
+   * desenlace viaja por elemento en `results[].ok` y `results[].error`, con
+   * `applied` y `failed` como resumen. Devolver 4xx porque uno de veinte no se
+   * pudo aplicar haría que el cliente descartara la respuesta entera y con ella
+   * la única constancia de cuáles diecinueve SÍ quedaron escritos. Es el mismo
+   * criterio de las demás operaciones masivas del repositorio.
+   *
+   * Sin `try/catch`: lo que sí invalida el lote entero —configuración
+   * inexistente, la DIAN sin responder, cuerpo mal formado— sube al
+   * `AllExceptionsFilter`, que emite el estado y el `error_code` reales.
+   */
+  @Post(':id/numbering-ranges/apply')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async applyNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApplyNumberingRangesDto,
+  ) {
+    const result = await this.dian_numbering_range_service.applyRanges(id, dto);
+    return this.response_service.updated(result);
   }
 
   /**

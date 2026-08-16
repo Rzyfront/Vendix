@@ -24,6 +24,7 @@ import { DianConfigService } from './dian-config/dian-config.service';
 import { BullModule } from '@nestjs/bullmq';
 import { DianTestSetProcessor } from './dian-config/dian-test-set.processor';
 import { DianTestService } from './dian-config/dian-test.service';
+import { DianNumberingRangeService } from './dian-config/dian-numbering-range.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { DianEventsService } from './services/dian-events.service';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
@@ -91,6 +92,12 @@ import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
     TrmService,
     DianConfigService,
     DianTestService,
+    // Cruce entre los rangos que la DIAN tiene autorizados (`GetNumberingRange`)
+    // y las `invoice_resolutions` guardadas. Depende de `DianTestService` sólo
+    // para la llamada SOAP —credenciales WS-Security incluidas—: aquí vive el
+    // parseo, el diff y la escritura, y sobre todo la regla de que la ClTec se
+    // compara en el servidor y nunca sale al cliente.
+    DianNumberingRangeService,
     // Worker de la cola `dian-test-set`. Se registra SOLO aquí: las otras dos
     // superficies (organización y plataforma) reusan este mismo servicio, y un
     // worker por módulo levantaría tres consumidores para la misma cola.

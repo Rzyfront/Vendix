@@ -905,6 +905,14 @@ export class BreadcrumbService {
       icon: 'receipt',
     },
     {
+      // La captura vive fuera del shell de pestañas del módulo, así que la
+      // migaja es lo único que dice de dónde vino el usuario.
+      path: '/admin/invoicing/invoices/new',
+      title: 'Nueva factura',
+      parent: 'Facturas',
+      icon: 'file-plus',
+    },
+    {
       path: '/admin/invoicing/resolutions',
       title: 'Resoluciones',
       parent: 'Facturación',

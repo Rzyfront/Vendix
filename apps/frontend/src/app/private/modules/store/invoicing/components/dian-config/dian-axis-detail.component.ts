@@ -36,6 +36,7 @@ import {
   DIAN_ENABLEMENT_STATUS_LABELS,
   DIAN_ENVIRONMENT_LABELS,
   DianCertificatePanelComponent,
+  DianNumberingRangePanelComponent,
   DianResolutionFormComponent,
   DianTestSetPanelComponent,
   requirementsFor,
@@ -96,6 +97,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
     IconComponent,
     DianCertificatePanelComponent,
     DianTestSetPanelComponent,
+    DianNumberingRangePanelComponent,
     DianResolutionFormComponent,
     ResolutionCreateComponent,
   ],
@@ -333,6 +335,20 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             [lastResult]="lastTestResult()"
             (changed)="reload()"
           ></app-dian-test-set-panel>
+
+          <!--
+            Numeración registrada en la DIAN.
+
+            Va JUSTO ANTES de la tarjeta «Numeración del eje», que lista lo que
+            tenemos guardado: primero lo que la DIAN dice, después lo nuestro.
+            El orden importa — la pregunta que trae aquí al comerciante es «¿lo
+            que guardé coincide con lo autorizado?», y sólo se puede responder
+            leyendo la fuente antes que la copia.
+          -->
+          <app-dian-numbering-range-panel
+            [configId]="id"
+            (changed)="reload()"
+          ></app-dian-numbering-range-panel>
         }
 
         <!-- Numeración del eje -->

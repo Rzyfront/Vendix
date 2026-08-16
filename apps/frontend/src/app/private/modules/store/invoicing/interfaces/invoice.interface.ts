@@ -558,6 +558,22 @@ export interface InvoiceResolution {
    */
   document_type?: string | null;
   technical_key?: string;
+  /**
+   * ⚠️ AMBOS SE DERIVAN SÓLO DE LA COLUMNA PLANA `technical_key`.
+   *
+   * `toPublicResolution` los calcula sobre esa columna, pero el emisor lee la
+   * clave por bóveda y PREFIERE `technical_key_encrypted`. Consecuencia: no son
+   * prueba de nada por sí solos.
+   *
+   *  - `technical_key_length === 0` NO significa que falte la clave: puede estar
+   *    únicamente cifrada y ser perfectamente válida.
+   *  - `technical_key_length !== 40` tampoco prueba un fallo: la plana puede
+   *    estar rancia mientras la cifrada está bien.
+   *
+   * Sirven para AVISAR, nunca para filtrar, ordenar ni bloquear.
+   */
+  technical_key_set?: boolean;
+  technical_key_length?: number;
   created_at: string;
   updated_at: string;
 }

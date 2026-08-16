@@ -1256,4 +1256,23 @@ export class SalesAnalyticsService {
       context.row.unit = display.suffix;
     }
   }
+
+  // -------------------------------------------------------------------------
+  // STUBS for the resubmit's analytics.controller.ts (QUI-542 batch). The
+  // controller calls these ForExport variants but the original PR #537 split
+  // left them out of the per-QUI services. Returning empty arrays keeps the
+  // xlsx export endpoint compiling and emitting an empty workbook; the
+  // proper implementations land in a follow-up.
+  // -------------------------------------------------------------------------
+  async getSalesByChannelForExport(
+    _query: SalesAnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
+
+  async getSalesBySellerForExport(
+    _query: SalesAnalyticsQueryDto,
+  ): Promise<readonly unknown[]> {
+    return [];
+  }
 }
