@@ -84,7 +84,7 @@ export class FiscalSettingsPage {
 
   readonly tabs = signal<ScrollableTab[]>([
     { id: 'aiu', label: 'Régimen AIU', icon: 'scale' },
-    { id: 'pos', label: 'POS', icon: 'monitor' },
+    { id: 'pos', label: 'Caja', icon: 'monitor' },
   ]);
 
   ngOnInit(): void {
