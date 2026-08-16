@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service';
+import { ReturnOrdersService } from './return-orders/return-orders.service';
 import { OrderEtaService } from './services/order-eta.service';
 import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -49,6 +50,10 @@ describe('OrdersController', () => {
         // relación con lo que probaba. Los stubs quedan vacíos a propósito: los
         // tests de acá sólo ejercitan las rutas que pasan por OrdersService.
         { provide: PurchaseOrdersService, useValue: {} },
+        // `ReturnOrdersService` entró al constructor junto con el `@Get
+        // ('return-orders')` que se declara antes que `@Get(':id')` para que el
+        // `ParseIntPipe` deje de responder 400 al listado de devoluciones.
+        { provide: ReturnOrdersService, useValue: {} },
         { provide: OrderEtaService, useValue: {} },
         { provide: SettingsService, useValue: {} },
         { provide: StorePrismaService, useValue: {} },
