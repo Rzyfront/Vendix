@@ -30,8 +30,53 @@ describe('InvoicingService · cableado del motor aritmético', () => {
     is_owner: true,
   };
 
+  /**
+   * Catálogo `tax_rates` de la tienda del contexto, en el formato REAL de la
+   * tabla: `rate` es una FRACCIÓN (`Decimal(6,5)`, cuyo máximo es 9,99999, así
+   * que no podría siquiera contener un 19), y el tipo fiscal cuelga de la
+   * categoría. La conversión ‰/porcentaje y la clasificación se comprueban
+   * contra estas filas, no contra un formato inventado para el test.
+   */
+  const TAX_RATE_CATALOG = [
+    {
+      id: 1,
+      store_id: 2,
+      rate: '0.19',
+      name: 'IVA General',
+      is_inclusive: false,
+      tax_categories: {
+        organization_id: 1,
+        store_id: 2,
+        tax_type: 'iva',
+        is_inclusive: false,
+      },
+    },
+    {
+      id: 2,
+      store_id: 2,
+      // Un impuesto que el comerciante creó y NO llamó «INC». Es el caso que
+      // rompe cualquier clasificación por nombre.
+      rate: '0.08',
+      name: 'Tributo propio del comerciante',
+      is_inclusive: false,
+      tax_categories: {
+        organization_id: 1,
+        store_id: 2,
+        tax_type: 'inc',
+        is_inclusive: false,
+      },
+    },
+  ];
+
   const createService = () => {
     const created: any[] = [];
+    const tax_rates_find = jest
+      .fn()
+      .mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          TAX_RATE_CATALOG.filter((row) => where.id.in.includes(row.id)),
+        ),
+      );
     const prisma = {
       invoices: {
         create: jest.fn().mockImplementation(({ data }) => {
@@ -45,6 +90,10 @@ describe('InvoicingService · cableado del motor aritmético', () => {
       products: { findMany: jest.fn().mockResolvedValue([]) },
       withoutScope: () => ({
         dian_configurations: { findFirst: jest.fn().mockResolvedValue(null) },
+        // `resolveTenantTaxRateCatalog` sale por `withoutScope()` a propósito:
+        // necesita VER la fila ajena para poder rechazarla con un mensaje que
+        // la nombre, en vez de recibir un «no existe» del scoping.
+        tax_rates: { findMany: tax_rates_find },
       }),
     };
     const generator = {
@@ -191,6 +240,139 @@ describe('InvoicingService · cableado del motor aritmético', () => {
     // Y la fila de cabecera lleva su tipo fiscal: es la clave con la que el
     // CUFE arma ValImp1/2/3.
     expect(data.invoice_taxes.create[0].tax_type).toBe('iva');
+  });
+
+  /**
+   * EL CATÁLOGO ES LA VERDAD DE LA TARIFA.
+   *
+   * Recalcular la cuota desde `tax_rate` cierra la mitad del hueco: si el
+   * cuerpo miente sobre la TARIFA, la cuota recalculada es fiel a una mentira.
+   * Medido con `curl` contra la tienda 3 antes de este cableado: un cuerpo con
+   * `tax_rate_id: 1` (IVA General, 19 % en el catálogo) y `tax_rate: 0`
+   * persistía la factura DEV11 con IVA cero y nada falló.
+   */
+  describe('El catálogo `tax_rates` manda sobre la tarifa declarada', () => {
+    it('usa la tarifa del catálogo cuando el cuerpo declara otra', async () => {
+      const { service, created } = createService();
+
+      await withContext(() =>
+        service.create(
+          baseDto([
+            {
+              description: 'Producto',
+              quantity: 1,
+              unit_price: 100000,
+              taxes: [
+                {
+                  tax_rate_id: 1,
+                  tax_name: 'IVA General',
+                  // La mentira: 0 % sobre una tarifa que el catálogo fija en 19.
+                  tax_rate: 0,
+                  tax_type: 'iva',
+                  tax_amount: 0,
+                },
+              ],
+            },
+          ] as any),
+        ),
+      );
+
+      const data = created[0];
+      expect(Number(data.tax_amount)).toBe(19000);
+      expect(Number(data.total_amount)).toBe(119000);
+      // La fila persistida declara la tarifa del catálogo, no la del cuerpo: es
+      // la que el XML emite como `cbc:Percent` y contra la que la DIAN aplica
+      // `TaxAmount = TaxableAmount × Percent / 100`.
+      expect(Number(data.invoice_taxes.create[0].tax_rate)).toBe(19);
+    });
+
+    it('clasifica por el `tax_type` del catálogo, no por el nombre ni por lo declarado', async () => {
+      const { service, created } = createService();
+
+      await withContext(() =>
+        service.create(
+          baseDto([
+            {
+              description: 'Producto',
+              quantity: 1,
+              unit_price: 100000,
+              taxes: [
+                {
+                  tax_rate_id: 2,
+                  tax_name: 'Tributo propio del comerciante',
+                  tax_rate: 8,
+                  // El cuerpo lo declara IVA; el catálogo dice que es INC. Sin
+                  // la autoridad del catálogo este importe entraría a `ValImp1`
+                  // en el hash del CUFE y a `ValImp2` en el XML: dos casillas
+                  // distintas para el mismo peso, y rechazo por clave inválida.
+                  tax_type: 'iva',
+                  tax_amount: 0,
+                },
+              ],
+            },
+          ] as any),
+        ),
+      );
+
+      const row = created[0].invoice_taxes.create[0];
+      expect(row.tax_type).toBe('inc');
+      expect(Number(row.tax_amount)).toBe(8000);
+    });
+
+    it('deja pasar el impuesto puntual que no referencia el catálogo', async () => {
+      const { service, created } = createService();
+
+      await withContext(() =>
+        service.create(
+          baseDto([
+            {
+              description: 'Producto',
+              quantity: 1,
+              unit_price: 100000,
+              // Sin `tax_rate_id`: no hay nada que consultar y manda el cuerpo.
+              // Es el camino del `curl`, la importación y las herramientas de
+              // IA; exigir el catálogo obligaría a dar de alta cada tributo de
+              // una sola vez.
+              taxes: [
+                { tax_name: 'INC Bolsas', tax_rate: 8, tax_type: 'inc' },
+              ],
+            },
+          ] as any),
+        ),
+      );
+
+      const row = created[0].invoice_taxes.create[0];
+      expect(Number(row.tax_rate)).toBe(8);
+      expect(Number(row.tax_amount)).toBe(8000);
+    });
+
+    it('rechaza una tarifa inexistente SIN gastar consecutivo', async () => {
+      const { service, generator } = createService();
+
+      await expect(
+        withContext(() =>
+          service.create(
+            baseDto([
+              {
+                description: 'Producto',
+                quantity: 1,
+                unit_price: 100000,
+                taxes: [
+                  {
+                    tax_rate_id: 999999,
+                    tax_name: 'X',
+                    tax_rate: 19,
+                    tax_type: 'iva',
+                  },
+                ],
+              },
+            ] as any),
+          ),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_002' });
+
+      expect(generator.generateNextNumber).not.toHaveBeenCalled();
+    });
   });
 
   it('rechaza un importe de impuesto sin tarifa SIN gastar consecutivo', async () => {

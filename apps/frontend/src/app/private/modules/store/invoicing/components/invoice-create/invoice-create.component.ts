@@ -43,7 +43,13 @@ import { selectActiveResolutions } from '../../state/selectors/invoicing.selecto
 import {
   applyBackendValidationErrors,
   clearBackendError,
+  extractValidationMessages,
 } from '../../utils/invoicing-errors.util';
+import {
+  InvoiceLineMath,
+  computeLineMath,
+  lineDiscountExceedsSubtotal,
+} from '../../utils/invoice-line-math';
 import {
   CreateCustomerRequest,
   CreateInvoiceDto,
@@ -67,10 +73,6 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
-  ProductPickerModalComponent,
-  ProductPickerOption,
-} from '../../../../../../shared/components/product-picker-modal';
-import {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
@@ -82,6 +84,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import {
+  computeNitDv,
+  isValidNitDv,
+} from '../../../../../../shared/utils/nit.util';
+import {
   FISCAL_RESPONSIBILITIES,
   FISCAL_RESPONSIBILITY_LABELS,
 } from '../../../../../../shared/constants/fiscal-responsibilities.constants';
@@ -90,16 +96,18 @@ import { getDianSchemeIdForDocumentType } from '../../../../../../shared/constan
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
 import { CustomersService } from '../../../customers/services/customers.service';
 import { Customer } from '../../../customers/models/customer.model';
-import { ProductsService } from '../../../products/services/products.service';
-import {
-  PaginatedResponse,
-  Product,
-  ProductState,
-} from '../../../products/interfaces/product.interface';
+
+import { InvoiceProductOption } from '../../services/invoice-product-lookup.service';
 
 import { InvoiceFormSectionComponent } from './invoice-form-section.component';
 import { InvoiceResolutionBannerComponent } from './invoice-resolution-banner.component';
 import { InvoiceLineTaxesComponent } from './invoice-line-taxes.component';
+import { InvoiceItemPickerModalComponent } from './invoice-item-picker-modal.component';
+import {
+  InvoiceCustomItemDraft,
+  InvoiceCustomItemModalComponent,
+} from './invoice-custom-item-modal.component';
+import { InvoiceOrderSelectComponent } from './invoice-order-select.component';
 import { InvoiceTaxCatalogService } from './invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -236,17 +244,6 @@ interface InvoiceItemFormValue {
   aiu_component: string;
 }
 
-/** Aritmética de una línea, ya desglosada. */
-interface LineMath {
-  /** `cantidad × precio − descuento`, tal como lo teclea el usuario. */
-  gross: number;
-  /** Base gravable (`cbc:LineExtensionAmount`): el bruto sin impuesto incluido. */
-  base: number;
-  taxInclusive: number;
-  taxAdditional: number;
-  total: number;
-}
-
 /** Una retención declarada en la sección de retenciones (sólo UI). */
 interface WithholdingRowValue {
   /** Nombre visible del concepto. Etiqueta: NO viaja al backend. */
@@ -335,8 +332,20 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
  * Ahora se carga el catálogo COMPLETO de la tienda y cada línea admite VARIOS
  * impuestos, que es como se factura de verdad en Colombia (IVA + INC).
  *
- * **No ofrece un selector de productos vacío.** `availableProducts` era un
- * arreglo vacío y "crear producto" era un `alert()`.
+ * **No busca productos contra una copia en memoria.** Se precargaba UNA página
+ * de 200 y se filtraba en el navegador, así que el producto 201 de una tienda
+ * era infacturable sin un solo error que lo explicara. Ahora el selector
+ * consulta el inventario en el servidor en cada término, y ofrece productos Y
+ * servicios.
+ *
+ * **No obliga a que el concepto exista en el inventario.** Una línea se puede
+ * declarar como ÍTEM PERSONALIZADO —descripción, cantidad, unidad, precio,
+ * varios impuestos y descuento— sin crear nada en el catálogo. El backend ya lo
+ * admitía (`product_id` es opcional); lo que faltaba era la pantalla.
+ *
+ * **No pide el id del pedido.** «Desde pedido» tenía un `<input type=number>`
+ * sobre la clave primaria, un dato que no aparece en ninguna pantalla del
+ * comerciante. Ahora se busca por número de pedido, cliente o id.
  *
  * **No cierra antes de saber si guardó.** Espera `...Success` / `...Failure`, y
  * si falla se queda abierto con el motivo a la vista y las líneas intactas.
@@ -359,12 +368,14 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     TextareaComponent,
     ToggleComponent,
     IconComponent,
-    ProductPickerModalComponent,
     CustomerModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
     InvoiceResolutionBannerComponent,
     InvoiceLineTaxesComponent,
+    InvoiceItemPickerModalComponent,
+    InvoiceCustomItemModalComponent,
+    InvoiceOrderSelectComponent,
   ],
   template: `
     <app-modal
@@ -376,7 +387,15 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       size="xxl"
       [fullScreenOnMobile]="true"
     >
-      <div class="p-4 space-y-3">
+      <!--
+        SEPARACIÓN ENTRE SECCIONES. Estaban a «space-y-2» (0,5 rem) sobre
+        tarjetas con borde propio, y el resultado se lee como un bloque
+        continuo: no hay canal blanco que diga dónde termina una sección y
+        empieza la siguiente. Se sube a la escala estándar del proyecto
+        («space-y-4» = 1 rem, la misma que usan los formularios de producto y
+        ajustes), sin valores sueltos.
+      -->
+      <div class="p-4 space-y-4">
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
@@ -424,16 +443,15 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         </div>
 
         @if (mode() === 'from_order') {
-          <app-input
-            label="ID del pedido"
-            type="number"
+          <!--
+            NO es un «<input type=number>» con el id. El id es la clave primaria
+            y no aparece en ninguna pantalla del comerciante; lo que él conoce es
+            «ORD-000142». El buscador acepta las dos cosas.
+          -->
+          <vendix-invoice-order-select
             [formControl]="orderIdControl"
-            [control]="orderIdControl"
-            [error]="fieldError('order_id')"
-            placeholder="Ingrese el ID del pedido"
-            [required]="true"
-            min="1"
-          ></app-input>
+            [error]="orderSelectError()"
+          />
         }
 
         @if (mode() === 'manual') {
@@ -443,7 +461,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             [documentLabel]="documentLabel()"
           />
 
-          <form [formGroup]="invoiceForm" class="space-y-2">
+          <form [formGroup]="invoiceForm" class="space-y-4">
             <!-- ── 1. DOCUMENTO ─────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Documento"
@@ -643,7 +661,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   label="DV"
                   formControlName="customer_verification_digit"
                   [control]="control('customer_verification_digit')"
-                  [error]="fieldError('customer_verification_digit')"
+                  [error]="verificationDigitError()"
                   [disabled]="!isNitCustomer()"
                   [maxlength]="1"
                   helperText="Si lo omites, el servidor lo calcula."
@@ -806,7 +824,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </button>
                       </div>
 
-                      <div class="col-span-12 md:col-span-5">
+                      <div class="col-span-12 md:col-span-4">
                         <vendix-invoice-line-taxes
                           formControlName="taxes"
                           [taxes]="availableTaxes()"
@@ -833,12 +851,28 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </div>
                       }
 
-                      <div class="col-span-4 md:col-span-1 flex justify-end">
+                      <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
+                        <!--
+                          Configuración avanzada de ESTA línea. La tira de la
+                          tabla no da para todo lo que una línea puede declarar
+                          (unidad, varios impuestos, cuenta PUC, componente AIU)
+                          y, sobre todo, no cabe la previsión de la aritmética.
+                        -->
+                        <button
+                          type="button"
+                          (click)="openAdvancedItem(item)"
+                          class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
+                          title="Configuración avanzada de la línea"
+                          aria-label="Configuración avanzada de la línea"
+                        >
+                          <app-icon name="sliders-horizontal" [size]="16" />
+                        </button>
                         <button
                           type="button"
                           (click)="removeItem(i)"
                           class="text-[var(--color-text-secondary)] hover:text-error transition-colors p-1"
                           title="Eliminar línea"
+                          aria-label="Eliminar línea"
                         >
                           <app-icon name="x" [size]="16" />
                         </button>
@@ -857,16 +891,43 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </p>
               }
 
-              <div class="flex justify-end mt-2">
+              <!--
+                TRES caminos a una línea, no uno. El comerciante pidió
+                explícitamente poder «tanto buscar los productos de mi
+                inventario (productos y servicios) como crear un producto
+                personalizado»; la línea en blanco se conserva para quien sólo
+                quiere teclear.
+              -->
+              <div class="flex flex-wrap justify-end gap-2 mt-4">
                 <app-button
                   variant="outline"
+                  size="sm"
+                  type="button"
+                  (clicked)="openProductPickerForNewLine()"
+                  [disabled]="itemCount() >= 100"
+                >
+                  <app-icon slot="icon" name="search" [size]="14" />
+                  Buscar en inventario
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  (clicked)="openCustomItemForNewLine()"
+                  [disabled]="itemCount() >= 100"
+                >
+                  <app-icon slot="icon" name="sparkles" [size]="14" />
+                  Ítem personalizado
+                </app-button>
+                <app-button
+                  variant="ghost"
                   size="sm"
                   type="button"
                   (clicked)="addItem()"
                   [disabled]="itemCount() >= 100"
                 >
                   <app-icon slot="icon" name="plus" [size]="14" />
-                  Agregar línea
+                  Línea en blanco
                 </app-button>
               </div>
             </vendix-invoice-form-section>
@@ -1721,18 +1782,31 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     />
 
     <!--
-      El picker no proyecta contenido: "crear producto" es su propio output.
-      Un botón con slot="…" aquí dentro se descartaría en silencio.
+      BUSCADOR DEL INVENTARIO. Pega al servidor en cada término (debounced), así
+      que el universo es el inventario completo y no la primera página.
     -->
-    <app-product-picker-modal
+    <vendix-invoice-item-picker-modal
       [open]="productPickerOpen()"
-      [products]="availableProducts()"
-      [loading]="productsLoading()"
-      [mode]="'single'"
-      [disabledIds]="pickedProductIds()"
-      (selected)="onProductPicked($event)"
-      (productCreateRequested)="onCreateProductRequested()"
-      (closed)="productPickerOpen.set(false)"
+      [usedProductIds]="pickedProductIds()"
+      (productPicked)="onProductPicked($event)"
+      (customRequested)="onCustomItemRequested()"
+      (closed)="closeProductPicker()"
+    />
+
+    <!--
+      CONFIGURACIÓN AVANZADA / ÍTEM PERSONALIZADO. El mismo modal sirve para las
+      dos cosas: crear una línea que no existe en el inventario y editar a fondo
+      una que ya está en la factura. Son el mismo conjunto de campos, y tener dos
+      pantallas para el mismo dato garantizaría que una se quede atrás.
+    -->
+    <vendix-invoice-custom-item-modal
+      [open]="customItemOpen()"
+      [draft]="customItemDraft()"
+      [taxes]="availableTaxes()"
+      [isAiu]="isAiu()"
+      [isEditing]="customItemEditing()"
+      (saved)="onCustomItemSaved($event)"
+      (closed)="customItemOpen.set(false)"
     />
 
     <!--
@@ -1766,7 +1840,6 @@ export class InvoiceCreateComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
-  private readonly productsService = inject(ProductsService);
   private readonly customersService = inject(CustomersService);
   private readonly taxCatalog = inject(InvoiceTaxCatalogService);
   private readonly aiuSettingsService = inject(InvoiceAiuSettingsService);
@@ -1792,9 +1865,19 @@ export class InvoiceCreateComponent {
   readonly submitting = signal(false);
   readonly customerModalOpen = signal(false);
   readonly productPickerOpen = signal(false);
-  readonly productsLoading = signal(false);
-  /** Fila (por `row_uid`) a la que apunta el picker abierto. */
+
+  /**
+   * Fila (por `row_uid`) a la que apunta el picker abierto, o `null` cuando se
+   * abrió desde el pie de la sección para AÑADIR una línea nueva. Es la misma
+   * distinción para el modal de configuración avanzada.
+   */
   private readonly pickerTargetUid = signal<string | null>(null);
+
+  // ── Ítem personalizado / configuración avanzada ─────────────
+  readonly customItemOpen = signal(false);
+  readonly customItemDraft = signal<InvoiceCustomItemDraft | null>(null);
+  readonly customItemEditing = signal(false);
+  private readonly customItemTargetUid = signal<string | null>(null);
 
   private readonly openSections = signal<Set<SectionId>>(
     new Set<SectionId>(['documento', 'adquiriente', 'lineas']),
@@ -2022,8 +2105,6 @@ export class InvoiceCreateComponent {
 
   readonly availableTaxes = signal<TaxOption[]>([]);
 
-  readonly availableProducts = signal<ProductPickerOption[]>([]);
-
   /** Conceptos de `withholding_concepts` del tenant, con tarifa en PORCENTAJE. */
   readonly withholdingConcepts = signal<WithholdingConceptOption[]>([]);
 
@@ -2086,9 +2167,6 @@ export class InvoiceCreateComponent {
     { value: 'suffered', label: 'A la tienda le retienen' },
   ];
 
-  /** `id → producto`, para hidratar descripción y precio al elegirlo. */
-  private readonly productsById = new Map<number, Product>();
-  private productsLoaded = false;
   private taxesLoaded = false;
   private aiuSettingsLoaded = false;
   private withholdingConceptsLoaded = false;
@@ -2114,40 +2192,13 @@ export class InvoiceCreateComponent {
   /**
    * Desglose por línea.
    *
-   * El bruto que se teclea NO es la base gravable: cuando el impuesto va
-   * incluido en el precio, la base es el bruto despejado
-   * (`bruto / (1 + Σtarifas incluidas)`). El backend persiste exactamente eso en
-   * `subtotal_amount` —la Σ de los `cbc:LineExtensionAmount`—, así que el panel
-   * de totales tiene que hablar el mismo idioma o el usuario ve una cifra en
-   * pantalla y otra en la factura.
+   * La fórmula vive en `utils/invoice-line-math.ts` y NO aquí: el modal de
+   * configuración avanzada enseña la previsión de la misma línea, y dos copias
+   * de esta aritmética divergirían sin dar un solo error — sólo dos cifras
+   * distintas para el mismo renglón.
    */
-  readonly lineMath = computed<LineMath[]>(() =>
-    this.itemsValue().map((item) => {
-      const quantity = Number(item.quantity) || 0;
-      const price = Number(item.unit_price) || 0;
-      const discount = Number(item.discount_amount) || 0;
-      const gross = Math.max(quantity * price - discount, 0);
-      const taxes = Array.isArray(item.taxes) ? item.taxes : [];
-
-      let inclusiveRate = 0;
-      let additionalRate = 0;
-      for (const tax of taxes) {
-        const rate = Number(tax.rate) || 0;
-        if (tax.is_inclusive) inclusiveRate += rate;
-        else additionalRate += rate;
-      }
-
-      const base = inclusiveRate > 0 ? gross / (1 + inclusiveRate / 100) : gross;
-      const taxInclusive = gross - base;
-      const taxAdditional = (base * additionalRate) / 100;
-      return {
-        gross,
-        base,
-        taxInclusive,
-        taxAdditional,
-        total: base + taxInclusive + taxAdditional,
-      };
-    }),
+  readonly lineMath = computed<InvoiceLineMath[]>(() =>
+    this.itemsValue().map((item) => computeLineMath(item)),
   );
 
   readonly totals = computed(() => {
@@ -2607,8 +2658,8 @@ export class InvoiceCreateComponent {
     }
     if (this.mode() === 'from_order') {
       return this.orderIdValue()
-        ? 'Se facturará el pedido indicado.'
-        : 'Indica el ID del pedido.';
+        ? 'Se facturará el pedido elegido, con sus líneas e impuestos.'
+        : 'Busca el pedido por su número, por el cliente o por su id.';
     }
     if (this.itemCount() === 0) return 'Agrega al menos una línea.';
     if (!this.activeResolution()) {
@@ -2700,7 +2751,9 @@ export class InvoiceCreateComponent {
     this.loadTaxCatalog();
     this.loadAiuSettings();
     this.loadWithholdingConcepts();
-    this.loadProducts();
+    // Los productos YA NO se precargan: el selector busca contra el servidor
+    // cada vez que se abre. Precargar una página era lo que hacía infacturable
+    // el producto 201 de una tienda.
     if (this.itemsArray.length === 0) {
       this.addItem();
     }
@@ -2796,45 +2849,6 @@ export class InvoiceCreateComponent {
       .subscribe((concepts) => this.withholdingConcepts.set(concepts));
   }
 
-  private loadProducts(): void {
-    if (this.productsLoaded) return;
-    this.productsLoaded = true;
-    this.productsLoading.set(true);
-    this.productsService
-      .getProducts({
-        limit: 200,
-        state: ProductState.ACTIVE,
-        is_sellable: true,
-      })
-      .pipe(
-        // Un catálogo que no carga NO tumba el modal: se puede facturar
-        // escribiendo la descripción a mano, que es exactamente lo que el
-        // backend permite (`product_id` es opcional).
-        catchError(() =>
-          of({ data: [] } as unknown as PaginatedResponse<Product>),
-        ),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((response) => {
-        this.productsLoading.set(false);
-        const products = response?.data ?? [];
-        this.productsById.clear();
-        for (const product of products) {
-          this.productsById.set(product.id, product);
-        }
-        this.availableProducts.set(
-          products.map((product) => ({
-            id: product.id,
-            name: product.name,
-            category: product.category?.name ?? product.categories?.[0]?.name,
-            imageUrl: product.image_url,
-            isSellable: product.is_sellable,
-            isCombo: product.is_combo,
-          })),
-        );
-      });
-  }
-
   // ── Lectura desde la plantilla ──────────────────────────────
 
   control(name: string): AbstractControl | null {
@@ -2856,6 +2870,22 @@ export class InvoiceCreateComponent {
 
   fieldError(path: string): string | undefined {
     return this.backendFieldErrors()[path];
+  }
+
+  /**
+   * Error del buscador de pedidos.
+   *
+   * `order_id` es como lo nombra el backend en un rechazo del `ParseIntPipe`;
+   * el mensaje local cubre el caso normal —pulsar «Crear desde pedido» sin
+   * haber elegido ninguno—, que antes no decía absolutamente nada.
+   */
+  orderSelectError(): string | undefined {
+    const backend = this.fieldError('order_id');
+    if (backend) return backend;
+    if (this.orderIdControl.touched && !this.orderIdValue()) {
+      return 'Elige el pedido que se va a facturar.';
+    }
+    return undefined;
   }
 
   itemError(index: number, field: string): string | undefined {
@@ -2881,6 +2911,24 @@ export class InvoiceCreateComponent {
       return 'El vencimiento no puede ser anterior a la fecha de emisión.';
     }
     return undefined;
+  }
+
+  /**
+   * Igual que `dueDateError()`: el backend también lo rechaza, pero decirlo
+   * junto al campo evita el viaje y, sobre todo, evita que el usuario lo
+   * descubra cuando la DIAN ya se comió el consecutivo.
+   */
+  verificationDigitError(): string | undefined {
+    const backend = this.fieldError('customer_verification_digit');
+    if (backend) return backend;
+    if (!this.isNitCustomer()) return undefined;
+    const raw = this.rawValue();
+    const taxId = String(raw['customer_tax_id'] ?? '')
+      .trim()
+      .split('-')[0];
+    const dv = String(raw['customer_verification_digit'] ?? '').trim();
+    if (!taxId || !dv || isValidNitDv(taxId, dv)) return undefined;
+    return `No corresponde al NIT ${taxId} (debería ser ${computeNitDv(taxId)})`;
   }
 
   dueDateHelp(): string {
@@ -3006,26 +3054,37 @@ export class InvoiceCreateComponent {
   }
 
   addItem(): void {
-    if (this.itemsArray.length >= 100) return;
+    this.appendItem();
+  }
+
+  /**
+   * Igual que `addItem`, pero DEVUELVE el grupo recién creado.
+   *
+   * Se lee del `FormArray` y no de `itemControls()`: ese `computed` se refresca
+   * a través de `toSignal(valueChanges)`, y quien acaba de empujar la fila
+   * necesita el control AHORA para escribirle encima, no en el siguiente ciclo.
+   */
+  private appendItem(): FormGroup | null {
+    if (this.itemsArray.length >= 100) return null;
     this.nextRowUid += 1;
-    this.itemsArray.push(
-      this.fb.group({
-        row_uid: ['row-' + this.nextRowUid],
-        product_id: [null],
-        product_name: [''],
-        description: ['', [Validators.required]],
-        // `@Min(0.0001)` en el backend: la columna es `Decimal(12,4)` y un cero
-        // colado produce una línea con base gravable cero que nadie puede
-        // cobrar y que la DIAN acepta igual.
-        quantity: [1, [Validators.required, Validators.min(0.0001)]],
-        unit_code: [UNIT_CODE_DEFAULT],
-        unit_price: [0, [Validators.required, Validators.min(0)]],
-        discount_amount: [0, [Validators.min(0)]],
-        taxes: [[] as TaxSelection[]],
-        account_code: [''],
-        aiu_component: [''],
-      }),
-    );
+    const group = this.fb.group({
+      row_uid: ['row-' + this.nextRowUid],
+      product_id: [null as number | null],
+      product_name: [''],
+      description: ['', [Validators.required]],
+      // `@Min(0.0001)` en el backend: la columna es `Decimal(12,4)` y un cero
+      // colado produce una línea con base gravable cero que nadie puede
+      // cobrar y que la DIAN acepta igual.
+      quantity: [1, [Validators.required, Validators.min(0.0001)]],
+      unit_code: [UNIT_CODE_DEFAULT],
+      unit_price: [0, [Validators.required, Validators.min(0)]],
+      discount_amount: [0, [Validators.min(0)]],
+      taxes: [[] as TaxSelection[]],
+      account_code: [''],
+      aiu_component: [''],
+    });
+    this.itemsArray.push(group);
+    return group;
   }
 
   removeItem(index: number): void {
@@ -3222,54 +3281,133 @@ export class InvoiceCreateComponent {
     this.linkedCustomerLabel.set(name ? name + ' (se creará al emitir)' : null);
   }
 
-  // ── Productos ───────────────────────────────────────────────
+  // ── Ítems: inventario e ítem personalizado ──────────────────
 
+  /** Picker apuntado a una fila existente: vincula el producto a ESA línea. */
   openProductPicker(item: AbstractControl): void {
     this.pickerTargetUid.set(this.rowUid(item));
     this.productPickerOpen.set(true);
   }
 
-  onProductPicked(productId: number | null): void {
+  /** Picker sin destino: lo que se elija AÑADE una línea. */
+  openProductPickerForNewLine(): void {
+    if (this.itemsArray.length >= 100) return;
+    this.pickerTargetUid.set(null);
+    this.productPickerOpen.set(true);
+  }
+
+  closeProductPicker(): void {
+    this.productPickerOpen.set(false);
+    this.pickerTargetUid.set(null);
+  }
+
+  /**
+   * El producto elegido hidrata la línea.
+   *
+   * La opción trae ya el nombre y el precio base, así que no hace falta el
+   * `Map` paralelo que había antes: un espejo del catálogo indexado en memoria
+   * es una copia que se desactualiza en cuanto la búsqueda deja de ser local.
+   */
+  onProductPicked(product: InvoiceProductOption): void {
     const uid = this.pickerTargetUid();
     this.productPickerOpen.set(false);
     this.pickerTargetUid.set(null);
-    if (uid == null || productId == null) return;
 
-    const group = this.itemControls().find((item) => this.rowUid(item) === uid);
+    const group = uid
+      ? this.itemControls().find((item) => this.rowUid(item) === uid)
+      : this.appendItem();
     if (!group) return;
 
-    const product = this.productsById.get(productId);
     const patch: Record<string, unknown> = {
-      product_id: productId,
-      product_name: product?.name ?? 'Producto #' + productId,
+      product_id: product.id,
+      product_name: product.name,
     };
-    if (product) {
-      // La descripción sólo se pisa si el usuario no escribió una: la suya
-      // manda, porque es la que la DIAN publica en `cbc:Description`.
-      if (!String(group.get('description')?.value ?? '').trim()) {
-        patch['description'] = product.name;
-      }
-      // `base_price` y NO `final_price`: `final_price` ya lleva impuesto dentro
-      // y el precio unitario que se captura es la base. Mandar el precio con
-      // impuesto y además declarar el impuesto como adicional lo cobraría dos
-      // veces.
-      if (!Number(group.get('unit_price')?.value)) {
-        patch['unit_price'] = Number(product.base_price) || 0;
-      }
+    // La descripción sólo se pisa si el usuario no escribió una: la suya manda,
+    // porque es la que la DIAN publica en `cbc:Description`.
+    if (!String(group.get('description')?.value ?? '').trim()) {
+      patch['description'] = product.name;
+    }
+    // `basePrice` y NO el precio final: éste último ya lleva impuesto dentro y
+    // el precio unitario que se captura es la base. Mandar el precio con
+    // impuesto y además declarar el impuesto como adicional lo cobraría dos
+    // veces.
+    if (!Number(group.get('unit_price')?.value)) {
+      patch['unit_price'] = product.basePrice;
     }
     group.patchValue(patch);
   }
 
-  onCreateProductRequested(): void {
-    // El backend acepta `inline_product` en el DTO pero lo rechaza en runtime a
-    // propósito (`ProductsService.create` no es transaccional todavía). Decirlo
-    // aquí evita que el usuario descubra el límite con un 400.
+  /** Desde el picker: «no está en mi inventario, lo facturo igual». */
+  onCustomItemRequested(): void {
     this.productPickerOpen.set(false);
-    this.toastService.info(
-      'La creación de productos desde la factura todavía no está disponible. Créalo en el módulo de Productos y vuelve a abrir el selector.',
-      undefined,
-      5000,
-    );
+    const uid = this.pickerTargetUid();
+    this.pickerTargetUid.set(null);
+    if (uid) {
+      const group = this.itemControls().find((item) => this.rowUid(item) === uid);
+      if (group) {
+        this.openAdvancedItem(group);
+        return;
+      }
+    }
+    this.openCustomItemForNewLine();
+  }
+
+  /** Ítem personalizado en blanco: añade una línea al guardar. */
+  openCustomItemForNewLine(): void {
+    if (this.itemsArray.length >= 100) return;
+    this.customItemTargetUid.set(null);
+    this.customItemEditing.set(false);
+    this.customItemDraft.set(null);
+    this.customItemOpen.set(true);
+  }
+
+  /** Configuración avanzada de una línea que ya existe. */
+  openAdvancedItem(item: AbstractControl): void {
+    const value = item.value as InvoiceItemFormValue;
+    this.customItemTargetUid.set(this.rowUid(item));
+    this.customItemEditing.set(true);
+    this.customItemDraft.set({
+      product_id: value.product_id ?? null,
+      product_name: value.product_name ?? '',
+      description: value.description ?? '',
+      quantity: Number(value.quantity) || 0,
+      unit_code: value.unit_code || UNIT_CODE_DEFAULT,
+      unit_price: Number(value.unit_price) || 0,
+      discount_amount: Number(value.discount_amount) || 0,
+      taxes: Array.isArray(value.taxes) ? [...value.taxes] : [],
+      account_code: value.account_code ?? '',
+      aiu_component: value.aiu_component ?? '',
+    });
+    this.customItemOpen.set(true);
+  }
+
+  /**
+   * El modal avanzado devolvió la línea. Se escribe sobre la fila apuntada, o
+   * se crea una nueva cuando el modal se abrió sin destino.
+   */
+  onCustomItemSaved(draft: InvoiceCustomItemDraft): void {
+    this.customItemOpen.set(false);
+    const uid = this.customItemTargetUid();
+    this.customItemTargetUid.set(null);
+
+    const group = uid
+      ? this.itemControls().find((item) => this.rowUid(item) === uid)
+      : this.appendItem();
+    if (!group) return;
+
+    group.patchValue({
+      product_id: draft.product_id,
+      product_name: draft.product_name,
+      description: draft.description,
+      quantity: draft.quantity,
+      unit_code: draft.unit_code,
+      unit_price: draft.unit_price,
+      discount_amount: draft.discount_amount,
+      taxes: draft.taxes,
+      account_code: draft.account_code,
+      aiu_component: draft.aiu_component,
+    });
+    this.setSection('lineas', true);
   }
 
   // ── Envío ───────────────────────────────────────────────────
@@ -3295,7 +3433,16 @@ export class InvoiceCreateComponent {
     if (this.mode() === 'from_order') {
       const orderId = this.orderIdControl.value;
       if (!orderId) {
+        // Antes esto era un `return` mudo: se pulsaba «Crear desde pedido» y no
+        // pasaba absolutamente nada. Un botón que no responde y no explica es
+        // indistinguible de una pantalla rota.
         this.orderIdControl.markAsTouched();
+        this.submitError.set(
+          'La factura no se envió: falta decir QUÉ pedido se va a facturar.',
+        );
+        this.submitErrorDetails.set([
+          'Busca el pedido por su número (p. ej. ORD-000142), por el nombre o el correo del cliente, o pega su id si lo conoces.',
+        ]);
         return;
       }
       this.submitting.set(true);
@@ -3312,9 +3459,16 @@ export class InvoiceCreateComponent {
     const blockers = this.collectBlockers();
     if (blockers.length > 0) {
       this.submitError.set(
-        'La factura no se envió: hay datos que la DIAN rechazaría y el consecutivo autorizado no se recupera.',
+        blockers.length === 1
+          ? 'La factura no se envió: falta 1 dato que la DIAN rechazaría, y el consecutivo autorizado no se recupera.'
+          : `La factura no se envió: faltan ${blockers.length} datos que la DIAN rechazaría, y el consecutivo autorizado no se recupera.`,
       );
-      this.submitErrorDetails.set(blockers);
+      // Los avisos viajan JUNTO a los bloqueantes, no en una segunda pasada: el
+      // usuario corrige una vez y vuelve a enviar una vez.
+      this.submitErrorDetails.set([
+        ...blockers,
+        ...this.collectAdvisories().map((advisory) => 'Aviso: ' + advisory),
+      ]);
       this.expandSectionsWithErrors();
       return;
     }
@@ -3336,6 +3490,22 @@ export class InvoiceCreateComponent {
 
     if (!raw['customer_name']) {
       blockers.push('El adquiriente necesita nombre o razón social.');
+    }
+    // El DV es un checksum, no un dato: si no cuadra con el NIT, la DIAN
+    // rechaza la identificación del adquiriente DESPUÉS de haber consumido el
+    // consecutivo autorizado, que no se recupera. Se verifica acá con el mismo
+    // módulo-11 que aplica `@NitDvMatches()` en el backend.
+    if (this.isNitCustomer()) {
+      // `900123456-7` ya trae el DV pegado: recortarlo evita un error falso.
+      const taxId = String(raw['customer_tax_id'] ?? '')
+        .trim()
+        .split('-')[0];
+      const dv = String(raw['customer_verification_digit'] ?? '').trim();
+      if (taxId && dv && !isValidNitDv(taxId, dv)) {
+        blockers.push(
+          `El dígito de verificación ${dv} no corresponde al NIT ${taxId}: el módulo-11 da ${computeNitDv(taxId)}. Corrígelo antes de emitir.`,
+        );
+      }
     }
     if (this.itemsArray.length === 0) {
       blockers.push('La factura necesita al menos una línea.');
@@ -3392,6 +3562,7 @@ export class InvoiceCreateComponent {
 
     this.itemControls().forEach((group, index) => {
       const label = this.lineLabel(index);
+      const value = group.value as InvoiceItemFormValue;
       if (!String(group.get('description')?.value ?? '').trim()) {
         blockers.push(
           label +
@@ -3407,6 +3578,26 @@ export class InvoiceCreateComponent {
       if (Number(group.get('discount_amount')?.value) < 0) {
         blockers.push(label + ': el descuento no puede ser negativo.');
       }
+      // El descuento que se come la línea NO produce un error ni un negativo:
+      // `lineGross` la recorta a cero y la factura sale con un renglón de cero
+      // que la DIAN acepta y que nadie cobra. Es el fallo más silencioso de
+      // esta pantalla desde que el descuento por línea existe.
+      if (lineDiscountExceedsSubtotal(value)) {
+        blockers.push(
+          label +
+            `: el descuento (${this.formatCurrency(Number(value.discount_amount) || 0)}) iguala o supera el subtotal de la línea (${this.formatCurrency(
+              (Number(value.quantity) || 0) * (Number(value.unit_price) || 0),
+            )}). La línea quedaría en cero.`,
+        );
+      }
+      // Una unidad de medida vacía saldría al XML como `@unitCode` en blanco y
+      // la DIAN rechaza el documento entero por una línea (regla FAJ).
+      if (!String(value.unit_code ?? '').trim()) {
+        blockers.push(
+          label +
+            ': falta la unidad de medida. Sale al XML como @unitCode y la DIAN no acepta el atributo vacío.',
+        );
+      }
     });
 
     const email = String(raw['customer_email'] ?? '').trim();
@@ -3415,8 +3606,44 @@ export class InvoiceCreateComponent {
         'El correo del adquiriente no es válido. Es la dirección a la que se entrega la factura electrónica.',
       );
     }
+    // OJO: la FALTA de correo NO entra aquí. Una venta a consumidor final se
+    // factura sin él y bloquearla dejaría sin emitir el caso más común del
+    // comercio. Ese hallazgo lo reporta la puerta de emisión con su severidad
+    // real, sobre el documento ya persistido.
 
     return blockers;
+  }
+
+  /**
+   * AVISOS: cosas que conviene saber y que NO impiden emitir.
+   *
+   * Van separadas de `collectBlockers()` a propósito. Mezclarlas convertiría
+   * una recomendación en un muro: un aviso que bloquea es un bloqueo, y esta
+   * pantalla ya tiene la fama de decir «revisa el formulario» sin decir qué.
+   */
+  private collectAdvisories(): string[] {
+    const advisories: string[] = [];
+    const raw = this.rawValue();
+
+    if (!String(raw['customer_email'] ?? '').trim()) {
+      advisories.push(
+        'El adquiriente no tiene correo: la factura se emite igual, pero no hay a dónde entregarla electrónicamente.',
+      );
+    }
+    if (!String(raw['customer_tax_id'] ?? '').trim()) {
+      advisories.push(
+        'El adquiriente no declara número de documento. Sólo es correcto si la venta es a consumidor final.',
+      );
+    }
+    if (
+      this.availableTaxes().length > 0 &&
+      this.itemsValue().every((item) => (item.taxes ?? []).length === 0)
+    ) {
+      advisories.push(
+        'Ninguna línea declara impuesto y tu tienda sí tiene catálogo. Sólo es correcto si toda la operación es excluida o exenta.',
+      );
+    }
+    return advisories;
   }
 
   /** Abre toda sección que tenga algo mal, para que el error sea alcanzable. */
@@ -3789,17 +4016,42 @@ export class InvoiceCreateComponent {
     this.submitting.set(false);
     this.submitError.set(failure.error);
 
-    if (failure.errorCode !== 'SYS_VALIDATION_001' || !form) {
-      this.submitErrorDetails.set([]);
+    // EL MOTIVO REAL NO SE PIERDE NUNCA.
+    //
+    // Antes esta lista se vaciaba salvo en el camino exacto «SYS_VALIDATION_001
+    // + formulario disponible». Las otras dos combinaciones —«desde pedido»
+    // (que pasa `form = null`) y cualquier código distinto que igual traiga
+    // `details.validationErrors`— dejaban al comerciante con una frase de
+    // catálogo y ni una pista de QUÉ campo rechazó el servidor. Extraer primero
+    // y mapear después separa las dos preguntas: qué dijo el backend, y a qué
+    // control corresponde.
+    const messages = extractValidationMessages(failure.details);
+
+    if (!form) {
+      this.submitErrorDetails.set(messages);
       return;
     }
 
     const applied = applyBackendValidationErrors(form, failure.details);
     this.backendFieldErrors.set(applied.fieldErrors);
-    this.submitErrorDetails.set(applied.unmatched);
+    // Lo que SÍ se pudo amarrar a un campo se pinta EN el campo; lo demás se
+    // enumera, para que ningún motivo desaparezca por no saber dónde ponerlo.
+    this.submitErrorDetails.set(
+      applied.unmatched.length > 0 ? applied.unmatched : [],
+    );
     this.erroredControls = applied.touchedControls;
     this.watchForCorrection(applied.touchedControls);
     this.expandSectionsWithErrors();
+
+    // Un 400 sin un solo `validationErrors` mapeable deja el banner con el copy
+    // del código y nada más. Al menos se enumera lo crudo antes que callar.
+    if (
+      applied.unmatched.length === 0 &&
+      Object.keys(applied.fieldErrors).length === 0 &&
+      messages.length > 0
+    ) {
+      this.submitErrorDetails.set(messages);
+    }
   }
 
   /**
@@ -3870,6 +4122,11 @@ export class InvoiceCreateComponent {
     this.orderIdControl.reset();
     this.mode.set('manual');
     this.pickerTargetUid.set(null);
+    this.productPickerOpen.set(false);
+    this.customItemOpen.set(false);
+    this.customItemDraft.set(null);
+    this.customItemEditing.set(false);
+    this.customItemTargetUid.set(null);
     this.inlineCustomer.set(null);
     this.linkedCustomerLabel.set(null);
     this.customerQuery.set('');

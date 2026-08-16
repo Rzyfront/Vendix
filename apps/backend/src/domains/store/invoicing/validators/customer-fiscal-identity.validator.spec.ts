@@ -521,13 +521,17 @@ describe('CustomerFiscalIdentityValidator', () => {
   // ---------------------------------------------------------------------------
 
   describe('dirección', () => {
-    it('bloquea la ausencia total de dirección y nombra el relleno de Bogotá', () => {
+    it('avisa (sin bloquear) la ausencia total de dirección: la cascada del emisor usa un domicilio real', () => {
       const report = validator.validate(juridica({ address: null }));
 
-      expect(blockerCodes(report)).toContain('ADDRESS_REQUIRED');
+      // Bloquear aquí dejaba inalcanzable la cascada fiscal→envío→tienda: el
+      // usuario veía el modal de errores aunque el respaldo funcionara. Y el
+      // texto ya no puede nombrar «11001», porque el emisor no rellena Bogotá.
+      expect(blockerCodes(report)).not.toContain('ADDRESS_REQUIRED');
+      expect(codes(report)).toContain('ADDRESS_REQUIRED');
       expect(
-        report.blockers.find((f) => f.code === 'ADDRESS_REQUIRED')?.problem,
-      ).toContain('11001');
+        report.warnings.find((f) => f.code === 'ADDRESS_REQUIRED')?.problem,
+      ).not.toContain('11001');
     });
 
     it('bloquea la falta de país', () => {
@@ -595,20 +599,26 @@ describe('CustomerFiscalIdentityValidator', () => {
       expect(report.normalized?.address?.department_code).toBe('05');
     });
 
-    it('bloquea el nombre de municipio ausente para no declarar «Bogotá»', () => {
+    // Los dos nombres se derivan del código por catálogo DANE
+    // (`resolveDianMunicipality`), así que su ausencia no puede producir un XML
+    // que se contradiga: o resuelve, o la emisión falla nombrando el municipio
+    // rechazado. Avisar sí; bloquear era una premisa falsa.
+    it('avisa (sin bloquear) el nombre de municipio ausente: se deriva del código DANE', () => {
       const report = validator.validate(
         juridica({ address: { ...VALID_ADDRESS, city_name: null } }),
       );
 
-      expect(blockerCodes(report)).toContain('CITY_NAME_REQUIRED');
+      expect(blockerCodes(report)).not.toContain('CITY_NAME_REQUIRED');
+      expect(codes(report)).toContain('CITY_NAME_REQUIRED');
     });
 
-    it('bloquea el nombre de departamento ausente', () => {
+    it('avisa (sin bloquear) el nombre de departamento ausente: sale del mismo catálogo', () => {
       const report = validator.validate(
         juridica({ address: { ...VALID_ADDRESS, department_name: null } }),
       );
 
-      expect(blockerCodes(report)).toContain('DEPARTMENT_NAME_REQUIRED');
+      expect(blockerCodes(report)).not.toContain('DEPARTMENT_NAME_REQUIRED');
+      expect(codes(report)).toContain('DEPARTMENT_NAME_REQUIRED');
     });
 
     it('avisa (sin bloquear) la línea de dirección vacía: su fallback es «N/A», no una mentira', () => {

@@ -273,6 +273,27 @@ import {
                 formatCurrency(cartState()?.summary?.total || 0)
               }}</span>
             </div>
+
+            <!--
+              Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Es el MISMO
+              predicado del carrito de escritorio (`PosCartService.invoiceRequiredByUvt`),
+              no una segunda regla: dos umbrales calculados aparte terminan
+              discrepando. Faltaba en el camino móvil, así que el cajero de
+              tablet/teléfono sólo se enteraba del tope cuando el backend
+              rechazaba la venta al pulsar «Finalizar Venta», con el cliente
+              delante y el cierre ya hecho.
+            -->
+            @if (invoiceRequiredByUvt()) {
+              <div class="uvt-warning">
+                <app-icon name="alert-triangle" [size]="12"></app-icon>
+                <span>
+                  Esta venta supera
+                  {{ formatCurrency(uvtLimitCop()) }}
+                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
+                  electrónica: identifica al cliente antes de cobrar.
+                </span>
+              </div>
+            }
           </div>
         }
     
@@ -781,6 +802,26 @@ import {
         color: var(--color-primary);
       }
 
+      .uvt-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 10px;
+        padding: 6px 8px;
+        border: 1px solid var(--color-warning);
+        border-radius: 6px;
+        background: var(--color-warning-light);
+        font-size: 11px;
+        line-height: 1.35;
+        color: var(--color-text-primary);
+      }
+
+      .uvt-warning app-icon {
+        color: var(--color-warning);
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
       /* Action Buttons */
       .modal-actions {
         display: flex;
@@ -882,6 +923,16 @@ export class PosCartModalComponent {
   readonly cartState = input<CartState | null>(null);
   readonly canCreateCustomItems = input<boolean>(false);
   readonly canOverridePrices = input<boolean>(false);
+
+  /**
+   * Techo de 5 UVT — se REUSAN los signals del servicio del carrito, que ya son
+   * la fuente de verdad del carrito de escritorio. Nada se recalcula acá.
+   */
+  readonly uvtThreshold = this.cartService.uvtThreshold;
+  readonly invoiceRequiredByUvt = this.cartService.invoiceRequiredByUvt;
+  readonly uvtLimitCop = computed(
+    () => this.cartService.uvtThreshold()?.limit_cop ?? 0,
+  );
 
   readonly closed = output<void>();
   readonly customItemRequested = output<void>();

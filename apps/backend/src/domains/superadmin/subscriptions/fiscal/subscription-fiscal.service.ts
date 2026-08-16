@@ -214,6 +214,12 @@ export class SubscriptionFiscalService {
     // `DianTestService`: el reporte de readiness y la guarda de promoción tienen
     // que ser LOS MISMOS que ve un tenant.
     private readonly dianConfigService: DianConfigService,
+    // La ClTec se persiste en TRES columnas (plana, cifrada y huella) y
+    // `reveal()` prefiere la cifrada. Escribir sólo la plana desde acá dejaría
+    // la cifrada ANTERIOR al mando: el super admin vería su corrección
+    // guardada y el CUFE se seguiría hashando con la clave vieja. Llega por
+    // `EncryptionModule`, que es @Global.
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   async getStatus() {
@@ -1461,9 +1467,11 @@ export class SubscriptionFiscalService {
         // `TenantContextRunner`), así que lo que no exija el servicio no lo
         // exige nadie — y una ClTec mal copiada quema un consecutivo autorizado
         // que no se recupera.
-        technical_key: assertTechnicalKeyShape(dto.technical_key, {
-          prefix: dto.prefix,
-        }),
+        ...this.technicalKeyVault.sealForWrite(
+          assertTechnicalKeyShape(dto.technical_key, {
+            prefix: dto.prefix,
+          }),
+        ),
       },
     });
 
@@ -1614,9 +1622,17 @@ export class SubscriptionFiscalService {
       data.valid_to = nextValidTo;
     }
     if (dto.technical_key !== undefined) {
-      data.technical_key = assertTechnicalKeyShape(dto.technical_key, {
-        resolution_id: id,
-      });
+      // Las TRES columnas se escriben juntas o la fila queda apuntando a dos
+      // claves a la vez, y `reveal()` —que prefiere la cifrada— devolvería la
+      // anterior. `sealForWrite` devuelve siempre las tres, incluso en `null`.
+      Object.assign(
+        data,
+        this.technicalKeyVault.sealForWrite(
+          assertTechnicalKeyShape(dto.technical_key, {
+            resolution_id: id,
+          }),
+        ),
+      );
     }
     if (dto.is_active !== undefined) data.is_active = dto.is_active;
 
@@ -2509,7 +2525,11 @@ export class SubscriptionFiscalService {
       // no de tres lecturas distintas, para que el número emitido y la autorización
       // declarada no puedan pertenecer a resoluciones diferentes.
       resolution_number: resolution.resolution_number ?? undefined,
-      technical_key: resolution.technical_key ?? undefined,
+      // Por la bóveda, no por la columna plana: es la MISMA lectura que hace
+      // `invoice-flow.service.ts` al hashear el CUFE. Leer aquí la plana y allá
+      // la cifrada es cómo se llega a que el documento se firme con una clave
+      // y se declare con otra.
+      technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
       control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
         resolution_id: resolution.id,
         document_type: resolution.document_type,

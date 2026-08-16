@@ -366,7 +366,7 @@ describe('UblDebitNoteBuilder', () => {
       );
       expect(customer_block).toContain('<cac:PartyLegalEntity>');
       expect(customer_block).toMatch(
-        /schemeID="31"[^>]*>900123456-7<\/cbc:CompanyID>/,
+        /schemeID="7"[^>]*>900123456<\/cbc:CompanyID>/,
       );
       expect(customer_block).toContain(
         '<cbc:IndustryClassificationCode>4711</cbc:IndustryClassificationCode>',

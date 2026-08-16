@@ -32,12 +32,23 @@ import {
   FISCAL_RESPONSIBILITY_LABELS,
   FiscalResponsibility,
 } from '../../../../../../shared/constants/fiscal-responsibilities.constants';
-import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
+import { nitDvGroupValidator } from '../../../../../../shared/utils/nit.util';
 import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 import { CustomersService } from '../../services/customers.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { Observable, of } from 'rxjs';
 import { finalize } from 'rxjs/operators';
+
+/**
+ * Validador NIT ↔ DV atado a los nombres de control de ESTE formulario. El
+ * espejo backend es `@NitDvMatches()` en `CreateCustomerDto`, que rechaza con
+ * 400 cualquier par incoherente — incluidos clientes ya guardados con un DV
+ * inconsistente de antes de que esa validación existiera.
+ */
+const CUSTOMER_NIT_DV_VALIDATOR = nitDvGroupValidator(
+  'document_number',
+  'verification_digit',
+);
 
 // Re-export del traductor centralizado para compatibilidad con consumidores
 // que importaban `translateCustomerError` desde este archivo.
@@ -660,10 +671,15 @@ export class CustomerModalComponent {
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
-    // Group-level validator: nitDvValidator solo aplica cuando document_type='NIT'.
+    // Group-level validator: solo aplica cuando document_type='NIT'.
+    // Los nombres de control se pasan explícitos porque este formulario usa
+    // `document_number`/`verification_digit`, no el `nit`/`nit_dv` de los
+    // formularios fiscales; con los nombres por defecto el validador queda
+    // como un no-op silencioso y el usuario sólo se entera por el 400 del
+    // backend (`NitDvMatches`), sin saber qué campo corregir.
     effect(() => {
       const type = this.document_type();
-      this.form.setValidators(type === 'NIT' ? [nitDvValidator] : []);
+      this.form.setValidators(type === 'NIT' ? [CUSTOMER_NIT_DV_VALIDATOR] : []);
       this.form.updateValueAndValidity({ emitEvent: false });
     });
 
@@ -774,7 +790,10 @@ export class CustomerModalComponent {
   getGroupNitDvError(): string {
     const errors = this.form.errors;
     if (!errors || !errors['nitDv']) return '';
-    return 'El dígito de verificación no corresponde al NIT';
+    const expected = (errors['nitDv'] as { expected?: string | null })?.expected;
+    return expected
+      ? `El dígito de verificación no corresponde al NIT (debería ser ${expected})`
+      : 'El dígito de verificación no corresponde al NIT';
   }
 
   onClose() {
@@ -877,6 +896,12 @@ export class CustomerModalComponent {
   onSubmit() {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
+      // Un error de grupo (NIT ↔ DV) sólo se pinta junto al campo DV, dentro
+      // de la sección fiscal; sin toast el botón parece no responder.
+      this.toast.error(
+        this.getGroupNitDvError() ||
+          'Revisa los campos marcados antes de guardar.',
+      );
       return;
     }
 

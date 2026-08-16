@@ -25,6 +25,11 @@ import { SerialNumberEnforcementService } from '../../../inventory/serial-number
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
+import {
+  resolveEffectiveRefundChannel,
+  API_REVERSIBLE_REFUND_PROCESSORS,
+  type EffectiveRefundChannel,
+} from './refund-channel.util';
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
 
@@ -85,7 +90,15 @@ export class RefundFlowService {
             product_variants: { select: { id: true } },
           },
         },
-        payments: true,
+        payments: {
+          include: {
+            store_payment_method: {
+              select: {
+                system_payment_method: { select: { type: true } },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -131,6 +144,20 @@ export class RefundFlowService {
     }
 
     const userId = RequestContextService.getUserId();
+
+    // REFUND OVERHAUL — derivar el canal EFECTIVO por donde se moverá el
+    // dinero. La intención del operador (`dto.refund_method`) no basta: para
+    // `original_payment` el canal real depende del tipo de pago original
+    // (cash → caja, bank_transfer → cartera, wompi/paypal/stripe → gateway).
+    // El resolver vive en `refund-channel.util.ts` para que la lógica sea
+    // compartible entre backend, tests y futuros consumidores.
+    const paymentType: string | null =
+      order.payments?.[0]?.store_payment_method?.system_payment_method?.type ??
+      null;
+    const effectiveChannel: EffectiveRefundChannel = resolveEffectiveRefundChannel(
+      dto.refund_method,
+      paymentType,
+    );
 
     // Execute everything in a transaction
     return this.prisma
@@ -315,21 +342,22 @@ export class RefundFlowService {
         //
         // Hotfix post-PR-576: el bug original_payment revertía dinero en DB
         // (mark completed) sin reversar nada en Wompi/cash_on_delivery/etc.
-        // Para `original_payment` dejamos el refund como `pending` dentro de
-        // la tx y luego, en el `.then()` de abajo, `dispatchRefundProcessor`
-        // llama al processor real (Wompi.reverse, etc.) y exige éxito antes
-        // de promover a `completed`. Si el processor no está integrado
-        // (la mayoría de las tiendas hoy), el refund queda en estado
+        // Para refunds que viajan por una pasarela reversible (gateway)
+        // dejamos el refund como `pending_approval` dentro de la tx y luego,
+        // en el `.then()` de abajo, `dispatchRefundProcessor` llama al
+        // processor real (Wompi.reverse, etc.) y exige éxito antes de
+        // promover a `completed`. Si el processor no está integrado (la
+        // mayoría de las tiendas hoy), el refund queda en estado
         // `pending_approval` para intervención manual del operador —
         // exactamente la semántica que el comentario en `:428-431` describía
-        // pero nunca implementó. Antes del fix el código usaba `'pending'`,
+        // pero nunca implementó. Para canales directos (cash, bank_transfer,
+        // store_credit) la promesa se cumple sincrónicamente en la tx y
+        // queda `completed`. Antes del fix el código usaba `'pending'`,
         // que NO es un valor válido de `refunds_state_enum` (el enum declara
         // `requested | pending_approval | approved | processing | completed`)
         // y provocaba SYS_INTERNAL_001 en `tx.refunds.update()`.
         const finalState =
-          dto.refund_method === 'original_payment'
-            ? 'pending_approval'
-            : 'completed';
+          effectiveChannel === 'gateway' ? 'pending_approval' : 'completed';
         const completedRefund = await tx.refunds.update({
           where: { id: refund.id },
           data: {
@@ -353,17 +381,23 @@ export class RefundFlowService {
         // emitting refund.completed. Hotfix post-PR-576: la rama vieja
         // marcaba `state='completed'` sin reversar el dinero en el processor.
         // Ahora emitimos `payment.refund.requested` y dejamos el refund en
-        // `pending`. El listener del processor (cuando existe) lo promueve
-        // a `completed` o rechaza con `failed`. Sin listener, el operador
-        // cierra manualmente — comportamiento correcto: nunca marcamos
-        // `completed` un refund que no se reversó en el gateway.
-        if (dto.refund_method === 'original_payment') {
+        // `pending_approval`. El listener del processor (cuando existe) lo
+        // promueve a `completed` o rechaza con `failed`. Sin listener, el
+        // operador cierra manualmente — comportamiento correcto: nunca
+        // marcamos `completed` un refund que no se reversó en el gateway.
+        //
+        // El gate se hace por CANAL EFECTIVO, no por `refund_method` crudo.
+        // Así, `original_payment` sobre `cash` o `bank_transfer` NO entra al
+        // processor (su promesa se cumplió en la tx) y el refund ya está
+        // `completed`.
+        if (effectiveChannel === 'gateway') {
           // FIX refund 500: el processor emit + downstream listener es
           // no-bloqueante para el refund row (que ya está committed). Si
           // falla, NO propagamos el throw al cliente — el refund sigue
-          // válido en `pending` para intervención manual del operador, y
-          // el `SYS_INTERNAL_001` que el filtro global devolvería solo
-          // confundiría al usuario. Loggeamos el error para diagnóstico.
+          // válido en `pending_approval` para intervención manual del
+          // operador, y el `SYS_INTERNAL_001` que el filtro global
+          // devolvería solo confundiría al usuario. Loggeamos el error
+          // para diagnóstico.
           try {
             await this.dispatchRefundProcessor(
               order,
@@ -372,7 +406,7 @@ export class RefundFlowService {
             );
           } catch (err) {
             this.logger.error(
-              `Refund #${completedRefund.id}: processor dispatch threw — refund stays in 'pending' for manual operator intervention. ${err instanceof Error ? err.message : String(err)}`,
+              `Refund #${completedRefund.id}: processor dispatch threw — refund stays in 'pending_approval' for manual operator intervention. ${err instanceof Error ? err.message : String(err)}`,
               err instanceof Error ? err.stack : undefined,
             );
           }
@@ -413,6 +447,12 @@ export class RefundFlowService {
             // Previously the event omitted this and the journal always
             // resolved to refund.completed.cash → 1105 Caja.
             refund_method: dto.refund_method,
+            // REFUND OVERHAUL — incluir el canal EFECTIVO (cash /
+            // bank_transfer / store_credit / gateway) para auditoría y para
+            // que AutoEntryService pueda enrutar por canal real en lugar de
+            // adivinarlo desde `refund_method` (que es intención del
+            // operador, no el canal final).
+            effective_channel: effectiveChannel,
           });
 
           if (calculation.is_full_refund) {
@@ -465,21 +505,21 @@ export class RefundFlowService {
 
         // Record cash register refund movement (non-blocking).
         //
-        // SOLO para `refund_method === 'cash'`. Antes este gate era
+        // SOLO cuando el canal efectivo es `cash`. Antes este gate era
         // `movesCash = refund_method !== 'store_credit' && refund_method !== 'bank_transfer'`,
         // lo que aplicaba a `cash` Y `original_payment` — un error que producía
         // un movimiento fantasma de caja para reembolsos con tarjeta. La
         // consecuencia era una salida de efectivo registrada en `movements` que
         // nunca ocurrió en la realidad.
         //
-        // `original_payment` → el processor (Wompi/cash_on_delivery/etc.)
+        // `original_payment` sobre pago gateway → el processor (Wompi/cash_on_delivery/etc.)
         // se llama a sí mismo abajo en `dispatchRefundProcessor` cuando la
         // integración existe; mientras tanto el refund queda como
         // `state='pending_approval'` para intervención manual del operador.
         // `store_credit` → ya se acreditó la wallet arriba.
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.
-        const movesCash = dto.refund_method === 'cash';
+        const movesCash = effectiveChannel === 'cash';
         if (userId && movesCash) {
           this.recordRefundCashRegisterMovement(
             order.store_id,
@@ -640,7 +680,9 @@ export class RefundFlowService {
     // rechaza con `failed`. Sin listener (la mayoría de las tiendas hoy),
     // el refund permanece `pending` y el operador lo cierra manualmente.
 
-    const reversible = ['wompi', 'paypal', 'stripe'].includes(systemMethodType);
+    const reversible = (API_REVERSIBLE_REFUND_PROCESSORS as readonly string[]).includes(
+      systemMethodType,
+    );
     if (reversible) {
       try {
         this.eventEmitter.emit('payment.refund.requested', {

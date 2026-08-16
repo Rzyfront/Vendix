@@ -7,7 +7,25 @@ import {
   IsIn,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
+
+/**
+ * «Sin valor» de un `<select>` es la cadena vacía, no `undefined`.
+ *
+ * `@IsOptional()` sólo se salta `undefined` y `null`, así que un campo opcional
+ * que el formulario envía en blanco llegaba al `@IsIn` y devolvía un 400 —
+ * exigiendo un dato que el propio DTO documenta como opcional con defecto.
+ *
+ * Este `@Transform` traduce el «no seleccionado» del formulario al «ausente»
+ * del contrato para que `@IsOptional()` haga lo que promete. NO inventa un
+ * valor: quien lee la periodicidad ya aplica su defecto
+ * (`FiscalObligationService.vatReturnAppliesForPeriod` ⇒ `bimonthly`), y
+ * escribir aquí un defecto silencioso persistiría como declarada una
+ * periodicidad que el comerciante nunca eligió.
+ */
+const blankToUndefined = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
 
 /**
  * Person type for fiscal/tax purposes (Colombia).
@@ -130,6 +148,7 @@ export class UpdateStoreFiscalDataDto {
       'Periodicidad de la declaración de IVA (art. 600 ET). Solo aplica si el tenant es responsable de IVA (O-48). Ausente ⇒ bimonthly.',
   })
   @IsOptional()
+  @Transform(blankToUndefined)
   @IsString()
   @IsIn(['monthly', 'bimonthly', 'four_monthly'])
   vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';

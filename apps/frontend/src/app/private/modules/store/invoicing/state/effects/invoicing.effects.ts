@@ -710,8 +710,14 @@ export class InvoicingEffects {
             return InvoicingActions.createResolutionSuccess({ resolution: response.data });
           }),
           catchError((error) =>
+            // `errorCode` + `details` viajan porque el modal los reparte sobre
+            // los campos del formulario (clave técnica, prefijo, rango…).
             this.fail(error, (f) =>
-              InvoicingActions.createResolutionFailure({ error: f.message }),
+              InvoicingActions.createResolutionFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
             ),
           )
         )
@@ -730,7 +736,11 @@ export class InvoicingEffects {
           }),
           catchError((error) =>
             this.fail(error, (f) =>
-              InvoicingActions.updateResolutionFailure({ error: f.message }),
+              InvoicingActions.updateResolutionFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
             ),
           )
         )

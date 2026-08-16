@@ -9,8 +9,23 @@ import {
   Min,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
+
+/**
+ * «Sin valor» de un `<select>` es la cadena vacía, no `undefined`.
+ *
+ * Gemelo del de `UpdateStoreFiscalDataDto` a propósito: los tres carriles de
+ * escritura de identidad fiscal —tienda, organización y plataforma
+ * (`superadmin-fiscal-operations.controller.ts` reutiliza ESTE DTO)— comparten
+ * el mismo `<app-legal-data-form>`, así que comparten el mismo blanco.
+ *
+ * `@IsOptional()` sólo se salta `undefined` y `null`; sin esto, un formulario
+ * que envía la periodicidad en blanco recibía un 400 por un campo que el DTO
+ * documenta como opcional con defecto.
+ */
+const blankToUndefined = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
 
 /**
  * Person type for fiscal/tax purposes (Colombia).

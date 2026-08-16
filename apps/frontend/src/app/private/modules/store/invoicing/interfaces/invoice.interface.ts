@@ -518,6 +518,14 @@ export interface InvoiceTax {
   tax_rate: number;
   tax_amount: number;
   taxable_amount: number;
+  /**
+   * Clasificación fiscal del tributo (`iva`, `inc`, `ica`…). La columna existe
+   * en `invoice_taxes` desde el contrato tipado y el backend la devuelve; el
+   * frontend no la declaraba, así que una nota crédito que copiara el desglose
+   * de la factura no tenía forma de saber que estaba corrigiendo un INC y lo
+   * habría rebautizado IVA.
+   */
+  tax_type?: string;
 }
 
 export interface InvoiceResolution {
@@ -658,6 +666,20 @@ export interface CreateInvoiceItemDto {
   discount_amount?: number;
   /** Legacy single tax rate (still honored for backward compat). */
   tax_rate?: number;
+  /**
+   * Cuota AFIRMADA de la línea. `CreateInvoiceItemDto` del backend la declara
+   * (`@IsOptional @IsNumber @Min(0)`) y el frontend no.
+   *
+   * La NECESITA la nota crédito/débito parcial: `credit-notes.service.ts` no
+   * pasa por `InvoiceCalculatorService` —una nota copia importes, no los
+   * recalcula— y suma la cabecera leyendo `item.tax_amount` (`:186`). Sin este
+   * campo, una nota parcial viajaría con impuesto cero.
+   *
+   * En una FACTURA sigue sin usarse: allá manda el calculador del servidor.
+   */
+  tax_amount?: number;
+  /** Variante del producto, cuando la línea corregida la tenía. */
+  product_variant_id?: number;
   /** QUI-690 — Per-line typed taxes with inclusive/additional flag. */
   taxes?: CreateInvoiceTaxDto[];
   /** QUI-690 — Per-line INCLUDED / ADDITIONAL shortcut. */

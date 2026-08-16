@@ -164,10 +164,27 @@ export class CreateResolutionDto {
   })
   @IsString()
   @Matches(TECHNICAL_KEY_PATTERN, {
-    message:
-      `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
-      'caracteres hexadecimales (0-9, a-f), tal como la entrega la DIAN en la ' +
-      'autorización de numeración. Déjala vacía si este documento no lleva clave técnica.',
+    /**
+     * El mensaje se construye por función para poder decir CUÁNTOS caracteres
+     * se capturaron. Sin ese número, «debe tener 40» no distingue una clave a
+     * la que le faltan dos de una en la que se coló un guion, y el operador se
+     * queda mirando cuarenta caracteres que a ojo parecen correctos — que es
+     * exactamente cómo la de 38 llegó a producción.
+     *
+     * De `args.value` se lee SÓLO `.length`. La ClTec es un secreto fiscal y
+     * este texto viaja al cliente y a los logs: interpolar el valor (con
+     * `$value`, por ejemplo) lo publicaría en cada intento fallido.
+     */
+    message: (args) => {
+      const length = typeof args.value === 'string' ? args.value.length : 0;
+      return (
+        `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} ` +
+        `caracteres hexadecimales (0-9, a-f); se capturaron ${length}. ` +
+        'Cópiala completa desde el PDF de la autorización de numeración o ' +
+        'consúltala en el servicio de Rangos de Numeración de la DIAN. ' +
+        'Déjala vacía si este documento no lleva clave técnica.'
+      );
+    },
   })
   technical_key?: string | null;
 }

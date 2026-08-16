@@ -6,6 +6,7 @@ import {
   effect,
   computed,
   signal,
+  untracked,
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -15,9 +16,7 @@ import {
   ButtonComponent,
   ModalComponent,
   IconComponent,
-  SaveRequirementsModalComponent,
   ToastService } from '../../../../../shared/components';
-import { FiscalRequirementsService } from '../../../../../shared/services/fiscal-requirements.service';
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { RepartosService } from '../../../store-delivery/services/repartos.service';
@@ -42,7 +41,6 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
     ButtonComponent,
     ModalComponent,
     IconComponent,
-    SaveRequirementsModalComponent,
     InvoicingNotConfiguredComponent,
     PosFiscalStatusComponent
 ],
@@ -277,13 +275,20 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       ></app-invoicing-not-configured>
     }
 
-    <!-- Modal de requisitos fiscales: explica un 4xx fiscal que bloquea el
-         cierre de factura con el mismo lenguaje/CTA del wizard de activacion. -->
-    <app-save-requirements-modal
-      [(isOpen)]="fiscalReq.isOpen"
-      [requirements]="fiscalReq.requirements()"
-      (action)="fiscalReq.handleAction($event)"
-    />
+    <!-- NO HAY MODAL DE REQUISITOS FISCALES ACÁ, Y ES DELIBERADO.
+         Vivía un <app-save-requirements-modal> enlazado al SINGLETON de raíz
+         `FiscalRequirementsService`. Ningún camino del POS lo abría a
+         propósito: lo abría `invoicing.effects.ts` (`report()` →
+         `presentFiscalError`) ante CUALQUIER 4xx fiscal de cualquier efecto de
+         facturación. Como este componente se monta con el POS —no está
+         diferido, sólo su modal interno se abre con `isOpen()`—, un fallo
+         fiscal de fondo le tapaba la pantalla al cajero con la venta ya
+         cobrada. Eso es exactamente lo que el carril del POS no puede hacer:
+         acá el estado fiscal se cuenta con el indicador NO MODAL
+         (`app-pos-fiscal-status`), que ya imprime `problem` + `fix` de cada
+         bloqueante sin interrumpir la caja. El modal de requisitos es del
+         carril fiscal, donde bloquear ANTES de gastar numeración es el
+         comportamiento correcto. -->
     `,
   styles: [
     `
@@ -411,7 +416,6 @@ export class PosOrderConfirmationComponent {
   paymentInfo: any = null;
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
-  readonly fiscalReq = inject(FiscalRequirementsService);
   private ticketService = inject(PosTicketService);
   private repartosService = inject(RepartosService);
   private currencyService = inject(CurrencyFormatService);
@@ -464,12 +468,40 @@ private authFacade = inject(AuthFacade);
   /** Sólo se avisa por toast la emisión que el cajero pidió a mano. */
   private awaitingManualEmit = false;
 
+  /**
+   * La compuerta DIAN se carga PEREZOSAMENTE y una sola vez por montaje.
+   *
+   * Antes se despachaba `loadDianConfigs()` en el constructor. Este componente
+   * se monta con el POS —no está diferido; sólo su modal interno se abre con
+   * `isOpen()`—, así que la petición salía en CADA entrada a la caja, incluso
+   * en tiendas sin facturación electrónica y con el cajón todavía cerrado. Un
+   * cajero sin `invoicing:read` recibía un 403 al abrir el POS: ruido en una
+   * pantalla donde el error fiscal no le pertenece.
+   *
+   * Ahora sale cuando la información se necesita —al cerrarse una venta— y sólo
+   * si el usuario puede leerla. Si no puede, `dianStatus()` queda en su valor
+   * inicial `configured: false`, que es exactamente el desenlace correcto: el
+   * botón «Factura» abre el modal de configuración en lugar de intentar emitir.
+   */
+  private dianConfigsRequested = false;
+
+  private ensureDianConfigsLoaded(): void {
+    if (this.dianConfigsRequested) return;
+    if (!this.authFacade.hasPermission('invoicing:read')) return;
+    this.dianConfigsRequested = true;
+    this.store.dispatch(InvoicingActions.loadDianConfigs());
+  }
+
   constructor() {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
     this.currencyService.loadCurrency();
-    this.store.dispatch(InvoicingActions.loadDianConfigs());
-effect(() => {
+    effect(() => {
+      if (this.isOpen()) {
+        untracked(() => this.ensureDianConfigsLoaded());
+      }
+    });
+    effect(() => {
       if (this.orderData()) {
         this.loadOrderData();
         this.maybeAutoPrint();

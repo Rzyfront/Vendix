@@ -63,6 +63,24 @@ const ERROR_CODE_MESSAGES: Record<string, string> = {
 };
 
 /**
+ * Extrae los mensajes legibles de `details.validationErrors`.
+ *
+ * Sólo devuelve entradas de tipo string: la carga masiva usa el mismo campo
+ * para un arreglo de `BulkRowError` (`{ row, column, value, code }`), que
+ * tiene su propia UI en `bulk-upload-modal` y no debe acabar serializado
+ * dentro de un toast.
+ */
+function extractValidationMessages(details: unknown): string[] {
+  if (!details || typeof details !== 'object') return [];
+  const raw = (details as { validationErrors?: unknown }).validationErrors;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m): m is string => typeof m === 'string')
+    .map((m) => m.trim())
+    .filter((m) => m.length > 0);
+}
+
+/**
  * Traduce un error HTTP a un mensaje en español listo para mostrar al usuario.
  *
  * @param err Error capturado por RxJS / HttpClient (HttpErrorResponse o similar).
@@ -102,6 +120,19 @@ export function translateCustomerError(
     : Array.isArray(details)
       ? details
       : [];
+
+  // 0. `details.validationErrors[]` — el motivo REAL del 400.
+  //
+  // El `exceptionFactory` global (`main.ts`) devuelve los mensajes de
+  // class-validator como array y `HttpExceptionFilter` los guarda bajo
+  // `details.validationErrors`, dejando `message: 'Validation failed'`. Sin
+  // leerlos, un rechazo tan concreto como "El dígito de verificación '0' no
+  // corresponde al NIT '11188607760' (DV calculado: '7')" se degradaba a
+  // "Datos del formulario inválidos", que no dice qué corregir.
+  const validationMessages = extractValidationMessages(details);
+  if (validationMessages.length) {
+    return validationMessages.slice(0, 2).join(' · ');
+  }
 
   // 1. Specific known codes
   if (code && ERROR_CODE_MESSAGES[code]) {

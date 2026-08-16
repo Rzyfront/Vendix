@@ -3,6 +3,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.service';
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
@@ -37,6 +38,10 @@ export class InvoiceNumberGenerator {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly fiscalScope: FiscalScopeService,
+    // Llega por `EncryptionModule`, que es @Global. Ver la precondición de
+    // `sales_invoice` más abajo: sin esto la puerta valida una columna y la
+    // emisión hashea otra.
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   /**
@@ -124,11 +129,18 @@ export class InvoiceNumberGenerator {
       // su forma. El XML salió perfecto —la ClTec no viaja en él—, la DIAN
       // recomputó el CUFE con la verdadera y respondió «Valor del CUFE no está
       // calculado correctamente». El número ya estaba quemado.
+      //
+      // Se valida por la BÓVEDA, no por la columna plana. La ClTec vive en tres
+      // columnas y `reveal()` PREFIERE la cifrada; leer aquí `technical_key` a
+      // secas comprobaba la forma de una clave que puede no ser la que después
+      // se hashea. Una fila con la plana corregida y la cifrada rancia pasaba
+      // esta puerta con 40 hex impecables y firmaba el CUFE con la vieja — el
+      // mismo rechazo por «CUFE mal calculado», sólo que ahora con un validador
+      // dando el visto bueno. Validar exactamente lo que se va a hashear es la
+      // única versión de esta comprobación que sirve para algo.
       if (document_type === 'sales_invoice') {
         const technical_key = normalizeTechnicalKey(
-          typeof resolution.technical_key === 'string'
-            ? resolution.technical_key
-            : null,
+          this.technicalKeyVault.reveal(resolution),
         );
         if (!isWellFormedTechnicalKey(technical_key)) {
           throw new VendixHttpException(

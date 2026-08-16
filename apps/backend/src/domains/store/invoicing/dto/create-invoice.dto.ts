@@ -24,6 +24,7 @@ import { TaxFiscalType } from '../../taxes/dto';
 import { CreateCustomerDto } from '../../customers/dto/create-customer.dto';
 import { CreateProductDto } from '../../products/dto';
 import { FiscalResponsibilityInCatalogRule } from '../../../../common/validators/fiscal-responsibility.validator';
+import { NitDvMatches } from '../../../../common/validators/nit-dv.validator';
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
 import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
@@ -462,6 +463,17 @@ export class CreateInvoiceDto {
     message:
       'customer_verification_digit debe ser un único dígito (0-9). Si no lo conoces, omítelo: el sistema lo calcula del NIT con el algoritmo módulo 11 de la DIAN.',
   })
+  // El DV es un checksum: si no cuadra con el NIT, la DIAN rechaza la
+  // identificación del adquiriente DESPUÉS de haber consumido el consecutivo
+  // autorizado, que no se recupera. Los nombres de campo son explícitos porque
+  // este DTO habla el vocabulario DIAN (`'31'` = NIT), no la sigla que usa
+  // `CreateCustomerDto`.
+  @NitDvMatches({
+    documentTypeField: 'customer_document_type',
+    documentNumberField: 'customer_tax_id',
+    verificationDigitField: 'customer_verification_digit',
+    nitValue: DIAN_ID_TYPES.NIT,
+  })
   customer_verification_digit?: string;
 
   /** Régimen tributario del adquiriente (`cbc:TaxLevelCode` / responsabilidad). */
@@ -567,12 +579,29 @@ export class CreateInvoiceDto {
   @Type(() => Number)
   resolution_id?: number;
 
+  /**
+   * Agregado de lo RETENIDO sobre este documento.
+   *
+   * ⚠️ **No netea el total.** Anexo Técnico 1.9 §11.9.1: «los cálculos aplicados
+   * por la validación previa de facturas electrónicas de la DIAN no incluyen en
+   * el fragmento `<cac:LegalMonetaryTotal/>` operaciones con el elemento
+   * `<cac:WithholdingTaxTotal/>`». O sea, la DIAN revalida
+   * `PayableAmount = base + tributos` SIN mirar la retención; restarla de
+   * `invoices.total_amount` rompe esa identidad y el documento se rechaza por
+   * descuadre aritmético — con el consecutivo autorizado ya gastado.
+   *
+   * El servicio lo respeta: `total_amount` sale de
+   * `InvoiceCalculatorService.calculate()`, que devuelve la retención aparte en
+   * `totals.withholding_amount` y jamás netada. Este campo sólo alimenta la
+   * columna `invoices.withholding_amount`, que es informativa (lo que el cliente
+   * girará de menos), y el grupo `cac:WithholdingTaxTotal` del XML.
+   */
   @IsOptional()
   @IsNumber({}, { message: 'withholding_amount debe ser un número.' })
   @Type(() => Number)
   @Min(0, {
     message:
-      'withholding_amount no puede ser negativo: es el valor retenido, y se resta del total automáticamente. No lo envíes con signo menos.',
+      'withholding_amount no puede ser negativo: es el valor retenido, que se declara aparte y NO se resta del total de la factura (Anexo Técnico DIAN 1.9 §11.9.1). No lo envíes con signo menos.',
   })
   withholding_amount?: number;
 

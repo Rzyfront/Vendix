@@ -57,6 +57,7 @@ import {
 import {
   DEFAULT_STORE_TIMEZONE,
   localDateString,
+  localOffsetString,
   localTimeString,
   resolveOrganizationTimezone,
   resolveStoreTimezone,
@@ -128,6 +129,21 @@ export type EmitReadinessReport = Omit<
    * se emite a la DIAN y por tanto no hay nada que prevalidar.
    */
   fiscal_document: FiscalDocumentReport | null;
+  /**
+   * Las transiciones legales desde el estado actual — lo mismo que aplica
+   * `validateTransition`.
+   *
+   * Se publica porque hasta ahora `getValidTransitions()` existía y NADIE lo
+   * exponía: el panel deducía qué botones pintar y acertaba a medias, que es
+   * como «Anular» acabó ofreciéndose sobre borradores para que el backend
+   * contestara 400 al pulsarlo.
+   */
+  valid_transitions: InvoiceStatus[];
+  /**
+   * Cómo se deshace ESTE documento ahora mismo. La respuesta a «ya no quiero
+   * esta factura», que es distinta de «¿puedo emitirla?» y es la que faltaba.
+   */
+  discard_route: InvoiceDiscardRoute;
 };
 
 type InvoiceStatus =
@@ -153,6 +169,104 @@ const VALID_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   rejected: ['sent', 'voided'],
   cancelled: [],
   voided: [],
+};
+
+/**
+ * CÓMO SE DESHACE ESTE DOCUMENTO — la pregunta que el operador hace de verdad.
+ *
+ * `VALID_TRANSITIONS` responde «¿qué transiciones existen?», que es la pregunta
+ * del diseñador. Quien está frente a la pantalla pregunta otra cosa: «esta
+ * factura me está estorbando, ¿cómo la quito para volver a facturar la orden?».
+ * Traducir una a otra a ojo es lo que produjo el atasco reportado —«me dice que
+ * primero debo cancelarla, pero no hay forma de cancelarla»—: el panel ofrecía
+ * «Anular» sobre un BORRADOR, cuya salida real se llama `cancel`, y el backend
+ * contestaba «transición inválida» sin decir cuál era la buena.
+ *
+ * Las tres salidas NO son sinónimos, y confundirlas tiene consecuencia fiscal:
+ *
+ * - `cancel` — el documento nunca se transmitió. Se descarta y ya. Su
+ *   consecutivo queda como hueco en la numeración autorizada (se tomó al
+ *   CREAR), y eso es irreversible: por eso descartar es barato en trámite pero
+ *   nunca gratis.
+ * - `void` — la DIAN lo recibió y lo RECHAZÓ. No existe fiscalmente, así que se
+ *   anula sin nota, pero se conserva la evidencia del rechazo.
+ * - `credit_note` — la DIAN lo ACEPTÓ. Existe. No se borra ni se anula: se
+ *   reversa con una nota crédito, que es un documento nuevo con su propio
+ *   consecutivo. Ver la guarda explícita al principio de `void()`.
+ */
+export interface InvoiceDiscardRoute {
+  /**
+   * La acción que SÍ funciona sobre este documento ahora mismo, o `null` cuando
+   * el estado es terminal y no hay nada que deshacer.
+   */
+  action: 'cancel' | 'void' | 'credit_note' | null;
+  /** Rótulo exacto que el panel debe pintar en el botón. */
+  label: string;
+  /** Por qué ésa y no otra, en español y sin nombres de enum. */
+  reason: string;
+  /**
+   * ¿Descartarlo libera la orden de origen para volver a facturarla?
+   *
+   * Es la única propiedad que le importa a quien llegó aquí por el 409 de
+   * `INVOICING_CREATE_002`. `true` sólo para `cancel` y `void`, que son los dos
+   * estados que `assertNotAlreadyInvoiced` excluye de «ya facturado»
+   * (`invoicing.service.ts`). La nota crédito NO libera la orden: la factura
+   * aceptada sigue existiendo y la orden sigue facturada.
+   */
+  releases_source_document: boolean;
+}
+
+/** La salida de cada estado. Derivada de `VALID_TRANSITIONS`, no paralela a ella. */
+const DISCARD_ROUTES: Record<InvoiceStatus, InvoiceDiscardRoute> = {
+  draft: {
+    action: 'cancel',
+    label: 'Descartar borrador',
+    reason:
+      'El borrador nunca se transmitió a la DIAN, así que se descarta sin nota. El consecutivo que ya tomó queda como hueco en la numeración autorizada y no se recupera.',
+    releases_source_document: true,
+  },
+  validated: {
+    action: 'cancel',
+    label: 'Descartar documento',
+    reason:
+      'El documento está validado pero todavía no se transmitió a la DIAN, así que se descarta sin nota.',
+    releases_source_document: true,
+  },
+  sent: {
+    action: null,
+    label: 'Esperando respuesta de la DIAN',
+    reason:
+      'El documento ya salió hacia la DIAN y su respuesta aún no llega. No se descarta mientras esté en tránsito: hasta saber si lo aceptó o lo rechazó, anularlo por nuestra cuenta dejaría la contabilidad diciendo una cosa y la DIAN otra.',
+    releases_source_document: false,
+  },
+  accepted: {
+    action: 'credit_note',
+    label: 'Emitir nota crédito',
+    reason:
+      'La DIAN aceptó este documento, así que existe fiscalmente y no se anula ni se borra: se reversa con una nota crédito, que consume su propio consecutivo.',
+    releases_source_document: false,
+  },
+  rejected: {
+    action: 'void',
+    label: 'Anular',
+    reason:
+      'La DIAN rechazó el documento, así que no existe fiscalmente y se anula sin nota crédito. Corrige lo que la DIAN señaló y reintenta el envío: reintentar reutiliza el MISMO consecutivo, no toma uno nuevo.',
+    releases_source_document: true,
+  },
+  cancelled: {
+    action: null,
+    label: 'Ya descartado',
+    reason:
+      'El documento ya fue descartado. La orden de origen quedó libre para volver a facturarse.',
+    releases_source_document: true,
+  },
+  voided: {
+    action: null,
+    label: 'Ya anulado',
+    reason:
+      'El documento ya fue anulado. La orden de origen quedó libre para volver a facturarse.',
+    releases_source_document: true,
+  },
 };
 
 /**
@@ -890,12 +1004,67 @@ export class InvoiceFlowService {
    * hours away from the real one, and rolls a whole day between 00:00Z and the
    * offset. Both fields must come from the same tz-aware conversion.
    */
-  private formatIssueDate(value: Date, timezone: string): string {
-    return localDateString(value, timezone);
+  /**
+   * `issue_date` / `due_date` NO guardan un instante: guardan una fecha civil
+   * escrita a medianoche UTC (verificado en dev — las 120 facturas de la tienda
+   * 3 tienen `2026-08-16 00:00:00` exacto). Aplicarle a ese valor la conversión
+   * instante→hora local lo empuja al día ANTERIOR: `2026-08-15 19:00-05:00`.
+   *
+   * Es decir, cada factura le declaraba a la DIAN una fecha un día antes de la
+   * capturada, en `cbc:IssueDate` y en el `FecFac` del CUFE a la vez. Como los
+   * dos salían del mismo error, eran coherentes entre sí y el hash no fallaba
+   * — por eso nadie lo vio: el documento se aceptaba, sólo que fechado mal.
+   *
+   * La fecha civil se lee por sus componentes UTC, que es como el resto de la
+   * app trata esta columna (`dateOnlyPeriodSql`). Corregir en cambio lo que se
+   * ESCRIBE movería los cubos de analítica de toda factura creada de noche.
+   */
+  private formatIssueDate(value: Date): string {
+    return [
+      String(value.getUTCFullYear()).padStart(4, '0'),
+      String(value.getUTCMonth() + 1).padStart(2, '0'),
+      String(value.getUTCDate()).padStart(2, '0'),
+    ].join('-');
   }
 
-  private formatIssueTime(value: Date, timezone: string): string {
-    return localTimeString(value, timezone);
+  /**
+   * `HorFac` sí exige una hora real, y la columna de fecha no la tiene. El
+   * instante honesto es el de creación de la factura — pero sólo vale si cae en
+   * la MISMA fecha civil que se declara; en una factura con fecha retroactiva
+   * tomaría la hora de otro día. Ahí se emite `00:00:00` con el desfase real de
+   * esa fecha, que es lo único que el dato respalda.
+   *
+   * Si algún día la columna llega a guardar una hora de verdad, la primera rama
+   * la usa tal cual y esto deja de aplicar solo.
+   */
+  private formatIssueTime(
+    value: Date,
+    timezone: string,
+    created_at?: Date | null,
+  ): string {
+    const has_real_time =
+      value.getUTCHours() !== 0 ||
+      value.getUTCMinutes() !== 0 ||
+      value.getUTCSeconds() !== 0;
+    if (has_real_time) return localTimeString(value, timezone);
+
+    const civil_date = this.formatIssueDate(value);
+    if (created_at && localDateString(created_at, timezone) === civil_date) {
+      return localTimeString(created_at, timezone);
+    }
+
+    // Mediodía UTC como sonda del desfase: evita que un cambio de horario de
+    // verano en la medianoche misma etiquete la hora con el desfase del día
+    // contiguo. Colombia no lo tiene, pero el emisor no siempre será Colombia.
+    const probe = new Date(
+      Date.UTC(
+        value.getUTCFullYear(),
+        value.getUTCMonth(),
+        value.getUTCDate(),
+        12,
+      ),
+    );
+    return `00:00:00${localOffsetString(probe, timezone)}`;
   }
 
   /** Timezone of the emitting tenant: store first, organization as fallback. */
@@ -1140,6 +1309,8 @@ export class InvoiceFlowService {
       invoice_number: invoice.invoice_number,
       status: invoice.status,
       has_items: (invoice.invoice_items?.length ?? 0) > 0,
+      valid_transitions: this.getValidTransitions(invoice.status),
+      discard_route: DISCARD_ROUTES[invoice.status as InvoiceStatus],
     };
   }
 
@@ -2615,10 +2786,14 @@ export class InvoiceFlowService {
     const provider_data: DianProviderInvoiceData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
-      issue_date: this.formatIssueDate(invoice.issue_date, timezone),
-      issue_time: this.formatIssueTime(invoice.issue_date, timezone),
+      issue_date: this.formatIssueDate(invoice.issue_date),
+      issue_time: this.formatIssueTime(
+        invoice.issue_date,
+        timezone,
+        invoice.created_at,
+      ),
       due_date: invoice.due_date
-        ? this.formatIssueDate(invoice.due_date, timezone)
+        ? this.formatIssueDate(invoice.due_date)
         : undefined,
       // Step 8 — `customer_name` / `customer_tax_id` / `customer_address`
       // prefieren el adapter; caen al valor persistido en la invoice para
@@ -2717,7 +2892,7 @@ export class InvoiceFlowService {
       original_invoice_number: invoice.related_invoice?.invoice_number,
       original_invoice_cufe: invoice.related_invoice?.cufe || undefined,
       original_invoice_issue_date: invoice.related_invoice?.issue_date
-        ? this.formatIssueDate(invoice.related_invoice.issue_date, timezone)
+        ? this.formatIssueDate(invoice.related_invoice.issue_date)
         : undefined,
     };
 
@@ -3163,6 +3338,29 @@ export class InvoiceFlowService {
 
   async cancel(id: number) {
     const invoice = await this.getInvoice(id);
+
+    // Simétrico a `void()`: descartar sólo aplica mientras el documento no haya
+    // salido hacia la DIAN. Pedirlo sobre uno transmitido no es un capricho del
+    // usuario —es el mismo botón, sobre otra fila— y merece que la respuesta
+    // nombre la salida correcta (anular si lo rechazaron, nota crédito si lo
+    // aceptaron) en vez de un «transición inválida» que no dice a dónde ir.
+    if (
+      !VALID_TRANSITIONS[invoice.status as InvoiceStatus]?.includes('cancelled')
+    ) {
+      const route = DISCARD_ROUTES[invoice.status as InvoiceStatus];
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_STATUS_001,
+        route?.action && route.action !== 'cancel'
+          ? `Este documento ya salió hacia la DIAN, así que no se descarta: usa «${route.label}». ${route.reason}`
+          : `Este documento no se puede descartar en su estado actual. ${route?.reason ?? ''}`.trim(),
+        {
+          invoice_id: id,
+          invoice_status: invoice.status,
+          discard_route: route ?? null,
+        },
+      );
+    }
+
     this.validateTransition(invoice.status, 'cancelled');
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
@@ -3194,7 +3392,38 @@ export class InvoiceFlowService {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_002,
         'Un documento aceptado por la DIAN no se anula: emite una nota crédito que lo corrija o lo revierta. La anulación sólo aplica a documentos que la DIAN nunca aceptó.',
-        { invoice_id: id, invoice_status: invoice.status },
+        {
+          invoice_id: id,
+          invoice_status: invoice.status,
+          discard_route: DISCARD_ROUTES.accepted,
+        },
+      );
+    }
+
+    // ANULAR NO ES LA SALIDA DE TODOS LOS ESTADOS, Y DECIRLO IMPORTA.
+    //
+    // Un borrador se DESCARTA (`cancel`), no se anula: nunca se transmitió, así
+    // que no hay nada ante la DIAN que dejar sin efecto. `validateTransition`
+    // contestaría «no se puede pasar de draft a voided», que es cierto y es
+    // inútil — nombra la transición que falta en vez de la acción que sí
+    // funciona. Ése es literalmente el atasco reportado: «me dice que primero
+    // debo cancelarla, pero no hay forma de cancelarla», sobre un documento
+    // cuya salida existía y se llamaba distinto.
+    //
+    // Se resuelve ANTES de `validateTransition` para que el mensaje dirigido
+    // gane sobre el genérico, igual que hace la guarda de `accepted` de arriba.
+    if (!VALID_TRANSITIONS[invoice.status as InvoiceStatus]?.includes('voided')) {
+      const route = DISCARD_ROUTES[invoice.status as InvoiceStatus];
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_STATUS_001,
+        route?.action === 'cancel'
+          ? `Este documento no se anula porque nunca se transmitió a la DIAN: usa «${route.label}». ${route.reason}`
+          : `Este documento no se puede anular en su estado actual. ${route?.reason ?? ''}`.trim(),
+        {
+          invoice_id: id,
+          invoice_status: invoice.status,
+          discard_route: route ?? null,
+        },
       );
     }
 

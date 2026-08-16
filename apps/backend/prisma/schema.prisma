@@ -5249,6 +5249,27 @@ model invoices {
   /// NULL y las nuevas en '10'— y el lector tendría que manejar ambas igual.
   /// Con NULL ⇒ '10' hay una sola regla y cero filas tocadas por la migración.
   operation_type          String?                         @db.VarChar(2)
+  /// Concepto de corrección de una NOTA CRÉDITO o DÉBITO —
+  /// `cac:DiscrepancyResponse/cbc:ResponseCode`. Sólo aplica a
+  /// `invoice_type` `credit_note` / `debit_note`.
+  ///
+  /// Catálogo (Anexo Técnico 1.9, tablas 13.2.4 y 13.2.5):
+  ///   · nota crédito: '1' devolución parcial · '2' anulación · '3' rebaja o
+  ///     descuento · '4' ajuste de precio · '5' otros
+  ///   · nota débito:  '1' intereses · '2' gastos por cobrar · '3' cambio del
+  ///     valor · '4' otro
+  /// Un dígito, sin cero a la izquierda (regla CAD02a). El catálogo tipado vive
+  /// en `providers/dian-direct/constants/dian-note-concepts.ts`.
+  ///
+  /// Antes de esta columna el concepto NO era transmisible: los builders
+  /// emitían el literal '2', así que una nota por descuento le declaraba a la
+  /// DIAN una anulación. El concepto elegido sólo sobrevivía como prosa dentro
+  /// de `notes` → `cbc:Description`, que ningún validador lee.
+  ///
+  /// NULL ⇒ se emite '2', el literal histórico. Sin DEFAULT por la misma razón
+  /// que `operation_type`: dos representaciones del mismo valor conviviendo
+  /// obligan al lector a manejar ambas.
+  note_concept_code       String?                         @db.VarChar(2)
   /// Objeto del contrato AIU de ESTE documento (regla CAV03, Anexo Técnico 1.9).
   ///
   /// La `cbc:Note` de la línea de Administración debe empezar por el literal

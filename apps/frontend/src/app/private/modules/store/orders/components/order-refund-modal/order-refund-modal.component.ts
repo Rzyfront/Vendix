@@ -727,12 +727,24 @@ export class OrderRefundModalComponent {
         error: (err) => {
           // Soft-fail: keep the hardcoded fallback in the dropdown so the
           // operator can still attempt the modal. The submit will surface
-          // the real backend error.
+          // the real backend error. `store_credit` (billetera) requiere
+          // un cliente asociado a la orden para recibir el saldo a favor;
+          // si la orden es anónima (customer_id null), deshabilitamos la
+          // opción con la razón correspondiente.
+          const customerId = this.order()?.customer_id;
           this.availableMethods.set([
             { value: 'original_payment', label: 'Pago original', icon: 'rotate-ccw', available: true },
             { value: 'cash', label: 'Efectivo', icon: 'banknote', available: true },
             { value: 'bank_transfer', label: 'Transferencia', icon: 'landmark', available: true },
-            { value: 'store_credit', label: 'Billetera', icon: 'wallet', available: true },
+            {
+              value: 'store_credit',
+              label: 'Billetera',
+              icon: 'wallet',
+              available: !!customerId,
+              reason_unavailable: !customerId
+                ? 'La orden no tiene un cliente asociado para recibir el saldo a favor'
+                : undefined,
+            },
           ]);
         },
       });
@@ -813,14 +825,16 @@ export class OrderRefundModalComponent {
     const selected = this.selectedItems();
     const method = this.refundMethod();
     const selectedBankId = this.selectedBankAccountId();
+    // El DTO acepta `bank_account_id` opcional; si el operador eligió
+    // `bank_transfer` y seleccionó una cuenta, la enviamos. Sin cuenta
+    // sigue siendo válido (refund a cuenta 1110 genérica). Ya no
+    // condicionamos el envío por presencia de cuentas en el store.
     // `bankAccountId` queda `number | undefined` (no `null`). El DTO
     // espera `number | undefined`; mandar `null` rompería el tipado y
     // haría que el backend reciba un literal `null` que no matchea el
     // optional int.
     const bankAccountId =
-      method === 'bank_transfer' && selectedBankId != null
-        ? selectedBankId
-        : undefined;
+      method === 'bank_transfer' ? selectedBankId ?? undefined : undefined;
     return {
       items: selected.map((item) => ({
         order_item_id: item.orderItem.id,
