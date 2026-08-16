@@ -1191,13 +1191,13 @@ export class InventoryAnalyticsService {
   // -------------------------------------------------------------------------
   async getLowStockForExport(
     _query: InventoryAnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 
   async getInventoryBySupplierForExport(
     _query: InventoryAnalyticsQueryDto,
-  ): Promise<readonly unknown[]> {
+  ): Promise<unknown[]> {
     return [];
   }
 }
