@@ -218,7 +218,7 @@ export class UblInvoiceBuilder {
     // 12. Invoice lines
     UblCommonBuilder.buildInvoiceLines(
       doc,
-      invoice_data.items as UblDocumentLine[],
+      invoice_data.items,
       invoice_data.taxes,
       currency,
     );

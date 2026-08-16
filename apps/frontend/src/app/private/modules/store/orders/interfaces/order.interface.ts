@@ -104,7 +104,9 @@ export interface Order {
  * Minimal invoice projection needed to print a ticket as an informative copy.
  */
 export interface OrderInvoiceSnapshot {
+  id: number;
   invoice_number: string;
+  invoice_type: 'sales_invoice' | 'purchase_invoice' | 'credit_note' | 'debit_note' | 'export_invoice';
   cufe?: string | null;
 }
 

@@ -19,6 +19,23 @@ import { environment } from '../../../../../../../environments/environment';
 import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { AppType } from '../../../../../../core/models/environment.enum';
 
+/**
+ * Fila del catálogo de mapping keys servido por
+ * `GET /store/accounting/account-mappings/keys`. Refleja el contrato de
+ * `MappingKeyCatalogEntry` en el backend (`account-mapping.service.ts`):
+ * declarado acá para que el frontend NO tenga que importar del backend, y
+ * cualquier drift entre los dos lados lo cazan las pruebas E2E que cruzan
+ * ambos.
+ */
+interface MappingKeyCatalogEntry {
+  key: string;
+  label: string;
+  event: string;
+  role: string;
+  default_code: string;
+  description: string;
+}
+
 import { AccountMapping } from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,

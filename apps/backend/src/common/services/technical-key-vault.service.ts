@@ -200,7 +200,7 @@ export class TechnicalKeyVaultService {
         );
       }
 
-      await this.prisma.invoice_resolutions.update({
+      await this.prisma.withoutScope().invoice_resolutions.update({
         where: { id: resolution_id },
         data: {
           technical_key_encrypted: sealed,

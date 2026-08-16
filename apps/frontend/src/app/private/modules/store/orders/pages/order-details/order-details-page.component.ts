@@ -2906,7 +2906,7 @@ export class OrderDetailsPageComponent {
   createInvoiceFromOrder(): void {
     if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
     this.isEmittingInvoice.set(true);
-    this.invoicingService.createFromSalesOrder(this.orderId).subscribe({
+    this.invoicingService.createFromSalesOrder(Number(this.orderId)).subscribe({
       next: (response) => {
         this.isEmittingInvoice.set(false);
         if (response?.success) {

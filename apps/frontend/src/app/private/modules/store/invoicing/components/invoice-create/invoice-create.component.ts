@@ -152,6 +152,12 @@ interface InvoiceCreatePayload {
   issue_date: string;
   due_date?: string;
   withholding_amount?: number;
+  /**
+   * Retenciones DECLARADAS explícitamente por el cliente al crear la factura.
+   * Vacío u omitido ⇒ sólo el agregado (`withholding_amount`) y el cálculo
+   * automático del tenant al aceptar.
+   */
+  withholdings?: InvoiceWithholdingInput[];
   payment_form?: string;
   payment_means_code?: string;
   operation_type?: string;
@@ -161,6 +167,14 @@ interface InvoiceCreatePayload {
   exchange_rate_date?: string;
   notes?: string;
   items: InvoiceCreateItemPayload[];
+}
+
+interface InvoiceWithholdingInput {
+  role: 'practiced' | 'suffered';
+  concept_id: number;
+  base_amount: number;
+  rate: number;
+  amount?: number;
 }
 
 interface InvoiceCreateItemPayload {
@@ -211,9 +225,16 @@ interface LineMath {
 
 /** Una retención declarada en la sección de retenciones (sólo UI). */
 interface WithholdingRowValue {
+  /** Código visible del concepto (texto que el usuario ve en el form). */
   concept: string;
+  /** `id` de `withholding_concepts` para mandar al backend en el POST. */
+  concept_id: number | null;
+  /** 'practiced' (tiende retiene al cliente) | 'suffered' (tiende es retenida). */
+  role: 'practiced' | 'suffered';
   rate: number | string;
   base: number | string;
+  /** Importe retenido. Si es `null` el backend recalcula con `base × rate`. */
+  amount: number | string | null;
 }
 
 type SectionId =
@@ -2685,13 +2706,13 @@ export class InvoiceCreateComponent {
         (row) =>
           row.role &&
           row.concept_id != null &&
-          Number(row.base_amount) > 0 &&
+          Number(row.base) > 0 &&
           Number(row.rate) >= 0,
       )
       .map((row) => ({
         role: row.role,
         concept_id: Number(row.concept_id),
-        base_amount: Number(row.base_amount),
+        base_amount: Number(row.base),
         rate: Number(row.rate),
         amount:
           row.amount != null && Number(row.amount) >= 0

@@ -1,9 +1,15 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import {
-  Prisma,
-  aiu_component_enum,
-  tax_type_enum,
-} from '@prisma/client';
+import { Prisma, tax_type_enum } from '@prisma/client';
+
+/**
+ * Los valores de `aiu_component_enum` viven en `prisma/schema.prisma`
+ * (administracion / imprevistos / utilidad) pero el cliente Prisma
+ * generado no los exporta como tipo top-level en este momento — sólo
+ * como columna. Mantener la unión ACÁ, calcada del schema, evita
+ * depender de la regeneración del cliente y mantiene un solo sitio de
+ * verdad para los strings del dominio.
+ */
+type AiuComponentValue = 'administracion' | 'imprevistos' | 'utilidad';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -185,8 +191,17 @@ export interface InvoiceTaxRowInput {
    * `Prisma.Decimal` acepta ambos sin pérdida.
    */
   tax_rate: number | string;
-  taxable_amount: number | string;
-  tax_amount: number | string;
+  /**
+   * Base gravable afirmada por el llamador. **Opcional** porque la fuente de
+   * verdad es `InvoiceCalculatorService`: si llega vacía, `buildInvoiceTaxCreateInput`
+   * persiste 0 y el reconciliador la reescribe tras la aceptación.
+   */
+  taxable_amount?: number | string;
+  /**
+   * Cuota afirmada por el llamador. Misma lógica que `taxable_amount`: si llega
+   * vacía, persiste 0; la fuente de verdad sigue siendo server-side.
+   */
+  tax_amount?: number | string;
   tax_type?: TaxFiscalType | string | null;
   is_inclusive?: boolean;
 }
@@ -2055,7 +2070,7 @@ export class InvoicingService {
       // Componente AIU. NULL = línea normal, que es el 100% del histórico. El
       // régimen que decide la base gravable (E.T. art. 462-1 vs Decreto
       // 1372/1992) es configuración de la tienda, no se deduce de esta columna.
-      aiu_component: item.aiu_component as aiu_component_enum | undefined,
+      aiu_component: item.aiu_component as AiuComponentValue | undefined,
     };
   }
 
@@ -2114,8 +2129,11 @@ export class InvoicingService {
       tax_rate_id: tax.tax_rate_id ?? undefined,
       tax_name: tax.tax_name,
       tax_rate: new Prisma.Decimal(tax.tax_rate),
-      taxable_amount: new Prisma.Decimal(tax.taxable_amount),
-      tax_amount: new Prisma.Decimal(tax.tax_amount),
+      // `?? 0`: la fila puede llegar sin `taxable_amount`/`tax_amount` cuando
+      // el DTO omitió lo que el servidor recalcula de todas formas. Persistir 0
+      // es seguro: el reconciliador de aceptación reescribe el valor real.
+      taxable_amount: new Prisma.Decimal(tax.taxable_amount ?? 0),
+      tax_amount: new Prisma.Decimal(tax.tax_amount ?? 0),
       // El default 'iva' es el histórico y se mantiene, pero NUNCA puede
       // quedar ausente: es la clave con la que el CUFE arma ValImp1/2/3.
       //
@@ -2904,7 +2922,15 @@ export class InvoicingService {
           },
         })
       : [];
-    const product_by_id = new Map(products.map((p) => [p.id, p]));
+    const product_by_id = new Map<
+      number,
+      {
+        id: number;
+        price_unit_quantity: number | null;
+        account_code: string | null;
+        stock_uom: { code: string } | null;
+      }
+    >(products.map((p) => [p.id, p]));
 
     // La variante es la unidad realmente vendida, así que su cuenta gana sobre
     // la del producto. Consulta aparte y sólo si alguna línea la usa: la
@@ -2915,7 +2941,10 @@ export class InvoicingService {
           select: { id: true, account_code: true },
         })
       : [];
-    const variant_by_id = new Map(variants.map((v) => [v.id, v]));
+    const variant_by_id = new Map<
+      number,
+      { id: number; account_code: string | null }
+    >(variants.map((v) => [v.id, v]));
 
     return items.map((item) => {
       const product =

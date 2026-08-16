@@ -12,13 +12,6 @@ import {
   ProviderInvoiceTax,
   ProviderInvoiceItem,
 } from '../../invoice-provider.interface';
-import {
-  DIAN_DEPARTMENTS,
-  DianMunicipality,
-  isDianDepartmentCode,
-  resolveDianMunicipality,
-} from '../constants/dian-geography';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { createHash } from 'crypto';
 import {
   dianAmount,
@@ -26,9 +19,9 @@ import {
   dianLineExtension,
   dianLineExtensionTotal,
   dianLineGross,
-  dianPriceAmount,
   dianRate,
   dianSum,
+  dianUnitPrice,
   toDecimal,
 } from '../../../utils/dian-money.util';
 
@@ -46,288 +39,6 @@ interface DianAddressFields {
   country_code?: string;
   postal_code?: string;
 }
-
-/**
- * De quién es la dirección que se está emitiendo.
- *
- * NO cambia CÓMO se resuelve el municipio —emisor y adquiriente pasan por la
- * misma cascada, a propósito: que uno tolerara lo que el otro rechaza es cómo
- * se llega a un documento que cuadra de un lado y no del otro—. Cambia sólo
- * dos cosas que el anexo distingue por rol:
- *
- *  1. El emisor DEBE estar en Colombia. FAJ16 (pág. 36-37, línea 1947): «Si este
- *     es un grupo con Información con respeto a la dirección del emisor de un
- *     documento electrónico, debe contener el literal "CO"», y FAJ09 lo repite
- *     sobre el municipio. El adquiriente puede ser extranjero.
- *  2. Los cuatro elementos Divipola son `1..1` para el emisor (FAJ09-FAJ12) y
- *     `0..1` para el adquiriente (FAK09-FAK12, FAK29-FAK32), así que sólo en el
- *     adquiriente se pueden omitir cuando la dirección no es colombiana.
- */
-export type DianAddressRole = 'emisor' | 'adquiriente';
-
-/** ISO 3166-1 alfa-2 de Colombia. Único país con municipios Divipola. */
-const DIAN_COLOMBIA_COUNTRY_CODE = 'CO';
-
-/**
- * Dónde se corrige la dirección, por rol. El mensaje de una excepción que
- * bloquea una emisión tiene que decir QUÉ falta y DÓNDE llenarlo; si no, el
- * usuario sólo sabe que no puede facturar.
- *
- * El texto del adquiriente es el mismo que ya usa
- * `customer-fiscal-identity.validator.ts` (`SCREEN_ADDRESS`), para que el aviso
- * preventivo y el bloqueo final manden al mismo sitio. El del emisor apunta a
- * la fila `type='billing'` porque es la que `loadIssuerData` elige como
- * dirección fiscal (`dian-direct.provider.ts`), no la marcada como principal.
- */
-const DIAN_ADDRESS_SCREEN: Readonly<Record<DianAddressRole, string>> = {
-  emisor:
-    'Configuración → Direcciones → la dirección de tipo «Facturación» de la tienda u organización que emite',
-  adquiriente:
-    'Clientes → abre la ficha del cliente → pestaña «Direcciones» → dirección principal',
-};
-
-/**
- * Colapsa un nombre geográfico a su forma comparable: sin tildes, en minúscula
- * y con cualquier separador vuelto un espacio simple. Réplica intencional de la
- * normalización interna de `dian-geography.ts` (que no la exporta), para que
- * «Bogotá D.C.», «BOGOTA DC» y «bogota d c» comparen igual.
- *
- * Las marcas combinantes se ELIMINAN, no se sustituyen por espacio: un
- * `replace(/[^a-z0-9]+/g, ' ')` a secas partiría «Medellín» en «medelli n» y
- * ningún departamento volvería a resolver.
- */
-function normalizeGeoName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-/** Índice perezoso nombre-normalizado → código de departamento (33 entradas). */
-let department_code_by_name: Map<string, string> | null = null;
-
-/**
- * Código de departamento a partir de su NOMBRE, contra la enumeración cerrada
- * de 33 valores del anexo. No es adivinar: o el nombre está en la lista oficial
- * o la función devuelve `undefined`.
- */
-function findDianDepartmentCodeByName(
-  name: string | null | undefined,
-): string | undefined {
-  const key = normalizeGeoName(name || '');
-  if (!key) return undefined;
-  if (!department_code_by_name) {
-    department_code_by_name = new Map(
-      Object.entries(DIAN_DEPARTMENTS).map(([code, label]) => [
-        normalizeGeoName(label),
-        code,
-      ]),
-    );
-  }
-  return department_code_by_name.get(key);
-}
-
-/**
- * DECLARACIÓN de la conversión de un documento que SIGUE EMITIÉNDOSE EN PESOS.
- *
- * La factura electrónica colombiana no cambia de moneda: `cbc:DocumentCurrencyCode`
- * y todos los `@currencyID` siguen en COP (Res. DIAN 000042/2020 art. 73; Oficios
- * 901544 y 903436 de 2020; Concepto 1509 de 2024). `cac:PaymentExchangeRate` es el
- * ÚNICO sitio del documento donde la divisa aparece, y lo que declara es a cuánto
- * se pactó la conversión — no en qué moneda se cobró.
- *
- * Sin este grupo, una operación pactada en dólares sale al XML sin decir a cuánto
- * se convirtió, y eso no se corrige después: sólo con nota crédito y reemisión.
- */
-export interface DianExchangeRateDeclaration {
-  /** Divisa pactada, ISO 4217 en mayúsculas. Va a `cbc:TargetCurrencyCode` (FAR04). */
-  foreign_currency: string;
-  /**
-   * PESOS POR UNA UNIDAD de la divisa —la TRM—, con 2 decimales (`dianAmount`).
-   *
-   * El sentido es el contrario al que uno escribiría espontáneamente y es el que
-   * fija el anexo para la tasa: «para COP-USD puede ser el valor de la TRM o tasa
-   * acordada entre las partes» (FAR06). Invertirla declara una operación miles de
-   * veces menor sin que nada la rechace.
-   */
-  rate: string;
-  /** `AAAA-MM-DD` en que se fijó la tasa. Va a `cbc:Date` (FAR07). */
-  date?: string;
-}
-
-/**
- * Una retención tal como viaja a `cac:WithholdingTaxTotal`.
- *
- * ## LA TARIFA NO ESTÁ EN LA MISMA UNIDAD QUE EN EL DOMINIO CONTABLE
- *
- * `WithholdingLine.rate` (el contrato de contabilidad) es una FRACCIÓN — `0.025`,
- * que es como la guarda `withholding_concepts.rate` y como la multiplica el
- * calculador—. `rate` de acá es un PORCENTAJE YA FORMATEADO (`'2.50'`) porque va
- * directo a `cbc:Percent` sin pasar por ninguna otra conversión.
- *
- * La traducción entre las dos vive en `InvoiceFlowService.toProviderWithholdings`.
- * Sin el `× 100` el documento declara una retención del 0,025 % donde hubo una del
- * 2,5 %, y el XML sigue siendo sintácticamente válido —el importe retenido viaja
- * aparte y es correcto—, así que nada lo rechaza: la tarifa equivocada sólo
- * aparece al cruzar la declaración, meses después.
- */
-export interface ProviderInvoiceWithholding {
-  /** Tipo fiscal. Espeja `withholding_type_enum`; decide el esquema DIAN 05/06/07. */
-  withholding_type: 'retefuente' | 'reteiva' | 'reteica';
-  /** Concepto que produjo la línea (honorarios, servicios, compras…). */
-  concept_code: string;
-  /** PORCENTAJE formateado (`'2.50'`), NO fracción. Ver el bloque de arriba. */
-  rate: string;
-  /** Base sobre la que se practicó, 2 decimales. */
-  base: string;
-  /** Importe retenido, 2 decimales. */
-  amount: string;
-}
-
-/**
- * Lo que el Anexo Técnico DIAN exige DE MÁS sobre el contrato de cualquier
- * proveedor de facturación.
- *
- * Vive aquí y no en `ProviderInvoiceData` porque aquel es el contrato de CUALQUIER
- * proveedor, mientras que estos tres bloques describen exigencias de la DIAN.
- * Todos sus campos son opcionales, así que un `ProviderInvoiceData` pelado sigue
- * siendo asignable y ningún llamador histórico cambia.
- */
-export interface DianDocumentExtras {
-  /**
-   * `cbc:CustomizationID` — tipo de operación. `'09'` es contrato de servicios
-   * AIU. Ausente ≡ `'10'` (estándar), que es lo que el builder resuelve.
-   */
-  operation_type?: string;
-  /** `cac:PaymentExchangeRate`. Ausente ⇒ el grupo no se emite. */
-  exchange_rate?: DianExchangeRateDeclaration;
-  /** `cac:WithholdingTaxTotal`. Vacío o ausente ⇒ el grupo no se emite. */
-  withholdings?: ProviderInvoiceWithholding[];
-}
-
-/**
- * La línea tal como la consume el emisor: `ProviderInvoiceItem` MÁS lo que el
- * flujo le adjunta justo antes de transmitir.
- *
- * Los tres campos son opcionales a propósito: una línea que no los trae produce
- * EXACTAMENTE el mismo XML que producía antes de que existieran. Hay facturas ya
- * emitidas que se reenvían tal cual años después, y no pueden cambiar de forma.
- */
-export interface UblDocumentLine extends ProviderInvoiceItem {
-  /**
-   * Desglose multi-impuesto DE ESTA LÍNEA. Sin él, en una factura mixta IVA + INC
-   * todas las líneas heredan el esquema del PRIMER tributo de la cabecera y una
-   * cuenta de restaurante sale entera como IVA 19 %.
-   */
-  taxes?: ProviderInvoiceTax[];
-  /**
-   * `cbc:Note` de línea (FAV03 / CAV03). Hoy su único emisor es la línea de
-   * ADMINISTRACIÓN de un contrato AIU, donde la nota es OBLIGATORIA.
-   */
-  note?: string;
-  /**
-   * `true` ⇒ la línea NO emite el grupo `cac:TaxTotal` (FAX01 / CAX01).
-   *
-   * Es distinto de «no tiene impuestos»: un bien EXENTO sí lo emite, con
-   * `cbc:Percent` en 0,00. Por eso viaja como bandera explícita y no se deduce de
-   * que el importe sea cero.
-   */
-  omit_tax_total?: boolean;
-}
-
-/**
- * Literal EXACTO con el que debe EMPEZAR el `cbc:Note` de la línea de
- * Administración de un contrato AIU.
- *
- * Anexo Técnico 1.9, FAV03 (pág. 88, espejo CAV03 pág. 165 en la nota crédito):
- * «Obligatorio: de informar para el caso de ítems de contratos de servicio tipo
- * AIU. Para el ítem Administración. En este caso la cbc:Note debe empezar por el
- * texto: “Contrato de servicios AIU por concepto de:” El contribuyente debe
- * incluir el objeto del contrato facturado.»
- *
- * La regla valida el PREFIJO, no el contenido: una tilde de más, la mayúscula
- * inicial o los dos puntos ausentes convierten el documento en rechazable.
- *
- * Tiene un ESPEJO EXACTO en el frontend
- * (`private/modules/store/settings/fiscal/aiu-note.constants.ts`), que mide la
- * longitud mientras el comerciante escribe el objeto del contrato. Cualquier
- * cambio acá tiene que replicarse allá: si las dos cadenas divergen, la pantalla
- * diría «cumple» sobre una nota que el backend arma distinta y la DIAN rechaza.
- */
-export const DIAN_AIU_NOTE_PREFIX = 'Contrato de servicios AIU por concepto de:';
-
-/**
- * Cota INFERIOR del nodo `cbc:Note` COMPLETO, prefijo incluido (FAV03: `20..5000`).
- *
- * Es menor que el prefijo (42 caracteres), así que por sí sola nunca frenaría un
- * objeto de contrato vacío. Quien lo frena es `buildAiuNote`, que devuelve cadena
- * vacía cuando no hay objeto — ver su nota.
- */
-export const DIAN_AIU_NOTE_MIN_LENGTH = 20;
-
-/** Cota SUPERIOR del nodo `cbc:Note` COMPLETO, prefijo incluido (FAV03: `20..5000`). */
-export const DIAN_AIU_NOTE_MAX_LENGTH = 5000;
-
-/**
- * Compone la nota AIU: prefijo obligatorio + UN espacio + objeto del contrato.
- *
- * ## Por qué devuelve cadena VACÍA cuando no hay objeto
- *
- * El prefijo solo ya mide 42 caracteres, o sea que pasaría el mínimo de 20 de
- * FAV03 sin describir contrato alguno. Devolver el prefijo pelado haría que las
- * dos validaciones que dependen de esta función —`InvoicingService` al crear el
- * documento y `InvoiceFlowService` antes de transmitirlo— aprobaran una nota que
- * declara «Contrato de servicios AIU por concepto de:» y nada más. La cadena
- * vacía las hace fallar, que es lo correcto: el objeto del contrato es un dato de
- * negocio que sólo el comerciante conoce.
- *
- * ## Por qué la componen las DOS capas con esta misma función
- *
- * La nota no se persiste en ninguna columna. `InvoicingService` la valida al
- * crear —fallar ahí es lo que ahorra el consecutivo— y la emisión la RECOMPONE
- * desde la misma configuración. Que las dos llamen a esta función es lo que hace
- * imposible que lo validado y lo emitido sean cadenas distintas.
- */
-export function buildAiuNote(contract_object?: string | null): string {
-  const object = (contract_object || '').trim();
-  return object ? `${DIAN_AIU_NOTE_PREFIX} ${object}` : '';
-}
-
-/**
- * `withholding_type` → esquema DIAN de `cac:WithholdingTaxTotal`.
- *
- * Se declara UNA vez y en el módulo, no en el sitio de uso: el código del tributo
- * es lo que la DIAN compara contra su tabla 13.2.2 y un valor equivocado es un
- * RECHAZO que quema un consecutivo autorizado e irrecuperable.
- */
-const DIAN_WITHHOLDING_SCHEME_BY_TYPE: Readonly<
-  Record<ProviderInvoiceWithholding['withholding_type'], string>
-> = {
-  retefuente: DIAN_TAX_CODES.RETE_FUENTE,
-  reteiva: DIAN_TAX_CODES.RETE_IVA,
-  reteica: DIAN_TAX_CODES.RETE_ICA,
-};
-
-/**
- * Valores de `invoice_taxes.tax_type` que YA SON una retención.
- *
- * OJO CON LOS DOS ENUMS. `tax_type_enum` (el de `invoice_taxes`) trae
- * `iva | inc | ica | withholding | reteiva | reteica` — nótese el genérico
- * `withholding` y la AUSENCIA de `retefuente`—, mientras que
- * `withholding_type_enum` (el del dominio de retenciones) trae
- * `retefuente | reteiva | reteica`. Se aceptan los valores de LOS DOS porque una
- * fila puede haber llegado por cualquiera de las dos puertas, y `retecree` porque
- * la tabla de tributos lo mantiene aunque la figura esté derogada.
- */
-const DIAN_WITHHOLDING_TAX_TYPES: ReadonlySet<string> = new Set([
-  'withholding',
-  'retefuente',
-  'reteiva',
-  'reteica',
-  'retecree',
-]);
 
 /**
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
@@ -612,7 +323,6 @@ export class UblCommonBuilder {
     UblCommonBuilder.buildAddress(
       party.ele(UBL_NAMESPACES.CAC, 'PhysicalLocation'),
       issuer,
-      'emisor',
     );
 
     // Tax scheme
@@ -641,7 +351,7 @@ export class UblCommonBuilder {
       .att('listName', 'No aplica')
       .txt(UblCommonBuilder.toTaxLevelCode(issuer.tax_scheme));
 
-    UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer, 'emisor');
+    UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer);
 
     // `cac:TaxScheme` se valida como PAR (ID, Name). El anexo exige `cbc:Name`
     // junto a `cbc:ID` y la DIAN notifica FAJ41 «el contenido de este elemento
@@ -834,7 +544,6 @@ export class UblCommonBuilder {
       UblCommonBuilder.buildAddress(
         party.ele(UBL_NAMESPACES.CAC, 'PhysicalLocation'),
         customer,
-        'adquiriente',
       );
     }
 
@@ -869,11 +578,7 @@ export class UblCommonBuilder {
       );
 
     if (customer.city_code) {
-      UblCommonBuilder.buildRegistrationAddress(
-        tax_scheme,
-        customer,
-        'adquiriente',
-      );
+      UblCommonBuilder.buildRegistrationAddress(tax_scheme, customer);
     }
 
     const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
@@ -951,12 +656,10 @@ export class UblCommonBuilder {
   static buildAddress(
     parent: any,
     address: DianAddressFields,
-    role: DianAddressRole,
   ): void {
     UblCommonBuilder.buildAddressFields(
       parent.ele(UBL_NAMESPACES.CAC, 'Address'),
       address,
-      role,
     );
   }
 
@@ -976,171 +679,32 @@ export class UblCommonBuilder {
   static buildRegistrationAddress(
     parent: any,
     address: DianAddressFields,
-    role: DianAddressRole,
   ): void {
     UblCommonBuilder.buildAddressFields(
       parent.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
       address,
-      role,
-    );
-  }
-
-  /**
-   * Código de departamento con el que buscar el municipio POR NOMBRE, probando
-   * de más fiable a menos:
-   *
-   *   1. `department_code` declarado, si es uno de los 33 del anexo;
-   *   2. los 2 primeros dígitos del código DANE del municipio — invariante
-   *      verificada sobre los 1122 registros del catálogo;
-   *   3. el NOMBRE del departamento contra la enumeración cerrada de 33.
-   *
-   * Nunca inventa: si ninguna de las tres resuelve, devuelve `undefined` y la
-   * búsqueda por nombre no se intenta. Buscar el municipio SÓLO por nombre no
-   * es una cuarta opción aceptable: hay homónimos en departamentos distintos
-   * (varios «San Juan», varios «La Unión») y elegir el primero es exactamente
-   * la clase de invención que este cableado existe para eliminar.
-   */
-  private static resolveDepartmentCode(
-    address: DianAddressFields,
-  ): string | undefined {
-    const declared = (address.department_code || '').trim();
-    if (isDianDepartmentCode(declared)) return declared;
-
-    const from_municipality = (address.city_code || '').trim().slice(0, 2);
-    if (isDianDepartmentCode(from_municipality)) return from_municipality;
-
-    return findDianDepartmentCodeByName(address.department_name);
-  }
-
-  /**
-   * Municipio DIAN de una dirección, o `null` cuando la dirección no es
-   * colombiana y por tanto no tiene municipio Divipola.
-   *
-   * ## POR QUÉ LANZA EN VEZ DE RELLENAR
-   *
-   * Hasta acá el emisor rellenaba `11001 / Bogotá / 110111 / Bogotá / 11` y el
-   * adquiriente lo mismo. Ese relleno no produce un documento rechazado: produce
-   * uno ACEPTADO que afirma que la operación ocurrió en Bogotá. La DIAN cruza el
-   * municipio del emisor y del adquiriente; un documento aceptado con el
-   * municipio equivocado no se corrige, se anula con nota crédito y se reemite,
-   * gastando dos consecutivos autorizados. Fallar antes de firmar no cuesta
-   * ninguno.
-   *
-   * Es además lo que ya dice el propio catálogo (`dian-geography.ts`): el `null`
-   * de `resolveDianMunicipality` significa «no sé en qué municipio está», y el
-   * llamador debe decidir explícitamente — «NUNCA rellenar Bogotá en silencio».
-   *
-   * ## POR QUÉ EL PAÍS DECIDE ANTES QUE EL MUNICIPIO
-   *
-   * Las listas Divipola sólo aplican a Colombia. El anexo lo condiciona
-   * literalmente en FAK30 (tabla de rechazos, pág. 406, línea 20752): «Si IdentificationCode es
-   * "CO", CountrySubentity debe corresponder a uno de los valores de la Columna
-   * Nombre Municipio de la lista de municipios». Exigir municipio DANE a un
-   * adquiriente extranjero bloquearía toda factura de exportación — es el mismo
-   * criterio que ya aplica `customer-fiscal-identity.validator.ts`.
-   *
-   * El emisor no tiene esa salida: FAJ16 (pág. 36-37, línea 1947) exige el literal
-   * «CO» en su país y FAJ09 exige que su municipio esté en la lista. Un emisor
-   * declarado fuera de Colombia es una configuración imposible, no un caso de
-   * negocio, y por eso también lanza.
-   */
-  private static resolveAddressMunicipality(
-    address: DianAddressFields,
-    role: DianAddressRole,
-    country_code: string,
-  ): DianMunicipality | null {
-    if (country_code !== DIAN_COLOMBIA_COUNTRY_CODE) {
-      if (role === 'adquiriente') return null;
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_VALIDATE_001,
-        `No se puede emitir: la dirección fiscal del emisor declara el país «${country_code}», y la factura electrónica colombiana exige que el emisor esté en Colombia. Corrige el país en ${DIAN_ADDRESS_SCREEN.emisor}.`,
-        { role, country_code },
-      );
-    }
-
-    const municipality = resolveDianMunicipality({
-      city_code: address.city_code,
-      city_name: address.city_name,
-      department_code: UblCommonBuilder.resolveDepartmentCode(address),
-    });
-    if (municipality) return municipality;
-
-    const declared_city = (address.city_code || address.city_name || '').trim();
-    throw new VendixHttpException(
-      ErrorCodes.INVOICING_VALIDATE_001,
-      declared_city
-        ? `No se puede emitir: «${declared_city}» no corresponde a ningún municipio de la lista DANE que la DIAN valida. Vuelve a seleccionar el municipio en ${DIAN_ADDRESS_SCREEN[role]} para que se cargue con su código DANE.`
-        : `No se puede emitir: la dirección ${role === 'emisor' ? 'fiscal del emisor' : 'del adquiriente'} no tiene municipio. Sin él el documento tendría que afirmar un municipio que nadie declaró. Selecciónalo en ${DIAN_ADDRESS_SCREEN[role]}.`,
-      {
-        role,
-        city_code: address.city_code ?? null,
-        city_name: address.city_name ?? null,
-        department_code: address.department_code ?? null,
-        department_name: address.department_name ?? null,
-      },
     );
   }
 
   /**
    * Emite el conjunto de campos de dirección DENTRO del elemento recibido, sin
    * crear envoltorio. Es el cuerpo común de las dos formas de arriba.
-   *
-   * Los cinco campos geográficos salen TODOS del municipio resuelto, no de lo
-   * que traiga la dirección. Es deliberado: FAJ32 y FAK32 no validan cada
-   * elemento por separado sino su COHERENCIA («CountrySubentity debe
-   * corresponder a…»), y un `city_code` correcto junto a un `department_name`
-   * escrito a mano es justo la combinación que la rompe. Tomándolos del
-   * catálogo, los cinco son coherentes por construcción y `cbc:CityName` sale
-   * verbatim de la columna que la DIAN compara (FAJ10, FAK30).
    */
   private static buildAddressFields(
     addr: any,
     address: DianAddressFields,
-    role: DianAddressRole,
   ): void {
-    const country_code = (
-      address.country_code || DIAN_COLOMBIA_COUNTRY_CODE
-    ).trim().toUpperCase();
-    const municipality = UblCommonBuilder.resolveAddressMunicipality(
-      address,
-      role,
-      country_code,
-    );
-    const declared_postal_code = (address.postal_code || '').trim();
-
-    if (municipality) {
-      addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(municipality.code);
-      addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(municipality.name);
-      // El postal declarado gana al del catálogo: el del catálogo es el urbano
-      // de referencia del municipio, útil como respaldo pero menos preciso que
-      // el que el usuario informó. FAJ73 es notificación, no rechazo.
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'PostalZone')
-        .txt(declared_postal_code || municipality.postal_code);
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'CountrySubentity')
-        .txt(municipality.department_name);
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'CountrySubentityCode')
-        .txt(municipality.department_code);
-    } else {
-      // Adquiriente extranjero. Los cuatro elementos Divipola son `0..1` en
-      // FAK09-FAK12 y FAK29-FAK32, así que OMITIRLOS es válido; poner un código
-      // DANE aquí sería afirmar un municipio colombiano de un cliente que no
-      // está en Colombia. Ciudad y región van tal como se declararon: son texto
-      // libre fuera de Colombia, y no hay lista contra la cual normalizarlos.
-      const city_name = (address.city_name || '').trim();
-      if (city_name) {
-        addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(city_name);
-      }
-      if (declared_postal_code) {
-        addr.ele(UBL_NAMESPACES.CBC, 'PostalZone').txt(declared_postal_code);
-      }
-      const department_name = (address.department_name || '').trim();
-      if (department_name) {
-        addr.ele(UBL_NAMESPACES.CBC, 'CountrySubentity').txt(department_name);
-      }
-    }
+    addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(address.city_code || '11001');
+    addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(address.city_name || 'Bogotá');
+    addr
+      .ele(UBL_NAMESPACES.CBC, 'PostalZone')
+      .txt(address.postal_code || '110111');
+    addr
+      .ele(UBL_NAMESPACES.CBC, 'CountrySubentity')
+      .txt(address.department_name || 'Bogotá');
+    addr
+      .ele(UBL_NAMESPACES.CBC, 'CountrySubentityCode')
+      .txt(address.department_code || '11');
 
     addr
       .ele(UBL_NAMESPACES.CAC, 'AddressLine')
@@ -1150,137 +714,11 @@ export class UblCommonBuilder {
     const country = addr.ele(UBL_NAMESPACES.CAC, 'Country');
     country
       .ele(UBL_NAMESPACES.CBC, 'IdentificationCode')
-      .txt(country_code);
-    // `cbc:Name` es `0..1` (FAJ17, FAK17) y el anexo sólo fija su valor para
-    // Colombia: «Debe informar literal "Colombia"». Estaba CABLEADO a
-    // «Colombia» pase lo que pase, así que una dirección con
-    // `IdentificationCode` extranjero salía nombrando a Colombia — el mismo
-    // defecto que el municipio inventado, un nivel más arriba. No hay catálogo
-    // de nombres de país en el repo, así que fuera de Colombia se omite en vez
-    // de traducir el ISO a un nombre a ojo.
-    if (country_code === DIAN_COLOMBIA_COUNTRY_CODE) {
-      country
-        .ele(UBL_NAMESPACES.CBC, 'Name')
-        .att('languageID', 'es')
-        .txt('Colombia');
-    }
-  }
-
-  /**
-   * `cac:PaymentExchangeRate` — la DECLARACIÓN de la conversión cuando la
-   * operación se pactó en divisa. Sólo se emite si hay declaración.
-   *
-   * ## EL DOCUMENTO NO CAMBIA DE MONEDA
-   *
-   * Sigue en COP: `cbc:DocumentCurrencyCode` y todos los `@currencyID` también
-   * (Res. DIAN 000042/2020 art. 73; Oficios 901544 y 903436 de 2020; Concepto
-   * 1509 de 2024). Este grupo es una declaración de a cuánto se convirtió, no la
-   * moneda en que se cobró. Por eso no recibe ni toca ningún importe.
-   *
-   * ## Reglas del Anexo 1.9 (FAR01-FAR07, pág. 73-74) y sus rechazos
-   *
-   * · FAR02 `cbc:SourceCurrencyCode`  1..1 — «Rechazo: Si no es igual al COP»
-   *   (la tabla de rechazos de la pág. 425 lo enuncia como «Sí no es igual a
-   *   cbc:DocumentCurrencyCode», que en un documento colombiano es lo mismo).
-   * · FAR04 `cbc:TargetCurrencyCode`  1..1 — la divisa: «si el
-   *   cbc:DocumentCurrencyCode es igual a COP debe contener un valor valido de la
-   *   lista de tipos de moneda extranjera».
-   * · FAR05 `cbc:TargetCurrencyBaseRate` 1..1 — «Base monetaria para la
-   *   conversión. Debe ser 1.00». «Rechazo: Si trae valor diferente a 1.00».
-   * · FAR06 `cbc:CalculationRate` 1..1 — «Se debe diligenciar con el valor de la
-   *   tasa de cambio. Por ejemplo, para COP-USD puede ser el valor de la TRM o
-   *   tasa acordada entre las partes». Su rechazo es por AUSENCIA («No es
-   *   informado el elemento»), no por valor.
-   * · FAR07 `cbc:Date` 1..1 — «Fecha en la que se fijó la tasa de cambio».
-   *
-   * El ORDEN de los hijos lo fija UBL y un elemento fuera de secuencia rompe la
-   * validación XSD antes de que ninguna regla de la DIAN llegue a mirarlo.
-   *
-   * ## POR QUÉ NO SE EMITE `cbc:SourceCurrencyBaseRate` (FAR03)
-   *
-   * Porque el anexo se contradice a sí mismo sobre su valor, y el elemento es
-   * OPCIONAL (`0..1`) en los tres tipos de documento:
-   *
-   *   · Tabla de campos de la FACTURA (pág. 74): «Base monetaria de la divisa COP
-   *     que se deberá convertir a moneda extranjera, ejemplo: si es USD el valor
-   *     a informar es el valor equivalente de un dólar en pesos» —
-   *     «Rechazo: Si trae valor IGUAL a 1.00».
-   *   · Tabla de RECHAZOS de la misma factura (pág. 425): «Base monetaria de la
-   *     divisa extranjera para el cambio. Debe ser 1.00» —
-   *     «SourceCurrencyBaseRate trae valor DIFERENTE a 1.00».
-   *   · CAR03 en la nota crédito (pág. 297) y DAR03 en la nota débito (pág. 233)
-   *     dicen lo mismo que la segunda: «Debe ser 1.00», rechazo si es distinto.
-   *
-   * Tres de las cuatro tablas exigen 1.00 y una exige que NO sea 1.00. Cualquier
-   * valor que se escriba viola una de las dos lecturas, y un rechazo acá quema el
-   * consecutivo. OMITIRLO no dispara ninguna de las dos —las dos están redactadas
-   * sobre «si TRAE valor»— y no pierde información: la tasa viaja completa en
-   * `cbc:CalculationRate`, que es obligatorio y es donde el propio anexo dice que
-   * va «el valor de la TRM».
-   */
-  static buildPaymentExchangeRate(
-    parent: any,
-    declaration?: DianExchangeRateDeclaration,
-  ): void {
-    if (!declaration) return;
-
-    const exchange = parent.ele(UBL_NAMESPACES.CAC, 'PaymentExchangeRate');
-
-    // FAR02 — la divisa BASE es siempre el peso: el documento se emite en COP.
-    exchange
-      .ele(UBL_NAMESPACES.CBC, 'SourceCurrencyCode')
-      .txt(UBL_CONSTANTS.DEFAULT_CURRENCY);
-
-    // FAR03 deliberadamente ausente — ver la nota del método.
-
-    // FAR04 — la divisa DESTINO es la pactada. Llega ya normalizada a mayúsculas
-    // por el productor (`buildExchangeRateDeclaration`).
-    exchange
-      .ele(UBL_NAMESPACES.CBC, 'TargetCurrencyCode')
-      .txt(declaration.foreign_currency);
-
-    // FAR05 — literal 1.00. No es la tasa: es la unidad de la divisa destino
-    // sobre la que se expresa `CalculationRate`.
-    exchange
-      .ele(UBL_NAMESPACES.CBC, 'TargetCurrencyBaseRate')
-      .txt(dianAmount(1));
-
-    // FAR06 — la tasa. `dianAmount` y no el crudo: el productor ya la formateó
-    // con la misma función, y volver a pasarla es idempotente, pero deja el
-    // formato garantizado si alguna vez llega por otra puerta.
-    exchange
-      .ele(UBL_NAMESPACES.CBC, 'CalculationRate')
-      .txt(dianAmount(declaration.rate));
-
-    // FAR07 — fecha en que se fijó la tasa. Se OMITE cuando no la hay en vez de
-    // emitirla vacía: `cbc:Date` es un `xsd:date` y un elemento sin contenido no
-    // es una fecha válida, así que el documento fallaría la validación de esquema
-    // —un fallo duro, antes de cualquier regla— en lugar de arrastrar sólo la
-    // ausencia de FAR07.
-    if (declaration.date) {
-      exchange.ele(UBL_NAMESPACES.CBC, 'Date').txt(declaration.date);
-    }
-  }
-
-  /**
-   * `cbc:Percent` de un tributo, con el saneamiento que depende del ESQUEMA.
-   *
-   * El ICA se guarda POR MIL —un 7 significa 7 ‰— y el XML declara porcentajes,
-   * así que se divide por 10 y se conservan 4 decimales: 7 ‰ es 0,7000 %, y dos
-   * decimales lo aplanarían. Cualquier otro esquema usa el contrato de 2
-   * decimales de la DIAN.
-   *
-   * Está extraído para que la cabecera y las líneas apliquen LA MISMA regla. Con
-   * dos copias, una tarifa de ICA saldría diez veces mayor en un sitio que en el
-   * otro y el documento se contradiría a sí mismo.
-   */
-  private static resolveSchemePercent(
-    scheme_code: string,
-    tax_rate: string,
-  ): string {
-    return scheme_code === DIAN_TAX_CODES.ICA
-      ? toDecimal(tax_rate).dividedBy(10).toFixed(4)
-      : dianRate(tax_rate);
+      .txt(address.country_code || 'CO');
+    country
+      .ele(UBL_NAMESPACES.CBC, 'Name')
+      .att('languageID', 'es')
+      .txt('Colombia');
   }
 
   /**
@@ -1325,131 +763,15 @@ export class UblCommonBuilder {
       // ICA rates are stored in "per mil" (‰) — convert to percentage for UBL.
       // ICA keeps 4 decimals because a 7‰ rate is 0.7000 %, which 2 decimals
       // would flatten; every other scheme uses the DIAN 2-decimal contract.
-      // Extraído a `resolveSchemePercent` para que las líneas apliquen la misma
-      // regla; la expresión es la misma, no cambia un dígito.
-      const tax_percent = UblCommonBuilder.resolveSchemePercent(
-        code,
-        group_taxes[0].tax_rate,
-      );
+      const tax_percent =
+        code === DIAN_TAX_CODES.ICA
+          ? toDecimal(group_taxes[0].tax_rate).dividedBy(10).toFixed(4)
+          : dianRate(group_taxes[0].tax_rate);
       tax_category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(tax_percent);
 
       const scheme = tax_category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
       scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
       scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
-    }
-  }
-
-  /**
-   * `cac:WithholdingTaxTotal` — las retenciones que el documento DECLARA.
-   *
-   * ## ⚠️ LAS RETENCIONES NO RESTAN DE `cbc:PayableAmount`
-   *
-   * Anexo Técnico 1.9 §11.9.1 (pág. 677), «Método incluye las retenciones en la
-   * fuente y las autorretenciones»:
-   *
-   *   «Observación 21 de junio de 2019: Se informa que los cálculos aplicados por
-   *   la validación previa de facturas electrónicas de la DIAN no incluyen en el
-   *   fragmento <cac:LegalMonetaryTotal/> operaciones con el elemento
-   *   <cac:WithholdingTaxTotal/>.»
-   *
-   * O sea: la DIAN valida `base + tributos = total` SIN mirar este grupo. Restar
-   * lo retenido del `cbc:PayableAmount` descuadra esa identidad y el documento se
-   * rechaza por aritmética. Vale para los tres roles, autorretención incluida.
-   * Por eso esta función SÓLO emite el grupo y no toca ningún total: no recibe
-   * `LegalMonetaryTotal` ni nada de lo que él calcula.
-   *
-   * ## Cómo se agrupa, y por qué así
-   *
-   * · **Un `cac:WithholdingTaxTotal` POR ESQUEMA** (FAT01, pág. 80): «Si
-   *   informado debe contener: Un bloque para cada código de tributo. Rechazo: Si
-   *   existe más de un grupo /Invoice/WhitHoldingTaxl con el mismo valor en el
-   *   elemento /Invoice/WithholdingTaxTotal/TaxSubtotal/cac:TaxCategory/
-   *   cac:TaxScheme/cbc:ID». Emitir una retefuente de honorarios y otra de
-   *   servicios como dos grupos separados es, literalmente, un rechazo.
-   * · **Un `cac:TaxSubtotal` POR TARIFA** dentro del grupo (FAT04, pág. 82):
-   *   «Debe ser informado un grupo de estos para cada tarifa». Dos conceptos de
-   *   la misma tarifa se suman en un solo subtotal, lo que además mantiene exacta
-   *   la aritmética que valida FAT07 (`TaxAmount = TaxableAmount × Percent`):
-   *   sumar bases de la misma tarifa da la suma de los importes.
-   * · `cbc:TaxAmount` del grupo = Σ de sus subtotales (FAT02, pág. 81-82):
-   *   «Rechazo: Si ../cac:WithholdingTaxTotal/cbc:TaxAmount <> sumatoria de todas
-   *   las ocurrencias de ../cac:WithholdingTaxTotal/TaxSubtotal/cbc:TaxAmount».
-   *
-   * ## La tarifa NO se divide por 10 aunque sea reteICA
-   *
-   * El «por mil» es de `invoice_taxes.tax_rate`, la tarifa del TRIBUTO ICA.
-   * `withholding_concepts.rate` es una fracción normal, y quien la trae acá ya la
-   * multiplicó por 100 (`toProviderWithholdings`), así que llega en porcentaje.
-   * Aplicarle el saneamiento del ICA la dividiría por diez.
-   *
-   * ## Posición en el documento
-   *
-   * Entre `cac:TaxTotal` y el grupo de totales, que es donde la secuencia de
-   * `InvoiceType` lo pone (FAT01 … FAT13, luego FAU01 `cac:LegalMonetaryTotal`).
-   * Los llamadores ya lo invocan ahí.
-   */
-  static buildWithholdingTaxTotal(
-    parent: any,
-    withholdings: ProviderInvoiceWithholding[] | undefined,
-    currency: string,
-  ): void {
-    if (!withholdings?.length) return;
-
-    /** Base y monto acumulados de una tarifa dentro de un esquema. */
-    type WithholdingBucket = { base: string; amount: string };
-    /** esquema DIAN → (tarifa formateada → acumulado). */
-    const by_scheme = new Map<string, Map<string, WithholdingBucket>>();
-
-    for (const withholding of withholdings) {
-      const code = DIAN_WITHHOLDING_SCHEME_BY_TYPE[withholding.withholding_type];
-      // Un tipo que no esté en el mapa no tiene código de tributo conocido, y
-      // adivinarlo sería declarar una figura tributaria que nadie verificó. Se
-      // descarta: el documento sale sin esa retención —recuperable— en vez de
-      // salir con un esquema inventado, que es rechazo y consecutivo quemado.
-      if (!code) continue;
-
-      const percent = dianRate(withholding.rate);
-      const rates =
-        by_scheme.get(code) ?? new Map<string, WithholdingBucket>();
-      const accumulated = rates.get(percent);
-      rates.set(percent, {
-        base: dianSum([accumulated?.base ?? '0', withholding.base]),
-        amount: dianSum([accumulated?.amount ?? '0', withholding.amount]),
-      });
-      by_scheme.set(code, rates);
-    }
-
-    for (const [code, rates] of by_scheme) {
-      const total = parent.ele(UBL_NAMESPACES.CAC, 'WithholdingTaxTotal');
-
-      // FAT02 — el importe del grupo es la suma de sus subtotales, no el total
-      // retenido del documento: cada esquema publica el suyo.
-      total
-        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-        .att('currencyID', currency)
-        .txt(dianSum([...rates.values()].map((row) => row.amount)));
-
-      for (const [percent, row] of rates) {
-        const subtotal = total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-        subtotal
-          .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-          .att('currencyID', currency)
-          .txt(dianAmount(row.base));
-        subtotal
-          .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-          .att('currencyID', currency)
-          .txt(dianAmount(row.amount));
-
-        const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-        category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(percent);
-
-        // Mismo par (ID, Name) que exige FAT12/FAT13: el identificador y el
-        // nombre tienen que ser los de la tabla 13.2.2 de la DIAN, y los dos
-        // salen de la misma tabla del repositorio para que no puedan divergir.
-        const scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-        scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-        scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
-      }
     }
   }
 
@@ -1512,6 +834,130 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
       .att('currencyID', currency)
       .txt(line_extension);
+  }
+
+  /**
+   * Builds `cac:PaymentExchangeRate` cuando el documento se pactó en divisa
+   * extranjera.
+   *
+   * NO cambia la moneda del documento: `DocumentCurrencyCode` se mantiene en
+   * COP (Res. 000042/2020 art. 73; Oficios 901544/903436/2020; Concepto
+   * 1509/2024). Este grupo es una DECLARACIÓN aparte de la conversión — sirve
+   * para que el adquiriente y la auditoría vean a qué tasa se pactó la
+   * operación.
+   *
+   * Reglas (Anexo 1.9 §FAR01-FAR07):
+   *   · source_currency === 'COP' (FAR02)
+   *   · source_base_rate === '1.00' (FAR03)
+   *   · target_base_rate === '1.00' (FAR05)
+   *   · calculation_rate > 0 (FAR06)
+   *   · date obligatoria, formato AAAA-MM-DD (FAR07)
+   *
+   * Si `rate` es `undefined`, no se emite el grupo: la factura está en COP y
+   * no hay conversión que declarar. Cardinalidad 0..1, así que omitirlo es
+   * legal.
+   */
+  static buildPaymentExchangeRate(
+    parent: any,
+    rate: DianExchangeRateDeclaration | undefined,
+  ): void {
+    if (!rate) return;
+
+    const er = parent.ele(UBL_NAMESPACES.CAC, 'PaymentExchangeRate');
+    er.ele(UBL_NAMESPACES.CBC, 'SourceCurrencyCode').txt(rate.source_currency);
+    er.ele(UBL_NAMESPACES.CBC, 'SourceCurrencyBaseRate').txt(rate.source_base_rate);
+    er.ele(UBL_NAMESPACES.CBC, 'TargetCurrencyCode').txt(rate.target_currency);
+    er.ele(UBL_NAMESPACES.CBC, 'TargetCurrencyBaseRate').txt(rate.target_base_rate);
+    er.ele(UBL_NAMESPACES.CBC, 'CalculationRate').txt(rate.calculation_rate);
+    er.ele(UBL_NAMESPACES.CBC, 'Date').txt(rate.date);
+  }
+
+  /**
+   * Builds `cac:WithholdingTaxTotal` para cada retención del documento.
+   *
+   * ## Crítico: NO altera `PayableAmount`
+   *
+   * §11.9.1: "los cálculos aplicados por la validación previa de la DIAN **no
+   * incluyen** en el fragmento `<cac:LegalMonetaryTotal/>` operaciones con el
+   * elemento `<cac:WithholdingTaxTotal/>`". Si restáramos el importe retenido
+   * de `cbc:PayableAmount`, la factura se rechaza por descuadre aritmético
+   * (FAU14). Vale para los tres roles: practiced, suffered y self.
+   *
+   * Cardinalidad 0..1 del grupo `WithholdingTaxTotal` por moneda —emitimos
+   * UN grupo con la suma si hay varias retenciones en la misma moneda—. Si
+   * no hay retenciones, omitir el grupo: la factura sin retenciones no lo
+   * declara.
+   */
+  static buildWithholdingTaxTotal(
+    parent: any,
+    withholdings: ProviderInvoiceWithholding[] | undefined,
+    currency: string,
+  ): void {
+    if (!withholdings || withholdings.length === 0) return;
+
+    // Acumulado por código de tributo (retefuente/reteiva/reteica). El anexo
+    // admite UN `WithholdingTaxTotal` por `TaxScheme`/`TaxSubtotal`, así que
+    // agrupar mantiene el documento compacto y alineado con la declaración.
+    const by_tax: Record<
+      string,
+      { total_amount: string; lines: ProviderInvoiceWithholding[] }
+    > = {};
+    for (const wh of withholdings) {
+      const key = wh.withholding_type || 'retefuente';
+      if (!by_tax[key]) {
+        by_tax[key] = { total_amount: '0.00', lines: [] };
+      }
+      by_tax[key].lines.push(wh);
+      by_tax[key].total_amount = dianSum([
+        by_tax[key].total_amount,
+        wh.amount,
+      ]);
+    }
+
+    for (const [tax_type, group] of Object.entries(by_tax)) {
+      const total = parent.ele(UBL_NAMESPACES.CAC, 'WithholdingTaxTotal');
+      total.att('currencyID', currency);
+      total.ele(UBL_NAMESPACES.CBC, 'TaxAmount').att('currencyID', currency).txt(group.total_amount);
+
+      const subtotal = total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
+      subtotal.ele(UBL_NAMESPACES.CBC, 'TaxableAmount').att('currencyID', currency).txt(
+        // Base gravable acumulada del subtotal —la suma de las bases de las
+        // líneas que retienen bajo este mismo código.
+        dianSum(group.lines.map((l) => l.base)),
+      );
+      subtotal.ele(UBL_NAMESPACES.CBC, 'TaxAmount').att('currencyID', currency).txt(group.total_amount);
+
+      const scheme = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+      scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(tax_type);
+      scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(this.withholdingTaxName(tax_type));
+    }
+  }
+
+  /**
+   * Nombre legible del código de retención, para `cac:TaxScheme/cbc:Name`.
+   *
+   * El `cbc:ID` carga el código técnico (la máquina lo lee); el `cbc:Name`
+   * carga el nombre humano (la DIAN lo muestra en su UI de validación). Si
+   * el código no se reconoce, se cae al código crudo: la DIAN prefiere un
+   * nombre visible aunque sea el identificador, antes que rechazar el
+   * documento por un campo vacío.
+   */
+  private static withholdingTaxName(taxType: string): string {
+    switch ((taxType || '').toLowerCase()) {
+      case 'retefuente':
+        return 'Retención en la fuente';
+      case 'reteiva':
+        return 'Retención al IVA';
+      case 'reteica':
+        return 'Retención al ICA';
+      case 'retecre':
+        return 'Retención al CREE';
+      case 'auto':
+      case 'autorretencion':
+        return 'Autorretención';
+      default:
+        return taxType;
+    }
   }
 
   /**
@@ -1709,7 +1155,7 @@ export class UblCommonBuilder {
    */
   static buildInvoiceLines(
     parent: any,
-    items: UblDocumentLine[],
+    items: (ProviderInvoiceItem | UblDocumentLine)[],
     taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
@@ -1738,22 +1184,10 @@ export class UblCommonBuilder {
    *
    * Un solo cuerpo hace imposible que la próxima regla alcance a un tipo de
    * documento y no a los otros.
-   *
-   * ## Lo que la línea declara ADEMÁS de su importe
-   *
-   * Los tres campos que `UblDocumentLine` añade sobre `ProviderInvoiceItem` son
-   * opcionales, y una línea que no los trae produce EXACTAMENTE el XML de antes:
-   *
-   * · `taxes` — desglose multi-impuesto. Sin él la línea hereda el PRIMER tributo
-   *   de la cabecera, que es el camino histórico y el único que sirve a las
-   *   facturas ya emitidas: se reenvían tal cual años después y sus tributos
-   *   nunca van a estar desglosados por línea.
-   * · `note` — `cbc:Note` de línea.
-   * · `omit_tax_total` — la línea no emite `cac:TaxTotal`.
    */
   static buildDocumentLines(
     parent: any,
-    items: UblDocumentLine[],
+    items: (ProviderInvoiceItem | UblDocumentLine)[],
     taxes: ProviderInvoiceTax[],
     currency: string,
     options: {
@@ -1767,23 +1201,6 @@ export class UblCommonBuilder {
     items.forEach((item, index) => {
       const line = parent.ele(UBL_NAMESPACES.CAC, options.line_element);
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
-
-      // `cbc:Note` va INMEDIATAMENTE DESPUÉS del `cbc:ID`. La secuencia de
-      // `InvoiceLineType` es cbc:ID → cbc:Note → cantidad →
-      // cbc:LineExtensionAmount → …, y UBL la fija: un elemento fuera de orden
-      // rompe la validación de esquema antes de que ninguna regla de la DIAN
-      // llegue a leerlo.
-      //
-      // Su único emisor hoy es la línea de ADMINISTRACIÓN de un contrato AIU,
-      // donde FAV03 (pág. 88; espejos CAV03 pág. 165 y su equivalente en la nota
-      // débito) la declara «Obligatorio: de informar para el caso de ítems de
-      // contratos de servicio tipo AIU. Para el ítem Administración». La cadena
-      // llega YA COMPUESTA por `buildAiuNote` —con su literal obligatorio— porque
-      // la misma función la validó al crear el documento: recomponerla acá con
-      // otro criterio permitiría que lo validado y lo emitido divergieran.
-      if (item.note) {
-        line.ele(UBL_NAMESPACES.CBC, 'Note').txt(item.note);
-      }
 
       line
         .ele(UBL_NAMESPACES.CBC, options.quantity_element)
@@ -1817,23 +1234,48 @@ export class UblCommonBuilder {
           .txt(dianLineGross(item));
       }
 
-      // `cac:TaxTotal` de línea — ausente cuando la línea lo pide.
-      //
-      // FAX01 (pág. 94; espejo CAX01 pág. 172) enumera los casos en que el grupo
-      // «NO debe ser informado»: «para ítems excluidos de acuerdo a lo
-      // establecido en el ET. Adicionalmente, NO debe ser informado para facturas
-      // del régimen simple grupo I, ni para ítems cuyo concepto en contratos de
-      // AIU no haga parte de la base gravable».
-      //
-      // Quién decide cuál de esos casos aplica NO es este builder: depende del
-      // régimen de IVA del contrato AIU y del componente de la línea, que es una
-      // lectura de configuración del tenant. Llega ya resuelto en la bandera para
-      // que el emisor no tenga que reconstruir esa decisión — y para que no se
-      // confunda con «no tiene impuestos»: un bien EXENTO sí emite el grupo, con
-      // `cbc:Percent` en 0,00.
-      if (!item.omit_tax_total) {
-        UblCommonBuilder.buildLineTaxTotal(line, item, taxes, currency);
-      }
+      // Tax total for line
+      const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
+      line_tax_total
+        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
+        .att('currencyID', currency)
+        .txt(dianAmount(item.tax_amount));
+
+      // Line-level tax code/rate. invoice_taxes is header-level (not persisted
+      // per item), so a line inherits the invoice's primary tax. The code is
+      // resolved tax_type-first for correctness on single-tax invoices (a pure
+      // INC restaurant bill emits scheme 04, not 01). Mixed IVA+INC invoices
+      // are reconciled at the authoritative document-level TaxTotal above.
+      const tax_rate = taxes.length > 0 ? taxes[0].tax_rate : '19.00';
+      const tax_code =
+        taxes.length > 0
+          ? UblCommonBuilder.resolveTaxCodeFromTax(taxes[0])
+          : DIAN_TAX_CODES.IVA;
+
+      const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
+      subtotal
+        .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
+        .att('currencyID', currency)
+        .txt(dianLineExtension(item));
+      subtotal
+        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
+        .att('currencyID', currency)
+        .txt(dianAmount(item.tax_amount));
+
+      const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
+      // dianRate, not the raw string: tax_rate arrives from a Decimal(5,2), so
+      // 19.00 serialized as '19' and reached the XML without decimals.
+      category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(dianRate(tax_rate));
+      // Mismo par (ID, Name) que en la cabecera. FAS01b compara «Porcentaje,
+      // Nombre y ID» de la línea contra el TaxTotal de cabecera para exigir que
+      // exista uno por cada tributo de línea «con las características
+      // correspondiente al mismo impuesto». La cabecera sí emitía el nombre y la
+      // línea no, así que la línea no coincidía con su propio impuesto.
+      const line_scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+      line_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(tax_code);
+      line_scheme
+        .ele(UBL_NAMESPACES.CBC, 'Name')
+        .txt(DIAN_TAX_NAMES[tax_code] || tax_code);
 
       // Item description + identificación estándar del ítem.
       //
@@ -1861,192 +1303,33 @@ export class UblCommonBuilder {
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        // `dianPriceAmount`, no el precio unitario crudo: FAV06 contrasta este
-        // número MULTIPLICADO por `cbc:BaseQuantity` contra el importe de la
-        // línea, y `BaseQuantity` es la cantidad facturada (ver
-        // `resolveBaseQuantity`). El helper despeja el precio para que la
-        // igualdad se cumpla por construcción, incluida la línea con escala de
-        // precio (QUI-648) y la de impuesto incluido. Admite 0-6 decimales
-        // —único campo monetario del perfil que no está fijado en 2—, así que
-        // el residuo de una división inexacta cabe en el propio campo.
-        .txt(dianPriceAmount(item));
-      // MISMA cadena que el elemento de cantidad de arriba. No es una copia por
-      // comodidad: es la invariante que hace verdadera la igualdad de FAV06. Si
-      // los dos números divergen, el documento afirma un precio por unidad que
-      // no reproduce su propio importe de línea.
+        // `dianUnitPrice`, no `dianAmount`: este campo admite 0-6 decimales y el
+        // precio despejado de una línea con impuesto incluido los necesita. Un
+        // precio redondo se sigue emitiendo con 2, así que ningún documento del
+        // histórico cambia. Ver la regla FAV06 en `clearInclusiveLine`: el
+        // importe de la línea se valida contra ESTE número.
+        .txt(dianUnitPrice(item.unit_price));
+      // `BaseQuantity` declara a cuánta cantidad aplica `PriceAmount`. Para un
+      // producto que publica su precio por N unidades de stock es N, no 1: con
+      // `1.00` el documento afirma "$28.000 por gramo" en vez de "por kilo".
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
         .att('unitCode', item.unit_code || 'EA')
-        .txt(UblCommonBuilder.resolveBaseQuantity(item));
+        .txt(dianAmount(UblCommonBuilder.resolveBaseQuantity(item)));
     });
   }
 
   /**
-   * El grupo `cac:TaxTotal` de UNA línea, por sus dos caminos.
+   * `cac:Price/cbc:BaseQuantity` — la cantidad a la que aplica `PriceAmount`.
    *
-   * ## 1. Con desglose propio (`item.taxes`) — un `cac:TaxSubtotal` por tributo
-   *
-   * Es lo que hace representable una cuenta mixta. Sin él, TODAS las líneas
-   * heredan el esquema del PRIMER tributo de la cabecera y una cuenta de
-   * restaurante con IVA e INC sale entera declarada como IVA 19 % — la DIAN
-   * recompone los impuestos desde lo que recibe, así que el documento afirma un
-   * reparto de tributos que no ocurrió.
-   *
-   * El `cbc:TaxAmount` del grupo es la SUMA de sus subtotales, no el
-   * `item.tax_amount`: FAX02 (pág. 95) rechaza «si ../cac:TaxTotal/cbc:TaxAmount
-   * <> sumatoria de todas las ocurrencias de ../cac:TaxTotal/TaxSubtotal/
-   * cbc:TaxAmount». Quien produce el desglose ya verificó que esa suma coincide
-   * con el impuesto de la línea al centavo; si no coincidiera, no adjunta
-   * desglose y esta función cae al camino histórico.
-   *
-   * Se emite UN subtotal por fila de `item.taxes`, con la base y el importe de
-   * ESA fila —no la suma—: en una línea, IVA e INC gravan LA MISMA base, así que
-   * sumar bases del mismo grupo la duplicaría. FAX04 (pág. 95) pide «un grupo de
-   * estos para cada tarifa», que es exactamente una fila por tributo; y el
-   * rechazo por duplicados de FAX01 es sobre bloques `cac:TaxTotal` que compartan
-   * esquema, de los que la línea emite exactamente uno.
-   *
-   * ## 2. Sin desglose — el camino histórico, byte por byte
-   *
-   * La línea hereda el primer tributo de la cabecera. NO se toca ni se "mejora":
-   * es la forma con la que se emitieron las facturas que ya están aceptadas, y
-   * esas se reenvían tal cual años después. Incluida su tarifa: acá se formatea
-   * con `dianRate` sin el saneamiento por-mil del ICA, al contrario que el camino
-   * nuevo. Cambiarlo alteraría documentos históricos.
+   * Saneado igual que el divisor del importe de línea (`dian-money.util.ts`):
+   * solo un valor > 1 cuenta como escala; ausente, 0, negativo o no numérico
+   * devuelve 1, que es el comportamiento histórico de todo el catálogo por
+   * pieza. Un `0.00` acá sería peor que el defecto que corrige.
    */
-  private static buildLineTaxTotal(
-    line: any,
-    item: UblDocumentLine,
-    header_taxes: ProviderInvoiceTax[],
-    currency: string,
-  ): void {
-    const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
-    const line_taxes = item.taxes ?? [];
-
-    if (line_taxes.length === 0) {
-      line_tax_total
-        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(item.tax_amount));
-
-      // Line-level tax code/rate. invoice_taxes is header-level (not persisted
-      // per item), so a line inherits the invoice's primary tax. The code is
-      // resolved tax_type-first for correctness on single-tax invoices (a pure
-      // INC restaurant bill emits scheme 04, not 01). Mixed IVA+INC invoices
-      // are reconciled at the authoritative document-level TaxTotal above.
-      const tax_rate =
-        header_taxes.length > 0 ? header_taxes[0].tax_rate : '19.00';
-      const tax_code =
-        header_taxes.length > 0
-          ? UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0])
-          : DIAN_TAX_CODES.IVA;
-
-      const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-        .att('currencyID', currency)
-        .txt(dianLineExtension(item));
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(item.tax_amount));
-
-      const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-      // dianRate, not the raw string: tax_rate arrives from a Decimal(5,2), so
-      // 19.00 serialized as '19' and reached the XML without decimals.
-      category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(dianRate(tax_rate));
-      // Mismo par (ID, Name) que en la cabecera. FAS01b compara «Porcentaje,
-      // Nombre y ID» de la línea contra el TaxTotal de cabecera para exigir que
-      // exista uno por cada tributo de línea «con las características
-      // correspondiente al mismo impuesto». La cabecera sí emitía el nombre y la
-      // línea no, así que la línea no coincidía con su propio impuesto.
-      const line_scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-      line_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(tax_code);
-      line_scheme
-        .ele(UBL_NAMESPACES.CBC, 'Name')
-        .txt(DIAN_TAX_NAMES[tax_code] || tax_code);
-      return;
-    }
-
-    // FAX02 — el importe del grupo es la Σ de sus subtotales.
-    line_tax_total
-      .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-      .att('currencyID', currency)
-      .txt(dianSum(line_taxes.map((tax) => tax.tax_amount)));
-
-    for (const tax of line_taxes) {
-      const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
-
-      const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(tax.taxable_amount));
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(tax.tax_amount));
-
-      const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-      // MISMA regla de tarifa que la cabecera —incluido el por-mil del ICA—,
-      // porque FAS01b contrasta el porcentaje de la línea contra el suyo.
-      category
-        .ele(UBL_NAMESPACES.CBC, 'Percent')
-        .txt(UblCommonBuilder.resolveSchemePercent(code, tax.tax_rate));
-
-      const scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-      scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-      scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
-    }
-  }
-
-  /**
-   * `cac:Price/cbc:BaseQuantity` — **la cantidad facturada**, no un divisor.
-   *
-   * ## Por qué devuelve la cantidad y no la escala de precio
-   *
-   * En UBL genérico `BaseQuantity` es «a cuántas unidades aplica el precio», y
-   * PEPPOL lo usa así (EN16931-R120 DIVIDE por él). **El perfil de la DIAN no.**
-   * Su regla de línea es una multiplicación, sin división en ninguna parte:
-   *
-   * ```
-   * LineExtensionAmount = PriceAmount × BaseQuantity
-   *                     − Σ AllowanceCharge[ChargeIndicator=false]
-   *                     + Σ AllowanceCharge[ChargeIndicator=true]
-   * ```
-   *
-   * Verificado sobre los **27 renglones** de todos los XML de ejemplo oficiales
-   * de la Caja de Herramientas: 27/27 reconcilian con esa fórmula y **0/27** con
-   * la lectura de divisor. Los dos casos con cantidad ≠ 1 la deciden solos —
-   * `Transporte de Carga.xml` (Qty=10, BQ=10, P=200.000, LEA=2.000.000) y
-   * `FacturaVenta_moneda_extranjera.xml` (Qty=10, BQ=10, P=1.000, LEA=10.000):
-   * bajo la lectura de divisor darían 20.000 y 100, errados por factor 10. El
-   * único renglón que parecía desmentirlo (`Consumidor Final.xml`, línea 3,
-   * LEA=1.410.000 frente a P×BQ=1.400.000) confirma en realidad el término de
-   * cargos: trae `ChargeIndicator=true, Amount=10000, Reason=Cargo`.
-   *
-   * ## Consecuencia para QUI-648
-   *
-   * La escala de precio (`price_unit_quantity`) **no es representable** en este
-   * perfil: el campo que la declararía está ocupado por la cantidad. Por eso se
-   * consume ANTES del XML, dentro del precio — `dianPriceAmount` despeja
-   * `importe ÷ cantidad`, y el queso a $28.000/kg vendido en gramos sale con su
-   * precio por gramo y un importe correcto, en vez de un `BaseQuantity` que la
-   * DIAN multiplicaría.
-   *
-   * ## Alcance del defecto que corrige
-   *
-   * La versión anterior devolvía la escala (1 en todo el catálogo por pieza), de
-   * modo que **toda línea con cantidad ≠ 1** declaraba `BaseQuantity=1` y
-   * afirmaba un importe igual al precio unitario. No fallaba sólo el producto
-   * con escala: fallaba cualquier venta de más de una unidad.
-   *
-   * Devuelve la cadena TAL CUAL la emite el elemento de cantidad
-   * (`cbc:InvoicedQuantity` / `CreditedQuantity` / `DebitedQuantity`) para que
-   * los dos números no puedan divergir por un redondeo intermedio.
-   */
-  static resolveBaseQuantity(item: { quantity: string }): string {
-    return item.quantity;
+  static resolveBaseQuantity(item: { price_unit_quantity?: string }): number {
+    const n = Number(item.price_unit_quantity ?? 1);
+    return Number.isFinite(n) && n > 1 ? n : 1;
   }
 
   /**
@@ -2085,63 +1368,50 @@ export class UblCommonBuilder {
   }
 
   /**
-   * ¿Esta fila de `invoice_taxes` es una RETENCIÓN y no un tributo del documento?
+   * ¿La fila `ProviderInvoiceTax` representa una RETENCIÓN?
    *
-   * ## Qué se rompe sin ella
+   * Una retención infiltrada en `invoice_taxes` (camino legacy que el DTO
+   * todavía permite) NO es un tributo del documento: tiene su propio grupo
+   * `cac:WithholdingTaxTotal` y nunca puede sumar al `TaxAmount` que la DIAN
+   * contrasta contra los totales del documento. Si la dejamos pasar, el
+   * `ValImp*` del CUFE diverge del XML y la DIAN rechaza por descuadre
+   * aritmético (§11.9.1 + FAU14).
    *
-   * Una retención tiene su propio grupo (`cac:WithholdingTaxTotal`) y NO puede
-   * sumar al `cac:TaxTotal` que la DIAN contrasta. Pero el DTO legacy
-   * (`dto.taxes[]`) deja escribir cualquier fila en `invoice_taxes`, así que una
-   * retención puede llegar infiltrada entre los tributos. Y `resolveTaxCode`, que
-   * clasifica por nombre, la clasificaría MAL de la peor manera posible: «ReteIVA»
-   * contiene «IVA» y «ReteICA» contiene «ICA», así que las dos entrarían al
-   * `cac:TaxTotal` como si fueran el tributo que retienen, inflando el impuesto
-   * declarado del documento.
+   * Resolución por orden de confianza:
+   *   1. `tax_type` — fuente autoritativa ('retefuente' | 'reteiva' | …).
+   *      Es el mismo campo que el builder prioriza para clasificar
+   *      IVA/INC/ICA, así que las retenciones se evalúan con la MISMA
+   *      función, no con una heurística paralela.
+   *   2. `tax_name` — heurística legacy (substring sobre el nombre). Útil
+   *      sólo para documentos viejos en los que `tax_type` aún no se
+   *      persistía.
    *
-   * ## Por qué NO mira el importe
-   *
-   * Porque el validador previo la llama con los importes en CERO: sólo necesita
-   * CLASIFICAR la fila (ver `FiscalDocumentValidator.emitterProbeOf`). Una
-   * clasificación que dependiera del importe aprobaría en el prevalidador filas
-   * que el emisor descarta, que es exactamente la divergencia que compartir esta
-   * función existe para impedir.
-   *
-   * ## Las tres señales, en orden de autoridad
-   *
-   * 1. **`tax_type` persistido** — es el dato, no una pista. Cubre los valores de
-   *    los dos enums que pueden llegar acá (ver `DIAN_WITHHOLDING_TAX_TYPES`).
-   * 2. **`tax_name`** — respaldo para el histórico anterior a que `tax_type`
-   *    existiera, donde el nombre es lo único que hay. Se compara sobre la forma
-   *    normalizada (sin tildes, sin espacios, en mayúscula) y sólo por PREFIJO
-   *    para «rete»/«autorrete»: buscarlo en cualquier posición haría que una
-   *    palabra que lo contiene por dentro clasificara como retención.
-   * 3. **Tarifa negativa** — una tarifa por debajo de cero no es un tributo: la
-   *    DIAN valida `cbc:Percent` como un porcentaje aplicado a una base y jamás
-   *    lo acepta negativo. Es la única señal que queda cuando una fila legacy no
-   *    tiene tipo y su nombre es libre.
+   * El `cac:WithholdingTaxTotal` del XML, en cambio, SÍ recibe las
+   * retenciones — las recibe explícitamente desde
+   * `ProviderInvoiceWithholding[]`, NO desde `ProviderInvoiceTax[]`.
+   * Esta función decide sólo qué entra a `TaxTotal` (no-retensión) y qué se
+   * queda fuera (retención).
    */
   static isWithholdingTax(tax: ProviderInvoiceTax): boolean {
-    const tax_type = (tax.tax_type || '').trim().toLowerCase();
-    if (tax_type) {
-      return DIAN_WITHHOLDING_TAX_TYPES.has(tax_type);
-    }
-
-    const name = (tax.tax_name || '')
-      // NFD separa la tilde de su letra y el filtro de abajo la descarta con
-      // todo lo que no sea A-Z0-9: «Retención», «Retencion» y «RETE-FUENTE»
-      // colapsan a la misma cadena.
-      .normalize('NFD')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '');
+    const type = (tax.tax_type || '').toLowerCase();
     if (
-      name.startsWith('RETE') ||
-      name.startsWith('AUTORRETE') ||
-      name.includes('RETENCION')
+      type === 'retefuente' ||
+      type === 'reteiva' ||
+      type === 'reteica' ||
+      type === 'retecre' ||
+      type === 'auto' ||
+      type === 'autorretencion'
     ) {
       return true;
     }
-
-    return toDecimal(tax.tax_rate).isNegative();
+    const name = (tax.tax_name || '').toLowerCase();
+    return (
+      name.includes('retefuente') ||
+      name.includes('rete iva') ||
+      name.includes('reteica') ||
+      name.includes('retecre') ||
+      name.includes('autorretenc')
+    );
   }
 
   /**
@@ -2156,4 +1426,173 @@ export class UblCommonBuilder {
     const raw = software_id + pin + invoice_number;
     return createHash('sha384').update(raw).digest('hex');
   }
+}
+
+// ── Fase 6 — exports tipados que la capa de emisión espera ────────────────
+//
+// El motor fiscal (invoice-flow.service.ts, dian-direct.provider.ts,
+// invoicing.service.ts) envía el payload DIAN ampliado con tipo de operación,
+// tasa de cambio y retenciones. Esos campos no entran en `ProviderInvoiceData`
+// porque describen exigencias del Anexo Técnico, no del contrato genérico del
+// proveedor. Antes vivían como tipos `any` ad-hoc en cada llamador; aquí
+// quedan declarados una sola vez y se re-exportan desde el builder para que
+// la dependencia siga siendo de un único módulo del dominio.
+
+/**
+ * Prefijo LITERAL que exige CAV03 sobre `cbc:Note` de la línea de Administración
+ * cuando la factura opera bajo `CustomizationID = '09'` (AIU).
+ *
+ * El prefijo se concatena con el objeto del contrato que la tienda configuró en
+ * `store_settings.invoicing.aiu.contract_object` y la cadena resultante viaja
+ * al XML sin más transformación. Si la tienda no escribió objeto, la nota
+ * queda sólo con el prefijo y falla la validación de longitud (CAV03 + FAx08),
+ * que es la falla correcta: la DIAN no admite AIU sin objeto del contrato.
+ */
+export const DIAN_AIU_NOTE_PREFIX = 'Contrato de servicios AIU por concepto de:';
+
+/**
+ * Mínimo de caracteres (incluyendo el prefijo) que CAV03 admite en la nota.
+ * 20 es el suelo del propio anexo para `cbc:Note`; por debajo la DIAN no lo
+ * toma como información válida.
+ */
+export const DIAN_AIU_NOTE_MIN_LENGTH = 20;
+
+/**
+ * Máximo de caracteres (incluyendo el prefijo) que el esquema UBL/XSD admite
+ * en `cbc:Note`. Coincide con el rango 20-5000 del Anexo Técnico; pasarlo
+ * recorta el XML sin error de esquema pero con descuadre semántico.
+ */
+export const DIAN_AIU_NOTE_MAX_LENGTH = 5000;
+
+/**
+ * Compone la nota de la línea de Administración.
+ *
+ * Misma función para creación (`InvoicingService`) y para emisión
+ * (`InvoiceFlowService.resolveAiuContext`) — la nota no se persiste, así que
+ * si las dos llamadas no leen EXACTAMENTE los mismos strings, el XML diría
+ * una cosa y la base de datos otra, y nadie lo detectaría hasta el cruce.
+ */
+export function buildAiuNote(contractObject: string): string {
+  const object = (contractObject || '').trim();
+  return `${DIAN_AIU_NOTE_PREFIX} ${object}`.trim();
+}
+
+/**
+ * Bloque `cac:PaymentExchangeRate` del Anexo 1.9 §FAR01-FAR07.
+ *
+ * La factura SIEMPRE se emite en pesos colombianos (DocumentCurrencyCode = COP,
+ * Res. 000042/2020 art. 73; Oficios 901544/903436/2020; Concepto 1509/2024).
+ * Cuando la operación se pactó en otra divisa, este grupo DECLARA la
+ * conversión: la DIAN no la usa para reescribir importes, sólo para que el
+ * adquiriente y la auditoría vean a qué tasa se pactó.
+ *
+ * Reglas de validación que el builder aplica antes de emitir:
+ *   · source_currency === 'COP' (FAR02 rechaza cualquier otro valor)
+ *   · source_base_rate === '1.00' (FAR03 rechaza cualquier otro valor)
+ *   · target_base_rate === '1.00' (FAR05 rechaza cualquier otro valor)
+ *   · calculation_rate > 0 (FAR06: tasa de cambio; "1.00" también rechaza —
+ *     una tasa unitaria no es "sin conversión", es un documento que devuelve)
+ *   · date obligatoria, formato AAAA-MM-DD (FAR07)
+ */
+export interface DianExchangeRateDeclaration {
+  /** 'COP' fijo. FAR02 rechaza cualquier otro valor. */
+  source_currency: string;
+  /** '1.00' fijo. FAR03 rechaza cualquier otro valor. */
+  source_base_rate: string;
+  /** ISO 4217 de la divisa pactada (USD, EUR, …). */
+  target_currency: string;
+  /** '1.00' fijo. FAR05 rechaza cualquier otro valor. */
+  target_base_rate: string;
+  /** Tasa de cambio: 1 unidad de la divisa = N pesos. FAR06. */
+  calculation_rate: string;
+  /** AAAA-MM-DD en que se fijó la tasa. FAR07. */
+  date: string;
+}
+
+/**
+ * Línea de retención que va al XML en `cac:WithholdingTaxTotal`.
+ *
+ * ## Las dos tarifas viven en unidades distintas
+ *
+ * `withholding_concepts.rate` se guarda como FRACCIÓN (`0.025` para una
+ * retención del 2,5 %). El calculador interno multiplica así:
+ * `amount = base × rate`. Este contrato `rate` va al XML como
+ * PORCENTAJE formateado (`'2.50'`) porque `cbc:Percent` lo requiere así. El
+ * cambio de unidad lo aplica `InvoiceFlowService.toProviderWithholdings`
+ * (`× 100` antes de pasar por `dianRate`); tocar esa conversión sin
+ * entenderlo declara retenciones 100 veces menores sin que nada falle en el
+ * XML — la DIAN acepta el documento y el error sólo aparece en la
+ * declaración, meses después.
+ *
+ * Las retenciones con `amount <= 0` se filtran antes de entrar al builder:
+ * `cbc:Percent` sin importe no declara nada y el builder las descartaría.
+ */
+export interface ProviderInvoiceWithholding {
+  /** Tipo ('retefuente' | 'reteiva' | 'reteica' | 'auto'). */
+  withholding_type: string;
+  /** Código del concepto (`withholding_concepts.code`). */
+  concept_code: string;
+  /** Porcentaje formateado ('2.50'). Ver bloque de unidades arriba. */
+  rate: string;
+  /** Base gravable sobre la que se calculó la retención. */
+  base: string;
+  /** Importe retenido (base × rate/100). */
+  amount: string;
+}
+
+/**
+ * Línea del documento UBL con los extras que la Fase 6 declaró.
+ *
+ * `ProviderInvoiceItem` es el contrato genérico del proveedor; este lo
+ * extiende con dos campos que SOLO aplican al perfil DIAN:
+ *
+ *   · `omit_tax_total` — bajo AIU, las líneas que NO entran a la base
+ *     gravable del IVA no emiten `cac:TaxTotal` (regla CAX01). Distinto
+ *     de «no tiene impuestos»: un bien exento SÍ lo emite, con
+ *     `cbc:Percent = 0.00`. Por eso viaja como bandera y no se deduce del
+ *     importe.
+ *   · `note` — sólo la línea de Administración AIU, con el prefijo literal
+ *     CAV03. Vacío en cualquier otra línea; el builder lo ignora si está
+ *     vacío.
+ */
+export interface UblDocumentLine {
+  description: string;
+  quantity: string;
+  unit_price: string;
+  discount_amount?: string;
+  tax_amount?: string;
+  total_amount?: string;
+  item_code?: string;
+  unit_code?: string;
+  price_unit_quantity?: string;
+  /**
+   * Tributos POR LÍNEA (no del documento). Lo escribe el resolver
+   * `InvoiceFlowService` antes de pasar al builder: cada `cac:InvoiceLine`
+   * lleva su propio `cac:TaxTotal` y la suma de líneas debe coincidir con
+   * `invoice_data.taxes` (regla FAU14). Si está ausente, el builder cae al
+   * `invoice_data.taxes` completo, que es lo que emiten los documentos sin
+   * desglose por línea.
+   */
+  taxes?: ProviderInvoiceTax[];
+  /** CAX01: línea fuera de la base gravable AIU, no emite `cac:TaxTotal`. */
+  omit_tax_total?: boolean;
+  /** CAV03: nota de la línea de Administración AIU. Vacío si no aplica. */
+  note?: string;
+}
+
+/**
+ * Ampliación del payload del proveedor con lo que el perfil DIAN exige.
+ *
+ * NO incluye `items` — `items: UblDocumentLine[]` se cruza con
+ * `ProviderInvoiceData['items']` en `InvoiceFlowService` para conservar el
+ * shape del contrato base. Estos campos describen exigencias del Anexo
+ * Técnico, no del proveedor genérico.
+ */
+export interface DianDocumentExtras {
+  /** `CustomizationID` ('09' AIU / '10' estándar / '11' mandatos / '12' transp.). */
+  operation_type?: string;
+  /** Bloque `cac:PaymentExchangeRate`. Ausente ≡ operación en COP sin declarar TRM. */
+  exchange_rate?: DianExchangeRateDeclaration;
+  /** Retenciones del documento, normalizadas al contrato del builder. */
+  withholdings?: ProviderInvoiceWithholding[];
 }

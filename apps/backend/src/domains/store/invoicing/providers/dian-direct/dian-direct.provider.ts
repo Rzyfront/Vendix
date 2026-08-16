@@ -339,7 +339,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: line_extension_total,
         taxes,
         issuer,
-        config,
         customer,
       });
 
@@ -510,7 +509,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: cn_line_extension_total,
         taxes,
         issuer,
-        config,
         customer,
       });
 
@@ -655,7 +653,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: dianLineExtensionTotal(debit_note_data.items),
         taxes,
         issuer,
-        config,
         customer,
       });
 
@@ -795,7 +792,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: dianLineExtensionTotal(support_document_data.items),
         taxes,
         issuer: buyer,
-        config,
         customer: seller,
       });
 
@@ -936,7 +932,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: dianLineExtensionTotal(support_adjustment_data.items),
         taxes,
         issuer: buyer,
-        config,
         customer: seller,
       });
 
@@ -1107,7 +1102,6 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_before_tax: dianLineExtensionTotal(document_data.items),
         taxes,
         issuer,
-        config,
         customer,
       });
 

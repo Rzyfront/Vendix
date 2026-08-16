@@ -9,6 +9,8 @@ import {
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Actions, ofType } from '@ngrx/effects';
+import { firstValueFrom } from 'rxjs';
 
 
 import {
@@ -206,7 +208,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       <div class="max-w-md mx-auto mt-4 print:hidden">
         <app-pos-fiscal-status
           [orderId]="orderId ? +orderId : null"
-          (statusChanged)="onFiscalStatus($event)"
+          (statusChanged)="fiscalStatus.set($event)"
         ></app-pos-fiscal-status>
       </div>
 

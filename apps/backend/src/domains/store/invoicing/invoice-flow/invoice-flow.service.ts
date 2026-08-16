@@ -2343,17 +2343,25 @@ export class InvoiceFlowService {
     }
 
     return {
-      foreign_currency,
-      // PESOS POR UNA UNIDAD de la divisa — el sentido que fija FAR03, y el
-      // opuesto al que uno escribiría espontáneamente.
-      rate: dianAmount(rate),
+      // FAR02: la fuente SIEMPRE es COP. La factura no cambia de moneda, sólo
+      // declara la conversión.
+      source_currency: 'COP',
+      // FAR03: 1.00 — el valor que la DIAN exige en este campo.
+      source_base_rate: '1.00',
+      // La divisa destino es la que el operador eligió al crear la factura.
+      target_currency: foreign_currency,
+      // FAR05: 1.00 — la DIAN lo exige así.
+      target_base_rate: '1.00',
+      // FAR06: PESOS POR UNA UNIDAD de la divisa — el sentido que fija FAR03,
+      // y el opuesto al que uno escribiría espontáneamente.
+      calculation_rate: dianAmount(rate),
       // `exchange_rate_date` es `@db.Date`: Prisma la devuelve a medianoche UTC
       // y es una fecha-sólo, no un instante. Convertirla a la zona de la tienda
       // la correría al día anterior — el off-by-one clásico—, así que se lee por
-      // sus componentes UTC, que es donde el valor realmente está.
+      // sus componentes UTC, que es donde el valor realmente está. FAR07.
       date: invoice.exchange_rate_date
         ? new Date(invoice.exchange_rate_date).toISOString().slice(0, 10)
-        : undefined,
+        : '',
     };
   }
 
@@ -2614,7 +2622,7 @@ export class InvoiceFlowService {
       // anterior; el builder lee `payment_means` y sin él emitía '10' fijo, o
       // sea declaraba efectivo en toda venta con tarjeta.
       payment_means: invoice.payment_means_code ?? undefined,
-      items: provider_items,
+      items: provider_items as unknown as any[],
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,
         tax_rate: dianRate(tax.tax_rate),
