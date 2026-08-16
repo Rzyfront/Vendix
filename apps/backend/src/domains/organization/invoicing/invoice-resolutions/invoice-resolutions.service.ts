@@ -24,6 +24,7 @@ import {
 import {
   CORRECCION_POR_VIOLACION,
   ROTULO_CAMPO_INMUTABLE,
+  toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
@@ -95,7 +96,7 @@ export class OrgInvoiceResolutionsService {
     const where: any = { organization_id };
     if (typeof store_id === 'number') where.store_id = store_id;
 
-    return this.prisma.invoice_resolutions.findMany({
+    const rows = await this.prisma.invoice_resolutions.findMany({
       where,
       orderBy: [{ is_active: 'desc' }, { valid_to: 'desc' }],
       include: {
@@ -106,10 +107,32 @@ export class OrgInvoiceResolutionsService {
         _count: { select: { invoices: true } },
       },
     });
+
+    // MISMA función que el carril de tienda, importada y no reescrita: la clave
+    // técnica es el secreto con el que se hashea el CUFE de cada factura de la
+    // resolución, y un `include` sin `select` la devuelve entera —junto con su
+    // versión cifrada y su huella— a cualquiera que liste resoluciones. Dos
+    // sanitizadores paralelos es exactamente cómo un carril se queda atrás
+    // cuando el otro se arregla.
+    return rows.map(toPublicResolution);
   }
 
   async findOne(id: number) {
     const organization_id = this.requireOrganizationId();
+    const resolution = await this.findOneInternal(id, organization_id);
+    return toPublicResolution(resolution);
+  }
+
+  /**
+   * La fila COMPLETA, para uso interno.
+   *
+   * `update` y `remove` necesitan comparar contra `technical_key` —para saber
+   * si cambió y para reconstruir el borrador que valida los requisitos
+   * fiscales—, así que no pueden consumir la versión saneada. Separarlas es lo
+   * que permite que `findOne` (la que sí sale por HTTP) nunca devuelva el
+   * secreto.
+   */
+  private async findOneInternal(id: number, organization_id: number) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id, organization_id },
       include: {
@@ -208,11 +231,16 @@ export class OrgInvoiceResolutionsService {
       `Org invoice resolution ${resolution.id} created for org ${organization_id}, entity ${accounting_entity.id}`,
     );
 
-    return resolution;
+    return toPublicResolution(resolution);
   }
 
   async update(id: number, dto: UpdateOrgInvoiceResolutionDto) {
-    const current = await this.findOne(id);
+    // La fila COMPLETA: más abajo se compara `current.technical_key` para
+    // decidir si la clave cambió, y la versión saneada ya no la trae.
+    const current = await this.findOneInternal(
+      id,
+      this.requireOrganizationId(),
+    );
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -406,11 +434,14 @@ export class OrgInvoiceResolutionsService {
     });
 
     this.logger.log(`Org invoice resolution #${id} updated`);
-    return updated;
+    return toPublicResolution(updated);
   }
 
   async remove(id: number) {
-    const resolution = await this.findOne(id);
+    const resolution = await this.findOneInternal(
+      id,
+      this.requireOrganizationId(),
+    );
 
     if (resolution._count.invoices > 0) {
       throw new VendixHttpException(

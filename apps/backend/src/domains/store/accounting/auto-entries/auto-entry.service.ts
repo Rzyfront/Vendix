@@ -1406,7 +1406,8 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,      description: `Invoice validated #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Invoice validated #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });

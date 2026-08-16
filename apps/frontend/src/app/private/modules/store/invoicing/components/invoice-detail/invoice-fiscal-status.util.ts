@@ -181,9 +181,35 @@ export function fiscalStatusCells(invoice: Invoice): FiscalStatusCell[] {
   }
 
   if (invoice.dian_status) {
-    cells.push(
-      buildCell('DIAN', invoice.dian_status, DIAN_LABELS, DIAN_TONES, DIAN_HINTS),
+    const cell = buildCell(
+      'DIAN',
+      invoice.dian_status,
+      DIAN_LABELS,
+      DIAN_TONES,
+      DIAN_HINTS,
     );
+
+    // `not_applicable` es el DEFAULT de la columna
+    // (`dian_document_status_enum @default(not_applicable)`), así que TODA
+    // factura nace ahí — también una factura de venta electrónica recién
+    // creada contra su resolución. Tomarlo como «este documento no es
+    // electrónico» le decía al comerciante que su factura de venta era un
+    // comprobante interno, contradiciendo el banner de resolución DIAN que
+    // aparece tres bloques más abajo en la misma pantalla.
+    //
+    // El enum sólo dice si hay VEREDICTO. Que el documento sea electrónico lo
+    // deciden su tipo y su resolución, así que la explicación se elige con
+    // eso y no con la columna sola.
+    if (invoice.dian_status === 'not_applicable') {
+      cell.text = isElectronicDocument(invoice)
+        ? 'Sin transmitir'
+        : DIAN_LABELS['not_applicable'];
+      cell.hint = isElectronicDocument(invoice)
+        ? 'El documento aún no se ha transmitido, así que la DIAN todavía no lo ha juzgado. El CUFE se genera al enviarlo.'
+        : DIAN_HINTS['not_applicable'];
+    }
+
+    cells.push(cell);
   }
 
   if (invoice.send_status) {
@@ -203,6 +229,36 @@ export function fiscalStatusCells(invoice: Invoice): FiscalStatusCell[] {
   }
 
   return cells;
+}
+
+/**
+ * Tipos de documento que la DIAN valida previamente, es decir los que SÍ tienen
+ * que terminar transmitidos y con CUFE/CUDE.
+ *
+ * `purchase_invoice` queda fuera a propósito: es la factura que RECIBE el
+ * comerciante y quien la transmite es su proveedor.
+ */
+const ELECTRONIC_DOCUMENT_TYPES = new Set([
+  'sales_invoice',
+  'credit_note',
+  'debit_note',
+  'export_invoice',
+  'support_document',
+  'support_adjustment_note',
+  'pos_equivalent_document',
+  'equivalent_adjustment_note',
+]);
+
+/**
+ * `true` cuando el documento está destinado a la DIAN.
+ *
+ * Basta el tipo: una factura de venta es electrónica por su naturaleza, no por
+ * tener ya la resolución enganchada. Pedir además `resolution_id` haría que una
+ * factura a la que todavía no se le asignó rango se describiera como
+ * comprobante interno, que es justo el error que esta función evita.
+ */
+function isElectronicDocument(invoice: Invoice): boolean {
+  return ELECTRONIC_DOCUMENT_TYPES.has(String(invoice.invoice_type ?? ''));
 }
 
 function buildCell(
