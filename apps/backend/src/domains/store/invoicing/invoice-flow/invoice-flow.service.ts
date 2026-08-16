@@ -2894,6 +2894,11 @@ export class InvoiceFlowService {
       original_invoice_issue_date: invoice.related_invoice?.issue_date
         ? this.formatIssueDate(invoice.related_invoice.issue_date)
         : undefined,
+      // Concepto DIAN de la nota (`cbc:ResponseCode`). Sólo las notas lo tienen;
+      // en cualquier otro documento la columna es NULL y el builder ni lo mira.
+      // `|| undefined` porque `ProviderInvoiceData` declara ausencia como
+      // `undefined`, no como `null`.
+      note_concept_code: invoice.note_concept_code || undefined,
     };
 
     if (

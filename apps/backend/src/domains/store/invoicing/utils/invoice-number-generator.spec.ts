@@ -40,10 +40,25 @@ describe('InvoiceNumberGenerator', () => {
       resolveAccountingEntityForFiscal: jest.fn(),
     };
 
+    // Doble de la bóveda con la MISMA preferencia que el servicio real: la
+    // copia cifrada manda y la plana sólo es respaldo. El generador valida por
+    // aquí justamente para no aprobar una clave distinta de la que se hashea.
+    const technicalKeyVault = {
+      reveal: jest.fn(
+        (stored: any) =>
+          stored?.technical_key_encrypted ?? stored?.technical_key ?? null,
+      ),
+    };
+
     return {
-      service: new InvoiceNumberGenerator(prisma as any, fiscalScope as any),
+      service: new InvoiceNumberGenerator(
+        prisma as any,
+        fiscalScope as any,
+        technicalKeyVault as any,
+      ),
       tx,
       fiscalScope,
+      technicalKeyVault,
     };
   };
 
@@ -212,6 +227,49 @@ describe('InvoiceNumberGenerator', () => {
       ).rejects.toMatchObject({ errorCode: 'INVOICING_RESOLUTION_011' });
 
       // Lo esencial: el cursor no se movió.
+      expect(tx.invoice_resolutions.updateMany).not.toHaveBeenCalled();
+    });
+
+    /**
+     * EL CASO QUE LA VERSIÓN ANTERIOR APROBABA.
+     *
+     * Fila con la columna plana ya corregida (40 hex impecables) y la copia
+     * cifrada todavía rancia. Validar `resolution.technical_key` la daba por
+     * buena, pero `reveal()` PREFIERE la cifrada, así que el CUFE se hashaba
+     * con la vieja y la DIAN rechazaba por «CUFE mal calculado» — con el
+     * consecutivo autorizado ya gastado y un validador que había dicho que sí.
+     *
+     * La puerta tiene que mirar exactamente el valor que se va a hashear.
+     */
+    it('rechaza cuando la copia cifrada —la que se hashea— está truncada, aunque la plana esté bien', async () => {
+      const row = {
+        id: 9,
+        prefix: 'FE',
+        current_number: 10,
+        range_from: 1,
+        range_to: 20,
+        technical_key: VALID_CLTEC,
+        technical_key_encrypted: VALID_CLTEC.slice(0, 38),
+      };
+      const { service, tx, technicalKeyVault } = createService({
+        invoice_resolutions: {
+          findFirst: jest.fn().mockResolvedValue(row),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ ...row, current_number: 11 }),
+        },
+      });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'sales_invoice',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_RESOLUTION_011' });
+
+      expect(technicalKeyVault.reveal).toHaveBeenCalled();
       expect(tx.invoice_resolutions.updateMany).not.toHaveBeenCalled();
     });
 

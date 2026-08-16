@@ -710,17 +710,39 @@ describe('CustomerFiscalIdentityValidator', () => {
       juridica({ legal_name: 'N/A' }),
       natural({ person_type: 'JURIDICA', legal_name: 'ABC S.A.S.' }),
       juridica({ tax_responsibilities: ['GRAN CONTRIBUYENTE'] }),
-      juridica({ address: null }),
       juridica({ address: { ...VALID_ADDRESS, country_code: null } }),
       juridica({ address: { ...VALID_ADDRESS, country_code: 'COL' } }),
       juridica({ address: { ...VALID_ADDRESS, city_code: null } }),
       juridica({ address: { ...VALID_ADDRESS, city_code: 'MED' } }),
       juridica({ address: { ...VALID_ADDRESS, department_code: 'ANT' } }),
       juridica({ address: { ...VALID_ADDRESS, department_code: '11' } }),
-      juridica({ address: { ...VALID_ADDRESS, city_name: null } }),
-      juridica({ address: { ...VALID_ADDRESS, department_name: null } }),
       juridica({ email: 'sin-arroba' }),
     ];
+
+    /**
+     * LO QUE FALTA PERO NO IMPIDE EMITIR.
+     *
+     * Estos tres estaban arriba, entre los bloqueantes, y bajaron a propósito.
+     * El emisor ya no inventa Bogotá: la cascada de dirección baja por los
+     * domicilios REALES —fiscal, luego envío, luego el de la tienda emisora—,
+     * declara cuál usó en `provider_data.acquirer_address_source`, y si no hay
+     * ninguno falla ella con un error tipado antes de firmar. Los nombres de
+     * municipio y departamento salen del catálogo DANE vía
+     * `resolveDianMunicipality`, no del cliente.
+     *
+     * Mantenerlos en `blocker` dejaba la cascada inalcanzable: el usuario veía
+     * el modal de errores aunque el respaldo funcionara — el atasco reportado.
+     *
+     * Siguen siendo hallazgos: el documento sale con el domicilio de otro, y eso
+     * hay que decirlo. Lo que ya no hacen es bloquear.
+     */
+    const escenariosSoloAviso: CustomerFiscalIdentityInput[] = [
+      juridica({ address: null }),
+      juridica({ address: { ...VALID_ADDRESS, city_name: null } }),
+      juridica({ address: { ...VALID_ADDRESS, department_name: null } }),
+    ];
+
+    const todosLosEscenarios = [...escenariosRotos, ...escenariosSoloAviso];
 
     it('ningún hallazgo bloqueante queda sin instrucción de corrección', () => {
       for (const escenario of escenariosRotos) {
@@ -735,7 +757,7 @@ describe('CustomerFiscalIdentityValidator', () => {
     });
 
     it('ningún hallazgo —bloqueante o advertencia— queda sin corrección ni campo', () => {
-      for (const escenario of escenariosRotos) {
+      for (const escenario of todosLosEscenarios) {
         for (const finding of validator.validate(escenario).findings) {
           expect(finding.fix.trim()).not.toBe('');
           expect(finding.problem.trim()).not.toBe('');
@@ -752,8 +774,23 @@ describe('CustomerFiscalIdentityValidator', () => {
       }
     });
 
+    /**
+     * La contracara, y el motivo por el que la degradación se hizo: una
+     * identidad a la que sólo le falta el domicilio SÍ es emitible, y el
+     * validador tiene que decirlo con un aviso, no callándose.
+     */
+    it('lo que sólo falta —no está mal— avisa sin bloquear y deja emitir', () => {
+      for (const escenario of escenariosSoloAviso) {
+        const report = validator.validate(escenario);
+        expect(report.blockers).toHaveLength(0);
+        expect(report.warnings.length).toBeGreaterThan(0);
+        expect(report.emittable).toBe(true);
+        expect(report.normalized).not.toBeNull();
+      }
+    });
+
     it('`findings` es exactamente la unión de bloqueantes y advertencias', () => {
-      for (const escenario of escenariosRotos) {
+      for (const escenario of todosLosEscenarios) {
         const report = validator.validate(escenario);
         expect(report.findings.length).toBe(
           report.blockers.length + report.warnings.length,
@@ -786,15 +823,16 @@ describe('CustomerFiscalIdentityValidator', () => {
         'NAME_PLACEHOLDER',
         'PERSON_TYPE_DOCUMENT_MISMATCH',
         'TAX_RESPONSIBILITY_MALFORMED',
-        'ADDRESS_REQUIRED',
+        // `ADDRESS_REQUIRED`, `CITY_NAME_REQUIRED` y `DEPARTMENT_NAME_REQUIRED`
+        // NO están aquí a propósito: dejaron de ser bloqueantes cuando la
+        // cascada de dirección los volvió resolubles (ver `escenariosSoloAviso`
+        // arriba). Su cobertura la da el test de avisos, no ésta.
         'COUNTRY_CODE_REQUIRED',
         'COUNTRY_CODE_MALFORMED',
         'CITY_CODE_REQUIRED',
         'CITY_CODE_MALFORMED',
-        'CITY_NAME_REQUIRED',
         'DEPARTMENT_CODE_MALFORMED',
         'DEPARTMENT_CITY_MISMATCH',
-        'DEPARTMENT_NAME_REQUIRED',
         'EMAIL_MALFORMED',
       ];
 
