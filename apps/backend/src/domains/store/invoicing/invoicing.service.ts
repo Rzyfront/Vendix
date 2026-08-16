@@ -35,7 +35,12 @@ import {
 } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
 import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
-import { AiuSettings } from '../settings/interfaces/store-settings.interface';
+import {
+  AiuSettings,
+  DEFAULT_POS_AUTO_EMIT,
+  DEFAULT_POS_DIAN_FAILURE_POLICY,
+  PosInvoicingSettings,
+} from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
@@ -380,6 +385,66 @@ export class InvoicingService {
             ? error.message
             : 'Esta tienda no puede emitir documentos electrónicos todavía.',
       };
+    }
+  }
+
+  /**
+   * `store_settings.invoicing.pos` de la tienda en contexto, con sus defaults ya
+   * aplicados.
+   *
+   * ## Por qué vive acá y no en el carril del POS
+   *
+   * Para que el dominio de facturación tenga UN solo sitio donde se decide qué
+   * se asume cuando el comerciante no configuró nada. El otro lector es
+   * `payments.service.ts`, que resuelve `auto_emit` en línea porque ya tiene los
+   * settings en memoria dentro del camino del cobro y una segunda consulta ahí
+   * se paga en cada venta; lo que NO hace es tener su propio criterio: importa
+   * la misma constante `DEFAULT_POS_AUTO_EMIT` de este archivo de interfaces.
+   * La regla es esa —una constante compartida, no dos defaults escritos a
+   * mano—, y romperla dejaría la emisión automática encendida para quien la
+   * dispara y apagada para quien la ejecuta.
+   *
+   * Nunca lanza: sus dos llamadores están en el camino de una venta YA cobrada,
+   * y quedarse sin poder leer una preferencia no puede ser peor que la
+   * preferencia misma. Ante cualquier fallo devuelve los defaults, que son los
+   * conservadores.
+   */
+  async getPosInvoicingSettings(): Promise<Required<PosInvoicingSettings>> {
+    const fallback: Required<PosInvoicingSettings> = {
+      auto_emit: DEFAULT_POS_AUTO_EMIT,
+      on_failure: DEFAULT_POS_DIAN_FAILURE_POLICY,
+    };
+
+    try {
+      const store_id = this.getContext().store_id;
+      if (typeof store_id !== 'number') return fallback;
+
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+
+      const pos = (row?.settings as Record<string, any> | null)?.invoicing?.pos;
+      if (!pos || typeof pos !== 'object') return fallback;
+
+      return {
+        auto_emit:
+          typeof pos.auto_emit === 'boolean' ? pos.auto_emit : fallback.auto_emit,
+        // Sólo se acepta un valor del dominio. Una cadena arbitraria escrita a
+        // mano en el JSON no puede desactivar el registro del fallo por la
+        // puerta de atrás: cae al default, que es el que sí lo registra.
+        on_failure:
+          pos.on_failure === 'queue' || pos.on_failure === 'ignore'
+            ? pos.on_failure
+            : fallback.on_failure,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los ajustes de facturación del POS; se usan los defaults: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return fallback;
     }
   }
 

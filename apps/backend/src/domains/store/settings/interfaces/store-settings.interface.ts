@@ -387,6 +387,41 @@ export interface AiuSettings {
  * emite son los mismos en ambas — duplicarlas por superficie es cómo se llegó a
  * que el CUFE y el XML clasificaran impuestos distinto.
  */
+/**
+ * Qué hace el carril del POS con una venta que quedó SIN documento fiscal.
+ *
+ * ## Lo que NINGUNO de los dos valores hace: bloquear la venta
+ *
+ * No existe un valor `block`, y su ausencia es la decisión, no un olvido. El
+ * evento `pos.sale.completed` se emite DESPUÉS del commit del cobro —el pedido,
+ * el pago, el inventario y la caja ya están confirmados—, así que cuando esta
+ * política se lee no queda nada que bloquear: la venta ocurrió. Ofrecer `block`
+ * obligaría a mover la emisión DENTRO de la transacción del cobro, que es
+ * exactamente lo que este carril existe para impedir: una caída de la DIAN
+ * dejaría al cajero sin poder cobrar. Y su única alternativa —un modal que el
+ * cajero tiene que cerrar para seguir vendiendo— es justo lo que el indicador
+ * no modal descarta por diseño.
+ *
+ * Lo que sí varía, y es lo que estos dos valores eligen, es si el fallo QUEDA
+ * REGISTRADO en un sitio que alguien pueda consultar después.
+ */
+export type PosDianFailurePolicy =
+  /**
+   * **Default.** El documento que no se pudo emitir queda anotado en
+   * `invoice_retry_queue` con su motivo. Ahí lo ven el indicador del POS, el
+   * listado de facturas (`retry_status`) y `getQueueStats()`, y desde ahí se
+   * reintenta. Es el valor seguro porque es el único que cumple la regla que
+   * de verdad importa: una venta cuya factura nunca se transmitió y de la que
+   * nadie se entera es peor que un error en pantalla.
+   */
+  | 'queue'
+  /**
+   * El fallo se registra sólo en el log. Para la tienda que emite a mano desde
+   * la superficie fiscal (`auto_emit: false`) y no quiere que cada borrador a
+   * medio capturar aparezca como pendiente en la cola.
+   */
+  | 'ignore';
+
 export interface PosInvoicingSettings {
   /**
    * Emitir el documento electrónico automáticamente al cerrar la venta.
@@ -396,6 +431,12 @@ export interface PosInvoicingSettings {
    * rápida: sólo obliga a pedir el documento a mano desde el POS.
    */
   auto_emit?: boolean;
+  /**
+   * Qué se hace con una venta de mostrador que quedó sin documento fiscal.
+   * Default `'queue'` (ver `DEFAULT_POS_DIAN_FAILURE_POLICY`). NUNCA bloquea la
+   * venta — ver `PosDianFailurePolicy` para por qué no existe ese valor.
+   */
+  on_failure?: PosDianFailurePolicy;
 }
 
 export interface InvoicingSettings {
@@ -415,6 +456,17 @@ export interface InvoicingSettings {
  * antes de crear nada y la venta ni se entera.
  */
 export const DEFAULT_POS_AUTO_EMIT = true;
+
+/**
+ * Ante un fallo de emisión en el POS, dejar constancia.
+ *
+ * El default NO es «no hacer nada» porque el riesgo de las dos opciones no es
+ * simétrico: anotar de más produce una fila en una cola que alguien revisa;
+ * anotar de menos produce una venta sin soporte fiscal que sólo aparece en la
+ * declaración del mes siguiente, cuando el consecutivo ya está gastado y el
+ * plazo vencido.
+ */
+export const DEFAULT_POS_DIAN_FAILURE_POLICY: PosDianFailurePolicy = 'queue';
 
 export interface StoreSettings {
   /**

@@ -126,6 +126,40 @@ export interface FiscalDocumentRequirements {
    * nota contra la tabla de factura la rechazaría por FAD02 estando bien.
    */
   uses_invoice_operation_types: boolean;
+  /**
+   * Elemento raíz del XML UBL que Vendix emite para este documento.
+   *
+   * ES LO QUE DECIDE QUÉ TABLA DE REGLAS DE LA DIAN LO JUZGA. El Anexo Técnico
+   * 1.9 no publica tablas por «tipo de documento de negocio» sino por elemento
+   * raíz: §8.2 `Invoice` (ids `FA*`), §8.3 `CreditNote` (ids `CA*`), §8.4
+   * `DebitNote` (ids `DA*`). Un documento equivalente POS no tiene familia de
+   * reglas propia: sale como `<Invoice>` con `InvoiceTypeCode` '20'
+   * (`ubl-equivalent-document.builder.ts:89`) y por tanto lo rechaza `FAD05a`,
+   * no un identificador inventado para el DE. Lo mismo el documento soporte
+   * (`ubl-support-document.builder.ts:45`) y, del otro lado, la nota de ajuste
+   * al documento soporte, que sale como `<CreditNote>`
+   * (`ubl-support-document.builder.ts:108`) y cae bajo `CA*`.
+   *
+   * `null` para nómina: el DSPNE no es UBL de facturación y ninguna de esas tres
+   * tablas lo juzga.
+   */
+  ubl_root_document: 'Invoice' | 'CreditNote' | 'DebitNote' | null;
+  /**
+   * ¿El constructor XML de este documento emite `cac:AllowanceCharge` a nivel de
+   * documento cuando hay descuento global?
+   *
+   * NO ES UN DETALLE DE IMPLEMENTACIÓN: `FAU08`/`CAU08`/`DAU08` exigen que
+   * `cbc:AllowanceTotalAmount` sea igual a la suma de los `cac:AllowanceCharge`
+   * con `ChargeIndicator = false`. Si el documento publica el total de descuento
+   * pero NO publica el grupo que lo respalda, esa suma es 0 y la DIAN rechaza —
+   * gastando el consecutivo. Sólo `ubl-invoice.builder.ts` y
+   * `ubl-equivalent-document.builder.ts:162` llaman a
+   * `UblCommonBuilder.buildDocumentAllowanceCharge`; la nota crédito
+   * (`ubl-credit-note.builder.ts:172`), la nota débito
+   * (`ubl-debit-note.builder.ts:194`) y el documento soporte
+   * (`ubl-support-document.builder.ts:318`) van directo al grupo de totales.
+   */
+  emits_document_allowance_charge: boolean;
 }
 
 /**
@@ -175,6 +209,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: true,
+    ubl_root_document: 'Invoice',
+    emits_document_allowance_charge: true,
   },
   /**
    * La DIAN no emite Autorización de Numeración para las notas: la Res.
@@ -197,6 +233,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'CreditNote',
+    emits_document_allowance_charge: false,
   },
   debit_note: {
     document_type: 'debit_note',
@@ -209,6 +247,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     // El ÚNICO documento cuyo grupo de totales NO es `cac:LegalMonetaryTotal`.
     monetary_total_element: 'RequestedMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'DebitNote',
+    emits_document_allowance_charge: false,
   },
   /**
    * Documento soporte en adquisiciones a no obligados a facturar (Res.
@@ -225,6 +265,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'Invoice',
+    emits_document_allowance_charge: false,
   },
   /** Nota de ajuste al documento soporte: ajusta, no numera contra rango propio. */
   support_adjustment_note: {
@@ -237,6 +279,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'CreditNote',
+    emits_document_allowance_charge: false,
   },
   /**
    * Nómina electrónica. NO lleva resolución de numeración: el DSPNE numera con su
@@ -257,6 +301,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: false,
     monetary_total_element: null,
     uses_invoice_operation_types: false,
+    ubl_root_document: null,
+    emits_document_allowance_charge: false,
   },
   payroll_adjustment: {
     document_type: 'payroll_adjustment',
@@ -268,6 +314,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: false,
     monetary_total_element: null,
     uses_invoice_operation_types: false,
+    ubl_root_document: null,
+    emits_document_allowance_charge: false,
   },
   /**
    * Documento equivalente electrónico del tiquete POS (Res. 000165/2023,
@@ -286,6 +334,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'Invoice',
+    emits_document_allowance_charge: true,
   },
   /**
    * Nota de ajuste al documento equivalente ('93' débito / '94' crédito, numeral
@@ -301,6 +351,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     requires_lines: true,
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
+    ubl_root_document: 'Invoice',
+    emits_document_allowance_charge: true,
   },
 });
 
@@ -592,3 +644,765 @@ export function validateResolutionDraft(
 
   return violations;
 }
+
+// -----------------------------------------------------------------------------
+// CATÁLOGO DE REGLAS OFICIALES DEL ANEXO TÉCNICO 1.9 (Res. 000165 · 01/NOV/2023)
+//
+// ## Por qué existe
+//
+// Cuando la DIAN rechaza, devuelve un identificador (`FAJ29`, `FAU02`, `FAD05a`)
+// y su propio mensaje. Hasta ahora NADA en el código permitía correlacionar ese
+// rechazo con la regla local que debió atajarlo: el prevalidador hablaba en
+// español de comerciante y la DIAN en español de anexo, y nadie tenía el
+// diccionario. Este catálogo es ese diccionario, y va aquí —en el motor
+// declarativo— y no dentro del validador porque la respuesta depende del TIPO DE
+// DOCUMENTO, que es justo lo que esta tabla ya sabe resolver.
+//
+// ## Reglas de transcripción (no negociables)
+//
+//  1. `dian_message` es LITERAL de la columna «Mensaje» del anexo, con sus
+//     erratas incluidas (el anexo escribe «validares positivos» en la columna
+//     Regla de VLR01 y «CustomizationID debe sr igual» en CAD02a). No se corrige:
+//     el valor de este campo es poder buscarlo tal cual en el PDF y en la
+//     respuesta de la DIAN.
+//  2. `annex_line` cita la línea de `anexo19.txt` —la extracción `pdftotext
+//     -layout` del PDF oficial de 753 páginas— de donde se transcribió, para que
+//     cualquiera pueda auditar la transcripción sin volver a leer el PDF entero.
+//  3. `dian_message: null` significa que la fila del anexo es una DEFINICIÓN DE
+//     CAMPO (columnas Tipo/Tam/Ocurrencia) y no una fila de regla con columna
+//     «Mensaje». No se inventa un mensaje para rellenar el hueco.
+//  4. Si un tipo de documento no aparece en `by_root`, es que ninguna de las tres
+//     tablas del anexo lo juzga. `dianRuleFor` devuelve `null` y el hallazgo sale
+//     sin cita, que es honesto; inventar un identificador sería peor que no
+//     tenerlo.
+//
+// ## Efecto
+//
+// La columna `Y` del anexo: `R` = Rechazo (la DIAN NO acepta el documento y el
+// consecutivo se pierde), `N` = Notificación (lo acepta y avisa). Sólo lo primero
+// justifica bloquear una emisión.
+// -----------------------------------------------------------------------------
+
+/** Columna `Y` del anexo: `R` = Rechazo, `N` = Notificación. */
+export type DianRuleEffect = 'rechazo' | 'notificacion';
+
+/** Elemento raíz UBL bajo el que el anexo agrupa sus tablas de reglas. */
+export type DianUblRootDocument = 'Invoice' | 'CreditNote' | 'DebitNote';
+
+/** La regla tal como el anexo la publica para UN elemento raíz. */
+export interface DianRuleVariant {
+  /** Identificador oficial: el que la DIAN devuelve al rechazar. */
+  id: string;
+  /**
+   * Mensaje LITERAL de la columna «Mensaje». `null` cuando la fila citada es una
+   * definición de campo sin columna «Mensaje» (ver regla 3 de la cabecera).
+   */
+  dian_message: string | null;
+  /** XPath de la columna «Xpath», normalizado a una sola línea. */
+  xpath: string;
+  /** Línea de `anexo19.txt` de la que se transcribió. */
+  annex_line: number;
+}
+
+/** Una regla del anexo, con su variante por elemento raíz. */
+export interface DianRuleDefinition {
+  /** Qué exige, en español de ingeniería. NO es el mensaje de la DIAN. */
+  requirement: string;
+  effect: DianRuleEffect;
+  by_root: Partial<Record<DianUblRootDocument, DianRuleVariant>>;
+}
+
+/** La regla resuelta para un tipo de documento concreto. */
+export interface DianRuleCitation extends DianRuleVariant {
+  key: DianRuleKey;
+  effect: DianRuleEffect;
+  /** Elemento raíz bajo el que se resolvió la cita. */
+  root: DianUblRootDocument;
+}
+
+/**
+ * EL CATÁLOGO. Cada clave nombra una regla en términos de negocio; cada variante
+ * la traduce al identificador que la DIAN devolverá si el documento la incumple.
+ */
+export const DIAN_RULES = {
+  // --- Totales del documento (§8.1.5 / §8.3.5 / §8.4.5) ---------------------
+  header_line_extension: {
+    requirement:
+      'El valor bruto antes de tributos del documento debe ser la suma de los ' +
+      'valores brutos de sus líneas.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAU02',
+        dian_message:
+          'El Valor Bruto antes de tributos no es igual a la suma de los valores de las líneas de la factura que contienen el valor comercial',
+        xpath: '…//cac:LegalMonetaryTotal/cbc:LineExtensionAmount',
+        annex_line: 22411,
+      },
+      CreditNote: {
+        id: 'CAU02',
+        dian_message:
+          'El Valor Bruto antes de tributos no es igual a la suma de los valores de las líneas de la factura que contienen el valor comercial.',
+        xpath: '…//LegalMonetaryTotal/cbc:LineExtensionAmount',
+        annex_line: 26136,
+      },
+      DebitNote: {
+        id: 'DAU02',
+        dian_message:
+          'El Valor Bruto antes de tributos NO es igual a la suma de los valores de las líneas de la factura que contienen el valor comercial.',
+        xpath: '…//cac:RequestedMonetaryTotal/cbc:LineExtensionAmount',
+        annex_line: 29510,
+      },
+    },
+  },
+  header_tax_inclusive: {
+    requirement:
+      'El valor bruto más tributos debe ser el valor bruto más la suma de los ' +
+      'tributos de todas las líneas de detalle.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAU06',
+        dian_message:
+          'Valor Bruto más tributos es diferente a Valor Bruto de la factura que contienen el valor comercial más la Suma de los Tributos de todas las líneas de detalle.',
+        xpath: '…//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount',
+        annex_line: 22475,
+      },
+      CreditNote: {
+        id: 'CAU06',
+        dian_message:
+          'Valor Bruto más tributos es diferente a Valor Bruto de la factura que contienen el valor comercial más la Suma de los Tributos de todas las líneas de detalle.',
+        xpath: '…//LegalMonetaryTotal/cbc:TaxInclusiveAmount',
+        annex_line: 26215,
+      },
+      DebitNote: {
+        id: 'DAU06',
+        dian_message:
+          'Valor Bruto más tributos, es diferente a Valor Bruto de la factura que contienen el valor comercial más la suma de los tributos de todas las líneas de detalle.',
+        xpath: '…//cac:RequestedMonetaryTotal/cbc:TaxInclusiveAmount',
+        annex_line: 29589,
+      },
+    },
+  },
+  payable_amount: {
+    requirement:
+      'Valor a pagar = valor bruto más tributos − descuento total + cargo total.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAU14',
+        dian_message:
+          'Valor a Pagar de Factura es distinto de la Suma de Valor Bruto más tributos - Valor del Descuento Total + Valor del Cargo Total',
+        xpath: '…//cac:LegalMonetaryTotal/cbc:PayableAmount',
+        annex_line: 22621,
+      },
+      CreditNote: {
+        id: 'CAU14',
+        dian_message:
+          'Valor a Pagar de Factura es distinto de la Suma de Valor Bruto más tributos - Valor del Descuento Total + Valor del Cargo Total',
+        xpath: '…//LegalMonetaryTotal/cbc:PayableAmount',
+        annex_line: 26327,
+      },
+      DebitNote: {
+        id: 'DAU14',
+        dian_message:
+          'Valor a Pagar de Factura, es distinto de la Suma de Valor Bruto más tributos - Valor del Descuento Total + Valor del Cargo Total',
+        xpath: '…//cac:RequestedMonetaryTotal/cbc:PayableAmount',
+        annex_line: 29701,
+      },
+    },
+  },
+  allowance_total_backed: {
+    requirement:
+      'El descuento total del documento debe ser igual a la suma de los ' +
+      'cac:AllowanceCharge con ChargeIndicator = "false". Si el documento ' +
+      'publica el total pero no publica los grupos, esa suma vale 0.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAU08',
+        dian_message:
+          'Total descuentos es diferente de la suma de todos los descuentos aplicados al total de la factura',
+        xpath: '…//cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount',
+        annex_line: 22514,
+      },
+      CreditNote: {
+        id: 'CAU08',
+        dian_message:
+          'Total descuentos, es diferente de la suma de todos los descuentos aplicados al total de la factura.',
+        xpath: '…//LegalMonetaryTotal/cbc:AllowanceTotalAmount',
+        annex_line: 26254,
+      },
+      DebitNote: {
+        id: 'DAU08',
+        dian_message:
+          'Total descuentos, es diferente de la suma de todos los descuentos aplicados al total de la factura.',
+        xpath: '…//cac:RequestedMonetaryTotal/cbc:AllowanceTotalAmount',
+        annex_line: 29607,
+      },
+    },
+  },
+
+  // --- Tributos de cabecera (§8.1.4 / §8.3.4 / §8.4.4) ----------------------
+  tax_subtotal_per_rate: {
+    requirement: 'Debe existir un cac:TaxSubtotal por cada tarifa.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAS04',
+        dian_message: 'Debe ser informado un grupo de estos para cada tarifa.',
+        xpath: '../cac:TaxTotal/cac:TaxSubtotal',
+        annex_line: 22011,
+      },
+      CreditNote: {
+        id: 'CAS04',
+        dian_message: 'Debe ser informado un grupo de estos para cada tarifa.',
+        xpath: '../cac:TaxTotal/TaxSubtotal',
+        annex_line: 25936,
+      },
+      DebitNote: {
+        id: 'DAS04',
+        dian_message: 'Debe ser informado un grupo de estos para cada tarifa.',
+        xpath: '../cac:TaxTotal/TaxSubtotal',
+        annex_line: 29337,
+      },
+    },
+  },
+  tax_subtotal_amount: {
+    requirement:
+      'El valor del tributo debe ser el producto del porcentaje aplicado sobre ' +
+      'la base imponible.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAS07',
+        dian_message:
+          'El valor del tributo informado no corresponde al producto del porcentaje aplicado sobre la base imponible',
+        xpath: '../cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount',
+        annex_line: 22060,
+      },
+      CreditNote: {
+        id: 'CAS07',
+        dian_message:
+          'El valor del tributo informado no corresponde al producto del porcentaje aplicado sobre la base imponible',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 25978,
+      },
+      DebitNote: {
+        id: 'DAS07',
+        dian_message:
+          'El valor del tributo informado no corresponde al producto del porcentaje aplicado sobre la base imponible',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 29359,
+      },
+    },
+  },
+
+  // --- Líneas (§8.2.1 / §8.3.1 / §8.4.1) ------------------------------------
+  line_group_required: {
+    requirement: 'Debe existir al menos un grupo de línea.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAV01',
+        dian_message: 'No fue informado el grupo',
+        xpath: '/Invoice/cac:InvoiceLine',
+        annex_line: 22670,
+      },
+      CreditNote: {
+        id: 'CAV01',
+        dian_message: 'No fue informado el grupo',
+        xpath: '/CreditNote/cac:CreditNoteLine',
+        annex_line: 26375,
+      },
+      DebitNote: {
+        id: 'DAV01',
+        dian_message: 'No fue informado el grupo',
+        xpath: '/DebitNote/cac:DebitNoteLine',
+        annex_line: 29762,
+      },
+    },
+  },
+  line_quantity_positive: {
+    requirement:
+      'La cantidad de cada línea debe existir y no puede ser negativa.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAV04b',
+        dian_message: 'No se puede expresar valores negativos',
+        xpath: '/Invoice/cac:InvoiceLine/cbc:InvoicedQuantity',
+        annex_line: 22731,
+      },
+      CreditNote: {
+        id: 'CAV04b',
+        dian_message: 'No se puede expresar valores negativos',
+        xpath: '/CreditNote/cac:CreditNoteLine/cbc:CreditedQuantity',
+        annex_line: 26423,
+      },
+      DebitNote: {
+        id: 'DAV04b',
+        dian_message: 'No se puede expresar valores negativos',
+        xpath: '/DebitNote/cac:DebitNoteLine/cbc:DebitedQuantity',
+        annex_line: 29810,
+      },
+    },
+  },
+  line_unit_code: {
+    requirement:
+      'La unidad de medida de la cantidad debe existir en la lista de unidades ' +
+      'del anexo (UN/ECE Rec. 20).',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAV05',
+        dian_message:
+          'La unidad de la cantidad utilizada no existe en la lista de unidades',
+        xpath: '/Invoice/cac:InvoiceLine/cbc:InvoicedQuantity /@unitCode',
+        annex_line: 22735,
+      },
+      CreditNote: {
+        id: 'CAV05',
+        dian_message:
+          'La unidad de la cantidad utilizada no existe en la lista de unidades.',
+        xpath: '/CreditNote/cac:CreditNoteLine/cbc:CreditedQuantity /@unitCode',
+        annex_line: 26429,
+      },
+      DebitNote: {
+        id: 'DAV05',
+        dian_message:
+          'La unidad de la cantidad utilizada NO existe en la lista de unidades.',
+        xpath: '/DebitNote/cac:DebitNoteLine/cbc:DebitedQuantity /@unitCode',
+        annex_line: 29815,
+      },
+    },
+  },
+  line_description: {
+    requirement: 'La descripción del artículo o servicio debe ser informada.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAZ02',
+        dian_message: 'Descripción no informada',
+        xpath: '../cac:Item/cbc:Description',
+        annex_line: 23332,
+      },
+      CreditNote: {
+        id: 'CAZ02',
+        dian_message: 'Descripción no informada',
+        xpath: '../cac:Item/cbc:Description',
+        annex_line: 26965,
+      },
+      DebitNote: {
+        id: 'DAZ02',
+        dian_message: 'Descripción no informada.',
+        xpath: '../cac:Item/cbc:Description',
+        annex_line: 30337,
+      },
+    },
+  },
+
+  // --- Cabecera del documento (§8.1.2 / §8.3.2 / §8.4.2) ---------------------
+  operation_type: {
+    requirement:
+      'cbc:CustomizationID debe ser un valor válido de la tabla de tipos de ' +
+      'operación que corresponde a ESTE documento.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD02',
+        dian_message:
+          'CustomizationID no indica un valor válido para el tipo de operación',
+        xpath: '/Invoice/cbc:CustomizationID',
+        annex_line: 19367,
+      },
+      CreditNote: {
+        id: 'CAD02',
+        dian_message:
+          'CustomizationID no indica un valor válido para el tipo de operación',
+        xpath: '/CreditNote/cbc:CustomizationID',
+        annex_line: 23818,
+      },
+      DebitNote: {
+        id: 'DAD02',
+        dian_message:
+          'CustomizationID no indica un valor válido para el tipo de operación.',
+        xpath: '/DebitNote/cbc:CustomizationID',
+        annex_line: 27437,
+      },
+    },
+  },
+  document_currency: {
+    requirement:
+      'La divisa del documento debe estar definida en el estándar ISO 4217.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD15a',
+        dian_message: 'Código de divisa inválido',
+        xpath: '/Invoice/cbc:DocumentCurrencyCode',
+        annex_line: 19520,
+      },
+      CreditNote: {
+        id: 'CAD15a',
+        dian_message: 'Código de divisa inválido',
+        xpath: '/CreditNote/cbc:DocumentCurrencyCode',
+        annex_line: 23916,
+      },
+      DebitNote: {
+        id: 'DAD15a',
+        dian_message: 'Código de divisa inválido.',
+        xpath: '/DebitNote/cbc:DocumentCurrencyCode',
+        annex_line: 27492,
+      },
+    },
+  },
+  /**
+   * LA REGLA DEL INCIDENTE. La ClTec de 38 caracteres no disparó ninguna regla
+   * de forma: disparó ESTA, porque la DIAN recalculó el CUFE con la clave
+   * verdadera y los hashes no coincidieron. Es la única entrada del hash que el
+   * XML no transporta, así que la DIAN es el primer sistema capaz de notarlo —
+   * y para entonces el consecutivo ya está gastado.
+   */
+  unique_code_calculation: {
+    requirement:
+      'El CUFE/CUDE debe estar calculado según el algoritmo del anexo técnico.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD06',
+        dian_message: 'Valor del CUFE no está calculado correctamente',
+        xpath: '/Invoice/cbc:UUID',
+        annex_line: 19423,
+      },
+      CreditNote: {
+        id: 'CAD06',
+        dian_message: 'Valor del CUDE No está calculado correctamente',
+        xpath: '/CreditNote/cbc:UUID',
+        annex_line: 23858,
+      },
+      DebitNote: {
+        id: 'DAD06',
+        dian_message: 'Valor del CUDE no está calculado correctamente.',
+        xpath: '/DebitNote/cbc:UUID',
+        annex_line: 27451,
+      },
+    },
+  },
+  issue_date_equals_signing_date: {
+    requirement:
+      'La fecha de generación del documento debe ser igual a la fecha de firma.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD09e',
+        dian_message:
+          'La fecha de generación de la factura es diferente a la fecha de firma de la factura',
+        xpath: '/Invoice/cbc:IssueDate',
+        annex_line: 19486,
+      },
+      CreditNote: {
+        id: 'CAD09e',
+        dian_message:
+          'La fecha de generación de la NC es diferente a la fecha de firma de la NC',
+        xpath: '/CreditNote/cbc:IssueDate',
+        annex_line: 23895,
+      },
+      DebitNote: {
+        id: 'DAD09e',
+        dian_message:
+          'La fecha de generación de la ND es diferente a la fecha de firma de la ND',
+        xpath: '/DebitNote/cbc:IssueDate',
+        annex_line: 27474,
+      },
+    },
+  },
+
+  // --- Numeración autorizada (§8.1.2 cbc:ID + §8.1.1 sts:InvoiceControl) -----
+  //
+  // Estas tablas SÓLO existen para `Invoice`: la autorización de numeración es
+  // de la factura (y, por herencia del elemento raíz, del documento soporte y
+  // del documento equivalente POS, que también salen como `<Invoice>`). Las
+  // notas no cuelgan de un rango autorizado — ver `requires_authorized_range`.
+  document_number_format: {
+    requirement:
+      'El número de documento sólo puede contener números y letras: ni espacios, ' +
+      'ni guiones, ni ningún otro carácter.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD05a',
+        dian_message:
+          'No se permiten caracteres adicionales como espacios o guiones',
+        xpath: '/Invoice/cbc:ID',
+        annex_line: 19384,
+      },
+      // Las notas no tienen fila de regla propia para el formato del `cbc:ID`:
+      // el anexo la publica dentro de la DEFINICIÓN del campo, en la columna
+      // «Reglas de validación» («Rechazo: No se permiten caracteres adicionales
+      // como espacios o guiones»). Es la misma regla y el mismo mensaje.
+      CreditNote: {
+        id: 'CAD05',
+        dian_message:
+          'No se permiten caracteres adicionales como espacios o guiones',
+        xpath: '/CreditNote/cbc:ID',
+        annex_line: 6196,
+      },
+      DebitNote: {
+        id: 'DAD05',
+        dian_message:
+          'No se permiten caracteres adicionales como espacios o guiones',
+        xpath: '/DebitNote/cbc:ID',
+        annex_line: 10021,
+      },
+    },
+  },
+  document_number_length: {
+    requirement:
+      'El número de documento (prefijo + consecutivo) es de tipo EA con Tam ' +
+      '1..20 en la definición de campo del anexo.',
+    effect: 'rechazo',
+    by_root: {
+      // Filas de DEFINICIÓN de campo (columnas Tipo/Tam/Ocurrencia). El anexo no
+      // publica columna «Mensaje» para la faceta de longitud: la violación la
+      // ataja el XSD, que es donde 21 caracteres dejan de caber en el tipo.
+      Invoice: {
+        id: 'FAD05',
+        dian_message: null,
+        xpath: '/Invoice/cbc:ID',
+        annex_line: 1463,
+      },
+      CreditNote: {
+        id: 'CAD05',
+        dian_message: null,
+        xpath: '/CreditNote/cbc:ID',
+        annex_line: 6196,
+      },
+      DebitNote: {
+        id: 'DAD05',
+        dian_message: null,
+        xpath: '/DebitNote/cbc:ID',
+        annex_line: 10021,
+      },
+    },
+  },
+  document_number_within_range: {
+    requirement:
+      'El número de documento debe estar contenido en el rango de numeración ' +
+      'autorizado.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD05d',
+        dian_message:
+          'Número de factura no está contenido en el rango de numeración autorizado',
+        xpath: '/Invoice/cbc:ID',
+        annex_line: 19414,
+      },
+    },
+  },
+  issue_date_within_authorization: {
+    requirement:
+      'La fecha de emisión debe estar entre la fecha inicial y la fecha final de ' +
+      'la autorización de numeración.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAD09a',
+        dian_message:
+          'Fecha de emisión anterior a la fecha de inicio de la autorización de la numeración',
+        xpath: '/Invoice/cbc:IssueDate',
+        annex_line: 19467,
+      },
+    },
+  },
+  authorization_number: {
+    requirement:
+      'El número de autorización del rango de numeración debe estar informado.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAB05a',
+        dian_message:
+          'No se encuentra el número de autorización del rango de numeración otorgado',
+        xpath:
+          '…//ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sts:DianExtensions/sts:InvoiceControl/sts:InvoiceAuthorization',
+        annex_line: 18971,
+      },
+    },
+  },
+  authorization_prefix: {
+    requirement:
+      'El prefijo informado debe corresponder al prefijo de la autorización de ' +
+      'numeración y al código del punto de facturación.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAB10b',
+        dian_message:
+          'El prefijo no corresponde al prefijo de la autorización de numeración',
+        xpath:
+          '…//ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sts:DianExtensions/sts:InvoiceControl/sts:AuthorizedInvoices/sts:Prefix',
+        annex_line: 19049,
+      },
+    },
+  },
+  authorization_prefix_length: {
+    requirement:
+      'sts:Prefix es de tipo EA con Tam 0..4 en la definición de campo del anexo.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAB10',
+        // Fila de DEFINICIÓN de campo. Sin columna «Mensaje» propia.
+        dian_message: null,
+        xpath:
+          '../ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sts:DianExtensions/sts:InvoiceControl/sts:AuthorizedInvoices/sts:Prefix',
+        annex_line: 1113,
+      },
+    },
+  },
+  authorization_range_bounds: {
+    requirement:
+      'Los valores inicial y final del rango de numeración deben estar informados.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAB11a',
+        dian_message: 'Valor inicial del rango de no está informado',
+        xpath:
+          '…//ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sts:DianExtensions/sts:InvoiceControl/sts:AuthorizedInvoices/sts:From',
+        annex_line: 19072,
+      },
+    },
+  },
+  authorization_range_digits: {
+    requirement:
+      'sts:From y sts:To son de tipo EN con Tam 1..9 en la definición de campo ' +
+      'del anexo: un rango de 10 dígitos no cabe en el XML.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAB11',
+        // Fila de DEFINICIÓN de campo. Sin columna «Mensaje» propia. FAB12 dice
+        // lo mismo para sts:To (línea 1138).
+        dian_message: null,
+        xpath:
+          '../ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sts:DianExtensions/sts:InvoiceControl/sts:AuthorizedInvoices/sts:From',
+        annex_line: 1127,
+      },
+    },
+  },
+
+  // --- Regla global (§5.2.3.1 / §5.2.3.2, tabla de reglas generales) ---------
+  /**
+   * VLR01 NO cuelga de un elemento raíz: es una regla GENERAL, aplicable a todo
+   * documento electrónico. Por eso se declara en las tres variantes con el mismo
+   * identificador — no es una traducción por tipo, es la misma regla.
+   */
+  positive_monetary_values: {
+    requirement:
+      'Todos los valores monetarios y porcentajes del documento deben ser ' +
+      'positivos. Una devolución o un ajuste a la baja se expresa con una NOTA ' +
+      'CRÉDITO, nunca con un importe negativo.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'VLR01',
+        dian_message:
+          'Los valores monetarios/porcentajes deben corresponder a valores Positivos',
+        xpath: '(regla general, aplica a todo importe y porcentaje)',
+        annex_line: 18915,
+      },
+      CreditNote: {
+        id: 'VLR01',
+        dian_message:
+          'Los valores monetarios/porcentajes deben corresponder a valores Positivos',
+        xpath: '(regla general, aplica a todo importe y porcentaje)',
+        annex_line: 18915,
+      },
+      DebitNote: {
+        id: 'VLR01',
+        dian_message:
+          'Los valores monetarios/porcentajes deben corresponder a valores Positivos',
+        xpath: '(regla general, aplica a todo importe y porcentaje)',
+        annex_line: 18915,
+      },
+    },
+  },
+} as const satisfies Record<string, DianRuleDefinition>;
+
+/** Nombre de negocio de una regla del anexo. */
+export type DianRuleKey = keyof typeof DIAN_RULES;
+
+/** Todas las claves, para recorrerlas en una UI o en un test de cobertura. */
+export const DIAN_RULE_KEYS = Object.keys(DIAN_RULES) as DianRuleKey[];
+
+/** Elemento raíz UBL bajo el que se emite este documento. */
+export function ublRootDocumentFor(
+  document_type: FiscalDocumentType,
+): DianUblRootDocument | null {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type].ubl_root_document;
+}
+
+/** ¿Su constructor XML respalda el descuento global con `cac:AllowanceCharge`? */
+export function emitsDocumentAllowanceCharge(
+  document_type: FiscalDocumentType,
+): boolean {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type]
+    .emits_document_allowance_charge;
+}
+
+/**
+ * La regla oficial que la DIAN aplicará a ESTE tipo de documento, o `null` si el
+ * Anexo 1.9 no la publica para su elemento raíz.
+ *
+ * `null` es una respuesta legítima y frecuente: la nota crédito no tiene tabla
+ * de numeración autorizada, y la nómina no tiene ninguna de las tres. Devolverlo
+ * es preferible a citar un identificador que la DIAN nunca devolverá.
+ */
+export function dianRuleFor(
+  key: DianRuleKey,
+  document_type: FiscalDocumentType,
+): DianRuleCitation | null {
+  const root = ublRootDocumentFor(document_type);
+  if (!root) return null;
+  const definition: DianRuleDefinition = DIAN_RULES[key];
+  const variant = definition.by_root[root];
+  if (!variant) return null;
+  return {
+    key,
+    effect: definition.effect,
+    root,
+    id: variant.id,
+    dian_message: variant.dian_message,
+    xpath: variant.xpath,
+    annex_line: variant.annex_line,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// FACETAS DE FORMA QUE EL ANEXO DECLARA COMO TIPO DE CAMPO
+//
+// Viven aquí, junto a TECHNICAL_KEY_PATTERN, por el mismo motivo: son la forma
+// EXACTA que el XML admite, y tenerlas en un solo sitio evita que el DTO de
+// alta, el generador de consecutivos y el prevalidador cada uno invente la suya.
+// -----------------------------------------------------------------------------
+
+/**
+ * FAD05a: el número de documento sólo admite letras y dígitos.
+ *
+ * NO se relaja para admitir el guion. Es tentador —muchos comerciantes escriben
+ * «FE-1234»— y es exactamente el rechazo que el anexo nombra por su nombre:
+ * «No se permiten caracteres adicionales como espacios o guiones».
+ */
+export const DOCUMENT_NUMBER_PATTERN = /^[0-9A-Za-z]+$/;
+
+/** FAD05: `cbc:ID` es de tipo EA, Tam 1..20 (anexo19.txt:1463). */
+export const DOCUMENT_NUMBER_MAX_LENGTH = 20;
+
+/** FAB10: `sts:Prefix` es de tipo EA, Tam 0..4 (anexo19.txt:1113). */
+export const RESOLUTION_PREFIX_MAX_LENGTH = 4;
+
+/** FAB11 / FAB12: `sts:From` y `sts:To` son de tipo EN, Tam 1..9. */
+export const RESOLUTION_RANGE_MAX_DIGITS = 9;

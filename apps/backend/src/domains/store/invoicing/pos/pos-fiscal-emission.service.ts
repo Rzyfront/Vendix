@@ -65,6 +65,15 @@ export class PosFiscalEmissionService {
    * contrato —pedido inexistente o de otra tienda—, no de emisión.
    */
   async emitForOrder(order_id: number): Promise<PosFiscalStatus> {
+    // Un solo punto de salida para que TODA rama que termine en `failed` —la
+    // creación, la prevalidación, la transmisión— deje su constancia por el
+    // mismo sitio. Registrarlo en cada `return this.failed(...)` era invitar a
+    // que la próxima rama nueva se olvidara, y la rama olvidada sería
+    // precisamente una venta sin documento de la que nadie se entera.
+    return this.registerFailure(await this.runEmission(order_id), order_id);
+  }
+
+  private async runEmission(order_id: number): Promise<PosFiscalStatus> {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       select: { id: true },
@@ -270,10 +279,19 @@ export class PosFiscalEmissionService {
           }
         : null;
 
+    // Constancia terminal: la fila existe pero ya no reintenta. Cubre los dos
+    // desenlaces que dejan a un documento esperando una mano humana —el
+    // bloqueado por prevalidación (`recordBlocked`, attempts 0) y el que agotó
+    // su cadencia— y es lo que impide que el sondeo del POS siga diciendo
+    // «emitiendo…» sobre un `draft` que nadie va a mover.
+    const retry_blocked =
+      retry_row && retry_row.status === 'failed' ? retry_row : null;
+
     const { state, message } = this.deriveState(
       invoice,
       Boolean(retry_alive),
       failure_message,
+      retry_blocked?.last_error ?? null,
     );
 
     return {
@@ -308,6 +326,7 @@ export class PosFiscalEmissionService {
     },
     has_live_retry: boolean,
     failure_message?: string,
+    blocked_error?: string | null,
   ): { state: PosFiscalState; message: string } {
     if (invoice.status === 'accepted') {
       return { state: 'issued', message: 'Documento aceptado por la DIAN.' };
@@ -326,6 +345,19 @@ export class PosFiscalEmissionService {
         state: 'pending',
         message: 'La DIAN no respondió; el documento se reintentará solo.',
       };
+    }
+
+    // Antes de la rama de abajo: un documento con constancia terminal en la
+    // cola sigue siendo `draft` o `validated`, y esos estados caían en el
+    // «sigue en curso» del final. El indicador del POS sondea mientras lea
+    // `pending`, así que un documento bloqueado se leía como uno en camino
+    // hasta que el cajero cerraba la pantalla — que es exactamente el olvido
+    // que `recordBlocked` existe para impedir. Va DESPUÉS de `has_live_retry`
+    // porque un reintento vivo describe mejor la situación que la última
+    // constancia terminal, y DESPUÉS de contingencia porque un documento en
+    // contingencia no está fallido.
+    if (blocked_error) {
+      return { state: 'failed', message: failure_message ?? blocked_error };
     }
 
     if (invoice.status === 'rejected') {
@@ -375,6 +407,64 @@ export class PosFiscalEmissionService {
       invoice_status: invoice?.status ?? null,
       blockers,
     };
+  }
+
+  /**
+   * Deja constancia consultable de un documento que quedó sin emitir.
+   *
+   * ## Por qué esto no es opcional aunque no bloquee nada
+   *
+   * Que la venta no se bloquee es el punto del carril; que el fallo se olvide,
+   * no. Antes de esto, un documento rechazado por la prevalidación existía
+   * únicamente como una advertencia en el log y como un `draft` con su
+   * consecutivo reservado: no aparecía en `getQueueStats()`, ni en el
+   * `retry_status` del listado de facturas, ni —en cuanto el cajero pasaba a la
+   * siguiente venta— en ninguna pantalla. El indicador del POS es efímero por
+   * diseño; hacía falta algo que sobreviviera a él.
+   *
+   * Se registra como bloqueado y NO como reintento pendiente porque a este
+   * documento le falta un dato, y eso no lo cura repetir el envío: cinco
+   * intentos contra la DIAN fallarían igual y el indicador le diría al cajero
+   * que espere algo que no va a ocurrir. Ver `recordBlocked`.
+   *
+   * La política de la tienda (`store_settings.invoicing.pos.on_failure`) puede
+   * apagarlo con `'ignore'`. Nunca puede hacer que el fallo bloquee la venta:
+   * ese valor no existe, y cuando este método corre el cobro ya está confirmado
+   * en base de datos.
+   */
+  private async registerFailure(
+    status: PosFiscalStatus,
+    order_id: number,
+  ): Promise<PosFiscalStatus> {
+    if (status.state !== 'failed' || status.invoice_id === null) return status;
+
+    try {
+      const policy = await this.invoicing.getPosInvoicingSettings();
+      if (policy.on_failure === 'ignore') return status;
+
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: status.invoice_id },
+        select: { id: true, organization_id: true, store_id: true },
+      });
+      if (!invoice) return status;
+
+      await this.retry_queue.recordBlocked(
+        invoice.id,
+        invoice.organization_id,
+        invoice.store_id,
+        status.message,
+      );
+    } catch (error) {
+      // Anotar el fallo no puede convertirse en un segundo fallo que tape al
+      // primero: el estado que ya se compuso es lo que el cajero necesita ver.
+      this.logger.error(
+        `POS: no se pudo registrar el fallo fiscal del pedido #${order_id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return status;
   }
 
   private emptyStatus(order_id: number): PosFiscalStatus {

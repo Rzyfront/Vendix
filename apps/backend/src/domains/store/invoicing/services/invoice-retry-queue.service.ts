@@ -24,6 +24,21 @@ const TIMEOUT_MAX_ATTEMPTS = TIMEOUT_BACKOFF_MINUTES.length;
  */
 export const CONTINGENCY_DEADLINE_HOURS = 48;
 
+/**
+ * Cuánto puede llevar una fila en `processing` antes de considerarla huérfana.
+ *
+ * `InvoiceRetryJob` marca la fila `processing` y emite un evento que NO espera.
+ * Si el proceso se cae entre esas dos cosas —un deploy, un OOM, un reinicio del
+ * contenedor— la fila queda en `processing` para siempre: el cron sólo busca
+ * `pending`, y `enqueue()` se niega a crear una nueva porque ya ve una viva. El
+ * documento queda ni reintentado ni reencolable, y nadie se entera.
+ *
+ * 15 min es holgado contra el ciclo real: el cron corre cada 5 min y un intento
+ * completo (leer, firmar, SOAP a la DIAN, persistir) se mide en segundos. Una
+ * fila que lleva 15 min en `processing` no está trabajando, está huérfana.
+ */
+export const STALE_PROCESSING_MINUTES = 15;
+
 /** Queue statuses. `contingency` is terminal for the queue but not for the doc. */
 export const RETRY_STATUS = {
   PENDING: 'pending',
@@ -50,13 +65,18 @@ export class InvoiceRetryQueueService {
 
   /**
    * Enqueue a failed invoice for retry with exponential backoff.
+   *
+   * @returns `true` si creó una fila nueva; `false` si ya había un reintento
+   * vivo o si la escritura falló. Lo devuelve —antes no devolvía nada— para
+   * que `resweepContingency` pueda contar reencolados de verdad en vez de
+   * intentos de reencolar. Ningún llamador previo lee el resultado.
    */
   async enqueue(
     invoice_id: number,
     org_id: number,
     store_id: number,
     error: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       // Check if already in queue and pending
       const existing = await this.prisma.invoice_retry_queue.findFirst({
@@ -70,7 +90,7 @@ export class InvoiceRetryQueueService {
         this.logger.debug(
           `Invoice ${invoice_id} already in retry queue (status: ${existing.status})`,
         );
-        return;
+        return false;
       }
 
       const next_retry_at = new Date();
@@ -94,11 +114,142 @@ export class InvoiceRetryQueueService {
       this.logger.log(
         `Invoice ${invoice_id} enqueued for retry. Next attempt at ${next_retry_at.toISOString()}`,
       );
+      return true;
     } catch (err) {
       this.logger.error(
         `Failed to enqueue invoice ${invoice_id}: ${err.message}`,
       );
+      return false;
     }
+  }
+
+  /**
+   * Deja constancia de un documento que NO se pudo emitir y que ningún
+   * reintento automático va a arreglar.
+   *
+   * ## Por qué `failed` y no `pending`
+   *
+   * El caso que trae acá es la prevalidación: al documento le falta un dato
+   * —identificación del adquiriente, resolución vencida, una línea sin
+   * impuesto— y eso no lo cura el tiempo. Encolarlo como `pending` gastaría
+   * cinco intentos contra la DIAN sabiendo que van a fallar, y peor: el
+   * indicador del POS los leería como «se reintentará solo» y le diría al
+   * cajero que espere algo que no va a pasar.
+   *
+   * Lo que sí hace falta es que el fallo EXISTA en algún sitio consultable. Sin
+   * esta fila, una venta cuya factura se quedó en `draft` sobrevive únicamente
+   * como una línea de log: no aparece en `getQueueStats()`, ni en el
+   * `retry_status` del listado de facturas, ni en el estado que devuelve el
+   * POS. La reemisión —desde el botón del POS o desde la superficie fiscal—
+   * sigue disponible; lo que se registra es que hace falta.
+   *
+   * Idempotente por documento: si ya hay una fila viva (`pending`/`processing`)
+   * no la pisa —esa describe un reintento en curso, que es información más
+   * fresca—, y si ya hay una `failed` la actualiza en vez de acumular filas.
+   */
+  async recordBlocked(
+    invoice_id: number,
+    org_id: number,
+    store_id: number,
+    reason: string,
+  ): Promise<void> {
+    try {
+      const existing = await this.prisma.invoice_retry_queue.findFirst({
+        where: { invoice_id },
+        orderBy: { updated_at: 'desc' },
+      });
+
+      // Un reintento vivo describe mejor la situación que un bloqueo: se deja
+      // correr y su propio desenlace escribirá el estado final.
+      if (
+        existing &&
+        [RETRY_STATUS.PENDING, RETRY_STATUS.PROCESSING].includes(
+          existing.status as 'pending' | 'processing',
+        )
+      ) {
+        return;
+      }
+
+      const last_error = reason.slice(0, 2000);
+
+      if (existing && existing.status === RETRY_STATUS.FAILED) {
+        await this.prisma.invoice_retry_queue.update({
+          where: { id: existing.id },
+          data: { last_error, updated_at: new Date() },
+        });
+        return;
+      }
+
+      await this.prisma.invoice_retry_queue.create({
+        data: {
+          org_id,
+          store_id,
+          invoice_id,
+          attempts: 0,
+          max_attempts: TIMEOUT_MAX_ATTEMPTS,
+          last_error,
+          // La columna es NOT NULL y no hay reintento programado. `now()` la
+          // satisface sin mentir: el selector del cron filtra por
+          // `status: 'pending'`, así que una fila `failed` nunca se recoge por
+          // muy vencida que esté esta fecha.
+          next_retry_at: new Date(),
+          status: RETRY_STATUS.FAILED,
+        },
+      });
+
+      this.logger.warn(
+        `Invoice ${invoice_id} recorded as blocked (no automatic retry): ${last_error}`,
+      );
+    } catch (err) {
+      // Registrar el fallo no puede ser a su vez un fallo que se propague: el
+      // llamador es el carril del POS sobre una venta YA cobrada.
+      this.logger.error(
+        `Failed to record blocked invoice ${invoice_id}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * Devuelve a `pending` las filas que quedaron colgadas en `processing`.
+   *
+   * Cierra el agujero descrito en `STALE_PROCESSING_MINUTES`: sin esto, un
+   * reinicio a mitad de un intento deja el documento fuera del alcance del cron
+   * (que sólo lee `pending`) Y fuera del alcance de `enqueue()` (que se niega a
+   * duplicar mientras vea una fila viva). El documento no se reintenta nunca
+   * más y ninguna pantalla lo delata: sigue figurando como «en cola».
+   *
+   * No consume un intento: el intento anterior no llegó a juzgarse, así que
+   * contarlo acortaría la ventana reglamentada de reintentos por un problema
+   * de infraestructura nuestro, no de la DIAN.
+   *
+   * @returns cuántas filas se recuperaron.
+   */
+  async reclaimStaleProcessing(
+    older_than_minutes = STALE_PROCESSING_MINUTES,
+  ): Promise<number> {
+    const cutoff = new Date(Date.now() - older_than_minutes * 60 * 1000);
+
+    const { count } = await this.prisma.invoice_retry_queue.updateMany({
+      where: {
+        status: RETRY_STATUS.PROCESSING,
+        updated_at: { lt: cutoff },
+      },
+      data: {
+        status: RETRY_STATUS.PENDING,
+        // Reintentable ya: el reloj de espera lo cumplió la fila mientras
+        // estaba colgada.
+        next_retry_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    if (count > 0) {
+      this.logger.warn(
+        `Reclaimed ${count} invoice retry item(s) stuck in 'processing' for more than ${older_than_minutes} min`,
+      );
+    }
+
+    return count;
   }
 
   /**
@@ -254,6 +405,99 @@ export class InvoiceRetryQueueService {
         contingency_deadline: true,
       },
     });
+  }
+
+  /**
+   * Vuelve a poner en cola los documentos expedidos bajo contingencia que
+   * siguen dentro de sus 48 h.
+   *
+   * ## El agujero que cierra
+   *
+   * `markFailed(..., contingency_eligible = true)` deja la fila de la cola en
+   * `contingency`, que es TERMINAL para la cola. El cron de reintentos sólo
+   * recoge `pending`. Resultado hasta ahora: un documento expedido bajo Anexo
+   * §12.2 se intentaba transmitir durante los ~10 min de la cadencia
+   * reglamentada y, si la DIAN seguía caída, no se volvía a intentar NUNCA —
+   * mientras su `contingency_deadline` corría en silencio y vencía. La
+   * obligación estaba registrada pero no cumplida.
+   *
+   * ## Por qué reencolar y no llamar a `send()` desde acá
+   *
+   * Porque `enqueue()` desemboca en el MISMO camino que cualquier otro
+   * reintento (cron → `invoice.retry` → `InvoiceRetryListener` → contexto de
+   * tienda → `InvoiceFlowService.send`), con su idempotencia y su re-chequeo
+   * del gate fiscal. Un segundo camino de transmisión sería una segunda forma
+   * de emitir el mismo documento, y de ahí a dos criterios distintos hay un
+   * paso.
+   *
+   * `enqueue()` ya se niega a duplicar mientras exista una fila viva, así que
+   * llamar a esto más seguido que la duración de un ciclo (~10 min) es inocuo.
+   *
+   * ## El vencimiento no se reintenta, se grita
+   *
+   * Pasadas las 48 h la transmisión ya no sana la obligación: toca una
+   * actuación distinta (nota de ajuste, corrección ante la DIAN) que ningún
+   * cron puede decidir. Seguir reintentando disfrazaría de «en curso» un
+   * incumplimiento consumado, así que se registra en ERROR y se deja quieto,
+   * visible en la superficie fiscal por su `transmission_status`.
+   *
+   * @returns cuántos se reencolaron y cuántos ya vencieron.
+   */
+  async resweepContingency(
+    limit = 100,
+  ): Promise<{ requeued: number; expired: number }> {
+    const now = new Date();
+
+    const pending = await this.prisma.invoices.findMany({
+      where: {
+        transmission_status: 'contingency',
+        contingency_type: { not: null },
+      },
+      orderBy: { contingency_deadline: 'asc' },
+      take: limit,
+      select: {
+        id: true,
+        organization_id: true,
+        store_id: true,
+        invoice_number: true,
+        contingency_deadline: true,
+      },
+    });
+
+    let requeued = 0;
+    let expired = 0;
+
+    for (const invoice of pending) {
+      const deadline = invoice.contingency_deadline;
+
+      if (deadline && deadline.getTime() <= now.getTime()) {
+        expired += 1;
+        this.logger.error(
+          `CONTINGENCY DEADLINE MISSED: invoice #${invoice.id} (${invoice.invoice_number}) ` +
+            `was expedited under contingency and its 48 h window closed at ${deadline.toISOString()} ` +
+            `without being accepted by the DIAN. It needs manual fiscal action; no further retries will be scheduled.`,
+        );
+        continue;
+      }
+
+      const created = await this.enqueue(
+        invoice.id,
+        invoice.organization_id,
+        invoice.store_id,
+        `Retransmisión de documento en contingencia${
+          deadline ? ` (vence ${deadline.toISOString()})` : ''
+        }`,
+      );
+      if (created) requeued += 1;
+    }
+
+    if (requeued > 0 || expired > 0) {
+      this.logger.log(
+        `Contingency sweep: ${requeued} re-queued, ${expired} past deadline`,
+      );
+    }
+
+    return { requeued, expired };
   }
 
   /**

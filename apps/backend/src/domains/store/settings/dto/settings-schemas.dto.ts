@@ -1556,6 +1556,17 @@ export class PosInvoicingSettingsDto {
   @IsOptional()
   @IsBoolean()
   auto_emit?: boolean;
+
+  @ApiProperty({
+    enum: ['queue', 'ignore'],
+    example: 'queue',
+    required: false,
+    description:
+      'Qué se hace con una venta de mostrador que quedó sin documento fiscal. `queue` (default): el fallo se anota en la cola de reintentos con su motivo, y desde ahí es visible en el indicador del POS, en el listado de facturas y reintentable. `ignore`: el fallo sólo queda en el log — para la tienda que emite a mano y no quiere borradores a medio capturar en la cola. NINGUNO de los dos bloquea la venta: cuando esta política se lee, el cobro ya está confirmado en base de datos.',
+  })
+  @IsOptional()
+  @IsIn(['queue', 'ignore'])
+  on_failure?: 'queue' | 'ignore';
 }
 
 export class InvoicingSettingsDto {

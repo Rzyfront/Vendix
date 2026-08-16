@@ -102,10 +102,15 @@ describe('FiscalDocumentValidator', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // FAU14 — la regla que más rechazos produce
+  // FAU02 — la regla que más rechazos produce
+  //
+  // Se llamaba FAU14 acá y en el validador, y era una CITA EQUIVOCADA: FAU14
+  // gobierna `cbc:PayableAmount` (y se prueba en su propio bloque más abajo). La
+  // que compara el bruto de cabecera contra la suma de las líneas es FAU02
+  // (anexo19.txt:22411) — CAU02 en nota crédito, DAU02 en nota débito.
   // ---------------------------------------------------------------------------
 
-  describe('FAU14 · LineExtensionAmount = Σ de las líneas EMITIDAS', () => {
+  describe('FAU02 · LineExtensionAmount = Σ de las líneas EMITIDAS', () => {
     it('denuncia una base de cabecera que sus líneas no sostienen', () => {
       // Sólo se toca la base persistida: el total sigue derivándose de las
       // líneas, así que el único descuadre posible es el que la prueba provoca.
@@ -881,6 +886,539 @@ describe('FiscalDocumentValidator', () => {
       expect(report.blockers).toEqual([]);
       expect(report.warnings.length).toBeGreaterThan(0);
       expect(report.emittable).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FAD05a · el número de documento sólo admite letras y dígitos
+  //
+  // El agujero es el prefijo: `CreateResolutionDto` sólo declara `@IsString()
+  // @MaxLength(10)`, sin clase de caracteres, y `generateNextNumber` lo
+  // concatena tal cual con el consecutivo.
+  // ---------------------------------------------------------------------------
+
+  describe('FAD05a · forma del número de documento', () => {
+    it('bloquea un número con guion y señala el prefijo como origen', () => {
+      const report = validator.validate(
+        baseInput({
+          invoice_number: 'FE-6',
+          resolution: { ...baseInput().resolution!, prefix: 'FE-' },
+        }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'DOCUMENT_NUMBER_NOT_ALPHANUMERIC',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.category).toBe('resolution');
+      expect(finding!.dian_rule?.id).toBe('FAD05a');
+      expect(finding!.dian_rule?.dian_message).toBe(
+        'No se permiten caracteres adicionales como espacios o guiones',
+      );
+      // Corregir el documento sin corregir la resolución deja el defecto vivo:
+      // el siguiente consecutivo nace igual de roto.
+      expect(finding!.fix).toContain('prefijo «FE-»');
+      expect(finding!.details).toMatchObject({ prefix_is_source: true });
+      expect(report.emittable).toBe(false);
+    });
+
+    it('bloquea un número con espacio, que NINGUNA otra comprobación atrapaba', () => {
+      // La trampa exacta: con prefijo «FE» limpio y número «FE 6»,
+      // `startsWith('FE')` pasa y `sequenceOf` extrae 6, que está en rango.
+      // Todas las comprobaciones de numeración aprueban un número que la DIAN
+      // rechaza — por eso esta regla no es redundante con ninguna anterior.
+      const report = validator.validate(baseInput({ invoice_number: 'FE 6' }));
+
+      expect(blockerCodesOf(report)).toEqual([
+        'DOCUMENT_NUMBER_NOT_ALPHANUMERIC',
+      ]);
+      expect(blockerCodesOf(report)).not.toContain(
+        'DOCUMENT_NUMBER_PREFIX_MISMATCH',
+      );
+      expect(blockerCodesOf(report)).not.toContain(
+        'DOCUMENT_NUMBER_OUT_OF_RANGE',
+      );
+    });
+
+    it('NO se dispara sobre un número alfanumérico correcto', () => {
+      const report = validator.validate(baseInput());
+
+      expect(codesOf(report)).not.toContain('DOCUMENT_NUMBER_NOT_ALPHANUMERIC');
+      expect(report.findings).toEqual([]);
+    });
+
+    it('bloquea un cbc:ID de más de 20 caracteres y respeta el límite exacto', () => {
+      const too_long = validator.validate(
+        baseInput({
+          invoice_number: 'ABCDEFGHIJ0123456789X',
+          resolution: { ...baseInput().resolution!, prefix: '' },
+        }),
+      );
+      expect(blockerCodesOf(too_long)).toContain('DOCUMENT_NUMBER_TOO_LONG');
+
+      const exactly_twenty = validator.validate(
+        baseInput({
+          invoice_number: 'ABCDEFGHIJ0123456789',
+          resolution: { ...baseInput().resolution!, prefix: '' },
+        }),
+      );
+      expect(codesOf(exactly_twenty)).not.toContain('DOCUMENT_NUMBER_TOO_LONG');
+    });
+
+    it('no juzga la forma de un número que todavía no existe', () => {
+      // `DOCUMENT_NUMBER_MISSING` ya explica el caso; repetirlo enterraría el
+      // único mensaje accionable.
+      const report = validator.validate(baseInput({ invoice_number: null }));
+
+      expect(codesOf(report)).toContain('DOCUMENT_NUMBER_MISSING');
+      expect(codesOf(report)).not.toContain('DOCUMENT_NUMBER_NOT_ALPHANUMERIC');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FAB10 / FAB11 / FAB12 · facetas del bloque de control
+  // ---------------------------------------------------------------------------
+
+  describe('forma del prefijo y del rango autorizado', () => {
+    it('bloquea un prefijo con caracteres no alfanuméricos: envenena TODO consecutivo futuro', () => {
+      const report = validator.validate(
+        baseInput({
+          invoice_number: 'FE6',
+          resolution: { ...baseInput().resolution!, prefix: 'FE.' },
+        }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'RESOLUTION_PREFIX_NOT_ALPHANUMERIC',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.field).toBe('resolution.prefix');
+      expect(finding!.dian_rule?.id).toBe('FAD05a');
+    });
+
+    it('AVISA —no bloquea— un prefijo de más de 4 caracteres', () => {
+      // El anexo declara `sts:Prefix` con Tam 0-4, pero el XSD versionado en el
+      // repo lo tipa `type="string"` sin faceta de longitud. Sin evidencia de
+      // rechazo, bloquear dejaría sin facturar a una tienda que hoy emite bien.
+      const report = validator.validate(
+        baseInput({
+          invoice_number: 'FEVENTA6',
+          resolution: { ...baseInput().resolution!, prefix: 'FEVENTA' },
+        }),
+      );
+
+      expect(codesOf(report)).toContain('RESOLUTION_PREFIX_TOO_LONG');
+      expect(report.blockers).toEqual([]);
+      expect(report.emittable).toBe(true);
+    });
+
+    it('NO avisa sobre un prefijo de 4 caracteres', () => {
+      const report = validator.validate(
+        baseInput({
+          invoice_number: 'SETP6',
+          resolution: { ...baseInput().resolution!, prefix: 'SETP' },
+        }),
+      );
+
+      expect(codesOf(report)).not.toContain('RESOLUTION_PREFIX_TOO_LONG');
+      expect(report.findings).toEqual([]);
+    });
+
+    it('AVISA un rango de más de 9 dígitos y calla con uno normal', () => {
+      const overlong = validator.validate(
+        baseInput({
+          resolution: { ...baseInput().resolution!, range_to: 1234567890 },
+        }),
+      );
+      expect(codesOf(overlong)).toContain('RESOLUTION_RANGE_TOO_MANY_DIGITS');
+      expect(overlong.blockers).toEqual([]);
+
+      const normal = validator.validate(baseInput());
+      expect(codesOf(normal)).not.toContain(
+        'RESOLUTION_RANGE_TOO_MANY_DIGITS',
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // VLR01 · ningún importe ni porcentaje puede ser negativo
+  // ---------------------------------------------------------------------------
+
+  describe('VLR01 · valores monetarios y porcentajes positivos', () => {
+    it('bloquea un precio unitario negativo aunque el neto de la línea salga positivo', () => {
+      // `LINE_AMOUNT_NEGATIVE` mira el NETO (precio × cantidad − descuento). Un
+      // precio negativo con descuento negativo da neto positivo y se le escapa;
+      // VLR01 mira el valor tal como viaja al XML.
+      const report = validator.validate(
+        baseInput({
+          subtotal_amount: '0.00',
+          tax_amount: '0.00',
+          total_amount: '0.00',
+          taxes: [],
+          items: [
+            {
+              line_number: 1,
+              description: 'Ajuste',
+              quantity: '1',
+              unit_price: '-1000.00',
+              discount_amount: '-1000.00',
+              tax_amount: '0.00',
+              unit_code: 'EA',
+            },
+          ],
+        }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'NEGATIVE_MONETARY_VALUE',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.dian_rule?.id).toBe('VLR01');
+      expect(finding!.dian_rule?.dian_message).toBe(
+        'Los valores monetarios/porcentajes deben corresponder a valores Positivos',
+      );
+      expect(codesOf(report)).not.toContain('LINE_AMOUNT_NEGATIVE');
+    });
+
+    it('bloquea una tarifa de impuesto negativa', () => {
+      const report = validator.validate(
+        baseInput({
+          taxes: [
+            {
+              tax_name: 'IVA 19%',
+              tax_type: 'iva',
+              tax_rate: '-19.00',
+              taxable_amount: '2000.00',
+              tax_amount: '380.00',
+            },
+          ],
+        }),
+      );
+
+      expect(blockerCodesOf(report)).toContain('NEGATIVE_MONETARY_VALUE');
+      expect(
+        report.blockers.find((f) => f.code === 'NEGATIVE_MONETARY_VALUE')!.field,
+      ).toBe('taxes[0].tax_rate');
+    });
+
+    it('bloquea importes de cabecera negativos', () => {
+      const report = validator.validate(
+        baseInput({ discount_amount: '-50.00' }),
+      );
+
+      expect(blockerCodesOf(report)).toContain('NEGATIVE_MONETARY_VALUE');
+      expect(
+        report.blockers.find((f) => f.code === 'NEGATIVE_MONETARY_VALUE')!.field,
+      ).toBe('discount_amount');
+    });
+
+    it('NO se dispara sobre un documento con todos sus valores positivos', () => {
+      const report = validator.validate(baseInput());
+
+      expect(codesOf(report)).not.toContain('NEGATIVE_MONETARY_VALUE');
+      expect(report.findings).toEqual([]);
+    });
+
+    it('NO se dispara sobre una nota crédito, que Vendix persiste en positivo', () => {
+      // La nota crédito ES el mecanismo de la DIAN para el ajuste a la baja: sus
+      // importes son positivos y el signo lo pone el tipo de documento.
+      const report = validator.validate(
+        baseInput({ document_type: 'credit_note', operation_type: null }),
+      );
+
+      expect(codesOf(report)).not.toContain('NEGATIVE_MONETARY_VALUE');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FAU08 / CAU08 / DAU08 · descuento de documento sin `cac:AllowanceCharge`
+  //
+  // `buildMonetaryTotal` escribe SIEMPRE `cbc:AllowanceTotalAmount`, pero sólo
+  // el constructor de la factura y el del documento equivalente emiten el grupo
+  // `cac:AllowanceCharge` que lo respalda.
+  // ---------------------------------------------------------------------------
+
+  describe('FAU08 · AllowanceTotalAmount respaldado', () => {
+    /** Cabecera que descuenta 100,00 que ninguna línea explica. */
+    const footerDiscount = {
+      discount_amount: '100.00',
+      subtotal_amount: '2000.00',
+      tax_amount: '380.00',
+      total_amount: '2280.00',
+    };
+
+    it('bloquea una nota crédito con descuento de pie', () => {
+      const report = validator.validate(
+        baseInput({
+          document_type: 'credit_note',
+          operation_type: null,
+          ...footerDiscount,
+        }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'ALLOWANCE_TOTAL_UNBACKED',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.category).toBe('arithmetic');
+      expect(finding!.dian_rule?.id).toBe('CAU08');
+      expect(finding!.details).toMatchObject({
+        allowance_total_amount: '100.00',
+        line_discounts_total: '0.00',
+        emits_allowance_charge: false,
+      });
+    });
+
+    it('bloquea una nota débito con descuento de pie, citando DAU08', () => {
+      const report = validator.validate(
+        baseInput({
+          document_type: 'debit_note',
+          operation_type: null,
+          ...footerDiscount,
+        }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'ALLOWANCE_TOTAL_UNBACKED',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.dian_rule?.id).toBe('DAU08');
+      expect(finding!.problem).toContain('RequestedMonetaryTotal');
+    });
+
+    it('NO se dispara en la factura de venta: su constructor SÍ emite el grupo', () => {
+      const report = validator.validate(baseInput(footerDiscount));
+
+      expect(codesOf(report)).not.toContain('ALLOWANCE_TOTAL_UNBACKED');
+      expect(report.emittable).toBe(true);
+    });
+
+    it('NO se dispara en el documento equivalente POS: también lo emite', () => {
+      const report = validator.validate(
+        baseInput({
+          document_type: 'pos_equivalent_document',
+          operation_type: null,
+          ...footerDiscount,
+        }),
+      );
+
+      expect(codesOf(report)).not.toContain('ALLOWANCE_TOTAL_UNBACKED');
+    });
+
+    it('NO se dispara en una nota crédito cuyo descuento vive en las líneas', () => {
+      // El caso normal de Vendix: los descuentos se originan por línea, el
+      // remanente de documento es cero y la regla se cumple sola.
+      const report = validator.validate(
+        baseInput({
+          document_type: 'credit_note',
+          operation_type: null,
+          discount_amount: '100.00',
+          subtotal_amount: '1900.00',
+          tax_amount: '361.00',
+          total_amount: '2261.00',
+          items: [
+            {
+              line_number: 1,
+              description: 'Queso costeño',
+              quantity: '2',
+              unit_price: '1000.00',
+              discount_amount: '100.00',
+              tax_amount: '361.00',
+              unit_code: 'EA',
+            },
+          ],
+          taxes: [
+            {
+              tax_name: 'IVA 19%',
+              tax_type: 'iva',
+              tax_rate: '19.00',
+              taxable_amount: '1900.00',
+              tax_amount: '361.00',
+            },
+          ],
+        }),
+      );
+
+      expect(codesOf(report)).not.toContain('ALLOWANCE_TOTAL_UNBACKED');
+      expect(report.emittable).toBe(true);
+    });
+
+    it('NO se dispara en una nota crédito sin descuento alguno', () => {
+      const report = validator.validate(
+        baseInput({ document_type: 'credit_note', operation_type: null }),
+      );
+
+      expect(codesOf(report)).not.toContain('ALLOWANCE_TOTAL_UNBACKED');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FAD09e · fecha de emisión = fecha de firma
+  // ---------------------------------------------------------------------------
+
+  describe('FAD09e · IssueDate igual a la fecha de firma', () => {
+    it('bloquea un borrador fechado un día y firmado otro', () => {
+      const report = validator.validate(
+        baseInput({ signing_date: new Date('2026-08-17T15:00:00Z') }),
+      );
+
+      const finding = report.blockers.find(
+        (f) => f.code === 'ISSUE_DATE_AFTER_SIGNING_DATE',
+      );
+      expect(finding).toBeDefined();
+      expect(finding!.dian_rule?.id).toBe('FAD09e');
+      expect(finding!.details).toMatchObject({
+        issue_date: '2026-08-14',
+        signing_date: '2026-08-17',
+      });
+    });
+
+    it('NO se dispara cuando los dos instantes caen el mismo día CIVIL del emisor', () => {
+      // 22:30 UTC del 14 son las 17:30 en Bogotá del MISMO día. Comparar
+      // instantes en vez de días civiles rechazaría toda emisión de la tarde.
+      const report = validator.validate(
+        baseInput({ signing_date: new Date('2026-08-14T22:30:00Z') }),
+      );
+
+      expect(codesOf(report)).not.toContain('ISSUE_DATE_AFTER_SIGNING_DATE');
+      expect(report.findings).toEqual([]);
+    });
+
+    it('duerme mientras nadie aporte la fecha de firma', () => {
+      // Asumir «ahora» como fecha de firma bloquearía documentos legítimos:
+      // este validador NO corre en el momento de la firma.
+      const report = validator.validate(baseInput());
+
+      expect(codesOf(report)).not.toContain('ISSUE_DATE_AFTER_SIGNING_DATE');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // CORRELACIÓN CON EL ANEXO — el diccionario que permite leer un rechazo real
+  // ---------------------------------------------------------------------------
+
+  describe('cita de la regla oficial en cada hallazgo', () => {
+    it('la regla del bruto de cabecera es FAU02, NO FAU14', () => {
+      const report = validator.validate(
+        baseInput({ subtotal_amount: '2100.00' }),
+      );
+      const finding = report.blockers[0];
+
+      expect(finding.code).toBe('HEADER_LINE_EXTENSION_MISMATCH');
+      expect(finding.dian_rule?.id).toBe('FAU02');
+      expect(finding.dian_rule?.effect).toBe('rechazo');
+      expect(finding.dian_rule?.annex_line).toBe(22411);
+      expect(finding.problem).not.toContain('FAU14');
+    });
+
+    it('FAU14 es la del PayableAmount, y ahí sí se cita', () => {
+      const report = validator.validate(
+        baseInput({ total_amount: '2500.00' }),
+      );
+
+      expect(
+        report.blockers.find((f) => f.code === 'PAYABLE_AMOUNT_MISMATCH')!
+          .dian_rule?.id,
+      ).toBe('FAU14');
+    });
+
+    it('la ClTec incompleta se correlaciona con FAD06 — el rechazo del incidente', () => {
+      // La DIAN no contesta «la clave está mal»: contesta «Valor del CUFE no
+      // está calculado correctamente», que es lo que una ClTec de 38 produce.
+      const report = validator.validate(
+        baseInput({
+          resolution: {
+            ...baseInput().resolution!,
+            technical_key: VALID_TECHNICAL_KEY.slice(0, 38),
+          },
+        }),
+      );
+      const finding = report.blockers.find(
+        (f) => f.code === 'TECHNICAL_KEY_MALFORMED',
+      )!;
+
+      expect(finding.dian_rule?.id).toBe('FAD06');
+      expect(finding.dian_rule?.dian_message).toBe(
+        'Valor del CUFE no está calculado correctamente',
+      );
+      // Y la clave sigue sin salir del validador.
+      expect(JSON.stringify(finding.details)).not.toContain('a1b2c3d4e5');
+    });
+
+    it('la MISMA regla local cita el identificador del tipo de documento', () => {
+      const invoice = validator.validate(
+        baseInput({ subtotal_amount: '2100.00' }),
+      );
+      const credit_note = validator.validate(
+        baseInput({
+          document_type: 'credit_note',
+          operation_type: null,
+          subtotal_amount: '2100.00',
+        }),
+      );
+      const debit_note = validator.validate(
+        baseInput({
+          document_type: 'debit_note',
+          operation_type: null,
+          subtotal_amount: '2100.00',
+        }),
+      );
+
+      const idOf = (report: FiscalDocumentReport) =>
+        report.blockers.find((f) => f.code === 'HEADER_LINE_EXTENSION_MISMATCH')!
+          .dian_rule?.id;
+
+      expect(idOf(invoice)).toBe('FAU02');
+      expect(idOf(credit_note)).toBe('CAU02');
+      expect(idOf(debit_note)).toBe('DAU02');
+    });
+
+    it('deja la cita en null cuando el hallazgo es política de Vendix y no regla del anexo', () => {
+      // La retención capturada como impuesto NO viaja al XML: el flujo la
+      // descarta antes de armarlo, así que no hay rechazo que citar. Inventar un
+      // identificador haría inútil el diccionario.
+      const report = validator.validate(
+        baseInput({
+          taxes: [
+            ...baseInput().taxes!,
+            {
+              tax_name: 'ReteFuente',
+              tax_type: 'withholding',
+              tax_rate: '2.50',
+              taxable_amount: '2000.00',
+              tax_amount: '50.00',
+            },
+          ],
+        }),
+      );
+
+      expect(
+        report.warnings.find((f) => f.code === 'TAX_ROW_IS_WITHHOLDING')!
+          .dian_rule,
+      ).toBeNull();
+    });
+
+    it('todo hallazgo trae el campo dian_rule resuelto, aunque sea a null', () => {
+      const report = validator.validate(
+        baseInput({
+          currency: 'USD',
+          total_amount: '999.00',
+          invoice_number: 'FV 6',
+          resolution: {
+            ...baseInput().resolution!,
+            technical_key: VALID_TECHNICAL_KEY.slice(0, 38),
+          },
+        }),
+      );
+
+      expect(report.findings.length).toBeGreaterThan(3);
+      for (const finding of report.findings) {
+        expect(finding).toHaveProperty('dian_rule');
+        if (finding.dian_rule) {
+          expect(finding.dian_rule.id).toMatch(/^[A-Z]/);
+          expect(finding.dian_rule.annex_line).toBeGreaterThan(0);
+        }
+      }
     });
   });
 });
