@@ -41,9 +41,9 @@ interface RegimeOption {
 }
 
 /**
- * Pestaña «Facturación» de Configuración General: el régimen AIU configurable.
+ * Sección AIU — pestaña «Régimen AIU» dentro de la página fiscal.
  *
- * ## Por qué esta pantalla existe
+ * ## Por qué esta sección existe
  *
  * Los cuatro parámetros AIU ya los leía el emisor, pero sólo se podían escribir
  * por seed o por SQL. Una tienda de construcción quedaba emitiendo con el
@@ -59,7 +59,7 @@ interface RegimeOption {
  * cambiar.
  */
 @Component({
-  selector: 'app-aiu-settings-page',
+  selector: 'app-aiu-settings-section',
   standalone: true,
   imports: [
     FormsModule,
@@ -71,21 +71,7 @@ interface RegimeOption {
     SettingsSectionComponent,
   ],
   template: `
-    <div class="settings-page">
-      <div class="page-intro">
-        <div class="page-intro__icon">
-          <app-icon name="scale" size="16"></app-icon>
-        </div>
-        <p class="page-intro__text">
-          <span class="page-intro__lead">Sólo afecta a las facturas AIU.</span>
-          En un contrato AIU el precio se descompone en Administración,
-          Imprevistos y Utilidad, y el IVA no se calcula sobre el total sino
-          sobre una base especial. Lo de abajo define cuál es esa base y qué
-          texto viaja dentro del documento. El resto de tus facturas no cambia.
-        </p>
-      </div>
-
-      <app-settings-section
+    <app-settings-section
         anchorId="section-aiu-regime"
         icon="scale"
         iconTone="purple"
@@ -279,7 +265,6 @@ interface RegimeOption {
           Guardar
         </app-button>
       </div>
-    </div>
   `,
   styleUrls: ['../general/pages/_settings-page.scss'],
   styles: [
@@ -512,7 +497,7 @@ interface RegimeOption {
     `,
   ],
 })
-export class AiuSettingsPage {
+export class AiuSettingsSection {
   private readonly settingsService = inject(StoreSettingsService);
   private readonly toast = inject(ToastService);
 

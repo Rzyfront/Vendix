@@ -144,7 +144,7 @@ export const GENERAL_SETTINGS_ROUTES: Routes = [
         path: 'facturacion',
         title: 'Facturación - Configuración General',
         loadComponent: () =>
-          import('../fiscal/aiu-settings.page').then((c) => c.AiuSettingsPage),
+          import('../fiscal/fiscal-settings.page').then((c) => c.FiscalSettingsPage),
       },
       {
         path: 'logistica',
