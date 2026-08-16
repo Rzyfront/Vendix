@@ -1,5 +1,4 @@
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsOptional, Min, ValidateNested } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 
 /**
  * Una línea de retención declarada por el cliente al CREAR la factura.
@@ -38,9 +37,32 @@ export class InvoiceWithholdingInputDto {
   @Min(0)
   base_amount: number;
 
-  /** Tarifa TAL COMO LA PERSISTIÓ el cliente. Va al XML con la misma escala. */
+  /**
+   * Tarifa en FRACCIÓN, no en porcentaje: `0.025` es 2,5 %.
+   *
+   * ─── POR QUÉ ESTA COTA NO ES COSMÉTICA ────────────────────────────────────
+   *
+   * `applyClientDeclaredWithholdings` calcula `base.times(rate)` sin dividir
+   * entre 100, y `withholding_concepts.rate` —la fuente de la que sale este
+   * número— es un `Decimal(7,4)` que el calculador consume igual
+   * (`withholding_calculator.service.ts`: `amount * rate`). O sea: la escala
+   * del backend es la fracción, punto.
+   *
+   * La UI, en cambio, pinta «Tarifa %» porque es lo que un contador escribe. Sin
+   * este `@Max(1)`, un cliente que mande el porcentaje crudo (`2.5` queriendo
+   * decir 2,5 %) persiste una retención del **250 % de la base** en
+   * `withholding_calculations` y en `invoices.withholding_amount`, sin un solo
+   * error: la aritmética interna cuadra consigo misma, sólo que sobre la escala
+   * equivocada. Y `amount` es opcional, así que el contraste `base × rate` ni
+   * siquiera corre para atajarlo.
+   *
+   * Una retención del 100 % (`rate = 1`) es absurda en la práctica pero no
+   * imposible de expresar, así que la cota se pone justo ahí: todo lo que la
+   * pase es, con certeza, una confusión de escala.
+   */
   @IsNumber()
   @Min(0)
+  @Max(1)
   rate: number;
 
   /**

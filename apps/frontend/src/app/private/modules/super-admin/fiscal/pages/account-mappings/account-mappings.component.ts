@@ -33,10 +33,9 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../shared/components';
-import {
-  AccountMapping,
-  ChartAccount,
-} from '../../interfaces/superadmin-fiscal.interface';
+import { AccountSelectComponent } from '../../../../../../shared/components/account-select/account-select.component';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { AccountMapping } from '../../interfaces/superadmin-fiscal.interface';
 import { SuperadminFiscalService } from '../../services/superadmin-fiscal.service';
 
 const PREFIX_OPTIONS: SelectorOption[] = [
@@ -50,8 +49,19 @@ const PREFIX_OPTIONS: SelectorOption[] = [
   { value: 'tax', label: 'Tax' },
 ];
 
+/**
+ * EL FORMULARIO GUARDA EL ID, NO EL CÓDIGO.
+ *
+ * Antes era `account_code: FormControl<string>` y el submit no lo miraba: mandaba
+ * `m.override_account_id ?? m.account_id`, o sea la cuenta que el mapeo YA tenía.
+ * Elegir otra cuenta y guardar devolvía 200 y un toast de éxito sin cambiar nada.
+ *
+ * `SetMappingOverrideDto` exige `account_id: number`, y `app-account-select` es
+ * un CVA cuyo valor ya es ese id: el formulario y el contrato del backend hablan
+ * la misma moneda, sin traducción intermedia que se pueda olvidar.
+ */
 interface OverrideForm {
-  account_code: FormControl<string>;
+  account_id: FormControl<number | null>;
 }
 
 interface MappingStats {
@@ -75,6 +85,7 @@ interface MappingStats {
     SelectorComponent,
     SpinnerComponent,
     StatsComponent,
+    AccountSelectComponent,
   ],
   template: `
     <div class="w-full">
@@ -199,15 +210,30 @@ interface MappingStats {
         autocomplete="off"
       >
         <div>
-          <app-selector
-            label="Cuenta PUC destino"
+          <label
+            class="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5"
+          >
+            Cuenta PUC destino
+            <span class="text-[var(--color-destructive)]">*</span>
+          </label>
+          <!--
+            app-account-select y no app-selector con [ngModel]. Dos motivos, y
+            ninguno es de gusto:
+
+            1. ngModel dentro de un formGroup sin standalone lanza NG01350 en
+               tiempo de ejecución y aborta la detección de cambios — el modal
+               entero quedaba muerto al abrirse.
+            2. app-selector recibía las 200 primeras cuentas cargadas de una:
+               con un PUC completo la cuenta buscada podía sencillamente no
+               estar en la lista. Este selector busca en el servidor por código
+               o por nombre y arranca con 5.
+          -->
+          <app-account-select
+            formControlName="account_id"
+            scope="super-admin/fiscal"
             placeholder="Busca por código o nombre…"
-            [required]="true"
-            [options]="chartOptions()"
-            [ngModel]="form.controls.account_code.value"
-            (ngModelChange)="form.controls.account_code.setValue($any($event))"
           />
-          <p class="text-xs text-text-secondary mt-1">
+          <p class="text-xs text-text-secondary mt-1.5">
             Por defecto: {{ selectedMapping()?.account_code }} —
             {{ selectedMapping()?.account_name }}
           </p>
@@ -253,16 +279,8 @@ export class AccountMappingsComponent {
   readonly prefixFilter = signal<string>('');
   readonly modalOpen = signal<boolean>(false);
   readonly selectedMapping = signal<AccountMapping | null>(null);
-  readonly chartAccounts = signal<ChartAccount[]>([]);
 
   readonly prefixOptions: SelectorOption[] = PREFIX_OPTIONS;
-
-  readonly chartOptions = computed<SelectorOption[]>(() =>
-    this.chartAccounts().map((c) => ({
-      value: c.code,
-      label: `${c.code} — ${c.name}`,
-    })),
-  );
 
   readonly overrideSubtitle = computed(() => {
     const m = this.selectedMapping();
@@ -283,8 +301,8 @@ export class AccountMappingsComponent {
 
   // ─── Form ──────────────────────────────────────────────────────────────
   readonly form: FormGroup<OverrideForm> = this.fb.group<OverrideForm>({
-    account_code: this.fb.nonNullable.control('', {
-      validators: [Validators.required, Validators.minLength(2)],
+    account_id: this.fb.control<number | null>(null, {
+      validators: [Validators.required],
     }),
   });
 
@@ -354,8 +372,8 @@ export class AccountMappingsComponent {
   };
 
   constructor() {
-    this.loadChartAccounts();
-
+    // Ya no se precargan 200 cuentas al montar: `app-account-select` pide sus
+    // 5 primeras cuando se abre y el resto por búsqueda en servidor.
     effect(() => {
       // Reload when prefix changes.
       const p = this.prefixFilter();
@@ -374,23 +392,9 @@ export class AccountMappingsComponent {
           this.mappings.set(list);
           this.loading.set(false);
         },
-        error: (err) => {
-          this.toast.error(
-            err?.error?.message ?? 'Error al cargar los mapeos.',
-          );
+        error: (err: unknown) => {
+          this.toast.error(parseApiError(err).userMessage);
           this.loading.set(false);
-        },
-      });
-  }
-
-  private loadChartAccounts(): void {
-    this.api
-      .getChartOfAccounts({ page: 1, limit: 200 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res) => this.chartAccounts.set(res.data ?? []),
-        error: () => {
-          // Silent — the override modal will simply show no options.
         },
       });
   }
@@ -411,8 +415,12 @@ export class AccountMappingsComponent {
   // ─── Modal ──────────────────────────────────────────────────────────────
   openModal(item: AccountMapping): void {
     this.selectedMapping.set(item);
-    const code = item.override_account_code ?? item.account_code;
-    this.form.reset({ account_code: code });
+    // El override vigente si lo hay, si no la cuenta por defecto del mapeo.
+    // `app-account-select` hidrata el chip por id contra el backend, así que
+    // basta el número: no hace falta arrastrar código ni nombre.
+    this.form.reset({
+      account_id: item.override_account_id ?? item.account_id ?? null,
+    });
     this.modalOpen.set(true);
   }
 
@@ -425,22 +433,15 @@ export class AccountMappingsComponent {
     if (this.formInvalid()) return;
     const m = this.selectedMapping();
     if (!m) return;
-    this.saving.set(true);
-    // El backend exige `account_id` (number), NO `account_code` (string).
-    // La UI muestra el código (es lo que el usuario elige), pero lo que
-    // viaja es el id: el PATCH del backend (`SetMappingOverrideDto`) tiene
-    // `@IsInt()` sobre `account_id` y rechazaría un string con 400 mudo.
-    // El id lo trae la fila preseleccionada (`override_account_id` si
-    // existe, `account_id` si no).
-    const target_id =
-      m.override_account_id ?? m.account_id ?? null;
+    // LA CUENTA QUE ELIGIÓ EL USUARIO, no la que el mapeo ya tenía. La versión
+    // anterior mandaba `m.override_account_id ?? m.account_id`, así que guardar
+    // reescribía el mismo valor: 200, toast de éxito, y el override sin cambiar.
+    const target_id = this.form.controls.account_id.value;
     if (target_id == null) {
-      this.saving.set(false);
-      this.toast.error(
-        'No se pudo resolver el identificador de la cuenta. Recarga la pantalla y vuelve a elegir.',
-      );
+      this.toast.error('Elige la cuenta PUC destino antes de guardar.');
       return;
     }
+    this.saving.set(true);
     this.api
       .setMappingOverride(m.mapping_key, target_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -451,11 +452,9 @@ export class AccountMappingsComponent {
           this.closeModal();
           this.loadMappings(this.prefixFilter() || undefined);
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.saving.set(false);
-          this.toast.error(
-            err?.error?.message ?? 'No se pudo guardar el override.',
-          );
+          this.toast.error(parseApiError(err).userMessage);
         },
       });
   }
@@ -474,11 +473,9 @@ export class AccountMappingsComponent {
           this.closeModal();
           this.loadMappings(this.prefixFilter() || undefined);
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.saving.set(false);
-          this.toast.error(
-            err?.error?.message ?? 'No se pudo restablecer el override.',
-          );
+          this.toast.error(parseApiError(err).userMessage);
         },
       });
   }

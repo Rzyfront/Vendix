@@ -59,7 +59,10 @@ import { toEmitRequirements } from '../../utils/invoice-emit-requirements';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -98,6 +101,10 @@ import { InvoiceFormSectionComponent } from './invoice-form-section.component';
 import { InvoiceResolutionBannerComponent } from './invoice-resolution-banner.component';
 import { InvoiceLineTaxesComponent } from './invoice-line-taxes.component';
 import { InvoiceTaxCatalogService } from './invoice-tax-catalog.service';
+import {
+  InvoiceWithholdingCatalogService,
+  WithholdingConceptOption,
+} from './invoice-withholding-catalog.service';
 import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
@@ -225,16 +232,22 @@ interface LineMath {
 
 /** Una retención declarada en la sección de retenciones (sólo UI). */
 interface WithholdingRowValue {
-  /** Código visible del concepto (texto que el usuario ve en el form). */
+  /** Nombre visible del concepto. Etiqueta: NO viaja al backend. */
   concept: string;
-  /** `id` de `withholding_concepts` para mandar al backend en el POST. */
+  /**
+   * `id` de `withholding_concepts`. Es el campo que el backend exige
+   * (`InvoiceWithholdingInputDto.concept_id`); una fila sin él se descarta del
+   * payload porque no hay forma de resolver su tipo ni su cuenta PUC.
+   */
   concept_id: number | null;
-  /** 'practiced' (tiende retiene al cliente) | 'suffered' (tiende es retenida). */
+  /** 'practiced' (la tienda retiene) | 'suffered' (a la tienda le retienen). */
   role: 'practiced' | 'suffered';
+  /**
+   * Tarifa en PORCENTAJE (2.5 = 2,5 %), que es como la teclea el contador.
+   * El backend la espera en fracción; se convierte al armar el payload.
+   */
   rate: number | string;
   base: number | string;
-  /** Importe retenido. Si es `null` el backend recalcula con `base × rate`. */
-  amount: number | string | null;
 }
 
 type SectionId =
@@ -999,63 +1012,120 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   size="sm"
                 ></app-input>
               } @else {
+                @if (withholdingConcepts().length === 0) {
+                  <div
+                    class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5 mb-3"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="14"
+                      class="text-warning mt-0.5 shrink-0"
+                    />
+                    <p class="text-xs text-text-primary leading-relaxed">
+                      No hay conceptos de retención configurados. Créalos en
+                      <span class="font-medium">Contabilidad › Retenciones</span>
+                      o activa el importe manual de arriba: sin concepto, el
+                      desglose no se puede guardar.
+                    </p>
+                  </div>
+                }
+
                 <div formArrayName="withholdings" class="space-y-2">
                   @for (
                     row of withholdingControls();
                     track withholdingUid(row);
                     let i = $index
                   ) {
-                    <div [formGroupName]="i" class="grid grid-cols-12 gap-2 items-end">
-                      <div class="col-span-12 md:col-span-5">
-                        <app-input
-                          label="Concepto"
-                          formControlName="concept"
-                          [control]="row.get('concept')"
-                          placeholder="Retefuente por servicios"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-4 md:col-span-2">
-                        <app-input
-                          label="Tarifa %"
-                          type="number"
-                          formControlName="rate"
-                          [control]="row.get('rate')"
-                          min="0"
-                          max="100"
-                          step="any"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-5 md:col-span-3">
-                        <app-input
-                          label="Base"
-                          [currency]="true"
-                          formControlName="base"
-                          [control]="row.get('base')"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div
-                        class="col-span-3 md:col-span-2 flex items-center justify-between gap-1 pb-1"
-                      >
-                        <span class="text-xs font-medium text-text-primary">
-                          {{ formatCurrency(withholdingRowAmount(i)) }}
-                        </span>
-                        <button
-                          type="button"
-                          class="text-[var(--color-text-secondary)] hover:text-error p-1"
-                          title="Quitar retención"
-                          (click)="removeWithholding(i)"
+                    <div
+                      [formGroupName]="i"
+                      class="rounded-lg border border-border bg-[var(--color-surface)] p-3"
+                    >
+                      <div class="grid grid-cols-12 gap-2.5">
+                        <div class="col-span-12 md:col-span-7">
+                          <app-selector
+                            label="Concepto"
+                            formControlName="concept_id"
+                            [options]="withholdingConceptOptions()"
+                            [searchable]="true"
+                            placeholder="Busca el concepto de retención…"
+                            size="sm"
+                            (valueChange)="onWithholdingConceptChange(i)"
+                          ></app-selector>
+                        </div>
+                        <div class="col-span-12 md:col-span-5">
+                          <app-selector
+                            label="Lado de la operación"
+                            formControlName="role"
+                            [options]="withholdingRoleOptions"
+                            size="sm"
+                          ></app-selector>
+                        </div>
+                        <div class="col-span-5 md:col-span-3">
+                          <app-input
+                            label="Tarifa %"
+                            type="number"
+                            formControlName="rate"
+                            [control]="row.get('rate')"
+                            min="0"
+                            max="100"
+                            step="any"
+                            size="sm"
+                          ></app-input>
+                        </div>
+                        <div class="col-span-7 md:col-span-5">
+                          <app-input
+                            label="Base gravable"
+                            [currency]="true"
+                            formControlName="base"
+                            [control]="row.get('base')"
+                            size="sm"
+                          ></app-input>
+                        </div>
+                        <div
+                          class="col-span-12 md:col-span-4 flex items-end justify-between gap-2 pb-0.5"
                         >
-                          <app-icon name="x" [size]="14" />
-                        </button>
+                          <div class="min-w-0">
+                            <span
+                              class="block text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                            >
+                              Retenido
+                            </span>
+                            <span
+                              class="block text-sm font-semibold text-text-primary truncate"
+                            >
+                              {{ formatCurrency(withholdingRowAmount(i)) }}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            class="shrink-0 rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-error-light hover:text-error"
+                            title="Quitar retención"
+                            (click)="removeWithholding(i)"
+                          >
+                            <app-icon name="x" [size]="14" />
+                          </button>
+                        </div>
                       </div>
+
+                      @if (!row.get('concept_id')?.value) {
+                        <p class="mt-2 text-[11px] text-warning">
+                          Elige un concepto: sin él esta línea no se envía con la
+                          factura.
+                        </p>
+                      }
                     </div>
+                  } @empty {
+                    <p
+                      class="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-[var(--color-text-secondary)]"
+                    >
+                      Sin retenciones. Agrega una si el documento las lleva.
+                    </p>
                   }
                 </div>
 
-                <div class="flex items-center justify-between mt-2">
+                <div
+                  class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                >
                   <app-button
                     variant="outline"
                     size="sm"
@@ -1065,9 +1135,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     <app-icon slot="icon" name="plus" [size]="14" />
                     Agregar retención
                   </app-button>
-                  <span class="text-sm font-semibold text-text-primary">
-                    Total retenido: {{ formatCurrency(effectiveWithholding()) }}
-                  </span>
+                  <div
+                    class="flex items-baseline justify-between gap-2 rounded-lg bg-[var(--color-surface-hover)] px-3 py-2 sm:justify-end"
+                  >
+                    <span
+                      class="text-xs text-[var(--color-text-secondary)]"
+                      >Total retenido</span
+                    >
+                    <span class="text-sm font-semibold text-text-primary">
+                      {{ formatCurrency(effectiveWithholding()) }}
+                    </span>
+                  </div>
                 </div>
               }
             </vendix-invoice-form-section>
@@ -1377,6 +1455,7 @@ export class InvoiceCreateComponent {
   private readonly productsService = inject(ProductsService);
   private readonly customersService = inject(CustomersService);
   private readonly taxCatalog = inject(InvoiceTaxCatalogService);
+  private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
@@ -1623,10 +1702,34 @@ export class InvoiceCreateComponent {
   readonly availableTaxes = signal<TaxOption[]>([]);
 
   readonly availableProducts = signal<ProductPickerOption[]>([]);
+
+  /** Conceptos de `withholding_concepts` del tenant, con tarifa en PORCENTAJE. */
+  readonly withholdingConcepts = signal<WithholdingConceptOption[]>([]);
+
+  /** Opciones del selector de concepto: código + nombre + tarifa a la vista. */
+  readonly withholdingConceptOptions = computed<SelectorOption[]>(() =>
+    this.withholdingConcepts().map((concept) => ({
+      value: concept.id,
+      label: concept.code + ' · ' + concept.name,
+      description:
+        formatRatePercent(concept.ratePercent) +
+        (concept.withholdingType
+          ? ' · ' + withholdingTypeLabel(concept.withholdingType)
+          : ''),
+    })),
+  );
+
+  /** Los dos lados de la operación, tal como los nombra el DTO del backend. */
+  readonly withholdingRoleOptions: SelectorOption[] = [
+    { value: 'practiced', label: 'La tienda retiene' },
+    { value: 'suffered', label: 'A la tienda le retienen' },
+  ];
+
   /** `id → producto`, para hidratar descripción y precio al elegirlo. */
   private readonly productsById = new Map<number, Product>();
   private productsLoaded = false;
   private taxesLoaded = false;
+  private withholdingConceptsLoaded = false;
 
   readonly pickedProductIds = computed<number[]>(() =>
     this.itemsValue()
@@ -2011,6 +2114,7 @@ export class InvoiceCreateComponent {
     this.checkingEmitReadiness.set(false);
 
     this.loadTaxCatalog();
+    this.loadWithholdingConcepts();
     this.loadProducts();
     if (this.itemsArray.length === 0) {
       this.addItem();
@@ -2024,6 +2128,15 @@ export class InvoiceCreateComponent {
       .load()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((taxes) => this.availableTaxes.set(taxes));
+  }
+
+  private loadWithholdingConcepts(): void {
+    if (this.withholdingConceptsLoaded) return;
+    this.withholdingConceptsLoaded = true;
+    this.withholdingCatalog
+      .load()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((concepts) => this.withholdingConcepts.set(concepts));
   }
 
   private loadProducts(): void {
@@ -2267,7 +2380,15 @@ export class InvoiceCreateComponent {
     this.withholdingsArray.push(
       this.fb.group({
         row_uid: ['wh-' + this.nextWithholdingUid],
+        // `concept_id` es lo que el backend exige (`InvoiceWithholdingInputDto`);
+        // `concept` es sólo la etiqueta que se muestra y que viaja a ningún lado.
+        // Sin el id, la fila NO se manda: el filtro de `onSubmit` la descarta.
+        concept_id: [null as number | null],
         concept: [''],
+        // 'practiced' = la tienda retiene al cliente (lo normal al facturar).
+        // 'suffered'  = al cliente le corresponde retener a la tienda.
+        role: ['practiced' as 'practiced' | 'suffered'],
+        /** PORCENTAJE. La conversión a fracción se hace en el payload. */
         rate: [0],
         // La base por defecto es la base gravable del documento, que es sobre
         // lo que se retiene en la práctica. Editable porque hay conceptos que
@@ -2275,6 +2396,23 @@ export class InvoiceCreateComponent {
         base: [Math.round(this.totals().base)],
       }),
     );
+  }
+
+  /**
+   * Elegir un concepto rellena tarifa y etiqueta desde el catálogo.
+   *
+   * La tarifa queda EDITABLE a propósito: hay conceptos con tarifa diferencial
+   * por cuantía o por tipo de proveedor, y forzar la del catálogo obligaría al
+   * contador a crear un concepto nuevo para una excepción de una factura.
+   */
+  onWithholdingConceptChange(index: number): void {
+    const group = this.withholdingsArray.at(index) as FormGroup | null;
+    if (!group) return;
+    const conceptId = Number(group.get('concept_id')?.value);
+    const concept = this.withholdingConcepts().find((c) => c.id === conceptId);
+    if (!concept) return;
+    group.get('concept')?.setValue(concept.name);
+    group.get('rate')?.setValue(concept.ratePercent);
   }
 
   removeWithholding(index: number): void {
@@ -2701,26 +2839,42 @@ export class InvoiceCreateComponent {
     // Si el comerciante DESGLOSÓ cada retención (no sólo el agregado), el
     // backend valida y persiste fila a fila. Vacío u omitido ≡ sólo el
     // agregado: la validación automática del tenant al ACEPTAR cubre ese caso.
-    const withheldRows = this.withholdingsValue()
-      .filter(
-        (row) =>
-          row.role &&
-          row.concept_id != null &&
-          Number(row.base) > 0 &&
-          Number(row.rate) >= 0,
-      )
-      .map((row) => ({
-        role: row.role,
-        concept_id: Number(row.concept_id),
-        base_amount: Number(row.base),
-        rate: Number(row.rate),
-        amount:
-          row.amount != null && Number(row.amount) >= 0
-            ? Number(row.amount)
-            : undefined,
-      }));
-    if (withheldRows.length > 0) {
-      payload.withholdings = withheldRows;
+    //
+    // El importe manual y el desglose son las dos ramas EXCLUYENTES del toggle
+    // de la sección: mandar filas mientras el usuario escribió un agregado a
+    // mano declararía dos verdades distintas sobre la misma retención.
+    if (!this.isManualWithholding()) {
+      const withheldRows = this.withholdingsValue()
+        .filter(
+          (row) =>
+            row.concept_id != null &&
+            Number(row.base) > 0 &&
+            Number(row.rate) > 0,
+        )
+        .map((row) => ({
+          role: (row.role ?? 'practiced') as 'practiced' | 'suffered',
+          concept_id: Number(row.concept_id),
+          base_amount: round2(Number(row.base)),
+          // ⚠️ PORCENTAJE → FRACCIÓN. El formulario captura «Tarifa %» (2.5) y
+          // `InvoiceWithholdingInputDto.rate` es una FRACCIÓN (0.025), porque
+          // el backend calcula `base.times(rate)` sin dividir entre 100 —igual
+          // que `WithholdingCalculatorService` sobre `withholding_concepts.rate`,
+          // que es `Decimal(7,4)` en fracción.
+          //
+          // Mandar el porcentaje crudo persistiría una retención CIEN VECES
+          // mayor sin un solo error visible: la aritmética interna cuadra
+          // consigo misma, sólo que sobre la escala equivocada. Ésta es la
+          // única división de escala del formulario; el `@Max(1)` del DTO es la
+          // red de seguridad del backend.
+          rate: Number((Number(row.rate) / 100).toFixed(6)),
+          // El importe viaja SIEMPRE calculado con la misma fórmula que pinta
+          // la UI. Si se omitiera, el backend lo recalcularía y el usuario
+          // podría terminar con un total distinto al que aprobó en pantalla.
+          amount: round2(rowWithholding(row)),
+        }));
+      if (withheldRows.length > 0) {
+        payload.withholdings = withheldRows;
+      }
     }
 
     // ── Divisa
@@ -3015,12 +3169,47 @@ export class InvoiceCreateComponent {
   }
 }
 
-/** Importe retenido de una fila: `base × tarifa`, nunca negativo. */
+/**
+ * Importe retenido de una fila: `base × tarifa`, nunca negativo.
+ *
+ * `row.rate` está en PORCENTAJE en todo el formulario —el input se llama
+ * «Tarifa %» y el contador escribe `2.5`—, de ahí el `/100`. El backend usa la
+ * escala contraria (fracción); la conversión ocurre una sola vez, en
+ * `buildWithholdingPayload`.
+ */
 function rowWithholding(row: WithholdingRowValue): number {
   const rate = Number(row?.rate) || 0;
   const base = Number(row?.base) || 0;
   if (rate <= 0 || base <= 0) return 0;
   return (base * rate) / 100;
+}
+
+/** «2.5 %» sin decimales sobrantes. */
+function formatRatePercent(percent: number): string {
+  const value = Number(percent) || 0;
+  const text = Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return text + ' %';
+}
+
+/**
+ * `withholding_type_enum` → etiqueta del contador.
+ *
+ * Con `default` explícito: el enum del backend puede crecer, y un valor nuevo
+ * debe verse tal cual antes que desaparecer de la descripción del selector.
+ */
+function withholdingTypeLabel(type: string): string {
+  switch (type) {
+    case 'retefuente':
+      return 'Retefuente';
+    case 'reteiva':
+      return 'ReteIVA';
+    case 'reteica':
+      return 'ReteICA';
+    case 'retecree':
+      return 'ReteCREE';
+    default:
+      return type;
+  }
 }
 
 /** Dos decimales. Evita que el artefacto de coma flotante viaje al backend. */

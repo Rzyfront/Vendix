@@ -209,13 +209,14 @@ export class SuperadminFiscalService {
   /**
    * PATCH del override de cuenta para un mapping key del tenant.
    *
-   * El backend (`SetMappingOverrideDto`) exige `account_id: number` —el id
-   * de la fila en `chart_of_accounts`—, NO `account_code`. La pantalla
-   * llama con `account_code` (lo que vio el usuario al elegir la cuenta),
-   * pero el servicio traduce a `account_id` consultando el PUC por código.
-   * Si el id no se puede resolver, el PATCH se rechaza en local y nunca
-   * sale a la red — el DTO backend (`@IsInt`) devolvería 400 sobre un
-   * account_id no numérico de todas formas.
+   * El backend (`SetMappingOverrideDto`) exige `account_id: number` —el id de
+   * la fila en `chart_of_accounts`—, NO `account_code`.
+   *
+   * ACÁ NO HAY TRADUCCIÓN de código a id, y no debe haberla: el formulario de
+   * la pantalla guarda directamente el id porque `app-account-select` es un CVA
+   * cuyo valor ES el id. Una traducción intermedia sería una segunda consulta
+   * al PUC por cada guardado y un punto más donde el código y el id se pueden
+   * desincronizar.
    */
   setMappingOverride(
     mapping_key: string,
