@@ -26,13 +26,19 @@
  *
  * QUÉ COMPRUEBA Y QUÉ NO
  * ----------------------
- * SÍ: que cada nombre de un `import { … }` con ruta RELATIVA esté exportado por
- * el archivo destino, siguiendo los `export * from` en cadena. También el
- * import por defecto contra la ausencia de `export default`.
+ * Son DOS compuertas independientes sobre el mismo recorrido:
+ *
+ * 1. **Imports rotos** — que cada nombre de un `import { … }` con ruta RELATIVA
+ *    esté exportado por el archivo destino, siguiendo los `export * from` en
+ *    cadena. También el import por defecto contra la ausencia de
+ *    `export default`. Es el caso del 15/08/2026 descrito arriba.
+ * 2. **Identificadores libres** — un nombre usado que no se declara en el
+ *    archivo, ni se importa, ni existe como global ambiental. Es un `TS2304`
+ *    puro: ese archivo NO compila. Ver {@link collectFreeIdentifiers}.
  *
  * NO: tipos, firmas, aridad, ni imports de paquetes o de alias de tsconfig
- * (`@common/…`). Esto NO reemplaza al build de CI — lo adelanta para el modo de
- * fallo que el desarrollo local no puede ver.
+ * (`@common/…`). Esto NO reemplaza al build de CI — lo adelanta para los dos
+ * modos de fallo que el desarrollo local no puede ver.
  *
  * Uso:
  *   npm run symbols:audit                 # backend + frontend
@@ -168,17 +174,125 @@ function resolveModule(from, specifier) {
 }
 
 /**
- * Nombres globales que un archivo usa sin declarar y sin importar, legítimamente.
- * La lista es corta a propósito: sólo hace falta cubrir los que se escriben en
- * CONSTANT_CASE, que es el alfabeto del barrido de abajo.
+ * Nombres que existen sin que nadie los declare ni los importe: los globales del
+ * lenguaje, del DOM, de Node y de los tipos ambientales instalados.
+ *
+ * NO se escriben a mano. Se cosechan de los `.d.ts` que ya están en disco —
+ * `typescript/lib/lib.*.d.ts` y los paquetes de `@types` que declaran globales—
+ * porque una lista manual envejece con cada actualización de dependencias y su
+ * envejecimiento produce FALSOS POSITIVOS, que es el modo de fallo que vuelve
+ * inútil a una compuerta: en cuanto ladra sin motivo, se ignora.
+ *
+ * Sobre-recolectar es seguro (a lo sumo deja pasar un error); sub-recolectar no.
+ * Por eso el barrido es deliberadamente laxo y se queda con cualquier nombre
+ * declarado en cabecera de una declaración ambiental.
  */
-const AMBIENT_GLOBALS = new Set(['NaN', 'Infinity', 'JSON', 'Math', 'Intl']);
+const AMBIENT_DECLARATION = new RegExp(
+  '^\\s*(?:declare\\s+)?(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?' +
+    '(?:var|let|const|function|class|interface|type|enum|namespace|module)\\s+' +
+    '([A-Za-z_$][\\w$]*)',
+  'gm',
+);
 
-/** `FOO_BAR`, `MAX_RETRIES_2`: mayúsculas con al menos un guion bajo. */
-const CONSTANT_CASE = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/;
+function harvestAmbientNames(dir, matches, into) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) continue;
+    if (!entry.name.endsWith('.d.ts')) continue;
+    if (matches && !matches.test(entry.name)) continue;
+    let text;
+    try {
+      text = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const match of text.matchAll(AMBIENT_DECLARATION)) into.add(match[1]);
+  }
+}
+
+function buildAmbientGlobals() {
+  const names = new Set([
+    // Palabras reservadas que el parser materializa como `Identifier` en
+    // posición de tipo: `x as const` y `typeof this.foo`. No pueden ser un
+    // nombre real, así que aceptarlas no relaja nada.
+    'const',
+    'this',
+    // Palabras del lenguaje que no son declaraciones en ningún `.d.ts`.
+    'globalThis',
+    'undefined',
+    'arguments',
+    'require',
+    'module',
+    'exports',
+    '__dirname',
+    '__filename',
+  ]);
+  const repo_root = path.resolve(__dirname, '..');
+
+  // Librerías estándar que trae el propio TypeScript: ES*, DOM, WebWorker…
+  harvestAmbientNames(
+    path.join(path.dirname(require.resolve('typescript', { paths: [repo_root] }))),
+    /^lib\..*\.d\.ts$/,
+    names,
+  );
+
+  // Paquetes de `@types` que declaran globales (node, jest, jasmine…). Se
+  // recorre un nivel de subdirectorio porque `@types/node` reparte sus globales
+  // en decenas de archivos sueltos.
+  const types_dir = path.join(repo_root, 'node_modules', '@types');
+  let packages;
+  try {
+    packages = fs.readdirSync(types_dir, { withFileTypes: true });
+  } catch {
+    packages = [];
+  }
+  for (const pkg of packages) {
+    if (!pkg.isDirectory()) continue;
+    const pkg_dir = path.join(types_dir, pkg.name);
+    harvestAmbientNames(pkg_dir, null, names);
+    for (const sub of fs.readdirSync(pkg_dir, { withFileTypes: true })) {
+      if (sub.isDirectory()) {
+        harvestAmbientNames(path.join(pkg_dir, sub.name), null, names);
+      }
+    }
+  }
+
+  // Y los `.d.ts` del PROPIO repo, que declaran globales que ninguna librería
+  // trae: `apps/frontend/src/web-serial.d.ts` declara la Web Serial API, que
+  // usa la báscula del POS y que no está en `lib.dom`. El barrido de archivos
+  // los excluye a propósito (no son código a auditar), así que sin esto un tipo
+  // ambiental propio se leería como un identificador inventado.
+  for (const root of roots) {
+    const resolved = path.resolve(root);
+    if (!fs.existsSync(resolved)) continue;
+    for (const dir of directoriesUnder(resolved)) {
+      harvestAmbientNames(dir, null, names);
+    }
+  }
+  return names;
+}
+
+/** Cada subdirectorio bajo `dir`, él incluido, sin `node_modules` ni `dist`. */
+function directoriesUnder(dir, out = []) {
+  out.push(dir);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+    directoriesUnder(path.join(dir, entry.name), out);
+  }
+  return out;
+}
+
+const AMBIENT_GLOBALS = buildAmbientGlobals();
 
 /**
- * SEGUNDA COMPUERTA — un identificador CONSTANT_CASE usado y nunca declarado.
+ * SEGUNDA COMPUERTA — un identificador usado y nunca declarado ni importado.
  *
  * POR QUÉ NO BASTA CON LA PRIMERA. La compuerta de imports sólo mira símbolos
  * que alguien pidió a otro módulo. Un identificador **libre** —escrito en el
@@ -191,12 +305,26 @@ const CONSTANT_CASE = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/;
  * frontend NO compilaba — y estuvo commiteado sin que nada lo señalara, porque
  * el flujo de este repo prohíbe correr builds en la máquina de desarrollo.
  *
- * ALCANCE DELIBERADAMENTE ESTRECHO. Sólo CONSTANT_CASE, y sólo dentro del
- * archivo: un nombre en mayúsculas es siempre una constante de módulo o de
- * clase, nunca un global del navegador ni de Node, así que el ruido es cero
- * (verificado sobre los 4.140 archivos del repo). Un barrido general de
- * identificadores exigiría resolver ámbitos y tipos, que es justamente lo que
- * este script existe para NO hacer.
+ * POR QUÉ YA NO SE LIMITA A CONSTANT_CASE. La primera versión sólo miraba
+ * nombres en mayúsculas, para no arriesgar ruido. Duró poco: en el mismo mes se
+ * colaron cuatro TS2304 que ese alfabeto no cubría —`MappingKeyCatalogEntry`
+ * usado como tipo sin import, y `ofType` / `Actions` / `firstValueFrom` en un
+ * componente de POS—. El modo de fallo no distingue capitalización, así que la
+ * compuerta tampoco debe.
+ *
+ * CÓMO EVITA EL RUIDO, que es lo único que hace útil a una compuerta:
+ *
+ * 1. El conjunto de "declarado" es **plano por archivo**, no por ámbito. Un
+ *    nombre declarado en cualquier punto del archivo cuenta como declarado en
+ *    todos. Eso pierde el uso-antes-de-declarar (falso negativo, tolerable) y a
+ *    cambio no puede inventar un falso positivo por no modelar ámbitos, que es
+ *    justamente el trabajo de resolución de tipos que este script existe para
+ *    NO hacer.
+ * 2. Los globales ambientales salen de los `.d.ts` en disco, no de una lista
+ *    escrita a mano que envejece (ver {@link buildAmbientGlobals}).
+ * 3. Se descarta toda posición que no es una LECTURA del identificador: nombres
+ *    de declaración, claves de objeto, propiedades tras un punto, el lado
+ *    derecho de un nombre calificado y los alias de import/export.
  */
 function collectFreeIdentifiers(source, file, out) {
   const declared = new Set();
@@ -227,6 +355,7 @@ function collectFreeIdentifiers(source, file, out) {
         }
       }
     }
+    if (ts.isImportEqualsDeclaration(node)) declared.add(node.name.text);
     if (
       ts.isVariableDeclaration(node) ||
       ts.isParameter(node) ||
@@ -234,9 +363,20 @@ function collectFreeIdentifiers(source, file, out) {
     ) {
       declareBinding(node.name);
     }
+    // Los parámetros de tipo (`<T>`, `<K extends keyof T>`) son declaraciones
+    // igual que una variable, y sin esto TODO genérico del repo sería un
+    // hallazgo. La firma que los declara puede estar en cualquier nodo, así que
+    // se leen del nodo genéricamente en vez de enumerar sus 12 portadores.
+    if (node.typeParameters) {
+      for (const parameter of node.typeParameters) {
+        declared.add(parameter.name.text);
+      }
+    }
     if (
       (ts.isFunctionDeclaration(node) ||
         ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node) ||
+        ts.isFunctionExpression(node) ||
         ts.isEnumDeclaration(node) ||
         ts.isInterfaceDeclaration(node) ||
         ts.isTypeAliasDeclaration(node) ||
@@ -246,25 +386,59 @@ function collectFreeIdentifiers(source, file, out) {
     ) {
       declared.add(node.name.text);
     }
+    // Una etiqueta (`outer: for (…) { break outer; }`) se declara y se lee con
+    // la misma forma sintáctica que una variable, pero vive en otro espacio de
+    // nombres.
+    if (ts.isLabeledStatement(node)) declared.add(node.label.text);
 
-    if (ts.isIdentifier(node) && CONSTANT_CASE.test(node.text)) {
+    if (ts.isIdentifier(node)) {
       const parent = node.parent;
-      // Se descarta todo lo que NO es una lectura del identificador: el nombre
-      // de cualquier declaración (incluida una propiedad de clase, que fue la
-      // fuente de ruido al calibrar esto), el lado derecho de un nombre
-      // calificado, y el `propertyName` de un import/export con alias.
       const is_declaration_name = parent && parent.name === node;
+      // `A.B` en posición de tipo, y el `.Foo` de un tipo-import
+      // (`import('./x').Foo`): en ambos el nombre lo resuelve el módulo de la
+      // izquierda, no el ámbito de este archivo.
       const is_qualified =
-        parent && ts.isQualifiedName(parent) && parent.right === node;
+        parent &&
+        ((ts.isQualifiedName(parent) && parent.right === node) ||
+          (ts.isImportTypeNode(parent) && parent.qualifier === node));
+      const is_property =
+        parent &&
+        ((ts.isPropertyAccessExpression(parent) ||
+          ts.isPropertyAssignment(parent) ||
+          ts.isMethodSignature(parent) ||
+          ts.isPropertySignature(parent)) &&
+          parent.name === node);
+      // `const { day: nowDay } = x` — `day` es la CLAVE del objeto de origen,
+      // no un nombre libre. Sin esto, todo destructurado con renombre ladra.
+      const is_binding_key =
+        parent && ts.isBindingElement(parent) && parent.propertyName === node;
       const is_specifier =
         parent && (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent));
-      if (!is_declaration_name && !is_qualified && !is_specifier) {
-        if (!used.has(node.text)) {
-          used.set(
-            node.text,
-            source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          );
-        }
+      const is_label =
+        parent &&
+        (ts.isBreakStatement(parent) || ts.isContinueStatement(parent)) &&
+        parent.label === node;
+      const is_meta =
+        parent &&
+        (ts.isMetaProperty(parent) ||
+          // `{ foo }` abreviado: el nombre es a la vez clave y lectura, y
+          // resolverlo pediría el ámbito. Se omite: falso negativo tolerable.
+          ts.isShorthandPropertyAssignment(parent) ||
+          ts.isJsxAttribute?.(parent));
+      if (
+        !is_declaration_name &&
+        !is_qualified &&
+        !is_property &&
+        !is_binding_key &&
+        !is_specifier &&
+        !is_label &&
+        !is_meta &&
+        !used.has(node.text)
+      ) {
+        used.set(
+          node.text,
+          source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+        );
       }
     }
     ts.forEachChild(node, visit);
@@ -326,16 +500,17 @@ const rel = (file) => path.relative(process.cwd(), file);
 
 if (freeFindings.length > 0) {
   console.error(
-    `\n❌ ${freeFindings.length} identificador(es) CONSTANT_CASE usados y nunca ` +
-      `declarados ni importados:\n`,
+    `\n❌ ${freeFindings.length} identificador(es) usados y nunca declarados ` +
+      `ni importados:\n`,
   );
   for (const finding of freeFindings) {
     console.error(`  ${rel(finding.file)}:${finding.line}  ${finding.name}`);
   }
   console.error(
-    `\nEs un TS2304: ese archivo NO compila. Causa habitual: la constante existe\n` +
-      `con otro nombre en el mismo archivo (se renombró la declaración o el uso,\n` +
-      `pero no ambos).\n`,
+    `\nEs un TS2304: ese archivo NO compila. Dos causas habituales: falta el\n` +
+      `import (se usó el símbolo y nunca se trajo), o el nombre existe en el\n` +
+      `mismo archivo con otra grafía (se renombró la declaración o el uso, pero\n` +
+      `no ambos).\n`,
   );
 }
 
