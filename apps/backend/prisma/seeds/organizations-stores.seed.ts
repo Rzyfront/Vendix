@@ -1,5 +1,87 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { createDefaultFiscalStatusBlock } from '../../src/common/interfaces/fiscal-status.interface';
+
+/**
+ * Deja el carril fiscal EMITIBLE en desarrollo sobre la tienda indicada.
+ *
+ * Crear una factura desde el módulo Facturación atraviesa DOS compuertas
+ * independientes, y hasta ahora ninguna tienda sembrada pasaba la primera:
+ *
+ *   1. `ModuleFlowGuard` → `FiscalGateService.isAreaEnabled` exige
+ *      `fiscal_status.invoicing.state ∈ {ACTIVE, LOCKED}`. Sin eso el módulo
+ *      entero responde 403 `FISCAL_AREA_INACTIVE` y no se llega ni al formulario.
+ *   2. `InvoicingService.assertElectronicEmissionLive` exige la habilitación DIAN
+ *      viva en producción — PERO abre paso cuando la tienda **no tiene** fila en
+ *      `dian_configurations` (`if (!config) return`). Una tienda sin habilitación
+ *      crea y trabaja facturas; lo único que no puede es transmitirlas.
+ *
+ * Por eso esto activa (1) y deliberadamente NO siembra (2). Sembrar una
+ * `dian_configurations` en `environment: 'production'` sería activamente
+ * peligroso: ese enum es el que elige el endpoint SOAP —
+ * `dian-endpoints.ts` mapea `production` a `https://vpfe.dian.gov.co`— así que
+ * cualquier dev que pulsara «emitir» transmitiría contra la DIAN REAL con un
+ * certificado de mentira. Es la misma razón por la que `DianConfigService`
+ * rechaza el PATCH plano a `production` y obliga a pasar por
+ * `promoteToProduction`, que sí verifica el readiness.
+ *
+ * Tampoco se siembra una `invoice_resolutions`, por la misma razón: exigiría
+ * inventar una clave técnica, y una ClTec sintética viviendo en una tienda demo
+ * es exactamente la clase de dato que provoca el rechazo por CUFE mal calculado
+ * cuando alguien promueve esa tienda. El dev la carga desde Facturación →
+ * Resoluciones; si falta, la creación responde 412 `FISCAL_RESOLUTION_MISSING`,
+ * que ya dice qué hacer. Lo que este seed quita de en medio es el 403 anterior,
+ * que escondía el módulo entero y no orientaba a nada.
+ *
+ * El merge es puntual —sólo toca `fiscal_status.invoicing`— para no pisar los
+ * ajustes que el dev ya tenga en `store_settings.settings`, y es idempotente:
+ * una tienda ya ACTIVE o LOCKED se deja intacta.
+ */
+async function activateInvoicingFiscalArea(
+  client: PrismaClient,
+  storeId: number,
+): Promise<void> {
+  const row = await client.store_settings.findUnique({
+    where: { store_id: storeId },
+    select: { settings: true },
+  });
+  if (!row) return;
+
+  const settings: Record<string, any> =
+    (row.settings as Record<string, any> | null) ?? {};
+  const block: Record<string, any> =
+    (settings.fiscal_status as Record<string, any> | null) ?? {};
+  const invoicing: Record<string, any> =
+    (block.invoicing as Record<string, any> | null) ?? {};
+
+  // LOCKED es ACTIVE + irreversible: cuenta como habilitado y NO debe degradarse.
+  if (invoicing.state === 'ACTIVE' || invoicing.state === 'LOCKED') return;
+
+  const now = new Date().toISOString();
+  const defaults = createDefaultFiscalStatusBlock();
+
+  const nextSettings = {
+    ...settings,
+    fiscal_status: {
+      ...defaults,
+      ...block,
+      invoicing: {
+        ...defaults.invoicing,
+        ...invoicing,
+        state: 'ACTIVE',
+        activated_at: invoicing.activated_at ?? now,
+        updated_at: now,
+      },
+    },
+  };
+
+  await client.store_settings.update({
+    where: { store_id: storeId },
+    // `FiscalStatusBlock` es una interfaz sin índice, y `InputJsonValue` de
+    // Prisma exige uno. Mismo casteo que `vendix-platform-org.seed.ts`.
+    data: { settings: nextSettings as unknown as Prisma.InputJsonValue },
+  });
+}
 
 /**
  * Seed organizations and stores data
@@ -264,6 +346,11 @@ export async function seedOrganizationsAndStores(
     },
   });
   settingsCreated++;
+
+  // Tech Solutions Bogotá es la tienda a la que aterrizan las credenciales de
+  // desarrollo documentadas (`owner@techsolutions.co`, ver `users.seed.ts`), así
+  // que es la que tiene que quedar lista para ejercitar el carril fiscal.
+  await activateInvoicingFiscalArea(client, techStore1.id);
 
   // Settings for Fashion Retail Norte
   await client.store_settings.upsert({
