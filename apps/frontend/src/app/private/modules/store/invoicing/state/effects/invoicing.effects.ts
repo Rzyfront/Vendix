@@ -16,6 +16,8 @@ import {
   formatReason,
   readDianRejection,
 } from '../../utils/invoicing-errors.util';
+import { dianEventLabel } from '../../utils/dian-events.util';
+import { DianDocumentEvent } from '../../interfaces/invoice.interface';
 
 /**
  * NINGUN FALLO DE FACTURACION PUEDE SER INVISIBLE.
@@ -536,6 +538,106 @@ export class InvoicingEffects {
       ),
     ),
   );
+
+  /**
+   * `POST /store/invoicing/:id/events` — REGISTRAR un evento RADIAN.
+   *
+   * `exhaustMap` DELIBERADO, por la misma razón que en la regeneración del PDF y
+   * con una consecuencia peor: cada intento reserva el consecutivo del evento
+   * antes de firmar. Un doble click con `switchMap` cancelaría la suscripción del
+   * frontend pero no la escritura del backend, y el segundo evento saldría con
+   * numeración gastada.
+   *
+   * NO entra en `mutationSuccess$`. Los eventos RADIAN no mueven la máquina de
+   * estados de la factura (`dian-events.service.ts` no toca `invoices.status`),
+   * así que recargar lista y stats sería tráfico por nada; lo que sí hay que
+   * refrescar es la pista de auditoría, y de eso se encarga `dianEventRegistered$`.
+   */
+  registerDianEvent$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.registerDianEvent),
+      exhaustMap(({ invoiceId, event }) =>
+        this.invoicingService.registerDianEvent(invoiceId, event).pipe(
+          map((response) => {
+            const registered = response?.data ?? null;
+            this.reportDianEventOutcome(registered);
+            return InvoicingActions.registerDianEventSuccess({
+              invoiceId,
+              event: registered,
+            });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.registerDianEventFailure({
+                invoiceId,
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /**
+   * La pista de auditoría se repuebla desde el servidor, NO con la fila que
+   * devolvió el POST: `findByInvoice` es el único que sabe el orden y el estado
+   * definitivo de todos los eventos de la factura, incluido el que acaba de
+   * reutilizar una fila `pending` anterior en vez de crear una nueva.
+   */
+  dianEventRegistered$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.registerDianEventSuccess),
+      map(({ invoiceId }) => InvoicingActions.loadDianEvents({ invoiceId })),
+    ),
+  );
+
+  /**
+   * QUÉ SE LE DICE AL USUARIO CUANDO EL POST DEVUELVE 200.
+   *
+   * 200 aquí significa «se transmitió», NUNCA «RADIAN lo aceptó»: el backend
+   * persiste la fila con `status: 'rejected' | 'error'` y la devuelve sin lanzar
+   * (`dian-events.service.ts` → `register`). Cantar «Evento registrado» sobre un
+   * rechazo sería exactamente el fallo silencioso que este módulo vino a cerrar,
+   * agravado porque el consecutivo del evento ya se gastó.
+   */
+  private reportDianEventOutcome(event: DianDocumentEvent | null): void {
+    if (!event) {
+      // El servidor contestó sin cuerpo reconocible. No se inventa un veredicto:
+      // la lista se recarga igual y ahí estará la verdad.
+      this.toastService.warning(
+        'El evento se envió, pero el servidor no devolvió su estado. Revisa la lista de eventos RADIAN.',
+      );
+      return;
+    }
+
+    const label = `${event.event_code} · ${dianEventLabel(event.event_code)}`;
+    const reason = event.dian_status_message?.trim()
+      ? `${event.dian_status_code ? event.dian_status_code + ': ' : ''}${event.dian_status_message}`
+      : null;
+
+    if (event.status === 'accepted') {
+      this.toastService.success(`Evento RADIAN registrado — ${label}`);
+      return;
+    }
+    if (event.status === 'rejected') {
+      this.toast(
+        reason ?? 'RADIAN no aceptó el evento.',
+        `RADIAN rechazó el evento ${label}`,
+        6000,
+      );
+      return;
+    }
+    // `pending` / `error`: no hay veredicto. Se dice tal cual en vez de elegir
+    // uno de los dos extremos.
+    this.toastService.warning(
+      reason ?? 'El evento se transmitió y RADIAN todavía no lo ha juzgado.',
+      `Evento ${label} sin veredicto`,
+      6000,
+    );
+  }
 
   // ── Regenerar PDF ─────────────────────────────────────────
 

@@ -336,6 +336,23 @@ export const invoicingReducer = createReducer(
       state.dianEventsInvoiceId === invoiceId ? false : state.dianEventsLoading,
   })),
 
+  // Registrar un evento NO toca `dianEvents`: la lista la repuebla el
+  // `loadDianEvents` que dispara el effect al terminar. Escribir aqui la fila
+  // devuelta y ADEMAS recargar produciria el evento duplicado en pantalla
+  // durante todo el viaje de la recarga.
+  on(InvoicingActions.registerDianEvent, (state) => ({
+    ...state,
+    dianEventRegistering: true,
+  })),
+  on(
+    InvoicingActions.registerDianEventSuccess,
+    InvoicingActions.registerDianEventFailure,
+    (state) => ({
+      ...state,
+      dianEventRegistering: false,
+    }),
+  ),
+
   // ── Regenerar PDF ───────────────────────────────────────
   on(InvoicingActions.regenerateInvoicePdf, (state) => ({
     ...state,

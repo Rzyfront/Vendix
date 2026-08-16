@@ -21,6 +21,7 @@ import {
   InvoicePdfResult,
   InvoicePdfUrl,
   PosUvtThreshold,
+  RegisterDianEventRequest,
 } from '../interfaces/invoice.interface';
 
 @Injectable({
@@ -78,6 +79,24 @@ export class InvoicingService {
     );
   }
 
+  /**
+   * SIN CLIENTE, Y DELIBERADAMENTE.
+   *
+   * `POST /store/invoicing/from-sales-order/:salesOrderId` funciona, pero
+   * `sales_orders` NO TIENE UN SOLO CAMINO DE CREACIÓN en producto: en todo
+   * `apps/backend/src` la tabla se usa con `findFirst` (3 veces) y `update`
+   * (2, en el listener de remisiones); la única fila que existe la escribe
+   * `prisma/seeds/test-orders.seed.ts`. No hay controlador que la cree, ni
+   * módulo de frontend que la muestre.
+   *
+   * Por eso el selector de origen del modal de creación ofrece «orden» y no
+   * «pedido de venta»: darle al comerciante un origen que nunca podrá tener
+   * filas no es una función a medias, es un callejón sin salida en la UI.
+   *
+   * El método se conserva —no se borra— porque el día que exista el módulo de
+   * pedidos de venta el cable ya está tendido: acción, effect y reducer también
+   * están puestos. Falta el despachador, y falta a propósito.
+   */
   createFromSalesOrder(salesOrderId: number): Observable<ApiResponse<Invoice>> {
     return this.http.post<ApiResponse<Invoice>>(
       this.getApiUrl(`from-sales-order/${salesOrderId}`),
@@ -174,6 +193,26 @@ export class InvoicingService {
   getDianEvents(id: number): Observable<ApiResponse<DianDocumentEvent[]>> {
     return this.http.get<ApiResponse<DianDocumentEvent[]>>(
       this.getApiUrl(`${id}/events`),
+    );
+  }
+
+  /**
+   * Registra un evento RADIAN contra la factura (`POST :id/events`, verificado en
+   * `invoicing.controller.ts` → `registerDianEvent`).
+   *
+   * OJO CON EL DESENLACE: el backend NO lanza cuando la DIAN rechaza el evento —
+   * persiste la fila con `status: 'rejected'` y la devuelve. Un `200` aquí
+   * significa «se transmitió», no «se aceptó». Quien lo consuma tiene que leer
+   * `status` de la fila devuelta antes de decirle al usuario que quedó
+   * registrado.
+   */
+  registerDianEvent(
+    id: number,
+    dto: RegisterDianEventRequest,
+  ): Observable<ApiResponse<DianDocumentEvent>> {
+    return this.http.post<ApiResponse<DianDocumentEvent>>(
+      this.getApiUrl(`${id}/events`),
+      dto,
     );
   }
 

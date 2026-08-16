@@ -117,9 +117,41 @@ export interface AiuSettings {
   minimum_base_percent?: number;
 }
 
+/**
+ * Qué hace el carril POS cuando la DIAN no acepta el documento. Espejo de
+ * `PosDianFailurePolicy`
+ * (`apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`).
+ *
+ * No existe un valor `'block'` y no debe añadirse aquí: el evento
+ * `pos.sale.completed` se emite DESPUÉS de confirmar el cobro, así que cuando
+ * esta política se lee ya no queda venta que bloquear.
+ */
+export type PosDianFailurePolicy = 'queue' | 'ignore';
+
+/**
+ * Comportamiento del carril fiscal del POS. Espejo de `PosInvoicingSettings`
+ * del backend. Igual que AIU, el backend mezcla `invoicing.pos` POR CLAVE:
+ * mandar sólo el campo que se edita es lo correcto.
+ */
+export interface PosInvoicingSettings {
+  auto_emit?: boolean;
+  on_failure?: PosDianFailurePolicy;
+}
+
 export interface InvoicingSettings {
   aiu?: AiuSettings;
+  pos?: PosInvoicingSettings;
 }
+
+/**
+ * Los mismos defaults que asume el backend (`DEFAULT_POS_AUTO_EMIT` y
+ * `DEFAULT_POS_DIAN_FAILURE_POLICY`). `'queue'` es el conservador: es el único
+ * que deja constancia consultable del fallo.
+ */
+export const POS_INVOICING_SETTINGS_DEFAULTS: Required<PosInvoicingSettings> = {
+  auto_emit: true,
+  on_failure: 'queue',
+};
 
 /**
  * Valores que asume el backend cuando la tienda nunca configuró la sección.

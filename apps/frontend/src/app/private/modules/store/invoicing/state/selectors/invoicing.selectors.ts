@@ -166,6 +166,12 @@ export const selectDianEventsLoading = createSelector(
   (state) => state.dianEventsLoading,
 );
 
+/** Registro de un evento RADIAN en curso; bloquea su propio botón, no la lista. */
+export const selectDianEventRegistering = createSelector(
+  selectInvoicingState,
+  (state) => state.dianEventRegistering,
+);
+
 /** Regeneración del PDF en curso; deshabilita su propio botón, no la tabla. */
 export const selectPdfRegenerating = createSelector(
   selectInvoicingState,

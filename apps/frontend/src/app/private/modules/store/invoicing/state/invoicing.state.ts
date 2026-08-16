@@ -50,6 +50,14 @@ export interface InvoicingState {
   dianEventsLoading: boolean;
 
   /**
+   * Registro de un evento RADIAN en curso. Bandera propia y NO `dianEventsLoading`:
+   * reusar la de la carga cambiaria la pista de auditoria por «Cargando eventos…»
+   * mientras se firma y transmite el evento, escondiendo justo la lista contra la
+   * que el usuario esta comprobando que no lo esta duplicando.
+   */
+  dianEventRegistering: boolean;
+
+  /**
    * Regeneracion del PDF en curso. Bandera propia y NO `loading`: reusar la de
    * la lista cambiaria la tabla por un spinner mientras se rearma un PDF.
    */
@@ -88,6 +96,7 @@ export const initialInvoicingState: InvoicingState = {
   dianEvents: [],
   dianEventsInvoiceId: null,
   dianEventsLoading: false,
+  dianEventRegistering: false,
   pdfRegenerating: false,
 
   search: '',

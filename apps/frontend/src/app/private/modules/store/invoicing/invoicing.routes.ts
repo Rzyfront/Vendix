@@ -29,6 +29,18 @@ export const invoicingRoutes: Routes = [
                     route: '/admin/invoicing/support-documents',
                 },
                 {
+                    // La única superficie desde la que se puede ver —y
+                    // reintentar— la conversión de una venta a consumidor final
+                    // en factura a nombre del cliente. Sin ella, una conversión
+                    // fallida es invisible: el listener la deja en `failed` y su
+                    // propio log remite a un endpoint que no tenía cliente.
+                    id: 'invoice-data-requests',
+                    label: 'Solicitudes de factura',
+                    shortLabel: 'Solicitudes',
+                    icon: 'user-plus',
+                    route: '/admin/invoicing/invoice-data-requests',
+                },
+                {
                     id: 'resolutions',
                     label: 'Resoluciones',
                     icon: 'file-check',
@@ -68,6 +80,13 @@ export const invoicingRoutes: Routes = [
                 loadComponent: () =>
                     import('./components/support-documents/support-documents-page.component').then(
                         (m) => m.SupportDocumentsPageComponent,
+                    ),
+            },
+            {
+                path: 'invoice-data-requests',
+                loadComponent: () =>
+                    import('./components/invoice-data-requests/invoice-data-requests-page.component').then(
+                        (m) => m.InvoiceDataRequestsPageComponent,
                     ),
             },
             {

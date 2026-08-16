@@ -355,43 +355,15 @@ export function retryStatusTone(status: string): FiscalTone {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Etiquetas de `dian_document_events.event_code`, COPIADAS VERBATIM de
- * `DIAN_EVENT_LABELS` en
- * `apps/backend/.../providers/dian-direct/constants/dian-endpoints.ts`
- * (numeral 14.2.1 del Anexo Técnico).
+ * Las etiquetas de `event_code` YA NO VIVEN ACÁ.
  *
- * Se duplican y no se importan porque el frontend no puede alcanzar el backend;
- * el riesgo de deriva se acota igual que en el resto del módulo: un código sin
- * etiqueta se pinta con su número crudo (`Evento 052`) en vez de desaparecer.
+ * Se movieron a `utils/dian-events.util.ts` junto con los tipos de operación y
+ * el motivo por el que el panel no registra ciertos eventos, porque el effect que
+ * reporta el veredicto de RADIAN también las necesita y un `state/effects/` no
+ * puede importar de `components/` sin invertir las capas. Se re-exporta para no
+ * romper a quien ya la importaba desde este archivo: un solo mapa, dos puertas.
  */
-const DIAN_EVENT_LABELS: Record<string, string> = {
-  '030': 'Acuse de recibo de la factura',
-  '031': 'Reclamo de la factura',
-  '032': 'Recibo del bien o servicio',
-  '033': 'Aceptación expresa',
-  '034': 'Aceptación tácita',
-  '035': 'Aval',
-  '036': 'Inscripción en el RADIAN como título valor',
-  '037': 'Endoso en propiedad',
-  '038': 'Endoso en garantía',
-  '039': 'Endoso en procuración',
-  '040': 'Cancelación de endoso',
-  '041': 'Limitación para circulación',
-  '042': 'Terminación de la limitación para circulación',
-  '043': 'Mandato',
-  '044': 'Terminación del mandato',
-  '045': 'Pago de la factura como título valor',
-  '046': 'Informe para el pago',
-  '047': 'Endoso con efectos de cesión ordinaria',
-  '048': 'Protesto',
-  '049': 'Transferencia de los derechos económicos',
-  '050': 'Notificación al deudor sobre la transferencia de derechos económicos',
-  '051': 'Pago de la transferencia de los derechos económicos',
-};
-
-export function dianEventLabel(code: string): string {
-  return DIAN_EVENT_LABELS[code] ?? `Evento ${code}`;
-}
+export { dianEventLabel } from '../../utils/dian-events.util';
 
 /**
  * `dian_document_events.status` — verificado en `DIAN_EVENT_STATUS`

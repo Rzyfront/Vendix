@@ -136,13 +136,20 @@ export interface Invoice {
   provider_response?: InvoiceProviderResponse | null;
 
   /**
-   * DIAN retry-queue state attached by the backend list endpoint.
-   * Only present for invoices whose send/transmission status is in an
-   * error or pending-send state; `null` for the rest.
+   * Estado de la cola de reintentos DIAN (`invoice_retry_queue`).
    *
-   * HUECO DE BACKEND CONOCIDO: sólo lo adjunta `GET /store/invoicing`
-   * (`invoicing.service.ts` → `findAll`). `GET /store/invoicing/:id` NO lo trae,
-   * así que el detalle lo conserva de la fila de la lista con la que se abrió.
+   * LO ADJUNTAN LOS DOS ENDPOINTS. `findAll` y `findOne` de
+   * `apps/backend/src/domains/store/invoicing/invoicing.service.ts` aplican HOY el
+   * MISMO criterio de elegibilidad (`RETRY_ELIGIBLE_SEND_STATUSES` ∪
+   * `RETRY_ELIGIBLE_TRANSMISSION_STATUSES`) y devuelven la clave en la raíz de la
+   * factura. El hueco que este comentario describía —«sólo la lista lo trae»— se
+   * cerró en el backend; se corrigió aquí tras releer `findOne`, porque una nota
+   * caducada sobre de dónde sale un dato es la que hace que el próximo lector
+   * conserve un apaño que ya no hace falta.
+   *
+   * `null` NO significa «no vino»: significa «esta factura no es candidata a
+   * reintento». Por eso el panel se pinta sobre la presencia del objeto y nunca
+   * sobre la presencia de la clave.
    */
   retry_status?: InvoiceRetryStatus | null;
 }
@@ -296,6 +303,48 @@ export interface DianDocumentEvent {
   issued_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/**
+ * Un tercero identificado sólo por su registro tributario, como los nombran los
+ * eventos RADIAN. Espejo de `DianEventPartyDto`
+ * (`apps/backend/.../invoicing/dto/register-dian-event.dto.ts`).
+ */
+export interface DianEventPartyRequest {
+  /** Código DIAN de tipo de identificación ('31' NIT, '13' CC…). */
+  document_type: string;
+  /** Identificación SIN puntos, guiones ni dígito de verificación. */
+  document_number: string;
+  document_dv?: string;
+  legal_name: string;
+}
+
+/**
+ * Cuerpo de `POST /store/invoicing/:id/events` — espejo de
+ * `RegisterDianEventDto`.
+ *
+ * Sólo `event_code` es obligatorio SIEMPRE. El resto lo exige el backend según el
+ * código: `operation_code` cuando el evento admite más de un «tipo de operación»
+ * (numeral 14.1.2), y `issuer_party` / `endorsement_list_id` / `negotiation_info`
+ * en la familia de título valor. Enviar un evento incompleto NO es gratis —
+ * gasta el consecutivo del evento y RADIAN lo rechaza igual—, así que la puerta
+ * está en el backend (`DIAN_EVENT_005`) y la UI no adivina.
+ */
+export interface RegisterDianEventRequest {
+  /** '030'…'051'. Numeral 14.2.1 del Anexo Técnico. */
+  event_code: string;
+  /** Justificación. RADIAN espera una en el reclamo (031). */
+  description?: string;
+  /** «Tipo de operación» del numeral 14.1.2 ('361', '451', …). */
+  operation_code?: string;
+  issuer_party?: DianEventPartyRequest;
+  /** '1' endoso completo · '2' endoso en blanco (numeral 14.2.3). */
+  endorsement_list_id?: string;
+  /** `InformacionNegociacion` con los literales del anexo como claves. */
+  negotiation_info?: Record<string, string>;
+  /** `YYYY-MM-DD`. Las dos ausentes = mandato ilimitado. */
+  validity_start_date?: string;
+  validity_end_date?: string;
 }
 
 /**

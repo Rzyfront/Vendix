@@ -11,6 +11,7 @@ import {
   UpdateResolutionDto,
   DianConfig,
   DianDocumentEvent,
+  RegisterDianEventRequest,
 } from '../../interfaces/invoice.interface';
 import { DianRejection } from '../../utils/invoicing-errors.util';
 
@@ -285,6 +286,37 @@ export const loadDianEventsSuccess = createAction(
 export const loadDianEventsFailure = createAction(
   '[Invoicing] Load DIAN Events Failure',
   props<{ invoiceId: number; error: string }>(),
+);
+
+// REGISTRAR un evento RADIAN (`POST /store/invoicing/:id/events`). El endpoint
+// existia y la UI solo sabia LEER: la pista de auditoria del titulo valor se
+// podia mirar pero no alimentar, asi que acusar recibo o aceptar expresamente una
+// factura solo era posible por `curl`.
+//
+// `event` viaja entero —no solo el codigo— porque el backend exige combinaciones
+// por evento (tipo de operacion, listID del endoso, montos de la negociacion) y
+// resumirlo aqui obligaria a reconstruirlo en el effect.
+
+export const registerDianEvent = createAction(
+  '[Invoicing] Register DIAN Event',
+  props<{ invoiceId: number; event: RegisterDianEventRequest }>(),
+);
+/**
+ * El backend NO lanza cuando RADIAN rechaza: persiste la fila con
+ * `status: 'rejected'` y la devuelve con 200. Por eso el desenlace de exito
+ * TRANSPORTA el evento: quien lo escuche decide si celebrar o avisar, y el modal
+ * solo se cierra cuando el evento quedo realmente aceptado.
+ */
+export const registerDianEventSuccess = createAction(
+  '[Invoicing] Register DIAN Event Success',
+  // `event: null` es un caso real, no defensa de más: significa que el POST
+  // respondió 200 sin cuerpo reconocible. El modal necesita distinguirlo de un
+  // evento aceptado, porque en ese caso NO puede cantar éxito ni cerrarse.
+  props<{ invoiceId: number; event: DianDocumentEvent | null }>(),
+);
+export const registerDianEventFailure = createAction(
+  '[Invoicing] Register DIAN Event Failure',
+  props<{ invoiceId: number } & MutationFailure>(),
 );
 
 // ── Regenerar PDF ───────────────────────────────────────────

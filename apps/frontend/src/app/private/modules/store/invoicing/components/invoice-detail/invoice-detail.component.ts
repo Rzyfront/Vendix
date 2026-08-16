@@ -50,6 +50,7 @@ import {
   retryStatusTone,
   toneClasses,
 } from './invoice-fiscal-status.util';
+import { DianEventRegisterModalComponent } from './dian-event-register-modal.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -60,7 +61,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
   selector: 'vendix-invoice-detail',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, DatePipe, ModalComponent, ButtonComponent, IconComponent],
+  imports: [
+    NgClass,
+    DatePipe,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    DianEventRegisterModalComponent,
+  ],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
@@ -246,10 +254,18 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           }
 
           <!-- ── COLA DE REINTENTOS ────────────────────────────────────────
-               «retry_status« viene de «invoice_retry_queue« y SOLO lo adjunta el
-               endpoint de LISTA («findAll«), nunca «GET :id«. Por eso se lee de
-               la fila con la que se abrio el detalle y no de la hidratacion: si
-               se leyera de «GET :id« este panel jamas se pintaria.
+               «retry_status« viene de «invoice_retry_queue« y HOY lo adjuntan LOS
+               DOS endpoints: «findAll« y «findOne« de invoicing.service.ts
+               aplican el MISMO criterio de elegibilidad
+               (RETRY_ELIGIBLE_SEND_STATUSES ∪ RETRY_ELIGIBLE_TRANSMISSION_STATUSES).
+               Acá decía lo contrario —«sólo la lista lo trae»— y era falso: se
+               verificó releyendo «findOne«. Una nota caducada sobre de dónde sale
+               un dato es justo la que hace que el próximo lector conserve un
+               apaño que ya no hace falta.
+
+               Ausente NO significa «no vino»: significa «esta factura no es
+               candidata a reintento». Por eso el panel se pinta sobre la
+               presencia del objeto y nunca sobre la de la clave.
           -->
           @if (inv.retry_status; as retry) {
             <div class="mb-4 p-3 rounded-lg border border-border bg-[var(--color-surface-secondary)] space-y-2">
@@ -500,13 +516,29 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   <app-icon name="history" [size]="14" class="text-text-secondary" />
                   <h4 class="text-sm font-semibold text-text-primary">Eventos RADIAN</h4>
                 </div>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  [loading]="eventsLoading()"
-                  (clicked)="reloadEvents()">
-                  <app-icon slot="icon" name="refresh-cw" [size]="12"></app-icon>
-                </app-button>
+                <div class="flex items-center gap-1">
+                  <!-- Registrar sólo con la factura ACEPTADA: un evento
+                       referencia el documento por su CUFE dentro del catálogo
+                       DIAN, y sobre un documento no aceptado el backend rechaza
+                       con DIAN_EVENT_001. Ofrecer el botón antes sería ofrecer
+                       un error. -->
+                  @if (inv.status === 'accepted') {
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="openEventModal()">
+                      <app-icon slot="icon" name="plus" [size]="12"></app-icon>
+                      Registrar
+                    </app-button>
+                  }
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    [loading]="eventsLoading()"
+                    (clicked)="reloadEvents()">
+                    <app-icon slot="icon" name="refresh-cw" [size]="12"></app-icon>
+                  </app-button>
+                </div>
               </div>
 
               @if (eventsLoading()) {
@@ -653,6 +685,19 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         </div>
       </div>
     </app-modal>
+
+    <!-- HERMANO del modal de detalle, no hijo. Metido dentro del cuerpo del
+         detalle, el desplegable del selector —posicionado absoluto— quedaría
+         recortado por el «overflow-y-auto« del modal padre, y el usuario vería
+         media lista de eventos. Acá arriba sólo se monta cuando hay factura, así
+         que «invoiceId« (input requerido) nunca se queda sin valor. -->
+    @if (detail(); as inv) {
+      <vendix-dian-event-register-modal
+        [(isOpen)]="eventModalOpen"
+        [invoiceId]="inv.id"
+        [invoiceNumber]="inv.invoice_number"
+      ></vendix-dian-event-register-modal>
+    }
     `
 })
 export class InvoiceDetailComponent {
@@ -685,6 +730,9 @@ export class InvoiceDetailComponent {
   /** Descarga del PDF en curso. Señal, no booleano plano: en zoneless un campo
    *  mutado dentro de un `subscribe` no repinta nada. */
   readonly pdfLoading = signal(false);
+
+  /** Visibilidad del modal de registro de eventos RADIAN. */
+  readonly eventModalOpen = signal(false);
 
   /**
    * Reloj que late para la cuenta regresiva de las 48 h.
@@ -758,10 +806,12 @@ export class InvoiceDetailComponent {
    * La factura que se pinta: la fila de la lista ENRIQUECIDA con el detalle
    * completo cuando ya llegó.
    *
-   * El orden del spread importa. `full` (de `GET :id`) manda porque es el dato
-   * fresco, pero NO trae `retry_status` —sólo lo adjunta el endpoint de lista—,
-   * y como el spread sólo copia claves presentes, el de `base` sobrevive. Al
-   * revés se perdería el panel de reintentos.
+   * El orden del spread importa: `full` (de `GET :id`) manda porque es el dato
+   * fresco. Ambos traen `retry_status` —`findOne` lo adjunta con el mismo
+   * criterio que `findAll`; lo contrario decía este comentario y era falso—, así
+   * que el fusionado se queda con el del detalle, que es el más reciente. El
+   * `...base` de abajo sigue siendo necesario para cualquier clave que la lista
+   * traiga y el detalle no, no para ésta en particular.
    */
   readonly detail = computed<Invoice | null>(() => {
     const base = this.invoice();
@@ -988,6 +1038,10 @@ export class InvoiceDetailComponent {
     if (inv && !this.eventsLoading()) {
       this.store.dispatch(InvoicingActions.loadDianEvents({ invoiceId: inv.id }));
     }
+  }
+
+  openEventModal(): void {
+    this.eventModalOpen.set(true);
   }
 
   // ── Documentos ────────────────────────────────────────────
