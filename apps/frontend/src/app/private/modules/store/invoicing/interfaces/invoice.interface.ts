@@ -676,16 +676,38 @@ export interface UpdateInvoiceDto {
   items?: CreateInvoiceItemDto[];
 }
 
+/**
+ * Nota crédito.
+ *
+ * El campo es `related_invoice_id`, igual que la columna y que
+ * `CreateCreditNoteDto` del backend. Se llamó `original_invoice_id` y ese
+ * nombre no existe en el DTO: con `forbidNonWhitelisted` activo la petición se
+ * rechazaba con 400 antes de llegar al servicio, así que crear una nota desde
+ * la UI era imposible.
+ *
+ * Sin `items` la nota es TOTAL y el backend copia las líneas de la factura que
+ * corrige. Sin `issue_date` la fecha la pone el backend en el huso de la
+ * tienda, que es donde debe calcularse una fecha fiscal.
+ */
 export interface CreateCreditNoteDto {
-  original_invoice_id: number;
-  reason: string;
+  related_invoice_id: number;
+  reason?: string;
+  issue_date?: string;
+  currency?: string;
+  notes?: string;
   items?: CreateInvoiceItemDto[];
+  taxes?: CreateInvoiceTaxDto[];
 }
 
+/** Nota débito. Mismo contrato que {@link CreateCreditNoteDto}. */
 export interface CreateDebitNoteDto {
-  original_invoice_id: number;
-  reason: string;
+  related_invoice_id: number;
+  reason?: string;
+  issue_date?: string;
+  currency?: string;
+  notes?: string;
   items?: CreateInvoiceItemDto[];
+  taxes?: CreateInvoiceTaxDto[];
 }
 
 export interface CreateResolutionDto {

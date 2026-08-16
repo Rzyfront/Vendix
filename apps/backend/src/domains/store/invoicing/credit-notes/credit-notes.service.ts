@@ -11,6 +11,10 @@ import {
 } from './dto/create-credit-note.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
+import {
+  localDateString,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
@@ -92,9 +96,12 @@ export class CreditNotesService {
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
 
-    // Validate the related invoice exists and is accepted
+    // Validate the related invoice exists and is accepted.
+    // Las líneas y los impuestos se traen aquí porque una nota TOTAL (la que
+    // sólo lleva motivo) los copia del documento que corrige.
     const related_invoice = await this.prisma.invoices.findFirst({
       where: { id: dto.related_invoice_id },
+      include: { invoice_items: true, invoice_taxes: true },
     });
 
     if (!related_invoice) {
@@ -128,16 +135,68 @@ export class CreditNotesService {
         accounting_entity_id: note_accounting_entity_id,
       });
 
+    // Nota TOTAL: sin líneas propias se copian las de la factura corregida.
+    // Iterar `dto.items` sin este fallback lanzaba un `TypeError` crudo —un 500
+    // «Error interno»— sobre lo que en realidad es una nota de anulación
+    // perfectamente válida.
+    const items = dto.items?.length
+      ? dto.items
+      : related_invoice.invoice_items.map((item) => ({
+          product_id: item.product_id ?? undefined,
+          product_variant_id: item.product_variant_id ?? undefined,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+          discount_amount: Number(item.discount_amount ?? 0),
+          tax_amount: Number(item.tax_amount ?? 0),
+        }));
+
+    if (!items.length) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `No hay líneas para la ${type === 'credit_note' ? 'nota crédito' : 'nota débito'}: ` +
+          'no se enviaron y la factura que corrige tampoco tiene ninguna.',
+        { related_invoice_id: related_invoice.id },
+      );
+    }
+
+    // Los impuestos siguen a las líneas: si la nota es total y no trae los
+    // suyos, copia también los de la factura, o el documento quedaría con base
+    // gravable pero sin cuota.
+    const taxes = dto.taxes?.length
+      ? dto.taxes
+      : dto.items?.length
+        ? []
+        : related_invoice.invoice_taxes.map((t) => ({
+            tax_rate_id: t.tax_rate_id ?? undefined,
+            tax_name: t.tax_name,
+            tax_rate: Number(t.tax_rate),
+            taxable_amount: Number(t.taxable_amount),
+            tax_amount: Number(t.tax_amount),
+            tax_type: t.tax_type,
+          }));
+
     // Calculate amounts
     let subtotal = 0;
     let discount = 0;
     let tax = 0;
-    for (const item of dto.items) {
+    for (const item of items) {
       subtotal += item.quantity * item.unit_price;
       discount += item.discount_amount || 0;
       tax += item.tax_amount || 0;
     }
     const total = subtotal - discount + tax;
+
+    // Fecha fiscal de la nota: HOY en el huso de la tienda. Derivarla en el
+    // navegador es de donde salen los desfases de un día.
+    const issue_date = dto.issue_date
+      ? new Date(dto.issue_date)
+      : new Date(
+          localDateString(
+            new Date(),
+            await resolveStoreTimezone(this.prisma, context.store_id!),
+          ),
+        );
 
     const note = await this.prisma.invoices.create({
       data: {
@@ -159,11 +218,11 @@ export class CreditNotesService {
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total),
         currency: dto.currency || related_invoice.currency || 'COP',
-        issue_date: new Date(dto.issue_date),
+        issue_date,
         created_by_user_id: context.user_id,
         notes: dto.notes || (dto as CreateCreditNoteDto).reason,
         invoice_items: {
-          create: dto.items.map((item) => {
+          create: items.map((item) => {
             const item_total =
               item.quantity * item.unit_price -
               (item.discount_amount || 0) +
@@ -180,10 +239,9 @@ export class CreditNotesService {
             };
           }),
         },
-        ...(dto.taxes &&
-          dto.taxes.length > 0 && {
+        ...(taxes.length > 0 && {
             invoice_taxes: {
-              create: dto.taxes.map((tax_item, index) => {
+              create: taxes.map((tax_item, index) => {
                 // `taxable_amount` y `tax_amount` son opcionales en
                 // `CreateInvoiceTaxDto` porque en las FACTURAS los deriva
                 // `InvoiceCalculatorService` a partir de la línea. Este servicio

@@ -274,13 +274,13 @@ export class CreditNoteCreateComponent {
     if (this.noteType() === 'credit') {
       this.store.dispatch(
         createCreditNote({
-          dto: { original_invoice_id: originalInvoiceId, reason },
+          dto: { related_invoice_id: originalInvoiceId, reason },
         }),
       );
     } else {
       this.store.dispatch(
         createDebitNote({
-          dto: { original_invoice_id: originalInvoiceId, reason },
+          dto: { related_invoice_id: originalInvoiceId, reason },
         }),
       );
     }
