@@ -6,9 +6,9 @@ import {
   IsArray,
   ValidateNested,
   IsDateString,
-  IsEnum,
   ValidateIf,
   Min,
+  IsIn,
 } from 'class-validator';
 import { Type, Transform, TransformFnParams } from 'class-transformer';
 
@@ -133,11 +133,11 @@ export class CreateDispatchNoteItemDto {
 
 export class CreateDispatchNoteDto {
   @IsOptional()
-  @IsEnum(['outbound', 'inbound'])
+  @IsIn(['outbound', 'inbound'])
   direction?: 'outbound' | 'inbound';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'customer_delivery',
     'customer_return',
     'transfer_out',
@@ -152,7 +152,7 @@ export class CreateDispatchNoteDto {
     | 'purchase_receipt';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'sale',
     'sample',
     'consignment',

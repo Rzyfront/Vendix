@@ -2,14 +2,14 @@ import {
   IsString,
   IsOptional,
   IsBoolean,
-  IsEnum,
   IsInt,
   MinLength,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 
 export class CreateMetadataFieldDto {
-  @IsEnum(['customer', 'booking', 'order'])
+  @IsIn(['customer', 'booking', 'order'])
   entity_type: string;
 
   @IsString()
@@ -17,7 +17,7 @@ export class CreateMetadataFieldDto {
   @MaxLength(100)
   field_key: string;
 
-  @IsEnum([
+  @IsIn([
     'text',
     'number',
     'date',
@@ -45,7 +45,7 @@ export class CreateMetadataFieldDto {
   is_required?: boolean;
 
   @IsOptional()
-  @IsEnum(['summary', 'detail'])
+  @IsIn(['summary', 'detail'])
   display_mode?: string;
 
   @IsOptional()

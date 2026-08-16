@@ -1,7 +1,6 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
   IsNumber,
   IsBoolean,
   IsObject,
@@ -10,11 +9,12 @@ import {
   ValidateNested,
   MaxLength,
   Min,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PlanPricingDto {
-  @IsEnum(['monthly', 'quarterly', 'semiannual', 'annual'])
+  @IsIn(['monthly', 'quarterly', 'semiannual', 'annual'])
   billing_cycle: string;
 
   @IsNumber()
@@ -46,15 +46,15 @@ export class CreatePlanDto {
   description?: string;
 
   @IsOptional()
-  @IsEnum(['base', 'partner_custom', 'promotional'])
+  @IsIn(['base', 'partner_custom', 'promotional'])
   plan_type?: string;
 
   @IsOptional()
-  @IsEnum(['draft', 'active', 'archived'])
+  @IsIn(['draft', 'active', 'archived'])
   state?: string;
 
   @IsOptional()
-  @IsEnum(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
+  @IsIn(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
   billing_cycle?: string;
 
   @IsNumber()

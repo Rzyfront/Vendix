@@ -5,8 +5,8 @@ import {
   IsArray,
   ValidateNested,
   IsDateString,
-  IsEnum,
   Min,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
@@ -16,13 +16,13 @@ import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
  * related_dispatch_id is REQUIRED — must point to the original outbound dispatch.
  */
 export class CreateReturnDispatchDto {
-  @IsEnum(['inbound'])
+  @IsIn(['inbound'])
   direction: 'inbound';
 
-  @IsEnum(['customer_return'])
+  @IsIn(['customer_return'])
   subtype: 'customer_return';
 
-  @IsEnum([
+  @IsIn([
     'defective',
     'wrong_item',
     'cancellation',

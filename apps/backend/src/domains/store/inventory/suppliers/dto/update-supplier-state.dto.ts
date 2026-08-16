@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty } from 'class-validator';
+import { IsNotEmpty, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { supplier_state_enum } from '@prisma/client';
 
@@ -15,6 +15,6 @@ export class UpdateSupplierStateDto {
     enum: [supplier_state_enum.active, supplier_state_enum.inactive],
   })
   @IsNotEmpty()
-  @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
+  @IsIn([supplier_state_enum.active, supplier_state_enum.inactive])
   state: supplier_state_enum;
 }

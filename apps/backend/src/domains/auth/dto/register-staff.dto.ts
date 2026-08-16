@@ -6,7 +6,7 @@ import {
   MinLength,
   MaxLength,
   IsInt,
-  IsEnum,
+  IsIn,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsStrongPassword } from '../../../common/validators/password-policy';
@@ -50,7 +50,7 @@ export class RegisterStaffDto {
     enum: ['manager', 'supervisor', 'employee', 'carrier'],
   })
   @IsString()
-  @IsEnum(['manager', 'supervisor', 'employee', 'carrier'])
+  @IsIn(['manager', 'supervisor', 'employee', 'carrier'])
   role: string;
 
   @ApiPropertyOptional({

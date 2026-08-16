@@ -1,13 +1,13 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
   IsBoolean,
   IsArray,
   ValidateNested,
   IsInt,
   MaxLength,
   Matches,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -119,11 +119,11 @@ export class CreateTemplateDto {
   icon?: string;
 
   @IsOptional()
-  @IsEnum(['active', 'inactive', 'archived'])
+  @IsIn(['active', 'inactive', 'archived'])
   status?: string;
 
   @IsOptional()
-  @IsEnum(['customer', 'booking', 'order'])
+  @IsIn(['customer', 'booking', 'order'])
   entity_type?: string;
 
   @IsOptional()

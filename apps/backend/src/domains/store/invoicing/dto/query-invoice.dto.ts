@@ -3,8 +3,8 @@ import {
   IsOptional,
   IsNumber,
   IsDateString,
-  IsEnum,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -34,7 +34,7 @@ export class QueryInvoiceDto {
   sort_order?: 'asc' | 'desc' = 'desc';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'draft',
     'validated',
     'sent',
@@ -55,7 +55,7 @@ export class QueryInvoiceDto {
    * listado solo aceptaba 5 antes de QUI-682).
    */
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'sales_invoice',
     'purchase_invoice',
     'credit_note',

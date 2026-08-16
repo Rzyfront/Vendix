@@ -336,7 +336,7 @@ export class CreateInvoiceTaxDto {
 }
 
 export class CreateInvoiceDto {
-  @IsEnum([
+  @IsIn([
     'sales_invoice',
     'purchase_invoice',
     'export_invoice',

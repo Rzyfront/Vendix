@@ -1,6 +1,7 @@
 import {
   IsDate,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -110,10 +111,10 @@ export class QueryOrgAdjustmentDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum(['created_at', 'approved_at', 'quantity_change'])
+  @IsIn(['created_at', 'approved_at', 'quantity_change'])
   sort_by?: 'created_at' | 'approved_at' | 'quantity_change';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc';
 }

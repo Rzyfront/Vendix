@@ -73,7 +73,7 @@ export class GeneralSettingsDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
+  @IsIn(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
 
   @ApiProperty({
@@ -104,7 +104,7 @@ export class InventorySettingsDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(['hide', 'show', 'disable', 'allow_backorder'])
+  @IsIn(['hide', 'show', 'disable', 'allow_backorder'])
   out_of_stock_action?: 'hide' | 'show' | 'disable' | 'allow_backorder';
 
   /**
@@ -162,7 +162,7 @@ export class InventorySettingsDto {
       'Scope used by POS when locating stock for sale. `main_location` restricts POS to the store default location; `all_locations` allows any active location.',
   })
   @IsOptional()
-  @IsEnum(['main_location', 'all_locations'])
+  @IsIn(['main_location', 'all_locations'])
   pos_stock_scope?: 'main_location' | 'all_locations';
 
   @ApiProperty({
@@ -173,7 +173,7 @@ export class InventorySettingsDto {
       'Scope used by low-stock alerts. `main_location` evaluates only the default location; `all_locations` aggregates across all active locations.',
   })
   @IsOptional()
-  @IsEnum(['main_location', 'all_locations'])
+  @IsIn(['main_location', 'all_locations'])
   low_stock_alerts_scope?: 'main_location' | 'all_locations';
 }
 

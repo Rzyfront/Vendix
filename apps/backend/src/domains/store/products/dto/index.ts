@@ -1120,7 +1120,7 @@ export class CreateProductVariantDto {
 
   @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
   @IsOptional()
-  @IsEnum(['per_session', 'package', 'subscription'])
+  @IsIn(['per_session', 'package', 'subscription'])
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
 
   @ApiPropertyOptional({
@@ -1228,7 +1228,7 @@ export class UpdateProductVariantDto {
 
   @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
   @IsOptional()
-  @IsEnum(['per_session', 'package', 'subscription'])
+  @IsIn(['per_session', 'package', 'subscription'])
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
 
   @ApiPropertyOptional({

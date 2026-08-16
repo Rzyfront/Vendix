@@ -5,9 +5,9 @@ import {
   IsArray,
   ValidateNested,
   IsDateString,
-  IsEnum,
   ValidateIf,
   Min,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
@@ -18,14 +18,14 @@ import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
  * Cross-field validation (direction↔subtype consistency, cross-store scope) is in the service.
  */
 export class CreateTransferDispatchDto {
-  @IsEnum(['outbound', 'inbound'])
+  @IsIn(['outbound', 'inbound'])
   direction: 'outbound' | 'inbound';
 
-  @IsEnum(['transfer_out', 'transfer_in'])
+  @IsIn(['transfer_out', 'transfer_in'])
   subtype: 'transfer_out' | 'transfer_in';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'replenishment',
     'rebalancing',
     'returned_from_consignee',

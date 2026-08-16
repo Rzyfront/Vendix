@@ -1,9 +1,9 @@
 import {
-  IsEnum,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -12,7 +12,7 @@ export class CreateAdjustmentDto {
   @Type(() => Number)
   account_id: number;
 
-  @IsEnum(['elimination', 'reclassification', 'adjustment'])
+  @IsIn(['elimination', 'reclassification', 'adjustment'])
   type: string;
 
   @IsNumber()

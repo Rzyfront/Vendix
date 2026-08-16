@@ -1,14 +1,14 @@
 import {
   IsOptional,
-  IsEnum,
   IsDateString,
   IsString,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 
 export class UpdatePayrollRunDto {
   @IsOptional()
-  @IsEnum(['monthly', 'biweekly', 'weekly'])
+  @IsIn(['monthly', 'biweekly', 'weekly'])
   frequency?: 'monthly' | 'biweekly' | 'weekly';
 
   @IsOptional()

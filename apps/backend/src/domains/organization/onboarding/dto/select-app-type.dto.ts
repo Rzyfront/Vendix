@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { AppType } from './setup-app-config-wizard.dto';
 
 export class SelectAppTypeDto {
@@ -18,7 +18,7 @@ export class SelectAppTypeDto {
     example: 'ORGANIZATION',
   })
   @IsOptional()
-  @IsEnum(['STORE', 'ORGANIZATION'] as any, {
+  @IsIn(['STORE', 'ORGANIZATION'] as any, {
     message: 'fiscal_scope must be STORE or ORGANIZATION',
   })
   fiscal_scope?: 'STORE' | 'ORGANIZATION';

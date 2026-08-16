@@ -4,11 +4,11 @@ import {
   IsNumber,
   Min,
   Max,
-  IsEnum,
   IsArray,
   IsOptional,
   IsObject,
   ValidateNested,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -84,7 +84,7 @@ export class StandardCarrierDto {
     enum: ['fedex', 'dhl', 'ups', 'correos', 'estafeta', 'custom'],
     example: 'fedex',
   })
-  @IsEnum(['fedex', 'dhl', 'ups', 'correos', 'estafeta', 'custom'])
+  @IsIn(['fedex', 'dhl', 'ups', 'correos', 'estafeta', 'custom'])
   type: 'fedex' | 'dhl' | 'ups' | 'correos' | 'estafeta' | 'custom';
 
   @ApiProperty({ example: true })
@@ -135,7 +135,7 @@ export class ExpressCarrierDto {
     enum: ['servientrega', 'rappi', 'didi', 'uber_direct', 'custom'],
     example: 'servientrega',
   })
-  @IsEnum(['servientrega', 'rappi', 'didi', 'uber_direct', 'custom'])
+  @IsIn(['servientrega', 'rappi', 'didi', 'uber_direct', 'custom'])
   type: 'servientrega' | 'rappi' | 'didi' | 'uber_direct' | 'custom';
 
   @ApiProperty({ example: true })
@@ -184,7 +184,7 @@ export class LocalDeliveryProviderDto {
     enum: ['deliveri', 'mensajeros', 'motocicletas', 'custom'],
     example: 'deliveri',
   })
-  @IsEnum(['deliveri', 'mensajeros', 'motocicletas', 'custom'])
+  @IsIn(['deliveri', 'mensajeros', 'motocicletas', 'custom'])
   type: 'deliveri' | 'mensajeros' | 'motocicletas' | 'custom';
 
   @ApiProperty({ example: true })

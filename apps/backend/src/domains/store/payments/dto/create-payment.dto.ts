@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsObject,
   IsEnum,
+  IsIn,
   Min,
   MaxLength,
   IsArray,
@@ -163,7 +164,7 @@ export class PaymentQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'pending',
     'succeeded',
     'failed',

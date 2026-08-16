@@ -2,8 +2,8 @@ import {
   IsOptional,
   IsNumber,
   IsString,
-  IsEnum,
   IsDate,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -26,7 +26,7 @@ export class TransferQueryDto {
    * clients and historical rows: `draft`, `completed`.
    */
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'pending',
     'approved',
     'in_transit',
@@ -80,10 +80,10 @@ export class TransferQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum(['transfer_date', 'created_at', 'transfer_number'])
+  @IsIn(['transfer_date', 'created_at', 'transfer_number'])
   sort_by?: 'transfer_date' | 'created_at' | 'transfer_number';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc';
 }

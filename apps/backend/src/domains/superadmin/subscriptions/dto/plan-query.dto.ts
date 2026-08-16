@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, IsEnum, Min } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PlanQueryDto {
@@ -19,15 +19,15 @@ export class PlanQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum(['base', 'partner_custom', 'promotional'])
+  @IsIn(['base', 'partner_custom', 'promotional'])
   plan_type?: string;
 
   @IsOptional()
-  @IsEnum(['draft', 'active', 'archived'])
+  @IsIn(['draft', 'active', 'archived'])
   state?: string;
 
   @IsOptional()
-  @IsEnum(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
+  @IsIn(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
   billing_cycle?: string;
 
   @IsOptional()
@@ -35,6 +35,6 @@ export class PlanQueryDto {
   sort_by?: string = 'created_at';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
 }

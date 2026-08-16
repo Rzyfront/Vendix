@@ -7,7 +7,6 @@ import {
   IsDateString,
   IsIn,
   IsBoolean,
-  IsEnum,
   ValidateIf,
   Min,
   MaxLength,
@@ -110,11 +109,11 @@ export class RouteAssignmentDto {
 
 export class CreateFromOrderDto {
   @IsOptional()
-  @IsEnum(['outbound', 'inbound'])
+  @IsIn(['outbound', 'inbound'])
   direction?: 'outbound' | 'inbound';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'customer_delivery',
     'customer_return',
     'transfer_out',
@@ -129,7 +128,7 @@ export class CreateFromOrderDto {
     | 'purchase_receipt';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'sale',
     'sample',
     'consignment',

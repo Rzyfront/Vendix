@@ -1,12 +1,12 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
   IsBoolean,
   IsUUID,
   MaxLength,
   MinLength,
   Matches,
+  IsIn,
 } from 'class-validator';
 import {
   TrimString,
@@ -28,7 +28,7 @@ export class UpdateDianConfigDto {
   nit?: string;
 
   @IsOptional()
-  @IsEnum(['NIT', 'CC', 'CE', 'TI', 'PP', 'NIT_EXTRANJERIA'])
+  @IsIn(['NIT', 'CC', 'CE', 'TI', 'PP', 'NIT_EXTRANJERIA'])
   nit_type?: 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
 
   @IsOptional()
@@ -43,7 +43,7 @@ export class UpdateDianConfigDto {
   is_default?: boolean;
 
   @IsOptional()
-  @IsEnum(['invoicing', 'support_document', 'payroll', 'equivalent_document'])
+  @IsIn(['invoicing', 'support_document', 'payroll', 'equivalent_document'])
   configuration_type?:
     | 'invoicing'
     | 'support_document'
@@ -52,7 +52,7 @@ export class UpdateDianConfigDto {
     | 'equivalent_document';
 
   @IsOptional()
-  @IsEnum(['own_software', 'technological_provider'])
+  @IsIn(['own_software', 'technological_provider'])
   operation_mode?: 'own_software' | 'technological_provider';
   /**
    * ARN (o key-id) de la clave asimétrica RSA de AWS KMS que custodia la mitad
@@ -99,7 +99,7 @@ export class UpdateDianConfigDto {
   software_pin?: string;
 
   @IsOptional()
-  @IsEnum(['test', 'production'])
+  @IsIn(['test', 'production'])
   environment?: 'test' | 'production';
 
   @IsOptional()

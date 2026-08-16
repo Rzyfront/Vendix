@@ -6,8 +6,8 @@ import {
   ArrayNotEmpty,
   ValidateNested,
   IsDateString,
-  IsEnum,
   Min,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
@@ -18,13 +18,13 @@ import { CreateDispatchNoteItemDto } from './create-dispatch-note.dto';
  * purchase_order_id is optional — when present, the service delegates to PurchaseOrdersService.receive.
  */
 export class CreatePurchaseReceiptDispatchDto {
-  @IsEnum(['inbound'])
+  @IsIn(['inbound'])
   direction: 'inbound';
 
-  @IsEnum(['purchase_receipt'])
+  @IsIn(['purchase_receipt'])
   subtype: 'purchase_receipt';
 
-  @IsEnum(['normal_purchase', 'replacement_for_damage', 'sample_received'])
+  @IsIn(['normal_purchase', 'replacement_for_damage', 'sample_received'])
   reason: 'normal_purchase' | 'replacement_for_damage' | 'sample_received';
 
   @IsInt()
