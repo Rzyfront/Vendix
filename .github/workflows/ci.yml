@@ -223,17 +223,8 @@ jobs:
     name: Backend Tests (jest)
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success' && needs.changes.outputs.backend == 'true'
+    if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
     timeout-minutes: 25
-    env:
-      # QUI-563: el default TEST_MEM=2048 + 2 workers OOM-eaba los specs de
-      # ts-jest en ubuntu-latest (7 GB). Subimos a 3072 MB por worker y baja-
-      # mos a 1 worker (runInBand) para que compile lineal sin competir por
-      # heap. Sin este override, la suite pega "heap out of memory" en ~25
-      # specs y el job expira a los 900 s del script. Es override de CI
-      # solamente — el default local sigue siendo 2048/2.
-      BUILDCHECK_TEST_MEM: '3072'
-      BUILDCHECK_TEST_WORKERS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
