@@ -104,7 +104,7 @@ import {
           @if (showAction()) {
             <button
               type="button"
-              (click)="emitNow()"
+              (click)="onAction()"
               [disabled]="working()"
               class="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               [class]="actionClass()"
@@ -308,24 +308,46 @@ export class PosFiscalStatusComponent {
   // ── Acciones ──────────────────────────────────────────────
 
   /**
+   * Lo que hace el botón, según el estado.
+   *
+   * Con el documento en camino RECONSULTA; sólo con el documento fallido vuelve
+   * a emitir. La distinción no es cosmética: un `POST /emit` sobre un documento
+   * que ya está `validated` y esperando en la cola lo transmitiría por segunda
+   * vez, en paralelo con el reintento del cron. El botón dice «Consultar»
+   * cuando consulta y «Reintentar» cuando reintenta.
+   */
+  onAction(): void {
+    if (this.state() === 'failed') {
+      this.emitNow();
+      return;
+    }
+    this.refresh();
+  }
+
+  /**
    * Pide la emisión (o el reintento) sin bloquear nada. El backend responde 200
    * con el estado incluso cuando la DIAN falla, así que aquí no hay rama de
    * error que atender: lo que vuelve siempre es el estado real del documento.
+   *
+   * @returns `false` si no llegó a pedirla porque ya hay una consulta en vuelo.
+   *   Lo usa el pie del POS para no dejar su botón cargando indefinidamente.
    */
-  emitNow(): void {
+  emitNow(): boolean {
     const order_id = this.orderId();
-    if (!order_id || this.working()) return;
+    if (!order_id || this.working()) return false;
     this.stopPolling();
     this.poll_attempts = 0;
     this.load(order_id, true);
+    return true;
   }
 
   /** Reconsulta el estado sin emitir. */
-  refresh(): void {
+  refresh(): boolean {
     const order_id = this.orderId();
-    if (!order_id || this.working()) return;
+    if (!order_id || this.working()) return false;
     this.stopPolling();
     this.load(order_id, false);
+    return true;
   }
 
   private load(order_id: number, emit: boolean): void {

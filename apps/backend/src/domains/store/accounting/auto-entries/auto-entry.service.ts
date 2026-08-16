@@ -400,7 +400,10 @@ export class AutoEntryService {
       where: { organization_id, code: { in: wanted } },
       select: { code: true, name: true, is_active: true, accepts_entries: true },
     });
-    const by_code = new Map(rows.map((r) => [r.code, r]));
+    const by_code = new Map<
+      string,
+      { code: string; name: string; is_active: boolean; accepts_entries: boolean }
+    >(rows.map((r) => [r.code, r]));
 
     for (const code of wanted) {
       const account = by_code.get(code);

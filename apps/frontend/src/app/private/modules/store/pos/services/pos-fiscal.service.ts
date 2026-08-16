@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
@@ -75,7 +75,7 @@ export class PosFiscalService {
       .get<any>(`${this.apiUrl}/orders/${orderId}/fiscal-status`)
       .pipe(
         map((response) => this.unwrap(response, orderId)),
-        catchError(() => of(this.unreachable(orderId))),
+        catchError((error) => of(this.unreachable(orderId, error))),
       );
   }
 
@@ -88,7 +88,7 @@ export class PosFiscalService {
       .post<any>(`${this.apiUrl}/orders/${orderId}/emit`, {})
       .pipe(
         map((response) => this.unwrap(response, orderId)),
-        catchError(() => of(this.unreachable(orderId))),
+        catchError((error) => of(this.unreachable(orderId, error))),
       );
   }
 
@@ -104,17 +104,31 @@ export class PosFiscalService {
   }
 
   /**
-   * El backend no contestó. NO es `failed`: `failed` significa que el documento
-   * fue rechazado y necesita intervención, y eso no es lo que sabemos. Lo que
-   * sabemos es que no pudimos preguntar, así que se reporta como pendiente —
-   * que es además el estado real más probable, porque el oyente post-commit ya
-   * disparó la emisión del lado del servidor.
+   * El backend no contestó, y lo que se responde depende de POR QUÉ.
+   *
+   * - **No podemos preguntar** (401/403 sin permiso, 400 de ruta mal formada,
+   *   404): `not_applicable`, que el indicador no pinta. Devolver `pending`
+   *   aquí dejaba al cajero mirando «Enviando a la DIAN…» sobre una consulta que
+   *   nunca iba a resolverse, y el indicador reconsultando doce veces contra un
+   *   403 que va a seguir siendo 403.
+   * - **No pudimos preguntar AHORA** (red caída, 5xx, timeout): `pending`. Es
+   *   además el estado real más probable, porque el oyente post-commit ya
+   *   disparó la emisión del lado del servidor; la reconsulta tiene sentido.
+   *
+   * En ninguno de los dos casos se responde `failed`: eso significa que el
+   * documento fue rechazado y necesita intervención, y eso es precisamente lo
+   * que NO sabemos cuando la respuesta no llegó.
    */
-  private unreachable(orderId: number): PosFiscalStatus {
+  private unreachable(orderId: number, error?: unknown): PosFiscalStatus {
+    const status = error instanceof HttpErrorResponse ? error.status : 0;
+    const cannot_ask = status === 400 || status === 401 || status === 403 || status === 404;
+
     return {
       order_id: orderId,
-      state: 'pending',
-      message: 'No se pudo consultar el estado fiscal. La venta ya está registrada.',
+      state: cannot_ask ? 'not_applicable' : 'pending',
+      message: cannot_ask
+        ? 'No hay estado fiscal disponible para esta venta.'
+        : 'No se pudo consultar el estado fiscal. La venta ya está registrada.',
       invoice_id: null,
       invoice_number: null,
       invoice_status: null,

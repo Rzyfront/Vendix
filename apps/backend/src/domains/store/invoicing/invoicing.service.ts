@@ -1072,9 +1072,17 @@ export class InvoicingService {
     // auto-resuelto del tenant (que también queda disponible vía
     // `accepted` para facturas SIN desglose). Vacío o ausente ⇒ sin cambio.
     if (dto.withholdings && dto.withholdings.length > 0) {
+      // Resolver el contexto de tienda/organización desde el ALS — `create()`
+      // ya validó que existe vía `assertInvoicingAreaActive`, así que aquí basta
+      // con derivar los ids que `applyClientDeclaredWithholdings` exige para
+      // abrir su propia transacción.
+      const ctx = this.getContext();
+      const organization_id = Number(ctx.organization_id);
+      const store_id = ctx.store_id != null ? Number(ctx.store_id) : null;
+
       const aggregated = await this.applyClientDeclaredWithholdings({
-        organization_id: organization_id!,
-        store_id: store_id ?? null,
+        organization_id,
+        store_id,
         accounting_entity_id: invoice.accounting_entity_id ?? null,
         invoice_id: invoice.id,
         customer_id:
@@ -2595,7 +2603,16 @@ export class InvoicingService {
         name: true,
       },
     });
-    const conceptById = new Map(concepts.map((c) => [c.id, c]));
+    const conceptById = new Map<
+      number,
+      {
+        id: number;
+        code: string;
+        withholding_type: string;
+        account_code: string | null;
+        name: string;
+      }
+    >(concepts.map((c) => [c.id, c]));
 
     const missing = conceptIds.filter((id) => !conceptById.has(id));
     if (missing.length > 0) {
