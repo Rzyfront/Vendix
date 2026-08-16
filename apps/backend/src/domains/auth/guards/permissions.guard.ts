@@ -45,10 +45,19 @@ export class PermissionsGuard implements CanActivate {
     const currentMethod = method.toUpperCase();
 
     const hasPermission = user.permissions.some((permission) => {
-      // Verificar si coincide exactamente con ruta y método
-      const pathMatches =
-        permission.path === currentPath ||
-        currentPath.startsWith(permission.path);
+      // Coincidencia EXACTA por ruta. El prefijo `startsWith(permission.path)`
+      // que estaba antes abría TODO `/api/*` GET al `customer` cuando el
+      // permiso `system.health` tenía `path = '/api'`: cualquier ruta que
+      // empezara por `/api` quedaba autorizada por error, y `system.health`
+      // se asignaba a 8 roles incluido `customer`.
+      //
+      // El permiso `system.health` apunta a una ruta concreta
+      // (`/api/health`, ver `permissions-roles.seed.ts`), no a un prefijo,
+      // así que la coincidencia exacta es lo correcto. Permisos con `path`
+      // que sea de verdad un prefijo (los módulos multi-ruta) deben
+      // declararlo así explícitamente con un `*` final, que es lo que
+      // distingue una ruta de un prefijo.
+      const pathMatches = permission.path === currentPath;
       const methodMatches =
         permission.method === currentMethod || permission.method === 'ALL';
       const isActive = permission.status === 'active';

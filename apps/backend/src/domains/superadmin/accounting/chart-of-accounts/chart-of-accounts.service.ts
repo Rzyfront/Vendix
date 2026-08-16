@@ -28,19 +28,37 @@ export class ChartOfAccountsService {
       level,
       accepts_entries,
       is_active,
+      ids,
       limit,
       offset,
     } = query;
 
+    // `ids` fija el conjunto y gana sobre `search`: un selector nunca manda
+    // los dos a la vez. Si los dos llegan, `ids` gana porque la
+    // hidratación es lo urgente y la búsqueda es lo exploratorio.
     const where: Prisma.chart_of_accountsWhereInput = {
       accounting_entity_id: ctx.accounting_entity_id,
       organization_id: ctx.organization_id,
-      ...(search && {
-        OR: [
-          { code: { contains: search, mode: 'insensitive' as const } },
-          { name: { contains: search, mode: 'insensitive' as const } },
-        ],
-      }),
+      ...(ids && ids.length > 0
+        ? { id: { in: ids } }
+        : search
+          ? {
+              OR: [
+                {
+                  code: {
+                    contains: search,
+                    mode: 'insensitive' as const,
+                  },
+                },
+                {
+                  name: {
+                    contains: search,
+                    mode: 'insensitive' as const,
+                  },
+                },
+              ],
+            }
+          : {}),
       ...(account_type && { account_type: account_type as any }),
       ...(parent_id !== undefined && { parent_id }),
       ...(level !== undefined && { level }),

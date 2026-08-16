@@ -158,9 +158,20 @@ export interface AccountMapping {
   mapping_key: string;
   account_code: string;
   account_name?: string;
+  /**
+   * `id` de la fila en `chart_of_accounts`. Es lo que el backend exige en
+   * `SetMappingOverrideDto.account_id`; el código (`account_code`) es la
+   * representación legible pero NO lo que se manda al backend.
+   */
+  account_id?: number;
   source: AccountMappingSource;
   override_account_code?: string | null;
   override_account_name?: string | null;
+  /**
+   * Id del override (`chart_of_accounts.id`), no el código. El PATCH al
+   * backend viaja con este id, no con `override_account_code`.
+   */
+  override_account_id?: number | null;
   description?: string;
   updated_at?: string;
 }

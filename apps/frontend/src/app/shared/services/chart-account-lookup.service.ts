@@ -38,7 +38,15 @@ export interface ChartAccountSearchResult {
 }
 
 /** Which controller answers the lookup. */
-export type ChartAccountScope = 'store' | 'organization';
+export type ChartAccountScope =
+  | 'store'
+  | 'organization'
+  /**
+   * Super-admin fiscal: el PUC de CUALQUIER tienda/organización, leído por
+   * super-admin con scope fiscal. La ruta del backend tiene guion porque el
+   * sub-camino es `fiscal`, no `super-admin`.
+   */
+  | 'super-admin/fiscal';
 
 export interface ChartAccountLookupOptions {
   /** Defaults to `'store'`; the ORG_ADMIN fiscal wizard passes `'organization'`. */

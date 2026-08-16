@@ -1786,7 +1786,11 @@ export async function seedPermissionsAndRoles(
     {
       name: 'system.health',
       description: 'Ver salud del sistema',
-      path: '/api',
+      // Coincidencia EXACTA: antes era `/api` con `method: GET`, que el
+      // guard interpretaba como `startsWith('/api')` y abría cualquier GET
+      // del `/api/*` a quien tuviera este permiso — fuga real, porque
+      // `system.health` se asigna a 8 roles incluido `customer`.
+      path: '/api/health',
       method: 'GET',
     },
     {

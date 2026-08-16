@@ -426,11 +426,23 @@ export class AccountMappingsComponent {
     const m = this.selectedMapping();
     if (!m) return;
     this.saving.set(true);
+    // El backend exige `account_id` (number), NO `account_code` (string).
+    // La UI muestra el código (es lo que el usuario elige), pero lo que
+    // viaja es el id: el PATCH del backend (`SetMappingOverrideDto`) tiene
+    // `@IsInt()` sobre `account_id` y rechazaría un string con 400 mudo.
+    // El id lo trae la fila preseleccionada (`override_account_id` si
+    // existe, `account_id` si no).
+    const target_id =
+      m.override_account_id ?? m.account_id ?? null;
+    if (target_id == null) {
+      this.saving.set(false);
+      this.toast.error(
+        'No se pudo resolver el identificador de la cuenta. Recarga la pantalla y vuelve a elegir.',
+      );
+      return;
+    }
     this.api
-      .setMappingOverride(
-        m.mapping_key,
-        this.form.controls.account_code.value.trim(),
-      )
+      .setMappingOverride(m.mapping_key, target_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
