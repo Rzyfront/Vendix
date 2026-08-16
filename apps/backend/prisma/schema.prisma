@@ -2015,6 +2015,9 @@ model refunds {
   processed_at          DateTime?          @db.Timestamp(6)
   created_at            DateTime?          @default(now()) @db.Timestamp(6)
   updated_at            DateTime?          @default(now()) @db.Timestamp(6)
+  // Respuesta cruda de la pasarela, igual que `payments.gateway_response`.
+  // `payment-gateway.service.ts` ya la escribía sin que la columna existiera.
+  gateway_response      Json?
   refund_items          refund_items[]
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2833,6 +2836,12 @@ model return_orders {
   reason_id           Int?
   created_at          DateTime?                @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                @default(now()) @db.Timestamp(6)
+  // Marcas de la transición. `return-orders.service.ts` ya las escribía en
+  // `process()` y `cancel()`, pero las columnas no existían: Prisma rechazaba
+  // el `update` completo, así que procesar o anular una devolución respondía
+  // «Error interno» y la devolución se quedaba en su estado anterior.
+  processed_date      DateTime?                @db.Timestamp(6)
+  cancelled_date      DateTime?                @db.Timestamp(6)
   return_order_items  return_order_items[]
   organizations       organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   related_dispatch    dispatch_notes?          @relation("return_orders_related_dispatch", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)

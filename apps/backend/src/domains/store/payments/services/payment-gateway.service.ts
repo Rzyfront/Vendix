@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { Prisma, refunds_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   PaymentData,
@@ -153,7 +154,7 @@ export class PaymentGatewayService {
       const result = await processor.refundPayment(paymentId, amount);
 
       if (result.success) {
-        await this.createRefundRecord(payment.id, result, reason);
+        await this.createRefundRecord(payment, result, reason);
         await this.updateOrderAfterRefund(payment.order_id);
       }
 
@@ -409,19 +410,46 @@ export class PaymentGatewayService {
     });
   }
 
+  /**
+   * Persiste el reembolso devuelto por la pasarela.
+   *
+   * Este método escribía cuatro campos que no existen en `refunds` y omitía dos
+   * obligatorios, así que TODO reembolso con éxito en la pasarela moría después
+   * con un `PrismaClientValidationError`: el dinero se devolvía al cliente y
+   * Vendix no guardaba el registro. El mapeo correcto es:
+   *
+   * | lo que se escribía | columna real            |
+   * |--------------------|-------------------------|
+   * | `status`           | `state` (`refunds_state_enum`) |
+   * | `refund_id`        | `refund_transaction_id` |
+   * | `gateway_response` | `gateway_response` (columna nueva, `Json?`) |
+   * | —                  | `order_id` (obligatorio) |
+   *
+   * `RefundResult.status` es `'succeeded' | 'failed' | 'pending'`, que NO son
+   * valores de `refunds_state_enum`; escribirlo tal cual habría seguido
+   * fallando aun con el nombre de columna corregido.
+   */
   private async createRefundRecord(
-    paymentId: number,
+    payment: { id: number; order_id: number },
     result: RefundResult,
     reason?: string,
   ) {
+    const REFUND_STATE: Record<RefundResult['status'], refunds_state_enum> = {
+      succeeded: refunds_state_enum.completed,
+      failed: refunds_state_enum.failed,
+      pending: refunds_state_enum.processing,
+    };
+
     return await this.prisma.refunds.create({
       data: {
-        payment_id: paymentId,
+        order_id: payment.order_id,
+        payment_id: payment.id,
         amount: result.amount,
         reason: reason || 'Customer request',
-        status: result.status,
-        refund_id: result.refundId,
-        gateway_response: result.gatewayResponse,
+        state: REFUND_STATE[result.status] ?? refunds_state_enum.processing,
+        refund_transaction_id: result.refundId ?? null,
+        gateway_response: result.gatewayResponse ?? Prisma.JsonNull,
+        processed_at: result.status === 'succeeded' ? new Date() : null,
       },
     });
   }

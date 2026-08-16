@@ -311,6 +311,13 @@ export class PromotionalService {
 
         if (!targetSub) {
           // No subscription yet — create one with the promo plan and active state.
+          //
+          // `effective_price`, `vendix_base_price` y `resolved_features` son
+          // columnas OBLIGATORIAS sin valor por defecto. Sin ellas Prisma
+          // rechazaba el `data` entero, así que asignar un plan promocional a
+          // una tienda que aún no tenía suscripción respondía «Error interno»
+          // — justo el caso que este bloque existe para cubrir. Los tres se
+          // toman del plan, igual que en `subscription-trial.service.ts`.
           targetSub = await tx.store_subscriptions.create({
             data: {
               store_id: store.id,
@@ -319,6 +326,13 @@ export class PromotionalService {
               promotional_applied_at: now,
               state: 'active',
               auto_renew: true,
+              effective_price: promoPlan.base_price,
+              vendix_base_price: promoPlan.base_price,
+              currency: promoPlan.currency,
+              resolved_features:
+                (promoPlan.ai_feature_flags as Prisma.InputJsonValue) ??
+                Prisma.JsonNull,
+              resolved_at: now,
               updated_at: now,
             },
           });

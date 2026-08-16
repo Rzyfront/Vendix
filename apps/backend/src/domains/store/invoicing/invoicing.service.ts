@@ -1244,11 +1244,14 @@ export class InvoicingService {
       select: { id: true },
     });
 
+    // `user_roles` sólo tiene `user_id`, `role_id` y `store_id`; el tenant se
+    // deriva del usuario y de la tienda. Pasar `organization_id` hacía que
+    // Prisma rechazara el `data` completo, así que el cliente inline se creaba
+    // sin rol y la factura fallaba después con «Error interno».
     await this.prisma.user_roles.create({
       data: {
         user_id: created.id,
         role_id: customerRole.id,
-        organization_id,
         store_id,
       },
     });

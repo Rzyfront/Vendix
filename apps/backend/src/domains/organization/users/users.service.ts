@@ -609,11 +609,19 @@ export class UsersService {
     // Hash the new password
     const hashed_password = await bcrypt.hash(new_password, 10);
 
-    // Update user password
+    // Update user password.
+    //
+    // La columna es `password`, no `password_hash`: así se llama en
+    // `schema.prisma` y así la lee el login. Escribir `password_hash` no
+    // actualizaba nada — Prisma rechazaba el `data` entero con un
+    // `PrismaClientValidationError`, que el filtro degrada a `SYS_INTERNAL_001`,
+    // de modo que restablecer la contraseña de un usuario desde la organización
+    // devolvía «Error interno del servidor» y la contraseña seguía siendo la
+    // anterior.
     const updated_user = await this.prisma.users.update({
       where: { id },
       data: {
-        password_hash: hashed_password,
+        password: hashed_password,
         updated_at: new Date(),
       },
     });
@@ -623,8 +631,8 @@ export class UsersService {
       id,
       AuditResource.USERS,
       id,
-      { password_hash: '[REDACTED]' },
-      { password_hash: '[REDACTED]' },
+      { password: '[REDACTED]' },
+      { password: '[REDACTED]' },
       {
         action: 'reset_password',
         reset_by_admin: true,

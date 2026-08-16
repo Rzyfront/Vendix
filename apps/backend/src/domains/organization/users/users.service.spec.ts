@@ -258,7 +258,12 @@ describe('UsersService', () => {
       expect(prismaService.users.update).toHaveBeenCalledWith({
         where: { id: userId },
         data: {
-          password_hash: expect.any(String), // Should be hashed
+          // La columna es `password` (ver `schema.prisma`). Esta aserción decía
+          // `password_hash` y por eso pasaba en verde con el servicio roto: el
+          // mock de Prisma acepta cualquier `data`, así que el test sólo
+          // comprobaba que el servicio y el test coincidieran entre sí, no que
+          // la columna existiera.
+          password: expect.any(String), // Should be hashed
           updated_at: expect.any(Date),
         },
       });
