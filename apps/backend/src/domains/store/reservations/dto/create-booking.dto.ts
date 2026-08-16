@@ -4,6 +4,7 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsIn,
   IsBoolean,
   Matches,
 } from 'class-validator';
@@ -81,7 +82,7 @@ export class CreateBookingDto {
    * `shop` for backwards compatibility with existing POS/ecommerce flows.
    */
   @IsOptional()
-  @IsEnum(['home', 'shop'])
+  @IsIn(['home', 'shop'])
   service_location_type?: 'home' | 'shop';
 
   /**

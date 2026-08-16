@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
@@ -16,8 +16,33 @@ import {
   TrimString,
   TrimTaxId,
 } from '../../../../../common/decorators/trim-string.decorator';
+import {
+  TECHNICAL_KEY_LENGTH,
+  TECHNICAL_KEY_PATTERN,
+  normalizeTechnicalKey,
+} from '../../../../store/invoicing/fiscal-document-requirements';
 
 export type SubscriptionFiscalEnvironment = 'test' | 'production';
+
+/**
+ * La resolución de la PLATAFORMA se numera y se hashea con el mismo motor
+ * fiscal que la de cualquier tienda —la plataforma es un tenant más—, así que su
+ * clave técnica tiene que juzgarse con la misma regla. Este DTO declaraba su
+ * propio `technical_key` con solo `@MaxLength(255)`: el hueco exacto por el que
+ * entró en producción una ClTec de 38 caracteres y se quemó un consecutivo
+ * autorizado. Se consume el contrato compartido en vez de reescribirlo.
+ */
+const TECHNICAL_KEY_MESSAGE =
+  `La clave técnica (ClTec) debe tener exactamente ${TECHNICAL_KEY_LENGTH} caracteres ` +
+  'hexadecimales (0-9, a-f), tal como la entrega la DIAN en la autorización de ' +
+  'numeración. Déjala vacía si este documento no lleva clave técnica.';
+
+/** Quita el ruido de copiar de un PDF y trata el campo en blanco como ausente. */
+const transformTechnicalKey = ({ value }: { value: unknown }) => {
+  if (typeof value !== 'string') return value;
+  const normalized = normalizeTechnicalKey(value);
+  return normalized === '' ? undefined : normalized;
+};
 
 export const PLATFORM_RESOLUTION_DOCUMENT_TYPES = [
   'sales_invoice',
@@ -172,8 +197,9 @@ export class CreatePlatformResolutionDto {
   rango_final!: number;
 
   @IsOptional()
+  @Transform(transformTechnicalKey)
   @IsString()
-  @MaxLength(255)
+  @Matches(TECHNICAL_KEY_PATTERN, { message: TECHNICAL_KEY_MESSAGE })
   technical_key?: string;
 
   @IsOptional()
@@ -224,8 +250,9 @@ export class UpdatePlatformResolutionDto {
   rango_final?: number;
 
   @IsOptional()
+  @Transform(transformTechnicalKey)
   @IsString()
-  @MaxLength(255)
+  @Matches(TECHNICAL_KEY_PATTERN, { message: TECHNICAL_KEY_MESSAGE })
   technical_key?: string;
 
   @IsOptional()

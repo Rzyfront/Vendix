@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsOptional, IsIn } from 'class-validator';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 
 /**
@@ -19,7 +19,7 @@ export class UpdateOrgInventorySettingsDto {
       'Método de costeo a nivel organización. LIFO no está soportado.',
   })
   @IsOptional()
-  @IsEnum(['weighted_average', 'fifo'] as const, {
+  @IsIn(['weighted_average', 'fifo'] as const, {
     message:
       'costing_method debe ser weighted_average o fifo. LIFO no está soportado y cpp es un valor legacy que sólo aplica a stores.',
   })

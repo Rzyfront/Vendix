@@ -62,6 +62,12 @@ export const KNOWN_SECTIONS = [
   'module_flows',
   'fiscal_status',
   'fiscal_data',
+  // Parámetros de emisión fiscal que la ley deja al contribuyente (régimen AIU).
+  // Tiene que estar acá Y como propiedad de `UpdateSettingsDto`: el sanitizador
+  // descarta lo que no esté en esta lista y responde 200 igual, y el
+  // `ValidationPipe` con `whitelist: true` borra lo que el DTO no declare. Con
+  // sólo una de las dos, el PATCH se pierde en silencio.
+  'invoicing',
   'dispatch',
   'restaurant',
   'membership',
@@ -587,6 +593,43 @@ export class SettingsService {
         ...((currentSettings as any).vexi ?? {}),
         ...dto.vexi,
       };
+    }
+
+    // `invoicing` también se mezcla por clave, y una clave MÁS ADENTRO que
+    // `vexi`, porque su contenido está anidado dos niveles: la sección sólo
+    // contiene `aiu`, y `aiu` contiene cuatro parámetros que la pantalla fiscal
+    // edita por separado (régimen, objeto del contrato, piso legal, porcentaje).
+    //
+    // Con el reemplazo del bucle genérico, un PATCH de `{ invoicing: { aiu: {
+    // contract_object } } }` borraría el `regime` ya elegido y el documento
+    // volvería al default `et_462_1` sin avisar. Eso no es una preferencia de
+    // UI que se pierde: cambia la BASE GRAVABLE del IVA de las facturas AIU que
+    // se emitan después, y el error no produce ningún síntoma —la DIAN acepta
+    // el documento igual— hasta que llega la revisión.
+    if (dto.invoicing !== undefined) {
+      const current_invoicing = (currentSettings as any).invoicing ?? {};
+      const merged_invoicing: Record<string, any> = {
+        ...current_invoicing,
+        ...dto.invoicing,
+      };
+
+      // Las subsecciones se FUSIONAN clave a clave; el spread de arriba las
+      // sustituiría enteras. Un PATCH que sólo trae `invoicing.pos.auto_emit`
+      // reemplazaría todo `pos` por ese único campo y borraría el resto en
+      // silencio — la misma pérdida callada que produce olvidar una sección en
+      // `KNOWN_SECTIONS`, sólo que un nivel más abajo y sin ningún síntoma
+      // (la respuesta sigue siendo 200).
+      //
+      // La lista se recorre en vez de escribirse a mano por subsección: `aiu`
+      // era la única cuando esto se escribió, `pos` llegó después, y lo que
+      // falla no es añadir la subsección — es olvidarse de añadirla AQUÍ.
+      for (const key of ['aiu', 'pos'] as const) {
+        const patch = (dto.invoicing as Record<string, any>)[key];
+        if (patch === undefined) continue;
+        merged_invoicing[key] = { ...(current_invoicing[key] ?? {}), ...patch };
+      }
+
+      (updatedSettings as any).invoicing = merged_invoicing;
     }
 
     // @deprecated: Sync bidireccional eliminada. module_flows es source of truth.

@@ -35,6 +35,22 @@ const TRUNCATE = Prisma.Decimal.ROUND_DOWN;
 /** DIAN emits monetary values and tax rates with exactly 2 decimals. */
 const DIAN_SCALE = 2;
 
+/**
+ * `cac:Price/cbc:PriceAmount` admite hasta 6 decimales.
+ *
+ * No es una licencia estética: el anexo declara el formato del campo como
+ * `p (0-6)` (Anexo Técnico 1.9, filas FAW03 / FBB02 / DAW03 / CAW03), mientras
+ * que todo importe monetario del documento va a 2. La diferencia existe porque
+ * el precio unitario no siempre es representable a 2 decimales — y el caso que
+ * lo obliga es exactamente el precio con impuesto incluido: $1.000 con IVA
+ * dentro son 840,336134… de base, y truncar eso a 840,33 multiplica el error
+ * por la cantidad de la línea.
+ *
+ * Sólo se usan los 6 decimales cuando el valor los necesita (ver
+ * {@link dianUnitPrice}): un precio redondo sigue emitiéndose como siempre.
+ */
+const DIAN_PRICE_SCALE = 6;
+
 export type DianNumericInput =
   | string
   | number
@@ -60,6 +76,37 @@ export type DianNumericInput =
  */
 export function dianAmount(value: DianNumericInput): string {
   return formatWithScale(value, DIAN_SCALE);
+}
+
+/**
+ * Formatea `cac:Price/cbc:PriceAmount`.
+ *
+ * Emite 2 decimales cuando el precio los agota —que es todo el catálogo
+ * histórico, así que ningún documento existente cambia— y 6 sólo cuando el
+ * valor tiene más precisión que esa. El campo lo permite (`p (0-6)`) y hace
+ * falta para el precio despejado de una línea con impuesto incluido.
+ *
+ * POR QUÉ IMPORTA QUE NO SE TRUNQUE A 2 — la regla FAV06 es de RECHAZO y
+ * compara `cbc:LineExtensionAmount` contra el precio unitario por la cantidad,
+ * menos los descuentos de la línea. Con el precio despejado truncado a 2
+ * decimales, esa igualdad se separa un centavo por unidad: una línea de 100
+ * unidades se desvía un peso, y el descuadre viaja además al
+ * `LineExtensionAmount` de la cabecera y al `ValFac` del CUFE.
+ *
+ * ```ts
+ * dianUnitPrice('1000')          // '1000.00'      (sin cambio)
+ * dianUnitPrice('840.336134')    // '840.336134'
+ * ```
+ */
+export function dianUnitPrice(value: DianNumericInput): string {
+  const decimal = toDecimal(value);
+  const two_decimals = applyScale(decimal, DIAN_SCALE);
+  // Comparar contra el valor de origen y no contra su longitud de texto: un
+  // `Decimal('840.3300')` es representable a 2 decimales aunque se escriba con
+  // cuatro.
+  return toDecimal(two_decimals).equals(decimal)
+    ? two_decimals
+    : applyScale(decimal, DIAN_PRICE_SCALE);
 }
 
 /**
@@ -142,6 +189,76 @@ export function dianLineExtension(line: DianLineAmounts): string {
 }
 
 /**
+ * Importe de la línea ANTES del descuento: `cantidad × precio ÷ price unit`.
+ *
+ * Es el `cbc:BaseAmount` del `cac:AllowanceCharge` de línea — sobre qué importe
+ * se calculó el descuento. Existe como función y no como expresión suelta
+ * porque el builder la escribía sin el divisor de la *price unit*: una línea
+ * que publica su precio por N unidades de stock declaraba una base N veces
+ * mayor que su propio `cbc:LineExtensionAmount`, o sea un descuento aplicado
+ * sobre un importe que la línea nunca afirma. Derivarla del mismo helper que el
+ * importe neto hace ese desacuerdo irrepresentable.
+ */
+export function dianLineGross(line: DianLineAmounts): string {
+  return applyScale(lineGrossDecimal(line));
+}
+
+/**
+ * `cac:Price/cbc:PriceAmount` — el precio de UNA unidad de las facturadas.
+ *
+ * ## Qué es `cbc:BaseQuantity` en el perfil colombiano
+ *
+ * En el perfil DIAN, `cbc:BaseQuantity` **es la cantidad facturada**, no un
+ * divisor de escala. La regla de rechazo FAV06 es una multiplicación, sin
+ * división en ninguna parte:
+ *
+ *   cbc:LineExtensionAmount = PriceAmount × BaseQuantity
+ *                             − Σ AllowanceCharge[ChargeIndicator=false]
+ *                             + Σ AllowanceCharge[ChargeIndicator=true]
+ *
+ * Verificado sobre los 27 renglones de los XMLs oficiales de la Caja de
+ * Herramientas: los 27 reconcilian con esta lectura y ninguno con la de
+ * divisor. Los dos únicos ejemplos con cantidad ≠ 1 lo fijan sin ambigüedad —
+ * `Transporte de Carga.xml` factura 10 KGM a 200.000 y declara
+ * `BaseQuantity=10` con `LineExtensionAmount=2.000.000`; bajo la lectura de
+ * divisor ese renglón valdría 200.000. (`Consumidor Final.xml` aporta además el
+ * término de recargos: 1.410.000 = 1.400.000 × 1 + 10.000.)
+ *
+ * Es la lectura contraria a la de PEPPOL EN16931-R120, donde `BaseQuantity` sí
+ * escala el precio. Esa regla no es de la DIAN y no aplica acá.
+ *
+ * ## Por qué existe esta función
+ *
+ * Porque `price_unit_quantity` (QUI-648) **no es representable** en este perfil:
+ * el campo que serviría para declarar "este precio es por N unidades" está
+ * ocupado por la cantidad. Así que la escala se consume ANTES del XML, en el
+ * precio: se emite el precio por unidad facturada, y `BaseQuantity` lleva la
+ * cantidad. El queso a $28.000 el kilo con la venta en gramos sale como 500 GRM
+ * a $28 el gramo — mismo importe, y ahora sí derivable de sus propios campos.
+ *
+ * El valor se deriva de {@link dianLineExtension} dividido por la cantidad, no
+ * de una expresión aparte, para que la igualdad de FAV06 se cumpla por
+ * construcción. El redondeo sube en la sexta cifra por el mismo motivo que en
+ * {@link clearInclusiveLine}: un precio periódico truncado deja el producto un
+ * centavo por debajo del importe que la línea declara.
+ */
+export function dianPriceAmount(line: DianLineAmounts): string {
+  const quantity = toDecimal(line.quantity);
+  // Cantidad cero o inválida: no hay de qué derivar, y dividir sería NaN. Se
+  // cae al precio ya escalado, que es lo que declaraba el emisor histórico.
+  const per_unit = quantity.greaterThan(0)
+    ? lineGrossDecimal(line).dividedBy(quantity)
+    : toDecimal(line.unit_price).dividedBy(
+        priceUnitDivisor(line.price_unit_quantity),
+      );
+
+  const two_decimals = applyScale(per_unit, DIAN_SCALE);
+  return toDecimal(two_decimals).equals(per_unit)
+    ? two_decimals
+    : per_unit.toFixed(DIAN_PRICE_SCALE, Prisma.Decimal.ROUND_UP);
+}
+
+/**
  * Sum of every line's net extension amount — the value that
  * `cac:LegalMonetaryTotal/cbc:LineExtensionAmount` **must** equal (rule
  * `FAU14`).
@@ -151,13 +268,119 @@ export function dianLineExtension(line: DianLineAmounts): string {
  * carry the gross subtotal while the lines carried net amounts, so any invoice
  * with a discount violated FAU14; deriving both from here makes that divergence
  * unrepresentable.
+ *
+ * SUMA DE TRUNCADOS, no truncado de la suma. Cada línea viaja al XML por
+ * `dianLineExtension`, es decir YA truncada a 2 decimales; la DIAN recomputa el
+ * total sumando esos valores emitidos, no los originales. Acumular en crudo y
+ * truncar al final producía un total que ninguna de las dos partes declara: diez
+ * líneas de 10,555 emiten diez 10,55 —105,50— mientras la cabecera afirmaba
+ * 105,55. La diferencia crece con el número de líneas y con la precisión del
+ * precio, así que se manifiesta justo en las facturas largas, y rechaza por
+ * FAU02 quemando el consecutivo. Truncar por línea antes de sumar hace que el
+ * total sea, por construcción, el que la DIAN va a obtener.
  */
 export function dianLineExtensionTotal(lines: DianLineAmounts[]): string {
   const total = lines.reduce<Prisma.Decimal>(
-    (acc, line) => acc.plus(lineExtensionDecimal(line)),
+    (acc, line) => acc.plus(toDecimal(applyScale(lineExtensionDecimal(line)))),
     new Prisma.Decimal(0),
   );
   return applyScale(total);
+}
+
+/** Importes ya despejados de una línea con precio impuesto-incluido. */
+export interface DianClearedLineAmounts {
+  /** Precio unitario SIN impuesto, con la precisión que haga falta (0-6 dec). */
+  unit_price: string;
+  /** Descuento SIN impuesto, 2 decimales. */
+  discount_amount: string;
+}
+
+/**
+ * Despeja el impuesto del precio de una línea capturada con IVA incluido, de
+ * modo que el XML declare la base gravable sin contradecirse a sí mismo.
+ *
+ * ## El defecto que cierra
+ *
+ * Con `invoice_items.is_inclusive`, `unit_price` lleva el impuesto DENTRO. El
+ * emisor escribía ese importe tal cual en `cbc:LineExtensionAmount`, así que el
+ * documento declaraba $1.000 de base y $190 de IVA sobre una venta de $1.000:
+ *
+ * · `TaxExclusiveAmount` = 1000,00 contra un `cac:TaxSubtotal` cuya
+ *   `cbc:TaxableAmount` es 840,34 — la base imponible no cuadra.
+ * · `PayableAmount` = 1000,00 + 159,66 = 1159,66 cuando el cliente pagó 1.000.
+ * · `ValFac` y `ValTot` del CUFE toman esas dos cifras, así que el descuadre
+ *   viaja dentro de la huella.
+ *
+ * En la práctica esas facturas ni siquiera llegaban a la DIAN: el prevalidador
+ * las frenaba con `HEADER_LINE_EXTENSION_MISMATCH` —lo cual es lo correcto, no
+ * se quemó ningún consecutivo— pero ninguna tienda con precios impuesto-incluido
+ * podía emitir.
+ *
+ * ## Por qué se despeja el PRECIO y no sólo el total de la línea
+ *
+ * Porque la regla FAV06 (RECHAZO) valida la línea contra su propio precio:
+ * `LineExtensionAmount = PriceAmount × cantidad − descuentos + recargos`.
+ * Bajar la base sin bajar el precio cambia un descuadre por otro. Por eso acá se
+ * devuelven las dos cifras y el importe de la línea vuelve a derivarse de ellas
+ * con {@link dianLineExtension}, que es la misma función que usan la cabecera y
+ * el CUFE: la igualdad se cumple por construcción y no por coincidencia.
+ *
+ * ## La base NO se recalcula: se recibe
+ *
+ * `taxable_base` es la base que YA persistió el motor de cálculo
+ * (`invoice_taxes.taxable_amount` de la línea). Despejarla otra vez acá con la
+ * tarifa produciría un segundo valor, y la suma de esos segundos valores no
+ * sería `invoices.subtotal_amount` — que es contra lo que el prevalidador
+ * compara la cabecera. Un solo origen para la base, igual que hay un solo
+ * origen para el importe de la línea.
+ *
+ * ## El redondeo del precio va HACIA ARRIBA, a propósito
+ *
+ * El precio exacto suele ser periódico (2.521,00 entre 3 unidades =
+ * 840,333333…). Truncando, `3 × 840,333333 = 2.520,999999` y el importe de la
+ * línea sale un centavo por debajo de la base persistida. Se redondea hacia
+ * arriba en la sexta cifra para que el producto quede apenas por encima y el
+ * truncado a 2 devuelva exactamente la base. El exceso es de 10⁻⁶ por unidad:
+ * irrelevante mientras `cantidad / BaseQuantity` no llegue a 10.000, y si
+ * llegara, el prevalidador lo ve antes de transmitir.
+ *
+ * Devuelve `null` cuando no hay nada que despejar o los datos no lo permiten
+ * (cantidad cero, base ausente, base mayor que el bruto). El llamador deja la
+ * línea como está — el comportamiento histórico— y la validación decide.
+ */
+export function clearInclusiveLine(
+  line: DianLineAmounts & { taxable_base: DianNumericInput },
+): DianClearedLineAmounts | null {
+  const quantity = toDecimal(line.quantity);
+  if (quantity.lessThanOrEqualTo(0)) return null;
+
+  // El bruto TAL COMO SE EMITIRÍA, no el de precisión plena: es contra ese
+  // valor que se calcula la proporción del descuento.
+  const gross = toDecimal(dianLineExtension(line));
+  const base = toDecimal(line.taxable_base);
+  if (gross.lessThanOrEqualTo(0)) return null;
+  if (base.lessThanOrEqualTo(0) || base.greaterThan(gross)) return null;
+
+  // Un descuento sobre un precio con impuesto dentro también lo lleva dentro:
+  // se despeja en la misma proporción que la base.
+  const discount = toDecimal(line.discount_amount);
+  const cleared_discount = discount.isZero()
+    ? applyScale(new Prisma.Decimal(0))
+    : applyScale(discount.times(base).dividedBy(gross));
+
+  const divisor = priceUnitDivisor(line.price_unit_quantity);
+  const exact_unit_price = base
+    .plus(toDecimal(cleared_discount))
+    .times(divisor)
+    .dividedBy(quantity);
+
+  return {
+    unit_price: exact_unit_price.toFixed(
+      DIAN_PRICE_SCALE,
+      Prisma.Decimal.ROUND_UP,
+    ),
+    discount_amount: cleared_discount,
+  };
 }
 
 /**
@@ -185,10 +408,13 @@ export function toDecimal(value: DianNumericInput): Prisma.Decimal {
 // --- Private helpers ---
 
 function lineExtensionDecimal(line: DianLineAmounts): Prisma.Decimal {
+  return lineGrossDecimal(line).minus(toDecimal(line.discount_amount));
+}
+
+function lineGrossDecimal(line: DianLineAmounts): Prisma.Decimal {
   return toDecimal(line.quantity)
     .times(toDecimal(line.unit_price))
-    .dividedBy(priceUnitDivisor(line.price_unit_quantity))
-    .minus(toDecimal(line.discount_amount));
+    .dividedBy(priceUnitDivisor(line.price_unit_quantity));
 }
 
 /**

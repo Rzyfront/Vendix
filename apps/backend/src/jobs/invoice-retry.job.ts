@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InvoiceRetryQueueService } from '../domains/store/invoicing/services/invoice-retry-queue.service';
 
 @Injectable()
 export class InvoiceRetryJob {
@@ -10,6 +11,7 @@ export class InvoiceRetryJob {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly event_emitter: EventEmitter2,
+    private readonly retry_queue: InvoiceRetryQueueService,
   ) {}
 
   /**
@@ -22,6 +24,23 @@ export class InvoiceRetryJob {
 
     try {
       const now = new Date();
+
+      // PRIMERO recuperar los huérfanos, y sólo después seleccionar.
+      //
+      // Este ciclo marca la fila `processing` y emite un evento que no espera.
+      // Si el proceso muere entre las dos cosas, la fila se queda en
+      // `processing` para siempre: la selección de abajo sólo mira `pending`, y
+      // `enqueue()` se niega a crear otra mientras vea una viva. El documento
+      // deja de reintentarse sin que nada lo delate — la venta figura como «en
+      // cola» indefinidamente. Ir primero hace que lo recuperado entre en ESTE
+      // ciclo y no espere cinco minutos más.
+      await this.retry_queue
+        .reclaimStaleProcessing()
+        .catch((error) =>
+          this.logger.error(
+            `Failed to reclaim stale 'processing' retry items: ${error.message}`,
+          ),
+        );
 
       const pending_items = await this.prisma.invoice_retry_queue.findMany({
         where: {
@@ -87,6 +106,44 @@ export class InvoiceRetryJob {
     } catch (error) {
       this.logger.error(
         `Invoice retry queue processing failed: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * Cada 30 min: devuelve a la cola los documentos expedidos bajo contingencia
+   * que siguen dentro de sus 48 h.
+   *
+   * ## Por qué hace falta un segundo cron y no basta el de arriba
+   *
+   * Porque cuando la cadencia reglamentada (5 intentos × 2 min, Anexo §12.4) se
+   * agota sobre una indisponibilidad de la DIAN, `markFailed` deja la fila en
+   * `contingency` — TERMINAL para la cola. El cron de arriba sólo recoge
+   * `pending`, así que a partir de ese momento nadie volvía a intentarlo: el
+   * documento se quedaba con su `contingency_deadline` corriendo y vencía en
+   * silencio. La obligación de 48 h estaba anotada en la fila, pero el sistema
+   * dejaba de perseguirla a los diez minutos.
+   *
+   * ## Por qué 30 min
+   *
+   * Un ciclo completo de reintentos dura ~10 min, y `enqueue()` no duplica
+   * mientras haya una fila viva. Con 30 min cada barrido encuentra la anterior
+   * ya terminada y abre una nueva: ~96 ciclos repartidos en las 48 h, sin
+   * amontonar intentos contra un servicio que ya se sabe caído.
+   */
+  @Cron('*/30 * * * *')
+  async handleContingencySweep() {
+    try {
+      const { requeued, expired } = await this.retry_queue.resweepContingency();
+      if (requeued > 0 || expired > 0) {
+        this.logger.log(
+          `Contingency sweep finished: ${requeued} re-queued, ${expired} past their 48 h deadline`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Contingency sweep failed: ${error.message}`,
         error.stack,
       );
     }

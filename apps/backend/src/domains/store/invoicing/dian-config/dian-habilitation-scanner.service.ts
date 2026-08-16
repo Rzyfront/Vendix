@@ -7,6 +7,10 @@ import {
   AIMessageContentPart,
 } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
+import {
+  TECHNICAL_KEY_LENGTH,
+  isWellFormedTechnicalKey,
+} from '../fiscal-document-requirements';
 import sharp = require('sharp');
 
 /**
@@ -110,7 +114,6 @@ const NIT_RE = /^\d{5,15}$/;
 const PREFIX_RE = /^[A-Z0-9]{1,10}$/;
 const RESOLUTION_NUMBER_RE = /^\d{4,25}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TECHNICAL_KEY_RE = /^[0-9a-f]{40}$/;
 
 /** Sanity ceiling for a single authorized range. */
 const MAX_RANGE_SPAN = 500_000_000;
@@ -607,12 +610,16 @@ export class DianHabilitationScannerService {
         'No se leyó clave técnica. Solo las resoluciones de habilitación la traen.',
       );
     }
-    if (!TECHNICAL_KEY_RE.test(value)) {
+    // Misma regla que el DTO, el servicio de resoluciones y el generador de
+    // consecutivos: una sola definición de qué es una ClTec, en
+    // `fiscal-document-requirements.ts`. La limpieza de arriba sigue siendo
+    // local porque es específica del OCR (un guion partido en dos líneas).
+    if (!isWellFormedTechnicalKey(value)) {
       return {
         value: null,
         confidence,
         verified: false,
-        warning: `La clave técnica leída no tiene 40 caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
+        warning: `La clave técnica leída no tiene ${TECHNICAL_KEY_LENGTH} caracteres hexadecimales (leyó ${value.length}). Cópiala a mano desde la resolución.`,
       };
     }
     return {

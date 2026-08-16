@@ -27,6 +27,7 @@ import {
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { describeApiFailure } from '../../utils/invoicing-errors.util';
 
 /**
  * Listado de documentos soporte (QUI-682).
@@ -131,11 +132,23 @@ export class SupportDocumentListComponent {
       });
   }
 
+  /**
+   * EL `message` DE UN `HttpErrorResponse` NO ES PARA EL USUARIO.
+   *
+   * Este método leía `err.message` a secas, y esa clave SIEMPRE existe en un
+   * `HttpErrorResponse`: no es el mensaje del backend sino el que fabrica
+   * Angular — «Http failure response for https://…/store/invoicing?…: 500
+   * Internal Server Error». Al comerciante le aparecía la URL con sus filtros y
+   * un código HTTP, y el `error_code` que el backend sí había mandado se perdía
+   * por el camino. `describeApiFailure` es el mismo punto por el que pasan los
+   * effects del módulo: copy curado de `ERROR_MESSAGES[error_code]` cuando el
+   * error viene tipado, y sólo si no lo está cae al texto genérico.
+   */
   private extractError(err: unknown): string {
-    if (typeof err === 'object' && err && 'message' in err) {
-      return String((err as { message: unknown }).message);
-    }
-    return 'No se pudo cargar el listado de documentos soporte.';
+    return (
+      describeApiFailure(err).message ||
+      'No se pudo cargar el listado de documentos soporte.'
+    );
   }
 
   // ── Eventos de tabla / paginación ──────────────────────

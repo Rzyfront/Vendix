@@ -3,6 +3,7 @@ import {
   IsInt,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsString,
   Min,
 } from 'class-validator';
@@ -45,6 +46,6 @@ export class TemplateQueryDto {
   sort_by?: string = 'created_at';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'] as const)
+  @IsIn(['asc', 'desc'] as const)
   sort_order?: 'asc' | 'desc' = 'desc';
 }

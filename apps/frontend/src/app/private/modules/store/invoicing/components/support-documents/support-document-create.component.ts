@@ -18,6 +18,7 @@ import {
   Validators,
 } from '@angular/forms';
 
+import { describeApiFailure } from '../../utils/invoicing-errors.util';
 import { SupportDocumentService } from '../../services/support-document.service';
 import { SuppliersService } from '../../../inventory/services/suppliers.service';
 import type {
@@ -433,11 +434,17 @@ export class SupportDocumentCreateComponent {
       });
   }
 
+  /**
+   * El `message` del backend es de DESARROLLADOR y no se muestra nunca; sobre un
+   * `HttpErrorResponse` ademas devuelve "Http failure response for …: 400 Bad
+   * Request", que no le dice nada a nadie. El texto visible sale del
+   * `error_code` (`ERROR_MESSAGES`), igual que en el resto del modulo.
+   */
   private extractError(err: unknown): string {
-    if (typeof err === 'object' && err && 'message' in err) {
-      return String((err as { message: unknown }).message);
-    }
-    return 'No se pudo crear el documento soporte.';
+    return (
+      describeApiFailure(err).message ??
+      'No se pudo crear el documento soporte.'
+    );
   }
 
   private reset(): void {

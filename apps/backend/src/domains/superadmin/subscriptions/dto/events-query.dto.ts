@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, IsEnum, Min } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class EventsQueryDto {
@@ -15,7 +15,7 @@ export class EventsQueryDto {
   limit?: number = 10;
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'created',
     'activated',
     'renewed',
@@ -39,6 +39,6 @@ export class EventsQueryDto {
   sort_by?: string = 'created_at';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
 }

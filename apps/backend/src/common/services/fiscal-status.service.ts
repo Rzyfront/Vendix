@@ -714,7 +714,11 @@ export class FiscalStatusService {
       current_number: resolution.current_number,
       valid_from: resolution.valid_from.toISOString(),
       valid_to: resolution.valid_to.toISOString(),
-      technical_key: resolution.technical_key ?? null,
+      // Sólo la PRESENCIA y la longitud. Ver `FiscalWizardPrefillResolution`:
+      // este prefill viaja al navegador y la ClTec es el secreto que hashea el
+      // CUFE de todas las facturas de esta resolución.
+      technical_key_set: (resolution.technical_key ?? '').trim().length > 0,
+      technical_key_length: (resolution.technical_key ?? '').trim().length,
       is_habilitacion_range: isHabilitacionResolution(resolution.prefix),
     };
   }

@@ -16,6 +16,9 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+// Función pura del catálogo Divipola (sin DI): valida que el código exista de
+// verdad en la lista que la DIAN acepta, no solo que tenga 5 dígitos.
+import { findDianMunicipality } from '../invoicing/providers/dian-direct/constants/dian-geography';
 
 @Injectable()
 export class AddressesService {
@@ -23,6 +26,32 @@ export class AddressesService {
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
   ) {}
+
+  /**
+   * Normaliza y VERIFICA el código DANE contra el catálogo Divipola.
+   *
+   * El DTO ya garantiza la forma (5 dígitos); aquí se comprueba la pertenencia,
+   * que es lo que de verdad importa: `99999` pasa el regex y sin embargo no es
+   * un municipio, y la DIAN rechazaría el documento con ese código. Es
+   * preferible un 400 al capturar la dirección que un rechazo al emitir.
+   *
+   * `null`/`undefined` pasan tal cual: el campo es opcional (direcciones no
+   * fiscales e históricas conviven con la columna en NULL).
+   */
+  private normalizeMunicipalityCode(
+    code: string | null | undefined,
+  ): string | null | undefined {
+    if (code === undefined) return undefined;
+    if (code === null) return null;
+    const trimmed = code.trim();
+    if (!trimmed) return null;
+    if (!findDianMunicipality(trimmed)) {
+      throw new BadRequestException(
+        `El código DANE «${trimmed}» no corresponde a ningún municipio de la lista Divipola que la DIAN acepta.`,
+      );
+    }
+    return trimmed;
+  }
 
   async create(createAddressDto: CreateAddressDto, user: any) {
     const context = RequestContextService.getContext();
@@ -38,12 +67,12 @@ export class AddressesService {
     // Block direct organization_id or user_id — use customer_id instead
     if (createAddressDto.organization_id) {
       throw new BadRequestException(
-        'Cannot create organization addresses in Store domain',
+        'Este endpoint crea direcciones de la TIENDA. Una dirección de la organización se registra desde Organización → Configuración → Datos generales; quita «organization_id» del envío.',
       );
     }
     if (createAddressDto.user_id) {
       throw new BadRequestException(
-        'Use customer_id instead of user_id to associate addresses with customers',
+        'Para asociar una dirección a un cliente usa «customer_id», no «user_id»: la dirección se resuelve contra los clientes de esta tienda y «user_id» apuntaría a un usuario del panel.',
       );
     }
 
@@ -58,7 +87,9 @@ export class AddressesService {
         select: { id: true },
       });
       if (!customer) {
-        throw new BadRequestException('Customer not found in this store');
+        throw new BadRequestException(
+          `El cliente #${createAddressDto.customer_id} no pertenece a esta tienda, así que no se le puede registrar una dirección aquí. Verifica el cliente en Clientes o crea primero su ficha en esta tienda.`,
+        );
       }
       resolvedUserId = customer.id;
     }
@@ -80,6 +111,9 @@ export class AddressesService {
       state_province: createAddressDto.state,
       postal_code: createAddressDto.postal_code,
       country_code: createAddressDto.country,
+      municipality_code: this.normalizeMunicipalityCode(
+        createAddressDto.municipality_code,
+      ),
       type: createAddressDto.type as any,
       is_primary: createAddressDto.is_primary,
       latitude: createAddressDto.latitude
@@ -216,6 +250,13 @@ export class AddressesService {
     if (updateAddressDto.type) update_data.type = updateAddressDto.type as any;
     if (updateAddressDto.is_primary !== undefined)
       update_data.is_primary = updateAddressDto.is_primary;
+    // `!== undefined` y no truthy: `null` es una orden legítima («este cliente
+    // ya no tiene municipio capturado») y un truthy check la descartaría en
+    // silencio, dejando un código viejo pegado a una dirección que cambió.
+    if (updateAddressDto.municipality_code !== undefined)
+      update_data.municipality_code = this.normalizeMunicipalityCode(
+        updateAddressDto.municipality_code,
+      );
 
     try {
       return await this.prisma.addresses.update({

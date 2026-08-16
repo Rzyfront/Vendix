@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
+  IsIn,
   IsUrl,
   MaxLength,
   MinLength,
@@ -152,7 +153,7 @@ export class AdminOrganizationQueryDto {
   sort_by?: string = 'created_at';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
 
   @IsOptional()

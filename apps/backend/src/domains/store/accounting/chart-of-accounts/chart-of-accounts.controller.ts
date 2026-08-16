@@ -38,12 +38,36 @@ export class ChartOfAccountsController {
     private readonly default_chart_seeder: DefaultChartOfAccountsSeederService,
   ) {}
 
+  /**
+   * Flat (or tree) listing of the chart of accounts.
+   *
+   * Returns the repo-standard paginated envelope
+   * (`{ success, message, data: [...], meta: { total, page, limit, ... } }`),
+   * copied from `JournalEntriesController.findAll` / `StoreUsersController.findAll`.
+   * `data` is still the plain row array, so existing consumers that read
+   * `res.data` keep working — `meta.total` is purely additive and is what
+   * lets a server-search selector know whether more rows exist beyond the
+   * handful it loaded.
+   *
+   * `?tree=true` is not a page, so it keeps the plain success envelope.
+   */
   @Get()
   @SkipModuleFlowGuard() // bootstrap: wizard loadInitial() reads chart while module still WIP
   @Permissions('store:accounting:chart_of_accounts:read')
   async findAll(@Query() query_dto: QueryAccountDto) {
-    const result = await this.chart_of_accounts_service.findAll(query_dto);
-    return this.response_service.success(result);
+    if (query_dto.tree) {
+      const tree = await this.chart_of_accounts_service.getTree();
+      return this.response_service.success(tree);
+    }
+
+    const result =
+      await this.chart_of_accounts_service.findAllPaginated(query_dto);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   // --- Static routes BEFORE :id ---

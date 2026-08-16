@@ -1,6 +1,10 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
-import { UblCommonBuilder } from './ubl-common.builder';
+import {
+  UblCommonBuilder,
+  DianDocumentExtras,
+  UblDocumentLine,
+} from './ubl-common.builder';
 import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
@@ -26,16 +30,26 @@ import {
  * 3. Supplier party (emisor)
  * 4. Customer party (adquirente)
  * 5. Payment means and terms
- * 6. Tax totals
- * 7. Legal monetary total
- * 8. Invoice lines
+ * 6. Document allowance charge
+ * 7. Payment exchange rate (divisa — el documento sigue en COP)
+ * 8. Tax totals
+ * 9. Withholding tax total (NO resta de PayableAmount, §11.9.1)
+ * 10. Legal monetary total
+ * 11. Invoice lines
  */
 export class UblInvoiceBuilder {
   /**
    * Builds the complete UBL 2.1 Invoice XML string.
    */
   static build(params: {
-    invoice_data: ProviderInvoiceData;
+    /**
+     * `DianDocumentExtras` amplía el contrato con lo que la Fase 6 necesita
+     * declarar —tipo de operación, tasa de cambio y retenciones—. Todos sus
+     * campos son opcionales, así que un `ProviderInvoiceData` pelado sigue
+     * siendo asignable y los llamadores que no los pueblan compilan y emiten
+     * exactamente igual que antes.
+     */
+    invoice_data: ProviderInvoiceData & DianDocumentExtras;
     issuer: DianIssuerData;
     customer: DianCustomerData;
     software_security: DianSoftwareSecurity;
@@ -93,10 +107,20 @@ export class UblInvoiceBuilder {
 
     // 2. Document metadata. CustomizationID = tipo de operación; '10' = Estándar
     //    (factura electrónica de venta nacional).
+    //
+    //    Estaba CABLEADO a '10', así que un contrato AIU salía declarado como
+    //    operación estándar y la DIAN no aplicaba las reglas CAV/CAX del AIU:
+    //    el documento entraba, pero con una base gravable que nadie validaba.
+    //    `operation_type` lo trae la factura (`invoices.operation_type`, nulo
+    //    ≡ estándar), y el nulo se mapea aquí para no obligar a los llamadores
+    //    históricos a poblarlo.
     doc.ele(UBL_NAMESPACES.CBC, 'UBLVersionID').txt(UBL_CONSTANTS.UBL_VERSION);
     doc
       .ele(UBL_NAMESPACES.CBC, 'CustomizationID')
-      .txt(DIAN_OPERATION_TYPES.STANDARD_INVOICE);
+      .txt(
+        (invoice_data.operation_type || '').trim() ||
+          DIAN_OPERATION_TYPES.STANDARD_INVOICE,
+      );
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(invoice_data.invoice_number);
@@ -161,13 +185,37 @@ export class UblInvoiceBuilder {
     // must precede the tax totals.
     UblCommonBuilder.buildDocumentAllowanceCharge(doc, invoice_data, currency);
 
-    // 8. Tax totals
+    // 8. Tasa de cambio, cuando la operación se pactó en divisa.
+    //
+    //    Va DESPUÉS de `AllowanceCharge` y ANTES de `TaxTotal`: la secuencia de
+    //    `InvoiceType` es AllowanceCharge → TaxExchangeRate → PricingExchangeRate
+    //    → PaymentExchangeRate → PaymentAlternativeExchangeRate → TaxTotal.
+    //    De los cuatro grupos de cambio, la DIAN sólo describe `Payment...`.
+    //
+    //    La factura NO cambia de moneda: sigue en COP (Res. 000042/2020 art. 73;
+    //    Oficios 901544 y 903436 de 2020; Concepto 1509 de 2024). Este grupo es
+    //    una DECLARACIÓN de la conversión, no la moneda del documento.
+    UblCommonBuilder.buildPaymentExchangeRate(doc, invoice_data.exchange_rate);
+
+    // 9. Tax totals
     UblCommonBuilder.buildTaxTotals(doc, invoice_data.taxes, currency);
 
-    // 9. Legal monetary total
+    // 10. Retenciones — `cac:WithholdingTaxTotal`, entre `TaxTotal` y
+    //     `LegalMonetaryTotal` según la secuencia de `InvoiceType`.
+    //
+    //     NO tocan `cbc:PayableAmount` (§11.9.1): la DIAN valida los totales sin
+    //     mirar este grupo, así que restarlas descuadra la factura y la rechaza.
+    //     Vale para los tres roles, incluida la autorretención.
+    UblCommonBuilder.buildWithholdingTaxTotal(
+      doc,
+      invoice_data.withholdings,
+      currency,
+    );
+
+    // 11. Legal monetary total
     UblCommonBuilder.buildLegalMonetaryTotal(doc, invoice_data, currency);
 
-    // 10. Invoice lines
+    // 12. Invoice lines
     UblCommonBuilder.buildInvoiceLines(
       doc,
       invoice_data.items,

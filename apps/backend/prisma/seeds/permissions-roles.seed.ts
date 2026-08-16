@@ -1786,7 +1786,11 @@ export async function seedPermissionsAndRoles(
     {
       name: 'system.health',
       description: 'Ver salud del sistema',
-      path: '/api',
+      // Coincidencia EXACTA: antes era `/api` con `method: GET`, que el
+      // guard interpretaba como `startsWith('/api')` y abría cualquier GET
+      // del `/api/*` a quien tuviera este permiso — fuga real, porque
+      // `system.health` se asigna a 8 roles incluido `customer`.
+      path: '/api/health',
       method: 'GET',
     },
     {
@@ -2383,6 +2387,46 @@ export async function seedPermissionsAndRoles(
       name: 'store:reports:read',
       description: 'Ver reportes generales',
       path: '/api/store/reports',
+      method: 'GET',
+    },
+    // ---------------------------------------------------------------------
+    // Nombres que los controladores exigían sin que existiera la fila.
+    //
+    // `@Permissions('store:payroll:read')` y los tres `reports:*:read`
+    // decoran rutas reales, pero ninguno tenía fila en `permissions`. Un
+    // nombre sin fila no lo puede tener NADIE: la vía por nombre del guard
+    // compara contra `userPerm.name`, y si el nombre no existe en el
+    // catálogo no hay usuario que lo porte. Esas rutas sólo quedaban
+    // alcanzables por la vía de RUTA, que hasta ahora casaba por prefijo —
+    // así que al pasar el guard a coincidencia exacta se quedaron sin
+    // ninguna vía, incluso para `owner`, que recibe todos los permisos que
+    // existen. Se veía como «owner perdió los reportes de nómina» y en
+    // realidad el permiso nunca había sido creado.
+    //
+    // El `path` es informativo en estos cuatro: los controladores los
+    // exigen por nombre, y una sola fila cubre las 3-4 rutas del grupo.
+    {
+      name: 'store:payroll:read',
+      description: 'Ver reportes de nómina de la tienda',
+      path: '/api/store/reports/payroll',
+      method: 'GET',
+    },
+    {
+      name: 'reports:sales:read',
+      description: 'Ver reportes de ventas de la organización',
+      path: '/api/organization/reports/sales',
+      method: 'GET',
+    },
+    {
+      name: 'reports:inventory:read',
+      description: 'Ver reportes de inventario de la organización',
+      path: '/api/organization/reports/inventory',
+      method: 'GET',
+    },
+    {
+      name: 'reports:financial:read',
+      description: 'Ver reportes financieros de la organización',
+      path: '/api/organization/reports/financial',
       method: 'GET',
     },
     {

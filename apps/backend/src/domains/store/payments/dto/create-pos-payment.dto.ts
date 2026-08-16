@@ -6,7 +6,6 @@ import {
   IsArray,
   ArrayMinSize,
   IsDateString,
-  IsEnum,
   IsIn,
   Min,
   Max,
@@ -194,7 +193,7 @@ export class PosInstallmentTermsDto {
   num_installments: number;
 
   @IsString()
-  @IsEnum(['weekly', 'biweekly', 'monthly'])
+  @IsIn(['weekly', 'biweekly', 'monthly'])
   frequency: string;
 
   @IsDateString()

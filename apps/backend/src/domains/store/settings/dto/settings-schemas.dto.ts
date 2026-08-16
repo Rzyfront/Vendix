@@ -73,7 +73,7 @@ export class GeneralSettingsDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
+  @IsIn(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
 
   @ApiProperty({
@@ -104,7 +104,7 @@ export class InventorySettingsDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(['hide', 'show', 'disable', 'allow_backorder'])
+  @IsIn(['hide', 'show', 'disable', 'allow_backorder'])
   out_of_stock_action?: 'hide' | 'show' | 'disable' | 'allow_backorder';
 
   /**
@@ -162,7 +162,7 @@ export class InventorySettingsDto {
       'Scope used by POS when locating stock for sale. `main_location` restricts POS to the store default location; `all_locations` allows any active location.',
   })
   @IsOptional()
-  @IsEnum(['main_location', 'all_locations'])
+  @IsIn(['main_location', 'all_locations'])
   pos_stock_scope?: 'main_location' | 'all_locations';
 
   @ApiProperty({
@@ -173,7 +173,7 @@ export class InventorySettingsDto {
       'Scope used by low-stock alerts. `main_location` evaluates only the default location; `all_locations` aggregates across all active locations.',
   })
   @IsOptional()
-  @IsEnum(['main_location', 'all_locations'])
+  @IsIn(['main_location', 'all_locations'])
   low_stock_alerts_scope?: 'main_location' | 'all_locations';
 }
 
@@ -1471,6 +1471,116 @@ export class ReservationsSettingsDto {
   @IsOptional()
   @IsBoolean()
   allow_direct_reschedule?: boolean;
+}
+
+/**
+ * Régimen de IVA para contratos AIU (`operation_type = '09'`).
+ *
+ * Los dos regímenes existen en la ley y no hay uno correcto: cuál aplica lo
+ * decide el CONTRATO. Por eso esto es configuración de la tienda y no una
+ * constante del código.
+ */
+export class AiuSettingsDto {
+  @ApiProperty({
+    enum: ['et_462_1', 'decreto_1372_1992'],
+    example: 'et_462_1',
+    required: false,
+    description:
+      'Régimen de base gravable. `et_462_1` (default, E.T. art. 462-1 — aseo, vigilancia, servicios temporales): la base es el AIU COMPLETO, con piso del 10 % del contrato. `decreto_1372_1992` (art. 3 — contratos de construcción de inmueble): la base es ÚNICAMENTE la utilidad. El default es el conservador: declara más IVA, y pagar de más se recupera mientras que declarar de menos es sanción.',
+  })
+  @IsOptional()
+  @IsIn(['et_462_1', 'decreto_1372_1992'])
+  regime?: 'et_462_1' | 'decreto_1372_1992';
+
+  @ApiProperty({
+    example: 'servicio de aseo y cafetería para las sedes de Bogotá',
+    required: false,
+    description:
+      'Objeto del contrato. Se concatena al literal obligatorio «Contrato de servicios AIU por concepto de: » en el `cbc:Note` de la línea de ADMINISTRACIÓN (Anexo Técnico 1.9, regla CAV03). La regla exige entre 20 y 5000 caracteres CONTANDO el prefijo, así que describe el contrato — un objeto vacío hace rechazar el documento.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4900, {
+    message:
+      'contract_object no puede superar 4900 caracteres: la regla CAV03 limita el `cbc:Note` completo a 5000 y el prefijo obligatorio ya ocupa parte.',
+  })
+  contract_object?: string;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Aplica el piso legal del 10 % del valor del contrato sobre la base gravable (E.T. art. 462-1). Default true. Sólo tiene sentido bajo `et_462_1`. Cuando el AIU declarado queda por debajo del piso la emisión se RECHAZA indicando cuánto falta — no se infla la base en silencio, porque eso cambiaría el importe que el cliente firmó.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enforce_minimum_base?: boolean;
+
+  @ApiProperty({
+    example: 10,
+    required: false,
+    description:
+      'Porcentaje del piso legal. Default 10. Configurable sólo por si la ley cambia; no es una palanca comercial.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  minimum_base_percent?: number;
+}
+
+/**
+ * Parámetros de emisión fiscal que la ley deja al contribuyente.
+ *
+ * Va declarado acá **y** en `KNOWN_SECTIONS` (`settings.service.ts`). Las dos
+ * cosas: el `ValidationPipe` corre con `whitelist: true`, así que sin la
+ * propiedad en `UpdateSettingsDto` el `ValidationPipe` la borra; y el
+ * sanitizador de `SettingsService` descarta toda clave de primer nivel que no
+ * esté en `KNOWN_SECTIONS` **respondiendo 200 igual**. Faltando cualquiera de
+ * las dos, el PATCH del usuario se pierde sin que nadie se entere.
+ */
+/**
+ * Comportamiento fiscal del carril del POS.
+ *
+ * Es el ÚNICO parámetro que distingue las dos superficies sobre el mismo motor:
+ * qué se hace al cerrar una venta de mostrador. Las reglas de validación y el
+ * documento que se emite son idénticos en ambas.
+ */
+export class PosInvoicingSettingsDto {
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Emite el documento electrónico automáticamente al cerrar una venta en el POS. Default true: si la tienda está habilitada ante la DIAN, cada venta debe soportarse con un documento, y esperar a que el cajero lo pida a mano es como se acumulan ventas sin soporte. La emisión ocurre SIEMPRE fuera del cobro, así que apagarlo no acelera la caja — sólo obliga a pedir el documento a mano desde el POS.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  auto_emit?: boolean;
+
+  @ApiProperty({
+    enum: ['queue', 'ignore'],
+    example: 'queue',
+    required: false,
+    description:
+      'Qué se hace con una venta de mostrador que quedó sin documento fiscal. `queue` (default): el fallo se anota en la cola de reintentos con su motivo, y desde ahí es visible en el indicador del POS, en el listado de facturas y reintentable. `ignore`: el fallo sólo queda en el log — para la tienda que emite a mano y no quiere borradores a medio capturar en la cola. NINGUNO de los dos bloquea la venta: cuando esta política se lee, el cobro ya está confirmado en base de datos.',
+  })
+  @IsOptional()
+  @IsIn(['queue', 'ignore'])
+  on_failure?: 'queue' | 'ignore';
+}
+
+export class InvoicingSettingsDto {
+  @ApiProperty({ type: AiuSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiuSettingsDto)
+  aiu?: AiuSettingsDto;
+
+  @ApiProperty({ type: PosInvoicingSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PosInvoicingSettingsDto)
+  pos?: PosInvoicingSettingsDto;
 }
 
 /**

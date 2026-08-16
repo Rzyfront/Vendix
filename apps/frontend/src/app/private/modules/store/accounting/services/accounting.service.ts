@@ -69,8 +69,11 @@ export class AccountingService {
     );
   }
 
+  // PUT, no PATCH: `chart-of-accounts.controller.ts` declara `@Put(':id')` y no
+  // expone PATCH, así que la edición de cuenta contestaba 404 sin llegar nunca
+  // al servicio.
   updateAccount(id: number, dto: UpdateAccountDto): Observable<ApiResponse<ChartAccount>> {
-    return this.http.patch<ApiResponse<ChartAccount>>(
+    return this.http.put<ApiResponse<ChartAccount>>(
       this.getApiUrl(`chart-of-accounts/${id}`),
       dto,
     );
@@ -109,8 +112,10 @@ export class AccountingService {
     );
   }
 
+  // PUT, no PATCH. El controlador reserva PATCH para las TRANSICIONES
+  // (`:id/post`, `:id/void`) y expone la edición como `@Put(':id')`.
   updateJournalEntry(id: number, dto: UpdateJournalEntryDto): Observable<ApiResponse<JournalEntry>> {
-    return this.http.patch<ApiResponse<JournalEntry>>(
+    return this.http.put<ApiResponse<JournalEntry>>(
       this.getApiUrl(`journal-entries/${id}`),
       dto,
     );
@@ -150,8 +155,11 @@ export class AccountingService {
     );
   }
 
+  // PATCH, no POST: `fiscal-periods.controller.ts` declara `@Patch(':id/close')`.
+  // Cerrar período es lo que congela los asientos de un mes; que respondiera 404
+  // dejaba el período abierto para siempre desde la UI.
   closeFiscalPeriod(id: number): Observable<ApiResponse<FiscalPeriod>> {
-    return this.http.post<ApiResponse<FiscalPeriod>>(
+    return this.http.patch<ApiResponse<FiscalPeriod>>(
       this.getApiUrl(`fiscal-periods/${id}/close`),
       {},
     );

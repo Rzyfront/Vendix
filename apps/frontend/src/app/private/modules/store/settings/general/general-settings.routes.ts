@@ -54,6 +54,13 @@ export const SETTINGS_TABS: readonly GeneralSettingsTabDef[] = [
     icon: 'shopping-cart',
   },
   {
+    id: 'facturacion',
+    path: 'facturacion',
+    label: 'Facturación',
+    shortLabel: 'Factura',
+    icon: 'receipt',
+  },
+  {
     id: 'logistica',
     path: 'logistica',
     label: 'Logística',
@@ -128,6 +135,16 @@ export const GENERAL_SETTINGS_ROUTES: Routes = [
         title: 'Venta - Configuración General',
         loadComponent: () =>
           import('./pages/sales-settings.page').then((c) => c.SalesSettingsPage),
+      },
+      {
+        // Vive fuera de `general/` a propósito: es configuración FISCAL (el
+        // régimen de base gravable AIU), y su hogar natural es la carpeta
+        // fiscal. Se enruta acá porque las pestañas del shell son la única
+        // navegación que la hace alcanzable para el usuario.
+        path: 'facturacion',
+        title: 'Facturación - Configuración General',
+        loadComponent: () =>
+          import('../fiscal/fiscal-settings.page').then((c) => c.FiscalSettingsPage),
       },
       {
         path: 'logistica',

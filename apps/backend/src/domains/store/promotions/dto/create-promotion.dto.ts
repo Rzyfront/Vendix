@@ -4,7 +4,6 @@ import {
   IsNumber,
   IsBoolean,
   IsInt,
-  IsEnum,
   IsArray,
   IsDateString,
   Min,
@@ -13,6 +12,7 @@ import {
   ArrayNotEmpty,
   ArrayUnique,
   ValidateNested,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -34,7 +34,7 @@ export class CreatePromotionDto {
   @MaxLength(50)
   code?: string;
 
-  @IsEnum(['percentage', 'fixed_amount'])
+  @IsIn(['percentage', 'fixed_amount'])
   type: 'percentage' | 'fixed_amount';
 
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -53,11 +53,11 @@ export class CreatePromotionDto {
    * clients that predate this field.
    */
   @IsOptional()
-  @IsEnum(['flat', 'quantity_tiered'])
+  @IsIn(['flat', 'quantity_tiered'])
   rule_type?: 'flat' | 'quantity_tiered';
 
   @IsOptional()
-  @IsEnum(['order', 'product', 'category'])
+  @IsIn(['order', 'product', 'category'])
   scope?: 'order' | 'product' | 'category';
 
   /**
@@ -77,7 +77,7 @@ export class CreatePromotionDto {
    * toggle to opt-in per promotion.
    */
   @IsOptional()
-  @IsEnum(['cart_total', 'per_product'])
+  @IsIn(['cart_total', 'per_product'])
   quantity_grouping?: 'cart_total' | 'per_product';
 
   @IsOptional()

@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsOptional, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QuerySessionDto {
@@ -8,7 +8,7 @@ export class QuerySessionDto {
   fiscal_period_id?: number;
 
   @IsOptional()
-  @IsEnum(['draft', 'in_progress', 'completed', 'cancelled'])
+  @IsIn(['draft', 'in_progress', 'completed', 'cancelled'])
   status?: string;
 
   @IsOptional()

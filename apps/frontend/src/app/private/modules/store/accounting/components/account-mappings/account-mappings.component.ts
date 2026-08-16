@@ -7,6 +7,7 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
@@ -18,22 +19,35 @@ import { environment } from '../../../../../../../environments/environment';
 import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { AppType } from '../../../../../../core/models/environment.enum';
 
-import {
-  AccountMapping,
-  ChartAccount,
-} from '../../interfaces/accounting.interface';
+/**
+ * Fila del catálogo de mapping keys servido por
+ * `GET /store/accounting/account-mappings/keys`. Refleja el contrato de
+ * `MappingKeyCatalogEntry` en el backend (`account-mapping.service.ts`):
+ * declarado acá para que el frontend NO tenga que importar del backend, y
+ * cualquier drift entre los dos lados lo cazan las pruebas E2E que cruzan
+ * ambos.
+ */
+interface MappingKeyCatalogEntry {
+  key: string;
+  label: string;
+  event: string;
+  role: string;
+  default_code: string;
+  description: string;
+}
+
+import { AccountMapping } from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,
   selectAccountMappingsLoading,
-  selectLeafAccounts,
 } from '../../state/selectors/accounting.selectors';
 import {
   loadAccountMappings,
   saveAccountMappings,
   resetAccountMappings,
-  loadAccounts,
 } from '../../state/actions/accounting.actions';
 import {
+  AccountSelectComponent,
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
@@ -48,250 +62,28 @@ interface MappingGroup {
   mappings: AccountMapping[];
 }
 
-const MAPPING_LABELS: Record<string, string> = {
-  'invoice.validated.accounts_receivable': 'Cuentas por Cobrar',
-  'invoice.validated.revenue': 'Ingresos por Ventas',
-  // Plan Despacho Economía — FASE 4 paso 13.
-  'invoice.validated.shipping_income': 'Ingresos por Fletes (Factura)',
-  'payment.received.shipping_income': 'Ingresos por Fletes (Pago POS)',
-  'credit_sale.created.shipping_income': 'Ingresos por Fletes (Crédito)',
-  'refund.completed.shipping_income_reversal': 'Reversión Fletes (Reembolso)',
-  'invoice.validated.vat_payable': 'IVA por Pagar',
-  'invoice.validated.iva_payable': 'IVA por Pagar (Tipado)',
-  'invoice.validated.inc_payable': 'INC por Pagar',
-  'invoice.validated.ica_payable': 'ICA por Pagar',
-  'payment.received.cash': 'Caja (Efectivo)',
-  'payment.received.bank': 'Banco (Transferencia / Tarjeta)',
-  'payment.received.accounts_receivable':
-    'Cuentas por Cobrar (recaudo factura)',
-  'payment.received.revenue': 'Ingresos por Ventas (venta directa)',
-  'payment.received.vat_payable': 'IVA por Pagar (venta directa)',
-  'payment.received.iva_payable': 'IVA por Pagar (Tipado, venta directa)',
-  'payment.received.inc_payable': 'INC por Pagar (venta directa)',
-  'payment.received.ica_payable': 'ICA por Pagar (venta directa)',
-  'expense.approved.expense': 'Gastos Diversos',
-  'expense.approved.accounts_payable': 'Cuentas por Pagar',
-  'expense.paid.accounts_payable': 'Cuentas por Pagar',
-  'expense.paid.cash': 'Caja / Banco',
-  'expense.cancelled.expense': 'Gastos Diversos (Reversa Cancelacion)',
-  'expense.cancelled.accounts_payable':
-    'Cuentas por Pagar (Reversa Cancelacion)',
-  'expense.refunded.expense': 'Gastos Diversos (Reversa Reembolso)',
-  'expense.refunded.accounts_payable':
-    'Cuentas por Pagar (Reversa Reembolso)',
-  'expense.refunded.cash': 'Caja / Banco (Reembolso de Gasto)',
-  'payroll.approved.payroll_expense': 'Gastos de Personal',
-  'payroll.approved.social_security': 'Seguridad Social Empleador',
-  'payroll.approved.salaries_payable': 'Salarios por Pagar',
-  'payroll.approved.health_payable': 'Aportes EPS',
-  'payroll.approved.pension_payable': 'Aportes Pension',
-  'payroll.approved.withholdings': 'Retenciones',
-  'payroll.approved.labor_withholding': 'Retencion en la Fuente Laboral',
-  'payroll.paid.salaries_payable': 'Salarios por Pagar',
-  'payroll.paid.bank': 'Banco',
-  'order.completed.cogs': 'Costo de Ventas',
-  'order.completed.inventory': 'Inventario (Salida)',
-  // Remisiones bidireccionales (Fase 4)
-  'dispatch_note.delivered.cogs': 'Costo de Ventas (Remisión)',
-  'dispatch_note.delivered.inventory': 'Inventario (Remisión Entregada)',
-  'dispatch_note.received.inventory': 'Inventario (Recepción Remisión)',
-  'dispatch_note.received.accounts_payable': 'Proveedores (Recepción Remisión)',
-  'dispatch_note.return.inventory': 'Inventario (Devolución Cliente)',
-  'dispatch_note.return.cogs': 'Reversa Costo de Ventas (Devolución)',
-  'refund.completed.revenue': 'Ingresos (Reversa)',
-  'refund.completed.cash': 'Caja / Banco (Reembolso)',
-  'refund.completed.original_payment': 'Pago Original (Reversa)',
-  'refund.completed.bank_transfer': 'Transferencia Bancaria (Reversa)',
-  'refund.completed.store_credit': 'Billetera del Cliente (Reversa)',
-  'refund.completed.vat_payable': 'IVA por Pagar (Reversa Devolucion)',
-  'refund.completed.iva_payable': 'IVA por Pagar (Tipado, Reversa Devolucion)',
-  'refund.completed.inc_payable': 'INC por Pagar (Reversa Devolucion)',
-  'refund.completed.ica_payable': 'ICA por Pagar (Reversa Devolucion)',
-  'purchase_order.received.inventory': 'Inventario (Entrada)',
-  'purchase_order.received.accounts_payable': 'Proveedores',
-  'support_document.accepted.expense': 'Compra/Gasto Soportado',
-  'support_document.accepted.vat_deductible': 'IVA Descontable',
-  'support_document.accepted.withholding_payable': 'Retenciones por Pagar',
-  'support_document.accepted.accounts_payable': 'Proveedor Documento Soporte',
-  'purchase.vat_recognized.iva_deductible': 'IVA Descontable de Compra (POP)',
-  'purchase.vat_recognized.accounts_payable': 'Proveedores (Complemento IVA Compra)',
-  'inventory.adjusted.inventory': 'Inventario (Ajuste)',
-  'inventory.adjusted.shrinkage': 'Faltantes de Inventario',
-  'credit_sale.created.accounts_receivable':
-    'Cuentas por Cobrar (Venta a Credito)',
-  'credit_sale.created.revenue': 'Ingresos (Venta a Credito)',
-  'credit_sale.created.vat_payable': 'IVA por Pagar (Venta a Credito)',
-  'credit_sale.created.iva_payable': 'IVA por Pagar (Tipado, Venta a Credito)',
-  'credit_sale.created.inc_payable': 'INC por Pagar (Venta a Credito)',
-  'credit_sale.created.ica_payable': 'ICA por Pagar (Venta a Credito)',
-  'payment.received.sales_discount': 'Descuentos en Ventas (POS)',
-  'credit_sale.created.sales_discount': 'Descuentos en Ventas (Credito)',
-  // Notas Credito (Devoluciones sobre Factura)
-  'credit_note.accepted.accounts_receivable':
-    'Cuentas por Cobrar (Reversa Nota Credito)',
-  'credit_note.accepted.sales_returns': 'Devoluciones en Ventas',
-  'credit_note.accepted.iva_payable': 'IVA por Pagar (Reversa Nota Credito)',
-  'credit_note.accepted.inc_payable': 'INC por Pagar (Reversa Nota Credito)',
-  'credit_note.accepted.ica_payable': 'ICA por Pagar (Reversa Nota Credito)',
-  // Purchase Order Payments
-  'purchase_order.payment.accounts_payable': 'Proveedores (Pago OC)',
-  'purchase_order.payment.cash_bank': 'Banco (Pago OC)',
-  // Layaway (Plan Separe)
-  'layaway.payment.cash': 'Caja (Cuota Separe)',
-  'layaway.payment.bank': 'Banco (Cuota Separe)',
-  'layaway.payment.customer_advance': 'Anticipos de Clientes (Separe)',
-  'layaway.completed.customer_advance':
-    'Anticipos de Clientes (Separe Completado)',
-  'layaway.completed.revenue': 'Ingresos por Ventas (Separe Completado)',
-  'layaway.cancelled.advance': 'Anticipos de Clientes (Reversa Separe Cancelado)',
-  'layaway.cancelled.refund': 'Caja/Banco (Devolucion Separe Cancelado)',
-  'layaway.cancelled.forfeit_income':
-    'Otros Ingresos (Penalizacion Separe Cancelado)',
-  // Fixed Assets - Depreciation
-  'depreciation.monthly.depreciation_expense': 'Gasto por Depreciacion',
-  'depreciation.monthly.accumulated_depreciation': 'Depreciacion Acumulada',
-  // Fixed Assets - Disposal
-  'disposal.fixed_asset.asset_cost': 'Propiedad Planta y Equipo',
-  'disposal.fixed_asset.accumulated_depreciation':
-    'Depreciacion Acumulada (Baja)',
-  'disposal.fixed_asset.loss': 'Perdida en Baja de Activos',
-  'disposal.fixed_asset.gain': 'Utilidad en Venta de Activos',
-  'disposal.fixed_asset.cash': 'Caja (Venta Activo)',
-  // Withholding Tax (Retencion en la Fuente)
-  'withholding.applied.expense': 'Gasto / Compra (Base Retencion)',
-  'withholding.applied.withholding_payable': 'Retencion en la Fuente por Pagar',
-  'withholding.applied.accounts_payable': 'Proveedores (Neto tras Retencion)',
-  // Retenciones Practicadas (Vendix retiene a terceros)
-  'withholding.practiced.retefuente_payable':
-    'Retefuente Practicada por Pagar',
-  'withholding.practiced.reteiva_payable': 'Reteiva Practicada por Pagar',
-  'withholding.practiced.reteica_payable': 'Reteica Practicada por Pagar',
-  // Retenciones Sufridas (terceros retienen a Vendix)
-  'withholding.suffered.retefuente_receivable':
-    'Retefuente Sufrida por Cobrar',
-  'withholding.suffered.reteiva_receivable': 'Reteiva Sufrida por Cobrar',
-  'withholding.suffered.reteica_receivable': 'Reteica Sufrida por Cobrar',
-  // Cocina / Produccion (Restaurante)
-  'kitchen.fired.cogs': 'Costo de Ventas (Fired a Cocina)',
-  'kitchen.fired.inventory': 'Inventario (Fired a Cocina)',
-  'production.completed.finished_goods':
-    'Inventario Producto Terminado (Produccion)',
-  'production.completed.ingredient_consumed':
-    'Inventario Insumos Consumidos (Produccion)',
-  // Settlement (Liquidacion por Terminacion)
-  'settlement.approved.severance': 'Cesantias (Causacion Liquidacion)',
-  'settlement.approved.severance_interest':
-    'Intereses Cesantias (Causacion Liquidacion)',
-  'settlement.approved.bonus': 'Prima de Servicios (Causacion Liquidacion)',
-  'settlement.approved.vacation': 'Vacaciones (Causacion Liquidacion)',
-  'settlement.approved.pending_salary':
-    'Gastos de Personal - Salario Pendiente (Causacion)',
-  'settlement.approved.indemnification':
-    'Gastos de Personal - Indemnizacion (Causacion)',
-  'settlement.approved.salaries_payable':
-    'Salarios por Pagar (Causacion Liquidacion)',
-  'settlement.paid.severance': 'Cesantias Consolidadas',
-  'settlement.paid.severance_interest': 'Intereses sobre Cesantias',
-  'settlement.paid.bonus': 'Prima de Servicios por Pagar',
-  'settlement.paid.vacation': 'Vacaciones por Pagar',
-  'settlement.paid.pending_salary': 'Gastos de Personal (Salario Pendiente)',
-  'settlement.paid.indemnification': 'Gastos de Personal (Indemnizacion)',
-  'settlement.paid.social_deductions': 'Retenciones y Aportes de Nomina',
-  'settlement.paid.bank': 'Bancos (Pago Liquidacion)',
-  'settlement.paid.salaries_payable':
-    'Salarios por Pagar (Drenaje Pago Liquidacion)',
-  // Wallet / Monedero
-  'wallet.topup.customer_advance': 'Anticipos de Clientes (Recarga Wallet)',
-  'wallet.topup.cash_bank': 'Caja/Banco (Recarga Wallet)',
-  'wallet.debit.customer_advance': 'Anticipos de Clientes (Uso Wallet)',
-  'wallet.debit.revenue': 'Ingresos (Uso Wallet)',
-  // Cuentas por Pagar (AP)
-  'ap.payment.accounts_payable': 'Cuentas por Pagar (Pago)',
-  'ap.payment.cash_bank': 'Banco (Pago CxP)',
-  'ap.write_off.accounts_payable': 'Cuentas por Pagar (Castigo)',
-  'ap.write_off.other_income': 'Otros Ingresos (Castigo CxP)',
-  // Cuentas por Cobrar (AR)
-  'ar.write_off.bad_debt': 'Deudas Incobrables',
-  'ar.write_off.accounts_receivable': 'Cuentas por Cobrar (Castigo)',
-  // Nomina por Departamento
-  'payroll.approved.payroll_expense.administrative':
-    'Gastos Personal (Administrativo)',
-  'payroll.approved.payroll_expense.operational': 'Gastos Personal (Operativo)',
-  'payroll.approved.payroll_expense.sales': 'Gastos Personal (Ventas)',
-  'payroll.approved.social_security.administrative':
-    'Seg. Social (Administrativo)',
-  'payroll.approved.social_security.operational': 'Seg. Social (Operativo)',
-  'payroll.approved.social_security.sales': 'Seg. Social (Ventas)',
-  // Nómina individual — gastos (débitos)
-  'payroll.approved.transport_subsidy': 'Aux. Transporte (Gasto)',
-  'payroll.approved.provision_severance': 'Gasto Cesantias',
-  'payroll.approved.provision_severance_interest': 'Gasto Intereses Cesantias',
-  'payroll.approved.provision_vacation': 'Gasto Vacaciones',
-  'payroll.approved.provision_bonus': 'Gasto Prima de Servicios',
-  'payroll.approved.health_employer': 'EPS Empleador (Gasto)',
-  'payroll.approved.pension_employer': 'AFP Empleador (Gasto)',
-  'payroll.approved.arl_expense': 'ARL (Gasto)',
-  'payroll.approved.sena_expense': 'SENA (Gasto)',
-  'payroll.approved.icbf_expense': 'ICBF (Gasto)',
-  'payroll.approved.compensation_fund_expense': 'Caja Compensacion (Gasto)',
-  // Nómina individual — pasivos provisiones (créditos)
-  'payroll.approved.liability_severance': 'Cesantias por Pagar',
-  'payroll.approved.liability_severance_interest':
-    'Intereses Cesantias por Pagar',
-  'payroll.approved.liability_vacation': 'Vacaciones por Pagar',
-  'payroll.approved.liability_bonus': 'Prima de Servicios por Pagar',
-  // Nómina individual — aportes patronales por pagar (créditos)
-  'payroll.approved.health_employer_payable': 'EPS Empleador por Pagar',
-  'payroll.approved.pension_employer_payable': 'AFP Empleador por Pagar',
-  'payroll.approved.arl_payable': 'ARL por Pagar',
-  'payroll.approved.sena_payable': 'SENA por Pagar',
-  'payroll.approved.icbf_payable': 'ICBF por Pagar',
-  'payroll.approved.compensation_fund_payable': 'Caja Compensacion por Pagar',
-  'payroll.approved.advance_deduction': 'Descuento Anticipos',
-  // Wompi
-  'payment.received.wompi': 'Pasarela Wompi',
-  // Comisiones
-  'commission.calculated.expense': 'Gasto por Comisiones',
-  'commission.calculated.payable': 'Comisiones por Pagar',
-  // SaaS Vendix — lado Plataforma (ingreso + comision partner)
-  'saas_revenue.cash_bank': 'Banco (Cobro Suscripcion SaaS)',
-  'saas_revenue.revenue': 'Ingresos por Suscripcion SaaS',
-  'saas_revenue.partner_payable': 'Comision Partner SaaS por Pagar',
-  'saas_refund.cash_bank': 'Banco (Reembolso Suscripcion SaaS)',
-  'saas_refund.revenue': 'Ingresos por Suscripcion SaaS (Reversa)',
-  'saas_bad_debt.receivable': 'Cartera Suscripcion SaaS (Castigo)',
-  'saas_bad_debt.expense': 'Gasto por Cartera Incobrable SaaS',
-  'saas_partner_payout.commissions_payable': 'Comisiones Partners por Pagar',
-  'saas_partner_payout.cash_bank': 'Banco (Pago Comisiones Partner)',
-  // SaaS Vendix — lado Store-Cliente (gasto por la suscripcion)
-  'saas_subscription_expense.expense': 'Gasto Suscripcion SaaS Vendix',
-  'saas_subscription_expense.cash_bank': 'Banco (Pago Suscripcion SaaS)',
-  // Caja Registradora
-  'cash_register.opened.cash': 'Caja (Apertura)',
-  'cash_register.opened.cash_base': 'Fondo Base (Apertura)',
-  'cash_register.closed.cash': 'Caja (Cierre)',
-  'cash_register.closed.bank': 'Banco (Cierre/Consignacion)',
-  'cash_register.closed.surplus': 'Sobrante de Caja',
-  'cash_register.closed.shortage': 'Faltante de Caja',
-  'cash_register.movement.cash': 'Caja (Movimiento Manual)',
-  'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
-  'dispatch_route.closed.cash': 'Caja (Cuadre Planilla de Ruta)',
-  'dispatch_route.closed.surplus': 'Otros Ingresos (Sobrante de Ruta)',
-  'dispatch_route.closed.shortage_receivable':
-    'CXC Trabajadores (Faltante de Ruta)',
-  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador.
-  'dispatch_route.settlement.transport_cost': 'Costo Transporte (Devengo)',
-  'dispatch_route.settlement.accounts_payable': 'CXP Transportador (Pago)',
-  // Transferencias de Stock
-  'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
-  'stock_transfer.completed.inventory_destination':
-    'Inventario (Tienda Destino)',
-  'intercompany_transfer.shipped.receivable': 'CxC Intercompany',
-  'intercompany_transfer.shipped.inventory': 'Inventario Enviado Intercompany',
-  'intercompany_transfer.received.inventory':
-    'Inventario Recibido Intercompany',
-  'intercompany_transfer.received.payable': 'CxP Intercompany',
-};
+/**
+ * One row of `GET /store/accounting/account-mappings/keys`.
+ *
+ * Mirrors `MappingKeyCatalogEntry` in
+ * `apps/backend/src/domains/store/accounting/account-mappings/account-mapping.service.ts`,
+ * which is the single source of truth for the mapping-key catalog. It is
+ * re-declared here (and nowhere else) only because the frontend cannot import
+ * from the backend package; the *values* are never re-declared — they are read
+ * off the wire, precisely so the two sides cannot drift again.
+ */
+interface MappingKeyCatalogEntry {
+  key: string;
+  label: string;
+  /** Event half of the key (`invoice.validated`). */
+  event: string;
+  /** Account role half of the key (`accounts_receivable`). */
+  role: string;
+  /** PUC code the default cascade falls back to. */
+  default_code: string;
+  /** Raw account description from the backend default mappings. */
+  description: string;
+}
 
 const GROUP_DEFINITIONS: Array<{
   key: string;
@@ -467,10 +259,12 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   selector: 'vendix-account-mappings',
   standalone: true,
   imports: [
+    AccountSelectComponent,
     ButtonComponent,
     CardComponent,
     IconComponent,
     EmptyStateComponent,
+    FormsModule,
     NgClass,
   ],
   templateUrl: './account-mappings.component.html',
@@ -486,11 +280,13 @@ export class AccountMappingsComponent {
   readonly loading = toSignal(this.store.select(selectAccountMappingsLoading), {
     initialValue: false,
   });
-  readonly leaf_accounts = toSignal(this.store.select(selectLeafAccounts), {
-    initialValue: [] as ChartAccount[],
-  });
+  // `leaf_accounts` is gone: each row's `app-account-select` searches the chart
+  // of accounts server-side. The old markup rendered the whole leaf list as
+  // <option>s inside every one of the ~230 mapping rows.
 
   // Local state
+  /** `mapping_key` → short account label, from the backend key catalog. */
+  readonly mapping_labels = signal<Record<string, string>>({});
   readonly mapping_groups = signal<MappingGroup[]>([]);
   readonly changed_mappings = signal<Map<string, number>>(new Map());
   readonly has_changes = signal(false);
@@ -500,7 +296,10 @@ export class AccountMappingsComponent {
 
   constructor() {
     this.store.dispatch(loadAccountMappings({}));
-    this.store.dispatch(loadAccounts());
+    // No `loadAccounts()` here any more — this screen no longer needs the whole
+    // chart in memory. (The accounting shell still dispatches it for the other
+    // tabs that read `selectLeafAccounts`.)
+    this.loadMappingKeyCatalog();
 
     this.store
       .select(selectAccountMappings)
@@ -558,8 +357,33 @@ export class AccountMappingsComponent {
         return null;
     }
   }
+  /**
+   * Pulls the canonical mapping-key catalog once. Failure is non-fatal: rows
+   * fall back to showing the raw `mapping_key`, which is still usable, so a
+   * flaky catalog request never blocks editing the mappings themselves.
+   */
+  private loadMappingKeyCatalog(): void {
+    this.http
+      .get<{ data?: MappingKeyCatalogEntry[] }>(
+        `${environment.apiUrl}/store/accounting/account-mappings/keys`,
+      )
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        const entries = res?.data ?? [];
+        if (entries.length === 0) return;
+        this.mapping_labels.set(
+          Object.fromEntries(
+            entries.map((e) => [e.key, e.description || e.label || e.key]),
+          ),
+        );
+      });
+  }
+
   getLabel(mapping_key: string): string {
-    return MAPPING_LABELS[mapping_key] || mapping_key;
+    return this.mapping_labels()[mapping_key] || mapping_key;
   }
 
   getSourceLabel(source: string): string {
@@ -571,19 +395,22 @@ export class AccountMappingsComponent {
     return labels[source] || source;
   }
 
-  getSelectedAccountId(mapping: AccountMapping): number | string {
+  getSelectedAccountId(mapping: AccountMapping): number | null {
     const changedMappings = this.changed_mappings();
     if (changedMappings.has(mapping.mapping_key)) {
       return changedMappings.get(mapping.mapping_key)!;
     }
-    return mapping.account_id || '';
+    return mapping.account_id ?? null;
   }
 
-  onAccountChange(mapping_key: string, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
+  /**
+   * `app-account-select` is a CVA, so it emits the account id directly instead
+   * of a DOM `Event` the way the old native `<select>` did.
+   */
+  onAccountSelected(mapping_key: string, account_id: number | null): void {
     const updatedMap = new Map(this.changed_mappings());
-    if (value) {
-      updatedMap.set(mapping_key, Number(value));
+    if (account_id != null) {
+      updatedMap.set(mapping_key, Number(account_id));
     } else {
       updatedMap.delete(mapping_key);
     }

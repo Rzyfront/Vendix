@@ -4,6 +4,7 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
+  IsIn,
   IsNumber,
   IsBoolean,
   ValidateIf,
@@ -122,7 +123,7 @@ export class CreateInventorySupplierDto {
   })
   @IsOptional()
   @nullToUndefined()
-  @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
+  @IsIn([supplier_state_enum.active, supplier_state_enum.inactive])
   state?: supplier_state_enum = supplier_state_enum.active;
 
   // Plan Despacho Economía — FASE 1 paso 7.

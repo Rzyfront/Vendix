@@ -1,5 +1,4 @@
 import {
-  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
@@ -10,6 +9,7 @@ import {
   ValidatorConstraintInterface,
   registerDecorator,
   ValidationOptions,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -33,7 +33,7 @@ export class QuantityTierDto {
   @Type(() => Number)
   max_quantity?: number;
 
-  @IsEnum(['percentage', 'fixed_amount'])
+  @IsIn(['percentage', 'fixed_amount'])
   type: QuantityTierType;
 
   @IsNumber({ maxDecimalPlaces: 2 })

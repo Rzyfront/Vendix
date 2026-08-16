@@ -4,7 +4,7 @@ import {
   IsOptional,
   IsString,
   Matches,
-  IsEnum,
+  IsIn,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -73,7 +73,7 @@ export class RegisterOwnerDto {
       'Fiscal scope inicial. STORE mantiene NIT/configuración DIAN por tienda; ORGANIZATION usa entidad fiscal consolidada.',
   })
   @IsOptional()
-  @IsEnum(['STORE', 'ORGANIZATION'] as any, {
+  @IsIn(['STORE', 'ORGANIZATION'] as any, {
     message: 'fiscal_scope must be STORE or ORGANIZATION',
   })
   fiscal_scope?: 'STORE' | 'ORGANIZATION';

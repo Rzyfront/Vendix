@@ -1559,6 +1559,42 @@
           }
         </section>
 
+        <!-- ─── Contabilidad (avanzado, opcional) ────────────────────────── -->
+        <section
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="calculator"
+              size="18"
+              class="text-primary-600"
+            ></app-icon>
+            <h2 class="text-base font-bold text-gray-900">
+              Contabilidad
+              <span class="text-gray-400 font-medium"> (opcional)</span>
+            </h2>
+          </div>
+
+          <div class="max-w-xl">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Cuenta de ingreso (PUC)
+            </label>
+            <app-account-code-select
+              formControlName="account_code"
+            ></app-account-code-select>
+            <p class="mt-1.5 text-xs text-gray-500">
+              Cuenta del PUC con la que se acredita el ingreso de este producto
+              al facturar. Si la dejas vacía, el ingreso va a la cuenta de
+              ingresos por defecto de la organización — es lo normal y no
+              necesitas tocar nada.
+            </p>
+            <p class="mt-1 text-xs text-gray-400">
+              Solo se ofrecen cuentas que aceptan movimientos: una cuenta de
+              agrupación no admite asientos.
+            </p>
+          </div>
+        </section>
+
         <!-- Service-Specific Fields -->
         @if (isService) {
           <section
@@ -3483,6 +3519,92 @@
                   }
                 </tbody>
               </table>
+            </div>
+          }
+
+          <!-- ─── Cuentas contables por variante (opcional) ─────────────── -->
+          @if (generatedVariants.length > 0) {
+            <div class="mt-4 rounded-xl border border-gray-200">
+              <button
+                type="button"
+                (click)="
+                  isVariantAccountingOpen.set(!isVariantAccountingOpen())
+                "
+                class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left"
+              >
+                <span class="flex items-center gap-2 min-w-0">
+                  <app-icon
+                    name="calculator"
+                    size="16"
+                    class="text-gray-500 shrink-0"
+                  ></app-icon>
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-gray-800">
+                      Cuenta contable por variante (opcional)
+                    </span>
+                    <span class="block text-xs text-gray-500">
+                      @if (variantsWithAccountCount > 0) {
+                        {{ variantsWithAccountCount }} de
+                        {{ generatedVariants.length }} variantes con cuenta
+                        propia
+                      } @else {
+                        Todas heredan la cuenta del producto
+                      }
+                    </span>
+                  </span>
+                </span>
+                <app-icon
+                  [name]="
+                    isVariantAccountingOpen() ? 'chevron-up' : 'chevron-down'
+                  "
+                  size="16"
+                  class="text-gray-400 shrink-0"
+                ></app-icon>
+              </button>
+
+              @if (isVariantAccountingOpen()) {
+                <div class="px-3 pb-3 pt-1 border-t border-gray-100 space-y-3">
+                  <p class="text-xs text-gray-500">
+                    La cuenta de la variante <strong>manda sobre</strong> la del
+                    producto, porque la variante es la unidad que realmente se
+                    factura. Si la dejas vacía, la variante hereda la cuenta del
+                    producto; y si el producto tampoco declara una, el ingreso va
+                    a la cuenta por defecto de la organización.
+                  </p>
+
+                  @for (variant of generatedVariants; track variant) {
+                    <div
+                      class="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-2 md:items-center p-2 border border-gray-100 rounded-lg"
+                    >
+                      <div class="min-w-0">
+                        <div
+                          class="text-sm text-gray-800 font-medium truncate"
+                          [title]="variant.name"
+                        >
+                          {{ variant.name }}
+                        </div>
+                        <div class="text-xs text-gray-400 font-mono truncate">
+                          {{ variant.sku }}
+                        </div>
+                        @if (!variant.account_code) {
+                          <div class="text-xs text-gray-500 mt-0.5">
+                            @if (productAccountCode(); as parentCode) {
+                              Hereda del producto: {{ parentCode }}
+                            } @else {
+                              Hereda: cuenta de ingresos por defecto
+                            }
+                          </div>
+                        }
+                      </div>
+                      <app-account-code-select
+                        [(ngModel)]="variant.account_code"
+                        [ngModelOptions]="{ standalone: true }"
+                        placeholder="Heredar del producto"
+                      ></app-account-code-select>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           }
         </div>

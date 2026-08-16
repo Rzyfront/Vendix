@@ -1,15 +1,15 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
   IsDateString,
   MaxLength,
   IsInt,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreatePayrollRunDto {
-  @IsEnum(['monthly', 'biweekly', 'weekly'])
+  @IsIn(['monthly', 'biweekly', 'weekly'])
   frequency: 'monthly' | 'biweekly' | 'weekly';
 
   @IsDateString()

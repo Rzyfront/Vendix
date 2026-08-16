@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, IsEnum, Min } from 'class-validator';
+import { IsOptional, IsString, IsInt, IsEnum, IsIn, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { partner_payout_batch_state_enum } from '@prisma/client';
 
@@ -29,6 +29,6 @@ export class PayoutQueryDto {
   sort_by?: string = 'created_at';
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
 }

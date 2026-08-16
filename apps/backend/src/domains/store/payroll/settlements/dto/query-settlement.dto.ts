@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsDateString } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsDateString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QuerySettlementDto {
@@ -33,7 +33,7 @@ export class QuerySettlementDto {
   sort_order?: 'asc' | 'desc' = 'desc';
 
   @IsOptional()
-  @IsEnum(['draft', 'calculated', 'approved', 'paid', 'cancelled'])
+  @IsIn(['draft', 'calculated', 'approved', 'paid', 'cancelled'])
   status?: string;
 
   @IsOptional()

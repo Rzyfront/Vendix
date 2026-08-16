@@ -41,6 +41,36 @@ export function computeNitDv(nit: string | null | undefined): string {
  * digits. `provided_dv` reports what the input claimed so a caller can flag the
  * mismatch; `dv_mismatch` says whether it disagreed.
  */
+/**
+ * Identificación de una parte tal como el CUFE y el XML DIAN deben declararla:
+ * `NitOFE` / `NumAdq` en el hash, `cbc:CompanyID` en el documento.
+ *
+ * Anexo Técnico 1.9 §11.2 exige el número **sin puntos, sin guiones y SIN dígito
+ * de verificación**. `onlyDigits()` solo cumple los dos primeros: sobre
+ * `900.123.456-7` devuelve `9001234567`, que conserva el DV pegado. La DIAN
+ * recomputa la huella con `900123456`, los hashes difieren y el documento se
+ * rechaza — habiendo gastado ya el consecutivo autorizado.
+ *
+ * El tipo de documento NO es opcional aquí, y esa es la razón de que esta función
+ * exista en vez de un `normalizeNit(...).number` a secas: **solo el NIT lleva
+ * DV**. Una cédula como `1118860776` son diez dígitos de dato; recortarle el
+ * último la convertiría en la cédula de otra persona. Así que el recorte se
+ * aplica únicamente cuando el emisor declaró un NIT (código DIAN `31`), y
+ * cualquier otro tipo pasa solo por la limpieza de separadores.
+ *
+ * @param document_type código DIAN del tipo de identificación (`'31'` = NIT), o
+ *   su alias interno (`'NIT'`). Ausente ⇒ se trata como NO-NIT, que es la lectura
+ *   conservadora: preserva el número íntegro en vez de mutilarlo por suposición.
+ */
+export function dianPartyId(
+  raw: string | null | undefined,
+  document_type?: string | null,
+): string {
+  const type = (document_type ?? '').trim().toUpperCase();
+  const isNit = type === '31' || type === 'NIT';
+  return isNit ? normalizeNit(raw).number : onlyDigits(raw);
+}
+
 export function normalizeNit(raw: string | null | undefined): {
   number: string;
   dv: string;

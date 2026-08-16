@@ -2,8 +2,8 @@ import {
   IsNumber,
   IsString,
   IsOptional,
-  IsEnum,
   IsDateString,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -15,7 +15,7 @@ export class CreateSettlementDto {
   @IsDateString()
   termination_date: string;
 
-  @IsEnum([
+  @IsIn([
     'voluntary_resignation',
     'just_cause',
     'without_just_cause',

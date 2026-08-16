@@ -43,7 +43,23 @@ export interface Invoice {
   customer_tax_id?: string;
   customer_email?: string;
   customer_phone?: string;
-  customer_address?: string;
+  /**
+   * JSONB. El histórico guardó aquí tanto un objeto con municipio y país como
+   * una cadena suelta con la línea de dirección, así que se declara ancho y se
+   * aplana en el borde — leer `.city` de un `string` devuelve `undefined` sin
+   * un solo error.
+   */
+  customer_address?: string | Record<string, unknown> | null;
+
+  /**
+   * Identidad fiscal CONGELADA al emitir (Fase 1.1 del plan). Es un snapshot:
+   * lo que viajó a la DIAN, no lo que dice hoy la ficha del cliente.
+   */
+  customer_document_type?: string | null;
+  customer_verification_digit?: string | number | null;
+  customer_tax_regime?: string | null;
+  customer_fiscal_responsibilities?: string | string[] | null;
+
   subtotal_amount: number;
   discount_amount: number;
   tax_amount: number;
@@ -60,9 +76,40 @@ export interface Invoice {
   updated_at: string;
 
   // Relations
+  /**
+   * OJO — ESTOS DOS NOMBRES NO SON LOS DEL BACKEND.
+   *
+   * `GET /store/invoicing/:id` devuelve la fila de Prisma tal cual, e `include`
+   * nombra las relaciones como la tabla: `invoice_items` / `invoice_taxes`.
+   * Nada en el frontend las renombra. `items` y `taxes` se quedan por los
+   * consumidores que ya los declaran, pero el detalle lee PRIMERO los nombres
+   * reales — leyendo sólo `items` la tabla de productos salía siempre vacía
+   * («Sin productos») sobre facturas que sí tenían líneas.
+   */
+  invoice_items?: InvoiceItem[];
+  invoice_taxes?: InvoiceTax[];
   items?: InvoiceItem[];
   taxes?: InvoiceTax[];
   resolution?: InvoiceResolution;
+
+  /**
+   * FICHA VIVA del adquiriente, distinta del SNAPSHOT (`customer_name`,
+   * `customer_tax_id`…) que congela la factura al emitirse.
+   *
+   * Las dos conviven a propósito y hay que leerlas en ese orden: el snapshot es
+   * lo que viajó a la DIAN y manda para cualquier cosa fiscal; la ficha viva es
+   * la que sabe cómo se llama hoy el cliente. Una factura creada desde el modal
+   * sin escribir el nombre a mano tiene el snapshot en `null` y el cliente
+   * asociado por `customer_id`: leer sólo el snapshot pinta una factura «Sin
+   * cliente» que sí tiene cliente.
+   */
+  customer?: {
+    id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 
   // DIAN fields
   cufe?: string;
@@ -72,26 +119,324 @@ export interface Invoice {
   accepted_at?: string;
 
   /**
-   * DIAN retry-queue state attached by the backend list endpoint.
-   * Only present for invoices whose send/transmission status is in an
-   * error or pending-send state; `null` for the rest.
+   * Los TRES estados fiscales que conviven con `status`, verificados en
+   * `schema.prisma` (modelo `invoices`). Son columnas NOT NULL con DEFAULT, así
+   * que el backend siempre las manda; se declaran opcionales sólo porque hay
+   * consumidores que construyen `Invoice` parciales.
+   *
+   * `status` dice dónde está el documento en el flujo de Vendix;
+   * `transmission_status` qué pasó con el envío; `dian_status` qué dijo la DIAN;
+   * `accounting_status` si el asiento quedó posteado. Confundirlos es lo que
+   * hacía que una factura en contingencia —válida y entregada— se viera igual
+   * que una que nadie envió.
+   */
+  transmission_status?: InvoiceTransmissionStatus | string;
+  dian_status?: InvoiceDianStatus | string;
+  accounting_status?: InvoiceAccountingStatus | string;
+
+  /**
+   * Contingencia (Anexo Técnico 1.9 §12). `contingency_deadline` lo PERSISTE el
+   * backend (`InvoiceRetryQueueService.declareContingency`), no se calcula en el
+   * navegador: el plazo de 48 h corre desde la PRIMERA declaración y un
+   * reintento no lo empuja hacia adelante.
+   */
+  contingency_type?: string | null;
+  contingency_declared_at?: string | null;
+  contingency_deadline?: string | null;
+  contingency_reason?: string | null;
+
+  /**
+   * XML firmado del documento electrónico (`invoices.xml_document`, columna
+   * `String?`). Viaja en el payload de la factura porque el backend hace
+   * `include` sin `select`; NO existe un endpoint dedicado para descargarlo, así
+   * que la descarga se arma en el cliente con este contenido.
+   */
+  xml_document?: string | null;
+
+  /**
+   * EVIDENCIA PERSISTIDA DE LO QUE DIJO EL PROVEEDOR / LA DIAN.
+   *
+   * Es la columna `invoices.provider_response` (Json?), y viaja entera en el
+   * payload porque `INVOICE_INCLUDE` no lleva `select` a nivel de factura —
+   * verificado por `curl` sobre `GET /store/invoicing/:id` y sobre la lista: la
+   * clave llega siempre, con `null` cuando el documento nunca se transmitió.
+   *
+   * POR QUÉ IMPORTA QUE ESTÉ DECLARADA. El motivo real del rechazo («Valor del
+   * CUFE no está calculado correctamente») vive acá dentro, en
+   * `provider_data.dian_errors[]`. Mientras el frontend no la declaró, el panel
+   * de reglas sólo se alimentaba del error EN VIVO de la petición: recargar la
+   * página, o abrir una factura rechazada de ayer, dejaba el badge «Rechazado
+   * por la DIAN» sin una sola regla que corregir.
+   */
+  provider_response?: InvoiceProviderResponse | null;
+
+  /**
+   * Estado de la cola de reintentos DIAN (`invoice_retry_queue`).
+   *
+   * LO ADJUNTAN LOS DOS ENDPOINTS. `findAll` y `findOne` de
+   * `apps/backend/src/domains/store/invoicing/invoicing.service.ts` aplican HOY el
+   * MISMO criterio de elegibilidad (`RETRY_ELIGIBLE_SEND_STATUSES` ∪
+   * `RETRY_ELIGIBLE_TRANSMISSION_STATUSES`) y devuelven la clave en la raíz de la
+   * factura. El hueco que este comentario describía —«sólo la lista lo trae»— se
+   * cerró en el backend; se corrigió aquí tras releer `findOne`, porque una nota
+   * caducada sobre de dónde sale un dato es la que hace que el próximo lector
+   * conserve un apaño que ya no hace falta.
+   *
+   * `null` NO significa «no vino»: significa «esta factura no es candidata a
+   * reintento». Por eso el panel se pinta sobre la presencia del objeto y nunca
+   * sobre la presencia de la clave.
    */
   retry_status?: InvoiceRetryStatus | null;
+
+  /**
+   * Moneda del documento. SIEMPRE `COP`: el Art. 73 de la Res. 000042/2020
+   * exige peso colombiano, y `DocumentCurrencyCode` distinto de COP es rechazo
+   * directo. Una operación pactada en divisa se declara aparte, con los cuatro
+   * campos de abajo.
+   */
+  currency?: string;
+
+  /** Divisa en que se pactó la operación (ISO 4217), si no fue COP. */
+  foreign_currency?: string | null;
+
+  /** El total en esa divisa, el que ve el cliente en su contrato. */
+  foreign_total_amount?: number | string | null;
+
+  /**
+   * Cuántos pesos vale UNA unidad de la divisa (la TRM). Va al XML como
+   * `cbc:CalculationRate`, y el anexo RECHAZA el valor `1.00`: si la tasa fuera
+   * uno, la operación no sería en divisa.
+   */
+  exchange_rate?: number | string | null;
+
+  /** El día al que corresponde esa tasa (`cbc:Date` del grupo de cambio). */
+  exchange_rate_date?: string | null;
+
+  /**
+   * `CustomizationID` — tipo de operación DIAN. `'10'` estándar, `'09'` AIU,
+   * `'11'` mandatos, `'12'` transporte. Tiene que ser coherente con el
+   * contenido: declarar `'10'` sobre líneas con `aiu_component` es un documento
+   * que la DIAN rechaza.
+   */
+  operation_type?: string | null;
+
+  /** Flete facturado, ya incluido en `total_amount`. */
+  shipping_amount?: number | string | null;
 }
 
+/**
+ * `invoices.provider_response` — la evidencia que el backend guarda de CADA
+ * transmisión (rechazo, aceptación, contingencia y respuesta sin CUFE).
+ *
+ * FORMA REAL, NO SUPUESTA. La escribe un único constructor,
+ * `toProviderEvidence()` en `invoice-flow.service.ts` (gemelo exacto de
+ * `providerEvidence()` en `fiscal-transmission-ledger.service.ts`), que aplana
+ * `ProviderResponse` con `?? null` campo por campo. Por eso los escalares se
+ * declaran `| null` y no opcionales: cuando ese constructor corre, las claves
+ * SIEMPRE están, y su ausencia sólo puede venir de una fila escrita por otra
+ * cosa.
+ *
+ * TODO SE DECLARA OPCIONAL DE TODAS FORMAS porque la columna es un `Json?` sin
+ * validación: en la base de desarrollo conviven filas con una forma
+ * completamente distinta (`{ date, status, tracking_id }`, sembradas por el
+ * seed). El tipo documenta el contrato; el lector
+ * (`readPersistedDianRejection`) no se fía de él y valida en runtime.
+ */
+export interface InvoiceProviderResponse {
+  success?: boolean;
+  tracking_id?: string | null;
+  cufe?: string | null;
+  cude?: string | null;
+  cuds?: string | null;
+  cune?: string | null;
+  qr_code?: string | null;
+  xml_document?: string | null;
+  pdf_url?: string | null;
+  /**
+   * Mensaje compuesto por el proveedor. En un rechazo del `DianDirectProvider`
+   * ya viene con los motivos concatenados («Documento rechazado: …»), así que
+   * NO se pinta junto a las viñetas: sería la misma información dos veces.
+   */
+  message?: string | null;
+  provider_data?: InvoiceProviderData | null;
+}
+
+/**
+ * `provider_response.provider_data` — la bolsa libre del proveedor.
+ *
+ * Las cuatro claves nombradas son las que pone `DianDirectProvider` en sus siete
+ * puntos de emisión. NO son un contrato firme: `sendCreditNote` omite
+ * `dian_status_description` y otro proveedor podría no poner ninguna. De ahí el
+ * índice `unknown` (nunca `any`): lo que no reconocemos se deja pasar sin
+ * pretender saber qué es.
+ */
+export interface InvoiceProviderData {
+  /** Código de estado de la DIAN («00» = aceptado). */
+  dian_status_code?: string | null;
+  dian_status_description?: string | null;
+  /** Las reglas violadas. Es EL dato que el comerciante necesita corregir. */
+  dian_errors?: DianProviderError[] | null;
+  /** `'test'` | `'production'`, tal como lo guarda el proveedor. */
+  environment?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * Un motivo tal como lo deja `DianResponseParserService.extractErrors()`:
+ * `{ code, message, severity }` con `severity: 'error' | 'warning'`.
+ *
+ * Todo opcional a propósito. Ese parser barre el XML con dos expresiones
+ * regulares —una por `Regla: …` y otra por CADA `<cbc:Description>`— y la
+ * segunda arrastra ruido: en el incidente real llegó un elemento cuyo `message`
+ * era literalmente `"0"`. El tipo admite la basura; el lector la descarta.
+ */
+export interface DianProviderError {
+  code?: string | null;
+  message?: string | null;
+  severity?: string | null;
+}
+
+/** Espejo de `fiscal_transmission_status_enum` (schema.prisma). */
+export type InvoiceTransmissionStatus =
+  | 'draft'
+  | 'queued'
+  | 'signing'
+  | 'signed'
+  | 'submitted'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'retrying'
+  | 'cancelled'
+  | 'contingency';
+
+/** Espejo de `dian_document_status_enum` (schema.prisma). */
+export type InvoiceDianStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'not_applicable';
+
+/** Espejo de `fiscal_accounting_status_enum` (schema.prisma). */
+export type InvoiceAccountingStatus =
+  | 'blocked'
+  | 'provisional'
+  | 'posted'
+  | 'reversed'
+  | 'not_applicable';
+
+/**
+ * `invoice_retry_queue.status`. `contingency` faltaba: es el estado terminal de
+ * la cola cuando se agotan los reintentos reglamentados y el documento se
+ * expide bajo contingencia (`RETRY_STATUS` en `invoice-retry-queue.service.ts`).
+ */
 export type InvoiceRetryQueueStatus =
   | 'pending'
   | 'processing'
   | 'failed'
-  | 'completed';
+  | 'completed'
+  | 'contingency';
 
 export interface InvoiceRetryStatus {
-  status: InvoiceRetryQueueStatus;
+  status: InvoiceRetryQueueStatus | string;
   attempts: number;
   max_attempts: number;
   last_error: string | null;
   /** ISO timestamp of the next scheduled retry attempt. */
   next_retry_at: string | null;
+}
+
+/**
+ * Un evento RADIAN registrado contra la factura (Res. 000085/2022), tal como lo
+ * devuelve `GET /store/invoicing/:id/events`.
+ *
+ * Espejo de la tabla `dian_document_events` VERIFICADA en `schema.prisma`. El
+ * endpoint hace `findMany` sin `select`, así que la respuesta TAMBIÉN trae
+ * `request_xml` y `response_xml`: se dejan deliberadamente fuera de este tipo —
+ * son documentos completos que nadie lee en una lista y que sólo engordarían el
+ * árbol de componentes.
+ */
+export interface DianDocumentEvent {
+  id: number;
+  invoice_id: number;
+  /** '030'…'051'. Numeral 14.2.1 del Anexo Técnico. */
+  event_code: string;
+  event_number: string | null;
+  /** CUDE del propio ApplicationResponse, no el CUFE de la factura. */
+  cude: string | null;
+  referenced_cufe: string | null;
+  /** `pending` | `accepted` | `rejected` | `error` (VarChar, no enum). */
+  status: string;
+  dian_status_code: string | null;
+  dian_status_message: string | null;
+  issued_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/**
+ * Un tercero identificado sólo por su registro tributario, como los nombran los
+ * eventos RADIAN. Espejo de `DianEventPartyDto`
+ * (`apps/backend/.../invoicing/dto/register-dian-event.dto.ts`).
+ */
+export interface DianEventPartyRequest {
+  /** Código DIAN de tipo de identificación ('31' NIT, '13' CC…). */
+  document_type: string;
+  /** Identificación SIN puntos, guiones ni dígito de verificación. */
+  document_number: string;
+  document_dv?: string;
+  legal_name: string;
+}
+
+/**
+ * Cuerpo de `POST /store/invoicing/:id/events` — espejo de
+ * `RegisterDianEventDto`.
+ *
+ * Sólo `event_code` es obligatorio SIEMPRE. El resto lo exige el backend según el
+ * código: `operation_code` cuando el evento admite más de un «tipo de operación»
+ * (numeral 14.1.2), y `issuer_party` / `endorsement_list_id` / `negotiation_info`
+ * en la familia de título valor. Enviar un evento incompleto NO es gratis —
+ * gasta el consecutivo del evento y RADIAN lo rechaza igual—, así que la puerta
+ * está en el backend (`DIAN_EVENT_005`) y la UI no adivina.
+ */
+export interface RegisterDianEventRequest {
+  /** '030'…'051'. Numeral 14.2.1 del Anexo Técnico. */
+  event_code: string;
+  /** Justificación. RADIAN espera una en el reclamo (031). */
+  description?: string;
+  /** «Tipo de operación» del numeral 14.1.2 ('361', '451', …). */
+  operation_code?: string;
+  issuer_party?: DianEventPartyRequest;
+  /** '1' endoso completo · '2' endoso en blanco (numeral 14.2.3). */
+  endorsement_list_id?: string;
+  /** `InformacionNegociacion` con los literales del anexo como claves. */
+  negotiation_info?: Record<string, string>;
+  /** `YYYY-MM-DD`. Las dos ausentes = mandato ilimitado. */
+  validity_start_date?: string;
+  validity_end_date?: string;
+}
+
+/**
+ * Respuesta de `POST /store/invoicing/:id/pdf/regenerate`. `key` es la llave S3
+ * persistida en `invoices.pdf_url`; `url` es la firmada, la ÚNICA que se puede
+ * abrir en el navegador.
+ */
+export interface InvoicePdfResult {
+  key: string;
+  url: string;
+}
+
+/**
+ * Respuesta de `GET /store/invoicing/:id/pdf`.
+ *
+ * OJO: `invoices.pdf_url` NO es una URL, es una LLAVE S3
+ * (`stores/{id}/invoices/{id}/invoice-XXX.pdf`, ver `invoice-pdf.service.ts`).
+ * Abrirla directamente desde el navegador produce una ruta relativa rota. Este
+ * endpoint es el que la firma; si la factura todavía no tiene PDF, lo genera.
+ */
+export interface InvoicePdfUrl {
+  url: string;
 }
 
 export type InvoiceType =
@@ -126,7 +471,45 @@ export interface InvoiceItem {
   // stock units consumed when packaging expands the sold quantity.
   applied_price_tier_name?: string | null;
   stock_units_consumed?: number | null;
+
+  /**
+   * Componente AIU de la línea (Anexo 1.9 §CAV03/§CAX01). `null` en toda línea
+   * que no participa de un contrato AIU.
+   *
+   * NO es decorativo: gobierna qué se grava. Bajo el Art. 462-1 ET la base es
+   * el AIU completo; bajo el Decreto 1372/1992 sólo la Utilidad. Las líneas
+   * fuera de base gravable se emiten SIN `cac:TaxTotal`, así que una línea
+   * marcada como `imprevistos` con impuesto sería un documento que la DIAN
+   * rechaza — y sin pintar la marca en pantalla nadie puede verlo.
+   */
+  aiu_component?: AiuComponent | null;
+
+  /**
+   * Unidad de medida UN/ECE del `@unitCode` (`EA`, `KGM`, `MTR`…). `null`
+   * cuando la línea no la declaró: el emisor cae a `EA`, que en una línea por
+   * pieza es correcto y en una línea por metros no.
+   */
+  unit_code?: string | null;
+
+  /**
+   * Subcuenta PUC congelada al facturar. Es un SNAPSHOT a propósito: que el
+   * producto cambie de cuenta mañana no puede reescribir un asiento ya
+   * contabilizado. `null` ⇒ la línea cae a la cuenta de ingreso por defecto.
+   */
+  account_code?: string | null;
+
+  /**
+   * Cuántas unidades de stock representa una unidad de precio. Lo que evita la
+   * sobrefacturación de QUI-648 (queso a $28.000/kg con stock en gramos).
+   */
+  price_unit_quantity?: number | string | null;
+
+  /** El precio de la línea ya trae el impuesto dentro. */
+  is_inclusive?: boolean | null;
 }
+
+/** Los tres componentes de un contrato AIU. */
+export type AiuComponent = 'administracion' | 'imprevistos' | 'utilidad';
 
 export interface InvoiceTax {
   id: number;
@@ -234,6 +617,31 @@ export interface CreateInvoiceDto {
    * Header-aggregated taxes (legacy). New flows use per-line `items[].taxes[]`.
    */
   taxes?: CreateInvoiceTaxDto[];
+  /**
+   * Retenciones declaradas explícitamente. Si vienen, el backend las valida y
+   * las persiste en `withholding_calculations` AL CREAR; el agregado de
+   * `withholding_amount` se recalcula desde este array. Vacío u omitido ⇒
+   * sólo el agregado, y la validación automática del tenant corre al aceptar.
+   *
+   * Espejo de `InvoiceWithholdingInputDto` del backend.
+   */
+  withholdings?: InvoiceWithholdingInput[];
+}
+
+/**
+ * Una retención DECLARADA en el payload de creación.
+ *
+ * `amount` es opcional: si llega, el backend valida que cuadre con
+ * `base × rate` dentro de la tolerancia de 1 centavo; si no llega, se
+ * recalcula server-side con el mismo truncado que `dian-money.util.ts`.
+ */
+export interface InvoiceWithholdingInput {
+  role: 'practiced' | 'suffered';
+  concept_id: number;
+  base_amount: number;
+  rate: number;
+  amount?: number;
+  customer_id?: number;
 }
 
 export interface CreateInvoiceItemDto {
@@ -268,16 +676,38 @@ export interface UpdateInvoiceDto {
   items?: CreateInvoiceItemDto[];
 }
 
+/**
+ * Nota crédito.
+ *
+ * El campo es `related_invoice_id`, igual que la columna y que
+ * `CreateCreditNoteDto` del backend. Se llamó `original_invoice_id` y ese
+ * nombre no existe en el DTO: con `forbidNonWhitelisted` activo la petición se
+ * rechazaba con 400 antes de llegar al servicio, así que crear una nota desde
+ * la UI era imposible.
+ *
+ * Sin `items` la nota es TOTAL y el backend copia las líneas de la factura que
+ * corrige. Sin `issue_date` la fecha la pone el backend en el huso de la
+ * tienda, que es donde debe calcularse una fecha fiscal.
+ */
 export interface CreateCreditNoteDto {
-  original_invoice_id: number;
-  reason: string;
+  related_invoice_id: number;
+  reason?: string;
+  issue_date?: string;
+  currency?: string;
+  notes?: string;
   items?: CreateInvoiceItemDto[];
+  taxes?: CreateInvoiceTaxDto[];
 }
 
+/** Nota débito. Mismo contrato que {@link CreateCreditNoteDto}. */
 export interface CreateDebitNoteDto {
-  original_invoice_id: number;
-  reason: string;
+  related_invoice_id: number;
+  reason?: string;
+  issue_date?: string;
+  currency?: string;
+  notes?: string;
   items?: CreateInvoiceItemDto[];
+  taxes?: CreateInvoiceTaxDto[];
 }
 
 export interface CreateResolutionDto {

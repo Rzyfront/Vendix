@@ -9,6 +9,7 @@ import {
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.service';
 import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import {
@@ -24,7 +25,9 @@ import {
 import {
   CORRECCION_POR_VIOLACION,
   ROTULO_CAMPO_INMUTABLE,
+  toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
+import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
 
@@ -79,6 +82,14 @@ export class OrgInvoiceResolutionsService {
   constructor(
     private readonly prisma: OrganizationPrismaService,
     private readonly fiscalScope: FiscalScopeService,
+    // `EncryptionModule` es `@Global()`, así que inyectarlo no pide un solo
+    // cambio de módulo. Este carril escribía SÓLO `technical_key` en claro
+    // mientras el de tienda ya sellaba las tres columnas: una resolución dada de
+    // alta por organización nacía sin copia cifrada y sin huella, y la huella es
+    // con lo que se detecta la ClTec repetida entre rangos. Dos escrituras del
+    // mismo dato con distinto contrato es cómo un control de seguridad se apaga
+    // por el lado que nadie mira.
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   private requireOrganizationId(): number {
@@ -94,7 +105,7 @@ export class OrgInvoiceResolutionsService {
     const where: any = { organization_id };
     if (typeof store_id === 'number') where.store_id = store_id;
 
-    return this.prisma.invoice_resolutions.findMany({
+    const rows = await this.prisma.invoice_resolutions.findMany({
       where,
       orderBy: [{ is_active: 'desc' }, { valid_to: 'desc' }],
       include: {
@@ -105,10 +116,32 @@ export class OrgInvoiceResolutionsService {
         _count: { select: { invoices: true } },
       },
     });
+
+    // MISMA función que el carril de tienda, importada y no reescrita: la clave
+    // técnica es el secreto con el que se hashea el CUFE de cada factura de la
+    // resolución, y un `include` sin `select` la devuelve entera —junto con su
+    // versión cifrada y su huella— a cualquiera que liste resoluciones. Dos
+    // sanitizadores paralelos es exactamente cómo un carril se queda atrás
+    // cuando el otro se arregla.
+    return rows.map(toPublicResolution);
   }
 
   async findOne(id: number) {
     const organization_id = this.requireOrganizationId();
+    const resolution = await this.findOneInternal(id, organization_id);
+    return toPublicResolution(resolution);
+  }
+
+  /**
+   * La fila COMPLETA, para uso interno.
+   *
+   * `update` y `remove` necesitan comparar contra `technical_key` —para saber
+   * si cambió y para reconstruir el borrador que valida los requisitos
+   * fiscales—, así que no pueden consumir la versión saneada. Separarlas es lo
+   * que permite que `findOne` (la que sí sale por HTTP) nunca devuelva el
+   * secreto.
+   */
+  private async findOneInternal(id: number, organization_id: number) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id, organization_id },
       include: {
@@ -136,6 +169,14 @@ export class OrgInvoiceResolutionsService {
       document_type,
       resolution_number: dto.resolution_number,
       technical_key: dto.technical_key,
+    });
+    // `assertFiscalRequirements` juzga si la clave DEBE estar; esto juzga si la
+    // que trajeron sirve. Son preguntas distintas y hasta ahora sólo el carril
+    // de tienda hacía la segunda: por acá entraba una ClTec mal copiada sin que
+    // nadie la mirara, y una ClTec mal copiada quema un consecutivo autorizado.
+    // Se guarda lo que devuelve —normalizado—, no `dto.technical_key`.
+    const technical_key = assertTechnicalKeyShape(dto.technical_key, {
+      prefix: dto.prefix,
     });
     this.assertRange(dto.range_from, dto.range_to);
 
@@ -185,7 +226,10 @@ export class OrgInvoiceResolutionsService {
         valid_from,
         valid_to,
         is_active: dto.is_active ?? true,
-        technical_key: dto.technical_key ?? null,
+        // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
+        // la misma función que usa el carril de tienda. Escribir una sin las
+        // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
+        ...this.technicalKeyVault.sealForWrite(technical_key),
       },
       include: {
         store: { select: { id: true, name: true, slug: true } },
@@ -199,11 +243,16 @@ export class OrgInvoiceResolutionsService {
       `Org invoice resolution ${resolution.id} created for org ${organization_id}, entity ${accounting_entity.id}`,
     );
 
-    return resolution;
+    return toPublicResolution(resolution);
   }
 
   async update(id: number, dto: UpdateOrgInvoiceResolutionDto) {
-    const current = await this.findOne(id);
+    // La fila COMPLETA: más abajo se compara `current.technical_key` para
+    // decidir si la clave cambió, y la versión saneada ya no la trae.
+    const current = await this.findOneInternal(
+      id,
+      this.requireOrganizationId(),
+    );
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -349,7 +398,21 @@ export class OrgInvoiceResolutionsService {
     // y su `PartialType` no llevan inicializadores de propiedad.
     if (dto.is_active !== undefined) update_data.is_active = dto.is_active;
     if (dto.technical_key !== undefined) {
-      update_data.technical_key = dto.technical_key;
+      // Normalizada y validada, igual que en el alta. Mandar `null` para borrar
+      // la clave sigue siendo válido —lo juzga `assertFiscalRequirements` según
+      // el tipo de documento—; lo que ya no pasa es una clave presente y rota.
+      // Las TRES columnas juntas, igual que en el alta: `sealForWrite` devuelve
+      // siempre las tres —incluso en `null`— porque un `undefined` haría que
+      // Prisma dejara la columna como estaba, y en un cambio de clave eso
+      // conservaría el cifrado y la huella de la ANTERIOR. La fila apuntaría a
+      // dos claves a la vez y la que mandaría al recomputar el CUFE sería la
+      // vieja.
+      Object.assign(
+        update_data,
+        this.technicalKeyVault.sealForWrite(
+          assertTechnicalKeyShape(dto.technical_key, { resolution_id: id }),
+        ),
+      );
     }
 
     let next_accounting_entity_id = current.accounting_entity_id;
@@ -392,11 +455,14 @@ export class OrgInvoiceResolutionsService {
     });
 
     this.logger.log(`Org invoice resolution #${id} updated`);
-    return updated;
+    return toPublicResolution(updated);
   }
 
   async remove(id: number) {
-    const resolution = await this.findOne(id);
+    const resolution = await this.findOneInternal(
+      id,
+      this.requireOrganizationId(),
+    );
 
     if (resolution._count.invoices > 0) {
       throw new VendixHttpException(

@@ -2,6 +2,7 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -152,7 +153,7 @@ export class CreateOrgSupplierDto {
   })
   @IsOptional()
   @nullToUndefined()
-  @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
+  @IsIn([supplier_state_enum.active, supplier_state_enum.inactive])
   state?: supplier_state_enum;
 
   // Plan Despacho Economía — FASE 1 paso 7.

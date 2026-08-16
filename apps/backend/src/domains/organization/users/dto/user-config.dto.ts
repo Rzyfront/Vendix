@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsInt, IsOptional, IsObject } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsObject, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UserConfigDto {
@@ -12,7 +12,7 @@ export class UserConfigDto {
     ],
     description: 'Application assigned to the user',
   })
-  @IsEnum([
+  @IsIn([
     'ORG_ADMIN',
     'STORE_ADMIN',
     'STORE_ECOMMERCE',

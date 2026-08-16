@@ -254,12 +254,54 @@ interface DianConfigControls {
             type="date"
             formControlName="resolution_date"
           ></app-input>
-          <app-input
-            label="Clave técnica (ClTec)"
-            formControlName="resolution_technical_key"
-            placeholder="40 caracteres del portal DIAN"
-            helperText="Aparece junto a la resolución en el portal. Sin ella la DIAN rechaza el CUFE."
-          ></app-input>
+          <div class="space-y-1.5">
+            <app-input
+              label="Clave técnica (ClTec)"
+              formControlName="resolution_technical_key"
+              [placeholder]="
+                storedTechnicalKeyLength() !== null
+                  ? 'Déjalo vacío para conservar la guardada'
+                  : '40 caracteres del portal DIAN'
+              "
+              helperText="Aparece junto a la resolución en el portal. Sin ella la DIAN rechaza el CUFE."
+            ></app-input>
+
+            @if (storedTechnicalKeyLength() !== null) {
+              @if (storedTechnicalKeyMalformed()) {
+                <p
+                  class="flex items-start gap-1.5 text-xs text-error"
+                  role="alert"
+                >
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="13"
+                    class="mt-0.5 flex-shrink-0"
+                  />
+                  <span>
+                    La clave guardada tiene
+                    {{ storedTechnicalKeyLength() }} caracteres y la DIAN exige
+                    exactamente 40 (hexadecimales). Con esta clave el CUFE se
+                    calcula mal y el documento se rechaza — gastando el
+                    consecutivo autorizado. Cópiala de nuevo del portal DIAN o
+                    del servicio de Rangos de Numeración.
+                  </span>
+                </p>
+              } @else {
+                <p
+                  class="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]"
+                >
+                  <app-icon
+                    name="shield-check"
+                    [size]="13"
+                    class="flex-shrink-0 text-success"
+                  />
+                  Ya hay una clave guardada, de
+                  {{ storedTechnicalKeyLength() }} caracteres. No se muestra por
+                  seguridad: es el secreto con el que se firma el CUFE.
+                </p>
+              }
+            }
+          </div>
         </div>
         @if (resolutionIncomplete()) {
           <p class="text-xs text-error" role="alert">
@@ -357,6 +399,29 @@ export class DianConfigFormComponent {
    * están presentes.
    */
   readonly hideCertificate = input<boolean>(false);
+
+  /**
+   * Longitud de la clave técnica YA GUARDADA, o `null` si no hay ninguna.
+   *
+   * Nunca el valor: la ClTec es el secreto con el que se hashea el CUFE de
+   * cada factura de la resolución, y este formulario vive en el navegador. Sin
+   * este dato el campo se vería vacío y el usuario no podría distinguir «no
+   * hay clave» de «la hay pero no te la muestro», que son dos situaciones con
+   * consecuencias opuestas: en la primera la emisión falla, en la segunda
+   * reescribirla a ciegas es lo que la rompe.
+   *
+   * La longitud es además el diagnóstico: la ClTec de la DIAN es un SHA-1 en
+   * hexadecimal de 40 caracteres, así que un 38 en pantalla delata de
+   * inmediato la clave truncada que en producción quemó un consecutivo
+   * autorizado sin que ningún validador lo atajara.
+   */
+  readonly storedTechnicalKeyLength = input<number | null>(null);
+
+  /** `true` cuando hay clave guardada y NO mide los 40 hex que exige la DIAN. */
+  readonly storedTechnicalKeyMalformed = computed<boolean>(() => {
+    const length = this.storedTechnicalKeyLength();
+    return length !== null && length !== 40;
+  });
 
   readonly valueChange = output<DianConfigValue>();
   readonly validityChange = output<boolean>();

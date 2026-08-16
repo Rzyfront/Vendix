@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { dianAmount } from './dian-money.util';
-import { onlyDigits } from '../../../../common/utils/nit.util';
+import { dianAmount, dianSum } from './dian-money.util';
+import { dianPartyId, onlyDigits } from '../../../../common/utils/nit.util';
 
 /**
  * CUFE / CUDE / CUDS calculator (Codigo Unico de Facturacion / Documento
@@ -50,8 +50,9 @@ export class CufeCalculator {
       '03', // ICA code
       dianAmount(params.tax_ica),
       dianAmount(params.total_amount),
-      onlyDigits(params.issuer_nit),
-      onlyDigits(params.customer_nit),
+      // El OFE es siempre NIT: su DV se recorta aunque el llamador no declare tipo.
+      dianPartyId(params.issuer_nit, params.issuer_document_type ?? '31'),
+      dianPartyId(params.customer_nit, params.customer_document_type),
       params.technical_key,
       params.environment || '2', // 1=production, 2=test
     ].join('');
@@ -131,11 +132,85 @@ export class CufeCalculator {
   }
 
   /**
-   * Generates a fake QR code URL for testing purposes.
+   * URL del catálogo de la DIAN donde se consulta el documento, POR AMBIENTE
+   * (Anexo Técnico 1.9 §11.7.1).
+   *
+   * Los dos catálogos son bases distintas. Un documento emitido en habilitación
+   * NO existe en el de producción, así que apuntar siempre a producción —como se
+   * hacía— produce un QR que no resuelve nada: el adquiriente lo escanea y la
+   * DIAN le responde que el documento no existe.
+   *
+   * @param environment `'1'` = producción, `'2'` = habilitación. Cualquier otro
+   *   valor se trata como habilitación, que es el lado seguro: enviar a alguien
+   *   al catálogo de pruebas es un error visible; publicar como productivo un
+   *   documento de pruebas, no.
    */
-  static generateQrUrl(cufe: string): string {
-    return `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${cufe}`;
+  static resolveQrUrl(cufe: string, environment: string | undefined): string {
+    const host =
+      environment === '1'
+        ? 'catalogo-vpfe.dian.gov.co'
+        : 'catalogo-vpfe-hab.dian.gov.co';
+    return `https://${host}/document/searchqr?documentkey=${cufe}`;
   }
+
+  /**
+   * Contenido completo del código QR (Anexo Técnico 1.9 §11.7).
+   *
+   * El QR **no es la URL**. El anexo fija once líneas —diez campos etiquetados
+   * más la URL del catálogo— para que el adquiriente pueda verificar el documento
+   * leyendo el propio código, sin conexión, y contrastarlo con la representación
+   * gráfica que tiene en la mano. Guardar solo la URL, como se hacía, elimina esa
+   * verificación: el QR pasa a ser un enlace y nada más.
+   *
+   * Los importes reutilizan {@link dianAmount} y las identificaciones
+   * {@link dianPartyId} a propósito. Son los MISMOS valores que entran al hash;
+   * si el QR los formateara por su cuenta, un documento podría mostrar en su cara
+   * visible cifras que no son las que la DIAN validó — que es exactamente la
+   * clase de divergencia que este módulo existe para hacer imposible.
+   *
+   * `ValOtroIm` es la suma de los impuestos que NO son IVA (esquemas ≠ `01`), no
+   * un cuarto campo de impuesto: el anexo lo define agregado.
+   */
+  static buildQrContent(params: QrContentParams): string {
+    return [
+      `NumFac: ${params.invoice_number}`,
+      `FecFac: ${params.issue_date}`,
+      `HorFac: ${params.issue_time}`,
+      `NitFac: ${dianPartyId(params.issuer_nit, params.issuer_document_type ?? '31')}`,
+      `DocAdq: ${dianPartyId(params.customer_nit, params.customer_document_type)}`,
+      `ValFac: ${dianAmount(params.total_before_tax)}`,
+      `ValIva: ${dianAmount(params.tax_iva)}`,
+      `ValOtroIm: ${dianSum([params.tax_inc, params.tax_ica, params.tax_other])}`,
+      `ValTolFac: ${dianAmount(params.total_amount)}`,
+      `CUFE: ${params.document_key}`,
+      CufeCalculator.resolveQrUrl(params.document_key, params.environment),
+    ].join('\n');
+  }
+}
+
+export interface QrContentParams {
+  invoice_number: string;
+  /** `AAAA-MM-DD` */
+  issue_date: string;
+  /** `HH:mm:ss-05:00` */
+  issue_time: string;
+  issuer_nit: string;
+  /** Código DIAN del tipo de identificación del emisor. Un OFE siempre es NIT. */
+  issuer_document_type?: string | null;
+  customer_nit: string;
+  /** Código DIAN del tipo de identificación del adquiriente (`'13'` CC, `'31'` NIT…). */
+  customer_document_type?: string | null;
+  total_before_tax: string;
+  tax_iva: string;
+  tax_inc?: string;
+  tax_ica?: string;
+  /** Otros impuestos distintos de IVA/INC/ICA, ya agregados. */
+  tax_other?: string;
+  total_amount: string;
+  /** CUFE, CUDE o CUDS según el tipo de documento. */
+  document_key: string;
+  /** `'1'` producción, `'2'` habilitación. */
+  environment?: string;
 }
 
 export interface EventCudeParams {
@@ -169,7 +244,22 @@ export interface CufeParams {
   tax_ica?: string;
   total_amount: string;
   issuer_nit: string;
+  /**
+   * Código DIAN del tipo de identificación del emisor. Un OFE siempre es NIT
+   * (`'31'`), así que omitirlo se interpreta como tal.
+   */
+  issuer_document_type?: string | null;
   customer_nit: string;
+  /**
+   * Código DIAN del tipo de identificación del adquiriente (`'13'` CC, `'31'`
+   * NIT, `'22'` CE…).
+   *
+   * Determina si se recorta el dígito de verificación (§11.2 lo exige para el
+   * NIT) o si el número pasa íntegro. Omitirlo trata la identificación como
+   * NO-NIT y la preserva completa: recortar un dígito a una cédula produce la
+   * cédula de otra persona, que es un daño peor que dejar un DV de más.
+   */
+  customer_document_type?: string | null;
   technical_key: string;
   environment?: string;
 }

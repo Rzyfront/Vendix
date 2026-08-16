@@ -1,5 +1,5 @@
 import { ReservationsService } from './reservations.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 
 /**

@@ -153,18 +153,14 @@
                   <div class="text-xs text-text-secondary font-mono">
                     {{ mapping.account_code }} - {{ mapping.description }}
                   </div>
-                  <select
-                    class="mapping-select"
-                    [value]="getSelectedAccountId(mapping)"
-                    (change)="onAccountChange(mapping.mapping_key, $event)"
-                  >
-                    <option value="">-- Seleccionar cuenta --</option>
-                    @for (account of leaf_accounts(); track account.id) {
-                      <option [value]="account.id">
-                        {{ account.code }} - {{ account.name }}
-                      </option>
-                    }
-                  </select>
+                  <app-account-select
+                    [ngModel]="getSelectedAccountId(mapping)"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="
+                      onAccountSelected(mapping.mapping_key, $event)
+                    "
+                    placeholder="-- Seleccionar cuenta --"
+                  ></app-account-select>
                 </div>
               </div>
 
@@ -196,18 +192,14 @@
                   </span>
                 </div>
                 <div class="col-span-4">
-                  <select
-                    class="mapping-select"
-                    [value]="getSelectedAccountId(mapping)"
-                    (change)="onAccountChange(mapping.mapping_key, $event)"
-                  >
-                    <option value="">-- Seleccionar cuenta --</option>
-                    @for (account of leaf_accounts(); track account.id) {
-                      <option [value]="account.id">
-                        {{ account.code }} - {{ account.name }}
-                      </option>
-                    }
-                  </select>
+                  <app-account-select
+                    [ngModel]="getSelectedAccountId(mapping)"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="
+                      onAccountSelected(mapping.mapping_key, $event)
+                    "
+                    placeholder="-- Seleccionar cuenta --"
+                  ></app-account-select>
                 </div>
               </div>
             }

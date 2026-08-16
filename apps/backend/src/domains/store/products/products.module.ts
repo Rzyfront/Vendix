@@ -22,6 +22,18 @@ import { AccessValidationService } from '@common/services/access-validation.serv
 import { QrService } from '@common/services/qr.service';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
+// `AutoEntryService.validateProductAccountCodes()` — la subcuenta PUC escrita a
+// mano sobre un producto/variante se valida contra el `chart_of_accounts` de la
+// organización ANTES de persistirla. Sin esto, un código con forma válida pero
+// inexistente se guardaba y la factura acreditaba en silencio la cuenta por
+// defecto.
+//
+// La arista es SEGURA en las dos direcciones: `AccountingModule` sólo importa
+// Response/Prisma/S3/AccountsPayable/Bull, ninguno de los cuales llega a
+// `ProductsModule`; y el archivo `auto-entry.service.ts` no alcanza —ni
+// transitivamente— ningún archivo de `products/`, así que tampoco hay ciclo de
+// import a nivel de módulo compilado (swc iza los `export *`).
+import { AccountingModule } from '../accounting/accounting.module';
 
 @Module({
   imports: [
@@ -32,6 +44,8 @@ import { SettingsModule } from '../settings/settings.module';
     PromotionsModule,
     // F4 — SettingsService.getFiscalData() para el gate "no responsable de IVA".
     SettingsModule,
+    // Exporta `AutoEntryService`: valida la subcuenta PUC del producto/variante.
+    AccountingModule,
   ],
   controllers: [
     ProductsController,

@@ -342,6 +342,7 @@ type SuccessInfo =
           [hasCertificate]="hasCertificate()"
           [certificateExpiry]="certificateExpiry()"
           [hideCertificate]="certificateBranch() === 'without_cert' && !hasCertificate()"
+          [storedTechnicalKeyLength]="storedTechnicalKey()?.length ?? null"
           (validityChange)="onValidity($event)"
         ></app-dian-config-form>
 
@@ -697,6 +698,17 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   readonly existingConfigId = signal<number | null>(null);
   /** Active numbering resolution already persisted for this fiscal entity. */
   readonly existingResolutionId = signal<number | null>(null);
+
+  /**
+   * Clave técnica YA GUARDADA para la resolución del prefill, descrita por su
+   * longitud. `null` cuando no hay ninguna.
+   *
+   * Nunca contiene el valor: el backend dejó de enviarlo. Lo que la UI necesita
+   * decir es «ya hay una, de 40 caracteres» para que el usuario no la reescriba
+   * a ciegas —y para que una de 38, que es lo que quemó un consecutivo en
+   * producción, sea visible de inmediato.
+   */
+  readonly storedTechnicalKey = signal<{ length: number } | null>(null);
   /** B3: precarga del certificado existente desde el prefill. */
   readonly hasCertificate = signal(false);
   readonly certificateExpiry = signal<string | null>(null);
@@ -940,6 +952,11 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   ): Partial<DianConfigValue> {
     if (!resolution) return {};
     this.existingResolutionId.set(resolution.id);
+    this.storedTechnicalKey.set(
+      resolution.technical_key_set
+        ? { length: resolution.technical_key_length }
+        : null,
+    );
     return {
       resolution_number: resolution.resolution_number ?? '',
       resolution_prefix: resolution.prefix ?? '',
@@ -948,7 +965,12 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       resolution_valid_from: toDateInput(resolution.valid_from),
       resolution_valid_to: toDateInput(resolution.valid_to),
       resolution_date: toDateInput(resolution.resolution_date),
-      resolution_technical_key: resolution.technical_key ?? '',
+      // VACÍO a propósito, y no la clave: el backend dejó de mandarla porque es
+      // el secreto que hashea el CUFE. Vacío significa «conserva la guardada»
+      // —`buildResolutionBody` sólo incluye `technical_key` cuando el campo
+      // trae algo—, y `storedTechnicalKey` es lo que la UI muestra para que el
+      // usuario sepa que sí hay una y no la vuelva a teclear por las dudas.
+      resolution_technical_key: '',
     };
   }
 

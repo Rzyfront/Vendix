@@ -1,12 +1,12 @@
 import {
   IsBoolean,
-  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
   ValidateIf,
+  IsIn,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -34,7 +34,7 @@ export class ChangeOperatingScopeDto {
     enum: ['STORE', 'ORGANIZATION'],
     description: 'Target operating_scope to migrate the organization to.',
   })
-  @IsEnum(['STORE', 'ORGANIZATION'] as any, {
+  @IsIn(['STORE', 'ORGANIZATION'] as any, {
     message: 'target_scope must be STORE or ORGANIZATION',
   })
   target_scope!: OperatingScopeValue;

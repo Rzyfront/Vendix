@@ -18,6 +18,7 @@ import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 
 @Injectable()
 export class ProductVariantService {
@@ -28,7 +29,37 @@ export class ProductVariantService {
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly s3Service: S3Service,
+    private readonly autoEntryService: AutoEntryService,
   ) {}
+
+  /**
+   * Subcuenta PUC de la variante: debe existir, estar activa y aceptar
+   * movimientos en el `chart_of_accounts` de la organización.
+   *
+   * NO valida cuando llega una `tx`. Con transacción abierta quien llama es
+   * `ProductsService`, que ya validó el LOTE completo (producto + todas sus
+   * variantes) en una sola consulta antes de abrirla; repetirla aquí sería una
+   * lectura por variante contra un pool ya comprometido — el patrón que agota
+   * conexiones dentro de `$transaction`.
+   *
+   * PATCH-safe: `undefined` (el campo no viaja) no se valida, así que una
+   * variante con un `account_code` histórico ya inválido se sigue pudiendo
+   * editar en cualquier otro campo.
+   */
+  private async assertVariantAccountCodePostable(
+    account_code: string | null | undefined,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (tx) return;
+    if (account_code === undefined) return;
+
+    const organization_id = RequestContextService.getOrganizationId();
+    if (!organization_id) return;
+
+    await this.autoEntryService.validateProductAccountCodes(organization_id, [
+      account_code,
+    ]);
+  }
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
     const variant = await this.prisma.product_variants.findFirst({
@@ -160,6 +191,13 @@ export class ProductVariantService {
         throw new ConflictException('El SKU de la variante ya está en uso');
       }
 
+      // Subcuenta PUC de la variante — se valida ANTES de abrir la transacción.
+      // No-op cuando `tx` viene dado: el lote ya lo validó `ProductsService`.
+      await this.assertVariantAccountCodePostable(
+        createVariantDto.account_code,
+        tx,
+      );
+
       if (tx) {
         return this.executeCreateVariant(
           tx,
@@ -236,6 +274,19 @@ export class ProductVariantService {
         service_pricing_type: createVariantDto.service_pricing_type,
         buffer_minutes: createVariantDto.buffer_minutes,
         preparation_time_minutes: createVariantDto.preparation_time_minutes,
+        // Cuenta PUC de ingreso de la variante. Se enumera campo por campo, así
+        // que omitirla la DESCARTABA en silencio: el DTO la acepta, la
+        // validación pasa, llega el 200 y el dato no queda —y el `as any` de
+        // abajo impide que el compilador lo note—. `executeUpdateVariant` sí la
+        // persistía (usa `...variantData`), de modo que el campo se guardaba al
+        // editar una variante y se perdía al crearla: el peor de los dos, porque
+        // funciona lo suficiente para que nadie sospeche.
+        //
+        // La variante manda sobre el producto al contabilizar
+        // (`resolveInvoiceRevenueLines`), así que perderla no deja el ingreso
+        // «sin cuenta»: lo manda a la del producto o a la de por defecto, y el
+        // asiento cuadra igual contra la subcuenta equivocada.
+        account_code: createVariantDto.account_code,
         created_at: new Date(),
         updated_at: new Date(),
       } as any,
@@ -344,6 +395,13 @@ export class ProductVariantService {
           throw new ConflictException('El SKU ya está en uso');
         }
       }
+
+      // Subcuenta PUC de la variante — semántica PATCH: sólo se valida si el
+      // campo viaja en el payload. No-op bajo `tx` (ver el helper).
+      await this.assertVariantAccountCodePostable(
+        updateVariantDto.account_code,
+        tx,
+      );
 
       if (tx) {
         return this.executeUpdateVariant(

@@ -4,6 +4,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
 import { resolveTestSetProof } from '../dian-config/test-set-wait.util';
 import { EncryptionService } from '@common/services/encryption.service';
+import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
 
 type DianConfigurationType =
   | 'invoicing'
@@ -62,6 +63,48 @@ export interface ProductionReadinessCheck {
   days_remaining?: number;
   /** Percentage of the numbering range still available, on range warnings. */
   percent_remaining?: number;
+  /**
+   * Cuántas claves técnicas se pudieron comparar ENTRE SÍ en los checks que
+   * buscan una clave repetida.
+   *
+   * Existe porque `satisfied: true` es ambiguo en una comprobación comparativa:
+   * significa lo mismo «comparé y salieron todas distintas» que «no había nada
+   * que comparar». La segunda lectura NO es evidencia de nada, y publicarla como
+   * si fuera un aprobado es cómo un control se apaga en silencio. El número deja
+   * el rastro auditable de sobre cuánta evidencia se pronunció el check.
+   *
+   * Nunca lleva claves ni huellas: sólo el CONTEO. Ver `TechnicalKeyUniquenessFinding`.
+   */
+  fingerprints_compared?: number;
+  /**
+   * Matiz de un check SATISFECHO — nunca una tarea pendiente.
+   *
+   * Va aparte de `action` a propósito: `action` es lo que el comerciante tiene
+   * que hacer, y la UI lo pinta como un to-do. Escribir aquí «no había con qué
+   * comparar» le pondría un deber al lado de un check en verde. Este campo es
+   * informativo y debe renderizarse como nota, o no renderizarse.
+   */
+  note?: string;
+  /**
+   * `true` cuando el `satisfied` de este check NO describe la configuración real,
+   * sino el escenario hipotético bajo el que se evaluó.
+   *
+   * `getProductionReadiness` llama al evaluador con `environment: 'production'` y
+   * `enablement_status: 'enabled'` forzados a propósito, porque la pregunta que
+   * responde el endpoint es «si promovieras AHORA, ¿qué te faltaría?». Sin ese
+   * override, los dos ejes que el propio botón de promoción va a cambiar saldrían
+   * siempre insatisfechos y taparían lo que de verdad bloquea.
+   *
+   * El problema no era el override sino el silencio: la respuesta trae
+   * `environment: "test"` y `enablement_status: "not_started"` en la cabecera y,
+   * unas líneas más abajo, sendos checks con esas mismas claves diciendo
+   * `satisfied: true`. Dos afirmaciones opuestas sobre el mismo campo en el mismo
+   * payload, sin nada que distinga cuál es la real — se lee como un checklist
+   * roto, y quien lo audite concluirá que el evaluador miente.
+   *
+   * Ausente (o `false`) = el check habla de la configuración tal como está.
+   */
+  assumed?: boolean;
 }
 
 /** A check counts against `ready` only when it is blocking. */
@@ -121,10 +164,92 @@ export type SharedTechnicalKeyFinding = {
   foreign: Array<{ resolution_id: number; tax_id: string | null }>;
 };
 
+/**
+ * Dos o más resoluciones del MISMO contribuyente guardando la misma ClTec.
+ *
+ * ── POR QUÉ ES SIEMPRE UN ERROR, Y NO UNA CONFIGURACIÓN RARA ───────────────
+ *
+ * La DIAN entrega una clave técnica DISTINTA por cada rango de numeración que
+ * autoriza (Anexo Técnico 1.9 §11.6). No hay escenario legítimo en el que dos
+ * autorizaciones compartan clave: si se repite, alguien copió la del rango
+ * anterior al renovar. Es un error de captura, no una decisión.
+ *
+ * ── POR QUÉ HAY QUE CAZARLO ANTES DE EMITIR ────────────────────────────────
+ *
+ * La ClTec es la 14ª entrada del hash del CUFE y la ÚNICA que el XML no lleva:
+ * la DIAN la pone de su lado al recomputar. Con la clave del rango anterior, el
+ * CUFE que enviamos no coincide con el que ella calcula y rechaza el documento
+ * — pero el consecutivo autorizado ya se gastó, y un consecutivo gastado no se
+ * recupera. El daño no lo repara corregir la clave después.
+ *
+ * ── POR QUÉ SE COMPARAN HUELLAS Y NO CLAVES ────────────────────────────────
+ *
+ * `technical_key_fingerprint` es un SHA-256 determinista de la clave (ver
+ * `TechnicalKeyVaultService.fingerprint`). Comparar por él permite detectar la
+ * repetición SIN descifrar nada y sin que el valor de la clave pase por este
+ * servicio. La huella tampoco sale de aquí: el hallazgo viaja identificando las
+ * resoluciones por su NÚMERO y PREFIJO —lo que el comerciante lee en el PDF de
+ * la autorización— porque la huella publicada sigue siendo un índice ciego con
+ * el que correlacionar qué rangos comparten clave.
+ */
+export type DuplicateTechnicalKeyGroup = {
+  /** Las resoluciones que comparten clave. Siempre dos o más. */
+  resolutions: Array<{
+    resolution_id: number;
+    resolution_number: string;
+    prefix: string | null;
+  }>;
+};
+
+/**
+ * Resultado completo de la sonda de unicidad, incluida la ausencia de evidencia.
+ *
+ * `duplicates: []` NO basta como respuesta: se lee igual con diez resoluciones
+ * comparadas y limpias que con diez resoluciones de las que ninguna tiene huella
+ * persistida —el estado histórico, anterior a que la columna existiera—. Por eso
+ * los conteos viajan con el hallazgo: son lo que distingue «comprobado y limpio»
+ * de «no había con qué comprobar», y el check dice cuál de las dos es.
+ */
+export type TechnicalKeyUniquenessFinding = {
+  /** Resoluciones activas consideradas, ya excluido el rango SETP. */
+  examined: number;
+  /** Cuántas de ellas traían huella persistida — las únicas comparables. */
+  fingerprinted: number;
+  /** Grupos que comparten huella. Vacío = ninguna repetida entre las comparables. */
+  duplicates: DuplicateTechnicalKeyGroup[];
+};
+
 /** Shape `assertProductionReady` / `evaluateProductionReadiness` need. */
 type ReadinessConfig = {
   /** Resultado de `findResolutionsSharingTechnicalKey`. `null` = comprobado y limpio. */
   shared_technical_key: SharedTechnicalKeyFinding | null;
+  /**
+   * Resultado de `findDuplicateTechnicalKeys` — la misma ClTec repetida en dos
+   * rangos del MISMO contribuyente.
+   *
+   * OPCIONAL, al revés que `shared_technical_key`, y la asimetría es deliberada:
+   * el hallazgo ya trae dentro sus propios conteos (`examined`, `fingerprinted`),
+   * así que un hallazgo presente nunca se puede confundir con «no había nada que
+   * comparar» — que es el fallo en abierto contra el que `shared_technical_key`
+   * se defiende volviéndose obligatorio. Aquí esa defensa vive en el dato, no en
+   * el tipo, y a cambio los llamadores que construyen esta forma a mano siguen
+   * compilando.
+   *
+   * Ausente = el llamador no corrió la sonda. El check lo dice en su `note` y no
+   * inventa una alarma: no haber mirado tampoco es evidencia de duplicado.
+   */
+  technical_key_uniqueness?: TechnicalKeyUniquenessFinding;
+  /**
+   * `true` cuando el llamador FORZÓ `environment`/`enablement_status` para
+   * preguntar «si promoviera ahora, ¿qué me faltaría?» en vez de describir la
+   * configuración tal como está.
+   *
+   * Sólo marca los dos checks correspondientes con `assumed: true`; no cambia
+   * ninguna evaluación. Opcional y por defecto `false`, así que quien construya
+   * esta forma a mano —los specs, el gate— sigue compilando y sigue leyéndose
+   * como lo que es: una foto de la realidad.
+   */
+  assume_production?: boolean;
   id: number;
   operation_mode: string;
   environment: string;
@@ -374,6 +499,112 @@ export class FiscalProductionReadinessService {
     };
   }
 
+  /**
+   * La misma clave técnica repetida en dos rangos autorizados del propio NIT.
+   *
+   * BLOQUEANTE, no aviso, y es la única forma honesta de reportarlo: un aviso
+   * describe algo que hoy funciona y romperá después, y esto no funciona hoy.
+   * Cada emisión bajo el rango con la clave copiada termina en rechazo con el
+   * consecutivo ya consumido, así que dejar pasar la emisión «avisando» sería
+   * gastar numeración autorizada para confirmar lo que la comprobación ya sabe.
+   *
+   * Es COMPLEMENTARIO a `technical_key_per_nit`, no una variante suya: aquel
+   * caza la clave de OTRO contribuyente (contaminación entre tenants) y éste la
+   * del rango ANTERIOR del mismo (error de captura al renovar). Un tenant con
+   * una sola resolución en toda la plataforma pasa el primero y puede fallar el
+   * segundo en cuanto renueve, que es justo cuando ocurre.
+   *
+   * El mensaje nombra las resoluciones por su número y prefijo. Nunca por su
+   * clave ni por su huella: el comerciante corrige mirando el PDF de la
+   * autorización, donde el número y el prefijo son lo que identifica el rango —
+   * imprimir la clave no ayudaría a corregir y sí la sacaría del cofre.
+   */
+  buildTechnicalKeyUniquenessCheck(
+    finding?: TechnicalKeyUniquenessFinding,
+  ): ProductionReadinessCheck {
+    const base = {
+      key: 'technical_key_uniqueness',
+      label: 'Una clave técnica distinta por cada rango autorizado',
+      owner: 'tenant' as const,
+    };
+
+    // Nadie corrió la sonda. No es un hallazgo ni su contrario, y fabricar
+    // cualquiera de los dos sería peor que decirlo.
+    if (!finding) {
+      return {
+        ...base,
+        satisfied: true,
+        action: '',
+        note:
+          'No se comprobó si dos rangos comparten clave técnica: el llamador no ' +
+          'resolvió `technical_key_uniqueness` con `findDuplicateTechnicalKeys`. ' +
+          'El check no afirma que las claves sean distintas, sólo que no las miró.',
+      };
+    }
+
+    // Con menos de dos huellas persistidas no hay comparación posible. Es el
+    // estado HISTÓRICO: la columna `technical_key_fingerprint` se llena cuando
+    // alguien guarda o lee la resolución, así que las filas anteriores a ella
+    // llegan aquí sin huella. Ausencia de evidencia no es evidencia de
+    // duplicado, y convertirla en alarma pondría en rojo a todo el parque
+    // instalado por una migración que aún no ha pasado por sus filas.
+    if (finding.fingerprinted < 2) {
+      return {
+        ...base,
+        satisfied: true,
+        action: '',
+        fingerprints_compared: finding.fingerprinted,
+        note:
+          finding.fingerprinted === 0
+            ? `Sin evidencia para comparar: ninguna de las ${finding.examined} ` +
+              'resolución(es) activa(s) tiene todavía persistida la huella de su ' +
+              'clave técnica. Se persiste sola la próxima vez que se guarde o se ' +
+              'lea la resolución.'
+            : 'Sólo una resolución activa tiene huella persistida: no hay una ' +
+              'segunda clave con la cual compararla.',
+      };
+    }
+
+    if (!finding.duplicates.length) {
+      return {
+        ...base,
+        satisfied: true,
+        action: '',
+        fingerprints_compared: finding.fingerprinted,
+      };
+    }
+
+    const named = finding.duplicates
+      .map((group) =>
+        group.resolutions
+          .map(
+            (r) =>
+              `resolución ${r.resolution_number} (prefijo ${
+                (r.prefix ?? '').trim() || 'sin prefijo'
+              })`,
+          )
+          .join(' y '),
+      )
+      .join('; ');
+
+    return {
+      ...base,
+      satisfied: false,
+      fingerprints_compared: finding.fingerprinted,
+      action:
+        `Dos rangos autorizados están guardando la MISMA clave técnica: ${named}. ` +
+        'La DIAN entrega una clave técnica distinta por cada Autorización de ' +
+        'Numeración, así que dos resoluciones no pueden compartirla: al renovar el ' +
+        'rango se copió la clave del anterior. Repón la clave del rango vigente ' +
+        'desde el PDF de la autorización (viene junto al prefijo y al rango ' +
+        'autorizado), o consúltala en el servicio web de Rangos de Numeración de la ' +
+        'DIAN, y vuelve a guardarla en la resolución afectada. Mientras siga la ' +
+        'clave equivocada, la DIAN recomputa el CUFE con la verdadera, no coincide ' +
+        'con el que enviamos y rechaza el documento con el consecutivo ya gastado — ' +
+        'y un consecutivo autorizado no se recupera.',
+    };
+  }
+
   isProductionRuntime(): boolean {
     return process.env.NODE_ENV === 'production';
   }
@@ -423,6 +654,15 @@ export class FiscalProductionReadinessService {
           params,
           config.environment,
         ),
+        // Se resuelve AQUÍ, en el gate, y no sólo en la pantalla: el daño que
+        // previene —un consecutivo autorizado quemado en un rechazo— ocurre en
+        // el instante de emitir, y una alarma que sólo vive en un checklist que
+        // nadie abrió no lo evita. Sin filtro de ambiente, al revés que la sonda
+        // de contaminación entre NIT: la clave repetida dentro del mismo
+        // contribuyente es un error de captura en cualquier ambiente, y el rango
+        // de habilitación —el único caso legítimo de clave compartida— ya queda
+        // fuera por prefijo.
+        technical_key_uniqueness: await this.findDuplicateTechnicalKeys(params),
       });
       // La DIAN no emite resolución de numeración para la nómina electrónica
       // (el DSPNE numera con su propio consecutivo NumNE, no con una
@@ -504,6 +744,7 @@ export class FiscalProductionReadinessService {
         action:
           'Promueve la configuración a producción una vez la DIAN apruebe el set.',
         owner: 'tenant',
+        assumed: config.assume_production === true,
       },
       {
         key: 'environment',
@@ -511,6 +752,7 @@ export class FiscalProductionReadinessService {
         satisfied: config.environment === 'production',
         action: 'Cambia el ambiente a Producción en el paso de Ambiente.',
         owner: 'tenant',
+        assumed: config.assume_production === true,
       },
       {
         key: 'software_id',
@@ -632,6 +874,10 @@ export class FiscalProductionReadinessService {
           : '',
         owner: 'tenant',
       },
+      // Hermano del anterior y no un duplicado suyo: aquel busca la clave de
+      // OTRO NIT, éste la del rango ANTERIOR del propio. Ver
+      // `buildTechnicalKeyUniquenessCheck`.
+      this.buildTechnicalKeyUniquenessCheck(config.technical_key_uniqueness),
       this.buildSecretsEnvelopeWarning(config),
       this.buildPrivateKeyCustodyWarning(config),
       this.buildCertificateExpiryWarning(config.certificate_expiry),
@@ -795,15 +1041,42 @@ export class FiscalProductionReadinessService {
         select: {
           id: true,
           technical_key: true,
+          technical_key_fingerprint: true,
           accounting_entity: { select: { tax_id: true } },
         },
       });
-    if (!own?.technical_key) return null;
+
+    // HUELLA PRIMERO, TEXTO PLANO DESPUÉS — y el orden es el que decide si este
+    // control sobrevive.
+    //
+    // La comparación es ENTRE FILAS, así que no puede hacerse sobre
+    // `technical_key_encrypted`: el cifrado usa salt e IV frescos por registro y
+    // dos filas con la misma clave dan ciphertexts distintos. La igualdad jamás
+    // coincidiría y —peor— su resultado vacío se lee idéntico a «no hay
+    // contaminación». Por eso existe `technical_key_fingerprint`, un SHA-256
+    // determinista de la clave.
+    //
+    // Buscar por AMBAS columnas cubre las filas históricas que todavía no tienen
+    // huella persistida (la columna se llenó por lectura, no por backfill: la
+    // llave de cifrado no está disponible para el runner de migraciones). Y deja
+    // el detector funcionando el día que se anule la columna en claro — que es
+    // un paso de DATOS pendiente de aprobación, no algo que este servicio pueda
+    // dar por hecho.
+    if (!own) return null;
+
+    const own_fingerprint = (own.technical_key_fingerprint ?? '').trim();
+    const own_plain = (own.technical_key ?? '').trim();
+    if (!own_fingerprint && !own_plain) return null;
+
+    const match_clauses: Array<Record<string, string>> = [];
+    if (own_fingerprint)
+      match_clauses.push({ technical_key_fingerprint: own_fingerprint });
+    if (own_plain) match_clauses.push({ technical_key: own_plain });
 
     const others = await this.prisma
       .withoutScope()
       .invoice_resolutions.findMany({
-        where: { technical_key: own.technical_key, id: { not: own.id } },
+        where: { OR: match_clauses, id: { not: own.id } },
         select: {
           id: true,
           accounting_entity: { select: { tax_id: true } },
@@ -821,6 +1094,103 @@ export class FiscalProductionReadinessService {
       }));
 
     return foreign.length ? { resolution_id: own.id, foreign } : null;
+  }
+
+  /**
+   * ¿Dos rangos activos del propio contribuyente guardan la misma ClTec?
+   *
+   * ── POR QUÉ COMPARA HUELLAS Y NO LAS CLAVES ────────────────────────────────
+   *
+   * Porque la clave en claro es un secreto fiscal y no tiene por qué entrar en
+   * este servicio para responder a una pregunta de IGUALDAD. `technical_key_fingerprint`
+   * es un SHA-256 determinista de la clave normalizada, así que dos rangos con la
+   * misma clave dan la misma huella y basta agrupar por ella. La huella se usa
+   * como llave del Map y muere aquí: lo que sale identifica las resoluciones por
+   * número y prefijo.
+   *
+   * Comparar contra `technical_key_encrypted` no serviría —salt e IV frescos por
+   * fila hacen que dos claves iguales den ciphertexts distintos— y comparar
+   * contra `technical_key` en claro obligaría a pasear el secreto por memoria
+   * para nada.
+   *
+   * ── POR QUÉ EL `where` NO FILTRA `fingerprint != null` ─────────────────────
+   *
+   * Aunque sólo las filas CON huella son comparables, la consulta trae también
+   * las que no la tienen. Sin ese conteo, cero duplicados se leería igual con
+   * cinco rangos comparados y limpios que con cinco rangos de los que ninguno
+   * tiene huella —el estado histórico— y el check daría por aprobado lo que
+   * nunca miró. El conteo viaja en el hallazgo para que el check pueda decir
+   * cuál de las dos cosas pasó.
+   *
+   * ── POR QUÉ SE EXCLUYE SETP ────────────────────────────────────────────────
+   *
+   * El rango de habilitación es el sandbox que la DIAN reparte idéntico a todo
+   * contribuyente: prefijo, resolución, rango y clave son los mismos para todos.
+   * Dos filas SETP coincidiendo no son un error de captura, son el ambiente de
+   * pruebas — y bloquear por eso pararía justo al tenant que está habilitándose.
+   * Es la misma corrección que ya se aplicó en `findResolutionsSharingTechnicalKey`.
+   */
+  async findDuplicateTechnicalKeys(
+    params: ResolveConfigParams,
+  ): Promise<TechnicalKeyUniquenessFinding> {
+    const document_type =
+      params.document_type ?? this.defaultDocumentType(params.configuration_type);
+
+    // Tipado explícito: `withoutScope()` devuelve el cliente sin tipar, y sin
+    // esta anotación las filas entrarían como `any` y un renombre de columna
+    // pasaría la compilación para fallar en runtime contra la base.
+    const rows: Array<{
+      id: number;
+      prefix: string | null;
+      resolution_number: string;
+      technical_key_fingerprint: string | null;
+    }> = await this.prisma.withoutScope().invoice_resolutions.findMany({
+      // Filtro de tenant EXPLÍCITO: `withoutScope()` no aplica ninguno, y la
+      // pregunta es sobre los rangos de ESTA entidad fiscal — la contaminación
+      // entre NIT distintos es la otra sonda.
+      where: {
+        organization_id: params.organization_id,
+        accounting_entity_id: params.accounting_entity_id,
+        document_type,
+        is_active: true,
+      },
+      select: {
+        id: true,
+        prefix: true,
+        resolution_number: true,
+        // La ÚNICA de las tres columnas de clave técnica que se pide. Ni el
+        // texto plano ni el ciphertext hacen falta para comparar por igualdad.
+        technical_key_fingerprint: true,
+      },
+      orderBy: [{ id: 'asc' }],
+    });
+
+    const comparable = rows.filter((r) => !isHabilitacionResolution(r.prefix));
+
+    const by_fingerprint = new Map<
+      string,
+      DuplicateTechnicalKeyGroup['resolutions']
+    >();
+    for (const row of comparable) {
+      const fingerprint = (row.technical_key_fingerprint ?? '').trim();
+      if (!fingerprint) continue;
+      const group = by_fingerprint.get(fingerprint) ?? [];
+      group.push({
+        resolution_id: row.id,
+        resolution_number: row.resolution_number,
+        prefix: row.prefix ?? null,
+      });
+      by_fingerprint.set(fingerprint, group);
+    }
+
+    const groups = [...by_fingerprint.values()];
+    return {
+      examined: comparable.length,
+      fingerprinted: groups.reduce((total, group) => total + group.length, 0),
+      duplicates: groups
+        .filter((resolutions) => resolutions.length > 1)
+        .map((resolutions) => ({ resolutions })),
+    };
   }
 
   private async assertResolutionReady(params: ResolveConfigParams): Promise<void> {

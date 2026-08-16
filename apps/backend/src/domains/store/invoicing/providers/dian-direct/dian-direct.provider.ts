@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as zlib from 'zlib';
+import { DOMParser } from '@xmldom/xmldom';
 import {
   InvoiceProviderAdapter,
   ProviderInvoiceData,
@@ -14,6 +15,11 @@ import { RequestContextService } from '../../../../../common/context/request-con
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
 import {
+  isWellFormedTechnicalKey,
+  normalizeTechnicalKey,
+  TECHNICAL_KEY_LENGTH,
+} from '../../fiscal-document-requirements';
+import {
   buildDianXmlFileName,
   buildDianZipFileName,
   consecutiveFromDocumentNumber,
@@ -21,10 +27,11 @@ import {
   DianDocumentKind,
 } from '../../utils/dian-file-naming.util';
 import {
+  dianAmount,
   dianLineExtensionTotal,
   dianSum,
 } from '../../utils/dian-money.util';
-import { onlyDigits } from '../../../../../common/utils/nit.util';
+import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
 import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -38,7 +45,10 @@ import { UblCreditNoteBuilder } from './xml/ubl-credit-note.builder';
 import { UblDebitNoteBuilder } from './xml/ubl-debit-note.builder';
 import { UblSupportDocumentBuilder } from './xml/ubl-support-document.builder';
 import { UblEquivalentDocumentBuilder } from './xml/ubl-equivalent-document.builder';
-import { UblCommonBuilder } from './xml/ubl-common.builder';
+import {
+  UblCommonBuilder,
+  DianDocumentExtras,
+} from './xml/ubl-common.builder';
 import {
   UblApplicationResponseBuilder,
   DianEventParty,
@@ -47,6 +57,12 @@ import {
   DIAN_DOCUMENT_TYPES,
   DIAN_ID_TYPES,
 } from './constants/dian-document-types';
+import { DIAN_TAX_CODES } from './constants/dian-tax-codes';
+import { UBL_NAMESPACES } from './xml/xml-namespaces';
+import {
+  UblStructureValidator,
+  summarizeUblViolations,
+} from './xml/ubl-structure.validator';
 import {
   DianConfigDecrypted,
   DianIssuerData,
@@ -58,6 +74,11 @@ import {
 } from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
+  DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER,
+  DIAN_FINAL_CONSUMER_NAME,
+  DIAN_FINAL_CONSUMER_TYPE_CODE,
+} from '../../validators/customer-fiscal-identity.validator';
+import {
   DEFAULT_STORE_TIMEZONE,
   localOffsetString,
 } from '../../../../../common/utils/store-timezone.util';
@@ -67,6 +88,107 @@ type DianConfigurationType =
   | 'support_document'
   | 'payroll'
   | 'equivalent_document';
+
+/**
+ * `NumAdq` del consumidor final (Anexo Técnico 1.9 §11.2).
+ *
+ * Ya NO se declara acá: se re-exporta desde
+ * `validators/customer-fiscal-identity.validator.ts`, que es donde vive el
+ * contrato del adquiriente. Existía una copia local del literal y eso es
+ * exactamente lo que permite que el validador y el emisor discrepen sobre qué
+ * cuenta como «consumidor final». Un solo literal, un solo dueño.
+ */
+const DIAN_FINAL_CONSUMER_ID = DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER;
+
+/**
+ * Literal de tipo de documento del consumidor final ('CC'), DERIVADO del código
+ * que fija el contrato (`DIAN_FINAL_CONSUMER_TYPE_CODE` = '13').
+ *
+ * `buildCustomerData` guarda el LITERAL y el builder lo traduce con
+ * `DIAN_ID_TYPES`; escribir `'CC'` a mano acá dejaría dos sitios que tendrían que
+ * moverse juntos. Derivándolo, si el contrato cambia el código, el literal sigue.
+ */
+const DIAN_FINAL_CONSUMER_TYPE_LITERAL =
+  Object.keys(DIAN_ID_TYPES).find(
+    (literal) => DIAN_ID_TYPES[literal] === DIAN_FINAL_CONSUMER_TYPE_CODE,
+  ) ?? 'CC';
+
+/**
+ * Papel que juega en el documento la parte que `buildCustomerData` arma.
+ *
+ * No es cosmético: decide si «Consumidor Final» es una respuesta legítima.
+ * - `adquiriente` — comprador de una factura, nota o documento equivalente. Un
+ *   comprador de mostrador que no se identifica ES un caso válido y se declara
+ *   con el `222222222222` oficial.
+ * - `vendedor_documento_soporte` — el TERCERO NO OBLIGADO A FACTURAR de un
+ *   documento soporte (o su nota de ajuste). Acá el `222222222222` no significa
+ *   nada: el documento soporte existe precisamente para identificar a quién se le
+ *   compró. Sin identificación no hay documento soporte que emitir.
+ */
+type DianCustomerRole = 'adquiriente' | 'vendedor_documento_soporte';
+
+/** `Node.ELEMENT_NODE`. La constante DOM no existe en el runtime de Node. */
+const XML_ELEMENT_NODE = 1;
+
+/**
+ * Los valores que ENTRARON al hash de la clave del documento, para contrastarlos
+ * contra el XML que se va a transmitir. Nombres del Anexo §11.2, no del código:
+ * el objetivo es poder leer una divergencia y saber qué campo de la fórmula la
+ * produjo sin traducir mentalmente.
+ */
+interface DocumentKeyHashInputs {
+  /** `NumFac` */
+  invoice_number: string;
+  /** `FecFac` */
+  issue_date: string;
+  /** `HorFac` */
+  issue_time: string;
+  /** `ValFac` */
+  total_before_tax: string;
+  /** `ValImp1` (esquema 01) */
+  tax_iva: string;
+  /** `ValImp2` (esquema 04) */
+  tax_inc: string;
+  /** `ValImp3` (esquema 03) */
+  tax_ica: string;
+  /** `ValTot` */
+  total_amount: string;
+  /** `NitOFE` */
+  issuer_nit: string;
+  /** Tipo de identificación con el que se normalizó `NitOFE`. */
+  issuer_document_type: string;
+  /** `NumAdq` */
+  customer_nit: string;
+  /** Tipo de identificación con el que se normalizó `NumAdq`. */
+  customer_document_type: string;
+}
+
+interface DocumentKeyAssertionParams {
+  /** Etiqueta legible del documento, para el mensaje de error. */
+  document_label: string;
+  /** XML ya construido, ANTES de firmar y de transmitir. */
+  xml: string;
+  /**
+   * Grupo de totales que este tipo de documento emite. La nota débito publica
+   * `cac:RequestedMonetaryTotal`; todos los demás, `cac:LegalMonetaryTotal`.
+   */
+  monetary_total_element: 'LegalMonetaryTotal' | 'RequestedMonetaryTotal';
+  /**
+   * El documento soporte invierte los papeles: quien firma es el ADQUIRIENTE, así
+   * que el XML pone al vendedor no obligado en `cac:AccountingSupplierParty` y al
+   * emisor del documento en `cac:AccountingCustomerParty`. El hash, en cambio,
+   * sigue llamando `NitFE` al que genera el documento. Sin este interruptor la
+   * aserción compararía emisor contra vendedor y abortaría toda emisión válida.
+   */
+  parties_swapped?: boolean;
+  hashed: DocumentKeyHashInputs;
+}
+
+interface DocumentKeyDivergence {
+  field: string;
+  hashed_value: string;
+  xml_value: string;
+}
 
 /**
  * DIAN Direct Provider — connects directly to DIAN web services
@@ -96,8 +218,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     private readonly secret_envelope: DianSecretEnvelopeService,
   ) {}
 
+  /**
+   * `DianDocumentExtras` amplía el parámetro con el tipo de operación (AIU),
+   * la tasa de cambio y las retenciones. Todos sus campos son opcionales, así
+   * que un `ProviderInvoiceData` pelado sigue siendo asignable: ningún llamador
+   * existente cambia, y el contrato de `InvoiceProviderAdapter` se satisface.
+   */
   async sendInvoice(
-    invoice_data: ProviderInvoiceData,
+    invoice_data: ProviderInvoiceData & DianDocumentExtras,
   ): Promise<ProviderResponse> {
     const start_time = Date.now();
     const config = await this.loadConfig();
@@ -123,27 +251,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         ),
       };
 
-      // Extract IVA and ICA amounts from taxes for CUFE calculation
-      const iva_taxes = invoice_data.taxes.filter(
-        (t) =>
-          t.tax_name.toUpperCase().includes('IVA') ||
-          t.tax_name.toUpperCase().includes('VAT'),
-      );
-      const ica_taxes = invoice_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('ICA'),
-      );
-      const inc_taxes = invoice_data.taxes.filter(
-        (t) =>
-          t.tax_name.toUpperCase().includes('INC') ||
-          t.tax_name.toUpperCase().includes('CONSUMO'),
-      );
-
-      // dianSum, not float reduce + toFixed: the CUFE is a hash, so a cent of
-      // float drift or a rounded half-cent changes it and the DIAN rejects the
-      // document. Summing in Decimal space with truncation matches Anexo §11.2.
-      const iva_amount = dianSum(iva_taxes.map((t) => t.tax_amount));
-      const ica_amount = dianSum(ica_taxes.map((t) => t.tax_amount));
-      const inc_amount = dianSum(inc_taxes.map((t) => t.tax_amount));
+      // ValImp1/2/3 por ESQUEMA DIAN, con el mismo criterio que el XML — ver
+      // `calculateTaxAmounts`. Antes se clasificaba acá por `tax_name`, en el XML
+      // por `tax_type`, y bastaba un impuesto con nombre libre para que el hash y
+      // el documento repartieran los importes en casillas distintas.
+      const taxes = this.calculateTaxAmounts(invoice_data);
 
       // La clave técnica (ClTec) entregada por la DIAN con la resolución de
       // numeración de habilitación alimenta el CUFE de la factura electrónica de
@@ -156,7 +268,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // documento soporte / nota de ajuste (CUDS) viven en métodos separados y usan
       // `config.software_pin` por diseño del esquema DIAN (el CUDE/CUDS NO usan la
       // ClTec), por lo que este assert NO aplica a esos flujos y no los rompe.
-      const technical_key = invoice_data.technical_key?.trim();
+      //
+      // `normalizeTechnicalKey`, no `.trim()`: el CUFE hashea el LITERAL de la
+      // ClTec. Un hexadecimal es el mismo VALOR en mayúscula o minúscula, pero no
+      // la misma CADENA, y la DIAN la emite en minúscula (vector oficial §11.2).
+      // Una fila guardada en mayúscula —legado, anterior a la validación del DTO—
+      // produce un hash que la DIAN no reproduce: el mismo fallo que ya quemó un
+      // consecutivo en producción, por otra puerta.
+      const technical_key = normalizeTechnicalKey(invoice_data.technical_key);
       if (!technical_key) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_PROVIDER_003,
@@ -169,6 +288,31 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         );
       }
 
+      // Último control de forma antes de firmar y transmitir. La ClTec es la ÚNICA
+      // entrada del hash que el XML NO transporta, así que la DIAN es el primer
+      // sistema capaz de notar que está mal — y para entonces el consecutivo ya se
+      // gastó y no se recupera. En producción se guardó una de 38 caracteres (dos
+      // perdidos al copiarla del PDF): pasaba el "no está vacía" sin problema.
+      //
+      // Ni el mensaje ni `details` llevan el valor, solo su longitud: la ClTec es
+      // un secreto fiscal y los errores viajan a logs y al cliente.
+      if (!isWellFormedTechnicalKey(technical_key)) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_RESOLUTION_011,
+          `La clave técnica (ClTec) de la resolución tiene ${technical_key.length} ` +
+            `caracteres y la DIAN la emite con exactamente ${TECHNICAL_KEY_LENGTH} ` +
+            `dígitos hexadecimales. No se transmite la factura ${invoice_data.invoice_number}: ` +
+            `una ClTec incompleta produce un CUFE que la DIAN rechaza gastando el ` +
+            `consecutivo autorizado. Corrígela en Facturación → Resoluciones, ` +
+            `copiándola completa del PDF de la Autorización de Numeración.`,
+          {
+            document_number: invoice_data.invoice_number,
+            technical_key_length: technical_key.length,
+            expected_length: TECHNICAL_KEY_LENGTH,
+          },
+        );
+      }
+
       // ValFac must be the SAME number the XML publishes as
       // `LegalMonetaryTotal/LineExtensionAmount`, because the DIAN recomputes the
       // CUFE from the XML. Both come from `dianLineExtensionTotal` so they cannot
@@ -176,22 +320,31 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // the document declares the NET one on any invoice carrying a discount.
       const line_extension_total = dianLineExtensionTotal(invoice_data.items);
 
+      // La hora se resuelve UNA vez y viaja al builder. Cada builder tiene su
+      // propio respaldo cuando `issue_time` llega vacío —la hora de reloj de
+      // AHORA— mientras el hash usa la medianoche de la fecha de emisión: dos
+      // instantes distintos para el mismo documento, y un CUFE que la DIAN no
+      // puede reproducir. Fijarla acá hace esa divergencia irrepresentable.
+      const issue_time = this.issueTime(invoice_data);
+      // Tipado con los extras: sin ellos el objeto los transportaba en runtime
+      // pero el tipo los ocultaba, y el builder no podía leerlos sin un cast.
+      const xml_invoice_data: ProviderInvoiceData & DianDocumentExtras = {
+        ...invoice_data,
+        issue_time,
+      };
+
+      const key_inputs = this.buildKeyInputs({
+        document_data: invoice_data,
+        issue_time,
+        total_before_tax: line_extension_total,
+        taxes,
+        issuer,
+        customer,
+      });
+
       // Calculate CUFE
       const cufe = CufeCalculator.generate({
-        invoice_number: invoice_data.invoice_number,
-        issue_date: invoice_data.issue_date,
-        issue_time: this.issueTime(invoice_data),
-        total_before_tax: line_extension_total,
-        tax_iva: iva_amount,
-        tax_inc: inc_amount,
-        tax_ica: ica_amount,
-        total_amount: invoice_data.total_amount,
-        // Anexo §11.2: NitOFE and NumAdq carry no dots, dashes or DV. A customer
-        // document typed as `900.123.456-7` otherwise yields a CUFE the DIAN
-        // cannot reproduce. `CufeCalculator` sanitizes defensively too; doing it
-        // here keeps the XML and the hash reading the same string.
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit: onlyDigits(invoice_data.customer_tax_id) || '222222222222',
+        ...key_inputs,
         technical_key,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -200,7 +353,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // document expedited under DIAN unavailability must declare '04' on its
       // later transmission, keeping the same prefix and number (Anexo §12.2).
       const xml = UblInvoiceBuilder.build({
-        invoice_data,
+        invoice_data: xml_invoice_data,
         issuer,
         customer,
         software_security,
@@ -210,6 +363,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         invoice_type_code: invoice_data.contingency_type
           ? DIAN_DOCUMENT_TYPES.CONTINGENCY_DIAN_INVOICE
           : undefined,
+      });
+
+      this.assertDocumentKeyMatchesXml({
+        document_label: 'factura electrónica de venta',
+        xml,
+        monetary_total_element: 'LegalMonetaryTotal',
+        hashed: key_inputs,
       });
 
       // Sign XML with certificate
@@ -258,8 +418,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         duration_ms: Date.now() - start_time,
       });
 
-      // Build QR URL
-      const qr_code = CufeCalculator.generateQrUrl(parsed.document_key || cufe);
+      // Contenido completo del QR (§11.7), no solo la URL: son las mismas cifras
+      // e identificaciones que entraron al hash, así que la cara visible del
+      // documento no puede mostrar algo distinto de lo que la DIAN validó.
+      const qr_code = CufeCalculator.buildQrContent({
+        ...key_inputs,
+        document_key: parsed.document_key || cufe,
+        environment: config.environment === 'production' ? '1' : '2',
+      });
 
       return {
         success: parsed.is_valid,
@@ -323,24 +489,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         ),
       };
 
-      // Extract IVA and ICA amounts from taxes for CUDE calculation
-      const cn_iva_taxes = credit_note_data.taxes.filter(
-        (t) =>
-          t.tax_name.toUpperCase().includes('IVA') ||
-          t.tax_name.toUpperCase().includes('VAT'),
-      );
-      const cn_ica_taxes = credit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('ICA'),
-      );
-      const cn_inc_taxes = credit_note_data.taxes.filter(
-        (t) =>
-          t.tax_name.toUpperCase().includes('INC') ||
-          t.tax_name.toUpperCase().includes('CONSUMO'),
-      );
-
-      const cn_iva_amount = dianSum(cn_iva_taxes.map((t) => t.tax_amount));
-      const cn_ica_amount = dianSum(cn_ica_taxes.map((t) => t.tax_amount));
-      const cn_inc_amount = dianSum(cn_inc_taxes.map((t) => t.tax_amount));
+      const taxes = this.calculateTaxAmounts(credit_note_data);
 
       // Same rule as the invoice: the hashed base must equal the base the XML
       // declares, so both derive from `dianLineExtensionTotal`.
@@ -348,20 +497,25 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         credit_note_data.items,
       );
 
+      const issue_time = this.issueTime(credit_note_data);
+      const xml_credit_note_data: ProviderInvoiceData = {
+        ...credit_note_data,
+        issue_time,
+      };
+
+      const key_inputs = this.buildKeyInputs({
+        document_data: credit_note_data,
+        issue_time,
+        total_before_tax: cn_line_extension_total,
+        taxes,
+        issuer,
+        customer,
+      });
+
       // For credit notes, generate CUDE (same algorithm as CUFE, ClTec replaced
       // by the software PIN per Anexo §11.4)
       const cude = CufeCalculator.generate({
-        invoice_number: credit_note_data.invoice_number,
-        issue_date: credit_note_data.issue_date,
-        issue_time: this.issueTime(credit_note_data),
-        total_before_tax: cn_line_extension_total,
-        tax_iva: cn_iva_amount,
-        tax_inc: cn_inc_amount,
-        tax_ica: cn_ica_amount,
-        total_amount: credit_note_data.total_amount,
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit:
-          onlyDigits(credit_note_data.customer_tax_id) || '222222222222',
+        ...key_inputs,
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -369,7 +523,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       this.assertOriginalInvoiceReference(credit_note_data, 'credit note');
 
       const xml = UblCreditNoteBuilder.build({
-        credit_note_data,
+        credit_note_data: xml_credit_note_data,
         issuer,
         customer,
         software_security,
@@ -381,6 +535,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           credit_note_data.order_reference,
         original_invoice_cufe: credit_note_data.original_invoice_cufe,
         original_invoice_date: credit_note_data.original_invoice_issue_date,
+      });
+
+      this.assertDocumentKeyMatchesXml({
+        document_label: 'nota crédito',
+        xml,
+        monetary_total_element: 'LegalMonetaryTotal',
+        hashed: key_inputs,
       });
 
       const signed_xml = await this.signXml(xml, config);
@@ -427,7 +588,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cude,
         cude: parsed.document_key || cude,
-        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
+        qr_code: CufeCalculator.buildQrContent({
+          ...key_inputs,
+          document_key: parsed.document_key || cude,
+          environment: config.environment === 'production' ? '1' : '2',
+        }),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Nota crédito aceptada por la DIAN'
@@ -474,28 +639,25 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         ),
       };
 
-      const iva_taxes = debit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('IVA'),
-      );
-      const ica_taxes = debit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('ICA'),
-      );
-      const inc_taxes = debit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('INC'),
-      );
+      const taxes = this.calculateTaxAmounts(debit_note_data);
+
+      const issue_time = this.issueTime(debit_note_data);
+      const xml_debit_note_data: ProviderInvoiceData = {
+        ...debit_note_data,
+        issue_time,
+      };
+
+      const key_inputs = this.buildKeyInputs({
+        document_data: debit_note_data,
+        issue_time,
+        total_before_tax: dianLineExtensionTotal(debit_note_data.items),
+        taxes,
+        issuer,
+        customer,
+      });
 
       const cude = CufeCalculator.generate({
-        invoice_number: debit_note_data.invoice_number,
-        issue_date: debit_note_data.issue_date,
-        issue_time: this.issueTime(debit_note_data),
-        total_before_tax: dianLineExtensionTotal(debit_note_data.items),
-        tax_iva: dianSum(iva_taxes.map((t) => t.tax_amount)),
-        tax_inc: dianSum(inc_taxes.map((t) => t.tax_amount)),
-        tax_ica: dianSum(ica_taxes.map((t) => t.tax_amount)),
-        total_amount: debit_note_data.total_amount,
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit:
-          onlyDigits(debit_note_data.customer_tax_id) || '222222222222',
+        ...key_inputs,
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -503,7 +665,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       this.assertOriginalInvoiceReference(debit_note_data, 'debit note');
 
       const xml = UblDebitNoteBuilder.build({
-        debit_note_data,
+        debit_note_data: xml_debit_note_data,
         issuer,
         customer,
         software_security,
@@ -515,6 +677,16 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           debit_note_data.order_reference,
         original_invoice_cufe: debit_note_data.original_invoice_cufe,
         original_invoice_date: debit_note_data.original_invoice_issue_date,
+      });
+
+      // `RequestedMonetaryTotal`, no `LegalMonetaryTotal`: la nota débito es el
+      // único documento que publica sus totales bajo ese grupo (ver
+      // `UblCommonBuilder.buildMonetaryTotal`).
+      this.assertDocumentKeyMatchesXml({
+        document_label: 'nota débito',
+        xml,
+        monetary_total_element: 'RequestedMonetaryTotal',
+        hashed: key_inputs,
       });
 
       const signed_xml = await this.signXml(xml, config);
@@ -557,7 +729,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cude,
         cude: parsed.document_key || cude,
-        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
+        qr_code: CufeCalculator.buildQrContent({
+          ...key_inputs,
+          document_key: parsed.document_key || cude,
+          environment: config.environment === 'production' ? '1' : '2',
+        }),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Nota débito aceptada por la DIAN'
@@ -599,30 +775,60 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         support_document_data.invoice_number,
       );
       const taxes = this.calculateTaxAmounts(support_document_data);
-      const cuds = CufeCalculator.generate({
-        invoice_number: support_document_data.invoice_number,
-        issue_date: support_document_data.issue_date,
-        issue_time: this.issueTime(support_document_data),
+
+      const issue_time = this.issueTime(support_document_data);
+      const xml_support_document_data: ProviderInvoiceData = {
+        ...support_document_data,
+        issue_time,
+      };
+
+      // `NitFE` del documento soporte es el ADQUIRIENTE —quien lo expide— y
+      // `NumAdq` el vendedor no obligado a facturar. Por eso `issuer` acá es el
+      // comprador (`buyer`) y `customer` el vendedor (`seller`): los nombres del
+      // hash y los del XML apuntan a partes opuestas en este único documento.
+      const key_inputs = this.buildKeyInputs({
+        document_data: support_document_data,
+        issue_time,
         total_before_tax: dianLineExtensionTotal(support_document_data.items),
-        tax_iva: taxes.iva,
-        tax_inc: taxes.inc,
-        tax_ica: taxes.ica,
-        total_amount: support_document_data.total_amount,
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit:
-          onlyDigits(support_document_data.customer_tax_id) || '222222222222',
-        technical_key:
-          support_document_data.technical_key || config.software_pin,
+        taxes,
+        issuer: buyer,
+        customer: seller,
+      });
+
+      // 14º campo del CUDS = **Software-PIN**, SIEMPRE. El documento soporte tiene
+      // rango autorizado propio pero NO clave técnica: así lo declara el contrato
+      // único (`FISCAL_DOCUMENT_REQUIREMENTS.support_document`,
+      // `accepts_technical_key: false`, `key_algorithm: 'CUDS'`), y así lo hace ya
+      // su nota de ajuste unas líneas más abajo.
+      //
+      // Antes esto era `support_document_data.technical_key || config.software_pin`.
+      // El `||` no era inofensivo: la fila de resolución del documento soporte SÍ
+      // llegaba con ClTec sembrada, así que el documento se hasheaba con la clave
+      // equivocada y la DIAN lo rechazaba sin explicar por qué —el XML no
+      // transporta ese campo, de modo que nada aguas arriba podía notarlo—, con el
+      // consecutivo autorizado ya consumido.
+      const cuds = CufeCalculator.generate({
+        ...key_inputs,
+        technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
       const xml = UblSupportDocumentBuilder.buildDocument({
-        support_document_data,
+        support_document_data: xml_support_document_data,
         buyer,
         seller,
         software_security,
         cuds,
         environment: config.environment,
       });
+
+      this.assertDocumentKeyMatchesXml({
+        document_label: 'documento soporte',
+        xml,
+        monetary_total_element: 'LegalMonetaryTotal',
+        parties_swapped: true,
+        hashed: key_inputs,
+      });
+
       const signed_xml = await this.signXml(xml, config);
       const file_names = this.dianFileNames(
         'support_document',
@@ -663,7 +869,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cuds,
         cuds: parsed.document_key || cuds,
-        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cuds),
+        qr_code: CufeCalculator.buildQrContent({
+          ...key_inputs,
+          document_key: parsed.document_key || cuds,
+          environment: config.environment === 'production' ? '1' : '2',
+        }),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Documento soporte aceptado por la DIAN'
@@ -708,19 +918,25 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         support_adjustment_data.invoice_number,
       );
       const taxes = this.calculateTaxAmounts(support_adjustment_data);
-      const cuds = CufeCalculator.generate({
-        invoice_number: support_adjustment_data.invoice_number,
-        issue_date: support_adjustment_data.issue_date,
-        issue_time: this.issueTime(support_adjustment_data),
+
+      const issue_time = this.issueTime(support_adjustment_data);
+      const xml_support_adjustment_data: ProviderInvoiceData = {
+        ...support_adjustment_data,
+        issue_time,
+      };
+
+      // Mismos papeles invertidos que el documento soporte que ajusta.
+      const key_inputs = this.buildKeyInputs({
+        document_data: support_adjustment_data,
+        issue_time,
         total_before_tax: dianLineExtensionTotal(support_adjustment_data.items),
-        tax_iva: taxes.iva,
-        tax_inc: taxes.inc,
-        tax_ica: taxes.ica,
-        total_amount: support_adjustment_data.total_amount,
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit:
-          onlyDigits(support_adjustment_data.customer_tax_id) ||
-          '222222222222',
+        taxes,
+        issuer: buyer,
+        customer: seller,
+      });
+
+      const cuds = CufeCalculator.generate({
+        ...key_inputs,
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -728,7 +944,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       this.assertOriginalSupportDocumentReference(support_adjustment_data);
 
       const xml = UblSupportDocumentBuilder.buildAdjustmentNote({
-        support_adjustment_data,
+        support_adjustment_data: xml_support_adjustment_data,
         buyer,
         seller,
         software_security,
@@ -742,6 +958,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         original_support_document_date:
           support_adjustment_data.original_invoice_issue_date,
       });
+
+      this.assertDocumentKeyMatchesXml({
+        document_label: 'nota de ajuste de documento soporte',
+        xml,
+        monetary_total_element: 'LegalMonetaryTotal',
+        parties_swapped: true,
+        hashed: key_inputs,
+      });
+
       const signed_xml = await this.signXml(xml, config);
       const file_names = this.dianFileNames(
         'support_adjustment_note',
@@ -782,7 +1007,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cuds,
         cuds: parsed.document_key || cuds,
-        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cuds),
+        qr_code: CufeCalculator.buildQrContent({
+          ...key_inputs,
+          document_key: parsed.document_key || cuds,
+          environment: config.environment === 'production' ? '1' : '2',
+        }),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Nota de ajuste de documento soporte aceptada por la DIAN'
@@ -858,26 +1087,32 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
       const taxes = this.calculateTaxAmounts(document_data);
 
+      const issue_time = this.issueTime(document_data);
+      const xml_document_data: ProviderInvoiceData = {
+        ...document_data,
+        issue_time,
+      };
+
       // ValFac must be the number the XML publishes as `LineExtensionAmount`, the
       // same invariant `sendInvoice` documents: the DIAN recomputes the key from
       // the XML, so hashing `subtotal_amount` would diverge on any discount.
-      const cude = CufeCalculator.generateEquivalentDocumentCude({
-        invoice_number: document_data.invoice_number,
-        issue_date: document_data.issue_date,
-        issue_time: this.issueTime(document_data),
+      const key_inputs = this.buildKeyInputs({
+        document_data,
+        issue_time,
         total_before_tax: dianLineExtensionTotal(document_data.items),
-        tax_iva: taxes.iva,
-        tax_inc: taxes.inc,
-        tax_ica: taxes.ica,
-        total_amount: document_data.total_amount,
-        issuer_nit: onlyDigits(config.nit),
-        customer_nit: onlyDigits(document_data.customer_tax_id) || '222222222222',
+        taxes,
+        issuer,
+        customer,
+      });
+
+      const cude = CufeCalculator.generateEquivalentDocumentCude({
+        ...key_inputs,
         environment: config.environment === 'production' ? '1' : '2',
         software_pin: config.software_pin,
       });
 
       const xml = UblEquivalentDocumentBuilder.build({
-        invoice_data: document_data,
+        invoice_data: xml_document_data,
         issuer,
         customer,
         software_security,
@@ -885,6 +1120,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         environment: config.environment,
         control: document_data.control,
         document_type_code: options.document_type_code,
+      });
+
+      this.assertDocumentKeyMatchesXml({
+        document_label: is_adjustment_note
+          ? 'nota de ajuste al documento equivalente'
+          : 'documento equivalente electrónico',
+        xml,
+        monetary_total_element: 'LegalMonetaryTotal',
+        hashed: key_inputs,
       });
 
       const signed_xml = await this.signXml(xml, config);
@@ -927,7 +1171,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cude,
         cude: parsed.document_key || cude,
-        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
+        qr_code: CufeCalculator.buildQrContent({
+          ...key_inputs,
+          document_key: parsed.document_key || cude,
+          environment: config.environment === 'production' ? '1' : '2',
+        }),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Documento equivalente aceptado por la DIAN'
@@ -1086,7 +1334,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       issue_time,
       event_code: event.event_code,
       issuer_nit: sender.document_number,
-      customer_nit: receiver.document_number || '222222222222',
+      customer_nit: receiver.document_number || DIAN_FINAL_CONSUMER_ID,
       referenced_document_number: event.referenced_document_number,
       referenced_document_type_code: event.referenced_document_type_code,
       software_pin: config.software_pin,
@@ -1383,26 +1631,366 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
+  /**
+   * `ValImp1` / `ValImp2` / `ValImp3` del CUFE/CUDE/CUDS, agrupados por el MISMO
+   * criterio con el que el XML reparte sus `cac:TaxSubtotal`.
+   *
+   * Antes esto clasificaba por el NOMBRE del impuesto (`tax_name.includes('IVA')`)
+   * mientras `UblCommonBuilder.buildTaxTotals` clasificaba por `tax_type`. Dos
+   * criterios sobre el mismo dato: un impuesto tipado `inc` pero llamado «IVA
+   * consumo», o uno tipado `iva` llamado «Impuesto sobre las ventas», cae en una
+   * casilla en el hash y en otra en el documento. La DIAN recomputa la clave desde
+   * el XML, obtiene otro hash y rechaza — con el consecutivo ya gastado.
+   *
+   * Se DELEGA en `UblCommonBuilder.resolveTaxCodeFromTax` en lugar de reimplementar
+   * su tabla (incluido su respaldo por nombre y su caída final a IVA): cualquier
+   * copia, por fiel que nazca, es la misma divergencia esperando turno.
+   *
+   * La suma es en espacio Decimal con truncamiento (`dianSum`) porque estos tres
+   * valores se hashean: un centavo de deriva de punto flotante, o un medio centavo
+   * redondeado, invalida la clave.
+   */
   private calculateTaxAmounts(document_data: ProviderInvoiceData): {
     iva: string;
     ica: string;
     inc: string;
   } {
-    const filter = (tokens: string[]) =>
-      document_data.taxes.filter((tax) => {
-        const name = tax.tax_name.toUpperCase();
-        return tokens.some((token) => name.includes(token));
-      });
-    // Decimal-space sum with truncation: these three values are hashed into the
-    // CUFE/CUDE/CUDS, so float drift or a rounded half-cent invalidates the key.
-    const total = (taxes: typeof document_data.taxes) =>
-      dianSum(taxes.map((tax) => tax.tax_amount));
+    const totalForScheme = (scheme_code: string): string =>
+      dianSum(
+        document_data.taxes
+          .filter(
+            (tax) => UblCommonBuilder.resolveTaxCodeFromTax(tax) === scheme_code,
+          )
+          .map((tax) => tax.tax_amount),
+      );
 
     return {
-      iva: total(filter(['IVA', 'VAT'])),
-      ica: total(filter(['ICA'])),
-      inc: total(filter(['INC', 'CONSUMO'])),
+      iva: totalForScheme(DIAN_TAX_CODES.IVA),
+      ica: totalForScheme(DIAN_TAX_CODES.ICA),
+      inc: totalForScheme(DIAN_TAX_CODES.INC),
     };
+  }
+
+  /**
+   * Arma, en un solo sitio, los valores que entran al hash de la clave del
+   * documento — y que la aserción previa a la transmisión vuelve a leer desde el
+   * XML ya construido.
+   *
+   * Existe porque los seis flujos de emisión repetían la misma lista de catorce
+   * campos con pequeñas variaciones, y cada copia era una oportunidad de que uno
+   * de ellos se saneara distinto. Concretamente:
+   *
+   * - `NitOFE` se toma de `issuer.nit` (la fuente única de identidad fiscal), NO
+   *   de `config.nit`: es exactamente la cadena que el XML publica en
+   *   `cac:PartyTaxScheme/cbc:CompanyID`. Ambas ya están atadas por la aserción de
+   *   identidad de `loadIssuerData`, pero `dian_configurations.nit` guarda formas
+   *   heterogéneas en producción (con guion, con DV pegado, con DV vacío) y
+   *   hashear la fila cruda dejaba abierta la única puerta que esa aserción no
+   *   cierra: mismo NIT, distinta escritura.
+   * - `NumAdq` se toma de `customer.document_number`, que es el mismo campo del
+   *   que sale el `cbc:CompanyID` del adquiriente.
+   * - Ambos pasan por `dianPartyId`, que recorta el DV SOLO cuando la parte
+   *   declaró NIT. Con `onlyDigits` un NIT `900123456-7` se hasheaba como
+   *   `9001234567` y la DIAN recomputaba con `900123456`: rechazo garantizado.
+   */
+  private buildKeyInputs(params: {
+    document_data: ProviderInvoiceData;
+    issue_time: string;
+    total_before_tax: string;
+    taxes: { iva: string; ica: string; inc: string };
+    issuer: DianIssuerData;
+    customer: DianCustomerData;
+  }): DocumentKeyHashInputs {
+    const { document_data, issuer, customer } = params;
+    // Un OFE es siempre NIT (§11.2 lo llama NitOFE), pero se respeta el tipo que
+    // resolvió la identidad fiscal si trae uno: recortarle un dígito a una parte
+    // que NO es NIT produce la identificación de otra persona.
+    const issuer_document_type = issuer.document_type || DIAN_ID_TYPES.NIT;
+
+    return {
+      invoice_number: document_data.invoice_number,
+      issue_date: document_data.issue_date,
+      issue_time: params.issue_time,
+      total_before_tax: params.total_before_tax,
+      tax_iva: params.taxes.iva,
+      tax_inc: params.taxes.inc,
+      tax_ica: params.taxes.ica,
+      total_amount: document_data.total_amount,
+      issuer_nit: dianPartyId(issuer.nit, issuer_document_type),
+      issuer_document_type,
+      customer_nit:
+        dianPartyId(customer.document_number, customer.document_type) ||
+        DIAN_FINAL_CONSUMER_ID,
+      customer_document_type: customer.document_type,
+    };
+  }
+
+  /**
+   * RED DE SEGURIDAD PREVIA A LA TRANSMISIÓN — recomputa desde el XML ya
+   * construido los valores que entraron al hash y aborta si alguno difiere.
+   *
+   * La DIAN recomputa el CUFE/CUDE/CUDS **leyendo el XML que recibe**. Si el hash
+   * se armó con un valor y el documento declara otro, rechaza — y el consecutivo
+   * autorizado ya se consumió, así que no se puede reintentar con el mismo número.
+   * Toda corrección aguas arriba (identificaciones, clasificación de impuestos,
+   * hora de emisión) elimina una causa conocida; esta aserción es lo que impide
+   * que la PRÓXIMA, todavía desconocida, llegue a producción sin avisar.
+   *
+   * Réplica del patrón que `loadIssuerData` ya aplica al NIT del emisor: mismo
+   * lugar del flujo (antes de firmar y de transmitir), misma forma de reportar
+   * (nombrar el campo y AMBOS valores, y explicar la consecuencia). La diferencia
+   * es el tipo de excepción: acá se lanza `VendixHttpException` con
+   * `INVOICING_CUFE_001` (422) para que el flujo lo distinga de un fallo de
+   * transporte y NO lo trate como contingencia.
+   *
+   * Fuera de comparación por definición: `ClTec` y `TipoAmbiente` entran al hash
+   * pero NO viajan en el XML (§11.2). Derivarlos del documento sería inventarlos.
+   */
+  private assertDocumentKeyMatchesXml(params: DocumentKeyAssertionParams): void {
+    const { hashed } = params;
+    // `parseFromString` no lanza ante XML malformado: reporta por su errorHandler
+    // y puede devolver un documento sin raíz. Por eso la comprobación explícita.
+    const parsed_document = new DOMParser().parseFromString(
+      params.xml,
+      'text/xml',
+    );
+    const root: Element | null = parsed_document.documentElement ?? null;
+
+    if (!root) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CUFE_001,
+        `No se pudo releer el XML del documento ${hashed.invoice_number} ` +
+          `(${params.document_label}) para verificar que declara los mismos valores ` +
+          `con los que se calculó su clave. Se aborta antes de transmitir: un ` +
+          `documento cuya clave no se puede verificar quema el consecutivo si la ` +
+          `DIAN lo rechaza.`,
+        { document_number: hashed.invoice_number },
+      );
+    }
+
+    const cbc = UBL_NAMESPACES.CBC;
+    const cac = UBL_NAMESPACES.CAC;
+
+    const [monetary_total] = this.directChildElements(
+      root,
+      cac,
+      params.monetary_total_element,
+    );
+    const xml_taxes = this.taxAmountsByScheme(root);
+
+    // El documento soporte firma al revés — ver `parties_swapped`.
+    const xml_supplier_id = this.partyTaxSchemeCompanyId(
+      root,
+      'AccountingSupplierParty',
+    );
+    const xml_customer_id = this.partyTaxSchemeCompanyId(
+      root,
+      'AccountingCustomerParty',
+    );
+    const xml_issuer_id = params.parties_swapped
+      ? xml_customer_id
+      : xml_supplier_id;
+    const xml_acquirer_id = params.parties_swapped
+      ? xml_supplier_id
+      : xml_customer_id;
+
+    const divergences: DocumentKeyDivergence[] = [];
+    const compare = (
+      field: string,
+      hashed_value: string,
+      xml_value: string | null,
+    ): void => {
+      if (hashed_value !== (xml_value ?? '')) {
+        divergences.push({
+          field,
+          hashed_value,
+          xml_value: xml_value ?? '(ausente en el XML)',
+        });
+      }
+    };
+
+    compare(
+      'NumFac',
+      hashed.invoice_number,
+      this.directChildText(root, cbc, 'ID'),
+    );
+    compare(
+      'FecFac',
+      hashed.issue_date,
+      this.directChildText(root, cbc, 'IssueDate'),
+    );
+    compare(
+      'HorFac',
+      hashed.issue_time,
+      this.directChildText(root, cbc, 'IssueTime'),
+    );
+    compare(
+      'ValFac',
+      dianAmount(hashed.total_before_tax),
+      this.directChildText(monetary_total ?? null, cbc, 'LineExtensionAmount'),
+    );
+    compare(
+      'ValImp1',
+      dianAmount(hashed.tax_iva),
+      xml_taxes(DIAN_TAX_CODES.IVA),
+    );
+    compare(
+      'ValImp2',
+      dianAmount(hashed.tax_inc),
+      xml_taxes(DIAN_TAX_CODES.INC),
+    );
+    compare(
+      'ValImp3',
+      dianAmount(hashed.tax_ica),
+      xml_taxes(DIAN_TAX_CODES.ICA),
+    );
+    compare(
+      'ValTot',
+      dianAmount(hashed.total_amount),
+      this.directChildText(monetary_total ?? null, cbc, 'PayableAmount'),
+    );
+    // Las identificaciones se normalizan por el MISMO camino en los dos lados: el
+    // XML publica el DV pegado (`900123456-7`) y el hash no, y eso no es una
+    // divergencia sino la misma parte escrita en dos convenciones. Lo que sí lo
+    // sería —otro número— sobrevive a la normalización.
+    compare(
+      'NitOFE',
+      hashed.issuer_nit,
+      xml_issuer_id === null
+        ? null
+        : dianPartyId(xml_issuer_id, hashed.issuer_document_type),
+    );
+    compare(
+      'NumAdq',
+      hashed.customer_nit,
+      xml_acquirer_id === null
+        ? null
+        : dianPartyId(xml_acquirer_id, hashed.customer_document_type),
+    );
+
+    if (divergences.length === 0) return;
+
+    const detail = divergences
+      .map((d) => `${d.field}: clave='${d.hashed_value}' XML='${d.xml_value}'`)
+      .join('; ');
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CUFE_001,
+      `La clave del documento ${hashed.invoice_number} (${params.document_label}) se ` +
+        `calculó con valores que el XML no declara: ${detail}. La DIAN recomputa la ` +
+        `clave leyendo el XML, así que obtendría otro hash y rechazaría el documento ` +
+        `con el consecutivo ya consumido. Se aborta ANTES de firmar y transmitir.`,
+      {
+        document_number: hashed.invoice_number,
+        divergences,
+      },
+    );
+  }
+
+  /**
+   * `cac:{Supplier|Customer}Party/cac:Party/cac:PartyTaxScheme/cbc:CompanyID`.
+   *
+   * Se navega hijo a hijo en vez de `getElementsByTagName*`: `cbc:CompanyID`
+   * aparece también bajo `cac:PartyLegalEntity`, y una búsqueda por descendientes
+   * podría devolver el de otra parte del documento.
+   */
+  private partyTaxSchemeCompanyId(
+    root: Element,
+    party_element: 'AccountingSupplierParty' | 'AccountingCustomerParty',
+  ): string | null {
+    const cac = UBL_NAMESPACES.CAC;
+    const [accounting_party] = this.directChildElements(
+      root,
+      cac,
+      party_element,
+    );
+    if (!accounting_party) return null;
+    const [party] = this.directChildElements(accounting_party, cac, 'Party');
+    if (!party) return null;
+    const [tax_scheme] = this.directChildElements(party, cac, 'PartyTaxScheme');
+    if (!tax_scheme) return null;
+    return this.directChildText(tax_scheme, UBL_NAMESPACES.CBC, 'CompanyID');
+  }
+
+  /**
+   * Totales de impuesto por código de esquema DIAN leídos del `cac:TaxTotal` de
+   * CABECERA (hijo directo de la raíz), que es el que la DIAN valida y el que
+   * alimenta `ValImp1/2/3`. Las líneas emiten su propio `cac:TaxTotal` anidado;
+   * sumarlas acá duplicaría los importes.
+   *
+   * Un esquema ausente del XML devuelve `'0.00'`, no `null`: el hash siempre lleva
+   * las tres casillas, y «no hay ICA» y «ICA vale cero» son el mismo hecho.
+   */
+  private taxAmountsByScheme(root: Element): (scheme_code: string) => string {
+    const cac = UBL_NAMESPACES.CAC;
+    const cbc = UBL_NAMESPACES.CBC;
+    const amounts_by_scheme = new Map<string, string[]>();
+
+    for (const tax_total of this.directChildElements(root, cac, 'TaxTotal')) {
+      for (const subtotal of this.directChildElements(
+        tax_total,
+        cac,
+        'TaxSubtotal',
+      )) {
+        const [category] = this.directChildElements(
+          subtotal,
+          cac,
+          'TaxCategory',
+        );
+        const [scheme] = category
+          ? this.directChildElements(category, cac, 'TaxScheme')
+          : [];
+        const code = scheme ? this.directChildText(scheme, cbc, 'ID') : null;
+        if (!code) continue;
+
+        const amount = this.directChildText(subtotal, cbc, 'TaxAmount') ?? '0';
+        amounts_by_scheme.set(code, [
+          ...(amounts_by_scheme.get(code) ?? []),
+          amount,
+        ]);
+      }
+    }
+
+    return (scheme_code: string) =>
+      dianSum(amounts_by_scheme.get(scheme_code) ?? []);
+  }
+
+  /** Elementos hijos DIRECTOS de `parent` con ese namespace y nombre local. */
+  private directChildElements(
+    parent: Element,
+    namespace: string,
+    local_name: string,
+  ): Element[] {
+    const matches: Element[] = [];
+    const children = parent.childNodes;
+    for (let index = 0; index < children.length; index++) {
+      const node: Node | null = children.item(index);
+      if (!node || node.nodeType !== XML_ELEMENT_NODE) continue;
+      const element = node as Element;
+      if (
+        element.localName === local_name &&
+        element.namespaceURI === namespace
+      ) {
+        matches.push(element);
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Texto del primer hijo directo que coincida, o `null` si no existe. `null` y
+   * cadena vacía NO son lo mismo acá: el primero dice «el XML no trae el campo» y
+   * el segundo «lo trae vacío», y en un reporte de divergencia esa distinción es
+   * la que dice si el builder omitió el elemento o si lo pobló mal.
+   */
+  private directChildText(
+    parent: Element | null,
+    namespace: string,
+    local_name: string,
+  ): string | null {
+    if (!parent) return null;
+    const [first] = this.directChildElements(parent, namespace, local_name);
+    return first ? (first.textContent ?? '').trim() : null;
   }
 
   private assertOriginalInvoiceReference(
@@ -1564,16 +2152,16 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     //
     // Hay DOS ejes que declaran el NIT emisor y no había nada que los atara:
     //
-    //   CUFE  ->  onlyDigits(config.nit)          (`dian_configurations`)
-    //   XML   ->  identity.nit                    (fuente única; el resolvedor
-    //                                              prefiere `fiscal_data.nit`
-    //                                              sobre `config.nit`)
+    //   dian_configurations.nit  ->  nombre del ZIP/XML entregado a la DIAN y
+    //                                emparejamiento con el certificado
+    //   identity.nit             ->  el XML y, desde `buildKeyInputs`, también el
+    //                                hash de la clave (fuente única; el resolvedor
+    //                                prefiere `fiscal_data.nit` sobre `config.nit`)
     //
-    // Si divergen, la DIAN recomputa la clave desde el XML, obtiene otro hash y
-    // rechaza — con el consecutivo ya gastado. El terreno para que ocurra existe:
-    // en producción la organización de la plataforma tiene tres filas en
-    // `dian_configurations`, dos de ellas con el NIT anterior, y una guarda el NIT
-    // con guion y `nit_dv` vacío.
+    // Si divergen, el documento se entrega bajo un NIT y declara otro. El terreno
+    // para que ocurra existe: en producción la organización de la plataforma tiene
+    // tres filas en `dian_configurations`, dos de ellas con el NIT anterior, y una
+    // guarda el NIT con guion y `nit_dv` vacío.
     //
     // `certificateNitMatches` en vez de comparar dígitos: es tolerante al DV en
     // cualquiera de los dos lados, así que acepta `'900123456-7'` contra base
@@ -1591,9 +2179,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         `El NIT de la configuración DIAN y el de la identidad fiscal no coinciden: ` +
           `dian_configurations declara '${config.nit}' ` +
           `(${normalizeNitDigits(config.nit)}) y la fuente única declara ` +
-          `'${identity.nit}' con DV '${identity.nit_dv}'. El CUFE se hashea con el ` +
-          `primero y el XML declara el segundo, así que la DIAN recomputaría otra ` +
-          `clave y rechazaría el documento con el consecutivo ya gastado. ` +
+          `'${identity.nit}' con DV '${identity.nit_dv}'. El documento se entregaría ` +
+          `bajo el primero y declararía el segundo, así que la DIAN lo rechazaría ` +
+          `con el consecutivo ya gastado. ` +
           `Alinea settings.fiscal_data.nit con dian_configurations.nit antes de emitir.`,
       );
     }
@@ -1620,16 +2208,114 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    */
   private buildCustomerData(
     invoice_data: ProviderInvoiceData,
+    role: DianCustomerRole = 'adquiriente',
   ): DianCustomerData {
     const address = this.normalizeAddress(invoice_data.customer_address);
+
+    const declared_type = invoice_data.customer_document_type
+      ?.trim()
+      .toUpperCase();
+    const declared_number = String(invoice_data.customer_tax_id ?? '').trim();
+    const declared_name = String(invoice_data.customer_name ?? '').trim();
+
+    // El documento DECLARÓ consumidor final cuando trae el número oficial. Se
+    // compara también por dígitos porque el número puede llegar formateado.
+    const declares_final_consumer =
+      declared_number === DIAN_FINAL_CONSUMER_ID ||
+      onlyDigits(declared_number) === DIAN_FINAL_CONSUMER_ID;
+    // No hay adquiriente en absoluto: ni tipo, ni número, ni nombre. Es la venta
+    // de mostrador anónima, que es un caso legítimo.
+    const declares_nothing =
+      !declared_type && !declared_number && !declared_name;
+
+    const is_final_consumer = declares_final_consumer || declares_nothing;
+
+    if (is_final_consumer) {
+      if (role === 'vendedor_documento_soporte') {
+        // Un documento soporte declara la compra a un tercero NO obligado a
+        // facturar. «Consumidor Final» ahí no es una elección: es la prueba de
+        // que se perdió la identidad del vendedor, y el documento afirmaría un
+        // costo deducible contra una persona que no existe.
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          'No se puede emitir el documento soporte: falta la identificación del tercero no obligado a facturar. Registra su documento y nombre antes de emitir.',
+          { role, has_document_number: !!declared_number },
+        );
+      }
+      // Emisión del valor OFICIAL, completo y coherente: número, tipo y nombre
+      // salen los tres del mismo contrato. Antes cada uno tenía su propia caída,
+      // así que era alcanzable un documento con número `222222222222` y el
+      // nombre real de un cliente a medio capturar.
+      if (
+        declares_final_consumer &&
+        (declared_name || address?.city_code || invoice_data.customer_email)
+      ) {
+        this.logger.warn(
+          `[DIAN] Documento ${invoice_data.invoice_number}: declara Consumidor Final (${DIAN_FINAL_CONSUMER_ID}) pero trae datos de un cliente identificado. Se emite como Consumidor Final; verifica la captura si debía ser nominativa.`,
+        );
+      }
+      return {
+        // Literal derivado de `DIAN_FINAL_CONSUMER_TYPE_CODE` ('13' → 'CC'). El
+        // builder traduce literal → código; acá se guarda el literal para que
+        // `@schemeName` lo lleve.
+        document_type: DIAN_FINAL_CONSUMER_TYPE_LITERAL,
+        document_number: DIAN_FINAL_CONSUMER_ID,
+        verification_digit: null,
+        person_type: 'NATURAL',
+        tax_responsibilities: [],
+        legal_name: DIAN_FINAL_CONSUMER_NAME,
+        // Sin dirección, sin correo y sin teléfono: el consumidor final no los
+        // declara, y el grupo de dirección se omite cuando no hay municipio.
+        address_line: undefined,
+        city_code: undefined,
+        city_name: undefined,
+        department_code: undefined,
+        department_name: undefined,
+        country_code: undefined,
+        postal_code: undefined,
+        email: undefined,
+        phone: undefined,
+        ciiu_code: null,
+        is_withholding_agent: false,
+        tax_regime: '2',
+      };
+    }
+
+    // ADQUIRIENTE NOMINATIVO — se exige la identidad COMPLETA.
+    //
+    // El defecto que esto cierra: cuando faltaba el número, el código ponía
+    // `222222222222`; cuando faltaba el nombre, ponía «Consumidor Final». Con
+    // media identidad presente eso produce un documento firmado y legalmente
+    // emitido que afirma que la venta fue a un consumidor anónimo cuando el
+    // propio documento sabe que no. Completar media identidad con el centinela
+    // es inventar un hecho sobre una parte parcialmente conocida.
+    //
+    // Fallar acá no cuesta nada; un rechazo de la DIAN gasta un consecutivo
+    // autorizado que no se recupera.
+    if (!declared_number || !declared_name) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        !declared_number
+          ? 'No se puede emitir: el adquiriente tiene nombre pero no número de identificación. Complétalo en la ficha del cliente, o emite la venta como Consumidor Final si el comprador no se identifica.'
+          : 'No se puede emitir: el adquiriente tiene número de identificación pero no razón social ni nombre. Complétalo en la ficha del cliente, o emite la venta como Consumidor Final si el comprador no se identifica.',
+        {
+          role,
+          has_document_type: !!declared_type,
+          has_document_number: !!declared_number,
+          has_name: !!declared_name,
+        },
+      );
+    }
+
     // Literal from `users.document_type` — keep the source-of-truth string so
-    // `@schemeName` carries the canonical type name. Fallback to 'CC' when
-    // absent so the consumer final default keeps working.
-    const document_type_literal =
-      invoice_data.customer_document_type?.trim().toUpperCase() || 'CC';
+    // `@schemeName` carries the canonical type name. Un adquiriente identificado
+    // con número y nombre pero sin tipo declarado es una cédula: es el documento
+    // que tiene una persona natural colombiana por defecto, y el tipo se deriva
+    // —no se inventa— del hecho de que el número existe.
+    const document_type_literal = declared_type || 'CC';
     return {
       document_type: document_type_literal,
-      document_number: invoice_data.customer_tax_id || '222222222222',
+      document_number: declared_number,
       verification_digit: invoice_data.customer_verification_digit ?? null,
       person_type: this.translatePersonTypeToStructural(
         invoice_data.customer_person_type,
@@ -1637,7 +2323,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       ),
       tax_responsibilities:
         invoice_data.customer_tax_responsibilities ?? [],
-      legal_name: invoice_data.customer_name || 'Consumidor Final',
+      legal_name: declared_name,
       address_line: address?.address_line,
       city_code: address?.city_code,
       city_name: address?.city_name,
@@ -1752,6 +2438,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     xml: string,
     config: DianConfigDecrypted,
   ): Promise<string> {
+    // Compuerta estructural. Va AQUÍ y no en cada builder porque este método es
+    // el único paso obligado de los siete caminos de emisión —factura, nota
+    // crédito, nota débito, documento soporte, nota de ajuste, documento
+    // equivalente POS y eventos RADIAN—: cubrirlos todos desde un punto evita
+    // que el próximo tipo de documento nazca sin la verificación.
+    //
+    // Corre sobre el XML SIN FIRMAR, que es cuando todavía se puede abortar sin
+    // costo. La firma entra bajo `ext:ExtensionContent`, declarado `xsd:any`, así
+    // que validar antes no deja fuera nada que el esquema gobierne.
+    this.assertStructurallyValid(xml);
+
     // Under HSM custody the container may legitimately hold no private key, so a
     // missing password is NOT a missing certificate. Requiring one would make the
     // stronger custody look unconfigured and silently ship unsigned XML in dev.
@@ -1777,6 +2474,46 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       p12_buffer,
       config.certificate_password || '',
       config.certificate_kms_key_id,
+    );
+  }
+
+  /**
+   * Aborta si el XML no respeta el modelo de contenido de los XSD oficiales.
+   *
+   * Bloquea en vez de advertir. La asimetría lo decide: una violación de
+   * estructura garantiza el rechazo de la DIAN, y ese rechazo quema el
+   * consecutivo autorizado sin vuelta atrás; un bloqueo local, en cambio, deja
+   * el borrador intacto con su número reservado y se reemite en cuanto se
+   * corrija. Ante la duda, el error barato.
+   *
+   * Un documento cuya raíz el modelo no describe también se bloquea. Podría
+   * parecer excesivo —«no sé validarlo, déjalo pasar»—, pero esa raíz sólo la
+   * produce código nuestro: no reconocerla significa que alguien añadió un tipo
+   * de documento sin regenerar el modelo, y dejarlo pasar en silencio devuelve
+   * exactamente el agujero que esta compuerta existe para cerrar.
+   */
+  private assertStructurallyValid(xml: string): void {
+    const result = UblStructureValidator.validate(xml);
+    if (result.valid) return;
+
+    const summary = summarizeUblViolations(result.violations);
+    this.logger.error(
+      `XML estructuralmente inválido (${result.root ?? 'raíz desconocida'}): ` +
+        `${result.violations.length} violación(es). ${summary.join(' | ')}`,
+    );
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_XSD_001,
+      'El documento generado no cumple la estructura que exige la DIAN, así que ' +
+        'no se transmitió: la numeración autorizada queda intacta y el documento ' +
+        'se puede reemitir apenas se corrija. Es un defecto del generador de XML, ' +
+        'no de los datos capturados — repórtalo con el detalle que acompaña este ' +
+        'error.',
+      {
+        document_root: result.root,
+        violation_count: result.violations.length,
+        violations: summary,
+      },
     );
   }
 

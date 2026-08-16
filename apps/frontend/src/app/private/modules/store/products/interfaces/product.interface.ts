@@ -151,6 +151,12 @@ export interface Product {
   total_stock_available?: number;
   total_stock_reserved?: number;
   image_url?: string; // Main thumbnail URL from API
+  /**
+   * Subcuenta PUC con la que se acredita el INGRESO de este producto al
+   * facturar. `null` ⇒ cae al mapping contable por defecto de la organización,
+   * que es el camino del 99% de los productos.
+   */
+  account_code?: string | null;
 }
 
 export interface StockLevel {
@@ -216,6 +222,12 @@ export interface ProductVariant {
    */
   kds_id?: number | null;
   image_id?: number;
+  /**
+   * Subcuenta PUC propia de la variante. GANA sobre la del producto padre,
+   * porque la variante es la unidad realmente vendida. `null` ⇒ hereda del
+   * producto; si el producto tampoco la define, cae al ingreso por defecto.
+   */
+  account_code?: string | null;
   created_at: Date;
   updated_at: Date;
 
@@ -404,6 +416,12 @@ export interface CreateProductDto {
   // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
   enabled_price_tier_ids?: number[];
+  /**
+   * Subcuenta PUC de ingreso del producto. `null` la limpia y devuelve el
+   * producto al mapping por defecto. Ver `PUC_ACCOUNT_CODE_REGEX` en el DTO
+   * del backend: solo dígitos, 4 a 20.
+   */
+  account_code?: string | null;
 }
 
 export interface UpdateProductDto {
@@ -460,6 +478,8 @@ export interface UpdateProductDto {
   // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
   enabled_price_tier_ids?: number[];
+  /** Subcuenta PUC de ingreso. `null` la limpia. Ver `CreateProductDto`. */
+  account_code?: string | null;
 }
 
 export interface CreateProductVariantDto {
@@ -487,6 +507,11 @@ export interface CreateProductVariantDto {
    * un solo plato.
    */
   kds_id?: number | null;
+  /**
+   * Subcuenta PUC propia de la variante. GANA sobre la del producto padre.
+   * `null` ⇒ hereda del producto.
+   */
+  account_code?: string | null;
 }
 
 export interface CreateProductImageDto {

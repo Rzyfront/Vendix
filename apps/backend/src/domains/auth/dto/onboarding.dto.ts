@@ -4,8 +4,8 @@ import {
   IsOptional,
   IsEmail,
   IsUrl,
-  IsEnum,
   MinLength,
+  IsIn,
 } from 'class-validator';
 
 export enum OnboardingStep {
@@ -127,7 +127,7 @@ export class CreateStoreOnboardingDto {
   @IsOptional()
   description?: string;
 
-  @IsEnum(['physical', 'online', 'hybrid'], {
+  @IsIn(['physical', 'online', 'hybrid'], {
     message: 'Tipo de tienda debe ser: physical, online o hybrid',
   })
   @IsOptional()

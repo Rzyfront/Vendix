@@ -3,6 +3,7 @@ import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
+  clearDianRejection,
   loadInvoices,
   loadInvoiceStats,
   loadResolutions,
@@ -162,6 +163,11 @@ export class InvoicingComponent {
   }
 
   viewInvoice(invoice: Invoice): void {
+    // El rechazo en estado pertenece a la factura anterior. `viewInvoice` no
+    // despacha `loadInvoice` (el detalle se pinta con la fila de la lista), asi
+    // que el reducer no tiene forma de enterarse: hay que limpiarlo aqui o el
+    // panel de rechazo aparecería sobre una factura que la DIAN nunca vio.
+    this.store.dispatch(clearDianRejection());
     this.selectedInvoice.set(invoice);
     this.isDetailModalOpen.set(true);
   }

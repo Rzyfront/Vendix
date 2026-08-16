@@ -5,3 +5,4 @@ export * from './bulk-image-upload-modal/bulk-image-upload-modal.component';
 export * from './product-list/product-list.component';
 export * from './category-quick-create.component';
 export * from './brand-quick-create.component';
+export * from './account-code-select.component';

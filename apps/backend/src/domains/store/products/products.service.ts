@@ -61,6 +61,7 @@ import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
@@ -115,7 +116,50 @@ export class ProductsService {
     private readonly ai_engine: AIEngineService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly settingsService: SettingsService,
+    private readonly autoEntryService: AutoEntryService,
   ) {}
+
+  /**
+   * Valida contra el PUC de la organización TODAS las subcuentas de ingreso que
+   * un guardado de producto trae consigo: la del producto y la de cada variante,
+   * en UNA sola consulta.
+   *
+   * PATCH-SAFE (y es el punto): sólo entran al lote los campos que el DTO
+   * REALMENTE trae. Un producto viejo cuyo `account_code` quedó inválido —porque
+   * alguien borró o desactivó la cuenta después— se sigue pudiendo editar en
+   * cualquier otro campo: ese `account_code` no viaja en el payload, luego no se
+   * valida. Sólo se exige una cuenta válida a quien la está escribiendo ahora.
+   *
+   * `null` explícito (limpiar el override) también pasa: lo descarta
+   * `validateProductAccountCodes`, que ignora vacíos.
+   *
+   * Sin `organization_id` en el contexto no se valida: el scoping de tenant es
+   * responsabilidad del guard/ALS, y fallar aquí convertiría un contexto
+   * incompleto en un error de "cuenta contable" que no le dice nada al usuario.
+   */
+  private async assertAccountCodesArePostable(payload: {
+    account_code?: string | null;
+    variants?: Array<{ account_code?: string | null } | undefined> | null;
+  }): Promise<void> {
+    const organization_id = RequestContextService.getOrganizationId();
+    if (!organization_id) return;
+
+    const codes: Array<string | null | undefined> = [];
+    if ('account_code' in payload && payload.account_code !== undefined) {
+      codes.push(payload.account_code);
+    }
+    for (const variant of payload.variants ?? []) {
+      if (variant && variant.account_code !== undefined) {
+        codes.push(variant.account_code);
+      }
+    }
+    if (codes.length === 0) return;
+
+    await this.autoEntryService.validateProductAccountCodes(
+      organization_id,
+      codes,
+    );
+  }
 
   /**
    * F4 — Gate "no responsable de IVA" (escritura de producto).
@@ -697,6 +741,15 @@ export class ProductsService {
         sanitizedDto.consultation_template_id = undefined;
         sanitizedDto.preconsultation_template_id = undefined;
       }
+
+      // Subcuenta PUC del producto y de cada variante: debe EXISTIR, estar
+      // activa y aceptar movimientos en el `chart_of_accounts` de esta
+      // organización. Antes sólo se validaba la forma (4-20 dígitos) y un
+      // código inexistente se persistía sin queja para descubrirse semanas
+      // después como un asiento acreditado a la cuenta de ingreso por defecto.
+      // Va ANTES de abrir la transacción: una sola lectura, fuera del pool
+      // comprometido, y sin haber escrito nada todavía.
+      await this.assertAccountCodesArePostable(sanitizedDto);
 
       const {
         store_id: dto_store_id,
@@ -2365,6 +2418,13 @@ export class ProductsService {
         sanitizedDto.consultation_template_id = undefined;
         sanitizedDto.preconsultation_template_id = undefined;
       }
+
+      // Subcuenta PUC — misma validación que en `create()`, con semántica
+      // PATCH: sólo se juzga lo que el payload TRAE. Un producto cuyo
+      // `account_code` histórico quedó inválido (cuenta borrada o desactivada
+      // después) se sigue pudiendo editar en precio, nombre o stock; sólo se le
+      // exige una cuenta contabilizable a quien la está escribiendo ahora.
+      await this.assertAccountCodesArePostable(sanitizedDto);
 
       // IMPORTANTE: se destructura `sanitizedDto`, NO `updateProductDto`.
       // `sanitizeIngredientPayload()` y `enforceIngredientCapability()`

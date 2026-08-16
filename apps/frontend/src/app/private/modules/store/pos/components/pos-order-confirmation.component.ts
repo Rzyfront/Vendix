@@ -4,10 +4,11 @@ import {
   output,
   inject,
   effect,
+  computed,
   signal,
+  viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { firstValueFrom } from 'rxjs';
 
 
 import {
@@ -23,7 +24,6 @@ import { RepartosService } from '../../../store-delivery/services/repartos.servi
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Store } from '@ngrx/store';
-import { Actions, ofType } from '@ngrx/effects';
 import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actions';
 import {
   selectDianConfigStatus,
@@ -32,6 +32,8 @@ import {
   DianGateReason,
 } from '../../invoicing/state/selectors/invoicing.selectors';
 import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
+import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
+import { PosFiscalStatus } from '../services/pos-fiscal.service';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -41,7 +43,8 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
     ModalComponent,
     IconComponent,
     SaveRequirementsModalComponent,
-    InvoicingNotConfiguredComponent
+    InvoicingNotConfiguredComponent,
+    PosFiscalStatusComponent
 ],
   template: `
     <app-modal
@@ -195,7 +198,28 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
           }
         </div>
       </div>
-    
+
+      <!-- Estado fiscal de la venta. Va FUERA del recibo (print:hidden) porque
+           es información de operación, no parte del documento que se entrega, y
+           porque el ticket ya declara por su cuenta si es copia informativa.
+           Nunca abre nada: informa mientras el cajero sigue trabajando. -->
+      <div class="max-w-md mx-auto mt-4 print:hidden">
+        <!-- SIN ACENTOS GRAVES ACÁ: este comentario vive DENTRO del literal
+             del template, y un acento grave lo CIERRA. La paridad del resto
+             del archivo se descuadra y el compilador reporta una cascada
+             (NG1002 sobre el decorador, TS1005, "Cannot find name 'styles'",
+             aridad falsa en otros archivos) en sitios que no tienen nada mal.
+
+             El isOpen() del binding de abajo no es decoración: el contenido
+             proyectado en un modal se instancia aunque el modal esté cerrado,
+             así que sin él el indicador seguiría sondeando en segundo plano
+             después de que el cajero pasó a la siguiente venta. -->
+        <app-pos-fiscal-status
+          [orderId]="isOpen() && orderId ? +orderId : null"
+          (statusChanged)="onFiscalStatus($event)"
+        ></app-pos-fiscal-status>
+      </div>
+
       <div slot="footer" class="flex flex-col gap-3 w-full">
         <!-- CTA Primario: full-width, prominente -->
         <app-button
@@ -220,7 +244,10 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
             <span class="hidden sm:inline">Email</span>
           </app-button>
     
-          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading()" [loading]="creatingInvoice" title="Crear Factura">
+          <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
+               cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
+               un reintento, es un hecho económico distinto. -->
+          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
             <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
@@ -344,7 +371,12 @@ export class PosOrderConfirmationComponent {
 
   printing = false;
   emailing = false;
-  creatingInvoice = false;
+  /**
+   * Loading del botón «Factura». Es señal —y no un campo plano como sus dos
+   * vecinos— porque ahora lo apaga la respuesta del indicador fiscal, que llega
+   * por un `output()` y no por el `await` que lo encendía.
+   */
+  readonly creatingInvoice = signal(false);
   /** Loading del botón "Despachar" (envío al pool de reparto). */
   readonly dispatching = signal(false);
 
@@ -384,7 +416,6 @@ private authFacade = inject(AuthFacade);
   private repartosService = inject(RepartosService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
-  private actions$ = inject(Actions);
 
   /**
    * Mismo predicado que el papel (`PosTicketService.shouldShowTaxes`): la
@@ -418,6 +449,20 @@ private authFacade = inject(AuthFacade);
   );
   readonly isNotConfiguredModalOpen = signal(false);
   readonly notConfiguredReason = signal<DianGateReason>('missing');
+
+  /**
+   * El indicador fiscal es el dueño del estado del documento: consulta, repite
+   * la consulta mientras sigue en camino y pinta el desenlace. El botón
+   * «Factura» del pie sólo le delega la emisión, para que no existan dos
+   * fuentes de verdad sobre la misma venta.
+   */
+  private readonly fiscalIndicator = viewChild(PosFiscalStatusComponent);
+
+  /** Último estado fiscal leído, para el pie y para el ticket. */
+  readonly fiscalStatus = signal<PosFiscalStatus | null>(null);
+
+  /** Sólo se avisa por toast la emisión que el cajero pidió a mano. */
+  private awaitingManualEmit = false;
 
   constructor() {
     const user = this.authFacade.getCurrentUser();
@@ -465,6 +510,12 @@ effect(() => {
     // next sale's ticket as a copy of the previous sale's invoice.
     if (this.orderId !== previousOrderId) {
       this.electronicInvoice.set(null);
+      this.fiscalStatus.set(null);
+      // Cerrar el modal con una emisión manual en vuelo deja al indicador sin
+      // llegar a responder. Sin este reinicio, el botón «Factura» de la SIGUIENTE
+      // venta nacería cargando para siempre.
+      this.awaitingManualEmit = false;
+      this.creatingInvoice.set(false);
     }
     this.orderNumber = data.order_number || data.number || 'N/A';
     this.currentDate = data.created_at
@@ -716,11 +767,33 @@ effect(() => {
       });
   }
 
-  async createInvoice(): Promise<void> {
-    if (!this.orderId) return;
+  /**
+   * Emite el documento electrónico de esta venta BAJO DEMANDA.
+   *
+   * ## Qué hacía antes y por qué estaba mal
+   *
+   * Despachaba `InvoicingActions.createFromOrder`, que crea un borrador y
+   * **nunca lo transmite**. El cajero pulsaba «Factura», recibía «Factura creada
+   * exitosamente» y se iba con la certeza de haber emitido un documento que en
+   * realidad seguía en `draft`, con su consecutivo reservado y sin CUFE. El
+   * mensaje era verdadero y la conclusión falsa, que es la peor combinación.
+   *
+   * Ahora delega en el indicador fiscal, que llama a
+   * `POST /store/invoicing/pos/orders/:id/emit` — el mismo motor y la misma
+   * puerta de validación que el carril fiscal. El indicador es el dueño del
+   * estado; este botón sólo lo empuja, para que no existan dos fuentes de verdad
+   * sobre la misma venta.
+   *
+   * El único modal de este flujo lo abre esta función y sólo cuando el cajero
+   * pulsa: la compuerta de configuración DIAN, que trae su CTA para terminar la
+   * habilitación. El resultado de la emisión NUNCA abre nada.
+   */
+  createInvoice(): void {
+    if (!this.orderId || this.creatingInvoice()) return;
 
-    // Gate: block the dispatch if DIAN config isn't ready.
-    // If configs are still loading, refuse to avoid a flashed "missing" modal.
+    // Con las configuraciones todavía cargando se rechaza en silencio, para no
+    // pintar un modal de «falta configurar» que se desmiente medio segundo
+    // después.
     if (this.dianConfigsLoading()) return;
     const dian = this.dianStatus();
     if (!dian.configured) {
@@ -729,51 +802,87 @@ effect(() => {
       return;
     }
 
-    this.creatingInvoice = true;
+    const indicator = this.fiscalIndicator();
+    if (!indicator) return;
 
-    // Listen for the result before dispatching
-    const actionPromise = firstValueFrom(
-      this.actions$.pipe(
-        ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
-        takeUntilDestroyed(this.destroyRef),
-      ),
-    );
-
-    this.store.dispatch(InvoicingActions.createFromOrder({ orderId: Number(this.orderId) }));
-
-    const action = await actionPromise;
-    this.creatingInvoice = false;
-    if (action.type === InvoicingActions.createFromOrderSuccess.type) {
-      // Remember the invoice so a ticket printed afterwards identifies itself as
-      // an informative copy instead of claiming it is not DIAN-validated.
-      const invoice = (
-        action as ReturnType<typeof InvoicingActions.createFromOrderSuccess>
-      ).invoice as { invoice_number?: string; cufe?: string } | undefined;
-      if (invoice?.invoice_number) {
-        this.electronicInvoice.set({
-          number: invoice.invoice_number,
-          cufe: invoice.cufe ?? undefined,
-        });
-      }
-      this.toastService.success('Factura creada exitosamente');
-    } else {
-      const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
-      // El effect (createFromOrder$) ya abrio el modal de requisitos fiscales:
-      // FiscalRequirementsService es singleton root y este componente monta el
-      // modal. Aqui solo SUPRIMIMOS el toast crudo cuando el fallo es una
-      // restriccion fiscal reconocida (config DIAN incompleta, estado fiscal,
-      // periodo cerrado, etc.), porque el modal ya explica el motivo + CTA. No
-      // reabrimos el modal para evitar doble apertura.
-      if (
-        this.fiscalReq.isFiscalRestriction({
-          error: { error_code: errorAction.errorCode },
-        })
-      ) {
-        return;
-      }
-      this.toastService.error(errorAction.error || 'Error al crear la factura');
+    // `emitNow()` devuelve `false` si ya hay una consulta en vuelo. Sin este
+    // aviso, el botón se quedaría cargando para siempre esperando una respuesta
+    // que nadie pidió.
+    this.awaitingManualEmit = true;
+    this.creatingInvoice.set(true);
+    if (!indicator.emitNow()) {
+      this.awaitingManualEmit = false;
+      this.creatingInvoice.set(false);
     }
   }
+
+  /**
+   * Cada lectura del estado fiscal que hace el indicador (la automática, cada
+   * sondeo, y la que provoca el botón «Factura»).
+   *
+   * Hace dos cosas y ninguna interrumpe al cajero:
+   *
+   * 1. **Sella el ticket.** Si ya hay número de factura, se recuerda para que un
+   *    tiquete impreso después se identifique como copia informativa de un
+   *    documento que existe, en vez de declararse no validado ante la DIAN.
+   *    Antes esto sólo ocurría si el cajero pulsaba «Factura» a mano; con la
+   *    emisión automática, el documento salía y el ticket seguía mintiendo.
+   * 2. **Avisa por toast SÓLO la emisión que el cajero pidió.** Los sondeos
+   *    automáticos no notifican nada: el indicador ya está en pantalla diciendo
+   *    exactamente lo mismo, y un toast por sondeo sería ruido cada cinco
+   *    segundos.
+   */
+  onFiscalStatus(status: PosFiscalStatus): void {
+    this.fiscalStatus.set(status);
+
+    if (status.invoice_number) {
+      this.electronicInvoice.set({
+        number: status.invoice_number,
+        cufe: status.cufe ?? undefined,
+      });
+    }
+
+    if (!this.awaitingManualEmit) return;
+    this.awaitingManualEmit = false;
+    this.creatingInvoice.set(false);
+
+    switch (status.state) {
+      case 'issued':
+        this.toastService.success(
+          status.invoice_number
+            ? `Factura ${status.invoice_number} aceptada por la DIAN`
+            : 'Factura aceptada por la DIAN',
+        );
+        break;
+      case 'contingency':
+        this.toastService.warning(status.message);
+        break;
+      case 'failed':
+        // El detalle accionable —qué falta y dónde se corrige— ya está impreso
+        // bajo el ticket, en el indicador. El toast sólo avisa que hay algo que
+        // mirar.
+        this.toastService.error(status.message);
+        break;
+      case 'not_applicable':
+        this.toastService.info(status.message);
+        break;
+      default:
+        this.toastService.info(
+          'El documento electrónico va en camino. La venta ya está registrada.',
+        );
+    }
+  }
+
+  /** La DIAN ya aceptó el documento de esta venta. */
+  readonly alreadyIssued = computed(
+    () => this.fiscalStatus()?.state === 'issued',
+  );
+
+  readonly invoiceButtonTitle = computed(() =>
+    this.alreadyIssued()
+      ? 'Esta venta ya tiene factura electrónica aceptada'
+      : 'Emitir la factura electrónica de esta venta',
+  );
 
   hasDiscount(): boolean {
     return this.orderDiscount > 0;

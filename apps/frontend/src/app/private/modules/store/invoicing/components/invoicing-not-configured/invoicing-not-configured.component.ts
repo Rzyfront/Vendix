@@ -54,8 +54,12 @@ export class InvoicingNotConfiguredComponent {
 
   readonly message = computed<string>(() => {
     switch (this.reason()) {
+      // El motivo `not_enabled` sale de `enablement_status !== 'enabled'`; el
+      // selector no mira el ambiente. Decir «en producción» mandaba a buscar
+      // un problema de ambiente donde lo que falta es terminar la habilitación
+      // ante la DIAN — que es lo mismo en habilitación y en producción.
       case 'not_enabled':
-        return 'La configuración DIAN no está habilitada en producción. Revisa el estado en DIAN.';
+        return 'La habilitación ante la DIAN no está terminada. Completa el set de pruebas en Configuración DIAN antes de facturar.';
       case 'expired_cert':
         return 'El certificado digital está vencido. Renuévalo antes de facturar.';
       case 'missing':

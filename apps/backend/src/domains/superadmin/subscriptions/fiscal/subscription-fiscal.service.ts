@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { dianAmount } from '../../../store/invoicing/utils/dian-money.util';
+import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { createHash } from 'crypto';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
+import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -1453,7 +1455,15 @@ export class SubscriptionFiscalService {
         valid_from: validFrom,
         valid_to: validTo,
         is_active: true,
-        technical_key: dto.technical_key ?? null,
+        // Validada y normalizada, igual que en los carriles de tienda y de
+        // organización. Este es el tercero y el último que faltaba: la consola
+        // de super admin no pasa por el mismo `ValidationPipe` (entra por
+        // `TenantContextRunner`), así que lo que no exija el servicio no lo
+        // exige nadie — y una ClTec mal copiada quema un consecutivo autorizado
+        // que no se recupera.
+        technical_key: assertTechnicalKeyShape(dto.technical_key, {
+          prefix: dto.prefix,
+        }),
       },
     });
 
@@ -1604,7 +1614,9 @@ export class SubscriptionFiscalService {
       data.valid_to = nextValidTo;
     }
     if (dto.technical_key !== undefined) {
-      data.technical_key = dto.technical_key;
+      data.technical_key = assertTechnicalKeyShape(dto.technical_key, {
+        resolution_id: id,
+      });
     }
     if (dto.is_active !== undefined) data.is_active = dto.is_active;
 

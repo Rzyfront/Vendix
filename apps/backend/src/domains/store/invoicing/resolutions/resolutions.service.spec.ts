@@ -72,9 +72,22 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
         .fn()
         .mockResolvedValue({ id: ACCOUNTING_ENTITY_ID }),
     };
+    // La ClTec ya no se escribe a pelo: pasa por `TechnicalKeyVaultService`,
+    // que devuelve la terna (claro, cifrado, huella) que el servicio esparce
+    // sobre el `data` de Prisma. El doble reproduce esa forma —no un `jest.fn()`
+    // vacío— porque un `undefined` esparcido borraría las tres columnas y la
+    // prueba pasaría sobre una escritura que en producción pierde la clave.
+    const technicalKeyVault = {
+      sealForWrite: jest.fn((raw: string | null | undefined) => ({
+        technical_key: raw ?? null,
+        technical_key_encrypted: raw ? `enc:${raw}` : null,
+        technical_key_fingerprint: raw ? `fp:${raw}` : null,
+      })),
+    };
     const service = new ResolutionsService(
       prisma as any,
       fiscalScope as any,
+      technicalKeyVault as any,
     );
     return { service, prisma };
   };
@@ -321,7 +334,15 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
       await service.update(55, { technical_key: null } as any);
 
       const { data } = prisma.invoice_resolutions.update.mock.calls[0][0];
-      expect(data).toEqual({ technical_key: null });
+      // Borrar la clave limpia las TRES columnas, no sólo el texto plano. Dejar
+      // la copia cifrada sería peor que no borrar nada: el vault prefiere la
+      // cifrada al revelar, así que el emisor seguiría hasheando la ClTec que el
+      // comerciante creyó haber quitado.
+      expect(data).toEqual({
+        technical_key: null,
+        technical_key_encrypted: null,
+        technical_key_fingerprint: null,
+      });
     });
 
     it('bloquea cambiar los campos que fijan su identidad fiscal', async () => {

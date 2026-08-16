@@ -41,6 +41,15 @@ export interface StickyHeaderTab {
   id: string;
   label: string;
   shortLabel?: string;
+  /**
+   * Qué hace esta sección, en una frase.
+   *
+   * La consume `ModuleTabsShellComponent` como segunda línea de la cabecera. El
+   * nombre de la pestaña ya está tres veces en pantalla —migaja, título del
+   * layout y la propia pestaña activa—, así que repetirlo una cuarta no orienta
+   * a nadie; una frase que diga qué se administra ahí sí.
+   */
+  description?: string;
   icon?: string;
   route?: string | unknown[];
   exact?: boolean;

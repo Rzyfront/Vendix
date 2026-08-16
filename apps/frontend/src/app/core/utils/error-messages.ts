@@ -11,6 +11,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+  // Red de seguridad del filtro global: la peticion llego mal formada y el
+  // backend lo detecto en la capa de datos. Antes salian como 500, asi que el
+  // usuario leia «error inesperado» ante algo que si puede corregir.
+  SYS_VALUE_OUT_OF_RANGE_001:
+    'El identificador solicitado no es válido. Vuelve a la lista y abre el registro desde ahí.',
+  SYS_INVALID_FIELD_VALUE_001:
+    'Uno de los datos enviados no tiene el formato esperado. Revisa los campos numéricos y vuelve a intentarlo.',
 
   // Alcance y asignación de roles (QUI-72). Compartidos por los tres niveles
   // (super-admin, organización y tienda): el mismo código debe leerse igual en
@@ -201,6 +208,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_VALIDATE_002:
     'Debes configurar un SKU para el producto antes de activar las variantes.',
   PROD_VALIDATE_003: 'El SKU de la variante no puede estar vacío.',
+  // Cuenta contable propia del producto (override del PUC). Los tres mensajes
+  // del backend nombran la cuenta concreta y la pantalla donde se corrige, así
+  // que las superficies que puedan anclarlo al campo deben mostrar `message`
+  // tal cual; estos textos son el respaldo genérico.
+  PROD_ACCOUNT_CODE_NOT_FOUND_001:
+    'La cuenta contable indicada no existe en el plan de cuentas (PUC) de esta organización. Créala en Contabilidad → Plan de Cuentas, elige una existente, o deja el campo vacío para usar la cuenta de ingreso por defecto.',
+  PROD_ACCOUNT_CODE_INACTIVE_001:
+    'La cuenta contable indicada está inactiva y no admite movimientos nuevos. Actívala en Contabilidad → Plan de Cuentas o elige otra.',
+  // Distinguir "no existe" de "es de agrupación" importa: la segunda SÍ aparece
+  // en el plan de cuentas, así que sin este matiz el usuario la vuelve a elegir.
+  PROD_ACCOUNT_CODE_NOT_POSTABLE_001:
+    'La cuenta contable indicada es de agrupación y no admite movimientos: un asiento no se puede registrar sobre ella. Elige una de sus subcuentas en Contabilidad → Plan de Cuentas.',
 
   // Product/Service & Variants Validation
   PROD_SVC_VARIANTS_001:
@@ -526,6 +545,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
   DIAN_CERT_004: 'El certificado no coincide con el NIT de la entidad fiscal.',
   DIAN_ENABLEMENT_001: 'Faltan requisitos para habilitar DIAN en produccion.',
+  // En modo proveedor tecnológico la transmisión no la firma Vendix, así que no
+  // hay nada que habilitar: el mensaje nombra el modo y dónde se cambia.
+  DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED:
+    'Para emitir en producción, la configuración DIAN de esta tienda debe estar en modo "software propio". Cámbialo en Facturación → Configuración DIAN antes de pasar a producción.',
 
   // Set de pruebas de habilitación. Los mensajes distinguen "espera" de "error":
   // reenviar un lote que la DIAN aún está validando quema un segundo bloque de
@@ -542,6 +565,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'El set guardado es anterior al registro de claves por documento. Reenvíalo para poder diagnosticarlo factura por factura.',
   DIAN_TEST_SET_006:
     'El set de pruebas debe emitirse contra una resolución de habilitación. La resolución seleccionada es de producción y sus consecutivos son reales.',
+  // 404 deliberadamente ambiguo en el backend (no existe / expiró / es de otra
+  // config): distinguirlos permitiría enumerar los lotes de otros tenants. El
+  // copy no promete cuál de los tres es, solo qué hacer.
+  DIAN_TEST_SET_007:
+    'Ese envío del set de pruebas ya no está disponible: pudo expirar o pertenecer a otra configuración fiscal. Vuelve a consultar el estado desde Facturación → Configuración DIAN.',
+  // Dos resoluciones gemelas activas avanzan su consecutivo por separado, así que
+  // la que quede atrás repetirá números ya entregados a la DIAN — y un
+  // consecutivo duplicado se rechaza para siempre. Por eso el texto dice qué
+  // cuesta ignorarlo, no solo que hay un duplicado.
+  DIAN_TEST_SET_008:
+    'Hay dos resoluciones activas con el mismo número y rango, y no se puede saber cuál numera. Desactiva la duplicada en Facturación → Resoluciones antes de emitir: si ambas siguen activas, la que quede atrás repetirá consecutivos ya enviados y la DIAN rechazará todo lo que emita con ellos.',
 
   // Eventos RADIAN (Res. 000085/2022)
   DIAN_EVENT_001:
@@ -552,12 +586,30 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Ese evento ya fue aceptado por la DIAN para esta factura. Registrarlo otra vez sería un duplicado.',
   DIAN_EVENT_004:
     'Los eventos RADIAN requieren la integración directa con la DIAN (software propio) activa en esta tienda.',
+  // El backend NOMBRA el campo que falta en `details` (missing / allowed) porque
+  // varía por código de evento; este texto es el encabezado de esa familia. Se
+  // corta antes de transmitir: registrar el evento incompleto gastaría el
+  // consecutivo del evento y RADIAN lo rechazaría igual.
+  DIAN_EVENT_005:
+    'Al evento RADIAN le faltan datos que el anexo exige para su código: el tipo de operación, si el endoso es completo o en blanco, o los montos de la negociación. Complétalos antes de registrarlo: enviarlo incompleto gasta el consecutivo del evento y RADIAN lo rechaza igual.',
 
   // Umbral 5 UVT (Art. 616-1 ET / Res. 000165 de 2023)
   FISCAL_UVT_INVOICE_REQUIRED:
     'Esta venta supera 5 UVT y requiere factura electrónica: identifica al comprador (documento y nombre) antes de cerrarla. El tiquete POS solo cubre ventas por debajo del tope.',
   FISCAL_CONFIG_INCOMPLETE:
     'La configuracion fiscal de esta entidad esta incompleta.',
+  // Sin nombrar el area: `parseApiError` mapea por codigo y no lee el `message`
+  // del backend, que si la nombra. Quien quiera decir cual —y enlazar la
+  // seccion del asistente— la toma de `details.area`.
+  FISCAL_AREA_INACTIVE:
+    'Este modulo fiscal no esta activo para tu tienda. Activalo en el asistente fiscal antes de usarlo.',
+  // Identidad fiscal del EMISOR: razon social, municipio DIAN o departamento.
+  // El backend manda en `details.missing` la lista completa de huecos y el
+  // `cta` al wizard, asi que este texto no enumera campos — la superficie que
+  // lo muestre debe leer `details` y pedirlos todos de una vez, en vez de
+  // hacer que el operador los descubra de a uno por reintento.
+  FISCAL_IDENTITY_INCOMPLETE:
+    'Falta completar la identidad fiscal de tu empresa antes de emitir. Ve al manejo fiscal y llena los datos que aparecen pendientes.',
   FISCAL_STATUS_INCOMPLETE:
     'No se puede activar: faltan pasos por completar. Revisa los datos marcados como pendientes.',
   FISCAL_SCOPE_INVALID:
@@ -580,6 +632,39 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede cambiar el estado fiscal desde el estado actual. Refresca la pagina y vuelve a intentarlo.',
   FISCAL_SCOPE_MISSING_TAX_ID:
     'Falta el NIT de la entidad fiscal. Registralo en los datos legales antes de continuar.',
+  // Responsabilidad de IVA (RUT). Cobrar IVA sin ser responsable produce una
+  // factura que la DIAN acepta y que despues hay que corregir con nota credito,
+  // asi que el corte es previo y el texto nombra donde se declara la condicion.
+  FISCAL_VAT_NOT_RESPONSIBLE_001:
+    'Esta tienda está registrada ante la DIAN como NO responsable de IVA, así que no puede asignar ni cobrar IVA. Si tu condición cambió, actualiza la responsabilidad fiscal (RUT) en el manejo fiscal antes de facturar con impuesto.',
+  // 500 de configuracion del servidor, no del comerciante: sin la clave de
+  // cifrado, guardar el secreto lo dejaria protegido con una clave visible en el
+  // repositorio. Se corta antes de escribir, y el copy lo dice para que nadie
+  // reintente creyendo que es un dato suyo.
+  FISCAL_ENCRYPTION_KEY_MISSING:
+    'No se pudo guardar el dato protegido: falta la clave de cifrado fiscal del servidor. No se guardó nada a medias. Es una configuración del servidor, no un dato tuyo — reporta este caso a soporte.',
+
+  // Alcance fiscal (por tienda vs por organización)
+  FISCAL_SCOPE_INVALID_VALUE:
+    'El alcance fiscal indicado no es válido. Elige si la fiscalidad se maneja por tienda o por organización.',
+  FISCAL_SCOPE_INVALID_COMBINATION:
+    'Esa combinación de alcance operativo y alcance fiscal no es válida. Revisa cómo opera la organización antes de cambiar el manejo fiscal.',
+  FISCAL_SCOPE_CHANGE_BLOCKED:
+    'No se puede cambiar el alcance fiscal todavía: hay condiciones previas sin resolver. Revisa los motivos señalados y corrígelos antes de reintentar.',
+  FISCAL_SCOPE_FORCE_REASON_REQUIRED:
+    'Forzar el cambio de alcance fiscal exige escribir el motivo. Explícalo antes de continuar: queda registrado en la auditoría fiscal.',
+  FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND:
+    'Esa entidad contable no existe o no pertenece a esta organización. Elige una de las entidades fiscales de la organización.',
+
+  // Estado fiscal (asistente de activación)
+  FISCAL_STATUS_WIZARD_STEP_INVALID:
+    'Ese paso del asistente fiscal no existe. Recarga la página y retoma el asistente desde donde quedó.',
+  FISCAL_STATUS_DEACTIVATION_BLOCKED:
+    'No se puede desactivar el manejo fiscal: hay operaciones que dependen de él. Revisa los motivos señalados antes de reintentar.',
+  FISCAL_STATUS_CONCURRENT_UPDATE:
+    'Otra persona cambió el estado fiscal mientras editabas. Recarga la página para ver el estado actual y vuelve a aplicar tu cambio.',
+  FISCAL_STATUS_PERMISSION_DENIED:
+    'No tienes permiso para cambiar el estado fiscal de esta entidad. Solicítalo a un administrador de la organización.',
 
   // Fiscal seeding (plan de cuentas / impuestos / entidad contable)
   TAXES_ALREADY_SEEDED:
@@ -598,6 +683,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_FIND_004: 'No se encontro la orden de venta asociada.',
   INVOICING_CREATE_001:
     'No se pudo crear la factura. Revisa los datos e intenta de nuevo.',
+  // Sin el numero de la factura existente: `parseApiError` mapea por codigo y
+  // nunca usa el `message` del backend. Quien quiera nombrarla —el detalle de
+  // la orden lo hace— lo toma de `details.invoice_number`.
+  INVOICING_CREATE_002:
+    'Este documento ya tiene una factura emitida. Anulala antes de emitir otra.',
+  INVOICING_CREATE_003:
+    'Los pedidos de venta no registran impuestos, asi que no se pueden facturar. Emite la factura desde la orden.',
+  INVOICING_AREA_001:
+    'La facturacion electronica no esta activa para esta tienda. Activala en Configuracion fiscal.',
+  INVOICING_ENABLEMENT_001:
+    'Tu habilitacion ante la DIAN aun no esta viva. Completa el set de pruebas y activa produccion antes de emitir.',
   INVOICING_VALIDATE_001:
     'La factura no cumple las validaciones. Revisa los datos.',
   INVOICING_STATUS_001:
@@ -643,9 +739,156 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer los documentos de habilitación. Intenta con fotos más nítidas o escribe los datos a mano.',
   HABILITATION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  INVOICING_RESOLUTION_006:
+    'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala antes de crear la resolución.',
+  INVOICING_RESOLUTION_007:
+    'Ya existe una resolución activa con ese prefijo para ese tipo de documento. Usa otro prefijo o desactiva la anterior.',
+  // 008 es la puerta del contrato fiscal por tipo de documento: qué campos exige
+  // la DIAN a una factura de venta, a una nota, a un documento soporte. La
+  // corrección es distinta según el campo, así que el backend manda el detalle.
+  INVOICING_RESOLUTION_008:
+    'La resolución no cumple lo que la DIAN exige para ese tipo de documento. Revisa los campos señalados.',
+  // El rango y la vigencia los fija la DIAN en la autorización de numeración:
+  // aquí no se corrige un criterio propio, se transcribe bien el documento.
+  INVOICING_RESOLUTION_009:
+    'El rango autorizado no es válido: deben ser dos números enteros positivos y el final mayor que el inicial. Cópialos de la autorización de numeración.',
+  INVOICING_RESOLUTION_010:
+    'La vigencia no es válida: la fecha final debe ser posterior a la inicial. Cópialas de la autorización de numeración.',
+  /**
+   * ESTE MENSAJE EXISTE POR UN RECHAZO REAL DE LA DIAN.
+   *
+   * Se guardó una clave técnica de 38 caracteres —dos perdidos al copiarla, todos
+   * hexadecimales, nada a la vista que delatara el error—. La ClTec es el único
+   * dato del CUFE que NO viaja en el XML, así que la DIAN fue el primer sistema
+   * capaz de notarlo: recomputó el hash con la clave verdadera, no coincidió y
+   * rechazó la factura. El consecutivo autorizado ya estaba gastado, y eso no se
+   * recupera.
+   *
+   * Por eso el texto dice DÓNDE conseguirla y no solo qué está mal: quien captura
+   * una resolución no tiene por qué saber que son 40 caracteres.
+   */
+  INVOICING_RESOLUTION_011:
+    'La clave técnica (ClTec) debe tener exactamente 40 caracteres hexadecimales. Cópiala completa del PDF de la autorización de numeración de la DIAN: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
+  INVOICING_PROVIDER_002:
+    'El proveedor de facturación electrónica no está configurado para esta tienda. Complétalo en Facturación → Configuración DIAN.',
+  INVOICING_PROVIDER_003:
+    'Faltan datos obligatorios para transmitir a la DIAN. Revisa la configuración DIAN y la resolución de numeración.',
+  // Este NO es un fallo de Vendix: la DIAN juzgó el documento y lo rechazó
+  // nombrando la regla que se violó. Ese detalle viaja en `details.dian_errors`,
+  // así que la UI debe enumerarlo — este texto es solo el encabezado.
+  INVOICING_PROVIDER_004:
+    'La DIAN rechazó el documento. Revisa los motivos que reporta y corrígelos antes de reintentar.',
+  INVOICING_CUFE_001:
+    'Los valores con los que se calculó la clave del documento no coinciden con los del XML. No se transmitió nada y no se gastó numeración. Reporta este caso: es un fallo interno, no un dato tuyo.',
+  // La DIAN valida la coherencia entre cantidad y unidad: 3 metros declarados
+  // como `EA` afirman "3 unidades". Antes se emitía `EA` de relleno ante
+  // cualquier fallo de resolución, así que el documento salía aceptado y falso.
+  // El backend nombra las líneas y los productos en `details`.
+  DIAN_UNIT_CODE_001:
+    'No se puede determinar la unidad de medida de una o más líneas del documento, y no se emite con una unidad de relleno. Revisa en Productos que esos artículos existan en esta tienda y tengan una unidad de stock válida.',
+  DIAN_UNIT_CODE_002:
+    'No se pudo leer el catálogo de unidades de medida para armar el documento. Es un fallo temporal: vuelve a intentar en unos segundos. No se gastó numeración.',
+  // Gemelo de CUFE_001: estructura, no contenido. Un elemento fuera del orden
+  // que fija el `xsd:sequence` de UBL produce un documento con TODOS los datos
+  // correctos que la DIAN rechaza igual. Se corta antes de firmar, así que lo
+  // primero que hay que decir es que no se perdió el consecutivo — ese es el
+  // miedo real de quien ve fallar una emisión.
+  INVOICING_XSD_001:
+    'El XML generado no cumple la estructura que exige la DIAN, así que no se firmó ni se transmitió nada: el borrador conserva su número y no se gastó numeración. Es un fallo interno del generador, no un dato tuyo — reporta este caso a soporte.',
+  // El backend recalcula toda la aritmética del documento, así que un importe
+  // de impuesto que no cuadre se corrige solo. Este código es el único caso que
+  // no se puede recalcular: importe sin tarifa. El mensaje del backend nombra la
+  // línea concreta, así que la UI debe preferirlo sobre este texto genérico.
+  INVOICING_CALC_001:
+    'Una línea declara un impuesto pero no indica su tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero.',
+  /**
+   * Genérico a propósito: el backend manda en `message` la lista de
+   * identificadores rechazados y si el problema es que no existen o que son de
+   * otra organización, y `parseApiError` prefiere ese texto. Este es el respaldo
+   * para cuando la respuesta llega sin cuerpo.
+   */
+  INVOICING_CALC_002:
+    'Uno de los impuestos del documento ya no está en el catálogo de la tienda. Vuelve a elegirlo en la línea y guarda de nuevo.',
+  /**
+   * PREVALIDACIÓN FISCAL — los cuatro mensajes siguientes son ENCABEZADOS.
+   *
+   * El backend rechaza el documento ANTES de firmarlo y transmitirlo, y manda en
+   * `details.blockers[]` un hallazgo por regla incumplida, cada uno con su
+   * `problem` (qué está mal y por qué la DIAN lo rechaza) y su `fix` (qué tocar y
+   * en qué pantalla). La UI DEBE enumerar esa lista: estos textos solo dicen de
+   * qué familia es el problema, porque un documento puede incumplir varias reglas
+   * a la vez y ninguna frase única las describe.
+   *
+   * Por qué vale la pena mostrarlos bien: un rechazo de la DIAN gasta un
+   * consecutivo autorizado que no se recupera. Todo lo que se corrija en esta
+   * pantalla es numeración que no se pierde.
+   */
+  INVOICING_PREVALIDATION_001:
+    'Las cuentas del documento no cuadran y la DIAN lo rechazaría. Revisa los descuadres señalados: normalmente basta con volver a guardar el documento para que se recalculen los totales.',
+  INVOICING_PREVALIDATION_002:
+    'La resolución de numeración no respalda este documento: revisa su vigencia, su rango y que el prefijo coincida con el número emitido. Se corrige en Facturación → Resoluciones.',
+  // El caso real: una clave técnica de 38 caracteres hizo rechazar una factura y
+  // quemó el consecutivo. El texto dice DÓNDE conseguirla porque quien captura
+  // una resolución no tiene por qué saber que son 40 caracteres.
+  INVOICING_PREVALIDATION_003:
+    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
+  INVOICING_PREVALIDATION_004:
+    'El contenido del documento no se puede emitir tal como está: revisa la moneda, las unidades de medida de las líneas y el tipo de operación. El detalle señala cada línea y qué corregir.',
+
+  /**
+   * Retenciones DECLARADAS POR EL CLIENTE al crear la factura.
+   *
+   * El backend separa el "concepto que no es tuyo" del "concepto borrado /
+   * inactivo" para que el mensaje ayude al depurador a saber qué pasó, no para
+   * que parezca que se trata del mismo problema. El del backend ya nombra
+   * ambos y los detalles llevan la lista de `concept_id`s malos.
+   */
+  INVOICING_WITHHOLDING_002:
+    'Alguna retención declarada referencia conceptos que no existen, están inactivos o pertenecen a otra tienda. El detalle lista los `concept_id`s en cuestión; revisa la lista de conceptos en Contabilidad → Retenciones y reemplaza los que falten o no apliquen.',
+  INVOICING_WITHHOLDING_003:
+    'La retención declarada no cuadra con la base y la tarifa: la diferencia entre el importe y `base × rate` supera 1 centavo. Una diferencia mayor ya no es truncado, es un dato mal capturado. Revisa la base, la tarifa o el importe y vuelve a enviar.',
+
+  /**
+   * AIU — el error que estos tres mensajes evitan NO se ve.
+   *
+   * Un contrato AIU mal clasificado produce una factura que la DIAN ACEPTA
+   * declarando menos IVA del que se debe; el faltante aparece meses después, ya
+   * con sanción e intereses, y sólo se corrige con nota crédito. Por eso los
+   * textos nombran la pantalla de configuración: quien factura no tiene por qué
+   * saber que existen dos regímenes de base gravable, pero sí tiene que poder
+   * llegar a donde se elige el suyo.
+   */
+  INVOICING_AIU_001:
+    'La base gravable del AIU es menor al 10% del valor del contrato, que es el mínimo legal para los servicios del artículo 462-1 (aseo y cafetería, vigilancia y servicios temporales de empleo). Sube el AIU o, si tu contrato es de construcción de bien inmueble, cambia el régimen en Configuración → Facturación → AIU.',
+  INVOICING_AIU_002:
+    'Falta el objeto del contrato AIU, o no tiene la longitud que exige la DIAN (entre 20 y 5.000 caracteres). Descríbelo en Configuración → Facturación → AIU: viaja en la línea de Administración y sin él la DIAN rechaza el documento.',
+  INVOICING_AIU_003:
+    'Una línea está marcada como componente AIU (Administración, Imprevistos o Utilidad) pero el documento no es un contrato AIU. Cambia el tipo de operación a AIU o quita la marca de la línea: como está, el componente se ignora y la línea se factura como una venta normal.',
+
+  /**
+   * DIVISA — la factura siempre se emite en pesos; la divisa sólo se DECLARA.
+   * Ninguno de los dos casos se puede resolver adivinando una tasa, así que los
+   * mensajes piden el dato en vez de prometer un reintento.
+   */
+  INVOICING_TRM_001:
+    'No se pudo obtener la TRM oficial para la fecha de la operación y no se indicó una tasa manual. Escribe la tasa de cambio en el documento: no se inventa ninguna, porque una tasa equivocada cambia el valor en pesos de la factura.',
+  INVOICING_CURRENCY_001:
+    'Para una divisa distinta del dólar hay que indicar la tasa de cambio a mano. La TRM oficial sólo cotiza dólar-peso, así que Vendix no puede derivar la equivalencia de otra moneda por su cuenta.',
+
+  // Solicitudes de factura a nombre del cliente. El 001 lo ve el comerciante en
+  // el panel; el 002/003/004 los ve el CLIENTE FINAL en el formulario público
+  // post-venta, y por eso su copy habla de «la tienda» y no de «el cliente».
+  INVOICING_DATA_REQUEST_001:
+    'La solicitud ya no está pendiente de procesar: puede que el proceso automático la haya tomado primero. Actualiza la lista para ver en qué estado quedó.',
+  INVOICING_DATA_REQUEST_002:
+    'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+  INVOICING_DATA_REQUEST_003:
+    'El enlace para solicitar tu factura venció. Pídele a la tienda uno nuevo.',
+  INVOICING_DATA_REQUEST_004:
+    'Este enlace ya recibió tus datos y sólo se puede usar una vez. La tienda está emitiendo tu factura.',
 
   // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
   KITCHEN_TICKET_NOT_READY:

@@ -45,16 +45,20 @@ export class ReturnOrdersController {
     return this.returnOrdersService.findByStatus('processed', query);
   }
 
+  // Los valores del enum son `purchase_return` y `sales_return`. Estas dos
+  // rutas pasaban `'refund'` y `'replacement'`, que no pertenecen a
+  // `return_order_type_enum`: Prisma rechazaba la consulta y ambas respondían
+  // 500 con cualquier petición.
   @Get('purchase-returns')
   @Permissions('store:orders:return_orders:read')
   findPurchaseReturns(@Query() query: ReturnOrderQueryDto) {
-    return this.returnOrdersService.findByType('refund', query);
+    return this.returnOrdersService.findByType('purchase_return', query);
   }
 
   @Get('sales-returns')
   @Permissions('store:orders:return_orders:read')
   findSalesReturns(@Query() query: ReturnOrderQueryDto) {
-    return this.returnOrdersService.findByType('replacement', query);
+    return this.returnOrdersService.findByType('sales_return', query);
   }
 
   @Get('partner/:partnerId')

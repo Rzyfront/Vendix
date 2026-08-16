@@ -33,7 +33,9 @@ import {
   FastTrackOrderDto,
   AssignShippingMethodDto,
   ReactivateOrderDto,
+  OrderInvoiceSnapshot,
 } from '../../interfaces/order.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
@@ -59,6 +61,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
+import { InvoicingService } from '../../../invoicing/services/invoicing.service';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -1056,6 +1059,12 @@ export class OrderDetailsPageComponent {
   private ticketService = inject(PosTicketService);
   private orderTicketService = inject(OrderTicketService);
   private posShippingService = inject(PosShippingService);
+  // Plan F5 — `POST /store/invoicing/from-sales-order/:id` existe en el backend
+  // y no tenía botón en el frontend: la tienda creaba el pedido pero nunca
+  // emitía la factura de venta. Sale sólo si la orden NO tiene ya una
+  // `sales_invoice` aceptada — reintentar una emisión gastaría un consecutivo
+  // autorizado ante la DIAN.
+  private invoicingService = inject(InvoicingService);
   // Plan KDS fire-flows (F3): manual selective fire for online orders
   // with `prepared` items that were never auto-fired (the auto-fire
   // runs in the payment $transaction; for orders paid before this
@@ -2878,5 +2887,77 @@ export class OrderDetailsPageComponent {
         this.toastService.error(err?.message || 'No se pudo finalizar la orden');
       },
     });
+  }
+
+  /**
+   * LA FACTURA ELECTRÓNICA ACEPTADA DE ESTA ORDEN, O `null`.
+   *
+   * `order.invoices` llega ya filtrado por el backend a `dian_status:
+   * 'accepted'` con `take: 1` (`orders.service.ts:574-579`), así que la sola
+   * presencia del elemento ES la respuesta. No se re-deriva nada.
+   *
+   * La versión anterior preguntaba `invoices.some(i => i.invoice_type ===
+   * 'sales_invoice')`. La proyección del backend sólo trae `invoice_number` y
+   * `cufe` — `invoice_type` no viaja —, así que ese predicado era SIEMPRE
+   * falso: el botón «Emitir factura electrónica» nunca se escondía, ni después
+   * de una emisión aceptada. Y como el backend tampoco tenía guarda de
+   * duplicado, cada clic tomaba un consecutivo autorizado nuevo. Los dos huecos
+   * están cerrados: acá el predicado, y allá `INVOICING_CREATE_002`.
+   */
+  acceptedInvoice = computed<OrderInvoiceSnapshot | null>(
+    () => this.order()?.invoices?.[0] ?? null,
+  );
+
+  hasSalesInvoice = computed(() => this.acceptedInvoice() !== null);
+
+  isEmittingInvoice = signal(false);
+
+  /**
+   * Emite la factura electrónica de venta a partir de ESTA orden.
+   *
+   * `createFromOrder`, no `createFromSalesOrder`: son endpoints distintos sobre
+   * tablas distintas. `from-sales-order/:id` resuelve contra `sales_orders`
+   * —una tabla que en producto no tiene ningún camino de creación—, así que
+   * pasarle el id de una `orders` devolvía 404 en el mejor caso y, en el peor,
+   * facturaba un documento ajeno cuyo id coincidiera. El botón vive en el
+   * detalle de una ORDEN; el endpoint correcto es el de órdenes.
+   */
+  createInvoiceFromOrder(): void {
+    if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
+    this.isEmittingInvoice.set(true);
+    this.invoicingService
+      .createFromOrder(Number(this.orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.isEmittingInvoice.set(false);
+          // `success: false` con HTTP 2xx es un caso real de este backend:
+          // `responseService.error()` RETORNA el sobre en vez de lanzarlo, así
+          // que llega por `next`. Sin esta rama el spinner se apagaba y no
+          // pasaba absolutamente nada en pantalla.
+          if (!response?.success) {
+            this.toastService.error(
+              parseApiError(response).userMessage ||
+                'No se pudo emitir la factura de venta',
+            );
+            return;
+          }
+          this.toastService.success('Factura de venta emitida');
+          this.loadData();
+        },
+        error: (err: unknown) => {
+          this.isEmittingInvoice.set(false);
+          // NO `err.message`: en un `HttpErrorResponse` esa propiedad es
+          // siempre la cadena sintética de Angular ("Http failure response
+          // for …: 500 Internal Server Error"), nunca el mensaje del backend.
+          const parsed = parseApiError(err);
+          const invoiceNumber = parsed.details?.invoice_number;
+          this.toastService.error(
+            invoiceNumber
+              ? `Esta orden ya tiene la factura ${invoiceNumber}. Anúlala antes de emitir otra.`
+              : parsed.userMessage,
+          );
+        },
+      });
   }
 }

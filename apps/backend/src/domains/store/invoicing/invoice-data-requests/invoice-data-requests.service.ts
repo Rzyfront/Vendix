@@ -1,15 +1,15 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
+import {
+  INVOICE_DATA_REQUEST_STATUSES,
+  QueryInvoiceDataRequestsDto,
+} from './dto/query-invoice-data-requests.dto';
 import { InvoiceDataRequestEvent } from './interfaces/invoice-data-request-events.interface';
 import { InvoicingService } from '../invoicing.service';
 import { CreditNotesService } from '../credit-notes/credit-notes.service';
@@ -136,15 +136,24 @@ export class InvoiceDataRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_002,
+        'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+      );
     }
 
     if (request.status === 'completed') {
-      throw new BadRequestException('INVOICE_DATA_REQUEST_ALREADY_COMPLETED');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_004,
+        'Tu factura ya fue emitida con los datos que enviaste. Si necesitas una copia, escríbele a la tienda.',
+      );
     }
 
     if (request.status === 'expired' || request.expires_at < new Date()) {
-      throw new BadRequestException('INVOICE_DATA_REQUEST_EXPIRED');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_003,
+        'El enlace para solicitar tu factura venció. Pídele a la tienda uno nuevo.',
+      );
     }
 
     return request;
@@ -259,7 +268,10 @@ export class InvoiceDataRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_002,
+        'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+      );
     }
 
     // Sign image URLs per item (mirrors account.service getOrderDetail).
@@ -357,11 +369,17 @@ export class InvoiceDataRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_002,
+        'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+      );
     }
 
     if (request.status !== 'pending') {
-      throw new BadRequestException('INVOICE_DATA_REQUEST_NOT_PENDING');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_004,
+        'Este enlace ya recibió tus datos. La tienda está emitiendo tu factura.',
+      );
     }
 
     if (request.expires_at < new Date()) {
@@ -370,7 +388,10 @@ export class InvoiceDataRequestsService {
         where: { id: request.id },
         data: { status: 'expired', updated_at: new Date() },
       });
-      throw new BadRequestException('INVOICE_DATA_REQUEST_EXPIRED');
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_003,
+        'El enlace para solicitar tu factura venció. Pídele a la tienda uno nuevo.',
+      );
     }
 
     const updated = await this.prisma.invoice_data_requests.update({
@@ -404,28 +425,125 @@ export class InvoiceDataRequestsService {
   }
 
   /**
-   * List pending/submitted requests for a store (admin view)
+   * Predicado de búsqueda del listado admin.
+   *
+   * `order.order_number` va por la relación y no por una columna propia porque
+   * la solicitud sólo guarda `order_id`: buscar «FV-1043» sobre las columnas de
+   * `invoice_data_requests` no encuentra nada, que es exactamente lo que el
+   * comerciante escribe. Los cuatro campos restantes son los que el cliente
+   * escribió en el formulario público.
    */
-  async findByStore(storeId: number, status?: string) {
-    const where: any = { store_id: storeId };
-    if (status) {
-      where.status = status;
+  private buildRequestSearchFilter(
+    search?: string,
+  ): Prisma.invoice_data_requestsWhereInput[] {
+    const term = search?.trim();
+    if (!term) {
+      return [];
     }
+    const contains = { contains: term, mode: 'insensitive' as const };
+    return [
+      {
+        OR: [
+          { first_name: contains },
+          { last_name: contains },
+          { document_number: contains },
+          { email: contains },
+          { order: { order_number: contains } },
+        ],
+      },
+    ];
+  }
 
-    return this.prisma.invoice_data_requests.findMany({
-      where,
-      include: {
-        order: {
-          select: {
-            id: true,
-            order_number: true,
-            grand_total: true,
-            created_at: true,
+  /**
+   * Listado admin paginado de solicitudes de factura a nombre del cliente.
+   *
+   * Devolvía `findMany` sin cota: una tienda con un año de ventas a consumidor
+   * final materializaba la tabla entera —con el `include` de órdenes— en cada
+   * apertura de la pestaña. Ahora pagina y devuelve el `total` que el
+   * `app-pagination` necesita para saber cuántas páginas hay.
+   */
+  async findByStore(
+    storeId: number,
+    query: QueryInvoiceDataRequestsDto = {},
+  ): Promise<{ data: any[]; total: number; page: number; limit: number }> {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 10));
+
+    const where: Prisma.invoice_data_requestsWhereInput = {
+      store_id: storeId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(this.buildRequestSearchFilter(query.search).length
+        ? { AND: this.buildRequestSearchFilter(query.search) }
+        : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.invoice_data_requests.findMany({
+        where,
+        include: {
+          order: {
+            select: {
+              id: true,
+              order_number: true,
+              grand_total: true,
+              created_at: true,
+            },
           },
         },
-      },
-      orderBy: { created_at: 'desc' },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.invoice_data_requests.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  /**
+   * Conteo por estado para las tarjetas del listado.
+   *
+   * NO acepta `status`: las tarjetas son el mapa completo de la pestaña y a la
+   * vez el atajo para filtrar por cada estado. Si el conteo respetara el filtro
+   * activo, al elegir «Falló la conversión» las otras cinco tarjetas caerían a
+   * cero y el comerciante perdería la única vista que le dice cuántas
+   * solicitudes están esperando en los demás estados. `search` sí se respeta,
+   * porque ahí el usuario está acotando el universo, no mirando una rebanada.
+   *
+   * Los seis estados se siembran en cero antes del `groupBy`: Prisma sólo
+   * devuelve filas para los estados presentes, y una tarjeta que desaparece
+   * cuando su conteo es cero hace que el bloque cambie de tamaño al filtrar.
+   */
+  async summaryByStore(
+    storeId: number,
+    search?: string,
+  ): Promise<Record<string, number> & { total: number }> {
+    const where: Prisma.invoice_data_requestsWhereInput = {
+      store_id: storeId,
+      ...(this.buildRequestSearchFilter(search).length
+        ? { AND: this.buildRequestSearchFilter(search) }
+        : {}),
+    };
+
+    const grouped = await this.prisma.invoice_data_requests.groupBy({
+      by: ['status'],
+      where,
+      _count: { _all: true },
     });
+
+    const summary = INVOICE_DATA_REQUEST_STATUSES.reduce(
+      (acc, status) => ({ ...acc, [status]: 0 }),
+      {} as Record<string, number>,
+    );
+
+    let total = 0;
+    for (const row of grouped) {
+      const count = row._count?._all ?? 0;
+      summary[row.status] = count;
+      total += count;
+    }
+
+    return { ...summary, total };
   }
 
   /**
@@ -449,8 +567,13 @@ export class InvoiceDataRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException(
-        'INVOICE_DATA_REQUEST_NOT_FOUND_OR_NOT_SUBMITTED',
+      // Un identificador en MAYÚSCULAS_CON_GUIONES no es un mensaje: sin
+      // `error_code` el frontend no tiene catálogo al que ir y le pinta al
+      // comerciante el nombre literal de la constante.
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_001,
+        'La solicitud ya no está pendiente de procesar. Actualiza la lista para ver en qué estado quedó.',
+        { request_id: requestId },
       );
     }
 

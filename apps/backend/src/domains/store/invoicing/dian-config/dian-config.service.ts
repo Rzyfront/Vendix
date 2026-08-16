@@ -864,7 +864,24 @@ export class DianConfigService {
       ...config,
       environment: 'production',
       enablement_status: 'enabled',
+      // Declara el override en vez de dejarlo implícito. La respuesta lleva
+      // `environment` y `enablement_status` REALES en la cabecera y, más abajo,
+      // sendos checks con esas mismas claves evaluados sobre los valores
+      // forzados de arriba. Sin esta marca son dos afirmaciones opuestas sobre
+      // el mismo campo en el mismo payload y el checklist se lee como roto.
+      assume_production: true,
       shared_technical_key,
+      // Repetir la ClTec entre dos rangos propios es un error de captura al
+      // renovar, y la DIAN lo castiga rechazando con el consecutivo ya gastado.
+      // Se resuelve aquí por lo mismo que el anterior: el evaluador es
+      // sincrónico a propósito, para que la lista y el gate no diverjan.
+      technical_key_uniqueness:
+        await this.readiness.findDuplicateTechnicalKeys({
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type: config.configuration_type,
+        }),
     });
 
     const resolutions = await this.prisma.invoice_resolutions.findMany({
@@ -1089,7 +1106,19 @@ export class DianConfigService {
       // ADEMÁS de la promoción misma y no una lista que se resuelve sola.
       environment: 'production',
       enablement_status: 'enabled',
+      assume_production: true,
       shared_technical_key,
+      // La otra mitad de la comprobación de ClTec: no que sea de otro NIT, sino
+      // que esté repetida en dos rangos de ESTE. La DIAN entrega una clave por
+      // rango autorizado, así que la repetición sólo puede venir de haber
+      // copiado la del rango anterior al renovar.
+      technical_key_uniqueness:
+        await this.readiness.findDuplicateTechnicalKeys({
+          organization_id: config.organization_id,
+          store_id: config.store_id,
+          accounting_entity_id: config.accounting_entity_id,
+          configuration_type,
+        }),
     });
 
     // TODOS los documentos que cubre el eje, vía contrato: la habilitación de

@@ -9,6 +9,7 @@ import {
 } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { TechnicalKeyVaultService } from '@common/services/technical-key-vault.service';
 import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 import {
   isFiscalDocumentType,
@@ -17,6 +18,7 @@ import {
   type FiscalDocumentType,
   type FiscalRequirementViolation,
 } from '../fiscal-document-requirements';
+import { assertTechnicalKeyShape } from '../utils/technical-key.util';
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -63,6 +65,7 @@ export class ResolutionsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly technicalKeyVault: TechnicalKeyVaultService,
   ) {}
 
   private getContext() {
@@ -74,12 +77,19 @@ export class ResolutionsService {
   }
 
   async findAll() {
-    return this.prisma.invoice_resolutions.findMany({
+    const rows = await this.prisma.invoice_resolutions.findMany({
       orderBy: { created_at: 'desc' },
     });
+    return rows.map(toPublicResolution);
   }
 
-  async findOne(id: number) {
+  /**
+   * La fila COMPLETA, con las tres columnas de la ClTec. Privada a propósito:
+   * la usan `update()` y `remove()`, que necesitan la clave vigente para
+   * decidir si la re-sellan o la conservan. Todo lo que sale por HTTP pasa por
+   * {@link findOne}, que la quita.
+   */
+  private async findOneInternal(id: number) {
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id },
     });
@@ -91,6 +101,10 @@ export class ResolutionsService {
     return resolution;
   }
 
+  async findOne(id: number) {
+    return toPublicResolution(await this.findOneInternal(id));
+  }
+
   async create(dto: CreateResolutionDto) {
     // Primero lo que no toca la base: un payload que la DIAN rechazaría no tiene
     // por qué gastar dos queries antes de que se lo digan.
@@ -99,6 +113,13 @@ export class ResolutionsService {
       document_type,
       resolution_number: dto.resolution_number,
       technical_key: dto.technical_key,
+    });
+    // Después de los requisitos por tipo, no antes: si el documento no admite
+    // ClTec, lo que hay que decirle a quien configura es «borra el campo», no
+    // «tiene 38 caracteres». Se guarda lo que devuelve, no `dto.technical_key`,
+    // para que lo validado y lo persistido sean el mismo valor.
+    const technical_key = this.assertTechnicalKeyShape(dto.technical_key, {
+      document_type,
     });
     this.assertRange(dto.range_from, dto.range_to);
 
@@ -174,18 +195,21 @@ export class ResolutionsService {
         valid_from,
         valid_to,
         is_active: dto.is_active ?? true,
-        technical_key: dto.technical_key ?? null,
+        // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
+        // huella. Escribir sólo `technical_key` es lo que dejó la columna
+        // cifrada en NULL desde que se creó.
+        ...this.technicalKeyVault.sealForWrite(technical_key),
       },
     });
 
     this.logger.log(
       `Resolution ${resolution.resolution_number} created (prefix: ${resolution.prefix}, range: ${resolution.range_from}-${resolution.range_to})`,
     );
-    return resolution;
+    return toPublicResolution(resolution);
   }
 
   async update(id: number, dto: UpdateResolutionDto) {
-    const current = await this.findOne(id);
+    const current = await this.findOneInternal(id);
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -265,6 +289,21 @@ export class ResolutionsService {
       );
     }
 
+    // La FORMA de la ClTec se juzga SOLO cuando el PATCH la escribe, por la misma
+    // razón que el bloque de arriba: una fila anterior a esta validación puede
+    // venir con la clave mal copiada, y bloquear todo PATCH que la arrastre
+    // dejaría al comerciante sin poder corregir el resto de la resolución ni
+    // retirarla. Lo que no se puede es GUARDAR una clave con forma inválida — y
+    // si una vieja sobrevive, `InvoiceNumberGenerator` la corta antes de gastar
+    // el consecutivo, que es donde el daño sería irreversible.
+    const patched_technical_key =
+      dto.technical_key !== undefined
+        ? this.assertTechnicalKeyShape(dto.technical_key, {
+            resolution_id: id,
+            document_type: next_document_type,
+          })
+        : undefined;
+
     const next_range_from = dto.range_from ?? current.range_from;
     const next_range_to = dto.range_to ?? current.range_to;
     if (dto.range_from !== undefined || dto.range_to !== undefined) {
@@ -315,9 +354,12 @@ export class ResolutionsService {
       ...(dto.valid_from && { valid_from: next_valid_from }),
       ...(dto.valid_to && { valid_to: next_valid_to }),
       ...(dto.is_active !== undefined && { is_active: dto.is_active }),
-      ...(dto.technical_key !== undefined && {
-        technical_key: dto.technical_key,
-      }),
+      // Las tres columnas van juntas o no va ninguna. Actualizar sólo
+      // `technical_key` dejaría la copia cifrada y la huella apuntando a la clave
+      // ANTERIOR, y como `reveal()` prefiere la cifrada, la resolución seguiría
+      // hasheando el CUFE con la clave que el usuario acaba de corregir.
+      ...(dto.technical_key !== undefined &&
+        this.technicalKeyVault.sealForWrite(patched_technical_key)),
     };
 
     const updated = await this.prisma.invoice_resolutions.update({
@@ -326,11 +368,11 @@ export class ResolutionsService {
     });
 
     this.logger.log(`Resolution #${id} updated`);
-    return updated;
+    return toPublicResolution(updated);
   }
 
   async remove(id: number) {
-    const resolution = await this.findOne(id);
+    const resolution = await this.findOneInternal(id);
 
     // Check if resolution has been used
     const usage_count = await this.prisma.invoices.count({
@@ -463,6 +505,37 @@ export class ResolutionsService {
     );
   }
 
+  /**
+   * Exige que la ClTec tenga la FORMA que emite la DIAN y devuelve el valor
+   * normalizado que hay que persistir (`null` si no hay clave).
+   *
+   * POR QUÉ NO BASTA EL DTO: los tres carriles de escritura pasan por aquí, pero
+   * no todos por el mismo `ValidationPipe` —la consola de super admin entra por
+   * `TenantContextRunner` y un llamador interno puede construir el DTO a mano—,
+   * así que lo que este servicio no exige no lo exige nadie.
+   *
+   * POR QUÉ IMPORTA LA FORMA Y NO SOLO LA PRESENCIA: la ClTec es el 14º campo
+   * del CUFE y la única entrada del hash que el XML NO transporta. La DIAN
+   * recomputa el CUFE con la clave que ella emitió, así que es el PRIMER sistema
+   * capaz de notar que la nuestra está mal — y lo notifica rechazando el
+   * documento con el consecutivo autorizado ya consumido. Pasó en producción con
+   * una clave de 38 caracteres que el `@MaxLength(255)` de entonces aceptó sin
+   * mirar: «Valor del CUFE no está calculado correctamente», número quemado.
+   *
+   * La AUSENCIA de clave no se juzga aquí: eso depende del tipo de documento y
+   * ya lo decidió `assertFiscalRequirements` (`INVOICING_RESOLUTION_008`).
+   */
+  private assertTechnicalKeyShape(
+    raw: string | null | undefined,
+    details: Record<string, unknown> = {},
+  ): string | null {
+    // La regla vive en `utils/technical-key.util.ts` porque hay TRES carriles de
+    // escritura de resoluciones —tienda, organización y consola de super admin—
+    // en tres dominios distintos, y durante un tiempo sólo éste la aplicaba. Un
+    // método privado no se puede compartir; una copia por carril se desincroniza.
+    return assertTechnicalKeyShape(raw, details);
+  }
+
   /** El rango tiene que ser un intervalo real de enteros positivos. */
   private assertRange(
     range_from: number,
@@ -507,4 +580,71 @@ export class ResolutionsService {
       );
     }
   }
+}
+
+/**
+ * ─── LA ClTec NO SALE POR HTTP ───────────────────────────────────────────────
+ *
+ * `GET /store/invoicing/resolutions` devolvía la fila entera de
+ * `invoice_resolutions`, y ahí viven TRES columnas que no pueden llegar al
+ * navegador:
+ *
+ *   - `technical_key` — la ClTec en claro. Es la 14.ª entrada del hash del CUFE
+ *     (Anexo 1.9 §11.2). Con ella y con los datos públicos del documento
+ *     —número, fecha, hora, totales, NIT de las dos partes— cualquiera recompone
+ *     el CUFE de todo lo emitido bajo esa resolución, que es exactamente lo que
+ *     la DIAN usa para probar autenticidad.
+ *   - `technical_key_encrypted` — el ciphertext. Publicarlo es peor que inútil:
+ *     regala material para atacar la llave fuera de línea, sin límite de
+ *     intentos y sin que quede rastro.
+ *   - `technical_key_fingerprint` — SHA-256 sin llave. Correlaciona resoluciones
+ *     de tenants distintos que comparten clave; es un índice ciego de uso
+ *     interno (`fiscal-production-readiness.service.ts`), no un dato de la
+ *     pantalla.
+ *
+ * Se sustituyen por lo único que la UI necesita: si la clave ESTÁ y cuántos
+ * caracteres tiene. Con eso el formulario pinta «clave guardada» sin volver a
+ * pedirla y el diagnóstico del caso de producción —una ClTec de 38 en vez de
+ * 40— se lee de un vistazo, sin exponer un solo carácter.
+ *
+ * Es la misma convención que ya aplica el carril superadmin
+ * (`tenant-resolutions.controller.ts`, `tenant-directory.service.ts`): allí se
+ * publica `technical_key_set`. Aquí se añade además la longitud porque este es
+ * el carril donde el comerciante corrige la clave.
+ *
+ * ⚠️ Se aplica en el SERVICIO y no en el controlador porque `findOne()` lo
+ * consumen también otros métodos de esta clase; los que sí necesitan la clave
+ * vigente llaman a `findOneInternal()`, que es privada. Un controlador nuevo no
+ * puede saltarse la limpieza sin escribir su propia consulta.
+ */
+export function toPublicResolution<
+  T extends {
+    technical_key?: string | null;
+    technical_key_encrypted?: string | null;
+    technical_key_fingerprint?: string | null;
+  },
+>(row: T) {
+  const {
+    technical_key,
+    technical_key_encrypted: _encrypted,
+    technical_key_fingerprint: _fingerprint,
+    ...rest
+  } = row;
+
+  const stored = (technical_key ?? '').trim();
+
+  return {
+    ...rest,
+    technical_key_set: stored.length > 0,
+    /**
+     * Cuántos caracteres tiene la guardada. `0` cuando no hay.
+     *
+     * No es un dato decorativo: la DIAN emite exactamente 40 hexadecimales, y
+     * el rechazo real del 14/08/2026 fue una clave de 38 que nadie miró. Que la
+     * pantalla pueda decir «tiene 38, deben ser 40» sin revelar ni un carácter
+     * es la diferencia entre diagnosticar en un segundo y quemar otro
+     * consecutivo autorizado.
+     */
+    technical_key_length: stored.length,
+  };
 }

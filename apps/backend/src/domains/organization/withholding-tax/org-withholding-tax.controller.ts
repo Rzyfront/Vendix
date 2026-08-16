@@ -22,9 +22,35 @@ import { ResponseService } from '../../../common/responses/response.service';
 import { OrgWithholdingTaxService } from './org-withholding-tax.service';
 import {
   CreateWithholdingConceptDto,
+  CreateUvtValueDto,
   UpdateWithholdingConceptDto,
   CalculateWithholdingDto,
 } from '../../store/withholding-tax/dto';
+import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../common/errors/error-codes';
+
+/**
+ * Lee el `?store_id=` opcional sin dejar pasar un `NaN`.
+ *
+ * `+storeIdRaw` convierte `?store_id=abc` en `NaN`, y un `NaN` no falla: viaja
+ * hasta el `where` de Prisma y allí produce un 500 —el cliente formuló mal la
+ * petición y la respuesta culpaba al servidor—. No se usa `ParseIntPipe` con
+ * `optional: true` porque el pipe sólo omite `undefined`: un `?store_id=` vacío,
+ * que hoy significa «sin filtro», pasaría a ser un 400. El contrato se conserva
+ * exacto (ausente o vacío ⇒ sin filtro) y sólo se rechaza el texto.
+ */
+function resolveOptionalStoreId(raw?: string): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new VendixHttpException(
+      ErrorCodes.SYS_INVALID_FIELD_VALUE_001,
+      'store_id debe ser el identificador numérico de una tienda.',
+      { received: raw },
+    );
+  }
+  return parsed;
+}
 
 /**
  * Org-native withholding-tax controller. Mirrors `/store/withholding-tax`
@@ -48,7 +74,7 @@ export class OrgWithholdingTaxController {
   @Get('concepts')
   @Permissions('organization:withholding:read')
   async findAllConcepts(@Query('store_id') storeIdRaw?: string) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.findAllConcepts(store_id);
     return this.responseService.success(result);
   }
@@ -59,7 +85,7 @@ export class OrgWithholdingTaxController {
     @Body() dto: CreateWithholdingConceptDto,
     @Query('store_id') storeIdRaw?: string,
   ) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.createConcept(dto, store_id);
     return this.responseService.success(
       result,
@@ -74,7 +100,7 @@ export class OrgWithholdingTaxController {
     @Body() dto: UpdateWithholdingConceptDto,
     @Query('store_id') storeIdRaw?: string,
   ) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.updateConcept(id, dto, store_id);
     return this.responseService.success(
       result,
@@ -88,7 +114,7 @@ export class OrgWithholdingTaxController {
     @Param('id', ParseIntPipe) id: number,
     @Query('store_id') storeIdRaw?: string,
   ) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.deactivateConcept(id, store_id);
     return this.responseService.success(
       result,
@@ -101,7 +127,7 @@ export class OrgWithholdingTaxController {
   @Get('uvt-values')
   @Permissions('organization:withholding:read')
   async findAllUvt(@Query('store_id') storeIdRaw?: string) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.findAllUvt(store_id);
     return this.responseService.success(result);
   }
@@ -109,10 +135,10 @@ export class OrgWithholdingTaxController {
   @Post('uvt-values')
   @Permissions('organization:withholding:write')
   async createUvt(
-    @Body() body: { year: number; value_cop: number },
+    @Body() body: CreateUvtValueDto,
     @Query('store_id') storeIdRaw?: string,
   ) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.createUvt(body, store_id);
     return this.responseService.success(
       result,
@@ -128,7 +154,7 @@ export class OrgWithholdingTaxController {
     @Body() dto: CalculateWithholdingDto,
     @Query('store_id') storeIdRaw?: string,
   ) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.calculateWithholding(dto, store_id);
     return this.responseService.success(result);
   }
@@ -138,7 +164,7 @@ export class OrgWithholdingTaxController {
   @Get('stats')
   @Permissions('organization:withholding:read')
   async getStats(@Query('store_id') storeIdRaw?: string) {
-    const store_id = storeIdRaw ? +storeIdRaw : undefined;
+    const store_id = resolveOptionalStoreId(storeIdRaw);
     const result = await this.withholdingTax.getStats(store_id);
     return this.responseService.success(result);
   }

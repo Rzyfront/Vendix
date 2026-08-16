@@ -17,7 +17,11 @@ import {
   InvoiceListResponse,
   ApiResponse,
   DianEmissionStatus,
+  DianDocumentEvent,
+  InvoicePdfResult,
+  InvoicePdfUrl,
   PosUvtThreshold,
+  RegisterDianEventRequest,
 } from '../interfaces/invoice.interface';
 
 @Injectable({
@@ -75,6 +79,24 @@ export class InvoicingService {
     );
   }
 
+  /**
+   * SIN CLIENTE, Y DELIBERADAMENTE.
+   *
+   * `POST /store/invoicing/from-sales-order/:salesOrderId` funciona, pero
+   * `sales_orders` NO TIENE UN SOLO CAMINO DE CREACIÓN en producto: en todo
+   * `apps/backend/src` la tabla se usa con `findFirst` (3 veces) y `update`
+   * (2, en el listener de remisiones); la única fila que existe la escribe
+   * `prisma/seeds/test-orders.seed.ts`. No hay controlador que la cree, ni
+   * módulo de frontend que la muestre.
+   *
+   * Por eso el selector de origen del modal de creación ofrece «orden» y no
+   * «pedido de venta»: darle al comerciante un origen que nunca podrá tener
+   * filas no es una función a medias, es un callejón sin salida en la UI.
+   *
+   * El método se conserva —no se borra— porque el día que exista el módulo de
+   * pedidos de venta el cable ya está tendido: acción, effect y reducer también
+   * están puestos. Falta el despachador, y falta a propósito.
+   */
   createFromSalesOrder(salesOrderId: number): Observable<ApiResponse<Invoice>> {
     return this.http.post<ApiResponse<Invoice>>(
       this.getApiUrl(`from-sales-order/${salesOrderId}`),
@@ -129,6 +151,68 @@ export class InvoicingService {
     return this.http.patch<ApiResponse<Invoice>>(
       this.getApiUrl(`${id}/void`),
       {},
+    );
+  }
+
+  // ── Documento electrónico: PDF y eventos RADIAN ───────────
+
+  /**
+   * URL FIRMADA del PDF de la factura (`GET :id/pdf`, verificado en
+   * `invoicing.controller.ts:178`).
+   *
+   * NO se abre `invoice.pdf_url` directamente: esa columna guarda la LLAVE S3,
+   * no una URL (`invoice-pdf.service.ts` → `generatePdf` persiste `s3_key`).
+   * Este endpoint la firma; y si la factura aún no tiene PDF, lo genera en el
+   * momento y devuelve la URL del recién creado.
+   */
+  getInvoicePdfUrl(id: number): Observable<ApiResponse<InvoicePdfUrl>> {
+    return this.http.get<ApiResponse<InvoicePdfUrl>>(
+      this.getApiUrl(`${id}/pdf`),
+    );
+  }
+
+  /**
+   * Vuelve a construir el PDF y lo sube a S3 pisando el anterior
+   * (`POST :id/pdf/regenerate`, verificado en `invoicing.controller.ts:185`).
+   *
+   * Es la salida cuando el PDF guardado quedó viejo respecto del documento —
+   * p. ej. se generó antes de que la DIAN devolviera el CUFE y el QR.
+   */
+  regenerateInvoicePdf(id: number): Observable<ApiResponse<InvoicePdfResult>> {
+    return this.http.post<ApiResponse<InvoicePdfResult>>(
+      this.getApiUrl(`${id}/pdf/regenerate`),
+      {},
+    );
+  }
+
+  /**
+   * Eventos RADIAN registrados contra la factura (`GET :id/events`, verificado
+   * en `invoicing.controller.ts:196`). El backend los devuelve del más nuevo al
+   * más viejo (`orderBy: { id: 'desc' }`).
+   */
+  getDianEvents(id: number): Observable<ApiResponse<DianDocumentEvent[]>> {
+    return this.http.get<ApiResponse<DianDocumentEvent[]>>(
+      this.getApiUrl(`${id}/events`),
+    );
+  }
+
+  /**
+   * Registra un evento RADIAN contra la factura (`POST :id/events`, verificado en
+   * `invoicing.controller.ts` → `registerDianEvent`).
+   *
+   * OJO CON EL DESENLACE: el backend NO lanza cuando la DIAN rechaza el evento —
+   * persiste la fila con `status: 'rejected'` y la devuelve. Un `200` aquí
+   * significa «se transmitió», no «se aceptó». Quien lo consuma tiene que leer
+   * `status` de la fila devuelta antes de decirle al usuario que quedó
+   * registrado.
+   */
+  registerDianEvent(
+    id: number,
+    dto: RegisterDianEventRequest,
+  ): Observable<ApiResponse<DianDocumentEvent>> {
+    return this.http.post<ApiResponse<DianDocumentEvent>>(
+      this.getApiUrl(`${id}/events`),
+      dto,
     );
   }
 

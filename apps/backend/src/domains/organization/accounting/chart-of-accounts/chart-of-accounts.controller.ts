@@ -49,6 +49,20 @@ export class OrgChartOfAccountsController {
     private readonly defaultChartSeeder: DefaultChartOfAccountsSeederService,
   ) {}
 
+  /**
+   * Flat (or tree) listing of the chart of accounts.
+   *
+   * Returns the repo-standard paginated envelope
+   * (`{ success, message, data: [...], meta: { total, page, limit, ... } }`),
+   * the same one `ChartOfAccountsController.findAll` already answers on the
+   * store lane. Previously this handler wrapped a bare array with
+   * `success()`, so the org lane had no `meta.total` and the selector footer
+   * «Mostrando X de Y» degraded Y to the page length — it reported 5 of 5 over
+   * a 230-account PUC. `data` is still the plain row array, so existing
+   * consumers that read `res.data` are untouched.
+   *
+   * `?tree=true` is not a page, so it keeps the plain success envelope.
+   */
   @Get()
   @SkipModuleFlowGuard() // bootstrap: wizard loadInitial() reads chart while module still WIP
   @Permissions('organization:accounting:chart_of_accounts:read')
@@ -57,8 +71,19 @@ export class OrgChartOfAccountsController {
     @Query('store_id') storeIdRaw?: string,
   ) {
     const store_id = storeIdRaw ? +storeIdRaw : undefined;
-    const result = await this.chartOfAccounts.findAll(query, store_id);
-    return this.responseService.success(result);
+
+    if (query.tree) {
+      const tree = await this.chartOfAccounts.getTree(store_id);
+      return this.responseService.success(tree);
+    }
+
+    const result = await this.chartOfAccounts.findAllPaginated(query, store_id);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Get('tree')

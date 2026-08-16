@@ -1,3 +1,10 @@
+export { ChartAccountLookupService } from './chart-account-lookup.service';
+export type {
+  ChartAccountOption,
+  ChartAccountSearchResult,
+  ChartAccountLookupOptions,
+  ChartAccountScope,
+} from './chart-account-lookup.service';
 export { FullscreenService } from './fullscreen.service';
 export { ImageUploadService } from './image-upload.service';
 export type {

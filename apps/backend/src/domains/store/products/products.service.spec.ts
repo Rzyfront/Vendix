@@ -18,6 +18,7 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { SettingsService } from '../settings/settings.service';
+import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -217,6 +218,18 @@ describe('ProductsService', () => {
     getFiscalData: jest.fn().mockResolvedValue(null),
   };
 
+  /**
+   * `ProductsService.create/update` valida la subcuenta PUC del producto contra
+   * `chart_of_accounts` antes de escribirla. El doble APRUEBA: si devolviera
+   * `undefined` desde un `{}` el servicio reventaría con «is not a function», y
+   * si rechazara, todos los casos de creación fallarían por una razón que estos
+   * tests no están probando. La validación de la cuenta tiene sus propios casos
+   * en `auto-entry.service.spec.ts`.
+   */
+  const mockAutoEntryService = {
+    validateProductAccountCodes: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -284,6 +297,10 @@ describe('ProductsService', () => {
         {
           provide: SettingsService,
           useValue: mockSettingsService,
+        },
+        {
+          provide: AutoEntryService,
+          useValue: mockAutoEntryService,
         },
       ],
     }).compile();

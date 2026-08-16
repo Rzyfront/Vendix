@@ -138,11 +138,23 @@ export const stage11FiscalDian: Stage = {
       }
 
       // Tax line
+      //
+      // `tax_rate` va en PORCENTAJE (19.00), no en fracción. Las dos tablas de
+      // tributos usan escalas distintas y el tipo de la columna lo delata:
+      // `order_item_taxes.tax_rate` es `Decimal(6,5)` —fracción, 0.19— porque
+      // multiplica una base; `invoice_taxes.tax_rate` es `Decimal(5,2)` y viaja
+      // TAL CUAL a `cbc:Percent` del UBL (`ubl-common.builder.ts`), donde la
+      // DIAN valida `TaxAmount = TaxableAmount × Percent/100`. Sembrar 0.19
+      // producía un documento que declara 0,19 % sobre una base con IVA del
+      // 19 %: rechazo por aritmética, y en el panel el detalle mostraba
+      // literalmente «IVA 19% (0.19%)». `InvoicingService` sí convierte —
+      // `round2(t.tax_rate * 100)` al derivar de la orden—; sólo este seed
+      // escribía la fracción a pelo.
       await prisma.invoice_taxes.create({
         data: {
           invoice_id: invoice.id,
           tax_name: 'IVA 19%',
-          tax_rate: new Prisma.Decimal(0.19),
+          tax_rate: new Prisma.Decimal(19),
           taxable_amount: new Prisma.Decimal(Number(o.subtotal_amount)),
           tax_amount: new Prisma.Decimal(Number(o.tax_amount)),
           tax_type: 'iva' as any,

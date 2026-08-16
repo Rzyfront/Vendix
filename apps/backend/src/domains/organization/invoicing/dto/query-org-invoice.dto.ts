@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDateString, IsNumber, IsOptional, IsString, MaxLength, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryOrgInvoiceDto {
@@ -27,7 +27,7 @@ export class QueryOrgInvoiceDto {
   sort_order?: 'asc' | 'desc' = 'desc';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'draft',
     'validated',
     'sent',
@@ -39,7 +39,7 @@ export class QueryOrgInvoiceDto {
   status?: string;
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'sales_invoice',
     'purchase_invoice',
     'credit_note',

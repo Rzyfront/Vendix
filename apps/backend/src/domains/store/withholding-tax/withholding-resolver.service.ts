@@ -104,6 +104,25 @@ export type EvaluateParams =
       appliesTo?: string | string[];
       tenant: TenantFiscalProfile;
       customer: CustomerFiscalProfile;
+    }
+  | {
+      /**
+       * CASO 3 — AUTORRETENCIÓN. La tienda vende y se retiene A SÍ MISMA.
+       *
+       * No lleva contraparte: quién compra es irrelevante. La autorretención
+       * nace de una calidad del EMISOR (Decreto 2201/2016 para renta, régimen
+       * municipal de autorretención para ICA), no de que el comprador sea
+       * agente retenedor. Por eso el discriminante no declara `customer` ni
+       * `supplier`: pedirlos sugeriría que la contraparte puede impedirla, y no
+       * puede.
+       */
+      role: 'self';
+      base: number;
+      ivaAmount?: number;
+      uvtValue: number;
+      concepts: EvaluableConcept[];
+      appliesTo?: string | string[];
+      tenant: TenantFiscalProfile;
     };
 
 @Injectable()
@@ -129,6 +148,35 @@ export class WithholdingResolverService {
    *   (b) NOT (retefuente AND (tenantIsSimpleRegime OR tenant.is_self_withholder))
    *   (c) base >= concept.min_uvt_threshold * uvtValue
    *   (d) concept matches applies_to for the sale
+   *
+   * CASO 3 — role='self' (AUTORRETENCIÓN: the tenant withholds itself):
+   *   (a) tenant.is_self_withholder === true
+   *   (b) NOT reteiva — ver abajo
+   *   (c) NOT tenantIsSimpleRegime (el RST no es autorretenedor de renta)
+   *   (d) base >= concept.min_uvt_threshold * uvtValue
+   *
+   * ## Por qué `self` EXCLUYE reteIVA
+   *
+   * La autorretención existe en renta (Decreto 2201/2016) y en ICA (régimen de
+   * autorretención de varios municipios). En IVA no: el art. 437-2 E.T. lista
+   * los agentes de retención de IVA y en todos los numerales quien retiene es
+   * la CONTRAPARTE. La única figura parecida —el «IVA teórico» del num. 3 por
+   * servicios prestados desde el exterior— es una retención ASUMIDA sobre una
+   * compra, o sea `practiced`, no una autorretención sobre la propia venta.
+   *
+   * Y el error sería mudo: reteIVA se calcula sobre el IVA del documento, así
+   * que emitir una autorretención de IVA generaría un pasivo con la DIAN que la
+   * ley no exige, sin que nada falle y sin que ninguna validación del anexo lo
+   * detecte —`cac:WithholdingTaxTotal` no altera el `PayableAmount`—. Se
+   * descubriría al conciliar la declaración, meses después.
+   *
+   * ## Por qué `self` y `suffered` son MUTUAMENTE EXCLUYENTES
+   *
+   * La compuerta (b) de CASO 2 ya excluye retefuente cuando el emisor es
+   * autorretenedor: si yo me autorretengo, mi cliente NO me retiene. Los dos
+   * casos leen el MISMO flag (`tenant.is_self_withholder`) con el signo opuesto,
+   * así que un concepto no puede salir por los dos caminos y la retención no se
+   * puede duplicar.
    */
   evaluate(params: EvaluateParams): WithholdingLine[] {
     const { role, base, uvtValue, concepts } = params;
@@ -182,7 +230,7 @@ export class WithholdingResolverService {
         ) {
           continue;
         }
-      } else {
+      } else if (role === 'suffered') {
         // CASO 2 — suffered.
         // (a) only an agent customer withholds me.
         if (params.customer.is_withholding_agent !== true) continue;
@@ -193,6 +241,21 @@ export class WithholdingResolverService {
           isRetefuente &&
           (tenantIsSimpleRegime || params.tenant.is_self_withholder === true)
         ) {
+          continue;
+        }
+      } else {
+        // CASO 3 — self (autorretención). Ver la nota del doc-comment.
+        // (a) sólo se autorretiene quien tiene la calidad de autorretenedor.
+        if (params.tenant.is_self_withholder !== true) continue;
+
+        // (b) no hay autorretención de IVA: la figura del art. 437-2 E.T. la
+        // practica siempre la contraparte.
+        if (concept.withholding_type === 'reteiva') continue;
+
+        // (c) el RST no es autorretenedor de renta (art. 911 E.T.: el régimen
+        // simple sustituye el impuesto de renta y no está sujeto a retención
+        // ni autorretención a ese título).
+        if (isRetefuente && isSimpleRegime(params.tenant.tax_regime)) {
           continue;
         }
       }
@@ -276,6 +339,18 @@ export class WithholdingResolverService {
           tenant: TenantFiscalProfile;
           customer: CustomerFiscalProfile;
           client?: ResolverDbClient;
+        }
+      | {
+          /** Autorretención — sin contraparte. Ver `EvaluateParams`. */
+          role: 'self';
+          organization_id: number;
+          base: number;
+          /** IVA de la operación. No lo usa `self` (reteIVA está excluido). */
+          ivaAmount?: number;
+          year?: number;
+          appliesTo?: string | string[];
+          tenant: TenantFiscalProfile;
+          client?: ResolverDbClient;
         },
   ): Promise<WithholdingLine[]> {
     const year = context.year || new Date().getFullYear();
@@ -320,6 +395,18 @@ export class WithholdingResolverService {
       });
     }
 
+    if (context.role === 'self') {
+      return this.evaluate({
+        role: 'self',
+        base: context.base,
+        ivaAmount: context.ivaAmount,
+        uvtValue,
+        concepts,
+        appliesTo: context.appliesTo,
+        tenant: context.tenant,
+      });
+    }
+
     return this.evaluate({
       role: 'suffered',
       base: context.base,
@@ -330,6 +417,26 @@ export class WithholdingResolverService {
       tenant: context.tenant,
       customer: context.customer,
     });
+  }
+
+  /**
+   * Atajo de `resolve({ role: 'self', ... })` para el flujo de emisión.
+   *
+   * Existe como método propio y no como una llamada más a `resolve` porque la
+   * autorretención es la única de las tres que NO depende de una contraparte:
+   * el llamador no tiene que buscar un proveedor ni un cliente antes de
+   * preguntar. Un método que pide exactamente lo que necesita —el perfil fiscal
+   * del emisor y la base— evita que quien lo cablee crea que le falta un dato.
+   */
+  async resolveSelfWithholding(context: {
+    organization_id: number;
+    base: number;
+    year?: number;
+    appliesTo?: string | string[];
+    tenant: TenantFiscalProfile;
+    client?: ResolverDbClient;
+  }): Promise<WithholdingLine[]> {
+    return this.resolve({ role: 'self', ...context });
   }
 
   private normalizeAppliesTo(

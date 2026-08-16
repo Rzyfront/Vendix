@@ -14,11 +14,22 @@ import {
   resolveTenantFiscalIdentity,
   tryResolveTenantFiscalIdentity,
 } from '@common/helpers/fiscal-identity.helper';
+import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 
+/**
+ * El PDF no publica la fila de la resolución —devuelve un buffer—, así que esto
+ * no cerraba una fuga: cargaba un secreto que nunca usa. Se estrecha igual, por
+ * el principio de mínimo privilegio, para que la ClTec no entre en memoria en un
+ * camino que no la necesita ni podría usarla.
+ *
+ * Los siete campos que el PDF sí lee —`resolution_number`, `prefix`,
+ * `range_from`, `range_to`, `resolution_date`, `valid_from` y `valid_to`, entre
+ * este servicio y `invoice-pdf.builder.ts`— están todos en la lista blanca.
+ */
 const INVOICE_PDF_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
-  resolution: true,
+  resolution: { select: RESOLUTION_PUBLIC_SELECT },
   organization: {
     select: {
       id: true,
@@ -78,22 +89,29 @@ export class InvoicePdfService {
   ) {}
 
   /**
-   * Renders the DIAN verification URL as a scannable PNG for the graphic
+   * Renders the persisted QR content as a scannable PNG for the graphic
    * representation.
+   *
+   * SE CODIFICA EL VALOR PERSISTIDO TAL CUAL, sin recomponerlo. `invoices.qr_code`
+   * guarda el contenido que se transmitió —las once líneas del Anexo Técnico 1.9
+   * §11.7, o una URL suelta en los documentos anteriores a ese cambio— y la
+   * representación gráfica debe mostrar eso y no una reconstrucción: un QR armado
+   * aquí con otros datos diría de la factura algo distinto de lo que la DIAN
+   * validó. `qrcode` codifica el bloque multilínea sin tratamiento especial.
    *
    * Returns `undefined` instead of throwing: the QR is an aid on the paper, not
    * a condition of the invoice's validity, so a rendering failure must never
    * abort an emission that the DIAN already accepted. The builder falls back to
-   * printing the URL as text.
+   * printing the catalogue URL as text.
    */
   private async renderVerificationQr(
-    qr_url?: string | null,
+    qr_content?: string | null,
   ): Promise<Buffer | undefined> {
-    if (!qr_url) return undefined;
+    if (!qr_content) return undefined;
     try {
       // 320 px keeps the code crisp once pdfkit scales it down to the ~84 pt a
       // thermal roll allows; a 200 px source visibly degrades at that size.
-      return await this.qr_service.generateBuffer(qr_url, 320);
+      return await this.qr_service.generateBuffer(qr_content, 320);
     } catch (error) {
       this.logger.warn(
         `No se pudo generar el QR de verificacion: ${(error as Error)?.message}`,

@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsString,
   IsEnum,
+  IsIn,
   IsDateString,
   IsInt,
 } from 'class-validator';
@@ -80,6 +81,6 @@ export class OrgPurchaseOrderQueryDto {
   sort_by?: string;
 
   @IsOptional()
-  @IsEnum(['asc', 'desc'])
+  @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc';
 }

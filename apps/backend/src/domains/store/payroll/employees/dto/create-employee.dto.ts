@@ -2,13 +2,13 @@ import {
   IsString,
   IsNumber,
   IsOptional,
-  IsEnum,
   IsDateString,
   IsBoolean,
   IsEmail,
   MaxLength,
   Min,
   IsInt,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -39,13 +39,13 @@ export class CreateEmployeeDto {
   birth_date?: string;
 
   @IsOptional()
-  @IsEnum(['male', 'female', 'other'])
+  @IsIn(['male', 'female', 'other'])
   gender?: 'male' | 'female' | 'other';
 
   @IsDateString()
   hire_date: string;
 
-  @IsEnum(['indefinite', 'fixed_term', 'service', 'apprentice', 'obra_labor'])
+  @IsIn(['indefinite', 'fixed_term', 'service', 'apprentice', 'obra_labor'])
   contract_type:
     | 'indefinite'
     | 'fixed_term'
@@ -58,7 +58,7 @@ export class CreateEmployeeDto {
   contract_end_date?: string;
 
   @IsOptional()
-  @IsEnum(['ordinary', 'integral'])
+  @IsIn(['ordinary', 'integral'])
   salary_type?: 'ordinary' | 'integral';
 
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -67,7 +67,7 @@ export class CreateEmployeeDto {
   base_salary: number;
 
   @IsOptional()
-  @IsEnum(['monthly', 'biweekly', 'weekly'])
+  @IsIn(['monthly', 'biweekly', 'weekly'])
   payment_frequency?: 'monthly' | 'biweekly' | 'weekly';
 
   @IsOptional()
@@ -86,7 +86,7 @@ export class CreateEmployeeDto {
   department?: string;
 
   @IsOptional()
-  @IsEnum(['operational', 'administrative', 'sales'])
+  @IsIn(['operational', 'administrative', 'sales'])
   cost_center?: 'operational' | 'administrative' | 'sales';
 
   @IsOptional()

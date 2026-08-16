@@ -36,10 +36,17 @@ describe('InvoiceFlowService · unitCode UN/ECE por línea', () => {
           .mockResolvedValueOnce(CATALOGO),
       },
     };
+    // El constructor creció con las tres piezas de validación fiscal
+    // (identidad del adquiriente, prevalidador del documento y bóveda de la
+    // ClTec). Aquí se ejercita `resolveLineUnitCodes`, que no las toca, así que
+    // se pasan como dobles vacíos: lo que importa es la aridad.
     const service = new InvoiceFlowService(
       prisma as any,
       {} as any,
       { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -150,10 +157,17 @@ describe('InvoiceFlowService · unitCode por dimensión (QUI-648)', () => {
           .mockResolvedValueOnce(CATALOGO),
       },
     };
+    // El constructor creció con las tres piezas de validación fiscal
+    // (identidad del adquiriente, prevalidador del documento y bóveda de la
+    // ClTec). Aquí se ejercita `resolveLineUnitCodes`, que no las toca, así que
+    // se pasan como dobles vacíos: lo que importa es la aridad.
     const service = new InvoiceFlowService(
       prisma as any,
       {} as any,
       { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

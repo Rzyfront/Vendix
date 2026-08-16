@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>QA Report v5 — Estado respuestas RC · 15-ago-2026</title>
+<style>
+  :root {
+    --bg-page: #f7f8fa;
+    --bg-surface: #ffffff;
+    --bg-surface-2: #f0f2f6;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --cat-axis: #94a3b8;
+    --cat-grid: #e2e8f0;
+    --accent-blue: #2563eb;
+    --accent-purple: #7c3aed;
+    --accent-teal: #0d9488;
+    --status-good: #15803d;
+    --status-good-soft: #bbf7d0;
+    --status-warn: #b45309;
+    --status-warn-soft: #fed7aa;
+    --status-bad: #b91c1c;
+    --status-bad-soft: #fecaca;
+    --status-neutral: #475569;
+    --status-neutral-soft: #e2e8f0;
+    --status-info: #1e40af;
+    --status-info-soft: #dbeafe;
+    --sev-critical: #b91c1c;
+    --sev-high: #d97706;
+    --sev-medium: #ca8a04;
+    --sev-low: #475569;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"])") {
+      --bg-page: #0b1220;
+      --bg-surface: #111827;
+      --bg-surface-2: #1f2937;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --border: #1f2937;
+      --border-strong: #334155;
+      --cat-axis: #64748b;
+      --cat-grid: #1f2937;
+      --accent-blue: #60a5fa;
+      --accent-purple: #a78bfa;
+      --accent-teal: #2dd4bf;
+      --status-good: #4ade80;
+      --status-good-soft: #14532d;
+      --status-warn: #fbbf24;
+      --status-warn-soft: #78350f;
+      --status-bad: #f87171;
+      --status-bad-soft: #7f1d1d;
+      --status-neutral: #94a3b8;
+      --status-neutral-soft: #1f2937;
+      --status-info: #60a5fa;
+      --status-info-soft: #1e3a8a;
+      --sev-critical: #f87171;
+      --sev-high: #fb923c;
+      --sev-medium: #fbbf24;
+      --sev-low: #94a3b8;
+    }
+  }
+  :root[data-theme="dark"]) {
+    --bg-page: #0b1220;
+    --bg-surface: #111827;
+    --bg-surface-2: #1f2937;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --border: #1f2937;
+    --border-strong: #334155;
+    --cat-axis: #64748b;
+    --cat-grid: #1f2937;
+    --accent-blue: #60a5fa;
+    --accent-purple: #a78bfa;
+    --accent-teal: #2dd4bf;
+    --status-good: #4ade80;
+    --status-good-soft: #14532d;
+    --status-warn: #fbbf24;
+    --status-warn-soft: #78350f;
+    --status-bad: #f87171;
+    --status-bad-soft: #7f1d1d;
+    --status-neutral: #94a3b8;
+    --status-neutral-soft: #1f2937;
+    --status-info: #60a5fa;
+    --status-info-soft: #1e3a8a;
+    --sev-critical: #f87171;
+    --sev-high: #fb923c;
+    --sev-medium: #fbbf24;
+    --sev-low: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1500px; margin: 0 auto; padding: 32px 24px 96px; }
+  header.page-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+    margin-bottom: 32px;
+  }
+  h1 { font-size: 28px; margin: 0 0 8px; font-weight: 700; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0; }
+  h2 { font-size: 20px; margin: 40px 0 12px; font-weight: 600; }
+  h3 { font-size: 16px; margin: 24px 0 8px; font-weight: 600; }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .stat-tile .label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .stat-tile .value {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+  .stat-tile .delta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .stat-tile.accent-good .value { color: var(--status-good); }
+  .stat-tile.accent-bad .value { color: var(--status-bad); }
+  .stat-tile.accent-warn .value { color: var(--status-warn); }
+  .stat-tile.accent-info .value { color: var(--status-info); }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .data-table th, .data-table td {
+    padding: 12px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  .data-table th {
+    background: var(--bg-surface-2);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: sticky;
+    top: 0;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: var(--bg-surface-2); }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge-good { background: var(--status-good-soft); color: var(--status-good); }
+  .badge-bad { background: var(--status-bad-soft); color: var(--status-bad); }
+  .badge-warn { background: var(--status-warn-soft); color: var(--status-warn); }
+  .badge-neutral { background: var(--status-neutral-soft); color: var(--status-neutral); }
+  .badge-info { background: var(--status-info-soft); color: var(--status-info); }
+
+  .callout {
+    border-left: 4px solid var(--accent-blue);
+    background: var(--bg-surface-2);
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .callout.bad { border-left-color: var(--status-bad); }
+  .callout.warn { border-left-color: var(--status-warn); }
+  .callout.good { border-left-color: var(--status-good); }
+
+  .author-block {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .author-block .author-name {
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 8px;
+  }
+  .author-block .author-prs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .author-block .pr-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-surface-2);
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+  }
+
+  .toggle-theme {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-secondary);
+    z-index: 100;
+  }
+
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg-surface-2);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header class="page-header">
+    <h1>📊 QA Report v5 — Quién respondió a los REQUEST CHANGES</h1>
+    <p class="subtitle">34 PRs abiertos. Análisis de respuestas: commits post-review, comentarios del autor, estado actual. 15-ago-2026.</p>
+  </header>
+
+  <section>
+    <h2>📈 Resumen ejecutivo</h2>
+    <div class="stats-row">
+      <div class="stat-tile accent-good">
+        <div class="label">APPROVED</div>
+        <div class="value">3</div>
+        <div class="delta">#552 #554 #598</div>
+      </div>
+      <div class="stat-tile accent-info">
+        <div class="label">CONVERSATIONAL</div>
+        <div class="value">1</div>
+        <div class="delta">#609 (commented, sin verdict)</div>
+      </div>
+      <div class="stat-tile accent-bad">
+        <div class="label">CHANGES_REQUESTED</div>
+        <div class="value">30</div>
+        <div class="delta">Issues críticos pendientes</div>
+      </div>
+      <div class="stat-tile accent-good">
+        <div class="label">RESPONDIERON (commits)</div>
+        <div class="value">21</div>
+        <div class="delta">+ commits tras review</div>
+      </div>
+      <div class="stat-tile accent-warn">
+        <div class="label">RESPONDIERON (comment)</div>
+        <div class="value">1</div>
+        <div class="delta">Solo conversacional</div>
+      </div>
+      <div class="stat-tile accent-bad">
+        <div class="label">SIN RESPUESTA</div>
+        <div class="value">12</div>
+        <div class="delta">Idle desde review</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="callout good">
+      <strong>✅ Andrespano respondió (13 PRs #587-#597, #599-#601).</strong> Plan estructurado:
+      <ol style="margin:8px 0 0;padding-left:20px;">
+        <li><strong>CI disable revertido</strong> en las 15 ramas (vuelve a correr backend-test).</li>
+        <li><strong>Helper date-only extraído</strong> a PR #607 (feat/date-only-helper). Pidió merge de #607 primero, luego rebaseo los 13 PRs per-QUI sobre <code>origin/dev</code>.</li>
+        <li><strong>PR #598 cerrado</strong> (contenido mergeado a <code>origin/dev</code> vía commit e591c7355, resubmission innecesaria).</li>
+      </ol>
+      Bloqueado: arregla baseline (28 suites con bugs pre-existentes) antes de mergear cualquier PR.
+    </div>
+
+    <div class="callout warn">
+      <strong>⚠️ y0ner respondió PARCIAL (PR #602).</strong> 7 nuevos commits post-review:
+      <ul style="margin:8px 0 0;padding-left:20px;">
+        <li><code>5e1e27ce</code>: 4 correcciones del review aplicadas</li>
+        <li><code>223964ba</code>, <code>52e4c788</code>: fixes CI (TS2322 + jest timeout 16m + autodetect specs)</li>
+        <li><code>b20e8463</code>, <code>0a27fc79</code>: mocks faltantes añadidos</li>
+        <li><code>0aa5be5c</code>, <code>6d27ba4f</code>: balance paréntesis + separa MembershipNotesService</li>
+        <li><strong>B1 BLOCKER persiste:</strong> NO se creó migración <code>membership_member_notes</code>. EPS/alergias/lesiones siguen perdiéndose silenciosamente.</li>
+      </ul>
+      PR #603 (#604 idle), #609 (conversacional).
+    </div>
+
+    <div class="callout bad">
+      <strong>🚨 Adelín NO respondió en 7 PRs (#542 #544 #547 #548 #550 #555 #556).</strong> Cero commits desde mi review. Tienen CHANGES_REQUESTED activo pero sin acción.
+      <br><br>
+      <strong>🚨 Adeling respondió solo con rebase/minor en 7 PRs (#506 #512 #540 #545 #549 #551 #553).</strong> Commits post-review son fixes CI/conflict, NO sustancia de los issues reportados.
+    </div>
+  </section>
+
+  <section>
+    <h2>👥 Análisis por autor</h2>
+
+    <div class="author-block">
+      <div class="author-name">andres2005md — 13 PRs con respuesta estructurada</div>
+      <p style="margin:8px 0;color:var(--text-secondary);font-size:13px;">
+        Comentario unificado publicado en #587-#597, #599-#601 (15-ago). Plan ejecutado:
+        revert CI <code>if:false</code>, extraer helper a #607, cerrar #598.
+      </p>
+      <div class="author-prs">
+        <span class="pr-pill">#587</span>
+        <span class="pr-pill">#588</span>
+        <span class="pr-pill">#589</span>
+        <span class="pr-pill">#590</span>
+        <span class="pr-pill">#591</span>
+        <span class="pr-pill">#592</span>
+        <span class="pr-pill">#593</span>
+        <span class="pr-pill">#594</span>
+        <span class="pr-pill">#595</span>
+        <span class="pr-pill">#596</span>
+        <span class="pr-pill">#597</span>
+        <span class="pr-pill">#599</span>
+        <span class="pr-pill">#600</span>
+        <span class="pr-pill">#601</span>
+        <span class="pr-pill">+ #607 (helper extracted)</span>
+      </div>
+    </div>
+
+    <div class="author-block">
+      <div class="author-name">y0ner — 3 PRs (1 respuesta parcial, 1 idle, 1 conversacional)</div>
+      <div class="author-prs">
+        <span class="pr-pill">#602 <span style="color:var(--status-warn);">(7 commits, B1 blocker persiste)</span></span>
+        <span class="pr-pill">#603 <span style="color:var(--status-bad);">(sin commits)</span></span>
+        <span class="pr-pill">#609 <span style="color:var(--status-info);">(conversacional)</span></span>
+      </div>
+    </div>
+
+    <div class="author-block">
+      <div class="author-name">adelingtoro — 14 PRs (7 sin respuesta, 7 con rebase-only)</div>
+      <div class="author-prs">
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#542 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#544 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#547 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#548 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#550 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#555 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-bad);color:var(--status-bad);">#556 <span>(idle)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#506 <span>(rebase)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#512 <span>(CONFLICTING)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#540 <span>(rebase)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#545 <span>(rebase)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#549 <span>(rebase)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#551 <span>(rebase)</span></span>
+        <span class="pr-pill" style="border-color:var(--status-warn);color:var(--status-warn);">#553 <span>(rebase)</span></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📋 Tabla detallada — Estado actual por PR (34 PRs)</h2>
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>Estado</th>
+            <th>Commits</th>
+            <th>Último commit</th>
+            <th>¿Respondió?</th>
+            <th>Detalle de la respuesta</th>
+            <th>Mergeable</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>#609</strong></td><td><span class="badge badge-info">CONVERSATIONAL</span></td><td>16</td><td>2026-08-16T00:30</td><td>✅ Conversación</td><td>y0ner explicó QUI-563 (issue multi-tienda). Rafa respondió con COMMENTED.</td><td>MERGEABLE</td></tr>
+          <tr><td><strong>#607</strong></td><td><span class="badge badge-neutral">SIN REVIEW</span></td><td>2</td><td>2026-08-15T23:33</td><td>—</td><td>Helper date-only extraído por andres2005md como prerequisito de #587-#601.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#603</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-14T19:42</td><td>❌ Sin respuesta</td><td>Idle desde review. 4 issues persisten (frontend CHOKIDAR, container names, backend-worker, docker-cleanup).</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#602</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>9</td><td>2026-08-15T23:57</td><td>⚠️ Parcial</td><td>7 commits: 4 fixes review + 3 CI fixes. B1 BLOCKER (migración) NO creada.</td><td>MERGEABLE</td></tr>
+          <tr><td><strong>#601</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respondió bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#600</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#599</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>9</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#598</strong></td><td><span class="badge badge-good">APPROVED</span></td><td>5</td><td>2026-08-15T03:33</td><td>—</td><td>Aprobado. Mergeable.</td><td>MERGEABLE</td></tr>
+          <tr><td><strong>#597</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>9</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#596</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#595</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>9</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#594</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>11</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#593</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#592</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#591</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>9</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#590</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#589</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>10</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#588</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>13</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#587</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>11</td><td>2026-08-15T19:51</td><td>⚠️ Parcial</td><td>andres2005md: respuesta bulk, rebase pendiente.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#556</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-11T15:51</td><td>❌ Sin respuesta</td><td>Idle 4 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#555</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-10T21:46</td><td>❌ Sin respuesta</td><td>Idle 5 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#554</strong></td><td><span class="badge badge-good">APPROVED</span></td><td>2</td><td>2026-08-12T21:24</td><td>—</td><td>Aprobado. Mergeable.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#553</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>4</td><td>2026-08-13T15:17</td><td>⚠️ Rebase</td><td>Commit post-review es solo rebase. Estados hardcoded persiste.</td><td>CONFLICTING</td></tr>
+          <tr><td><strong>#552</strong></td><td><span class="badge badge-good">APPROVED</span></td><td>2</td><td>2026-08-12T21:12</td><td>—</td><td>Aprobado. Mergeable.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#551</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>3</td><td>2026-08-12T21:01</td><td>⚠️ Rebase</td><td>Solo rebase.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#550</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>5</td><td>2026-08-11T12:48</td><td>❌ Sin respuesta efectiva</td><td>5 commits pero ninguno después de mi review.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#549</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>2</td><td>2026-08-13T14:06</td><td>⚠️ Rebase</td><td>Solo rebase.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#548</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>2</td><td>2026-08-10T21:03</td><td>❌ Sin respuesta</td><td>Idle 5 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#547</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-10T20:43</td><td>❌ Sin respuesta</td><td>Idle 5 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#545</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>5</td><td>2026-08-13T14:13</td><td>⚠️ Rebase</td><td>Solo rebase. top_sellers_sort_by persiste.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#544</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-10T19:32</td><td>❌ Sin respuesta</td><td>Idle 5 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#542</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>1</td><td>2026-08-10T19:15</td><td>❌ Sin respuesta</td><td>Idle 5 días.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#540</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>5</td><td>2026-08-12T20:50</td><td>⚠️ Rebase</td><td>Solo rebase.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#537</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>34</td><td>2026-08-11T02:07</td><td>⚠️ Solo admin</td><td>34 commits pre-review (division en PRs hijos).</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#512</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>12</td><td>2026-08-13T13:51</td><td>⚠️ Rebase</td><td>Commits post-review son rebase. Sigue CONFLICTING con origin/dev.</td><td>UNKNOWN</td></tr>
+          <tr><td><strong>#506</strong></td><td><span class="badge badge-bad">REQUEST CHANGES</span></td><td>15</td><td>2026-08-13T15:37</td><td>⚠️ Rebase</td><td>Commits post-review son rebase. Export columns regresivas persisten.</td><td>UNKNOWN</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer style="margin-top:48px;color:var(--text-muted);font-size:12px;">
+    Reporte v5 — Análisis de respuestas a REQUEST CHANGES · 15-ago-2026
+  </footer>
+</div>
+
+<button class="toggle-theme" id="themeToggle">🌓 Tema</button>
+
+<script>
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+});
+</script>
+</body>
+</html>

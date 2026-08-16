@@ -48,6 +48,17 @@ export interface StoreSettings {
    * `settings.vexi!.enabled`.
    */
   vexi?: VexiSettings;
+
+  /**
+   * Parámetros de emisión fiscal que la ley deja al contribuyente. Espejo de
+   * `InvoicingSettingsDto` en
+   * `apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts`.
+   *
+   * Opcional porque una tienda sólo lleva este bloque una vez que alguien
+   * configuró la pantalla: ausente significa "todo por defecto", no "apagado".
+   * Leer siempre con fallback a `AIU_SETTINGS_DEFAULTS`.
+   */
+  invoicing?: InvoicingSettings;
 }
 
 /**
@@ -80,6 +91,80 @@ export interface VexiSettings {
    */
   voice_engine?: 'realtime' | 'pipeline';
 }
+
+/**
+ * Régimen de IVA de un contrato AIU. Espejo de `AiuSettingsDto.regime` en el
+ * backend.
+ *
+ * Los dos existen en la ley y ninguno es "el correcto": cuál aplica lo decide
+ * el objeto del CONTRATO, no una preferencia del negocio.
+ */
+export type AiuRegime = 'et_462_1' | 'decreto_1372_1992';
+
+/**
+ * Parámetros AIU. Espejo de `AiuSettingsDto`
+ * (`apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts`).
+ *
+ * Todos los campos son opcionales igual que en el DTO: el backend mezcla la
+ * sección `invoicing.aiu` POR CLAVE, así que un PATCH parcial es válido y es
+ * la forma correcta de guardar — reenviar un valor que no se está editando es
+ * cómo se sobreescribe por accidente lo que otra pantalla acaba de cambiar.
+ */
+export interface AiuSettings {
+  regime?: AiuRegime;
+  contract_object?: string;
+  enforce_minimum_base?: boolean;
+  minimum_base_percent?: number;
+}
+
+/**
+ * Qué hace el carril POS cuando la DIAN no acepta el documento. Espejo de
+ * `PosDianFailurePolicy`
+ * (`apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`).
+ *
+ * No existe un valor `'block'` y no debe añadirse aquí: el evento
+ * `pos.sale.completed` se emite DESPUÉS de confirmar el cobro, así que cuando
+ * esta política se lee ya no queda venta que bloquear.
+ */
+export type PosDianFailurePolicy = 'queue' | 'ignore';
+
+/**
+ * Comportamiento del carril fiscal del POS. Espejo de `PosInvoicingSettings`
+ * del backend. Igual que AIU, el backend mezcla `invoicing.pos` POR CLAVE:
+ * mandar sólo el campo que se edita es lo correcto.
+ */
+export interface PosInvoicingSettings {
+  auto_emit?: boolean;
+  on_failure?: PosDianFailurePolicy;
+}
+
+export interface InvoicingSettings {
+  aiu?: AiuSettings;
+  pos?: PosInvoicingSettings;
+}
+
+/**
+ * Los mismos defaults que asume el backend (`DEFAULT_POS_AUTO_EMIT` y
+ * `DEFAULT_POS_DIAN_FAILURE_POLICY`). `'queue'` es el conservador: es el único
+ * que deja constancia consultable del fallo.
+ */
+export const POS_INVOICING_SETTINGS_DEFAULTS: Required<PosInvoicingSettings> = {
+  auto_emit: true,
+  on_failure: 'queue',
+};
+
+/**
+ * Valores que asume el backend cuando la tienda nunca configuró la sección.
+ *
+ * `et_462_1` es el default conservador a propósito: declara MÁS IVA, y pagar de
+ * más se recupera mientras que declarar de menos es sanción.
+ */
+export const AIU_SETTINGS_DEFAULTS: Required<AiuSettings> = {
+  regime: 'et_462_1',
+  contract_object: '',
+  enforce_minimum_base: true,
+  minimum_base_percent: 10,
+};
 
 /**
  * Reservations policy. Mirrors backend `ReservationsSettings` in

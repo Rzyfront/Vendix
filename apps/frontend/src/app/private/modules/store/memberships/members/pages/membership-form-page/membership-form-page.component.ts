@@ -333,6 +333,9 @@ export class MembershipFormPageComponent implements OnInit {
       customer_id: customerId,
       latitude: payload.latitude != null ? String(payload.latitude) : undefined,
       longitude: payload.longitude != null ? String(payload.longitude) : undefined,
+      // DANE 5 dígitos del municipio. Sin él el emisor cae a "Bogotá/11001"
+      // y la DIAN rechaza por incoherencia geográfica (FAJ32/FAK32).
+      municipality_code: payload.municipality_code ?? undefined,
     };
     this.customersService
       .createCustomerAddress(dto)

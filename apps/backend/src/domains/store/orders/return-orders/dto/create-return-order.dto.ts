@@ -1,136 +1,102 @@
 import {
   IsNotEmpty,
-  IsNumber,
   IsOptional,
-  IsString,
-  IsEnum,
   IsArray,
   ValidateNested,
-  IsBoolean,
-  IsDate,
+  ArrayMinSize,
+  IsInt,
+  Min,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/**
+ * Línea de una devolución.
+ *
+ * `return_order_items` tiene exactamente cinco columnas escribibles:
+ * `return_order_id`, `product_id`, `product_variant_id`, `quantity` y
+ * `condition`. Este DTO declaraba `quantity_returned`, `return_reason`,
+ * `condition_on_return`, `refund_amount`, `restock`, `notes` y
+ * `order_item_id` — ninguna existe. La creación jamás llegó a insertar una
+ * línea: el `create` del padre ni siquiera enviaba la relación.
+ */
 export class CreateReturnOrderItemDto {
-  @IsOptional()
-  @IsNumber()
-  order_item_id?: number;
-
-  @IsNumber()
+  @IsInt()
   @IsNotEmpty()
   product_id: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   product_variant_id?: number;
 
-  @IsNumber()
-  @IsNotEmpty()
-  quantity_returned: number;
+  @IsInt()
+  @Min(1)
+  quantity: number;
 
-  @IsEnum([
-    'defective',
-    'wrong_item',
-    'damaged_shipping',
-    'customer_dissatisfaction',
-    'expired',
-    'other',
-  ])
-  @IsNotEmpty()
-  return_reason:
-    | 'defective'
-    | 'wrong_item'
-    | 'damaged_shipping'
-    | 'customer_dissatisfaction'
-    | 'expired'
-    | 'other';
-
-  @IsEnum(['new', 'used', 'damaged', 'defective', 'missing_parts'])
-  @IsNotEmpty()
-  condition_on_return:
-    | 'new'
-    | 'used'
-    | 'damaged'
-    | 'defective'
-    | 'missing_parts';
-
+  /** `item_condition_enum`. Por defecto `good`. */
   @IsOptional()
-  @IsNumber()
-  refund_amount?: number;
-
-  @IsNotEmpty()
-  @IsBoolean()
-  restock: boolean;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
+  @IsIn(['good', 'damaged'])
+  condition?: 'good' | 'damaged';
 }
 
+/**
+ * Creación de una devolución.
+ *
+ * El DTO anterior describía una tabla que no existe: pedía `customer_id`
+ * obligatorio, un `reason` de seis valores de texto, `total_refund_amount`,
+ * `return_date`, `notes`, `internal_notes` y `refund_method`. Ninguna de esas
+ * claves es columna de `return_orders`, y `type` prometía
+ * `refund|replacement|credit` donde `return_order_type_enum` sólo acepta
+ * `purchase_return|sales_return`. Con `forbidNonWhitelisted:true` el cuerpo
+ * pasaba la validación —el DTO las declaraba— y reventaba después contra
+ * Prisma como «Error interno del servidor».
+ *
+ * Ahora cada campo corresponde a una columna real. `organization_id` no se
+ * declara aquí a propósito: lo resuelve el servidor desde el contexto de la
+ * petición, porque el cliente no debe poder elegir de qué organización cuelga
+ * la devolución.
+ */
 export class CreateReturnOrderDto {
-  @IsNumber()
+  /** `return_order_type_enum`. Obligatorio: la columna no tiene default. */
+  @IsIn(['purchase_return', 'sales_return'])
   @IsNotEmpty()
-  customer_id: number;
+  type: 'purchase_return' | 'sales_return';
+
+  /**
+   * Referencia suelta —sin FK— a `orders.id` (venta) o a la orden de compra,
+   * según `related_order_type`.
+   */
+  @IsOptional()
+  @IsInt()
+  related_order_id?: number;
 
   @IsOptional()
-  @IsNumber()
-  order_id?: number;
+  @IsIn(['purchase_order', 'sales_order'])
+  related_order_type?: 'purchase_order' | 'sales_order';
 
   @IsOptional()
-  @IsNumber()
-  store_id?: number;
+  @IsInt()
+  related_dispatch_id?: number;
 
+  /** Cliente o proveedor, según `partner_type`. */
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   partner_id?: number;
 
-  @IsEnum(['refund', 'replacement', 'credit'])
   @IsOptional()
-  type?: 'refund' | 'replacement' | 'credit';
+  @IsIn(['customer', 'supplier'])
+  partner_type?: 'customer' | 'supplier';
 
+  /**
+   * `return_orders.reason_id` es un `Int?` sin FK ni tabla de motivos en el
+   * esquema. Se acepta tal cual, sin inventar un catálogo que no existe.
+   */
   @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  return_date?: Date;
-
-  @IsOptional()
-  @IsNumber()
-  total_refund_amount?: number;
-
-  @IsEnum([
-    'defective',
-    'wrong_item',
-    'damaged_shipping',
-    'customer_dissatisfaction',
-    'expired',
-    'other',
-  ])
-  @IsNotEmpty()
-  reason:
-    | 'defective'
-    | 'wrong_item'
-    | 'damaged_shipping'
-    | 'customer_dissatisfaction'
-    | 'expired'
-    | 'other';
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-
-  @IsOptional()
-  @IsString()
-  internal_notes?: string;
-
-  @IsOptional()
-  @IsEnum(['original_payment', 'store_credit', 'cash', 'bank_transfer'])
-  refund_method?:
-    | 'original_payment'
-    | 'store_credit'
-    | 'cash'
-    | 'bank_transfer';
+  @IsInt()
+  reason_id?: number;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateReturnOrderItemDto)
   items: CreateReturnOrderItemDto[];

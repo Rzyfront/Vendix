@@ -17,14 +17,25 @@ import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   AccountMappingsFormComponent,
   AccountMappingsValue,
-  AccountOption,
   MappingKeyDef,
 } from '../../forms/account-mappings-form/account-mappings-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { ToastService } from '../../toast/toast.service';
 
-// Canonical mapping keys (mirrors DEFAULT_ACCOUNT_MAPPINGS in the backend).
-const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
+/**
+ * RESPALDO — no es la fuente de verdad.
+ *
+ * La lista canónica de claves de mapeo vive en el backend
+ * (`AccountMappingService`) y se descarga al abrir el paso; en cuanto llega,
+ * `mappingKeys` se reemplaza entera. Esta copia sólo cubre los dos huecos en que
+ * la pantalla quedaría vacía: el instante previo a que responda el HTTP, y una
+ * respuesta sin elementos.
+ *
+ * Se llama RESPALDO y no «por defecto» a propósito: mientras se llamó
+ * `DEFAULT_`, invitaba a editar una etiqueta acá creyendo que surtía efecto en
+ * la pantalla, cuando el backend la pisa un instante después.
+ */
+const MAPPING_KEYS_FALLBACK: MappingKeyDef[] = [
   { key: 'invoice.validated.accounts_receivable', label: 'Factura validada · Cuentas por Cobrar' },
   { key: 'invoice.validated.revenue', label: 'Factura validada · Ingresos' },
   { key: 'invoice.validated.vat_payable', label: 'Factura validada · IVA por Pagar' },
@@ -216,7 +227,8 @@ const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
         [initialValue]="initial()"
         [disabled]="submitting() || readOnlyForStore()"
         [mappingKeys]="mappingKeys()"
-        [availableAccounts]="accounts()"
+        [scope]="lookupScope()"
+        [storeId]="lookupStoreId()"
         (validityChange)="onValidity($event)"
         (applyDefaultsClicked)="onApplyDefaults()"
       ></app-account-mappings-form>
@@ -253,13 +265,24 @@ export class FiscalAccountingMappingsStepComponent
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<AccountMappingsValue> | null>(null);
-  readonly mappingKeys = signal<MappingKeyDef[]>(DEFAULT_MAPPING_KEYS);
-  readonly accounts = signal<AccountOption[]>([]);
+  readonly mappingKeys = signal<MappingKeyDef[]>(MAPPING_KEYS_FALLBACK);
   readonly existingCount = signal(0);
   readonly readOnlyForStore = computed(
     () =>
       this.service.userScope() === 'store' &&
       this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
+
+  /**
+   * Lookup routing forwarded to every `app-account-select` inside the form.
+   * Exposed as component signals because `service` is private and
+   * `storeContext()` is a plain method (not reactive) — reading either
+   * directly from the template would break template type-checking or
+   * change detection.
+   */
+  readonly lookupScope = computed(() => this.service.userScope());
+  readonly lookupStoreId = computed<number | null>(
+    () => this.service.storeContext().store_id ?? null,
   );
 
   private readonly form =
@@ -285,37 +308,53 @@ export class FiscalAccountingMappingsStepComponent
       : `${environment.apiUrl}/store/accounting/account-mappings`;
   }
 
-  private coaUrl(): string {
-    return `${environment.apiUrl}/${this.service.userScope()}/accounting/chart-of-accounts`;
+  /** Canonical mapping-key catalog, served by the backend for either scope. */
+  private mappingKeysUrl(): string {
+    return `${this.mappingsUrl()}/keys`;
   }
 
   private async loadData(): Promise<void> {
     try {
       // Prefill gives us the already-mapped keys (no account_id though),
       // so we seed `existingCount` from there. We still need the canonical
-      // GETs for the full account_id mappings AND the CoA dropdown options
-      // — those are not in the prefill snapshot, so the GETs are NOT
-      // redundant. We do them in parallel to keep latency low.
+      // GET for the full account_id mappings — that is not in the prefill
+      // snapshot, so it is NOT redundant. Alongside it we pull the mapping-key
+      // catalog. The chart of accounts is no longer fetched here: each row's
+      // `app-account-select` searches it server-side, which is what replaced
+      // the old `?limit=500` bulk read of half the PUC.
       const prefillMappings = this.service.prefill()?.accounting_mappings;
       this.existingCount.set(prefillMappings?.total ?? 0);
 
-      // Both GETs accept `?store_id=` to narrow the org-level views when a
-      // specific store is selected (operating_scope=STORE or per-store
+      // The mappings GET accepts `?store_id=` to narrow the org-level view when
+      // a specific store is selected (operating_scope=STORE or per-store
       // overrides). For consolidated org reads (no targetStoreId) the query
-      // is omitted and the backend returns org-wide rows.
+      // is omitted and the backend returns org-wide rows. The key catalog is
+      // static, so it takes no store query.
       const storeQuery = this.service.storeContext().store_id
         ? `store_id=${this.service.storeContext().store_id}`
         : '';
       const mappingsUrl = storeQuery
         ? `${this.mappingsUrl()}?${storeQuery}`
         : this.mappingsUrl();
-      const coaUrl = storeQuery
-        ? `${this.coaUrl()}?limit=500&${storeQuery}`
-        : `${this.coaUrl()}?limit=500`;
-      const [mappingsRes, coaRes]: any[] = await Promise.all([
+      const [mappingsRes, keysRes]: any[] = await Promise.all([
         firstValueFrom(this.http.get(mappingsUrl)),
-        firstValueFrom(this.http.get(coaUrl)),
+        firstValueFrom(this.http.get(this.mappingKeysUrl())),
       ]);
+
+      const keyItems: any[] = Array.isArray(keysRes?.data)
+        ? keysRes.data
+        : Array.isArray(keysRes)
+          ? keysRes
+          : [];
+      if (keyItems.length > 0) {
+        this.mappingKeys.set(
+          keyItems.map((k: any) => ({
+            key: String(k.key),
+            label: String(k.label ?? k.description ?? k.key),
+          })),
+        );
+      }
+
       const mappingsPayload = mappingsRes?.data ?? mappingsRes;
       const mappingItems: any[] = Array.isArray(mappingsPayload)
         ? mappingsPayload
@@ -341,32 +380,16 @@ export class FiscalAccountingMappingsStepComponent
       ).length;
       this.existingCount.set(persistedCount);
       this.initial.set({ mappings: initialMap });
-
-      const coaPayload = coaRes?.data ?? coaRes;
-      const coaItems: any[] = Array.isArray(coaPayload)
-        ? coaPayload
-        : Array.isArray(coaPayload?.items)
-          ? coaPayload.items
-          : Array.isArray(coaPayload?.data)
-            ? coaPayload.data
-            : [];
-      this.accounts.set(
-        coaItems.map((a: any) => ({
-          id: a.id,
-          code: a.code ?? a.account_code ?? '',
-          name: a.name ?? a.account_name ?? '',
-        })),
-      );
     } catch (e) {
-      // Never hide a load failure. If the chart-of-accounts or the mappings
+      // Never hide a load failure. If the mapping-key catalog or the mappings
       // GET fails (network, 403, 5xx) the form would silently render with zero
-      // selectable accounts and the user could not tell why nothing works.
-      // Surface an inline, actionable message instead of swallowing it.
+      // rows and the user could not tell why nothing works. Surface an inline,
+      // actionable message instead of swallowing it.
       const parsed = parseApiError(e);
       this.localError.set(
         parsed.errorCode
           ? parsed.userMessage
-          : 'No se pudieron cargar el plan de cuentas y los mapeos contables. Revisa tu conexión e inténtalo de nuevo.',
+          : 'No se pudieron cargar las claves de mapeo y los mapeos contables. Revisa tu conexión e inténtalo de nuevo.',
       );
     }
   }

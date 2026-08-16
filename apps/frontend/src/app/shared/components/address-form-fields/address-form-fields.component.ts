@@ -18,6 +18,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import { debounceTime, distinctUntilChanged, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
@@ -27,6 +28,14 @@ import {
 } from '../../../private/modules/ecommerce/services/geocoding.service';
 import { InputComponent } from '../input/input.component';
 import { IconComponent } from '../icon/icon.component';
+import { DianMunicipalitySelectComponent } from '../dian-municipality-select/dian-municipality-select.component';
+import {
+  DianMunicipalityLookupService,
+  DianMunicipalityOption,
+} from '../../services/dian-municipality-lookup.service';
+
+/** País cuyo catálogo Divipola gobierna este formulario. */
+const COLOMBIA_COUNTRY_CODE = 'CO';
 
 /** Lat/lng pair — mirrors AddressMapPickerComponent.LatLng (not exported there). */
 export interface LatLng {
@@ -50,6 +59,20 @@ export interface AddressPayload {
   phone_number: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * Código DANE (Divipola) del municipio → columna
+   * `addresses.municipality_code`.
+   *
+   * OPCIONAL en la interfaz a propósito, por dos razones distintas:
+   *
+   * 1. La captura general de direcciones no lo exige y las direcciones
+   *    históricas lo tienen en NULL — hacerlo obligatorio rompería toda alta de
+   *    dirección no fiscal. Quien lo exige es el camino de facturación, que ya
+   *    lanza `CITY_CODE_REQUIRED` cuando falta.
+   * 2. Marcarlo requerido obligaría a tocar todos los consumidores que
+   *    construyen un `AddressPayload` literal (despacho, rutas, checkout, POS).
+   */
+  municipality_code?: string | null;
 }
 
 /**
@@ -77,6 +100,7 @@ export interface AddressPayload {
     AddressMapPickerComponent,
     InputComponent,
     IconComponent,
+    DianMunicipalitySelectComponent,
   ],
   templateUrl: './address-form-fields.component.html',
   styleUrls: ['./address-form-fields.component.scss'],
@@ -118,6 +142,7 @@ export class AddressFormFieldsComponent {
 
   private readonly fb = inject(FormBuilder);
   private readonly geocoding = inject(GeocodingService);
+  private readonly municipalities = inject(DianMunicipalityLookupService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly form: FormGroup = this.fb.group({
@@ -130,6 +155,11 @@ export class AddressFormFieldsComponent {
     state_province: [null as string | null, [Validators.required]],
     country_code: ['CO' as string, [Validators.required]],
     postal_code: [null as string | null, [Validators.maxLength(20)]],
+    // Código DANE del municipio. SIN validadores: es opcional en la captura
+    // general (direcciones no fiscales e históricas viven sin él) y solo el
+    // camino de facturación lo exige. Ponerle `required` aquí bloquearía el
+    // guardado de toda dirección de envío del sistema.
+    municipality_code: [null as string | null],
     phone_number: [
       null as string | null,
       [Validators.pattern(/^[\d+#*\s()-]*$/)],
@@ -168,6 +198,54 @@ export class AddressFormFieldsComponent {
     return !!this.form.get('phone_number')?.invalid;
   });
 
+  /**
+   * País actual del formulario, como signal. Igual que `formStatus`, el valor
+   * de un FormControl es una propiedad plana: leerlo dentro de un `computed`
+   * nunca recalcularía, así que se puentea por `valueChanges`.
+   */
+  private readonly countryCode = toSignal(
+    this.form
+      .get('country_code')!
+      .valueChanges.pipe(
+        startWith(this.form.get('country_code')!.value),
+      ) as Observable<string | null>,
+    // `startWith` emite de forma síncrona al suscribirse, así que el valor real
+    // ('CO') llega de inmediato; este `initialValue` solo cubre ese instante.
+    { initialValue: null },
+  );
+
+  /** Código DANE actualmente puesto en el formulario, como signal. */
+  private readonly municipalityCode = toSignal(
+    this.form
+      .get('municipality_code')!
+      .valueChanges.pipe(
+        startWith(this.form.get('municipality_code')!.value),
+      ) as Observable<string | null>,
+    { initialValue: null },
+  );
+
+  /**
+   * El selector de municipio solo aparece para Colombia: la Divipola es un
+   * catálogo colombiano y ofrecerlo en una dirección extranjera sería ofrecer
+   * un dato que no existe.
+   */
+  readonly showMunicipality = computed<boolean>(
+    () => (this.countryCode() ?? '').trim().toUpperCase() === COLOMBIA_COUNTRY_CODE,
+  );
+
+  /**
+   * Ciudad y departamento pasan a solo-lectura en cuanto hay municipio DANE
+   * elegido.
+   *
+   * Es la garantía de coherencia: mientras el código está puesto, los dos
+   * textos los escribe el catálogo, así que no puede existir «Medellín /
+   * Cundinamarca». Al limpiar el municipio vuelven a ser editables, que es lo
+   * que necesitan las direcciones sin dato fiscal y las de otros países.
+   */
+  readonly cityLockedByMunicipality = computed<boolean>(
+    () => this.showMunicipality() && !!this.municipalityCode(),
+  );
+
   constructor() {
     // Prefill when `initialAddress` arrives (create → null, edit → snapshot).
     effect(() => {
@@ -184,9 +262,18 @@ export class AddressFormFieldsComponent {
           phone_number: addr.phone_number ?? null,
           latitude: addr.latitude ?? null,
           longitude: addr.longitude ?? null,
+          municipality_code: addr.municipality_code ?? null,
         },
+        // `emitEvent: true` SOLO para municipality_code no es posible en un
+        // patchValue conjunto, así que el signal se refresca explícitamente
+        // abajo: `municipalityCode` se alimenta de `valueChanges` y con
+        // `emitEvent:false` no se enteraría de la precarga, dejando ciudad y
+        // departamento editables sobre una dirección que sí tiene código.
         { emitEvent: false },
       );
+      this.form
+        .get('municipality_code')!
+        .setValue(addr.municipality_code ?? null, { emitEvent: true });
       if (addr.latitude != null && addr.longitude != null) {
         this.coordsSignal.set({ lat: addr.latitude, lng: addr.longitude });
       }
@@ -247,6 +334,32 @@ export class AddressFormFieldsComponent {
   /** Toggles the collapsible map section. */
   toggleMap(): void {
     this.showMap.set(!this.showMap());
+  }
+
+  /**
+   * El operador eligió (o quitó) un municipio DANE.
+   *
+   * Al elegir, el catálogo pasa a ser la fuente de verdad de `city` y
+   * `state_province`: se sobreescriben con el nombre oficial del municipio y de
+   * su departamento. Eso es lo que hace imposible una combinación inválida —
+   * los dos textos dejan de ser independientes del código.
+   *
+   * Al quitar, los textos se dejan como estaban (no se borra trabajo del
+   * usuario) y vuelven a ser editables.
+   */
+  onMunicipalitySelected(municipality: DianMunicipalityOption | null): void {
+    if (!municipality) {
+      this.addressChange.emit(this.form.value as AddressPayload);
+      return;
+    }
+    this.form
+      .get('city')
+      ?.setValue(municipality.name, { emitEvent: false });
+    this.form
+      .get('state_province')
+      ?.setValue(municipality.department_name, { emitEvent: false });
+    this.form.markAsDirty();
+    this.addressChange.emit(this.form.value as AddressPayload);
   }
 
   /**
@@ -328,6 +441,50 @@ export class AddressFormFieldsComponent {
     this.reverseLoading.set(false);
     // Re-emit so the parent sees the reverse-filled values.
     this.addressChange.emit(this.form.value as AddressPayload);
+    // El geocodificador devuelve nombres y NUNCA el código DANE
+    // (`geocoding.service.ts:440` pone `municipality_code: null` a propósito),
+    // así que se traduce aquí. Sin este paso, ubicar la dirección en el mapa
+    // dejaría la dirección sin código y la emisión seguiría bloqueada.
+    this.resolveMunicipalityFromText();
+  }
+
+  /**
+   * Traduce los textos `city` + `state_province` a un municipio del catálogo y
+   * lo escribe en `municipality_code`.
+   *
+   * NO bloquea nada y NO pisa una elección previa del operador: si ya hay
+   * código puesto, se respeta. Si el catálogo no resuelve, el campo se queda
+   * vacío y el selector se lo pedirá al operador — nunca se rellena Bogotá por
+   * defecto, que es precisamente el error que el bloqueante existe para evitar.
+   */
+  private resolveMunicipalityFromText(): void {
+    const control = this.form.get('municipality_code');
+    if (!control || control.value) return;
+
+    const country = (this.form.get('country_code')?.value as string | null) ?? '';
+    if (country.trim().toUpperCase() !== COLOMBIA_COUNTRY_CODE) return;
+
+    const city = (this.form.get('city')?.value as string | null) ?? '';
+    const department =
+      (this.form.get('state_province')?.value as string | null) ?? '';
+    if (!city.trim() || !department.trim()) return;
+
+    this.municipalities
+      .resolveByName(city, department)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((municipality) => {
+        if (!municipality) return;
+        // Otra escritura pudo llegar mientras la petición estaba en vuelo.
+        if (control.value) return;
+        control.setValue(municipality.code, { emitEvent: true });
+        this.form
+          .get('city')
+          ?.setValue(municipality.name, { emitEvent: false });
+        this.form
+          .get('state_province')
+          ?.setValue(municipality.department_name, { emitEvent: false });
+        this.addressChange.emit(this.form.value as AddressPayload);
+      });
   }
 
   /**

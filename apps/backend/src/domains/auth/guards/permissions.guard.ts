@@ -45,10 +45,37 @@ export class PermissionsGuard implements CanActivate {
     const currentMethod = method.toUpperCase();
 
     const hasPermission = user.permissions.some((permission) => {
-      // Verificar si coincide exactamente con ruta y método
-      const pathMatches =
-        permission.path === currentPath ||
-        currentPath.startsWith(permission.path);
+      // Coincidencia EXACTA por ruta. El prefijo `startsWith(permission.path)`
+      // que estaba antes abría TODO `/api/*` GET al `customer` cuando el
+      // permiso `system.health` tenía `path = '/api'`: cualquier ruta que
+      // empezara por `/api` quedaba autorizada por error, y `system.health`
+      // se asignaba a 8 roles incluido `customer`.
+      //
+      // El permiso `system.health` apunta a una ruta concreta
+      // (`/api/health`, ver `permissions-roles.seed.ts`), no a un prefijo,
+      // así que la coincidencia exacta es lo correcto.
+      //
+      // `currentPath` es el PATRÓN de la ruta Nest (`route.path`), no la URL
+      // concreta: una petición a `/api/inventory/adjustments/42` compara
+      // contra `/api/inventory/adjustments/:id`, que es exactamente como el
+      // seed declara sus filas. Por eso la igualdad estricta funciona con
+      // rutas parametrizadas.
+      //
+      // EL COMODÍN `*` NO ESTÁ SOPORTADO, ni antes ni ahora. El seed declara
+      // ~10 filas con `path` terminado en `/*` (`/api/store/subscriptions/*`,
+      // `/api/super-admin/fiscal/accounting/*`, …). Ninguna casa por ruta:
+      // con el `startsWith` anterior tampoco lo hacía, porque el asterisco
+      // viajaba DENTRO del prefijo comparado. Esas filas autorizan sólo por
+      // la vía de NOMBRE de abajo (`hasNamedPermission`), que es la que usan
+      // los controladores vía `@Permissions('...')`.
+      //
+      // No se implementa el comodín acá porque hacerlo AMPLÍA el acceso: esas
+      // ~10 filas pasarían de no conceder nada por ruta a conceder subárboles
+      // enteros del API, y ese es un cambio de superficie de autorización que
+      // debe decidirse explícitamente, no colarse como efecto secundario de
+      // un arreglo de matching. Si se decide soportarlo, va con su prueba y
+      // con la revisión de a qué roles está asignada cada una de esas filas.
+      const pathMatches = permission.path === currentPath;
       const methodMatches =
         permission.method === currentMethod || permission.method === 'ALL';
       const isActive = permission.status === 'active';

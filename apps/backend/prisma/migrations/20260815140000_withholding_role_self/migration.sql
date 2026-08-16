@@ -1,0 +1,59 @@
+-- DATA IMPACT:
+-- Tables affected: NINGUNA. Esta migración no toca ni una sola fila.
+-- Types altered (1):
+--   - withholding_role_enum  += 'self'   (antes: 'practiced', 'suffered')
+-- Columns added: NINGUNA.
+-- Indexes added: NINGUNO.
+-- Expected row changes: NINGUNO. Cero UPDATE, cero INSERT, cero DELETE. Añadir
+--   una etiqueta a un enum no reescribe las filas existentes: ninguna fila de
+--   `withholding_calculations` cambia de rol, ninguna retención ya calculada se
+--   recalcula, ningún asiento ya posteado se mueve.
+-- Destructive operations: none. No hay DROP TYPE, DROP TABLE, DROP COLUMN,
+--   TRUNCATE, CASCADE, DELETE ni UPDATE.
+-- FK/cascade risk: none. No se crea, altera ni elimina ninguna foreign key.
+-- Lock risk: none en la práctica. `ALTER TYPE ... ADD VALUE` es un cambio de
+--   catálogo: no reescribe las tablas que usan el tipo.
+-- Idempotency: `ADD VALUE IF NOT EXISTS` — la migración se puede reproducir
+--   entera sin efectos secundarios.
+-- Approval: Fase 6.2 (retenciones al crear factura) del plan de reconstrucción
+--   de facturación electrónica DIAN — documentado en chat.
+--
+-- ============================================================================
+-- POR QUÉ ESTA MIGRACIÓN VA SOLA
+-- ============================================================================
+-- Postgres NO deja usar un valor de enum recién añadido dentro de la MISMA
+-- transacción que lo añadió. Una migración que hiciera `ADD VALUE 'self'` y
+-- acto seguido lo usara en un INSERT, un DEFAULT o un CHECK fallaría con
+-- «unsafe use of new value of enum type». Por eso el valor se añade aquí, solo,
+-- y cualquier uso vive en una migración posterior. Es la regla del skill
+-- `vendix-prisma-migrations` (§ Enum Rule).
+--
+-- ============================================================================
+-- QUÉ ES 'self' Y POR QUÉ NO CABÍA EN LOS DOS ROLES QUE YA EXISTÍAN
+-- ============================================================================
+-- El enum modelaba una retención desde el punto de vista de QUIÉN la soporta:
+--
+--   · practiced — la tienda RETIENE a un tercero. La tienda es agente de
+--     retención: descuenta del pago al proveedor y le queda una obligación con
+--     la DIAN (pasivo).
+--   · suffered  — a la tienda LE RETIENEN. El cliente es agente de retención:
+--     paga menos y la tienda acumula un anticipo de impuesto (activo).
+--
+-- La AUTORRETENCIÓN no es ninguna de las dos: la tienda se retiene A SÍ MISMA.
+-- No hay un tercero al otro lado. La DIAN autoriza (o exige) a ciertos
+-- contribuyentes a liquidar y declarar directamente la retención sobre sus
+-- propios ingresos, sin que el cliente actúe como agente retenedor.
+--
+-- Meterla en `practiced` habría sido el atajo, y es exactamente el error que
+-- esta migración evita: el asiento de una autorretención NO se parece al de una
+-- retención practicada. En `practiced` la contrapartida es una MENOR salida de
+-- caja hacia el proveedor; en autorretención la tienda reconoce a la vez un
+-- GASTO y un PASIVO propios y el cliente paga el 100% de la factura. Con un
+-- solo rol para los dos casos, el `PayableAmount` y el asiento se descuadran en
+-- silencio — que es la peor forma de fallar en materia fiscal.
+--
+-- Recordatorio normativo que gobierna la emisión (Anexo Técnico 1.9 §11.9.1):
+-- `cac:WithholdingTaxTotal` NO resta de `cac:LegalMonetaryTotal/cbc:PayableAmount`.
+-- Vale para los tres roles. Restarla es rechazo por descuadre aritmético.
+
+ALTER TYPE "withholding_role_enum" ADD VALUE IF NOT EXISTS 'self';

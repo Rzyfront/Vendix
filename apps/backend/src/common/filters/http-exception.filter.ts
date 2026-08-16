@@ -6,7 +6,29 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { VendixHttpException } from '../errors';
+import { Prisma } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from '../errors';
+
+/**
+ * DESAJUSTE DE TIPO EN UN VALOR — el ÚNICO subconjunto de
+ * `PrismaClientValidationError` que se traduce a 400.
+ *
+ * POR QUÉ EL CRITERIO ES TAN ESTRECHO. `PrismaClientValidationError` mezcla dos
+ * poblaciones que no se parecen en nada:
+ *
+ *   1. «Unknown argument `foo`», «Argument `data` is missing», «needs at least
+ *      one argument» ⇒ la consulta la construyó MAL Vendix. Es un bug del
+ *      servidor. Si lo convirtiéramos en 400, el bug dejaría de aparecer en la
+ *      tasa de 5xx y se volvería invisible justo cuando más urge verlo.
+ *   2. «Invalid value provided. Expected Int, provided String» ⇒ el valor lo
+ *      mandó el cliente. Eso sí es 400, y es lo único que este patrón captura.
+ *
+ * Se aceptan las dos redacciones porque Prisma cambió el texto entre mayores
+ * («Got invalid value» en la 4.x, «Invalid value provided» desde la 5.x) y un
+ * bump de versión no debe reabrir el 500 en silencio.
+ */
+const PRISMA_VALUE_TYPE_MISMATCH =
+  /Invalid value provided\.\s*Expected|Got invalid value/i;
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -15,7 +37,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const status =
+    let status =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -61,6 +83,48 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else {
         message = exception.message || 'Request failed';
       }
+    } else if (
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      exception.code === 'P2020'
+    ) {
+      /**
+       * P2020 — «value out of range for type integer».
+       *
+       * `ParseIntPipe` NO lo ataja: `999999999999999999` es un entero
+       * sintácticamente válido, así que el pipe lo deja pasar y quien lo rechaza
+       * es Postgres (SQLSTATE 22003) ya dentro de la consulta. El resultado era
+       * un 500 por una petición que el cliente formuló mal, en CUALQUIER
+       * endpoint con `:id`.
+       *
+       * Solo se traduce este código y ningún otro de la familia P20xx: P2002
+       * (duplicado) y P2025 (no encontrado) ya los traducen los servicios que
+       * saben QUÉ recurso está en juego, y hacerlo también acá les taparía el
+       * mensaje de dominio con uno genérico.
+       */
+      const entry = ErrorCodes.SYS_VALUE_OUT_OF_RANGE_001;
+      status = entry.httpStatus;
+      errorCode = entry.code;
+      message = entry.devMessage;
+      // El texto crudo trae el fragmento de la invocación con nombres de tabla
+      // y columna: se queda en el log del servidor, nunca en la respuesta.
+      console.error(
+        `[AllExceptionsFilter] Prisma P2020 on ${request.method} ${request.url}:`,
+        exception.message,
+      );
+    } else if (
+      exception instanceof Prisma.PrismaClientValidationError &&
+      PRISMA_VALUE_TYPE_MISMATCH.test(exception.message)
+    ) {
+      const entry = ErrorCodes.SYS_INVALID_FIELD_VALUE_001;
+      status = entry.httpStatus;
+      errorCode = entry.code;
+      message = entry.devMessage;
+      // Mismo motivo que arriba: el mensaje de Prisma reproduce el objeto de la
+      // consulta completo, con los nombres de campo del modelo.
+      console.error(
+        `[AllExceptionsFilter] Prisma validation (value type mismatch) on ${request.method} ${request.url}:`,
+        exception.message,
+      );
     } else {
       errorCode = 'SYS_INTERNAL_001';
       message = 'Internal server error';

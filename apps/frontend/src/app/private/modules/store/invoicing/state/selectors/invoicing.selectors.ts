@@ -135,6 +135,49 @@ export const selectDianConfigsError = createSelector(
   (state) => state.dianConfigsError,
 );
 
+/**
+ * Ultimo rechazo de la DIAN con sus motivos. Lo consume el detalle de factura
+ * para enumerar las reglas que la DIAN nombro (`details.dian_errors[]`).
+ */
+export const selectDianRejection = createSelector(
+  selectInvoicingState,
+  (state) => state.dianRejection,
+);
+
+// ── Eventos RADIAN ──────────────────────────────────────────
+
+/**
+ * Eventos RADIAN cargados, SIN filtrar por factura. El filtro lo hace el
+ * detalle con `selectDianEventsInvoiceId`, igual que con el rechazo: el
+ * selector no conoce cuál factura está abierta en pantalla.
+ */
+export const selectDianEvents = createSelector(
+  selectInvoicingState,
+  (state) => state.dianEvents,
+);
+
+export const selectDianEventsInvoiceId = createSelector(
+  selectInvoicingState,
+  (state) => state.dianEventsInvoiceId,
+);
+
+export const selectDianEventsLoading = createSelector(
+  selectInvoicingState,
+  (state) => state.dianEventsLoading,
+);
+
+/** Registro de un evento RADIAN en curso; bloquea su propio botón, no la lista. */
+export const selectDianEventRegistering = createSelector(
+  selectInvoicingState,
+  (state) => state.dianEventRegistering,
+);
+
+/** Regeneración del PDF en curso; deshabilita su propio botón, no la tabla. */
+export const selectPdfRegenerating = createSelector(
+  selectInvoicingState,
+  (state) => state.pdfRegenerating,
+);
+
 export const selectDefaultDianConfig = createSelector(
   selectDianConfigs,
   (configs) => configs.find((c) => c.is_default) ?? null,

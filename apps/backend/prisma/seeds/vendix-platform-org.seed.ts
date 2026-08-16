@@ -612,7 +612,7 @@ async function ensurePlatformInvoiceResolutions(
     resolution_number: string;
     range_from: number;
     range_to: number;
-    technical_key: string;
+    technical_key: string | null;
   }> = [
     {
       prefix: 'SETP',
@@ -621,8 +621,15 @@ async function ensurePlatformInvoiceResolutions(
       range_from: 990000000,
       range_to: 990001000,
       // Placeholder DIAN test-set technical_key; super-admin replaces via UI.
-      technical_key:
-        'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c52d76f64db8a2c0f7ee5d4f3',
+      //
+      // 40 hexadecimales EXACTOS: la ClTec es el hex de un SHA-1 y es el 14º
+      // campo del CUFE. Este placeholder llevaba 64 (hex de un SHA-256), así que
+      // la resolución sembrada quedaba inservible — el generador de consecutivos
+      // y el set de pruebas la rechazan por forma, y antes de que existiera esa
+      // validación habría producido facturas con un CUFE que la DIAN no puede
+      // reproducir. Ver `fiscal-document-requirements.ts` § FORMA DE LA CLAVE
+      // TÉCNICA.
+      technical_key: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
     },
     {
       prefix: 'DSON',
@@ -630,8 +637,11 @@ async function ensurePlatformInvoiceResolutions(
       resolution_number: 'DSON-PLATFORM-2026',
       range_from: 1,
       range_to: 100000,
-      technical_key:
-        'a1c2e3d4b5f60798a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1',
+      // El documento soporte NO lleva clave técnica (`accepts_technical_key:
+      // false`): su CUDE se hashea con el Software-PIN en esa posición. Sembrar
+      // una aquí contradecía el contrato fiscal y el servicio de resoluciones la
+      // rechaza con `INVOICING_RESOLUTION_008`.
+      technical_key: null,
     },
   ];
 

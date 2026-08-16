@@ -3,7 +3,9 @@ import {
   InvoiceResolution,
   InvoiceStats,
   DianConfig,
+  DianDocumentEvent,
 } from '../interfaces/invoice.interface';
+import { DianRejection } from '../utils/invoicing-errors.util';
 
 export interface InvoicingState {
   invoices: Invoice[];
@@ -28,6 +30,38 @@ export interface InvoicingState {
   dianConfigs: DianConfig[];
   dianConfigsLoading: boolean;
   dianConfigsError: string | null;
+
+  /**
+   * Ultimo rechazo de la DIAN con sus motivos enumerados. Vive en el state —y
+   * no en un toast— porque es la unica informacion que dice QUE corregir, y
+   * tiene que seguir disponible mientras el usuario lee la factura.
+   */
+  dianRejection: DianRejection | null;
+
+  /**
+   * Eventos RADIAN de la factura abierta, con la factura a la que pertenecen.
+   *
+   * `dianEventsInvoiceId` no es redundante: sin el, los eventos de la factura A
+   * seguirian en el store al abrir la B y el detalle los pintaria como suyos —
+   * el mismo fallo que `dianRejection` ya resuelve con `invoiceId`.
+   */
+  dianEvents: DianDocumentEvent[];
+  dianEventsInvoiceId: number | null;
+  dianEventsLoading: boolean;
+
+  /**
+   * Registro de un evento RADIAN en curso. Bandera propia y NO `dianEventsLoading`:
+   * reusar la de la carga cambiaria la pista de auditoria por «Cargando eventos…»
+   * mientras se firma y transmite el evento, escondiendo justo la lista contra la
+   * que el usuario esta comprobando que no lo esta duplicando.
+   */
+  dianEventRegistering: boolean;
+
+  /**
+   * Regeneracion del PDF en curso. Bandera propia y NO `loading`: reusar la de
+   * la lista cambiaria la tabla por un spinner mientras se rearma un PDF.
+   */
+  pdfRegenerating: boolean;
 
   // Filter-as-state
   search: string;
@@ -57,6 +91,13 @@ export const initialInvoicingState: InvoicingState = {
   dianConfigs: [],
   dianConfigsLoading: false,
   dianConfigsError: null,
+  dianRejection: null,
+
+  dianEvents: [],
+  dianEventsInvoiceId: null,
+  dianEventsLoading: false,
+  dianEventRegistering: false,
+  pdfRegenerating: false,
 
   search: '',
   page: 1,

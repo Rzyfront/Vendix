@@ -29,6 +29,9 @@ export const invoicingReducer = createReducer(
     ...state,
     currentInvoiceLoading: true,
     error: null,
+    // Cargar otra factura invalida el rechazo en pantalla: pertenecia a la
+    // anterior y mostrarlo sobre esta seria mentir dos veces.
+    dianRejection: null,
   })),
   on(InvoicingActions.loadInvoiceSuccess, (state, { invoice }) => ({
     ...state,
@@ -138,6 +141,8 @@ export const invoicingReducer = createReducer(
       ...state,
       loading: true,
       error: null,
+      // Un reintento empieza sin el rechazo anterior en pantalla.
+      dianRejection: null,
     }),
   ),
   on(
@@ -170,6 +175,7 @@ export const invoicingReducer = createReducer(
       ...state,
       loading: true,
       error: null,
+      dianRejection: null,
     }),
   ),
   on(
@@ -204,6 +210,7 @@ export const invoicingReducer = createReducer(
       ...state,
       loading: true,
       error: null,
+      dianRejection: null,
     }),
   ),
   on(
@@ -292,6 +299,73 @@ export const invoicingReducer = createReducer(
     dianConfigsLoading: false,
     dianConfigsError: error,
   })),
+
+  // ── Rechazo DIAN ────────────────────────────────────────
+  on(InvoicingActions.dianDocumentRejected, (state, { rejection }) => ({
+    ...state,
+    dianRejection: rejection,
+  })),
+  on(InvoicingActions.clearDianRejection, (state) => ({
+    ...state,
+    dianRejection: null,
+  })),
+
+  // ── Eventos RADIAN ──────────────────────────────────────
+  //
+  // La carga BORRA los eventos anteriores y fija ya la factura destino: si no
+  // se limpiaran, la lista de la factura anterior seguiria en pantalla durante
+  // todo el viaje HTTP y el usuario leeria eventos ajenos como propios.
+  on(InvoicingActions.loadDianEvents, (state, { invoiceId }) => ({
+    ...state,
+    dianEvents: [],
+    dianEventsInvoiceId: invoiceId,
+    dianEventsLoading: true,
+  })),
+  on(InvoicingActions.loadDianEventsSuccess, (state, { invoiceId, events }) => ({
+    ...state,
+    // Una respuesta que llega tarde, cuando el usuario ya abrio OTRA factura, se
+    // descarta. `switchMap` cancela la suscripcion pero no la respuesta ya en
+    // vuelo de una carga disparada desde otra superficie.
+    dianEvents: state.dianEventsInvoiceId === invoiceId ? events : state.dianEvents,
+    dianEventsLoading:
+      state.dianEventsInvoiceId === invoiceId ? false : state.dianEventsLoading,
+  })),
+  on(InvoicingActions.loadDianEventsFailure, (state, { invoiceId }) => ({
+    ...state,
+    dianEventsLoading:
+      state.dianEventsInvoiceId === invoiceId ? false : state.dianEventsLoading,
+  })),
+
+  // Registrar un evento NO toca `dianEvents`: la lista la repuebla el
+  // `loadDianEvents` que dispara el effect al terminar. Escribir aqui la fila
+  // devuelta y ADEMAS recargar produciria el evento duplicado en pantalla
+  // durante todo el viaje de la recarga.
+  on(InvoicingActions.registerDianEvent, (state) => ({
+    ...state,
+    dianEventRegistering: true,
+  })),
+  on(
+    InvoicingActions.registerDianEventSuccess,
+    InvoicingActions.registerDianEventFailure,
+    (state) => ({
+      ...state,
+      dianEventRegistering: false,
+    }),
+  ),
+
+  // ── Regenerar PDF ───────────────────────────────────────
+  on(InvoicingActions.regenerateInvoicePdf, (state) => ({
+    ...state,
+    pdfRegenerating: true,
+  })),
+  on(
+    InvoicingActions.regenerateInvoicePdfSuccess,
+    InvoicingActions.regenerateInvoicePdfFailure,
+    (state) => ({
+      ...state,
+      pdfRegenerating: false,
+    }),
+  ),
 
   // ── Filter setters ─────────────────────────────────────
   on(InvoicingActions.setSearch, (state, { search }) => ({

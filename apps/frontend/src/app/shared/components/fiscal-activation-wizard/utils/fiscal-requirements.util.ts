@@ -233,6 +233,76 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
     area: 'invoicing',
   },
 
+  // ── Facturacion: preconditions de CONFIGURACION ────────────
+  //
+  // QUE ENTRA EN ESTE MAPA (y por que no entran los demas codigos INVOICING_*).
+  // Estar aqui significa que `presentFiscalError` SECUESTRA el error: en lugar
+  // de un toast, se abre el modal de requisitos con un texto fijo y un CTA. Eso
+  // solo es correcto cuando el fallo cumple las tres condiciones:
+  //
+  //   (a) es una PRECONDICION que vive en la configuracion, no en el documento;
+  //   (b) tiene un destino concreto adonde mandar al usuario a arreglarlo;
+  //   (c) no trae detalle por-instancia que una fila fija destruiria.
+  //
+  // Por (c) quedan FUERA `INVOICING_PROVIDER_004` —trae en `details.dian_errors`
+  // las reglas que la DIAN nombro, y una fila estatica las borraria justo cuando
+  // son lo unico accionable— e `INVOICING_CUFE_001`, que es un fallo interno de
+  // coherencia: no hay nada que el comerciante pueda ir a configurar.
+  //
+  // Por (a) quedan fuera `INVOICING_STATUS_*`, `INVOICING_DUP_001`,
+  // `INVOICING_FIND_*` y `INVOICING_VALIDATE_001` (estado del documento), y por
+  // (b) los `INVOICING_RESOLUTION_003..005` y `007..011`, que se levantan
+  // MIENTRAS el usuario edita la resolucion: mandarlo "a DIAN" cuando ya esta
+  // parado en DIAN es ruido; esos van al campo del formulario.
+  //
+  // `INVOICING_RESOLUTION_001/002` tampoco entran: no los lanza nadie en el
+  // backend — la numeracion falla con `FISCAL_RESOLUTION_MISSING` /
+  // `FISCAL_RESOLUTION_EXHAUSTED`, que ya estan arriba.
+  //
+  // Con el mismo criterio quedan FUERA tres codigos mas, que van por toast:
+  //  - `INVOICING_XSD_001`: fallo de coherencia interna del generador de XML.
+  //    Falla (a) y (b) — no hay dato del comerciante que lo cause ni pantalla
+  //    donde arreglarlo; el copy explica que no se gasto numeracion.
+  //  - `DIAN_EVENT_005`: el backend nombra en `details` el campo que falta del
+  //    evento RADIAN, y ese campo cambia por codigo de evento. Falla (c).
+  //  - `DIAN_TEST_SET_007`: el lote consultado no existe, expiro o es de otra
+  //    config. Falla (b): no hay nada que configurar, solo volver a consultar.
+
+  // Precondicion: la tienda no tiene habilitada la configuracion DIAN de
+  // software propio con la que se transmite. 412 = precondicion de config.
+  // CTA: completarla en Facturacion -> Configuracion DIAN.
+  INVOICING_PROVIDER_002: {
+    label: 'Falta la configuración DIAN de la tienda',
+    reason:
+      'El proveedor de facturación electrónica no está configurado para esta tienda. Complétalo en Facturación → Configuración DIAN antes de transmitir.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la habilitacion de produccion esta incompleta — tipicamente
+  // la resolucion sin clave tecnica (ClTec), sin la cual el CUFE se firmaria
+  // mal y la DIAN rechazaria el documento gastando el consecutivo.
+  // CTA: completar la config DIAN / la resolucion de numeracion.
+  INVOICING_PROVIDER_003: {
+    label: 'Habilitación DIAN incompleta',
+    reason:
+      'Faltan datos obligatorios para transmitir a la DIAN (normalmente la clave técnica de la resolución de numeración). Revisa la configuración DIAN y la resolución antes de reintentar.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la identidad fiscal no tiene entidad contable activa y una
+  // resolucion no puede colgar de la nada. Gemelo de MISSING_ACCOUNTING_ENTITY.
+  // CTA: completar los datos legales.
+  INVOICING_RESOLUTION_006: {
+    label: 'Falta la entidad contable activa',
+    reason:
+      'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala en los datos legales antes de crear la resolución.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a Datos legales', navigate: 'legal_data' },
+  },
+
   // ── Habilitacion / certificado DIAN ────────────────────────
   // Precondicion: falta configurar la conexion DIAN. CTA: configurarla.
   DIAN_CONFIG_001: {
@@ -312,6 +382,30 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
     label: 'Habilitación DIAN incompleta',
     reason:
       'Faltan requisitos para habilitar la DIAN en producción (set de pruebas, certificado o resolución). Completa la habilitación.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: la config DIAN no esta en modo software propio, que es el
+  // unico modo en el que Vendix firma y transmite. 412 = precondicion de config.
+  // CTA: cambiar el modo de operacion en la config DIAN.
+  DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED: {
+    label: 'Falta el modo software propio',
+    reason:
+      'Para emitir en producción, la configuración DIAN de esta tienda debe estar en modo "software propio". Cámbialo en la configuración DIAN antes de pasar a producción.',
+    area: 'invoicing',
+    severity: 'required',
+    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+  },
+  // Precondicion: dos resoluciones activas declaran el MISMO numero y rango, asi
+  // que cual numera depende del orden de las filas. Cada gemela avanza su
+  // consecutivo por separado: la que quede atras repetira numeros ya entregados
+  // a la DIAN, y un consecutivo duplicado se rechaza de forma permanente.
+  // CTA: desactivar la duplicada antes de emitir.
+  DIAN_TEST_SET_008: {
+    label: 'Resolución activa duplicada',
+    reason:
+      'Hay dos resoluciones activas con el mismo número y rango, y no se puede saber cuál numera. Desactiva la duplicada antes de emitir: si ambas siguen activas, la que quede atrás repetirá consecutivos ya enviados y la DIAN rechazará todo lo que emita con ellos.',
     area: 'invoicing',
     severity: 'required',
     action: { label: 'Volver a DIAN', navigate: 'dian_config' },

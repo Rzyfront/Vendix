@@ -172,6 +172,9 @@ export class ShippingAddressModalComponent {
       // El DTO backend usa @IsString @IsLatLong → convertimos number → string.
       if (payload.latitude != null) update.latitude = String(payload.latitude);
       if (payload.longitude != null) update.longitude = String(payload.longitude);
+      // DANE 5 dígitos. Sin él, el emisor cae a "Bogotá / 11001" y la DIAN
+      // rechaza el documento por incoherencia geográfica (FAJ32 / FAK32).
+      if (payload.municipality_code) update.municipality_code = payload.municipality_code;
       this.submitEdit.emit({ addressId: id, payload: update });
     } else {
       // Modo crear: POST /store/addresses con type + customer_id.
@@ -184,6 +187,7 @@ export class ShippingAddressModalComponent {
       };
       if (payload.address_line2) create.address_line_2 = payload.address_line2;
       if (payload.postal_code) create.postal_code = payload.postal_code;
+      if (payload.municipality_code) create.municipality_code = payload.municipality_code;
       if (cid != null) create.customer_id = cid;
       this.submitForm.emit(create);
     }

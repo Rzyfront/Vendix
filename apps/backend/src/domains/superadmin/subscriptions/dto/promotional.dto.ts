@@ -1,12 +1,12 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
   IsNumber,
   IsObject,
   IsNotEmpty,
   MaxLength,
   Min,
+  IsIn,
 } from 'class-validator';
 
 export class CreatePromotionalDto {
@@ -25,7 +25,7 @@ export class CreatePromotionalDto {
   description?: string;
 
   @IsOptional()
-  @IsEnum(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
+  @IsIn(['monthly', 'quarterly', 'semiannual', 'annual', 'lifetime'])
   billing_cycle?: string;
 
   @IsNumber()

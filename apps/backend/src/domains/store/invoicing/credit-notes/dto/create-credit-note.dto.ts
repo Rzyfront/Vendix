@@ -24,8 +24,17 @@ export class CreateCreditNoteDto {
   @MaxLength(500)
   reason?: string;
 
+  /**
+   * Fecha de emisión de la nota. Opcional: cuando no viene, el servicio la
+   * resuelve como HOY en el huso horario de la tienda.
+   *
+   * Exigirla obligaba al frontend a derivar una fecha fiscal en el navegador,
+   * que es justo de donde salen los desfases de un día. El modal de notas nunca
+   * la capturó, así que el campo obligatorio sólo producía un 400.
+   */
+  @IsOptional()
   @IsDateString()
-  issue_date: string;
+  issue_date?: string;
 
   @IsOptional()
   @IsString()
@@ -36,10 +45,16 @@ export class CreateCreditNoteDto {
   @IsString()
   notes?: string;
 
+  /**
+   * Líneas de la nota. Opcional: sin ellas la nota es TOTAL y el servicio copia
+   * las líneas de la factura que corrige, que es el caso más común (anulación)
+   * y el único que la UI ofrece hoy.
+   */
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateInvoiceItemDto)
-  items: CreateInvoiceItemDto[];
+  items?: CreateInvoiceItemDto[];
 
   @IsOptional()
   @IsArray()
@@ -58,8 +73,17 @@ export class CreateDebitNoteDto {
   @MaxLength(500)
   reason?: string;
 
+  /**
+   * Fecha de emisión de la nota. Opcional: cuando no viene, el servicio la
+   * resuelve como HOY en el huso horario de la tienda.
+   *
+   * Exigirla obligaba al frontend a derivar una fecha fiscal en el navegador,
+   * que es justo de donde salen los desfases de un día. El modal de notas nunca
+   * la capturó, así que el campo obligatorio sólo producía un 400.
+   */
+  @IsOptional()
   @IsDateString()
-  issue_date: string;
+  issue_date?: string;
 
   @IsOptional()
   @IsString()
@@ -70,10 +94,16 @@ export class CreateDebitNoteDto {
   @IsString()
   notes?: string;
 
+  /**
+   * Líneas de la nota. Opcional: sin ellas la nota es TOTAL y el servicio copia
+   * las líneas de la factura que corrige, que es el caso más común (anulación)
+   * y el único que la UI ofrece hoy.
+   */
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateInvoiceItemDto)
-  items: CreateInvoiceItemDto[];
+  items?: CreateInvoiceItemDto[];
 
   @IsOptional()
   @IsArray()

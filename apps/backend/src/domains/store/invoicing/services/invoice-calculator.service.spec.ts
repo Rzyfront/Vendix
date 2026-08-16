@@ -1,0 +1,1087 @@
+import { Prisma } from '@prisma/client';
+import {
+  InvoiceCalculatorInput,
+  InvoiceCalculatorService,
+} from './invoice-calculator.service';
+
+/**
+ * El servicio es PURO (sin Prisma, sin ALS, sin HTTP), así que se instancia con
+ * `new` en vez de armar un `Test.createTestingModule`. Ese es justamente el
+ * punto de haberlo separado: la aritmética fiscal se tiene que poder verificar
+ * a mano, sin levantar Nest.
+ */
+describe('InvoiceCalculatorService', () => {
+  let service: InvoiceCalculatorService;
+
+  beforeEach(() => {
+    service = new InvoiceCalculatorService();
+  });
+
+  /** Atajo: una línea con un solo impuesto. */
+  const oneLine = (
+    line: InvoiceCalculatorInput['items'][number],
+  ): InvoiceCalculatorInput => ({ items: [line] });
+
+  describe('IVA 19 % — el caso base', () => {
+    it('calcula base, impuesto y total de una línea exclusiva', () => {
+      const result = service.calculate(
+        oneLine({
+          description: 'Producto A',
+          quantity: 2,
+          unit_price: 50000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.gross_amount).toBe('100000.00');
+      expect(line.line_extension_amount).toBe('100000.00');
+      expect(line.tax_amount).toBe('19000.00');
+      expect(line.total_amount).toBe('119000.00');
+
+      expect(result.totals.total_before_tax).toBe('100000.00');
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.total_amount).toBe('119000.00');
+    });
+
+    it('resta el descuento antes de gravar', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          discount_amount: 10000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.gross_amount).toBe('100000.00');
+      expect(line.discount_amount).toBe('10000.00');
+      expect(line.net_entered_amount).toBe('90000.00');
+      expect(line.line_extension_amount).toBe('90000.00');
+      // 90.000 × 19 % — NO 100.000 × 19 %: la base es neta de descuento.
+      expect(line.tax_amount).toBe('17100.00');
+      expect(line.total_amount).toBe('107100.00');
+    });
+
+    it('escala el importe por la *price unit* (precio por kilo, stock en gramos)', () => {
+      const result = service.calculate(
+        oneLine({
+          description: 'Queso a $28.000/kg, 2.500 g',
+          quantity: 2500,
+          unit_price: 28000,
+          price_unit_quantity: 1000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      // Sin el divisor esto declararía $70.000.000 por una venta de $70.000.
+      expect(result.lines[0].line_extension_amount).toBe('70000.00');
+      expect(result.totals.tax_iva).toBe('13300.00');
+    });
+  });
+
+  describe('EL DEFECTO — el servidor ya no confía en el cliente', () => {
+    it('calcula el IVA aunque el frontend mande tax_amount: 0', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              // Literalmente lo que manda invoice-create.component.ts:731.
+              tax_amount: 0,
+            },
+          ],
+        }),
+      );
+
+      // Antes se persistía 0 y la factura salía con IVA cero.
+      expect(result.lines[0].tax_amount).toBe('19000.00');
+      expect(result.lines[0].taxes[0].tax_amount).toBe('19000.00');
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.total_amount).toBe('119000.00');
+    });
+
+    it('reporta la divergencia en vez de callarla', () => {
+      const result = service.calculate(
+        oneLine({
+          description: 'Producto A',
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva', tax_amount: 0 },
+          ],
+        }),
+      );
+
+      expect(result.divergences).toHaveLength(1);
+      expect(result.divergences[0]).toMatchObject({
+        scope: 'line_tax',
+        line_index: 0,
+        line_description: 'Producto A',
+        tax_name: 'IVA',
+        tax_type: 'iva',
+        expected: '19000.00',
+        received: '0.00',
+        difference: '-19000.00',
+      });
+    });
+
+    it('no lanza excepciones: la política la decide el llamador', () => {
+      expect(() =>
+        service.calculate(
+          oneLine({
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [
+              { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva', tax_amount: 0 },
+            ],
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('no reporta nada cuando el cliente acertó', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              tax_amount: 19000,
+            },
+          ],
+        }),
+      );
+
+      expect(result.divergences).toEqual([]);
+    });
+
+    it('tolera un centavo (el cliente redondea donde el anexo trunca)', () => {
+      const within = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              tax_amount: 19000.01,
+            },
+          ],
+        }),
+      );
+      expect(within.divergences).toEqual([]);
+
+      const beyond = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              tax_amount: 19000.02,
+            },
+          ],
+        }),
+      );
+      expect(beyond.divergences).toHaveLength(1);
+      expect(beyond.divergences[0].scope).toBe('line_tax');
+    });
+
+    it('marca la línea legacy con importe pero sin tarifa de la que derivarlo', () => {
+      const result = service.calculate(
+        oneLine({ quantity: 1, unit_price: 100000, tax_amount: 19000 }),
+      );
+
+      expect(result.lines[0].tax_amount).toBe('0.00');
+      expect(result.divergences).toHaveLength(1);
+      expect(result.divergences[0]).toMatchObject({
+        scope: 'untaxed_line_with_amount',
+        expected: '0.00',
+        received: '19000.00',
+      });
+    });
+  });
+
+  describe('is_inclusive — despeje hacia atrás', () => {
+    it('deriva base y cuota de un precio con IVA incluido', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 119000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.net_entered_amount).toBe('119000.00');
+      // 119.000 / 1,19
+      expect(line.line_extension_amount).toBe('100000.00');
+      expect(line.tax_amount).toBe('19000.00');
+      expect(line.total_amount).toBe('119000.00');
+      expect(line.is_inclusive).toBe(true);
+    });
+
+    it('despeja contra la SUMA de tarifas, no en cascada (IVA 19 % + INC 8 %)', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 127000,
+          is_inclusive: true,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      // 127.000 / (1 + 0,19 + 0,08) = 100.000 exacto.
+      // En cascada (127.000 / 1,19 / 1,08) daría 98.847,63: una base ~1,5 %
+      // más baja, menos IVA declarado, y un ValImp1 que la DIAN no reproduce.
+      expect(line.line_extension_amount).toBe('100000.00');
+      expect(line.taxes[0].tax_amount).toBe('19000.00');
+      expect(line.taxes[1].tax_amount).toBe('8000.00');
+      expect(line.total_amount).toBe('127000.00');
+    });
+
+    it('deja los impuestos exclusivos fuera del divisor (IVA incluido + ICA encima)', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 119000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              is_inclusive: true,
+            },
+            // 7 ‰ = 0,7 %, sobre la base neta, encima del precio.
+            {
+              tax_name: 'ICA',
+              tax_rate: 7,
+              tax_type: 'ica',
+              is_inclusive: false,
+            },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('100000.00');
+      expect(line.taxes[0].tax_amount).toBe('19000.00');
+      expect(line.taxes[1].tax_amount).toBe('700.00');
+      expect(line.total_amount).toBe('119700.00');
+    });
+
+    it('acepta el centavo que el truncado se lleva, en vez de romper base × tarifa', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      // 100 / 1,19 = 84,033613... → 84,03 (truncado, §11.2)
+      expect(line.line_extension_amount).toBe('84.03');
+      // 84,03 × 0,19 = 15,9657 → 15,96
+      expect(line.tax_amount).toBe('15.96');
+      // 84,03 + 15,96 = 99,99, un centavo bajo el precio de mostrador.
+      // Es deliberado: la DIAN valida TaxAmount = TaxableAmount × Percent, así
+      // que inflar la cuota para cuadrar con los $100 rompería esa regla.
+      expect(line.total_amount).toBe('99.99');
+    });
+  });
+
+  describe('Multi-impuesto por línea', () => {
+    it('grava IVA e INC exclusivos sobre la misma base', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.taxes.map((t) => t.taxable_amount)).toEqual([
+        '100000.00',
+        '100000.00',
+      ]);
+      expect(line.tax_amount).toBe('27000.00');
+      expect(line.total_amount).toBe('127000.00');
+
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.tax_inc).toBe('8000.00');
+      expect(result.totals.tax_ica).toBe('0.00');
+      expect(result.totals.tax_other).toBe('0.00');
+    });
+
+    it('respeta una base explícita distinta por impuesto (régimen AIU)', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 1000000,
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              // En AIU el IVA grava solo la utilidad, no el total facturado.
+              taxable_amount: 300000,
+            },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('1000000.00');
+      expect(line.taxes[0].taxable_amount).toBe('300000.00');
+      expect(line.taxes[0].tax_amount).toBe('57000.00');
+      expect(line.total_amount).toBe('1057000.00');
+    });
+
+    it('trata el ICA en por mil, no en porcentaje', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 1000000,
+          taxes: [{ tax_name: 'ICA', tax_rate: 7, tax_type: 'ica' }],
+        }),
+      );
+
+      const [tax] = result.lines[0].taxes;
+      expect(tax.rate_basis).toBe('per_mil');
+      expect(tax.dian_tax_code).toBe('03');
+      // 7 ‰ = 0,7 % ⇒ 7.000, no 70.000.
+      expect(tax.tax_amount).toBe('7000.00');
+      expect(result.totals.tax_ica).toBe('7000.00');
+    });
+  });
+
+  describe('Exento (0 %) vs excluido (sin impuesto) — no son lo mismo', () => {
+    it('exento: emite una fila de impuesto al 0 %', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 0, tax_type: 'iva' }],
+        }),
+      );
+
+      expect(result.lines[0].taxes).toHaveLength(1);
+      expect(result.lines[0].taxes[0]).toMatchObject({
+        dian_tax_code: '01',
+        tax_rate: '0.00',
+        taxable_amount: '100000.00',
+        tax_amount: '0.00',
+      });
+      // El esquema existe: el XML emitirá un TaxSubtotal con Percent 0.00.
+      expect(result.tax_schemes).toHaveLength(1);
+      expect(result.header_taxes).toHaveLength(1);
+      expect(result.totals.total_amount).toBe('100000.00');
+    });
+
+    it('excluido: no emite ninguna fila de impuesto', () => {
+      const result = service.calculate(
+        oneLine({ quantity: 1, unit_price: 100000 }),
+      );
+
+      expect(result.lines[0].taxes).toEqual([]);
+      // Sin esquema no hay TaxSubtotal en el XML — que es exactamente la
+      // diferencia entre un bien exento y uno excluido.
+      expect(result.tax_schemes).toEqual([]);
+      expect(result.header_taxes).toEqual([]);
+      expect(result.totals.total_amount).toBe('100000.00');
+    });
+
+    it('el total coincide pero la estructura no', () => {
+      const exento = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 0, tax_type: 'iva' }],
+        }),
+      );
+      const excluido = service.calculate(
+        oneLine({ quantity: 1, unit_price: 100000 }),
+      );
+
+      expect(exento.totals.total_amount).toBe(excluido.totals.total_amount);
+      expect(exento.tax_schemes.length).not.toBe(excluido.tax_schemes.length);
+    });
+  });
+
+  describe('Truncado, no redondeo (Anexo 1.9 §11.2)', () => {
+    it('baja el tercer decimal ≥ 5 en vez de subir el centavo', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100.05,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      // 100,05 × 0,19 = 19,0095 → redondeado sería 19,01; truncado es 19,00.
+      expect(result.lines[0].tax_amount).toBe('19.00');
+      expect(result.lines[0].total_amount).toBe('119.05');
+    });
+
+    it('trunca también sobre cantidades fraccionadas', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 3,
+          unit_price: 33.33,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      expect(result.lines[0].line_extension_amount).toBe('99.99');
+      // 99,99 × 0,19 = 18,9981 → 18,99 (redondeado sería 19,00).
+      expect(result.lines[0].tax_amount).toBe('18.99');
+    });
+
+    it('suma valores YA truncados: la cabecera es la suma de lo que va al XML', () => {
+      // Dos líneas de 10,005. Si la cabecera sumara en precisión plena y
+      // truncara al final daría 20,01, mientras el XML lleva 10,00 + 10,00 =
+      // 20,00 → descuadre FAU14 y rechazo.
+      const result = service.calculate({
+        items: [
+          { quantity: 1, unit_price: 10.005 },
+          { quantity: 1, unit_price: 10.005 },
+        ],
+      });
+
+      expect(result.lines.map((l) => l.line_extension_amount)).toEqual([
+        '10.00',
+        '10.00',
+      ]);
+      expect(result.totals.total_before_tax).toBe('20.00');
+    });
+  });
+
+  describe('Retenciones — NO restan del total (Anexo 1.9 §11.9.1)', () => {
+    const base_invoice: InvoiceCalculatorInput = {
+      items: [
+        {
+          quantity: 1,
+          unit_price: 1000000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+      ],
+    };
+
+    it('el total es idéntico con y sin retención', () => {
+      const sin = service.calculate(base_invoice);
+      const con = service.calculate({
+        ...base_invoice,
+        withholdings: [
+          {
+            withholding_type: 'retefuente',
+            concept_code: 'compras_generales',
+            rate: 2.5,
+          },
+        ],
+      });
+
+      expect(con.totals.total_amount).toBe(sin.totals.total_amount);
+      expect(con.totals.total_amount).toBe('1190000.00');
+      expect(con.totals.tax_inclusive_amount).toBe('1190000.00');
+      // Calculada y devuelta aparte, nunca netada.
+      expect(con.totals.withholding_amount).toBe('25000.00');
+    });
+
+    it('retefuente retiene sobre la base gravable', () => {
+      const result = service.calculate({
+        ...base_invoice,
+        withholdings: [{ withholding_type: 'retefuente', rate: 2.5 }],
+      });
+
+      expect(result.withholdings[0]).toMatchObject({
+        withholding_type: 'retefuente',
+        base: '1000000.00',
+        amount: '25000.00',
+        rate_basis: 'percent',
+      });
+    });
+
+    it('reteIVA retiene sobre el IVA de la operación, no sobre el subtotal', () => {
+      const result = service.calculate({
+        ...base_invoice,
+        withholdings: [{ withholding_type: 'reteiva', rate: 15 }],
+      });
+
+      expect(result.withholdings[0]).toMatchObject({
+        withholding_type: 'reteiva',
+        base: '190000.00',
+        amount: '28500.00',
+      });
+      expect(result.totals.total_amount).toBe('1190000.00');
+    });
+
+    it('reteICA se expresa en por mil', () => {
+      const result = service.calculate({
+        ...base_invoice,
+        withholdings: [{ withholding_type: 'reteica', rate: 9.66 }],
+      });
+
+      expect(result.withholdings[0].rate_basis).toBe('per_mil');
+      // 1.000.000 × 9,66 ‰ = 9.660
+      expect(result.withholdings[0].amount).toBe('9660.00');
+    });
+
+    it('saca del documento una retención infiltrada como impuesto de línea', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 1000000,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            // `CreateInvoiceTaxDto.tax_type` admite retenciones; sin este
+            // corte, "ReteICA" caería al heurístico por nombre y se
+            // clasificaría como ICA ('03'), contaminando ValImp3 del CUFE.
+            { tax_name: 'ReteICA', tax_rate: 10, tax_type: 'reteica' },
+          ],
+        }),
+      );
+
+      expect(result.totals.tax_ica).toBe('0.00');
+      expect(
+        result.tax_schemes.map((scheme) => scheme.dian_tax_code),
+      ).not.toContain('03');
+      expect(result.totals.total_amount).toBe('1190000.00');
+
+      expect(result.withholdings).toHaveLength(1);
+      expect(result.withholdings[0].amount).toBe('10000.00');
+      expect(
+        result.divergences.some((d) => d.scope === 'withholding_as_tax'),
+      ).toBe(true);
+    });
+
+    it('reporta una retención cuyo importe declarado no cuadra', () => {
+      const result = service.calculate({
+        ...base_invoice,
+        withholdings: [
+          { withholding_type: 'retefuente', rate: 2.5, amount: 30000 },
+        ],
+      });
+
+      expect(result.divergences).toHaveLength(1);
+      expect(result.divergences[0]).toMatchObject({
+        scope: 'withholding_amount',
+        expected: '25000.00',
+        received: '30000.00',
+        difference: '5000.00',
+      });
+    });
+  });
+
+  describe('Anticipos — informativos desde el Anexo 1.8', () => {
+    it('no restan del total', () => {
+      const result = service.calculate({
+        items: [
+          {
+            quantity: 1,
+            unit_price: 1000000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+        prepaid_amount: 500000,
+      });
+
+      expect(result.totals.prepaid_amount).toBe('500000.00');
+      expect(result.totals.total_amount).toBe('1190000.00');
+    });
+  });
+
+  describe('Agregación por esquema DIAN (ValImp1/2/3 del CUFE)', () => {
+    it('agrupa por el código de esquema y respeta el orden 01 → 04 → 03', () => {
+      const result = service.calculate({
+        items: [
+          {
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [
+              { tax_name: 'ICA', tax_rate: 7, tax_type: 'ica' },
+              { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+              { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            ],
+          },
+        ],
+      });
+
+      expect(result.tax_schemes.map((s) => s.dian_tax_code)).toEqual([
+        '01',
+        '04',
+        '03',
+      ]);
+      expect(result.tax_schemes.map((s) => s.scheme_name)).toEqual([
+        'IVA',
+        'INC',
+        'ICA',
+      ]);
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.tax_inc).toBe('8000.00');
+      expect(result.totals.tax_ica).toBe('700.00');
+    });
+
+    it('clasifica por tax_type persistido aunque el nombre mienta', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [
+            // Nombre libre del usuario; el tipo fiscal manda.
+            { tax_name: 'Impuesto al consumo', tax_rate: 8, tax_type: 'inc' },
+          ],
+        }),
+      );
+
+      expect(result.lines[0].taxes[0].dian_tax_code).toBe('04');
+      expect(result.totals.tax_inc).toBe('8000.00');
+      expect(result.totals.tax_iva).toBe('0.00');
+    });
+
+    it('trata una fila sin tax_type como IVA', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19 }],
+        }),
+      );
+
+      expect(result.lines[0].taxes[0].tax_type).toBe('iva');
+      expect(result.lines[0].taxes[0].dian_tax_code).toBe('01');
+      expect(result.totals.tax_iva).toBe('19000.00');
+    });
+
+    it('agrupa dos líneas con el mismo impuesto en una sola fila de cabecera', () => {
+      const result = service.calculate({
+        items: [
+          {
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+          {
+            quantity: 1,
+            unit_price: 200000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(result.header_taxes).toHaveLength(1);
+      expect(result.header_taxes[0]).toMatchObject({
+        tax_name: 'IVA',
+        tax_rate: '19.00',
+        taxable_amount: '300000.00',
+        tax_amount: '57000.00',
+      });
+    });
+
+    it('separa las tarifas distintas del mismo impuesto', () => {
+      const result = service.calculate({
+        items: [
+          {
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+          {
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [{ tax_name: 'IVA', tax_rate: 5, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(result.header_taxes).toHaveLength(2);
+      // Pero un solo esquema: los dos son IVA ⇒ un único ValImp1.
+      expect(result.tax_schemes).toHaveLength(1);
+      expect(result.totals.tax_iva).toBe('24000.00');
+    });
+  });
+
+  describe('Identidad aritmética que valida la DIAN', () => {
+    const complex: InvoiceCalculatorInput = {
+      items: [
+        {
+          description: 'Exclusivo con descuento',
+          quantity: 3,
+          unit_price: 33333,
+          discount_amount: 999,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+        {
+          description: 'Inclusivo IVA + INC',
+          quantity: 2,
+          unit_price: 63500,
+          is_inclusive: true,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+          ],
+        },
+        {
+          description: 'Exento',
+          quantity: 1,
+          unit_price: 45000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 0, tax_type: 'iva' }],
+        },
+        {
+          description: 'Excluido',
+          quantity: 7,
+          unit_price: 1234.56,
+        },
+      ],
+      withholdings: [{ withholding_type: 'retefuente', rate: 2.5 }],
+      prepaid_amount: 10000,
+    };
+
+    const sum = (values: string[]): string =>
+      values
+        .reduce(
+          (acc, value) => acc.plus(new Prisma.Decimal(value)),
+          new Prisma.Decimal(0),
+        )
+        .toFixed(2);
+
+    it('la suma de las líneas es la base de la cabecera (FAU14)', () => {
+      const result = service.calculate(complex);
+      expect(sum(result.lines.map((l) => l.line_extension_amount))).toBe(
+        result.totals.total_before_tax,
+      );
+    });
+
+    it('la suma de los impuestos de línea es el TaxTotal', () => {
+      const result = service.calculate(complex);
+      expect(sum(result.lines.map((l) => l.tax_amount))).toBe(
+        result.totals.tax_amount,
+      );
+    });
+
+    it('base + impuestos = total pagadero', () => {
+      const result = service.calculate(complex);
+      expect(
+        sum([result.totals.total_before_tax, result.totals.tax_amount]),
+      ).toBe(result.totals.total_amount);
+    });
+
+    it('ValImp1 + ValImp2 + ValImp3 + otros = TaxTotal', () => {
+      const result = service.calculate(complex);
+      expect(
+        sum([
+          result.totals.tax_iva,
+          result.totals.tax_inc,
+          result.totals.tax_ica,
+          result.totals.tax_other,
+        ]),
+      ).toBe(result.totals.tax_amount);
+    });
+
+    it('la suma de los totales de línea es el total del documento', () => {
+      const result = service.calculate(complex);
+      expect(sum(result.lines.map((l) => l.total_amount))).toBe(
+        result.totals.total_amount,
+      );
+    });
+
+    it('los esquemas suman exactamente el TaxTotal', () => {
+      const result = service.calculate(complex);
+      expect(sum(result.tax_schemes.map((s) => s.tax_amount))).toBe(
+        result.totals.tax_amount,
+      );
+    });
+
+    it('las filas de cabecera suman exactamente el TaxTotal', () => {
+      const result = service.calculate(complex);
+      expect(sum(result.header_taxes.map((t) => t.tax_amount))).toBe(
+        result.totals.tax_amount,
+      );
+    });
+
+    it('ni la retención ni el anticipo tocan el total', () => {
+      const result = service.calculate(complex);
+      const without = service.calculate({ items: complex.items });
+      expect(result.totals.total_amount).toBe(without.totals.total_amount);
+      expect(result.totals.withholding_amount).not.toBe('0.00');
+      expect(result.totals.prepaid_amount).toBe('10000.00');
+    });
+  });
+
+  describe('Entrada defensiva', () => {
+    it('devuelve ceros con un documento sin líneas', () => {
+      const result = service.calculate({ items: [] });
+      expect(result.totals).toMatchObject({
+        total_before_tax: '0.00',
+        tax_amount: '0.00',
+        total_amount: '0.00',
+        withholding_amount: '0.00',
+        prepaid_amount: '0.00',
+      });
+      expect(result.divergences).toEqual([]);
+    });
+
+    it('nunca emite una base negativa cuando el descuento supera el precio', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100,
+          discount_amount: 500,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      expect(result.lines[0].line_extension_amount).toBe('0.00');
+      expect(result.lines[0].tax_amount).toBe('0.00');
+      expect(result.totals.total_amount).toBe('0.00');
+    });
+
+    it('acepta Prisma.Decimal y strings además de number', () => {
+      const result = service.calculate(
+        oneLine({
+          quantity: new Prisma.Decimal('2'),
+          unit_price: '50000.00',
+          taxes: [
+            {
+              tax_name: 'IVA',
+              tax_rate: new Prisma.Decimal('19.00'),
+              tax_type: 'iva',
+            },
+          ],
+        }),
+      );
+
+      expect(result.lines[0].line_extension_amount).toBe('100000.00');
+      expect(result.lines[0].tax_amount).toBe('19000.00');
+    });
+  });
+
+  /**
+   * AIU — el bloque que protege el error que NO se ve.
+   *
+   * Un contrato AIU mal clasificado no produce rechazo: produce una factura que
+   * la DIAN acepta declarando menos IVA del debido. Estos casos fijan las dos
+   * bases gravables y el piso legal para que un cambio futuro tenga que
+   * romperlos antes de volver a mezclarlas.
+   */
+  describe('AIU — base gravable por régimen', () => {
+    /**
+     * Contrato de aseo por $100M: $90M de costo reembolsable (sin componente),
+     * $6M de administración, $1M de imprevistos y $3M de utilidad.
+     */
+    const aiuContract = (
+      aiu: InvoiceCalculatorInput['aiu'],
+    ): InvoiceCalculatorInput => ({
+      aiu,
+      items: [
+        {
+          description: 'Costo reembolsable (nómina e insumos)',
+          quantity: 1,
+          unit_price: 90_000_000,
+        },
+        {
+          description: 'Administración',
+          quantity: 1,
+          unit_price: 6_000_000,
+          aiu_component: 'administracion',
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+        {
+          description: 'Imprevistos',
+          quantity: 1,
+          unit_price: 1_000_000,
+          aiu_component: 'imprevistos',
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+        {
+          description: 'Utilidad',
+          quantity: 1,
+          unit_price: 3_000_000,
+          aiu_component: 'utilidad',
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+      ],
+    });
+
+    it('E.T. art. 462-1: grava el AIU COMPLETO (A+I+U) y nunca el costo', () => {
+      const result = service.calculate(aiuContract({ regime: 'et_462_1' }));
+
+      // La línea de costo reembolsable NO hace parte del AIU: sale sin grupo de
+      // impuesto (regla CAX01), no con impuesto en cero.
+      expect(result.lines[0].omit_tax_total).toBe(true);
+      expect(result.lines[0].tax_amount).toBe('0.00');
+
+      // Los tres componentes gravan.
+      expect(result.lines[1].omit_tax_total).toBe(false);
+      expect(result.lines[2].omit_tax_total).toBe(false);
+      expect(result.lines[3].omit_tax_total).toBe(false);
+
+      // IVA sobre $10M de AIU, no sobre los $100M del contrato.
+      expect(result.totals.tax_iva).toBe('1900000.00');
+      expect(result.aiu?.contract_value).toBe('100000000.00');
+      expect(result.aiu?.aiu_value).toBe('10000000.00');
+      expect(result.aiu?.taxable_base).toBe('10000000.00');
+    });
+
+    it('Decreto 1372/1992: grava SÓLO la utilidad', () => {
+      const result = service.calculate(
+        aiuContract({ regime: 'decreto_1372_1992' }),
+      );
+
+      // Administración e imprevistos quedan fuera de la base y por tanto sin
+      // `cac:TaxTotal` de línea.
+      expect(result.lines[1].omit_tax_total).toBe(true);
+      expect(result.lines[2].omit_tax_total).toBe(true);
+      expect(result.lines[3].omit_tax_total).toBe(false);
+
+      // IVA sobre $3M, no sobre $10M: la diferencia entre los dos regímenes es
+      // exactamente lo que se declara de menos si se elige el equivocado.
+      expect(result.totals.tax_iva).toBe('570000.00');
+      expect(result.aiu?.taxable_base).toBe('3000000.00');
+      // El AIU declarado sigue siendo el mismo; lo que cambia es qué grava.
+      expect(result.aiu?.aiu_value).toBe('10000000.00');
+    });
+
+    it('reporta —sin inflar— el AIU que no llega al 10 % del contrato', () => {
+      const result = service.calculate({
+        aiu: { regime: 'et_462_1' },
+        items: [
+          { description: 'Costo', quantity: 1, unit_price: 95_000_000 },
+          {
+            description: 'Utilidad',
+            quantity: 1,
+            unit_price: 5_000_000,
+            aiu_component: 'utilidad',
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      const floor = result.divergences.find(
+        (d) => d.scope === 'aiu_base_below_minimum',
+      );
+      expect(floor).toBeDefined();
+      expect(floor?.expected).toBe('10000000.00');
+      expect(floor?.received).toBe('5000000.00');
+
+      // La base NO se sube por cuenta propia: el AIU es una cifra pactada.
+      expect(result.aiu?.taxable_base).toBe('5000000.00');
+      expect(result.totals.tax_iva).toBe('950000.00');
+    });
+
+    it('el piso del 10 % NO aplica bajo Decreto 1372/1992', () => {
+      const result = service.calculate({
+        aiu: { regime: 'decreto_1372_1992' },
+        items: [
+          { description: 'Obra', quantity: 1, unit_price: 95_000_000 },
+          {
+            description: 'Utilidad',
+            quantity: 1,
+            unit_price: 5_000_000,
+            aiu_component: 'utilidad',
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(
+        result.divergences.some((d) => d.scope === 'aiu_base_below_minimum'),
+      ).toBe(false);
+    });
+
+    it('descarta el impuesto que una línea fuera de base intente declarar', () => {
+      const result = service.calculate({
+        aiu: { regime: 'decreto_1372_1992' },
+        items: [
+          {
+            description: 'Administración',
+            quantity: 1,
+            unit_price: 1_000_000,
+            aiu_component: 'administracion',
+            // El cliente manda IVA en una línea que bajo este régimen NO grava.
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(result.lines[0].omit_tax_total).toBe(true);
+      expect(result.lines[0].tax_amount).toBe('0.00');
+      expect(result.lines[0].taxes).toHaveLength(0);
+      expect(
+        result.divergences.some(
+          (d) => d.scope === 'aiu_untaxable_line_declares_tax',
+        ),
+      ).toBe(true);
+    });
+
+    it('sin bloque `aiu` el documento es normal y `aiu_component` se ignora', () => {
+      const result = service.calculate({
+        items: [
+          {
+            description: 'Utilidad',
+            quantity: 1,
+            unit_price: 1_000_000,
+            aiu_component: 'utilidad',
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(result.aiu).toBeUndefined();
+      expect(result.lines[0].omit_tax_total).toBe(false);
+      expect(result.lines[0].tax_amount).toBe('190000.00');
+    });
+  });
+
+  /**
+   * Multi-impuesto por línea: dos tributos DISTINTOS sobre la misma base. El
+   * XML necesita un `cac:TaxSubtotal` por cada uno, así que el motor tiene que
+   * conservarlos separados en vez de agregarlos en un único importe.
+   */
+  describe('multi-impuesto por línea', () => {
+    it('conserva IVA e INC separados en la línea y por esquema en la cabecera', () => {
+      const result = service.calculate(
+        oneLine({
+          description: 'Menú de restaurante',
+          quantity: 1,
+          unit_price: 100_000,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+          ],
+        }),
+      );
+
+      expect(result.lines[0].taxes).toHaveLength(2);
+      expect(result.lines[0].tax_amount).toBe('27000.00');
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.tax_inc).toBe('8000.00');
+
+      // Cabecera: una fila por esquema, no una sola con la suma.
+      expect(result.header_taxes).toHaveLength(2);
+    });
+  });
+});

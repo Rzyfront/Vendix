@@ -9,6 +9,21 @@ import {
 import { Reflector } from '@nestjs/core';
 import { FiscalArea } from '../interfaces/fiscal-status.interface';
 import { FiscalGateService } from '../services/fiscal-gate.service';
+import { ErrorCodes } from '../errors/error-codes';
+import { VendixHttpException } from '../errors/vendix-http.exception';
+
+/**
+ * Nombre del área tal como lo ve el comerciante en el asistente fiscal.
+ *
+ * El identificador técnico (`invoicing`) no significa nada fuera del código, y
+ * un 403 que dice «invoicing» manda al usuario a buscar un módulo que en su
+ * panel se llama «Facturación».
+ */
+const MODULE_LABELS: Partial<Record<FiscalArea, string>> = {
+  invoicing: 'Facturación',
+  accounting: 'Contabilidad',
+  payroll: 'Nómina',
+};
 
 export const MODULE_FLOW_KEY = 'module_flow';
 export const RequireModuleFlow = (
@@ -84,12 +99,19 @@ export class ModuleFlowGuard implements CanActivate {
         module as FiscalArea,
       );
       if (!enabled) {
-        throw new ForbiddenException(
-          `Fiscal area "${module}" is inactive for this tenant`,
+        throw new VendixHttpException(
+          ErrorCodes.FISCAL_AREA_INACTIVE,
+          `El área fiscal "${MODULE_LABELS[module as FiscalArea] ?? module}" no está activa para esta tienda. Actívala en el asistente fiscal antes de usar el módulo.`,
+          { area: module },
         );
       }
       return true;
     } catch (error) {
+      // `VendixHttpException` primero: extiende `HttpException`, NO
+      // `ForbiddenException`, así que sin esta rama la denegación tipada caía
+      // al `return false` de abajo y Nest la reemplazaba por un «Forbidden
+      // resource» genérico — exactamente el mensaje que este cambio elimina.
+      if (error instanceof VendixHttpException) throw error;
       if (error instanceof ForbiddenException) throw error;
       this.logger.warn(
         `Module flow check failed for "${module}" (org ${organization_id}) — denying access: ${(error as Error).message}`,

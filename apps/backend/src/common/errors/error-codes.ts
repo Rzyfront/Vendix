@@ -36,6 +36,46 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Resource conflict',
   },
+  /**
+   * RED DE SEGURIDAD DEL FILTRO GLOBAL — Prisma P2020 («value out of range»).
+   *
+   * Por qué existe: `ParseIntPipe` acepta `999999999999999999` porque ES un
+   * entero sintácticamente válido; quien lo rechaza es Postgres, ya dentro de la
+   * consulta, con `22003` sobre una columna `int4`. Sin este código, cualquier
+   * `:id` desmesurado —o un bot barriendo la API— produce un 500 que ensucia la
+   * observabilidad con falsos incidentes de servidor.
+   *
+   * Por qué 400 y no 404: la petición nunca llegó a ser una búsqueda. Postgres
+   * se negó a comparar el valor, así que responder 404 afirmaría que se buscó y
+   * no se encontró, cuando lo cierto es que el identificador no es legal para la
+   * columna.
+   *
+   * El texto crudo de Prisma NO viaja al cliente: incluye el fragmento de la
+   * invocación con nombres de tabla y columna. Ese detalle va al log.
+   */
+  SYS_VALUE_OUT_OF_RANGE_001: {
+    code: 'SYS_VALUE_OUT_OF_RANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'A value in the request exceeds the range the database column can store (Prisma P2020)',
+  },
+  /**
+   * RED DE SEGURIDAD DEL FILTRO GLOBAL — subconjunto ESTRECHO de
+   * `PrismaClientValidationError`: solo el desajuste de TIPO de un valor.
+   *
+   * `PrismaClientValidationError` cubre dos poblaciones muy distintas y
+   * mezclarlas sería el peor de los arreglos. «Unknown argument» o «Argument X
+   * is missing» son consultas que Vendix construyó mal: bugs del servidor, y
+   * deben seguir siendo 500 para que sigan doliendo y se vean. Solo el caso
+   * «Invalid value provided. Expected Int, provided String» tiene su origen en
+   * el dato que mandó el cliente, y ese es el único que este código traduce.
+   */
+  SYS_INVALID_FIELD_VALUE_001: {
+    code: 'SYS_INVALID_FIELD_VALUE_001',
+    httpStatus: 400,
+    devMessage:
+      'A request value does not match the type the model field expects (narrow PrismaClientValidationError subset)',
+  },
 
   // Role scope (QUI-72) — shared by superadmin / organization / store levels.
   // Live next to SYS_* on purpose: the scope matrix is cross-domain, so the
@@ -752,6 +792,42 @@ export const ErrorCodes = {
     devMessage: 'track_inventory_override inválido',
   },
 
+  /**
+   * `products.account_code` / `product_variants.account_code` — subcuenta PUC de
+   * ingreso escrita a mano sobre el catálogo.
+   *
+   * Hasta aquí sólo se validaba la FORMA (`PUC_ACCOUNT_CODE_REGEX`: 4-20
+   * dígitos). Un código con forma válida pero que no existe en el
+   * `chart_of_accounts` de la organización se guardaba sin queja y, al facturar,
+   * `AutoEntryService.resolveInvoiceRevenueLines()` lo descartaba y acreditaba
+   * la cuenta de ingreso POR DEFECTO dejando sólo un `logger.warn`. El
+   * comerciante creía tener su venta separada en una subcuenta y su contabilidad
+   * decía otra cosa, sin ningún síntoma visible.
+   *
+   * Los tres casos van separados porque exigen acciones distintas del usuario:
+   * crear la cuenta, activarla, o bajar a una subcuenta hija. 400 y no 422 para
+   * alinear con el resto del bloque `PROD_*`: el frontend discrimina por
+   * `error_code`, no por status.
+   */
+  PROD_ACCOUNT_CODE_NOT_FOUND_001: {
+    code: 'PROD_ACCOUNT_CODE_NOT_FOUND_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada no existe en el plan de cuentas (PUC) de esta organización',
+  },
+  PROD_ACCOUNT_CODE_INACTIVE_001: {
+    code: 'PROD_ACCOUNT_CODE_INACTIVE_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada está inactiva y no puede recibir movimientos',
+  },
+  PROD_ACCOUNT_CODE_NOT_POSTABLE_001: {
+    code: 'PROD_ACCOUNT_CODE_NOT_POSTABLE_001',
+    httpStatus: 400,
+    devMessage:
+      'La cuenta contable indicada es de agrupación y no admite movimientos; se requiere una subcuenta',
+  },
+
   // Quotations
   QUOTE_CONVERT_STATUS_001: {
     code: 'QUOTE_CONVERT_STATUS_001',
@@ -1460,6 +1536,77 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Error creating invoice',
   },
+  /**
+   * El documento de origen YA TIENE una factura viva.
+   *
+   * 409 y no 400: la petición está bien formada, lo que está mal es el estado
+   * del recurso. El cliente no tiene nada que corregir en el cuerpo — tiene que
+   * mirar la factura que ya existe.
+   *
+   * Existe porque `createFromOrder` / `createFromSalesOrder` NO tenían guarda:
+   * iban derecho a `generateNextNumber()`, que toma el consecutivo autorizado
+   * bajo `pg_advisory_xact_lock` e incrementa `current_number` en el acto. Dos
+   * clics en «Emitir factura electrónica» —o un botón que nunca se esconde
+   * porque su predicado leía un campo que la proyección no trae— quemaban
+   * numeración autorizada de la DIAN por cada intento, y esa numeración no se
+   * recupera.
+   *
+   * `details.invoice_id` / `details.invoice_number` viajan para que la UI pueda
+   * enlazar la factura existente en vez de dejar al usuario en un callejón.
+   */
+  INVOICING_CREATE_002: {
+    code: 'INVOICING_CREATE_002',
+    httpStatus: 409,
+    devMessage: 'Source document already has a live invoice',
+  },
+  /**
+   * El pedido de venta no puede facturarse porque no lleva desglose de
+   * impuestos.
+   *
+   * `sales_order_items` no tiene columna de impuesto ni tabla hermana
+   * equivalente a `order_item_taxes`, y `products` no enlaza una `tax_rates`.
+   * La ruta emitía todas las líneas con `tax = 0`: una factura con IVA cero,
+   * `ValImp1` incorrecto DENTRO del hash CUFE —que la DIAN recomputa desde el
+   * XML— y rechazo por la regla aritmética, después de haber quemado el
+   * consecutivo.
+   *
+   * Se rechaza ANTES de tomar numeración. Cuando exista el módulo de pedidos de
+   * venta con su desglose tributario, esta guarda se retira.
+   */
+  INVOICING_CREATE_003: {
+    code: 'INVOICING_CREATE_003',
+    httpStatus: 422,
+    devMessage: 'Sales orders carry no tax breakdown; cannot be invoiced',
+  },
+  /**
+   * El área fiscal «invoicing» está inactiva para el tenant.
+   *
+   * Las dos compuertas de abajo lanzaban `ForbiddenException` a secas. Un 403
+   * sin `error_code` deja a `parseApiError` sin nada que mapear —devuelve
+   * `DEFAULT_ERROR_MESSAGE`— y el mensaje en español que el backend ya había
+   * escrito no llegaba nunca a la pantalla: el comerciante veía «Ocurrió un
+   * error» en lugar de «completa el set de pruebas y activa producción».
+   *
+   * Es el defecto §C.1 #6 del plan, aplicado a la puerta que MÁS se dispara.
+   */
+  INVOICING_AREA_001: {
+    code: 'INVOICING_AREA_001',
+    httpStatus: 403,
+    devMessage: 'Fiscal area "invoicing" is inactive for this tenant',
+  },
+  /**
+   * El tenant configuró facturación electrónica pero su habilitación no está
+   * viva (ambiente ≠ producción o `enablement_status` ≠ `enabled`).
+   *
+   * Separado de `INVOICING_AREA_001` porque la acción correctiva es distinta:
+   * allá se activa el área fiscal, acá se termina el set de pruebas ante la
+   * DIAN. Un solo código obligaría a un mensaje que no sirve para ninguno.
+   */
+  INVOICING_ENABLEMENT_001: {
+    code: 'INVOICING_ENABLEMENT_001',
+    httpStatus: 403,
+    devMessage: 'DIAN enablement is not live (production + enabled) yet',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,
@@ -1543,6 +1690,30 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Resolution validity window is inverted or empty',
   },
+  /**
+   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 caracteres
+   * hexadecimales, el hex de un SHA-1.
+   *
+   * No es una validación cosmética — es la que faltaba. En producción se guardó
+   * una ClTec de 38 caracteres (todos hex, sin espacios: un par de caracteres
+   * perdidos al copiar o al leerla por OCR). Nadie la revisó porque el DTO solo
+   * pedía `@IsString() @MaxLength(255)`. El CUFE se calculó con ella, la DIAN lo
+   * recomputó con la verdadera, los hashes difirieron y respondió «Valor del CUFE
+   * no está calculado correctamente» — con el consecutivo autorizado ya gastado,
+   * que es irrecuperable.
+   *
+   * La ClTec es la única entrada del hash que el XML NO lleva, así que la DIAN es
+   * el primer sistema capaz de detectar que está mal. Por eso su forma se valida
+   * al ESCRIBIRLA: es la última oportunidad barata.
+   *
+   * 422 y no 400: el payload está bien formado, el valor fiscal no.
+   */
+  INVOICING_RESOLUTION_011: {
+    code: 'INVOICING_RESOLUTION_011',
+    httpStatus: 422,
+    devMessage:
+      'Technical key (ClTec) must be exactly 40 hexadecimal characters as issued by the DIAN numbering-range web service',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
@@ -1568,10 +1739,325 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Invoice provider rejected the document',
   },
+  /**
+   * Los campos que se hashearon en el CUFE/CUDE no coinciden con los que quedaron
+   * escritos en el XML que se iba a transmitir.
+   *
+   * La DIAN recomputa la huella LEYENDO EL XML. Si el hash se armó con un valor y
+   * el XML declara otro —el NIT del adquiriente con dígito de verificación en un
+   * lado y sin él en el otro, el IVA clasificado por nombre acá y por `tax_type`
+   * allá, un total que se recalculó después de hashear— el documento se rechaza y
+   * el consecutivo autorizado se pierde.
+   *
+   * Este código existe para que esa divergencia se detecte ANTES de firmar y
+   * transmitir, comparando lo hasheado contra el XML ya construido. Es un fallo de
+   * coherencia interna, no del contribuyente: `details` nombra el campo divergente
+   * y ambos valores para que sea depurable sin leer el XML entero.
+   */
+  INVOICING_CUFE_001: {
+    code: 'INVOICING_CUFE_001',
+    httpStatus: 422,
+    devMessage:
+      'Document key was computed from values that diverge from the built XML; transmission aborted before consuming numbering',
+  },
+  /**
+   * El XML construido no respeta el modelo de contenido de los XSD de la DIAN:
+   * un elemento fuera del orden que fija `xsd:sequence`, uno que el tipo no
+   * admite, o uno obligatorio que falta.
+   *
+   * UBL ordena los hijos de cada elemento por secuencia, y ese orden lo sostenían
+   * comentarios en los builders, no una compuerta. La consecuencia real fue una
+   * familia de defectos silenciosos: `cbc:ID` al final de `cac:Person` en vez de
+   * al principio, `cac:Contact` detrás de `cac:Person`, `cbc:DueDate` detrás de
+   * `cbc:LineCountNumeric`. Cada uno produce un documento con TODO el contenido
+   * correcto que la DIAN rechaza por estructura, con un mensaje que no dice qué
+   * elemento sobra ni dónde — y el consecutivo autorizado ya se gastó.
+   *
+   * Se corta antes de firmar y transmitir: acá no hay nada perdido, el borrador
+   * conserva su número y se reemite en cuanto se corrija. `details` nombra la
+   * ruta del elemento y qué esperaba el esquema.
+   *
+   * Es un fallo de coherencia interna del generador, nunca del contribuyente:
+   * ningún dato que capture un usuario puede provocarlo.
+   */
+  INVOICING_XSD_001: {
+    code: 'INVOICING_XSD_001',
+    httpStatus: 422,
+    devMessage:
+      'Built XML violates the DIAN UBL content model; transmission aborted before signing',
+  },
+  /**
+   * Una línea declara importe de impuesto pero no declara NINGUNA tarifa de la
+   * que derivarlo.
+   *
+   * Desde que el servidor recalcula toda la aritmética (`InvoiceCalculatorService`)
+   * el `tax_amount` que manda el cliente es informativo: se contrasta y, si
+   * difiere, gana el servidor. Este caso es el único irrecuperable — sin tarifa
+   * no hay nada que recalcular, y un importe de impuesto suelto no puede
+   * producir un `cac:TaxSubtotal` válido porque la DIAN exige `cbc:Percent` y
+   * valida `TaxAmount = TaxableAmount × Percent/100`.
+   *
+   * Se corta al crear/actualizar, no al emitir: acá todavía no se ha gastado
+   * numeración autorizada. `details` nombra la línea y el importe huérfano.
+   */
+  INVOICING_CALC_001: {
+    code: 'INVOICING_CALC_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice line declares a tax amount without any tax rate to derive it from',
+  },
+  /**
+   * `tax_rate_id` QUE NO EXISTE EN `tax_rates`, O QUE ES DE OTRO TENANT.
+   *
+   * `invoice_taxes.tax_rate_id` tiene FK a `tax_rates(id)`. Sin esta compuerta,
+   * un identificador equivocado sólo se descubría cuando Postgres rechazaba el
+   * INSERT — y para entonces `InvoiceNumberGenerator` YA había avanzado
+   * `current_number`, así que el error se llevaba por delante un consecutivo
+   * autorizado y devolvía un `SYS_INTERNAL_001` sin decir qué campo era.
+   *
+   * El identificador equivocado no es hipotético: `GET /store/taxes` devuelve
+   * `tax_categories` con sus `tax_rates` ANIDADAS, y las dos filas tienen `id`.
+   * Mandar el de la categoría en vez del de la tarifa es un error de una línea
+   * en cualquier integración, y el que este código nombra.
+   *
+   * Se verifica ANTES de tomar la numeración, junto con la pertenencia al
+   * tenant: una tarifa de otra organización tampoco puede entrar al documento
+   * aunque el FK la acepte.
+   */
+  INVOICING_CALC_002: {
+    code: 'INVOICING_CALC_002',
+    httpStatus: 422,
+    devMessage:
+      'Invoice declares a tax_rate_id that does not exist in tax_rates or belongs to another tenant',
+  },
+  /**
+   * PREVALIDACIÓN FISCAL — los cuatro códigos siguientes traducen el veredicto de
+   * `FiscalDocumentValidator` (`validators/fiscal-document.validator.ts`), la
+   * puerta que rechaza en LOCAL lo que la DIAN rechazaría.
+   *
+   * POR QUÉ SON CUATRO Y NO UNO. El validador emite ~30 hallazgos distintos, pero
+   * quien está frente al formulario solo necesita saber A DÓNDE IR: los totales,
+   * la resolución, la clave técnica o el contenido del documento. Cada código es
+   * una de esas cuatro pantallas. El hallazgo exacto —qué regla del Anexo, qué
+   * línea, qué importe se esperaba— viaja íntegro en `details.blockers[]`, con su
+   * `problem` y su `fix` redactados, así que el frontend debe preferirlos sobre
+   * el texto genérico del catálogo.
+   *
+   * POR QUÉ NO ES UN 500 NI UN 400 GENÉRICO. El payload está bien formado; lo que
+   * no cuadra es el documento fiscal. Un 500 diría que Vendix se rompió y no
+   * dejaría nada que corregir, que es exactamente lo que el operador recibía
+   * antes: «error interno» y una factura que la DIAN rechazaba después.
+   *
+   * LO QUE ESTOS CÓDIGOS AHORRAN. Un rechazo de la DIAN no cuesta un reintento —
+   * cuesta un consecutivo autorizado, que es irrecuperable y deja un hueco en la
+   * numeración que hay que justificar. Fallar acá no gasta nada.
+   */
+  INVOICING_PREVALIDATION_001: {
+    code: 'INVOICING_PREVALIDATION_001',
+    httpStatus: 422,
+    devMessage:
+      'Document arithmetic does not satisfy the DIAN rules (FAU14 header vs lines, TaxAmount = TaxableAmount x Percent/100, or PayableAmount identity)',
+  },
+  INVOICING_PREVALIDATION_002: {
+    code: 'INVOICING_PREVALIDATION_002',
+    httpStatus: 412,
+    devMessage:
+      'The numbering resolution does not back the document being issued (inactive, out of validity at issue date, exhausted range, or prefix/sequence mismatch)',
+  },
+  /**
+   * El código que cierra el incidente del 14/08/2026: una ClTec de 38 caracteres
+   * hizo rechazar una factura real y quemó un consecutivo autorizado.
+   *
+   * La ClTec es la ÚNICA entrada del CUFE que el XML no transporta, así que la
+   * DIAN es el primer sistema capaz de notar que está mal — a menos que se mire
+   * antes de firmar. Ni el mensaje, ni los `details`, ni los logs llevan nunca su
+   * VALOR: solo su longitud, que es el único dato necesario para corregirla.
+   */
+  INVOICING_PREVALIDATION_003: {
+    code: 'INVOICING_PREVALIDATION_003',
+    httpStatus: 422,
+    devMessage:
+      'Technical key (ClTec) is missing or malformed for a document type whose key is built from it; never log or return its value, only its length',
+  },
+  INVOICING_PREVALIDATION_004: {
+    code: 'INVOICING_PREVALIDATION_004',
+    httpStatus: 422,
+    devMessage:
+      'Document content is not emittable (currency other than COP, unit of measure outside the DIAN list, missing/invalid lines, or CustomizationID incoherent with the AIU lines)',
+  },
+
+  /**
+   * Retenciones DECLARADAS POR EL CLIENTE al crear la factura.
+   *
+   * El cliente puede mandar un `withholdings[]` con `concept_id` + `base` + `rate`
+   * + `amount` cuando su sistema contable ya calculó las retenciones. La
+   * validación es una invariante de NEGOCIO (no de tipo) porque la verificación
+   * de que el concepto pertenece al tenant no la hace class-validator: un 400
+   * genérico de "id no existe" deja al cliente sin saber si el concepto está
+   * borrado, inactivo, o es de otra tienda.
+   *
+   * El 422 (no 400) sigue la convención del dominio: el cuerpo del request es
+   * sintácticamente válido —los campos son del tipo y rango correctos— y el
+   * fallo es de coherencia con el estado del tenant, no de forma.
+   */
+  INVOICING_WITHHOLDING_002: {
+    code: 'INVOICING_WITHHOLDING_002',
+    httpStatus: 422,
+    devMessage:
+      'One or more declared withholdings reference concepts that do not exist, are inactive, or belong to another tenant',
+  },
+  INVOICING_WITHHOLDING_003: {
+    code: 'INVOICING_WITHHOLDING_003',
+    httpStatus: 422,
+    devMessage:
+      'Declared withholding amount differs from base x rate by more than 1 centavo: a larger difference is not a rounding artifact, it is a data entry error',
+  },
+  /**
+   * AIU — los tres códigos siguientes cubren el contrato de servicios AIU
+   * (`cbc:CustomizationID = '09'`), donde el error NO se manifiesta como un
+   * rechazo sino como una factura ACEPTADA que declara menos IVA del debido.
+   *
+   * Por qué merecen códigos propios y no un `INVOICING_VALIDATE_001` genérico:
+   * el AIU tiene dos regímenes de base gravable incompatibles —E.T. art. 462-1
+   * (base = A+I+U completo, piso del 10 % del valor del contrato) y Decreto
+   * 1372/1992 art. 3 (base = sólo la Utilidad)— y cuál aplica depende del
+   * CONTRATO, no del producto. Elegir el equivocado no produce ningún síntoma
+   * visible: la DIAN acepta el documento y el faltante sólo se corrige con nota
+   * crédito, ya con la sanción corriendo. Por eso la elección es configuración
+   * explícita de la tienda (`store_settings.invoicing.aiu`) y por eso estos
+   * errores nombran la configuración a tocar, no «el dato».
+   */
+  INVOICING_AIU_001: {
+    code: 'INVOICING_AIU_001',
+    httpStatus: 422,
+    devMessage:
+      'AIU taxable base is below the legal floor (E.T. art. 462-1: the AIU cannot be less than 10% of the contract value); the base is never inflated silently because that would change the amount the customer signed',
+  },
+  INVOICING_AIU_002: {
+    code: 'INVOICING_AIU_002',
+    httpStatus: 422,
+    devMessage:
+      'AIU contract object is missing or out of range; rule CAV03 requires the Administracion line cbc:Note to start with the literal prefix and be 20-5000 characters including it',
+  },
+  INVOICING_AIU_003: {
+    code: 'INVOICING_AIU_003',
+    httpStatus: 422,
+    devMessage:
+      'Line declares an aiu_component on a document whose operation_type is not the AIU one (09); the component would be silently ignored and the line taxed as standard',
+  },
+  /**
+   * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos
+   * (Res. DIAN 000042/2020 art. 73; Oficios 901544 y 903436 de 2020; Concepto
+   * 1509 de 2024). La divisa no cambia `cbc:DocumentCurrencyCode`: se DECLARA
+   * en `cac:PaymentExchangeRate`. Estos dos códigos cubren los únicos casos en
+   * que esa declaración no se puede construir, y ninguno de los dos puede
+   * resolverse adivinando una tasa: una tasa inventada es una factura con un
+   * valor en pesos que no corresponde a la operación.
+   */
+  INVOICING_TRM_001: {
+    code: 'INVOICING_TRM_001',
+    httpStatus: 422,
+    devMessage:
+      'Could not resolve the official TRM for the exchange rate date and no manual rate was supplied; never guess a rate',
+  },
+  INVOICING_CURRENCY_001: {
+    code: 'INVOICING_CURRENCY_001',
+    httpStatus: 422,
+    devMessage:
+      'Non-USD currency requires either a manual exchange rate or the USD cross rate for the date: the TRM only quotes USD/COP, so any other currency needs a second leg Vendix does not source',
+  },
+  /**
+   * SOLICITUD DE FACTURA NOMINATIVA INEXISTENTE O YA RECLAMADA.
+   *
+   * `processRequest` era el único controlador de la familia que lanzaba
+   * `NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND_OR_NOT_SUBMITTED')` —un
+   * identificador en mayúsculas, no un mensaje—. Sin `error_code` el frontend no
+   * tenía catálogo al que ir y le pintaba al comerciante el nombre literal de la
+   * constante. Un solo código cubre los dos casos porque la acción del usuario
+   * es la misma en ambos: refrescar la lista y mirar en qué estado quedó.
+   */
+  INVOICING_DATA_REQUEST_001: {
+    code: 'INVOICING_DATA_REQUEST_001',
+    httpStatus: 404,
+    devMessage:
+      'Invoice data request not found for this store, or it is no longer in the submitted state',
+  },
+  /**
+   * ENLACE PÚBLICO INVÁLIDO. El token no corresponde a ninguna solicitud.
+   *
+   * Los tres códigos que siguen viajan al CLIENTE FINAL, no al comerciante: son
+   * los del formulario público post-venta donde el comprador escribe sus datos
+   * fiscales. Por eso se separan por causa —enlace inválido, enlace vencido,
+   * enlace ya usado—: las tres tienen salidas distintas y decirle «error» a las
+   * tres deja al comprador sin saber si debe pedir un enlace nuevo o si su
+   * factura ya está emitida.
+   */
+  INVOICING_DATA_REQUEST_002: {
+    code: 'INVOICING_DATA_REQUEST_002',
+    httpStatus: 404,
+    devMessage: 'Invoice data request link is invalid or no longer exists',
+  },
+  /** Enlace vencido: `expires_at` en el pasado, o estado `expired`. */
+  INVOICING_DATA_REQUEST_003: {
+    code: 'INVOICING_DATA_REQUEST_003',
+    httpStatus: 410,
+    devMessage: 'Invoice data request link has expired',
+  },
+  /** Enlace ya usado: los datos se enviaron o la factura ya se emitió. */
+  INVOICING_DATA_REQUEST_004: {
+    code: 'INVOICING_DATA_REQUEST_004',
+    httpStatus: 409,
+    devMessage:
+      'Invoice data request has already been submitted or completed; the link accepts data only once',
+  },
+  /**
+   * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
+   * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
+   * `municipality_code` o `department`.
+   *
+   * POR QUÉ UN SOLO CÓDIGO Y NO TRES. Los códigos se dividen por PANTALLA a la
+   * que hay que ir, no por campo (mismo criterio que `INVOICING_PREVALIDATION_*`).
+   * Los tres campos se llenan en el mismo sitio —la identidad fiscal del
+   * tenant—, así que un solo código con `details.missing` nombrando TODOS los
+   * huecos manda al operador una sola vez y con la lista completa, en vez de
+   * hacerle descubrirlos de a uno por reintento.
+   *
+   * POR QUÉ 422 Y NO 500. El problema no es que Vendix se rompiera: es que el
+   * tenant no ha declarado su municipio DIAN. El resolvedor ya lo diagnostica
+   * con precisión —dice el NIT, el campo ausente y dónde llenarlo— y ese
+   * diagnóstico se perdía entero al degradarse a `SYS_INTERNAL_001`, dejando al
+   * operador con «Error interno del servidor» ante un PDF que nunca iba a salir.
+   *
+   * `details` lleva `nit`, `missing_field` (el que cortó) y `missing` (todos),
+   * más el `cta` al wizard fiscal, igual que `FISCAL_VAT_NOT_RESPONSIBLE_001`.
+   */
+  FISCAL_IDENTITY_INCOMPLETE: {
+    code: 'FISCAL_IDENTITY_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'Issuer fiscal identity is missing a field required to issue (legal_name, municipality_code or department)',
+  },
   FISCAL_CONFIG_INCOMPLETE: {
     code: 'FISCAL_CONFIG_INCOMPLETE',
     httpStatus: 412,
     devMessage: 'Fiscal configuration is incomplete for this accounting entity',
+  },
+  /**
+   * `ModuleFlowGuard` cerró la petición: el área fiscal que gobierna el módulo
+   * (`invoicing`, `accounting`, `payroll`…) está inactiva para el tenant.
+   *
+   * Es la PRIMERA puerta que atraviesa cualquier llamada al módulo, y lanzaba
+   * `ForbiddenException` con un texto en inglés dirigido al desarrollador. Sin
+   * `error_code`, `parseApiError` caía en `DEFAULT_ERROR_MESSAGE` y el operador
+   * leía «Ocurrió un error» ante una situación que tiene una corrección
+   * concreta y de un solo clic: activar el área en el wizard fiscal.
+   *
+   * `details.area` viaja para que el frontend pueda enlazar la sección correcta.
+   */
+  FISCAL_AREA_INACTIVE: {
+    code: 'FISCAL_AREA_INACTIVE',
+    httpStatus: 403,
+    devMessage: 'Fiscal area is inactive for this tenant',
   },
   FISCAL_SCOPE_INVALID: {
     code: 'FISCAL_SCOPE_INVALID',
@@ -2078,6 +2564,44 @@ export const ErrorCodes = {
     code: 'DIAN_SEND_002',
     httpStatus: 504,
     devMessage: 'DIAN request timed out',
+  },
+  /**
+   * `cbc:InvoicedQuantity/@unitCode` — la unidad de medida de una línea no se
+   * pudo resolver contra el catálogo, y NO se inventa.
+   *
+   * La DIAN valida `@unitCode` contra su lista de códigos UN/ECE y valida además
+   * la coherencia entre la cantidad y su unidad. Rellenar con `'EA'` una línea
+   * cuya unidad real es kilos o metros produce un documento que declara piezas
+   * donde hubo kilos: aceptado por el validador, falso ante la DIAN, e
+   * irreversible una vez emitido. Se rechaza ANTES de gastar el consecutivo.
+   *
+   * `'EA'` sigue siendo legítimo —y se sigue emitiendo sin error— en los dos
+   * casos donde SIGNIFICA algo: la línea libre sin producto, y el producto sin
+   * unidad de stock declarada (se cuenta por unidades). Este código sólo aparece
+   * cuando la unidad EXISTE pero no se pudo traducir: producto ilegible desde el
+   * documento, o unidad del catálogo sin equivalencia UN/ECE en
+   * `uom-uncefact.util.ts`.
+   */
+  DIAN_UNIT_CODE_001: {
+    code: 'DIAN_UNIT_CODE_001',
+    httpStatus: 422,
+    devMessage:
+      'No se pudo resolver la unidad de medida (unitCode) de una o más líneas del documento',
+  },
+  /**
+   * La lectura del catálogo de unidades falló (base de datos). Es infraestructura
+   * transitoria, no un dato mal capturado: 503 para que el cliente reintente en
+   * vez de mandar al comerciante a corregir algo que está bien.
+   *
+   * Antes esto era un `catch {}` MUDO que devolvía el mapa a medias y hacía que
+   * toda la factura se emitiera con `'EA'`. Tragarse el error no sólo emitía un
+   * documento falso: impedía siquiera diagnosticarlo.
+   */
+  DIAN_UNIT_CODE_002: {
+    code: 'DIAN_UNIT_CODE_002',
+    httpStatus: 503,
+    devMessage:
+      'Fallo al leer el catálogo de unidades de medida para resolver los unitCode del documento',
   },
   // Coupons
   CPN_FIND_001: {

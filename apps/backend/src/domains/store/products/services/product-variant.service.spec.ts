@@ -6,6 +6,7 @@ import { S3Service } from '../../../../common/services/s3.service';
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 
 describe('ProductVariantService', () => {
   let service: ProductVariantService;
@@ -38,6 +39,15 @@ describe('ProductVariantService', () => {
     updateStock: jest.fn(),
   };
 
+  /**
+   * La variante también valida su subcuenta PUC contra `chart_of_accounts`.
+   * El doble APRUEBA a propósito: un `{}` reventaría con «is not a function» y
+   * un rechazo haría fallar todos los casos por algo que este spec no prueba.
+   */
+  const mockAutoEntryService = {
+    validateProductAccountCodes: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +63,7 @@ describe('ProductVariantService', () => {
           provide: RequestContextService,
           useValue: { getContext: () => ({ user_id: 1 }) },
         },
+        { provide: AutoEntryService, useValue: mockAutoEntryService },
       ],
     }).compile();
 

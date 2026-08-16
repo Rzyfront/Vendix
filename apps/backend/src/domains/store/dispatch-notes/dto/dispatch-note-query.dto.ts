@@ -4,6 +4,7 @@ import {
   IsInt,
   Min,
   IsEnum,
+  IsIn,
   IsDateString,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -31,11 +32,11 @@ export class DispatchNoteQueryDto {
   status?: dispatch_note_status_enum;
 
   @IsOptional()
-  @IsEnum(['outbound', 'inbound'])
+  @IsIn(['outbound', 'inbound'])
   direction?: 'outbound' | 'inbound';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'customer_delivery',
     'customer_return',
     'transfer_out',
@@ -50,7 +51,7 @@ export class DispatchNoteQueryDto {
     | 'purchase_receipt';
 
   @IsOptional()
-  @IsEnum([
+  @IsIn([
     'sale',
     'sample',
     'consignment',
