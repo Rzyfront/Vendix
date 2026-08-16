@@ -27,6 +27,7 @@ import {
   ScrollableTabsComponent,
   EmptyStateComponent,
 } from '../../../../../../shared/components';
+import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import type {
   TableColumn,
   TableAction,
@@ -93,6 +94,12 @@ export class ScheduleManagementComponent {
   private toastService = inject(ToastService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
+  // FIX: detect when the create-employee call failed because the
+  // payroll fiscal area is not yet active on this store, and surface
+  // the Save-Requirements modal the rest of the app uses so the
+  // operator lands in the activation wizard with a single CTA instead
+  // of a generic error toast that doesn't tell them where to go.
+  private fiscalRequirements = inject(FiscalRequirementsService);
 
   // Detail modal
   isDetailModalOpen = signal(false);
@@ -497,6 +504,20 @@ export class ScheduleManagementComponent {
           this.resetNewEmployee();
         },
         error: (err) => {
+          // FIX: if this is a fiscal-area-not-active rejection (e.g.
+          // the payroll area on this store is still DRAFT or hasn't
+          // been activated), present the Save-Requirements modal which
+          // already has the right "Activar nómina" CTA wired up. That
+          // modal is used by every other surface that hits a fiscal
+          // gate, so reusing it here keeps the operator's vocabulary
+          // consistent (instead of inventing a new toast phrasing for
+          // the same problem on a different page).
+          const openedFiscalModal = this.fiscalRequirements.presentFiscalError(
+            err,
+          );
+          if (openedFiscalModal) {
+            return;
+          }
           // Backend returns structured validation errors at
           // err.error.details.validationErrors (array of strings) when
           // the ValidationPipe rejects. The default Nest message
