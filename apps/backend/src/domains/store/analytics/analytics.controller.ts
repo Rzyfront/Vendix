@@ -872,10 +872,13 @@ export class AnalyticsController {
           value = row.value !== null ? countFmt.format(row.value) : '';
           break;
         case 'percent':
-          // The service already emits margins on a 0-100 scale (grossProfit /
-          // netRevenue * 100), so the value is a ready percentage, not a
-          // fraction — no extra ×100 here.
-          value = row.value !== null ? `${row.value.toFixed(2)}%` : '';
+          // vendix-report-xlsx rule 3: services return raw numbers,
+          // never pre-formatted "$X" / `${n.toFixed(...)}%` strings.
+          // Cell formatting lives in the report-column catalog /
+          // ReportBuilder. We pass the numeric value through; the column
+          // definition for `value` declares numFmt: '0.00%' so ExcelJS
+          // renders the % sign in the cell.
+          value = row.value;
           break;
         case 'date':
           value = row.date ? formatCellDate(row.date, tz) : '';

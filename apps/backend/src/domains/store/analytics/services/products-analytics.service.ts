@@ -380,7 +380,10 @@ export class ProductsAnalyticsService {
         revenue,
         avg_order_value: orderCount > 0 ? revenue / orderCount : 0,
         profit_margin: profitMargin,
-        last_sold_at: lastSold ? lastSold.toISOString() : null,
+        // vendix-report-xlsx rule 2: services return raw Date instants for
+        // business dates, never .toISOString().split('T')[0] (TZ formatting
+        // lives in the report-column catalog / ReportBuilder numFmt).
+        last_sold_at: lastSold ?? null,
       };
     });
 
