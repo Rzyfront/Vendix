@@ -37,6 +37,8 @@ import { EcommercePrismaService } from 'src/prisma/services/ecommerce-prisma.ser
 import { ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service';
 import { PurchaseOrderQueryDto } from './purchase-orders/dto/purchase-order-query.dto';
+import { ReturnOrdersService } from './return-orders/return-orders.service';
+import { ReturnOrderQueryDto } from './return-orders/dto/return-order-query.dto';
 
 @Controller('store/orders')
 @UseGuards(PermissionsGuard)
@@ -44,6 +46,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
+    private readonly returnOrdersService: ReturnOrdersService,
     private readonly responseService: ResponseService,
     private readonly orderEtaService: OrderEtaService,
     private readonly settingsService: SettingsService,
@@ -160,6 +163,25 @@ export class OrdersController {
         error.status || 400,
       );
     }
+  }
+
+  /**
+   * Listado de devoluciones.
+   *
+   * `ReturnOrdersController` declara este mismo path con prefijo propio
+   * (`store/orders/return-orders`), pero el `@Get(':id')` de abajo lo captura
+   * antes —son las dos rutas de tres segmentos— y el `ParseIntPipe` respondía
+   * 400 «numeric string is expected» a todo listado. Es el mismo choque que ya
+   * resolvió `purchase-orders` justo debajo: la ruta estática se declara aquí,
+   * delante de `:id`, y delega en el servicio del submódulo.
+   *
+   * Los demás endpoints de devoluciones no colisionan: todos tienen cuatro o
+   * más segmentos.
+   */
+  @Get('return-orders')
+  @Permissions('store:orders:return_orders:read')
+  findReturnOrders(@Query() query: ReturnOrderQueryDto) {
+    return this.returnOrdersService.findAll(query);
   }
 
   @Get('purchase-orders')
