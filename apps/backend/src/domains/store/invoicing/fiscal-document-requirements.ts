@@ -29,11 +29,15 @@ import type {
  *
  * ## Qué NO hace
  *
- * No cambia comportamiento de emisión ni de numeración. Declara el requisito;
- * quien lo aplica (guards, DTOs, servicios) lo consume. En particular NO altera
- * `generateNextNumber` (`utils/invoice-number-generator.ts`), que sigue exigiendo
- * una fila `invoice_resolutions` por `document_type` para TODO documento —
- * incluidas las notas, cuyo consecutivo es interno pero sigue saliendo de ahí.
+ * No emite ni numera. Declara el requisito; quien lo aplica (guards, DTOs,
+ * servicios) lo consume.
+ *
+ * La excepción, y es deliberada: `internal_series_prefix` es lo que
+ * `generateNextNumber` (`utils/invoice-number-generator.ts`) consulta para
+ * decidir si puede dar de alta y ampliar una serie él solo. Antes esa tabla no
+ * gobernaba nada del generador y las notas se bloqueaban por falta de una fila
+ * que nadie creaba nunca; la regla vive aquí porque el que añade un tipo al enum
+ * es quien tiene que decidir si su numeración es nuestra o de la DIAN.
  *
  * ## Las dos preguntas que la tabla separa (y que se confundían)
  *
@@ -79,12 +83,33 @@ export interface FiscalDocumentRequirements {
    * ¿La DIAN emite Autorización de Numeración para este documento?
    *
    * `false` NO significa «no necesita fila en `invoice_resolutions`»: el
-   * generador de consecutivos la exige igual (ver `invoice-number-generator.ts`).
-   * Significa que esa fila es una **fuente de consecutivo interno**, y que su
-   * `resolution_number` es un rótulo del comerciante, no una autorización DIAN
-   * que la validación pueda exigir ni confrontar.
+   * generador de consecutivos la sigue usando como cursor. Significa que esa
+   * fila es una **fuente de consecutivo interno**, y que su `resolution_number`
+   * es un rótulo del comerciante, no una autorización DIAN que la validación
+   * pueda exigir ni confrontar. De ahí {@link internal_series_prefix}: lo que no
+   * respalda un acto administrativo tampoco tiene por qué esperar a que alguien
+   * lo dé de alta a mano.
    */
   requires_authorized_range: boolean;
+  /**
+   * Prefijo de la serie interna que el generador da de alta y amplía SOLO, o
+   * `null` cuando el consecutivo de este documento no es nuestro.
+   *
+   * Es la llave de las dos automatismos de `invoice-number-generator.ts`
+   * —auto-alta cuando no hay fila, auto-extensión cuando el rango se acaba— y
+   * por eso se declara aquí y no como una lista suelta en el generador: fabricar
+   * o ampliar numeración de un documento que la DIAN SÍ autoriza por rango es
+   * emitir fuera de la Autorización de Numeración, con rechazo garantizado y
+   * consecutivo quemado. Con el prefijo en la tabla, quien añada un tipo al enum
+   * tiene que decidir explícitamente de qué lado cae.
+   *
+   * `null` cubre dos casos distintos que aquí se comportan igual:
+   * - rango autorizado por la DIAN (`sales_invoice`, `support_document`,
+   *   `pos_equivalent_document`) — el alta es un acto del comerciante en MUISCA;
+   * - numeración que no cuelga de `invoice_resolutions` en absoluto (`payroll`,
+   *   `payroll_adjustment`, que llevan su propio `NumNE`).
+   */
+  internal_series_prefix: string | null;
   /**
    * ¿La clave de este documento se alimenta de la ClTec del rango?
    *
@@ -203,6 +228,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'sales_invoice',
     configuration_type: 'invoicing',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: true,
     key_algorithm: 'CUFE',
     label: 'Factura electrónica de venta',
@@ -227,6 +253,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'credit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
+    internal_series_prefix: 'NC',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota crédito',
@@ -240,6 +267,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'debit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
+    internal_series_prefix: 'ND',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota débito',
@@ -259,6 +287,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'support_document',
     configuration_type: 'support_document',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Documento soporte',
@@ -273,6 +302,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'support_adjustment_note',
     configuration_type: 'support_document',
     requires_authorized_range: false,
+    internal_series_prefix: 'NAS',
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Nota de ajuste al documento soporte',
@@ -292,6 +322,11 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'payroll',
     configuration_type: 'payroll',
     requires_authorized_range: false,
+    // `null` por una razón DISTINTA a la de la factura: no es que su rango lo
+    // autorice la DIAN, es que la nómina no numera contra `invoice_resolutions`
+    // en absoluto — lleva su propio `NumNE`. Darle serie interna crearía un
+    // cursor que nadie lee y que contradice al que sí manda.
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nómina electrónica',
@@ -308,6 +343,8 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'payroll_adjustment',
     configuration_type: 'payroll',
     requires_authorized_range: false,
+    // Mismo motivo que `payroll`: `NumNE`, no `invoice_resolutions`.
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nota de ajuste de nómina electrónica',
@@ -328,6 +365,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'pos_equivalent_document',
     configuration_type: 'equivalent_document',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Documento equivalente POS',
@@ -345,6 +383,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'equivalent_adjustment_note',
     configuration_type: 'equivalent_document',
     requires_authorized_range: false,
+    internal_series_prefix: 'NAE',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota de ajuste al documento equivalente',
@@ -371,6 +410,22 @@ export function requirementsFor(
   document_type: FiscalDocumentType,
 ): FiscalDocumentRequirements {
   return FISCAL_DOCUMENT_REQUIREMENTS[document_type];
+}
+
+/**
+ * Prefijo de la serie interna de este documento, o `null` si su numeración no
+ * es nuestra.
+ *
+ * Es el único predicado que autoriza a `generateNextNumber` a crear una fila de
+ * `invoice_resolutions` o a ampliarle el rango. Se lee como pregunta: «¿el
+ * consecutivo de este documento lo pone el comerciante o lo autorizó la DIAN?».
+ * Devolver un prefijo para un documento con Autorización de Numeración sería
+ * numerar fuera de ella.
+ */
+export function internalSeriesPrefixFor(
+  document_type: FiscalDocumentType,
+): string | null {
+  return FISCAL_DOCUMENT_REQUIREMENTS[document_type].internal_series_prefix;
 }
 
 /**

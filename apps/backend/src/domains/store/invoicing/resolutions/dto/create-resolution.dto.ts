@@ -51,7 +51,7 @@ export const RESOLUTION_DOCUMENT_TYPES: readonly ResolutionDocumentType[] =
  * para que quien cambie el tipo en el schema encuentre el sitio que hay que
  * mover con él.
  */
-const RANGE_BOUND = 2_147_483_647;
+export const RANGE_BOUND = 2_147_483_647;
 
 /**
  * Alta de una resolución / rango de numeración DIAN.

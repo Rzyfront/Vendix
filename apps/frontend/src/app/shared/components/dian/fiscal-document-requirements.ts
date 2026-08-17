@@ -75,11 +75,21 @@ export interface FiscalDocumentRequirements {
    * ¿La DIAN emite Autorización de Numeración para este documento?
    *
    * `false` NO significa «no necesita fila `invoice_resolutions`»: el generador
-   * de consecutivos la exige igual. Significa que esa fila es una **fuente de
-   * consecutivo interno**, y que su `resolution_number` es un rótulo del
-   * comerciante, no una autorización DIAN que se pueda exigir ni confrontar.
+   * de consecutivos la sigue usando como cursor. Significa que esa fila es una
+   * **fuente de consecutivo interno**, y que su `resolution_number` es un rótulo
+   * del comerciante, no una autorización DIAN que se pueda exigir ni confrontar.
    */
   requires_authorized_range: boolean;
+  /**
+   * Prefijo de la serie interna que el backend da de alta y amplía SOLO, o
+   * `null` cuando el consecutivo de este documento no es nuestro.
+   *
+   * La UI no lo pinta: está aquí porque el espejo es campo por campo y porque
+   * explica por qué ciertos tipos NUNCA piden al comerciante que registre una
+   * resolución. Fabricar o ampliar numeración de un documento que la DIAN sí
+   * autoriza por rango sería emitir fuera de la Autorización de Numeración.
+   */
+  internal_series_prefix: string | null;
   /**
    * ¿La clave de este documento se alimenta de la ClTec del rango?
    *
@@ -136,6 +146,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'sales_invoice',
     configuration_type: 'invoicing',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: true,
     key_algorithm: 'CUFE',
     label: 'Factura electrónica de venta',
@@ -151,6 +162,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'credit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
+    internal_series_prefix: 'NC',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota crédito',
@@ -159,6 +171,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'debit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
+    internal_series_prefix: 'ND',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota débito',
@@ -172,6 +185,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'support_document',
     configuration_type: 'support_document',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Documento soporte',
@@ -181,6 +195,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'support_adjustment_note',
     configuration_type: 'support_document',
     requires_authorized_range: false,
+    internal_series_prefix: 'NAS',
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Nota de ajuste al documento soporte',
@@ -194,6 +209,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'payroll',
     configuration_type: 'payroll',
     requires_authorized_range: false,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nómina electrónica',
@@ -202,6 +218,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'payroll_adjustment',
     configuration_type: 'payroll',
     requires_authorized_range: false,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUNE',
     label: 'Nota de ajuste de nómina electrónica',
@@ -216,6 +233,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'pos_equivalent_document',
     configuration_type: 'equivalent_document',
     requires_authorized_range: true,
+    internal_series_prefix: null,
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Documento equivalente POS',
@@ -228,6 +246,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'equivalent_adjustment_note',
     configuration_type: 'equivalent_document',
     requires_authorized_range: false,
+    internal_series_prefix: 'NAE',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota de ajuste al documento equivalente',
