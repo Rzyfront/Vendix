@@ -629,6 +629,14 @@ export class InventoryAnalyticsService {
           organization_id: context.organization_id,
           ...storeFilter,
         },
+        // Filtrar a nivel de top-level para excluir productos archivados
+        // de la métrica 'Unidades en Mano'. No filtramos por `track_inventory`
+        // porque el flag solo indica si el stock se rastrea por movimientos
+        // (auditoría), NO si el producto cuenta para inventario total —
+        // `sdfdfs` con `track_inventory=false` SÍ debe contar.
+        products: {
+          state: 'active',
+        },
       },
       include: {
         inventory_locations: {
