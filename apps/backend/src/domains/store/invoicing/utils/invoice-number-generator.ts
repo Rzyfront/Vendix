@@ -245,24 +245,33 @@ export class InvoiceNumberGenerator {
       // —el techo acaba de subir— sino contención o una fila corrupta, y taparlo
       // con un bucle escondería el defecto real detrás de numeración quemada.
       const extendable = internalSeriesPrefixFor(document_type) !== null;
+
+      // El techo VIGENTE, que deja de ser `resolution.range_to` en cuanto se
+      // amplía. Se lleva aparte porque si el reintento tampoco asigna, el error
+      // de abajo tiene que decir contra qué rango se midió: reportar el viejo
+      // describiría un agotamiento que ya no existe y mandaría a quien lea la
+      // traza a ampliar un rango que acaba de crecer.
+      let ceiling = resolution.range_to;
+
       if (result.count !== 1 && extendable) {
         const extended_to = Math.min(
-          resolution.range_to + INTERNAL_SERIES_BLOCK,
+          ceiling + INTERNAL_SERIES_BLOCK,
           RANGE_BOUND,
         );
 
-        if (extended_to > resolution.range_to) {
+        if (extended_to > ceiling) {
           await tx.invoice_resolutions.update({
             where: { id: resolution.id },
             data: { range_to: extended_to },
           });
 
           this.logger.log(
-            `Internal series #${resolution.id} (${document_type}) exhausted at ${resolution.range_to}; ` +
+            `Internal series #${resolution.id} (${document_type}) exhausted at ${ceiling}; ` +
               `extended to ${extended_to} instead of blocking`,
           );
 
-          result = await allocate(extended_to);
+          ceiling = extended_to;
+          result = await allocate(ceiling);
         }
       }
 
@@ -274,7 +283,7 @@ export class InvoiceNumberGenerator {
             ? `La serie interna de «${label}» (${resolution.prefix}) no admitió el siguiente consecutivo ni después de ampliarla. ` +
                 'No se asignó numeración.'
             : `La resolución ${resolution.prefix}${resolution.resolution_number} agotó su rango autorizado ` +
-                `(${resolution.range_from}-${resolution.range_to}). Solicita un rango nuevo en MUISCA y regístralo en ` +
+                `(${resolution.range_from}-${ceiling}). Solicita un rango nuevo en MUISCA y regístralo en ` +
                 'Facturación → Resoluciones: numerar fuera del rango autorizado hace que la DIAN rechace el documento. ' +
                 'No se asignó numeración.',
           {
@@ -282,7 +291,7 @@ export class InvoiceNumberGenerator {
             document_type,
             document_label: label,
             range_from: resolution.range_from,
-            range_to: resolution.range_to,
+            range_to: ceiling,
           },
         );
       }

@@ -545,5 +545,38 @@ describe('InvoiceNumberGenerator', () => {
       expect(tx.invoice_resolutions.updateMany).toHaveBeenCalledTimes(2);
       expect(tx.invoice_resolutions.update).toHaveBeenCalledTimes(1);
     });
+
+    /**
+     * Reportar el techo viejo describiría un agotamiento que ya no existe y
+     * mandaría a quien lea la traza a ampliar un rango que acaba de crecer.
+     */
+    it('reporta el techo ampliado, no el que acaba de quedar obsoleto', async () => {
+      const invoice_resolutions = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 31,
+          prefix: 'NC',
+          current_number: 1000,
+          range_from: 1,
+          range_to: 1000,
+          technical_key: null,
+        }),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn(),
+      };
+      const { service } = createService({ invoice_resolutions });
+
+      const error: any = await service
+        .generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        })
+        .catch((e: any) => e);
+
+      expect(error.errorCode).toBe('FISCAL_RESOLUTION_EXHAUSTED');
+      expect(error.getResponse().details).toMatchObject({ range_to: 2000 });
+    });
   });
 });
