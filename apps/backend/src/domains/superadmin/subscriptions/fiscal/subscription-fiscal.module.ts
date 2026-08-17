@@ -22,6 +22,15 @@ import { ResolutionScannerService } from '../../../store/invoicing/resolutions/r
 // Reused for the shared early-alert helpers (certificate expiry tiers, range
 // threshold) so the platform checklist cannot drift from the tenant one.
 import { FiscalProductionReadinessService } from '../../../store/invoicing/providers/fiscal-production-readiness.service';
+// Reutilizado TAL CUAL, sin una línea de cambio: el scope de `invoice_resolutions`
+// es FISCAL, no de tienda (`buildFiscalEntityDirectScope` devuelve sólo
+// `{organization_id, accounting_entity_id}` y nunca filtra por `store_id`), así
+// que el servicio ya funciona bajo el contexto de plataforma —organización 1 sin
+// tienda— igual que `DianTestService`.
+//
+// Se importa por su path y NO vía `InvoicingModule`: ese módulo importa este riel
+// y traerlo aquí cerraría el ciclo.
+import { DianNumberingRangeService } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { SubscriptionFiscalController } from './subscription-fiscal.controller';
 import { SubscriptionFiscalListener } from './subscription-fiscal.listener';
@@ -47,6 +56,10 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
     ResolutionScannerService,
     PlatformOrgService,
     FiscalProductionReadinessService,
+    // Sus tres dependencias ya están resueltas en este módulo: `StorePrismaService`
+    // por `PrismaModule`, `DianTestService` como provider de arriba y
+    // `TechnicalKeyVaultService` por `EncryptionModule`, que es @Global.
+    DianNumberingRangeService,
     SubscriptionFiscalService,
     SubscriptionFiscalListener,
   ],

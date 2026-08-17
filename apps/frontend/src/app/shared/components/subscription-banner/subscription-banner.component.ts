@@ -69,6 +69,9 @@ function graceDetail(
             @if (copy().detail) {
               <span class="sub-banner__detail">{{ copy().detail }}</span>
             }
+            @if (autoRenewSecondaryNotice(); as notice) {
+              <span class="sub-banner__detail">{{ notice }}</span>
+            }
           </div>
           <a
             [attr.href]="ctaLink()"
@@ -304,7 +307,10 @@ export class SubscriptionBannerComponent implements OnInit {
       return {
         title: 'Tu suscripción entró en gracia crítica',
         detail: graceDetail(ui.daysOverdue, ui.daysRemaining, 'la suspensión total'),
-        ctaText: 'Regularizar',
+        // Mismo rótulo que `grace_soft`: ambos aterrizan directo en la vista de
+        // pago del plan, así que el CTA debe prometer lo mismo. La urgencia la
+        // comunican el nivel `danger` y el detalle, no un verbo distinto.
+        ctaText: 'Pagar ahora',
         iconName: 'alert-octagon',
       };
     }
@@ -317,8 +323,8 @@ export class SubscriptionBannerComponent implements OnInit {
       return {
         title: 'Tu autopago no se pudo activar',
         detail:
-          'Tu renovación automática quedó desactivada porque el cargo no incluyó una credencial recurrente.',
-        ctaText: 'Agregar método de pago',
+          'Pagaste por un medio que no permite cobros recurrentes. La renovación automática solo funciona con tarjeta: agrega una para que tu plan se renueve solo.',
+        ctaText: 'Agregar tarjeta',
         iconName: 'alert-triangle',
       };
     }
@@ -326,8 +332,8 @@ export class SubscriptionBannerComponent implements OnInit {
       return {
         title: 'Tu renovación automática falló',
         detail:
-          'El cobro automático de tu suscripción no pudo completarse.',
-        ctaText: 'Actualizar método de pago',
+          'No pudimos cobrar tu suscripción. Revisa tu tarjeta: la renovación automática solo funciona con tarjeta.',
+        ctaText: 'Revisar mi tarjeta',
         iconName: 'alert-octagon',
       };
     }
@@ -354,6 +360,51 @@ export class SubscriptionBannerComponent implements OnInit {
     return { title: '', detail: '', ctaText: '', iconName: 'info' };
   });
 
+  /**
+   * Línea secundaria que informa del autopago pausado en los estados donde otro
+   * aviso más urgente se queda con el título y el CTA.
+   *
+   * Existe porque el caso reportado cayó en `grace_soft`: el aviso de autopago
+   * solo se derivaba dentro de la rama `active`, así que el cliente cuya
+   * renovación quedó pausada por no tener tarjeta no lo veía en ninguna parte.
+   * La regla de producto es que el cliente lo sepa SIEMPRE. Cuando el aviso ya
+   * es el motivo del banner (`renewal_failed` / `auto_renew_disabled_no_credential`)
+   * se calla, para no repetir el mismo texto dos veces.
+   */
+  readonly autoRenewSecondaryNotice = computed<string | null>(() => {
+    const warning = this.facade.autoRenewWarning();
+    if (!warning) return null;
+
+    const kind = this.facade.subscriptionUiState().kind;
+    if (
+      kind === 'renewal_failed' ||
+      kind === 'auto_renew_disabled_no_credential'
+    ) {
+      return null;
+    }
+
+    return warning.type === 'auto_renew_charge_failed'
+      ? 'Además, tu renovación automática falló. Recuerda que el pago automático solo funciona con tarjeta.'
+      : 'Además, tu renovación automática está pausada porque no tienes una tarjeta guardada. El pago automático solo funciona con tarjeta.';
+  });
+
+  /**
+   * Vista de pago del plan vigente, o `null` cuando no hay plan al que pagarle.
+   *
+   * `plan_id` es lo que espera la ruta `/admin/subscription/checkout/:planId`;
+   * `paid_plan_id` es el respaldo para filas donde el plan seleccionado quedó
+   * en null pero el pagado sigue siendo la referencia de facturación.
+   */
+  private readonly planPaymentUrl = computed<string | null>(() => {
+    const sub = this.facade.current() as {
+      plan_id?: number | string | null;
+      paid_plan_id?: number | string | null;
+    } | null;
+    const planId = sub?.plan_id ?? sub?.paid_plan_id ?? null;
+    if (planId === null || planId === undefined || planId === '') return null;
+    return `/admin/subscription/checkout/${planId}`;
+  });
+
   readonly ctaLink = computed(() => {
     // S1.2 — Banner is STORE-ONLY (super-admin only manages plans, never
     // consumes them; org-admin is plan-agnostic). visible() already gates
@@ -369,6 +420,18 @@ export class SubscriptionBannerComponent implements OnInit {
     }
     if (ui.kind === 'renewal_failed') {
       return ui.paymentMethodEditUrl;
+    }
+    // En gracia el CTA dice "Pagar ahora", así que debe llevar a pagar: la vista
+    // de pago del plan. Antes aterrizaba en el tablero de mora, que exige un
+    // clic más y cuyo propio botón era el que el cliente leía como "cobrar".
+    //
+    // Se decide por `ui.kind` — la misma fuente que `visible()`, `level()` y
+    // `copy()` — y no por `facade.status()`: el reducer prefiere el campo
+    // `status` del backend sobre `state`, así que un `status: 'past_due'` con
+    // `state: 'grace_soft'` dejaba la rama de abajo sin disparar mientras el
+    // banner sí se pintaba en gracia.
+    if (ui.kind === 'grace_soft' || ui.kind === 'grace_hard') {
+      return this.planPaymentUrl() ?? '/admin/subscription/dunning';
     }
     const subLevel = this.facade.bannerLevel();
     const pm = this.pmWarning();
@@ -388,17 +451,21 @@ export class SubscriptionBannerComponent implements OnInit {
     if (this.facade.scheduledCancelAt()) {
       return '/admin/subscription';
     }
-    // G6 — grace/suspended/blocked stores recover via the dunning board.
-    if (
-      status === 'grace_soft' ||
-      status === 'grace_hard' ||
-      status === 'suspended' ||
-      status === 'blocked'
-    ) {
+    // Respaldo por `status` cuando el backend no envió `state` y por tanto
+    // `ui.kind` no resolvió a gracia: mismo destino que la rama de arriba.
+    if (status === 'grace_soft' || status === 'grace_hard') {
+      return this.planPaymentUrl() ?? '/admin/subscription/dunning';
+    }
+    // G6 — suspended/blocked siguen entrando por el tablero de mora: ahí no
+    // basta con pagar (hay facturas vencidas, features perdidas y el CTA de
+    // soporte), y su copy no promete "pagar ahora". Solo la gracia, cuyo CTA sí
+    // lo promete, se salta el tablero.
+    if (status === 'suspended' || status === 'blocked') {
       return '/admin/subscription/dunning';
     }
-    // Default fallback — send to subscription overview. The /payment page is
-    // opt-in only (managing already-saved methods); never the auto entry.
+    // Default fallback — send to subscription overview. /payment ya permite dar
+    // de alta una tarjeta, pero sigue siendo destino explícito (avisos de
+    // autopago y de tarjeta), nunca la entrada por defecto.
     return '/admin/subscription';
   });
 

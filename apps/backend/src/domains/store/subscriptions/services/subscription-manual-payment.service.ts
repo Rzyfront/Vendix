@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from './subscription-state.service';
+import { SubscriptionPaymentService } from './subscription-payment.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
@@ -14,6 +15,7 @@ export class SubscriptionManualPaymentService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly stateService: SubscriptionStateService,
+    private readonly paymentService: SubscriptionPaymentService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -156,6 +158,39 @@ export class SubscriptionManualPaymentService {
           error instanceof Error ? error.message : String(error)
         }`,
       );
+    }
+
+    // DEFECTO 9 — el pago manual pasa por el MISMO gate.
+    //
+    // Una consignación registrada por el administrador nunca deja tarjeta: no
+    // pasa por `handleChargeSuccess`, ni por
+    // `autoRegisterPaymentMethodFromGateway`, ni por el gate. La transición a
+    // `active` de más arriba (y la ventana de reactivación que cuelga de ella)
+    // devolvía la tienda a operar con `auto_renew` como estuviera, así que la
+    // tienda salía "activa con autopago" y sin nada con qué renovar — el mismo
+    // final del incidente, por otra puerta.
+    //
+    // Fuera de la transacción a propósito: el gate abre la suya y correrlo dentro
+    // de esta pelearía con el `FOR UPDATE` que ya tomó `transitionInTx`. El aviso
+    // también debe salir después del commit.
+    if (result.storeId) {
+      try {
+        await this.paymentService.pauseAutoRenewForMissingCredential({
+          subscriptionId: result.subscriptionId,
+          storeId: result.storeId,
+          source: 'manual_payment',
+          triggeredByJob: 'manual-payment',
+          auditSource: 'manual_payment_no_credential',
+          eventKey: `manual-${invoiceId}-${result.paymentId}`,
+          payload: { invoice_id: invoiceId, payment_id: result.paymentId },
+        });
+      } catch (error) {
+        this.logger.error(
+          `AUTO_RENEW_GATE_FAILED manual payment invoice ${invoiceId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
 

@@ -1,0 +1,154 @@
+/* store-edit-modal styles — minimal, layout relies on the host tokens. */
+
+// ─── Brand card (logo) — copied from app-settings-form so the super-admin
+// modal's branding tab matches the store settings design language exactly.
+.brand-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 76px;
+  padding: 12px;
+  background: var(--color-neutral-100);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  transition: border-color 180ms ease, background 180ms ease;
+
+  &:hover {
+    background: var(--color-surface);
+    border-color: var(--color-neutral-300);
+  }
+}
+
+.brand-preview {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  padding: 4px;
+  position: relative;
+}
+
+.brand-preview--logo {
+  width: 44px;
+  height: 44px;
+}
+
+.brand-preview--favicon {
+  width: 40px;
+  height: 40px;
+}
+
+.brand-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.brand-preview-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--color-neutral-50-rgb, 255, 255, 255), 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border-radius: inherit;
+}
+
+.brand-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.25;
+  margin-bottom: 3px;
+}
+
+.brand-help {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
+.brand-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.brand-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--color-error-100);
+  color: var(--color-error-600);
+  background: var(--color-surface);
+  transition: background 180ms ease, border-color 180ms ease;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-error-50);
+    border-color: var(--color-error-200);
+  }
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  cursor: help;
+  transition: color 160ms ease;
+
+  &:hover {
+    color: var(--color-info);
+  }
+}
+
+@media (max-width: 520px) {
+  .brand-card,
+  .brand-content {
+    align-items: flex-start;
+  }
+
+  .brand-content {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

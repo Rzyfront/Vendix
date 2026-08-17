@@ -15,9 +15,22 @@ export const BILLING_WARNING_RENEWAL_FAILED = 'billing-warning-renewal-failed';
 
 export interface BillingWarningRenewalFailedData {
   storeId: number;
-  /** Usually `subscription_payments.id` of the last failed attempt. Used as the dedupe key. */
-  sourceEventId: number;
-  /** Same as `sourceEventId` today, kept separate for the email/notification payload. */
+  /**
+   * ANCLA DEL DEDUPLICADO (defecto 8): `subscription_invoices.id`.
+   *
+   * La factura es constante durante todo el ciclo de reintentos; el intento no.
+   * Con `subscription_payments.id` como ancla, el UNIQUE
+   * `(store_id, type, source_event_id)` de `billing_warning_logs` no colapsaba
+   * nada y el comerciante recibía hasta 4 campanas y 4 correos por ciclo.
+   */
+  invoiceId?: number | null;
+  /**
+   * LEGADO — id del último intento de pago. Solo se usa como ancla cuando el job
+   * viene de una versión anterior que ya estaba en Redis al desplegar. Los
+   * emisores nuevos mandan `invoiceId`.
+   */
+  sourceEventId?: number | null;
+  /** Id del intento fallido. Alimenta el correo y la traza, nunca la identidad. */
   paymentId: number;
   /** Optional: subscription for the audit row. */
   storeSubscriptionId?: number | null;
@@ -85,7 +98,9 @@ export class BillingWarningProcessor extends WorkerHost {
 
       await this.billingWarningQueue.add(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: payload.storeId,
-        sourceEventId: payload.paymentId,
+        // La factura, no el intento: el reintento crea un `subscription_payments`
+        // nuevo cada vez y con él como ancla el aviso se repetía por intento.
+        invoiceId: payload.invoiceId ?? null,
         paymentId: payload.paymentId,
         storeSubscriptionId: payload.subscriptionId ?? null,
       });
@@ -140,7 +155,7 @@ export class BillingWarningProcessor extends WorkerHost {
     notificationDispatched: boolean;
     emailEnqueued: boolean;
   }> {
-    const { storeId, sourceEventId, paymentId } = job.data;
+    const { storeId, paymentId } = job.data;
 
     if (!Number.isInteger(storeId) || storeId <= 0) {
       this.logger.warn(
@@ -153,9 +168,11 @@ export class BillingWarningProcessor extends WorkerHost {
       };
     }
 
-    if (!Number.isInteger(sourceEventId) || sourceEventId <= 0) {
+    const anchor = await this.resolveDedupeAnchor(job);
+
+    if (anchor == null || !Number.isInteger(anchor) || anchor <= 0) {
       this.logger.warn(
-        `BILLING_WARNING_SKIP reason=invalid_source_event_id sourceEventId=${sourceEventId}`,
+        `BILLING_WARNING_SKIP reason=invalid_source_event_id sourceEventId=${anchor}`,
       );
       return {
         inserted: false,
@@ -163,6 +180,8 @@ export class BillingWarningProcessor extends WorkerHost {
         emailEnqueued: false,
       };
     }
+
+    const sourceEventId: number = anchor;
 
     // 1) Upsert the dedupe row. P2002 collapses to "no-op".
     let isFirstInsert = false;
@@ -212,7 +231,11 @@ export class BillingWarningProcessor extends WorkerHost {
             type: 'renewal_failed',
             payload: {
               event_id: monotonicId,
+              // `source_event_id` es la FACTURA desde el defecto 8; se deja
+              // explícito `invoice_id` para que ningún lector futuro tenga que
+              // adivinar a qué se ancló el aviso.
               source_event_id: sourceEventId,
+              invoice_id: sourceEventId,
               payment_id: paymentId,
               store_subscription_id: storeSubscriptionId,
               source: 'auto_renewal_failed',
@@ -239,6 +262,60 @@ export class BillingWarningProcessor extends WorkerHost {
       notificationDispatched,
       emailEnqueued,
     };
+  }
+
+  /**
+   * DEFECTO 8 — resuelve el `source_event_id` con el que se deduplica el aviso.
+   *
+   * Orden, de más estricto a menos:
+   *   1. `invoiceId` del job (los emisores nuevos siempre lo mandan).
+   *   2. La factura del `paymentId`, leída de la base. Cubre los jobs que ya
+   *      estaban en Redis cuando se desplegó este cambio y venían anclados al
+   *      intento: se re-ancla al ciclo, que es más estricto.
+   *   3. `sourceEventId` legado. Último recurso; se registra como advertencia
+   *      porque en ese modo el aviso puede repetirse por intento, que es
+   *      exactamente el defecto.
+   *
+   * Nunca devuelve un ancla MÁS LAXA que la del job: si hay factura, gana.
+   */
+  private async resolveDedupeAnchor(
+    job: Job<BillingWarningRenewalFailedData>,
+  ): Promise<number | null> {
+    const { invoiceId, paymentId, sourceEventId } = job.data;
+
+    if (invoiceId && Number.isInteger(invoiceId) && invoiceId > 0) {
+      return invoiceId;
+    }
+
+    if (paymentId && Number.isInteger(paymentId) && paymentId > 0) {
+      try {
+        const payment = await this.prisma.subscription_payments.findFirst({
+          where: { id: paymentId },
+          select: { invoice_id: true },
+        });
+        if (payment?.invoice_id) {
+          this.logger.log(
+            `BILLING_WARNING_ANCHOR_RESOLVED jobId=${job.id} paymentId=${paymentId} ` +
+              `invoiceId=${payment.invoice_id} — job legado re-anclado al ciclo`,
+          );
+          return payment.invoice_id;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `BILLING_WARNING_ANCHOR_LOOKUP_FAILED paymentId=${paymentId} err=${err?.message ?? err}`,
+        );
+      }
+    }
+
+    if (sourceEventId && Number.isInteger(sourceEventId) && sourceEventId > 0) {
+      this.logger.warn(
+        `BILLING_WARNING_ANCHOR_LEGACY jobId=${job.id} sourceEventId=${sourceEventId} ` +
+          `— sin factura resoluble; el aviso puede repetirse por intento`,
+      );
+      return sourceEventId;
+    }
+
+    return null;
   }
 
   private async resolveSubscriptionId(

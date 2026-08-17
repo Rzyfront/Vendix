@@ -5,11 +5,11 @@ import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 
 import {
-  Store,
+  StoreDetail,
   StoreListItem,
   CreateStoreDto,
-  UpdateStoreDto,
   StoreQueryDto,
+  StoreUpdatePayload,
 } from '../interfaces/store.interface';
 
 export interface ApiResponse<T> {
@@ -104,10 +104,12 @@ export class StoresService {
   }
 
   /**
-   * Get store by ID
+   * Get store by ID — returns the normalized `StoreDetail` shape
+   * (plan §A.3 / §B.5) so callers can hydrate forms, color pickers, and
+   * address fields without an extra fetch.
    */
-  getStoreById(id: number): Observable<ApiResponse<Store>> {
-    return this.http.get<ApiResponse<Store>>(
+  getStoreById(id: number): Observable<ApiResponse<StoreDetail>> {
+    return this.http.get<ApiResponse<StoreDetail>>(
       `${this.apiUrl}/superadmin/stores/${id}`,
     );
   }
@@ -115,23 +117,29 @@ export class StoresService {
   /**
    * Create a new store
    */
-  createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
+  createStore(data: CreateStoreDto): Observable<ApiResponse<StoreDetail>> {
     this.isCreatingStore.set(true);
     return this.http
-      .post<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores`, data)
+      .post<ApiResponse<StoreDetail>>(`${this.apiUrl}/superadmin/stores`, data)
       .pipe(finalize(() => this.isCreatingStore.set(false)));
   }
 
   /**
-   * Update an existing store
+   * Update an existing store. Accepts the typed `StoreUpdatePayload` from
+   * the contract file so the backend DTO and frontend payload stay in
+   * sync — the global `ValidationPipe({ whitelist: true })` will silently
+   * strip any field that isn't declared on `UpdateStoreDto`.
    */
   updateStore(
     id: number,
-    data: UpdateStoreDto,
-  ): Observable<ApiResponse<Store>> {
+    data: StoreUpdatePayload,
+  ): Observable<ApiResponse<StoreDetail>> {
     this.isUpdatingStore.set(true);
     return this.http
-      .patch<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores/${id}`, data)
+      .patch<ApiResponse<StoreDetail>>(
+        `${this.apiUrl}/superadmin/stores/${id}`,
+        data,
+      )
       .pipe(finalize(() => this.isUpdatingStore.set(false)));
   }
 

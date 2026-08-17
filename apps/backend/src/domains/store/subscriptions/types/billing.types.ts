@@ -10,6 +10,36 @@ export interface InvoiceLineItem {
   quantity: number;
   unit_price: string; // Decimal serialized
   total: string; // Decimal serialized
+  /**
+   * Código de catálogo del ítem → `cac:StandardItemIdentification/cbc:ID` con
+   * `schemeID="999"`. Lo produce `buildSubscriptionItemCode(plan_code)`.
+   *
+   * OPCIONAL a propósito: las facturas emitidas antes de este contrato no lo
+   * tienen, y el builder cae al NÚMERO DE LÍNEA cuando falta —que es
+   * exactamente el comportamiento que traían—. Un reenvío años después debe
+   * producir el mismo XML.
+   */
+  item_code?: string;
+  /**
+   * Unidad de medida de la DIAN → `@unitCode` de `cbc:InvoicedQuantity` y
+   * `cbc:BaseQuantity`. La resuelve `dianUnitCodeForBillingCycle(billing_cycle)`.
+   *
+   * ⚠️ El mes es `'LUN'` y el año `'ANA'`, no `'MON'`/`'ANN'` — ver el aviso de
+   * traducción corrompida en `dian-unit-codes.ts`. Ausente ⇒ `'EA'`.
+   */
+  unit_code?: string;
+  /**
+   * `true` ⇒ la línea está EXCLUIDA del IVA por el artículo 476 numeral 21 del
+   * Estatuto Tributario (computación en la nube). El emisor fiscal la traduce a
+   * `omit_tax_total: true` en `UblDocumentLine`, con lo que la línea NO emite el
+   * grupo `cac:TaxTotal` (regla FAX01).
+   *
+   * NO es «no tiene impuestos»: un ítem EXENTO sí emite el grupo, con
+   * `cbc:Percent` en 0,00. Por eso viaja como bandera explícita y no se deduce
+   * de que el importe del impuesto sea cero — un cero sin bandera es un cero por
+   * accidente.
+   */
+  vat_excluded?: boolean;
   meta: {
     plan_id: number;
     plan_code: string;
@@ -21,6 +51,35 @@ export interface InvoiceLineItem {
     kind?: ProrationKind;
     unused_credit_applied?: string;
   };
+}
+
+/**
+ * `subscription_invoices.metadata`, tipado.
+ *
+ * Es JSON en la base, así que este contrato es una PROMESA de forma, no una
+ * garantía del motor: leerlo siempre por los resolvedores del contrato fiscal
+ * (`resolveSubscriptionDocumentDiscount`), nunca indexando el JSON a mano.
+ */
+export interface SubscriptionInvoiceMetadata {
+  /** La factura es un ajuste de prorrateo, no un ciclo completo. */
+  prorated?: boolean;
+  /**
+   * Crédito por cambio a plan inferior consumido por esta factura, 2 decimales.
+   * Llave HISTÓRICA: existía antes de que el crédito se modelara como descuento
+   * de documento y se sigue escribiendo para no romper lecturas anteriores.
+   */
+  credit_applied?: string;
+  /**
+   * DESCUENTO A NIVEL DE DOCUMENTO, 2 decimales. Mismo número que
+   * `credit_applied`, con el nombre que dice qué ES fiscalmente.
+   *
+   * Es lo que el emisor fiscal pone en `ProviderInvoiceData.discount_amount`
+   * para que salga como `cac:AllowanceCharge` de documento
+   * (`ChargeIndicator=false`) en vez de como línea negativa. Una línea negativa
+   * descuadra el bruto, la base y el total que la DIAN recompone desde las
+   * líneas — la familia de rechazos DAU02 / DAU04 / DAU06.
+   */
+  document_discount?: string;
 }
 
 export interface InvoiceSplitBreakdown {
@@ -40,6 +99,15 @@ export interface InvoicePreview {
   period_end: string; // ISO
   line_items: InvoiceLineItem[];
   split_breakdown: InvoiceSplitBreakdown;
+  /**
+   * Descuento a nivel de DOCUMENTO que la emisión aplicará, 2 decimales.
+   *
+   * Los previews no lo calculan (el crédito pendiente se resuelve al emitir, con
+   * la fila bloqueada `FOR UPDATE`), así que hoy siempre es `'0.00'` o ausente.
+   * Existe para que `total` sea legible sin ambigüedad: `Σ line_items.total −
+   * document_discount = total`. Ausente ⇒ `'0.00'`.
+   */
+  document_discount?: string;
 }
 
 export type ProrationKind =

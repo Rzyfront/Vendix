@@ -20,6 +20,10 @@ import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
+// El MISMO DTO del riel de tiendas, no una copia: define que el cuerpo sólo
+// SELECCIONA rangos por su par `(resolution_number, prefix)` y nunca acarrea la
+// clave técnica. Un segundo DTO sería el sitio por donde esa regla se relaja.
+import { ApplyNumberingRangesDto } from '../../../store/invoicing/dian-config/dto/apply-numbering-range.dto';
 import { ResolutionScannerService } from '../../../store/invoicing/resolutions/resolution-scanner.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { Roles } from '../../../auth/decorators/roles.decorator';
@@ -233,6 +237,75 @@ export class SubscriptionFiscalController {
   async abandonTestSet(): Promise<any> {
     const result = await this.fiscalService.abandonTestSet();
     return this.responseService.success(result, 'Lote descartado');
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Numeración autorizada por la DIAN para el NIT de la plataforma
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Rangos que la DIAN tiene AUTORIZADOS, cruzados con lo guardado.
+   *
+   * Espeja `GET store/invoicing/dian-config/:id/numbering-ranges`, con la MISMA
+   * forma de ruta a propósito: el panel compartido
+   * (`app-dian-numbering-range-panel`) arma la URL como
+   * `{basePath}/dian-config/{configId}/numbering-ranges`, así que reapuntar
+   * `DIAN_API_CONTEXT` a este riel es todo lo que hace falta para montarlo sin
+   * tocarlo.
+   *
+   * `:read` y no `:write`: no escribe nada, no emite documentos y no reserva un
+   * solo consecutivo. Es una consulta al web service `GetNumberingRange`.
+   *
+   * LA ClTec NO VIAJA. La respuesta de la DIAN la trae en claro; la comparación
+   * contra la guardada ocurre en el servidor y de ella sólo sale
+   * `technical_key_matches`.
+   */
+  @Get('dian-config/:id/numbering-ranges')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary: 'DIAN-authorized numbering ranges for the platform NIT vs. stored',
+  })
+  async getNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const result = await this.fiscalService.queryPlatformNumberingRanges(id);
+    return this.responseService.success(
+      result,
+      'Rangos de numeración consultados a la DIAN',
+    );
+  }
+
+  /**
+   * Trae de la DIAN a `invoice_resolutions` los rangos SELECCIONADOS.
+   *
+   * 200 aunque algún elemento falle, igual que el riel de tiendas: el estado HTTP
+   * describe la PETICIÓN, y la petición se atendió —la consulta a la DIAN se hizo
+   * y cada rango marcado obtuvo su desenlace en `results[].ok`—. Un 4xx porque uno
+   * de veinte no entró haría que el cliente descartara la única constancia de
+   * cuáles diecinueve SÍ quedaron escritos.
+   *
+   * Sin `try/catch`: lo que invalida el lote entero —configuración ajena, la DIAN
+   * sin responder, cuerpo mal formado— sube al `AllExceptionsFilter`, que emite el
+   * estado y el `error_code` reales.
+   */
+  @Post('dian-config/:id/numbering-ranges/apply')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Sync the selected DIAN-authorized ranges into platform resolutions',
+  })
+  async applyNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApplyNumberingRangesDto,
+  ): Promise<any> {
+    const result = await this.fiscalService.applyPlatformNumberingRanges(
+      id,
+      dto,
+    );
+    return this.responseService.updated(
+      result,
+      'Numeración sincronizada con la DIAN',
+    );
   }
 
   @Get('transmissions')

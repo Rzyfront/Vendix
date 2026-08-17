@@ -1,0 +1,31 @@
+-- =============================================================================
+-- Bug 7 — Add `pending_delivery` to order_state_enum
+-- -----------------------------------------------------------------------------
+-- Tables affected (schema-only, no row deletes / no truncates):
+--   * order_state_enum   -> ADD VALUE 'pending_delivery'
+--
+-- Why:
+--   El usuario reportó que las ventas POS con `delivery_type='home_delivery'`
+--   que incluyen platos (product_type='prepared') auto-finalizaban al cobrar,
+--   bloqueando el flujo Despachar → Entregar → Finalizar.
+--
+--   Se agrega `pending_delivery` como estado intermedio que se asigna cuando
+--   una orden de venta cumple:
+--     - delivery_type IN ('home_delivery')
+--     - la orden contiene al menos un item con `product_type='prepared'`
+--       (es decir, requiere despacho físico, no auto-cierre).
+--
+-- Existing rows preserved:
+--   * No row deletes / no truncates / no unscoped updates.
+--   * Enum value additions are APPEND-ONLY. PostgreSQL `ALTER TYPE ... ADD
+--     VALUE IF NOT EXISTS` is idempotent within a session — Prisma tracks
+--     migration state separately so this is safe to run once.
+--   * Default state of new orders remains `created` until the POS path
+--     explicitly assigns `pending_delivery`. No existing OC is touched.
+--
+-- Compatibility:
+--   * Frontend must handle the new value gracefully (treat as `created`
+--     when the enum client hasn't been regenerated yet).
+-- =============================================================================
+
+ALTER TYPE "order_state_enum" ADD VALUE IF NOT EXISTS 'pending_delivery';

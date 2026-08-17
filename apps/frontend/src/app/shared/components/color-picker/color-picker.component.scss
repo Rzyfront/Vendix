@@ -1,0 +1,14 @@
+:host { display: block; }
+input[type="color"] {
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}

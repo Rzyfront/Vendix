@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 
 import { ModuleTabsShellComponent } from '../../../../../shared/components/module-tabs-shell/module-tabs-shell.component';
+import { providePlatformDianApi } from './platform-dian-context.factory';
 import { PlatformInvoicingStore } from './platform-invoicing.store';
 
 /**
@@ -55,7 +56,12 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
         },
       ],
     },
-    providers: [PlatformInvoicingStore],
+    // `providePlatformDianApi()` reapunta `DIAN_API_CONTEXT` a
+    // `superadmin/subscriptions/fiscal` y re-declara `DianConfigApiService` en
+    // esta rama. Sin la segunda parte el singleton de raíz seguiría resolviendo
+    // el token contra el injector RAÍZ y los componentes DIAN compartidos
+    // pegarían a `store/invoicing` — la tienda del operador, no la plataforma.
+    providers: [PlatformInvoicingStore, ...providePlatformDianApi()],
     children: [
       {
         path: '',

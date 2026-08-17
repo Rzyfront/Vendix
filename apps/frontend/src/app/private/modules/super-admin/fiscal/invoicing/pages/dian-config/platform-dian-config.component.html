@@ -723,6 +723,32 @@
           </details>
         }
       </div>
+
+      <!--
+        Numeración registrada en la DIAN.
+
+        Es el MISMO panel que monta el asistente DIAN de tiendas
+        (`store/invoicing/components/dian-config/dian-axis-detail.component.ts`),
+        sin una línea de cambio: habla con el riel de plataforma porque la ruta
+        reapunta `DIAN_API_CONTEXT`.
+
+        Va después del set de pruebas y antes del paso a producción porque ese es
+        el orden real del trámite: la DIAN separa la habilitación del software de
+        la autorización de numeración, y esta última es justo el chequeo que
+        bloquea la promoción.
+
+        POR QUÉ IMPORTA: la resolución y la clave técnica de la plataforma se
+        teclean del portal MUISCA, y la «clave actual vigente» que ese portal
+        muestra es la que se usaría para una resolución NUEVA — no la que la DIAN
+        tiene ligada a la resolución con la que se factura. Con la clave
+        equivocada cada factura de suscripción vuelve rechazada por FAD06, y
+        `technical_key_matches` (que el backend calcula sin que la clave viaje) es
+        el único dato que lo delata.
+      -->
+      <app-dian-numbering-range-panel
+        [configId]="dianConfigId()"
+        (changed)="onNumberingRangesChanged()"
+      ></app-dian-numbering-range-panel>
     </div>
 
     <!--

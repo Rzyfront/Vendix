@@ -5,6 +5,53 @@ import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
+import {
+  AcquirerAddressCandidate,
+  DianAcquirerAddressSource,
+  classifyAcquirerAddressType,
+  resolveAcquirerAddress,
+} from '../../invoicing/providers/dian-direct/acquirer-address.resolver';
+
+/**
+ * Fila de `addresses` tal como `get()` la lee para precargar el checkout.
+ *
+ * `type` viaja porque es lo ÚNICO que separa el primer escalón de la cascada
+ * (dirección fiscal) del segundo (cualquier otra de la organización); se
+ * descarta antes de devolver la dirección, igual que hace la emisión.
+ */
+interface BillingProfileAddressRow {
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state_province: string | null;
+  country_code: string;
+  postal_code: string | null;
+  municipality_code: string | null;
+  type: string;
+}
+
+/** La dirección que el perfil devuelve, sin el metadato de la cascada. */
+type BillingProfileAddress = Omit<BillingProfileAddressRow, 'type'>;
+
+/** Dirección elegida por la cascada más el escalón del que salió. */
+interface ResolvedBillingProfileAddress {
+  address: BillingProfileAddress;
+  source: DianAcquirerAddressSource;
+}
+
+/**
+ * Candidato de la cascada que además recuerda de qué fila salió.
+ *
+ * El resolvedor sólo conserva los campos que viajan al XML, y el formulario del
+ * checkout necesita también `address_line2`. Cargar el índice permite devolver
+ * la fila ENTERA sin volver a adivinar cuál ganó comparando textos.
+ */
+interface IndexedAcquirerAddressCandidate extends AcquirerAddressCandidate {
+  row_index: number;
+}
+
+/** Cuántas direcciones de la organización entran a la cascada. */
+const BILLING_ADDRESS_CANDIDATE_LIMIT = 10;
 
 /**
  * Persists the fiscal identity of the organization that pays for a subscription.
@@ -181,10 +228,15 @@ export class SubscriptionBillingProfileService {
         tax_regime: true,
         fiscal_responsibilities: true,
         organization_settings: { select: { settings: true } },
+        // SIN filtro por `type`: quién decide cuál dirección es la fiscal es la
+        // cascada de abajo, no la consulta. Filtrando `billing` acá, una
+        // organización que configuró su domicilio en el onboarding o en ajustes
+        // con otro tipo veía «Dirección» vacía en el checkout y la volvía a
+        // teclear — que es exactamente cómo entra un dato peor que el que ya
+        // estaba en la base.
         addresses: {
-          where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-          take: 1,
+          take: BILLING_ADDRESS_CANDIDATE_LIMIT,
           select: {
             address_line1: true,
             address_line2: true,
@@ -193,6 +245,7 @@ export class SubscriptionBillingProfileService {
             country_code: true,
             postal_code: true,
             municipality_code: true,
+            type: true,
           },
         },
       },
@@ -223,6 +276,13 @@ export class SubscriptionBillingProfileService {
         : null,
     });
 
+    // Misma cascada que usa la emisión para el adquiriente: fiscal → cualquier
+    // otra → nada. Precargar lo que la organización YA tiene es lo que evita
+    // que el checkout pida de nuevo un dato que existe.
+    const resolvedAddress = this.resolveProfileAddress(
+      (org?.addresses ?? []) as BillingProfileAddressRow[],
+    );
+
     return {
       // `enabled: false` means the checkout must not render the fiscal section
       // at all — not that the data is missing.
@@ -247,10 +307,92 @@ export class SubscriptionBillingProfileService {
             )
               ? (orgFiscalData?.['tax_responsibilities'] as string[])
               : org.fiscal_responsibilities,
-            address: org.addresses[0] ?? null,
+            address: resolvedAddress?.address ?? null,
+            // De qué escalón salió la dirección. Un respaldo que se anuncia es
+            // una decisión; uno silencioso es una suposición disfrazada de
+            // dato — es la misma razón por la que la emisión lo reporta.
+            address_source: resolvedAddress?.source ?? null,
           }
         : null,
     };
+  }
+
+  /**
+   * Dirección con la que el checkout precarga el formulario, elegida por la
+   * MISMA cascada que usa la emisión (`resolveAcquirerAddress`): direcciones
+   * fiscales (`billing` / `legal`) primero, cualquier otra de la organización
+   * después.
+   *
+   * ## Por qué hay un respaldo después de la cascada
+   *
+   * `resolveAcquirerAddress` descarta todo candidato que no sea EMITIBLE —
+   * una dirección colombiana sin municipio DANE no pasa `canEmitAddress`. Eso
+   * es correcto para emitir y sería contraproducente acá: el tenant abre esta
+   * pantalla justamente para completar lo que le falta, y devolverle `null`
+   * porque su dirección aún no tiene código DANE le dejaría el campo vacío y le
+   * haría teclear de nuevo la calle que ya tenía guardada.
+   *
+   * Así que cuando la cascada no encuentra nada emitible, se devuelve la mejor
+   * fila EN CRUDO ordenada por el mismo criterio (`classifyAcquirerAddressType`,
+   * el mismo que usa la cascada) y el municipio se lo pone el selector DANE del
+   * formulario. Es la misma asimetría lectura/emisión que ya rige el resolvedor
+   * de identidad fiscal unas líneas más arriba: leer es permisivo, emitir es
+   * estricto.
+   */
+  private resolveProfileAddress(
+    rows: BillingProfileAddressRow[],
+  ): ResolvedBillingProfileAddress | null {
+    if (!rows.length) return null;
+
+    const candidates: IndexedAcquirerAddressCandidate[] = rows.map(
+      (row, index) => ({
+        row_index: index,
+        type: row.type,
+        address_line: row.address_line1,
+        city_code: row.municipality_code ?? undefined,
+        city_name: row.city,
+        // El departamento se deriva del municipio, que es su prefijo Divipola.
+        // Sin esto la cascada tendría que resolverlo por nombre y una fila con
+        // código bueno y departamento mal escrito quedaría descartada.
+        department_code: row.municipality_code
+          ? row.municipality_code.slice(0, 2)
+          : undefined,
+        department_name: row.state_province ?? undefined,
+        country_code: row.country_code,
+        postal_code: row.postal_code ?? undefined,
+      }),
+    );
+
+    const resolved = resolveAcquirerAddress({
+      candidates,
+      // El emisor de esta factura es Vendix, no el tenant: su domicilio jamás
+      // puede ser el respaldo de la dirección del tenant. El tercer escalón de
+      // la cascada se deja deliberadamente vacío.
+      store_address: null,
+    });
+
+    if (resolved) {
+      const index = (resolved.address as IndexedAcquirerAddressCandidate)
+        .row_index;
+      const row = typeof index === 'number' ? rows[index] : undefined;
+      if (row) {
+        return { address: this.stripRowType(row), source: resolved.source };
+      }
+    }
+
+    const fallback =
+      rows.find((row) => classifyAcquirerAddressType(row.type) === 'fiscal') ??
+      rows[0];
+    return {
+      address: this.stripRowType(fallback),
+      source: classifyAcquirerAddressType(fallback.type),
+    };
+  }
+
+  /** Quita el `type`, que es metadato de la cascada y no de la dirección. */
+  private stripRowType(row: BillingProfileAddressRow): BillingProfileAddress {
+    const { type: _type, ...address } = row;
+    return address;
   }
 
   /**
@@ -318,11 +460,24 @@ export class SubscriptionBillingProfileService {
         email: true,
         name: true,
         organization_settings: { select: { settings: true } },
+        // Sin filtro por `type`: la misma cascada que usa el emisor. Filtrar por
+        // `billing` dejaba a este gate MÁS estricto que la emisión, así que una
+        // organización cuya única dirección fiscal es `legal` quedaba marcada
+        // como incompleta y el checkout le pedía de nuevo un dato que ya tiene
+        // y con el que la factura sale perfectamente.
         addresses: {
-          where: { type: 'billing' },
           orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-          take: 1,
-          select: { municipality_code: true },
+          take: BILLING_ADDRESS_CANDIDATE_LIMIT,
+          select: {
+            address_line1: true,
+            address_line2: true,
+            city: true,
+            state_province: true,
+            country_code: true,
+            postal_code: true,
+            municipality_code: true,
+            type: true,
+          },
         },
       },
     });
@@ -338,10 +493,19 @@ export class SubscriptionBillingProfileService {
     if (!number) return false;
     if (!dv) return false; // el DV se deriva del NIT, no se lee de columna
 
-    return !!(
-      org.legal_name?.trim() &&
-      org.email?.trim() &&
-      org.addresses[0]?.municipality_code
+    if (!org.legal_name?.trim() || !org.email?.trim()) return false;
+
+    // Cascada ESTRICTA, la misma de la emisión (`resolveAcquirerAddress` filtra
+    // por `canEmitAddress`, así que una dirección colombiana sin municipio DANE
+    // queda descartada). Aquí no se usa el respaldo permisivo de
+    // `resolveProfileAddress`: ese existe para PRECARGAR el formulario, y
+    // aceptarlo como «completo» dejaría pasar en el checkout una dirección que
+    // el emisor luego rechaza — justo la divergencia que este espejo evita.
+    return (
+      resolveAcquirerAddress({
+        candidates: (org.addresses ?? []) as AcquirerAddressCandidate[],
+        store_address: null,
+      }) !== null
     );
   }
 }

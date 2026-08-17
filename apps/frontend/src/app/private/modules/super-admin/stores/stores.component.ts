@@ -20,7 +20,10 @@ import {
   StoreListItem,
   StoreState,
   StoreType,
-  CreateStoreDto} from './interfaces/store.interface';
+  CreateStoreDto,
+  StoreDetail,
+  StoreUpdatePayload} from './interfaces/store.interface';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 // Import new components
 import {
@@ -307,6 +310,12 @@ export class StoresComponent implements OnInit, OnChanges {
   readonly isEditModalOpen = signal(false);
   readonly isUpdatingStore = signal(false);
   readonly selectedStore = signal<StoreListItem | null>(null);
+  /**
+   * Lazy-loaded enriched detail returned by `GET /superadmin/stores/:id`
+   * (plan §A.3). Hydrated when the modal opens via `(opened)` so the modal
+   * form has access to `manager`, `currency`, `primary_address`, etc.
+   */
+  readonly selectedStoreDetail = signal<StoreDetail | null>(null);
 
 private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
@@ -786,6 +795,11 @@ private initializeCreateForm(): void {
 
   editStore(store: StoreListItem): void {
     this.selectedStore.set(store);
+    this.selectedStoreDetail.set(null);
+    // Fire-and-forget detail fetch; the modal opens immediately and populates
+    // when `selectedStoreDetail` updates via the input signal. The `(opened)`
+    // handler is a redundant safety net for the @defer race.
+    this.loadSelectedStoreDetail(store.id);
     this.isEditModalOpen.set(true);
   }
 
@@ -793,54 +807,97 @@ private initializeCreateForm(): void {
     this.isEditModalOpen.set(isOpen);
     if (!isOpen) {
       this.selectedStore.set(null);
+      this.selectedStoreDetail.set(null);
     }
   }
 
   onEditModalCancel(): void {
     this.isEditModalOpen.set(false);
     this.selectedStore.set(null);
+    this.selectedStoreDetail.set(null);
   }
 
-  updateStore(storeData: any): void {
-    const current = this.selectedStore();
-    if (!current) return;
-
-    const updateData = {
-      name: storeData.name,
-      slug: storeData.slug,
-      description: storeData.description,
-      email: storeData.email,
-      phone: storeData.phone,
-      website: storeData.website,
-      address: storeData.address,
-      city: storeData.city,
-      country: storeData.country,
-      is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL,
-      industries: Array.isArray(storeData.industries) && storeData.industries.length > 0
-        ? storeData.industries
-        : ['retail']};
-
+  /**
+   * Lazy-load the enriched `StoreDetail` for the row the user clicked Edit
+   * on. Backed by `GET /superadmin/stores/:id` (plan §A.3 / §B.5). The
+   * contract schema check happens at the HTTP layer (per the contract
+   * file's plan), so this handler just trusts the response and stores it.
+   */
+  loadSelectedStoreDetail(id: number | undefined): void {
+    if (!id) {
+      this.selectedStoreDetail.set(null);
+      return;
+    }
     this.storesService
-      .updateStore(current.id, updateData)
+      .getStoreById(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          if (response.success && response.data) {
+          if (response?.success && response.data) {
+            this.selectedStoreDetail.set(response.data as StoreDetail);
+          } else {
+            this.selectedStoreDetail.set(null);
+          }
+        },
+        error: () => this.selectedStoreDetail.set(null),
+      });
+  }
+
+  /**
+   * Handle the typed `StoreUpdatePayload` emitted by the edit modal. The
+   * modal is now the single source of truth for what gets sent — the page
+   * only forwards the payload, refreshes the list/stats, and surfaces errors
+   * (with `parseApiError` mapping field errors → form controls when the
+   * backend hands back details).
+   */
+  onEditModalSubmit(payload: StoreUpdatePayload): void {
+    const current = this.selectedStore();
+    if (!current) return;
+
+    this.storesService
+      .updateStore(current.id, payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response?.success) {
             this.isEditModalOpen.set(false);
             this.selectedStore.set(null);
+            this.selectedStoreDetail.set(null);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda actualizada exitosamente');
           } else {
+            this.toastService.error('Respuesta inválida al actualizar la tienda');
+          }
+        },
+        error: (err) => {
+          // Map field errors back to the form when the backend sends a
+          // SYS_VALIDATION_001 with details — list ALL validation errors
+          // so the user sees every issue at once, not just the first one.
+          const parsed = parseApiError(err);
+          const validationErrors = (
+            err?.error?.details?.validationErrors ??
+            parsed.details?.validationErrors ??
+            []
+          ) as string[];
+          if (validationErrors.length > 0) {
+            // Show one toast per error so the user can act on each, plus
+            // a summary toast with the count.
             this.toastService.error(
-              'Respuesta inválida al actualizar la tienda',
+              `${validationErrors.length} error${validationErrors.length === 1 ? '' : 'es'} de validación`,
+              'Validación',
+              8000,
+            );
+            for (const message of validationErrors) {
+              this.toastService.error(message, 'Validación', 6000);
+            }
+          } else {
+            this.toastService.error(
+              parsed.userMessage || 'Error al actualizar la tienda',
             );
           }
         },
-        error: (error) => {
-          this.toastService.error('Error al actualizar la tienda');
-        }});
+      });
   }
 
   getEmptyStateTitle(): string {

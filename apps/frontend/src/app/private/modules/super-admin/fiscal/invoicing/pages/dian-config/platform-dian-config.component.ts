@@ -32,6 +32,14 @@ import {
   ToastService,
   ToggleComponent,
 } from '../../../../../../../shared/components';
+// El MISMO panel que usa el asistente DIAN de tiendas, sin una línea de cambio:
+// habla con el riel de plataforma porque la ruta reapunta `DIAN_API_CONTEXT`
+// (ver `platform-dian-context.factory.ts`), no porque el componente sepa dónde
+// está montado.
+// Se importa desde el sub-barril `shared/components/dian`, que es de donde lo
+// toma el asistente de tiendas: el barril raíz `shared/components` no lo
+// reexporta.
+import { DianNumberingRangePanelComponent } from '../../../../../../../shared/components/dian';
 import { computeNitDv } from '../../../../../../../shared/utils/nit.util';
 import {
   SubscriptionFiscalEnvironment,
@@ -117,6 +125,7 @@ const REQUIRED_LABELS: Record<string, string> = {
     ToggleComponent,
     PlatformDianGuideComponent,
     DianTechnicalResponseComponent,
+    DianNumberingRangePanelComponent,
   ],
   templateUrl: './platform-dian-config.component.html',
 })
@@ -190,6 +199,15 @@ export class PlatformDianConfigComponent {
       config?.enablement_status === 'enabled'
     );
   });
+
+  /**
+   * Configuración DIAN sobre la que opera el panel de numeración autorizada.
+   *
+   * `null` mientras la plataforma no tenga configuración: el panel compartido se
+   * auto-deshabilita con un `configId` nulo, que es mejor que consultar un id
+   * inventado y recibir un 404 al abrir la pestaña.
+   */
+  readonly dianConfigId = computed(() => this.store.dianConfig()?.id ?? null);
 
   readonly form: FormGroup<FiscalConfigFormControls> =
     this.fb.group<FiscalConfigFormControls>(
@@ -678,6 +696,26 @@ export class PlatformDianConfigComponent {
           this.reloadStatus();
         },
       });
+  }
+
+  /**
+   * El panel de numeración escribió en `invoice_resolutions`: se relee todo lo que
+   * cuelga de ellas.
+   *
+   * Son TRES lecturas y no una porque la resolución alimenta tres cosas distintas:
+   * el listado que ofrecen los selectores (`resolutions`), el estado agregado que
+   * pinta la tarjeta «Resolución activa» y los requisitos de habilitación
+   * (`status`), y el reporte de producción, cuyo chequeo `production_resolution`
+   * acaba de cambiar de veredicto.
+   *
+   * El readiness se refresca SÓLO si ya se había leído: pedirlo sin que el
+   * operador lo haya solicitado abriría la sección 6 sola y, sin configuración,
+   * respondería 400 con un toast de error sobre algo que sí funcionó.
+   */
+  onNumberingRangesChanged(): void {
+    this.store.loadResolutions(true);
+    this.reloadStatus();
+    if (this.readiness()) this.onCheckReadiness();
   }
 
   onTestConnection(): void {

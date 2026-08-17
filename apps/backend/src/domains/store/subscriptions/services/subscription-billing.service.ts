@@ -13,6 +13,11 @@ import {
   InvoicePreview,
   InvoiceSplitBreakdown,
 } from '../types/billing.types';
+import {
+  buildSubscriptionItemCode,
+  buildSubscriptionLineDescription,
+  dianUnitCodeForBillingCycle,
+} from '../types/subscription-invoice-fiscal.contract';
 
 /**
  * Advisory lock key (int4) for invoice numbering sequence.
@@ -344,15 +349,35 @@ export class SubscriptionBillingService {
 
         const invoiceNumber = await this.allocateInvoiceNumber(tx);
 
+        const planLabel = this.planDisplayName(sub.plan);
+
         const lineItems: InvoiceLineItem[] =
           opts.invoicePreview?.line_items ?? [
             {
-              description: opts.prorated
-                ? `Proration adjustment — plan ${sub.plan.code}`
-                : `Plan ${sub.plan.code} (${sub.plan.billing_cycle})`,
+              // Descripción canónica en español, con plan, ciclo y PERÍODO
+              // facturado. Antes decía `Plan pro (monthly)`: ni nombraba el
+              // servicio prestado ni declaraba el período, que en una factura de
+              // ciclo es el dato que dice qué se prestó.
+              description: buildSubscriptionLineDescription({
+                planName: planLabel,
+                billingCycle: sub.plan.billing_cycle,
+                periodStart: basePeriodStart,
+                periodEnd: basePeriodEnd,
+                prorated: !!opts.prorated,
+              }),
               quantity,
               unit_price: unitPrice.toFixed(2),
               total: unitPrice.times(quantity).toFixed(2),
+              // Código de catálogo estable por plan (`schemeID="999"`). Sin él el
+              // XML publica el NÚMERO DE LÍNEA como identificación del ítem.
+              item_code: buildSubscriptionItemCode(sub.plan.code),
+              // Unidad que califica la cantidad: mes `LUN` / año `ANA`. Ver la
+              // nota del mapeo: NO son `MON`/`ANN`.
+              unit_code: dianUnitCodeForBillingCycle(sub.plan.billing_cycle),
+              // El servicio de computación en la nube está EXCLUIDO del IVA
+              // (art. 476 num. 21 ET). Excluido ≠ exento: la bandera hace que la
+              // línea NO emita `cac:TaxTotal` (FAX01), en vez de emitirlo en cero.
+              vat_excluded: true,
               meta: {
                 plan_id: sub.plan.id,
                 plan_code: sub.plan.code,
@@ -362,18 +387,47 @@ export class SubscriptionBillingService {
               },
             },
           ];
-        if (creditApplied.greaterThan(DECIMAL_ZERO)) {
-          lineItems.push({
-            description: 'Downgrade credit (applied from previous cycle)',
-            quantity: 1,
-            unit_price: creditApplied.negated().toFixed(2),
-            total: creditApplied.negated().toFixed(2),
-            meta: {
-              plan_id: sub.plan.id,
-              plan_code: sub.plan.code,
-              billing_cycle: sub.plan.billing_cycle,
-            },
-          });
+
+        // EL CRÉDITO POR CAMBIO A PLAN INFERIOR ES UN DESCUENTO DE DOCUMENTO,
+        // NO UNA LÍNEA NEGATIVA.
+        //
+        // Antes se empujaba como `lineItems.push({ unit_price: -crédito })`. La
+        // DIAN RECOMPONE el bruto, la base imponible y el total desde las líneas,
+        // así que una línea negativa descuadra los tres a la vez — es la familia
+        // de rechazos DAU02 / DAU04 / DAU06 que devolvió el set de pruebas.
+        //
+        // El importe se DERIVA del cierre aritmético (`Σ líneas − descuento =
+        // total`) en lugar de copiar `creditApplied`, para que el descuento que
+        // viaja al XML no pueda diferir en un centavo del que el cliente ve
+        // descontado. `total` ya está redondeado a 2 decimales y las líneas se
+        // serializan a 2, así que la resta es exacta por construcción.
+        //
+        // Se recorta en cero por defensa: un preview cuyas líneas sumen menos que
+        // su propio total sería un defecto de quien lo armó, y un descuento
+        // negativo es rechazo seguro (la DIAN no admite `AllowanceCharge`
+        // negativo). Se registra para que el defecto no pase inadvertido.
+        const lineItemsGross = lineItems.reduce((acc, item) => {
+          try {
+            return acc.plus(new Prisma.Decimal(item.total));
+          } catch {
+            return acc;
+          }
+        }, DECIMAL_ZERO);
+        const rawDocumentDiscount = this.round2(lineItemsGross).minus(total);
+        const documentDiscount = Prisma.Decimal.max(
+          rawDocumentDiscount,
+          DECIMAL_ZERO,
+        );
+        if (rawDocumentDiscount.lessThan(DECIMAL_ZERO)) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'INVOICE_LINE_TOTALS_BELOW_DOCUMENT_TOTAL',
+              subscription_id: sub.id,
+              line_items_gross: this.round2(lineItemsGross).toFixed(2),
+              invoice_total: total.toFixed(2),
+              credit_applied: creditApplied.toFixed(2),
+            }),
+          );
         }
 
         const splitBreakdown: InvoiceSplitBreakdown =
@@ -414,7 +468,14 @@ export class SubscriptionBillingService {
             split_breakdown: splitBreakdown as unknown as Prisma.InputJsonValue,
             metadata: {
               prorated: !!opts.prorated,
+              // Llave HISTÓRICA, se conserva tal cual: la leen facturas y specs
+              // anteriores a este contrato.
               credit_applied: creditApplied.toFixed(2),
+              // La MISMA cifra con el nombre de lo que es fiscalmente. Es la que
+              // el emisor fiscal pone en `ProviderInvoiceData.discount_amount`
+              // (vía `resolveSubscriptionDocumentDiscount`) para que salga como
+              // `cac:AllowanceCharge` de documento.
+              document_discount: documentDiscount.toFixed(2),
             } as Prisma.InputJsonValue,
             from_plan_id: opts.fromPlanId ?? null,
             to_plan_id: opts.toPlanId ?? null,
@@ -510,10 +571,18 @@ export class SubscriptionBillingService {
     const periodEnd = new Date(periodStart.getTime() + cycleMs);
 
     const lineItem: InvoiceLineItem = {
-      description: `Plan ${sub.plan.code} (${sub.plan.billing_cycle})`,
+      description: buildSubscriptionLineDescription({
+        planName: this.planDisplayName(sub.plan),
+        billingCycle: sub.plan.billing_cycle,
+        periodStart,
+        periodEnd,
+      }),
       quantity: 1,
       unit_price: pricing.effective_price.toFixed(2),
       total: pricing.effective_price.toFixed(2),
+      item_code: buildSubscriptionItemCode(sub.plan.code),
+      unit_code: dianUnitCodeForBillingCycle(sub.plan.billing_cycle),
+      vat_excluded: true,
       meta: {
         plan_id: sub.plan.id,
         plan_code: sub.plan.code,
@@ -535,6 +604,9 @@ export class SubscriptionBillingService {
       period_end: periodEnd.toISOString(),
       line_items: [lineItem],
       split_breakdown: split,
+      // El crédito pendiente se resuelve al EMITIR, con la fila bloqueada; un
+      // preview nunca lo conoce. Declararlo en cero es lo honesto.
+      document_discount: '0.00',
     };
   }
 
@@ -712,5 +784,20 @@ export class SubscriptionBillingService {
   private round2(d: Prisma.Decimal): Prisma.Decimal {
     // Prisma.Decimal (decimal.js) — ROUND_HALF_EVEN = 6 (banker's rounding).
     return d.toDecimalPlaces(2, 6 /* ROUND_HALF_EVEN */);
+  }
+
+  /**
+   * Nombre LEGIBLE del plan para el texto que ve el cliente en la factura.
+   *
+   * `subscription_plans.name` es NOT NULL en el esquema, pero acá llega por
+   * `findUniqueOrThrow` sobre un cliente sin tipar (`tx: any`) y también desde
+   * fixtures de prueba que sólo pueblan `code`. La comprobación de tipo evita que
+   * una emisión real muera con `.trim() of undefined`, que costaría el
+   * consecutivo. El `code` (`pro_annual`) es la llave de negocio, no texto de
+   * factura: sólo se usa como último recurso.
+   */
+  private planDisplayName(plan: { name?: unknown; code: string }): string {
+    const name = typeof plan.name === 'string' ? plan.name.trim() : '';
+    return name || plan.code;
   }
 }

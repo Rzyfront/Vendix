@@ -8,6 +8,15 @@ import {
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionAccessService } from './subscription-access.service';
+import {
+  AUTO_RENEW_PAUSE_REASON_NO_CARD,
+  AutoRenewPauseSource,
+  autoRenewIntentDesired,
+  metadataWithPausedAutoRenewIntent,
+  metadataWithRearmedAutoRenewIntent,
+  pickRenewalEligiblePaymentMethod,
+  renewalEligiblePmWhere,
+} from '../renewal-eligibility.contract';
 
 type State = store_subscription_state_enum;
 
@@ -583,9 +592,15 @@ export class SubscriptionStateService {
    * won't re-fire. The store's subscription STATE is unchanged — only the
    * "auto-renew at next period end" flag moves.
    *
+   * EL PREDICADO MANDA: el rearme se verifica contra
+   * `renewal-eligibility.contract.ts`, nunca se impone. Un rearme sin medio
+   * apto devolvía el autopago a la misma renovación silenciosa que lo apagó.
+   * Al rearmar se marca la intención como cumplida en
+   * `metadata.auto_renew_intent` para que el gate no la vuelva a leer como
+   * pendiente.
+   *
    * Returns true when the flip happened, false otherwise (already on,
-   * no subscription row, etc.). Idempotent on retry: a second call is a
-   * no-op because the guard `auto_renew: false` no longer matches.
+   * no subscription row, no eligible payment method). Idempotent on retry.
    */
   async reEnableAutoRenewInTx(
     tx: Prisma.TransactionClient,
@@ -596,19 +611,249 @@ export class SubscriptionStateService {
     }
     const sub = await tx.store_subscriptions.findUnique({
       where: { store_id: storeId },
-      select: { id: true, auto_renew: true },
+      select: { id: true, auto_renew: true, metadata: true },
     });
     if (!sub) {
       return false;
     }
-    if (sub.auto_renew !== false) {
+
+    const now = new Date();
+    const eligible = await this.hasRenewalEligiblePmInTx(tx, sub.id, now);
+    if (!eligible) {
+      this.logger.warn(
+        `AUTO_RENEW_REARM_SKIPPED store=${storeId} sub=${sub.id} ` +
+          `reason=no_renewal_eligible_payment_method — el autopago solo funciona con tarjeta`,
+      );
       return false;
     }
+
+    if (sub.auto_renew !== false) {
+      // Ya estaba encendido (toggle manual entre el cobro y la tokenización).
+      // Aun así cerramos la intención: quedó cumplida.
+      await tx.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          metadata: metadataWithRearmedAutoRenewIntent(
+            sub.metadata,
+            now,
+          ) as Prisma.InputJsonValue,
+          updated_at: now,
+        },
+      });
+      return false;
+    }
+
     await tx.store_subscriptions.update({
       where: { id: sub.id },
-      data: { auto_renew: true, updated_at: new Date() },
+      data: {
+        auto_renew: true,
+        metadata: metadataWithRearmedAutoRenewIntent(
+          sub.metadata,
+          now,
+        ) as Prisma.InputJsonValue,
+        updated_at: now,
+      },
     });
     return true;
+  }
+
+  /**
+   * LA CURA, en un solo lugar — rearme automático del autopago cuando el
+   * comerciante consigue una credencial cobrable.
+   *
+   * Dos caminos guardan tarjeta y ambos deben curar igual:
+   *   - `SubscriptionPaymentMethodsService.tokenizeAndRegister` (alta explícita).
+   *   - `SubscriptionPaymentService.autoRegisterPaymentMethodFromGateway` (la
+   *     tarjeta con la que se pagó una factura por el widget).
+   *
+   * Vive aquí porque es el único servicio que AMBOS inyectan; duplicar la
+   * secuencia en los dos era la vía segura a que un camino curara y el otro no.
+   *
+   * Autorización del rearme (no se enciende el autopago a quien lo apagó a mano):
+   * hace falta una fila de auditoría `auto_renew_disabled_no_credential` sin
+   * resolver, o la intención recordada en `metadata.auto_renew_intent`.
+   *
+   * Devuelve `rearmed: true` SOLO cuando el flag pasó de apagado a encendido —
+   * es la señal con la que el llamador avisa (campana + correo) después del
+   * commit. `resolvedEventId` es la fila de auditoría que quedó cerrada.
+   */
+  async rearmAutoRenewAfterCredentialInTx(
+    tx: Prisma.TransactionClient,
+    args: { storeId: number; subscriptionId: number; source: string },
+  ): Promise<{
+    rearmed: boolean;
+    resolvedEventId: number | null;
+    eligible: boolean;
+  }> {
+    const { storeId, subscriptionId, source } = args;
+    const now = new Date();
+
+    const eligible = await this.hasRenewalEligiblePmInTx(
+      tx,
+      subscriptionId,
+      now,
+    );
+    if (!eligible) {
+      // Medio guardado que NO renueva (Nequi/PSE, tarjeta vencida, sin COF bajo
+      // enforce). Curar aquí sería reponer el autopago silencioso.
+      this.logger.log(
+        `AUTO_RENEW_REARM_NOT_ELIGIBLE store=${storeId} sub=${subscriptionId} source=${source}`,
+      );
+      return { rearmed: false, resolvedEventId: null, eligible: false };
+    }
+
+    const openEventId = await this.findUnresolvedNoCredentialEventInTx(
+      tx,
+      subscriptionId,
+    );
+
+    const sub = await tx.store_subscriptions.findFirst({
+      where: { id: subscriptionId },
+      select: { auto_renew: true, metadata: true },
+    });
+
+    const authorized =
+      openEventId != null || autoRenewIntentDesired(sub?.metadata ?? null);
+    if (!authorized) {
+      return { rearmed: false, resolvedEventId: null, eligible: true };
+    }
+
+    const flipped = await this.reEnableAutoRenewInTx(tx, storeId);
+
+    // `flipped === false` con autorización significa que el autopago ya estaba
+    // encendido (toggle manual entre el cobro y el alta de la tarjeta). Se cierra
+    // la auditoría igual para que el aviso en pantalla desaparezca, pero NO se
+    // notifica un rearme que el cliente no percibe como cambio.
+    let resolvedEventId: number | null = null;
+    if (openEventId != null) {
+      const existing = await tx.subscription_events.findUnique({
+        where: { id: openEventId },
+        select: { payload: true },
+      });
+      const prevPayload =
+        existing?.payload &&
+        typeof existing.payload === 'object' &&
+        !Array.isArray(existing.payload)
+          ? (existing.payload as Record<string, unknown>)
+          : {};
+      await tx.subscription_events.update({
+        where: { id: openEventId },
+        data: {
+          payload: {
+            ...prevPayload,
+            resolved_at: now.toISOString(),
+            resolved_by: source,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      resolvedEventId = openEventId;
+    }
+
+    this.logger.log(
+      `AUTO_RENEW_REARMED store=${storeId} sub=${subscriptionId} source=${source} ` +
+        `flipped=${flipped} resolvedEvent=${resolvedEventId ?? 'none'}`,
+    );
+
+    return { rearmed: flipped, resolvedEventId, eligible: true };
+  }
+
+  /**
+   * Id del `auto_renew_disabled_no_credential` más reciente que sigue sin
+   * resolver, o null.
+   *
+   * SQL crudo a propósito: el filtro de path JSON de Prisma es frágil entre
+   * versiones menores, y la pausa (`SubscriptionPaymentService`) lee la MISMA
+   * expresión `payload->>'resolved_at' IS NULL`. Los dos lados tienen que hablar
+   * del mismo registro o el aviso se duplica o no se cierra nunca.
+   */
+  private async findUnresolvedNoCredentialEventInTx(
+    tx: Prisma.TransactionClient,
+    subscriptionId: number,
+  ): Promise<number | null> {
+    const rows = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT id FROM subscription_events
+      WHERE store_subscription_id = ${subscriptionId}
+        AND type = 'auto_renew_disabled_no_credential'
+        AND payload->>'resolved_at' IS NULL
+      ORDER BY id DESC
+      LIMIT 1
+    `);
+    return rows?.[0]?.id ?? null;
+  }
+
+  /**
+   * `true` cuando la suscripción tiene al menos un medio de pago apto para
+   * renovar, leído dentro de la transacción del llamador.
+   *
+   * Delega en `renewal-eligibility.contract.ts`. Este servicio NO puede inyectar
+   * `SubscriptionPaymentService` (ese servicio inyecta a este: sería un ciclo de
+   * DI), así que consume el predicado como función pura sobre el cliente de la
+   * transacción. La REGLA sigue viviendo en un solo archivo.
+   */
+  private async hasRenewalEligiblePmInTx(
+    tx: Prisma.TransactionClient,
+    subscriptionId: number,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const rows = await tx.subscription_payment_methods.findMany({
+      where: renewalEligiblePmWhere(subscriptionId, now),
+    });
+    return pickRenewalEligiblePaymentMethod(rows, now) !== null;
+  }
+
+  /**
+   * Valor de `auto_renew` que una reactivación puede escribir, más el `metadata`
+   * que debe acompañarlo.
+   *
+   * Regla: la reactivación NO impone `true`. Si hay medio apto lo enciende; si
+   * no lo hay lo deja/pone en `false` y RECUERDA la intención del cliente en
+   * `metadata.auto_renew_intent`, que es lo que autoriza el rearme automático
+   * cuando el comerciante guarde una tarjeta.
+   *
+   * Este método existe porque la línea `auto_renew: true` sin condición era el
+   * punto exacto donde se perdía el apagado del gate: el gate corre antes en la
+   * MISMA transacción y la ventana de reactivación lo pisaba.
+   *
+   * Público porque `SubscriptionProrationService` escribe `auto_renew` por su
+   * cuenta en tres caminos (cambio de plan, revertir cancelación programada y
+   * resuscripción), y en el camino de **plan gratis** no corre ningún gate
+   * después. Sin compartir este resolvedor, ese camino seguiría encendiendo el
+   * autopago de una tienda sin tarjeta: el mismo defecto, por otra puerta.
+   */
+  async resolveAutoRenewForReactivation(
+    tx: any,
+    args: {
+      subscriptionId: number;
+      storeId: number;
+      currentAutoRenew: boolean | null;
+      metadata: unknown;
+      source: AutoRenewPauseSource;
+      now: Date;
+    },
+  ): Promise<{ auto_renew: boolean; metadata?: Prisma.InputJsonValue }> {
+    const eligible = await this.hasRenewalEligiblePmInTx(
+      tx as Prisma.TransactionClient,
+      args.subscriptionId,
+      args.now,
+    );
+
+    if (eligible) {
+      return { auto_renew: true };
+    }
+
+    this.logger.warn(
+      `AUTO_RENEW_HELD_OFF store=${args.storeId} sub=${args.subscriptionId} ` +
+        `source=${args.source} reason=no_renewal_eligible_payment_method — ` +
+        `el autopago solo funciona con tarjeta; intención recordada para rearme`,
+    );
+
+    return {
+      auto_renew: false,
+      metadata: metadataWithPausedAutoRenewIntent(args.metadata, {
+        source: args.source,
+        now: args.now,
+      }) as Prisma.InputJsonValue,
+    };
   }
 
   /**
@@ -765,6 +1010,19 @@ export class SubscriptionStateService {
    * deadlines computed off the lapsed period and must not survive either.
    * `grace_soft_until` / `grace_hard_until` / `lock_reason` are already
    * cleared by `transition()` on the way into `active`.
+   *
+   * `auto_renew` NO se impone
+   * -------------------------
+   * Esta línea escribía `auto_renew: true` sin condición y era el punto exacto
+   * donde se perdía el apagado del gate: `handleChargeSuccess` pausa el autopago
+   * por falta de tarjeta y DESPUÉS, en la MISMA transacción, llamaba aquí. El
+   * apagado solo sobrevivía si la suscripción ya estaba `active` (no pasa por
+   * esta ruta); en el primer checkout y en toda reactivación desde
+   * gracia/suspendida/cancelada/vencida se perdía.
+   *
+   * Ahora el valor lo decide `renewal-eligibility.contract.ts`. Sin medio apto
+   * queda en `false` y la intención del cliente se recuerda en
+   * `metadata.auto_renew_intent` para el rearme automático.
    */
   private async applyReactivationWindow(
     tx: any,
@@ -781,13 +1039,31 @@ export class SubscriptionStateService {
     const { subscriptionId, storeId, now, originalPeriodEnd, planId, ctx } =
       args;
 
+    const existing = (await tx.store_subscriptions.findFirst({
+      where: { id: subscriptionId },
+      select: { auto_renew: true, metadata: true },
+    })) as { auto_renew: boolean | null; metadata: unknown } | null;
+
+    const autoRenew = await this.resolveAutoRenewForReactivation(tx, {
+      subscriptionId,
+      storeId,
+      currentAutoRenew: existing?.auto_renew ?? null,
+      metadata: existing?.metadata ?? null,
+      source: 'reactivation_window',
+      now,
+    });
+
     const data: Prisma.store_subscriptionsUncheckedUpdateInput = {
       scheduled_cancel_at: null,
-      auto_renew: true,
+      auto_renew: autoRenew.auto_renew,
       suspend_at: null,
       cancel_at: null,
       updated_at: now,
     };
+
+    if (autoRenew.metadata !== undefined) {
+      data.metadata = autoRenew.metadata;
+    }
 
     // Only rebuild the window when the paid one actually lapsed (or the
     // caller pinned one, or there never was one). A mid-period `blocked`
@@ -967,8 +1243,13 @@ export class SubscriptionStateService {
 
   /**
    * Revert a scheduled cancellation before period_end.
-   * Clears scheduled_cancel_at, restores auto_renew=true.
+   * Clears scheduled_cancel_at and restores auto_renew **si hay medio apto**.
    * Returns the updated subscription (state stays unchanged).
+   *
+   * Volver a encender el autopago sin tarjeta cobrable reproducía el incidente:
+   * el cliente cree que sigue renovando y la renovación falla en silencio. Sin
+   * medio apto se deshace la cancelación (que es lo que el cliente pidió) pero el
+   * autopago queda pausado con la intención recordada para el rearme automático.
    */
   async unscheduleCancel(
     storeId: number,
@@ -991,12 +1272,25 @@ export class SubscriptionStateService {
       );
     }
 
+    const now = new Date();
+    const autoRenew = await this.resolveAutoRenewForReactivation(this.prisma, {
+      subscriptionId: sub.id,
+      storeId,
+      currentAutoRenew: sub.auto_renew ?? null,
+      metadata: sub.metadata ?? null,
+      source: 'unschedule_cancel',
+      now,
+    });
+
     const updated = await this.prisma.store_subscriptions.update({
       where: { store_id: storeId },
       data: {
         scheduled_cancel_at: null,
-        auto_renew: true,
-        updated_at: new Date(),
+        auto_renew: autoRenew.auto_renew,
+        ...(autoRenew.metadata !== undefined
+          ? { metadata: autoRenew.metadata }
+          : {}),
+        updated_at: now,
       },
     });
 
@@ -1010,6 +1304,10 @@ export class SubscriptionStateService {
           reason: opts.reason,
           kind: 'scheduled_cancel_voided',
           previous_scheduled_cancel_at: sub.scheduled_cancel_at.toISOString(),
+          auto_renew_restored: autoRenew.auto_renew,
+          auto_renew_paused_reason: autoRenew.auto_renew
+            ? null
+            : AUTO_RENEW_PAUSE_REASON_NO_CARD,
         } as Prisma.InputJsonValue,
         triggered_by_user_id: opts.triggeredByUserId ?? null,
         triggered_by_job: opts.triggeredByJob ?? null,

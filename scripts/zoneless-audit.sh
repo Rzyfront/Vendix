@@ -54,6 +54,8 @@ info() {
 
 # Count TypeScript files with a real code match, ignoring files whose
 # occurrences appear only on comment lines.
+# El patron se evalua con grep -E Y con awk: usar [(] en vez de \( , porque
+# awk rechaza \( con "illegal primary in regular expression" y devuelve 0.
 count_code_only() {
   local pattern="$1"
   local exempt="$2"
@@ -73,11 +75,11 @@ count_code_only() {
 echo "=== 1. LEGACY INPUTS/OUTPUTS/EVENTEMITTER/NgZone/markForCheck ==="
 
 check "Legacy @Input/@Output" \
-  "grep -rln '@Input(\|@Output(' $FRONTEND --include='*.ts' | wc -l" \
+  "count_code_only '@Input[(]|@Output[(]' ''" \
   0
 
 check "EventEmitter" \
-  "grep -rln 'EventEmitter' $FRONTEND --include='*.ts' | wc -l" \
+  "count_code_only 'EventEmitter' ''" \
   0
 
 check "NgZone (excl app.config.ts)" \

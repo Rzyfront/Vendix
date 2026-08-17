@@ -154,11 +154,31 @@ export class UblInvoiceBuilder {
       .ele(UBL_NAMESPACES.CBC, 'LineCountNumeric')
       .txt(String(invoice_data.items.length));
 
-    // 3. Invoice period (optional — for recurrent invoicing)
-    if (invoice_data.due_date) {
+    // 3. `cac:InvoicePeriod` — el período REALMENTE facturado.
+    //
+    //    `invoice_period` MANDA cuando viene. La derivación de abajo
+    //    (`issue_date` → `due_date`) se conserva intacta como respaldo porque es
+    //    lo que emitían todas las facturas anteriores a este campo, y el riel de
+    //    tenant sigue por ahí: cambiarle la forma alteraría documentos que se
+    //    reenvían tal cual años después.
+    //
+    //    Por qué la derivación NO sirve para una factura de ciclo: publica
+    //    «emisión → vencimiento», que en una suscripción es la ventana de pago
+    //    (+7 días), no el mes de servicio prestado.
+    //    Los DOS extremos se toman de la MISMA fuente, nunca uno de cada una:
+    //    mezclarlos publicaría un período que no existe en ningún lado.
+    const declared_start = invoice_data.invoice_period?.start_date?.trim() || '';
+    const declared_end = invoice_data.invoice_period?.end_date?.trim() || '';
+    const period_dates =
+      declared_start && declared_end
+        ? { start: declared_start, end: declared_end }
+        : invoice_data.due_date
+          ? { start: invoice_data.issue_date, end: invoice_data.due_date }
+          : null;
+    if (period_dates) {
       const period = doc.ele(UBL_NAMESPACES.CAC, 'InvoicePeriod');
-      period.ele(UBL_NAMESPACES.CBC, 'StartDate').txt(invoice_data.issue_date);
-      period.ele(UBL_NAMESPACES.CBC, 'EndDate').txt(invoice_data.due_date);
+      period.ele(UBL_NAMESPACES.CBC, 'StartDate').txt(period_dates.start);
+      period.ele(UBL_NAMESPACES.CBC, 'EndDate').txt(period_dates.end);
     }
 
     // 4. Supplier party

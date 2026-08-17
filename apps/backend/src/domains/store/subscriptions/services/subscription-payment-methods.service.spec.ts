@@ -10,6 +10,7 @@ import { WompiProcessor } from '../../payments/processors/wompi/wompi.processor'
 import { WompiClientFactory } from '../../payments/processors/wompi/wompi.factory';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { SubscriptionStateService } from './subscription-state.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 const wompiCredsMock = {
   public_key: 'pub_test',
@@ -36,6 +37,8 @@ describe('SubscriptionPaymentMethodsService', () => {
   let createPaymentSourceFromCardToken: jest.Mock;
   let getActiveCredentials: jest.Mock;
   let reEnableAutoRenewInTx: jest.Mock;
+  let rearmAutoRenewAfterCredentialInTx: jest.Mock;
+  let emit: jest.Mock;
   let txMock: any;
 
   beforeEach(async () => {
@@ -54,6 +57,12 @@ describe('SubscriptionPaymentMethodsService', () => {
     createPaymentSourceFromCardToken = jest.fn();
     getActiveCredentials = jest.fn().mockResolvedValue(wompiCredsMock);
     reEnableAutoRenewInTx = jest.fn().mockResolvedValue(true);
+    rearmAutoRenewAfterCredentialInTx = jest.fn().mockResolvedValue({
+      rearmed: false,
+      resolvedEventId: null,
+      eligible: false,
+    });
+    emit = jest.fn();
 
     txMock = {
       subscription_payment_methods: {
@@ -107,8 +116,9 @@ describe('SubscriptionPaymentMethodsService', () => {
         },
         {
           provide: SubscriptionStateService,
-          useValue: { reEnableAutoRenewInTx },
+          useValue: { reEnableAutoRenewInTx, rearmAutoRenewAfterCredentialInTx },
         },
+        { provide: EventEmitter2, useValue: { emit } },
       ],
     }).compile();
 
@@ -253,7 +263,7 @@ describe('SubscriptionPaymentMethodsService', () => {
 
   // ── tokenize re-enable hook (billing-warning resolution) ────────────
 
-  describe('tokenize re-enables auto_renew when an unresolved audit row exists', () => {
+  describe('tokenize re-arms auto_renew through the shared eligibility seam', () => {
     function setupHappyTokenize(cof_registered_at: Date | null) {
       subFindUnique.mockResolvedValue({ id: 1 });
       pmFindFirst.mockResolvedValue(null);
@@ -280,18 +290,12 @@ describe('SubscriptionPaymentMethodsService', () => {
       });
     }
 
-    it('flips auto_renew back on and stamps resolved_at on the audit row', async () => {
+    it('delegates the cure to the shared seam and notifies the merchant', async () => {
       setupHappyTokenize(new Date('2026-07-01T00:00:00Z'));
-      queryRaw.mockResolvedValueOnce([{ id: 555 }]); // unresolved audit row
-      eventsFindUnique.mockResolvedValueOnce({
-        payload: {
-          event_id: 'no-cred-77-wompi-tx',
-          transaction_id: 'wompi-tx',
-          payment_id: 77,
-          store_subscription_id: 1,
-          source: 'no_credential_post_register',
-          resolved_at: null,
-        },
+      rearmAutoRenewAfterCredentialInTx.mockResolvedValue({
+        rearmed: true,
+        resolvedEventId: 555,
+        eligible: true,
       });
 
       await service.tokenize({
@@ -304,25 +308,33 @@ describe('SubscriptionPaymentMethodsService', () => {
         expiry_year: '2030',
       });
 
-      // 1) Raw SQL lookup for the unresolved audit row fired.
-      expect(queryRaw).toHaveBeenCalled();
-      // 2) State service flipped auto_renew back on.
-      expect(reEnableAutoRenewInTx).toHaveBeenCalledTimes(1);
-      expect(reEnableAutoRenewInTx).toHaveBeenCalledWith(txMock, 42);
-      // 3) Audit row updated with resolved_at.
-      expect(eventsUpdate).toHaveBeenCalledTimes(1);
-      const updateArg = eventsUpdate.mock.calls[0][0];
-      expect(updateArg).toMatchObject({ where: { id: 555 } });
-      expect(updateArg.data.payload).toMatchObject({
-        event_id: 'no-cred-77-wompi-tx',
-        transaction_id: 'wompi-tx',
-        resolved_at: expect.any(String),
+      // 1) La secuencia (predicado → flag → cerrar auditoría) vive en el seam
+      // compartido de SubscriptionStateService, NO duplicada aquí: el otro camino
+      // que guarda tarjeta (auto-registro del cobro) llama al mismo.
+      expect(rearmAutoRenewAfterCredentialInTx).toHaveBeenCalledTimes(1);
+      expect(rearmAutoRenewAfterCredentialInTx).toHaveBeenCalledWith(txMock, {
+        storeId: 42,
+        subscriptionId: 1,
+        source: 'tokenize_widget',
+      });
+
+      // 2) El aviso de rearme sale DESPUÉS del commit y en el bus, nunca desde
+      // dentro de la transacción.
+      expect(emit).toHaveBeenCalledWith('subscription.auto_renew.rearmed', {
+        storeId: 42,
+        subscriptionId: 1,
+        paymentMethodId: 88,
+        source: 'tokenize_widget',
       });
     });
 
-    it('does NOT re-enable when no unresolved audit row exists', async () => {
+    it('does NOT notify when the seam reports no flip (autopay was already on)', async () => {
       setupHappyTokenize(new Date('2026-07-01T00:00:00Z'));
-      queryRaw.mockResolvedValueOnce([]); // no audit row
+      rearmAutoRenewAfterCredentialInTx.mockResolvedValue({
+        rearmed: false,
+        resolvedEventId: 555,
+        eligible: true,
+      });
 
       await service.tokenize({
         card_token: 'tok_widget_abc',
@@ -334,13 +346,17 @@ describe('SubscriptionPaymentMethodsService', () => {
         expiry_year: '2030',
       });
 
-      expect(reEnableAutoRenewInTx).not.toHaveBeenCalled();
-      expect(eventsUpdate).not.toHaveBeenCalled();
+      expect(rearmAutoRenewAfterCredentialInTx).toHaveBeenCalledTimes(1);
+      // Nada cambió para el comerciante: avisarle un rearme que no ocurrió es
+      // ruido que erosiona el valor del aviso que sí importa.
+      expect(emit).not.toHaveBeenCalledWith(
+        'subscription.auto_renew.rearmed',
+        expect.anything(),
+      );
     });
 
-    it('does NOT re-enable when the new PM has no cof_registered_at', async () => {
+    it('does NOT call the seam when the new PM has no cof_registered_at', async () => {
       setupHappyTokenize(null);
-      queryRaw.mockResolvedValueOnce([{ id: 555 }]);
 
       await service.tokenize({
         card_token: 'tok_widget_abc',
@@ -352,10 +368,13 @@ describe('SubscriptionPaymentMethodsService', () => {
         expiry_year: '2030',
       });
 
-      // cof_registered_at is the gate — without it the PM is not
-      // considered a recurring credential, so no re-enable fires.
-      expect(reEnableAutoRenewInTx).not.toHaveBeenCalled();
-      expect(eventsUpdate).not.toHaveBeenCalled();
+      // Sin credencial recurrente no hay nada que curar: el medio no puede
+      // sostener una renovación, así que ni se consulta el predicado.
+      expect(rearmAutoRenewAfterCredentialInTx).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalledWith(
+        'subscription.auto_renew.rearmed',
+        expect.anything(),
+      );
     });
   });
 

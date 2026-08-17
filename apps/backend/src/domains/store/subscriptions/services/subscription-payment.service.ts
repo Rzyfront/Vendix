@@ -31,6 +31,15 @@ import { SubscriptionStateService } from './subscription-state.service';
 import { SubscriptionResolverService } from './subscription-resolver.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { isLegacyInlineTokenAllowed } from '../../payments/config/wompi-rollout.config';
+import {
+  MAX_CONSECUTIVE_FAILURES,
+  AutoRenewPauseSource,
+  RenewalEligiblePaymentMethod,
+  metadataWithPausedAutoRenewIntent,
+  pickRenewalEligiblePaymentMethod,
+  renewalEligiblePmWhere,
+  toRenewalEligiblePaymentMethod,
+} from '../renewal-eligibility.contract';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -40,10 +49,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * payment method before the PM is auto-invalidated (`state='invalid'`,
  * `is_default=false`) and the customer is notified to update their card.
  *
- * Exported so unit tests can assert behavior at the boundary without
- * hard-coding a magic number.
+ * La constante vive en `renewal-eligibility.contract.ts` (es parte del
+ * predicado). Se re-exporta aquí porque los tests y otros módulos ya la
+ * importaban desde este archivo.
  */
-export const MAX_CONSECUTIVE_FAILURES = 3;
+export { MAX_CONSECUTIVE_FAILURES };
 
 /**
  * Marker stamped on an error raised AFTER the gateway already APPROVED the
@@ -1187,10 +1197,14 @@ export class SubscriptionPaymentService {
         // Promote a sibling active PM with a payment_source_id (failover
         // requires the COF/MIT flow to work end-to-end without prompting
         // the user). Prefer payment_source-enabled candidates.
+        //
+        // El candidato tiene que ser APTO PARA RENOVAR con el mismo predicado
+        // que todo lo demás: promover una tarjeta vencida o con el contador de
+        // fallos agotado dejaba el default apuntando a algo que el cobrador no
+        // puede usar y el gate iba a pausar el autopago acto seguido.
         const fallback = await tx.subscription_payment_methods.findFirst({
           where: {
-            store_subscription_id: subscriptionId,
-            state: subscription_payment_method_state_enum.active,
+            ...renewalEligiblePmWhere(subscriptionId),
             id: { not: revokedPm.id },
             provider_payment_source_id: { not: null },
           },
@@ -1338,58 +1352,79 @@ export class SubscriptionPaymentService {
   }
 
   /**
-   * G11 / S3.5 — Returns the active default payment method for a subscription
-   * if it is usable for an automatic renewal charge:
-   *   - state = 'active'
-   *   - not expired (expiry_year/expiry_month either null = unknown or future)
-   *   - consecutive_failures < MAX_CONSECUTIVE_FAILURES (real column).
+   * G11 / S3.5 — Medio de pago con el que ESTA suscripción puede renovarse.
    *
-   * Returns null if no eligible PM is found; callers fall back to the
-   * Wompi widget flow.
+   * Ya NO reimplementa el criterio: delega en
+   * `renewal-eligibility.contract.ts`, el mismo predicado que consultan el gate
+   * (`disableAutoRenewForMissingCredential`), el `where` del cron de
+   * renovación, la ventana de reactivación, el rearme al tokenizar y la lectura
+   * del panel. Antes había dos versiones privadas divergentes y podían
+   * contradecirse en ambos sentidos.
    *
-   * Wompi Phase 6 — also returns `provider_payment_source_id` (when present)
-   * so chargeInvoice can route to the COF / `recurrent: true` branch instead
-   * of the legacy inline-token path.
+   * Dos diferencias deliberadas respecto de la versión anterior:
+   *   - `is_default` pasó de requisito a PREFERENCIA de orden. Una tienda con
+   *     tarjeta apta pero sin default se cobra igual en vez de caer en dunning.
+   *   - El tipo debe ser TARJETA y la credencial debe ser cobrable (COF, o el
+   *     token heredado mientras `WOMPI_RECURRENT_ENFORCE` siga apagado), que es
+   *     exactamente lo que `charge()` necesita para no cobrar contra el vacío.
+   *
+   * Devuelve null cuando no hay medio apto; el llamador cae al flujo del widget.
    */
-  private async resolveReusablePaymentMethod(subscriptionId: number): Promise<{
-    id: number;
-    provider_token: string;
-    provider_payment_source_id: string | null;
-  } | null> {
+  private async resolveReusablePaymentMethod(
+    subscriptionId: number,
+  ): Promise<RenewalEligiblePaymentMethod | null> {
+    const now = new Date();
     const pm = await this.prisma.subscription_payment_methods.findFirst({
-      where: {
-        store_subscription_id: subscriptionId,
-        is_default: true,
-        state: 'active',
-      },
-      orderBy: { created_at: 'desc' },
+      where: renewalEligiblePmWhere(subscriptionId, now),
+      orderBy: [
+        { is_default: 'desc' },
+        { cof_registered_at: 'desc' },
+        { created_at: 'desc' },
+      ],
     });
-    if (!pm || !pm.provider_token) return null;
+    if (!pm) return null;
 
-    // Expiry check: if expiry_month/year are stored and the card is already
-    // expired, skip it. We use UTC-safe comparison vs current month.
-    if (pm.expiry_month && pm.expiry_year) {
-      const expMonth = parseInt(pm.expiry_month, 10);
-      const expYear = parseInt(pm.expiry_year, 10);
-      if (!isNaN(expMonth) && !isNaN(expYear)) {
-        const now = new Date();
-        const currentYear = now.getUTCFullYear();
-        const currentMonth = now.getUTCMonth() + 1;
-        const expiredAlready =
-          expYear < currentYear ||
-          (expYear === currentYear && expMonth < currentMonth);
-        if (expiredAlready) return null;
-      }
-    }
+    // Re-verificación en memoria: el `where` es un pre-filtro SQL del mismo
+    // predicado, pero la función es la verdad. Si alguna vez divergen, el
+    // resultado seguro es "no hay medio apto" → el gate pausa y avisa.
+    const eligible = pickRenewalEligiblePaymentMethod([pm], now);
+    if (!eligible) return null;
 
-    // S3.5 — Consecutive failures guard (real column).
-    if ((pm.consecutive_failures ?? 0) >= MAX_CONSECUTIVE_FAILURES) return null;
+    return toRenewalEligiblePaymentMethod(eligible);
+  }
 
-    return {
-      id: pm.id,
-      provider_token: pm.provider_token,
-      provider_payment_source_id: pm.provider_payment_source_id ?? null,
-    };
+  /**
+   * `true` cuando la suscripción tiene al menos un medio apto para renovar,
+   * leído DENTRO de la transacción del llamador.
+   *
+   * Mismo predicado que `resolveReusablePaymentMethod`, expresado como pregunta
+   * booleana para el gate. Se lee en la tx del llamador a propósito: el registro
+   * automático de la tarjeta ocurre en esa misma transacción y el gate tiene que
+   * verla.
+   */
+  private async hasRenewalEligiblePmInTx(
+    tx: Prisma.TransactionClient,
+    subscriptionId: number,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const rows = await tx.subscription_payment_methods.findMany({
+      where: renewalEligiblePmWhere(subscriptionId, now),
+    });
+    return pickRenewalEligiblePaymentMethod(rows, now) !== null;
+  }
+
+  /**
+   * Versión pública sin transacción, para el cron de renovación y para
+   * cualquier lector que solo necesite la respuesta.
+   */
+  async hasRenewalEligiblePaymentMethod(
+    subscriptionId: number,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const rows = await this.prisma.subscription_payment_methods.findMany({
+      where: renewalEligiblePmWhere(subscriptionId, now),
+    });
+    return pickRenewalEligiblePaymentMethod(rows, now) !== null;
   }
 
   /**
@@ -1713,6 +1748,10 @@ export class SubscriptionPaymentService {
     // listener dedupe row).
     let noCredentialEventId: number | null = null;
 
+    // Puesto en true cuando el pago con tarjeta rearmó el autopago dentro de esta
+    // transacción. El aviso al comerciante se emite post-commit.
+    let autoRenewRearmed = false;
+
     // If an external transaction is provided (e.g. from the atomic webhook
     // dedup flow), execute writes directly inside it — no nested $transaction.
     // Otherwise open a new transaction (charge() / handleZeroInvoice paths).
@@ -1776,6 +1815,35 @@ export class SubscriptionPaymentService {
         this.logger.warn(
           `autoRegisterPaymentMethodFromGateway failed for invoice ${invoiceId}: ${e?.message ?? e}`,
         );
+      }
+
+      // ── Rearme del autopago (defecto 4). Pagar con TARJETA es guardar una
+      // tarjeta: si el gate lo había pausado por falta de credencial y ahora hay
+      // medio apto, el autopago vuelve solo y se avisa. Sin esto, una tienda ya
+      // `active` (que no camina la ruta de reactivación) quedaba pausada para
+      // siempre aunque acabara de pagar con tarjeta.
+      //
+      // Errores tragados a propósito: el cobro ya está aprobado y la factura
+      // pagada; no rearmar es recuperable (el alta explícita de tarjeta también
+      // cura), revertir el cobro no lo es.
+      if (invoice.store_id) {
+        try {
+          const rearm = await this.stateService.rearmAutoRenewAfterCredentialInTx(
+            tx,
+            {
+              storeId: invoice.store_id,
+              subscriptionId: invoice.store_subscription_id,
+              source: 'charge_auto_register',
+            },
+          );
+          if (rearm.rearmed) {
+            autoRenewRearmed = true;
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `rearmAutoRenewAfterCredentialInTx failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+          );
+        }
       }
 
       // ── Billing-warning detection: if the gateway did NOT persist a
@@ -2055,6 +2123,23 @@ export class SubscriptionPaymentService {
           );
         }
       }
+
+      // Aviso simétrico al de la pausa: el comerciante también debe enterarse de
+      // que el autopago volvió a quedar armado, en pantalla y por correo.
+      if (autoRenewRearmed && invoice.store_id) {
+        try {
+          this.eventEmitter.emit('subscription.auto_renew.rearmed', {
+            storeId: invoice.store_id,
+            subscriptionId: invoice.store_subscription_id,
+            paymentMethodId: null,
+            source: 'charge_auto_register',
+          });
+        } catch (e: any) {
+          this.logger.warn(
+            `subscription.auto_renew.rearmed emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+          );
+        }
+      }
     }
 
     // The collection is recorded, the side effects fired — and the store is NOT
@@ -2108,39 +2193,111 @@ export class SubscriptionPaymentService {
       return null;
     }
 
-    // Is there ANY active PM with a recorded recurring credential?
-    // `cof_registered_at` is the "Wompi has a payment_source we can MIT"
-    // anchor. A row that exists but has it NULL means tokenize raced and
-    // failed — we treat that as no recurring credential for renewals.
-    const recurringPm = await tx.subscription_payment_methods.findFirst({
-      where: {
-        store_subscription_id: subscriptionId,
-        state: subscription_payment_method_state_enum.active,
-        cof_registered_at: { not: null },
+    return this.pauseAutoRenewForMissingCredentialInTx(tx, {
+      subscriptionId,
+      storeId,
+      source: triggeredByJob === 'webhook' ? 'webhook' : 'checkout_commit',
+      triggeredByJob,
+      auditSource: 'no_credential_post_register',
+      eventKey: `no-cred-${paymentId}-${transactionId ?? 'no-tx'}`,
+      payload: {
+        transaction_id: transactionId ?? null,
+        payment_id: paymentId,
       },
-      select: { id: true },
     });
-    if (recurringPm) {
+  }
+
+  /**
+   * Núcleo del gate, compartido por el checkout/webhook, el cron de renovación
+   * y el pago manual del administrador. Corre SIEMPRE dentro de la transacción
+   * del llamador.
+   *
+   * Hace tres cosas y ninguna más:
+   *   1. Consulta EL predicado (`hasRenewalEligiblePmInTx`). Si hay medio apto,
+   *      no toca nada y devuelve null.
+   *   2. Apaga `auto_renew` y RECUERDA LA INTENCIÓN en
+   *      `store_subscriptions.metadata.auto_renew_intent` — mismo mecanismo que
+   *      `metadata.pending_credit`, sin migración. La intención solo se guarda
+   *      cuando `auto_renew` estaba encendido: si el cliente lo había apagado a
+   *      mano, no inventamos que lo quiere.
+   *   3. Estampa un `subscription_events` de tipo
+   *      `auto_renew_disabled_no_credential` y devuelve su id para que el emit
+   *      post-commit alimente al listener (campana + correo).
+   *
+   * IDEMPOTENCIA: si ya existe una fila de auditoría SIN `payload.resolved_at`,
+   * no se estampa otra y se devuelve null. Sin esta guarda cada intento de cobro
+   * y cada corrida del cron generaban un `subscription_events` nuevo, con un id
+   * nuevo, y el UNIQUE de `billing_warning_logs` (store, type, source_event_id)
+   * no colapsaba nada: el comerciante recibía una campana y un correo por
+   * intento. `auto_renew` sí se re-asegura en false, que es idempotente.
+   */
+  private async pauseAutoRenewForMissingCredentialInTx(
+    tx: Prisma.TransactionClient,
+    args: {
+      subscriptionId: number;
+      storeId: number;
+      source: AutoRenewPauseSource;
+      triggeredByJob: string;
+      auditSource: string;
+      eventKey: string;
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<number | null> {
+    const { subscriptionId, storeId, source, triggeredByJob } = args;
+    const now = new Date();
+
+    // 1. EL predicado. Con medio apto no hay nada que pausar.
+    if (await this.hasRenewalEligiblePmInTx(tx, subscriptionId, now)) {
       return null;
     }
 
-    // Flip auto_renew off (only if it was on — preserves any user-toggled
-    // off state we might have missed). Idempotent on retry.
-    await tx.store_subscriptions.updateMany({
-      where: { store_id: storeId, auto_renew: true },
-      data: { auto_renew: false, updated_at: new Date() },
+    // 2. Apagar el autopago recordando la intención del cliente.
+    const sub = await tx.store_subscriptions.findFirst({
+      where: { id: subscriptionId },
+      select: { id: true, auto_renew: true, metadata: true },
     });
+    if (sub?.auto_renew === true) {
+      await tx.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          auto_renew: false,
+          metadata: metadataWithPausedAutoRenewIntent(sub.metadata, {
+            source,
+            now,
+          }) as Prisma.InputJsonValue,
+          updated_at: now,
+        },
+      });
+    } else if (!sub) {
+      // Sin fila no hay nada que pausar ni a quién avisarle.
+      return null;
+    }
+
+    // 3. Auditoría — una sola fila abierta por ciclo de pausa.
+    const openWarning = await this.findUnresolvedNoCredentialEventInTx(
+      tx,
+      subscriptionId,
+    );
+    if (openWarning != null) {
+      this.logger.log(
+        `AUTO_RENEW_PAUSE_DEDUPED store=${storeId} sub=${subscriptionId} ` +
+          `openEvent=${openWarning} source=${source} — aviso ya emitido, no se re-notifica`,
+      );
+      return null;
+    }
 
     const event = await tx.subscription_events.create({
       data: {
         store_subscription_id: subscriptionId,
         type: 'auto_renew_disabled_no_credential',
         payload: {
-          event_id: `no-cred-${paymentId}-${transactionId ?? 'no-tx'}`,
-          transaction_id: transactionId ?? null,
-          payment_id: paymentId,
+          event_id: args.eventKey,
+          transaction_id: null,
+          payment_id: null,
+          ...(args.payload ?? {}),
           store_subscription_id: subscriptionId,
-          source: 'no_credential_post_register',
+          source: args.auditSource,
+          paused_by: source,
           resolved_at: null,
         } as Prisma.InputJsonValue,
         triggered_by_job: triggeredByJob,
@@ -2148,7 +2305,81 @@ export class SubscriptionPaymentService {
       select: { id: true },
     });
 
+    this.logger.warn(
+      `AUTO_RENEW_PAUSED_NO_CREDENTIAL store=${storeId} sub=${subscriptionId} ` +
+        `event=${event.id} source=${source} — el autopago solo funciona con tarjeta`,
+    );
+
     return event.id;
+  }
+
+  /**
+   * Id del `subscription_events.auto_renew_disabled_no_credential` más reciente
+   * que sigue SIN resolver, o null.
+   *
+   * Mismo filtro SQL que usa `SubscriptionPaymentMethodsService` para curar el
+   * aviso al tokenizar una tarjeta: el path JSON de Prisma es frágil entre
+   * versiones menores, así que ambos lados leen `payload->>'resolved_at'` en SQL
+   * crudo para que la pausa y la cura hablen del MISMO registro.
+   */
+  private async findUnresolvedNoCredentialEventInTx(
+    tx: Prisma.TransactionClient,
+    subscriptionId: number,
+  ): Promise<number | null> {
+    const rows = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT id FROM subscription_events
+      WHERE store_subscription_id = ${subscriptionId}
+        AND type = 'auto_renew_disabled_no_credential'
+        AND payload->>'resolved_at' IS NULL
+      ORDER BY id DESC
+      LIMIT 1
+    `);
+    return rows?.[0]?.id ?? null;
+  }
+
+  /**
+   * Entrada pública del gate para llamadores que NO están dentro de una
+   * transacción: el cron de renovación y el pago manual del administrador.
+   *
+   * Abre su propia transacción, corre el gate y — si pausó — emite
+   * `subscription.payment.no_credential` DESPUÉS del commit, para que el
+   * listener no dispare campana ni correo sobre una escritura que se revirtió.
+   *
+   * Devuelve el id del evento de auditoría cuando pausó, o null.
+   */
+  async pauseAutoRenewForMissingCredential(args: {
+    subscriptionId: number;
+    storeId: number;
+    source: AutoRenewPauseSource;
+    triggeredByJob: string;
+    auditSource: string;
+    eventKey: string;
+    payload?: Record<string, unknown>;
+  }): Promise<number | null> {
+    const eventId = await this.prisma.$transaction(
+      (tx: Prisma.TransactionClient) =>
+        this.pauseAutoRenewForMissingCredentialInTx(tx, args),
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
+
+    if (eventId == null) {
+      return null;
+    }
+
+    try {
+      this.eventEmitter.emit('subscription.payment.no_credential', {
+        subscriptionEventId: eventId,
+        storeId: args.storeId,
+        paymentId: 0,
+        source: args.source,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `subscription.payment.no_credential emit failed for sub ${args.subscriptionId}: ${e?.message ?? e}`,
+      );
+    }
+
+    return eventId;
   }
 
   /**

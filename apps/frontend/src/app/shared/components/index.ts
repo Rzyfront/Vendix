@@ -108,6 +108,9 @@ export type {
   LatLng as AddressLatLng,
   AddressPayload,
 } from './address-form-fields/address-form-fields.component';
+export { ColorPickerComponent } from './color-picker/color-picker.component';
+export { UserSelectComponent } from './user-select/user-select.component';
+export type { UserPickerOption } from './user-select/user-select.component';
 export { DispatchNoteAddressEditorComponent } from './dispatch-note-address-editor/dispatch-note-address-editor.component';
 export { DispatchNoteAddressService } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
 export type { DispatchNoteAddressPayload } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
