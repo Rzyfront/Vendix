@@ -210,23 +210,34 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
   },
 
   // ── Facturacion / resoluciones / documento ─────────────────
-  // Precondicion: no hay resolucion DIAN activa. CTA: registrar resolucion.
+  // Precondicion: no hay resolucion activa para el tipo de documento. CTA:
+  // registrarla en Resoluciones.
+  //
+  // El CTA apunta a Resoluciones, NO a la habilitacion DIAN: lo que falta es una
+  // fila de numeracion, y `dian_config` es la pantalla del certificado y el
+  // software. Mandar ahi al comerciante lo dejaba mirando una pantalla completa
+  // sin nada que arreglar.
+  //
+  // Estos dos codigos solo alcanzan ya a documentos que la DIAN SI autoriza por
+  // rango: desde que `invoice-number-generator.ts` abre y amplia la serie
+  // interna sola, las notas no llegan aqui. Por eso el copy puede hablar de
+  // MUISCA sin mentirle a la mitad de los casos.
   FISCAL_RESOLUTION_MISSING: {
-    label: 'Falta la resolución DIAN',
+    label: 'Falta la resolución de numeración',
     reason:
-      'No hay una resolución DIAN activa para esta entidad fiscal. Registra la resolución de facturación.',
+      'Este documento se numera contra una Autorización de Numeración de la DIAN y no hay ninguna vigente. Solicítala en MUISCA y regístrala en Resoluciones.',
     area: 'invoicing',
     severity: 'required',
-    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+    action: { label: 'Ir a Resoluciones', navigate: '/admin/invoicing/resolutions' },
   },
-  // Precondicion: la numeracion de la resolucion esta agotada. CTA: crear una
-  // nueva resolucion.
+  // Precondicion: la numeracion autorizada esta agotada. CTA: registrar el
+  // rango nuevo.
   FISCAL_RESOLUTION_EXHAUSTED: {
-    label: 'Numeración DIAN agotada',
+    label: 'Numeración autorizada agotada',
     reason:
-      'La numeración DIAN de esta resolución está agotada. Crea una nueva resolución para seguir facturando.',
+      'Se acabaron los consecutivos del rango que autorizó la DIAN. Solicita un rango nuevo en MUISCA y regístralo en Resoluciones: numerar fuera del rango hace que la DIAN rechace el documento.',
     area: 'invoicing',
-    action: { label: 'Volver a DIAN', navigate: 'dian_config' },
+    action: { label: 'Ir a Resoluciones', navigate: '/admin/invoicing/resolutions' },
   },
   // Precondicion: tipo de documento no implementado en software propio DIAN.
   // CTA: usar otro tipo o contactar soporte.

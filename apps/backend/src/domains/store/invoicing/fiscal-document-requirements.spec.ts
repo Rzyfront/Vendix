@@ -12,6 +12,7 @@ import {
   configurationTypeFor,
   defaultDocumentTypeFor,
   documentTypesFor,
+  internalSeriesPrefixFor,
   isFiscalDocumentType,
   isSupportDocumentType,
   requirementsFor,
@@ -167,6 +168,51 @@ describe('fiscal-document-requirements', () => {
       expect([...requiring].sort()).toEqual(
         ['pos_equivalent_document', 'sales_invoice', 'support_document'].sort(),
       );
+    });
+
+    /**
+     * EL INVARIANTE QUE PROTEGE LA NUMERACIÓN AUTORIZADA.
+     *
+     * `internal_series_prefix` es lo único que autoriza a `generateNextNumber` a
+     * crear una fila de `invoice_resolutions` y a ampliarle el rango. Dárselo a
+     * un documento con Autorización de Numeración haría que el sistema fabricara
+     * consecutivos fuera de la autorización: la DIAN los rechaza uno por uno y
+     * cada rechazo quema un número que no se recupera.
+     *
+     * Se comprueba como implicación en un solo sentido —autorizado ⇒ sin
+     * prefijo— y no como equivalencia, porque el recíproco es falso a propósito:
+     * `payroll` y `payroll_adjustment` tampoco exigen rango autorizado y aun así
+     * van sin prefijo, ya que no numeran contra `invoice_resolutions` en
+     * absoluto.
+     */
+    it('ningún documento con rango autorizado por la DIAN admite serie interna', () => {
+      for (const document_type of FISCAL_DOCUMENT_TYPES) {
+        if (!requiresAuthorizedRange(document_type)) continue;
+        expect(internalSeriesPrefixFor(document_type)).toBeNull();
+      }
+    });
+
+    it('la serie interna la abren exactamente las cuatro notas de ajuste', () => {
+      const withSeries = FISCAL_DOCUMENT_TYPES.filter(
+        (document_type) => internalSeriesPrefixFor(document_type) !== null,
+      );
+      expect([...withSeries].sort()).toEqual(
+        [
+          'credit_note',
+          'debit_note',
+          'equivalent_adjustment_note',
+          'support_adjustment_note',
+        ].sort(),
+      );
+    });
+
+    it('dos documentos no comparten prefijo de serie interna', () => {
+      const prefixes = FISCAL_DOCUMENT_TYPES.map((document_type) =>
+        internalSeriesPrefixFor(document_type),
+      ).filter((prefix): prefix is string => prefix !== null);
+      // Compartirlo emitiría `NC1` dos veces bajo el mismo NIT: cada tipo lleva
+      // su propio cursor, y el número que se imprime es `prefijo + cursor`.
+      expect(new Set(prefixes).size).toBe(prefixes.length);
     });
 
     /**
