@@ -843,6 +843,13 @@ export class InventoryAnalyticsService {
           organization_id: context.organization_id,
           ...storeFilter,
         },
+        // Excluir productos archivados/inactivos del cálculo de valorización.
+        // Mismo filtro que "Unidades en Mano" — el cálculo de `total_value`
+        // itera sobre estos stock_levels, así que si el producto está
+        // archivado, su `quantity_on_hand * cost` no entra al total.
+        products: {
+          state: 'active',
+        },
       },
       include: {
         inventory_locations: {
