@@ -124,8 +124,10 @@
     <app-store-edit-modal
       [(isOpen)]="isEditModalOpen"
       [isSubmitting]="isUpdatingStore()"
-      [store]="selectedStore() ?? undefined"
+      [store]="selectedStoreDetail()"
       (cancel)="onEditModalCancel()"
+      (submit)="onEditModalSubmit($event)"
+      (opened)="loadSelectedStoreDetail(selectedStore()?.id)"
     ></app-store-edit-modal>
   }
 

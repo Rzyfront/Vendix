@@ -36,6 +36,7 @@ import {
   SelectorOption,
   MultiSelectorComponent,
   MultiSelectorOption,
+  ColorPickerComponent,
 } from '../../../../../../shared/components/index';
 import {
   INDUSTRY_METADATA,
@@ -43,7 +44,6 @@ import {
 } from '../../../../../../shared/constants/industry-modules.constant';
 import { OperatingHoursPickerComponent, OperatingHoursValue } from '../operating-hours-picker/operating-hours-picker.component';
 import { UserSelectComponent } from '../user-select/user-select.component';
-import { ColorPickerComponent } from '../color-picker/color-picker.component';
 
 const nonEmptyArray: ValidatorFn = (control) => {
   const v = control.value;

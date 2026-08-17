@@ -1,192 +1,78 @@
-export enum StoreType {
-  PHYSICAL = 'physical',
-  ONLINE = 'online',
-  HYBRID = 'hybrid',
-  POPUP = 'popup',
-  KIOSKO = 'kiosko',
-}
+/**
+ * Legacy interface barrel for the super-admin store slice.
+ *
+ * The single source of truth now lives in
+ * `apps/frontend/src/app/private/modules/super-admin/stores/contracts/store.contract.ts`.
+ * This file re-exports the contract's types under the historical names so
+ * existing consumers keep compiling while we migrate.
+ *
+ * Adding a NEW field here is a bug: extend the contract instead.
+ */
 
-export enum StoreState {
-  ACTIVE = 'active',
-  INACTIVE = 'inactive',
-  DRAFT = 'draft',
-  SUSPENDED = 'suspended',
-  ARCHIVED = 'archived',
-}
+import type {
+  StoreListItem,
+  StoreUpdatePayload,
+  StoreCreatePayload,
+  StoreDetail,
+  StoreSettings,
+  EditableField,
+  JsonbSettingsKey,
+  OperatingHours,
+  CurrencyOption,
+  OrganizationOption,
+  ManagerOption,
+  AddressPayload,
+  StoreIndustry,
+} from '../contracts/store.contract';
 
-export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service' | 'gym';
+// Bring the *value* form of the const enums into scope under their historical
+// names so consumers of this file can still write `StoreType.PHYSICAL` etc.
+import { StoreType, StoreState } from '../contracts/store.contract';
 
-export interface Store {
-  id: number;
-  name: string;
-  slug: string;
-  store_code: string;
-  description?: string;
-  email: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  country?: string;
-  logo_url?: string;
-  color_primary?: string;
-  color_secondary?: string;
-  domain?: string;
-  timezone?: string;
-  currency_code?: string;
-  operating_hours?: OperatingHours;
-  store_type: StoreType;
-  industries?: StoreIndustry[];
-  is_active: boolean;
-  manager_user_id?: number;
-  settings?: StoreSettings;
-  organization_id: number;
-  organization?: {
-    id: number;
-    name: string;
-  };
-  created_at: string;
-  updated_at: string;
-}
+export {
+  StoreType,
+  StoreState,
+  EDITABLE_FIELDS,
+  JSONB_SETTINGS_KEYS,
+} from '../contracts/store.contract';
+export type {
+  EditableField,
+  JsonbSettingsKey,
+  StoreIndustry,
+  CurrencyOption,
+  OrganizationOption,
+  ManagerOption,
+  AddressPayload,
+  OperatingHours,
+  StoreListItem,
+  StoreDetail,
+  StoreSettings,
+  StoreCreatePayload,
+  StoreUpdatePayload,
+} from '../contracts/store.contract';
 
-export interface OperatingHours {
-  monday?: { open: string; close: string };
-  tuesday?: { open: string; close: string };
-  wednesday?: { open: string; close: string };
-  thursday?: { open: string; close: string };
-  friday?: { open: string; close: string };
-  saturday?: { open: string; close: string };
-  sunday?: { open: string; close: string };
-}
+// Historical type aliases (value + type re-exports under the old names).
+export type StoreTypeAlias = StoreType;
+export type StoreStateAlias = StoreState;
 
-export interface StoreSettings {
-  theme?: string;
-  notifications?: boolean;
-  language?: string;
-  currency_format?: string;
-  email_notifications?: boolean;
-  sms_notifications?: boolean;
-  inventory_alerts?: boolean;
-  low_stock_threshold?: number;
-}
+// Re-export the most-used types under the historical names.
+export type Store = StoreDetail;
+export type StoreListItemAlias = StoreListItem;
+export type UpdateStoreDto = StoreUpdatePayload;
+export type CreateStoreDto = StoreCreatePayload;
 
-export interface StoreListItem {
-  id: number;
-  name: string;
-  slug: string;
-  store_code: string;
-  store_type: StoreType;
-  industries?: StoreIndustry[];
-  timezone: string;
-  is_active: boolean;
-  manager_user_id?: number;
-  organization_id: number;
-  logo_url?: string;
-  created_at: string;
-  updated_at: string;
-  settings?: StoreSettings;
-  organizations?: {
-    id: number;
-    name: string;
-    slug: string;
-  };
-  addresses?: Array<{
-    id: number;
-    store_id: number;
-    address_line1: string;
-    address_line2?: string;
-    city: string;
-    state_province: string;
-    country_code: string;
-    postal_code: string;
-    phone_number?: string;
-    type: string;
-    is_primary: boolean;
-    latitude?: number;
-    longitude?: number;
-    organization_id?: number;
-    user_id?: number;
-  }>;
-  _count?: {
-    products: number;
-    orders: number;
-    store_users: number;
-  };
-}
+// New type alias added by the plan (not previously in this file).
+export type StoreDetailContract = StoreDetail;
 
-export interface StoreDetails extends Store {
-  addresses?: Array<{
-    id: number;
-    street: string;
-    city: string;
-    country: string;
-    postal_code: string;
-    is_primary: boolean;
-  }>;
-  store_users?: Array<{
-    id: number;
-    user_id: number;
-    role: string;
-    user: {
-      id: number;
-      name: string;
-      email: string;
-    };
-  }>;
-}
-
-export interface CreateStoreDto {
-  organization_id: number;
-  name: string;
-  slug: string;
-  store_code: string;
-  logo_url?: string;
-  color_primary?: string;
-  color_secondary?: string;
-  domain?: string;
-  timezone?: string;
-  currency_code?: string;
-  operating_hours?: OperatingHours;
-  store_type: StoreType;
-  industries?: StoreIndustry[];
-  is_active: boolean;
-  manager_user_id?: number;
-  description?: string;
-  email: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  country?: string;
-}
-
-export interface UpdateStoreDto {
-  name?: string;
-  is_active?: boolean;
-  store_type?: StoreType;
-  industries?: StoreIndustry[];
-  manager_user_id?: number;
-  description?: string;
-  email?: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  country?: string;
-  logo_url?: string;
-  color_primary?: string;
-  color_secondary?: string;
-  domain?: string;
-  timezone?: string;
-  currency_code?: string;
-  operating_hours?: OperatingHours;
-}
+/* -------------------------------------------------------------------------- */
+/*  Domain helpers preserved from the legacy file                            */
+/* -------------------------------------------------------------------------- */
 
 export interface StoreQueryDto {
   page?: number;
   limit?: number;
   search?: string;
-  store_type?: StoreType;
+  store_type?: StoreTypeAlias;
   is_active?: boolean;
   organization_id?: number;
   include_non_production?: boolean;
@@ -219,7 +105,7 @@ export interface StoreSettingsUpdateDto {
 
 export interface StoreFilters {
   search: string;
-  store_type: StoreType;
+  store_type: StoreTypeAlias;
   is_active: boolean;
   organization_id: number;
   dateRange: {
@@ -238,8 +124,8 @@ export interface StoreTableColumn {
 export interface StoreTableAction {
   label: string;
   icon: string;
-  action: (store: StoreListItem) => void;
-  disabled?: (store: StoreListItem) => boolean;
+  action: (store: StoreListItemAlias) => void;
+  disabled?: (store: StoreListItemAlias) => boolean;
   danger?: boolean;
 }
 
@@ -255,11 +141,43 @@ export interface StoreStats {
 }
 
 export interface PaginatedStoresResponse {
-  data: StoreListItem[];
+  data: StoreListItemAlias[];
   pagination: {
     page: number;
     limit: number;
     total: number;
     total_pages: number;
   };
+}
+
+/**
+ * Historical alias for the enriched detail shape (was `StoreDetails` in the
+ * legacy interface). Prefer `StoreDetail` from the contract for new code.
+ *
+ * This interface is **standalone** on purpose: the legacy `addresses[]` shape
+ * (`street` + `country`) does not match the normalized address shape returned
+ * by `StoreDetail.addresses[]` (`address_line1` + `country_code`), so an
+ * `extends StoreDetailContract` would trip TS2430. Both shapes exist in the
+ * wild — the modal rewrite (plan §B.5) collapses them onto the normalized
+ * one. Until then, this stays a standalone record.
+ */
+export interface StoreDetails {
+  addresses?: Array<{
+    id: number;
+    street: string;
+    city: string;
+    country: string;
+    postal_code: string;
+    is_primary: boolean;
+  }>;
+  store_users?: Array<{
+    id: number;
+    user_id: number;
+    role: string;
+    user: {
+      id: number;
+      name: string;
+      email: string;
+    };
+  }>;
 }
