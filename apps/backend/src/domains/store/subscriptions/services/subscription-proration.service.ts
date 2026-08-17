@@ -14,6 +14,13 @@ import {
   ComputedPricing,
   InvoicePreview,
 } from '../types/billing.types';
+import {
+  SUBSCRIPTION_DOWNGRADE_NOTE,
+  SUBSCRIPTION_UPGRADE_NOTE,
+  buildSubscriptionItemCode,
+  buildSubscriptionLineDescription,
+  dianUnitCodeForBillingCycle,
+} from '../types/subscription-invoice-fiscal.contract';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -202,20 +209,29 @@ export class SubscriptionProrationService {
         newPlan.billing_cycle ?? 'monthly',
       );
       const targetIsFree = newPlan.is_free === true;
+      const freshPeriodEndResub = new Date(now.getTime() + cycleDays * DAY_MS);
       const invoiceToIssue: InvoicePreview | null = targetIsFree
         ? null
         : {
             total: newPlan.base_price.toFixed(2),
             period_start: now.toISOString(),
-            period_end: new Date(
-              now.getTime() + cycleDays * DAY_MS,
-            ).toISOString(),
+            period_end: freshPeriodEndResub.toISOString(),
             line_items: [
               {
-                description: `Plan ${newPlan.code} (${newPlan.billing_cycle})`,
+                // El emisor persiste ESTE `line_items` tal cual cuando recibe el
+                // preview, así que la forma fiscal se decide acá, no allá.
+                description: buildSubscriptionLineDescription({
+                  planName: newPlan.name,
+                  billingCycle: newPlan.billing_cycle,
+                  periodStart: now,
+                  periodEnd: freshPeriodEndResub,
+                }),
                 quantity: 1,
                 unit_price: newPlan.base_price.toFixed(2),
                 total: newPlan.base_price.toFixed(2),
+                item_code: buildSubscriptionItemCode(newPlan.code),
+                unit_code: dianUnitCodeForBillingCycle(newPlan.billing_cycle),
+                vat_excluded: true,
                 meta: {
                   plan_id: newPlan.id,
                   plan_code: newPlan.code,
@@ -230,6 +246,7 @@ export class SubscriptionProrationService {
               margin_pct_used: '0.00',
               partner_org_id: null,
             },
+            document_discount: '0.00',
           };
       return {
         kind: 're_subscribe',
@@ -462,27 +479,40 @@ export class SubscriptionProrationService {
 
     let invoicePreview: InvoicePreview | null = null;
     if (prorationAmount.greaterThan(DECIMAL_ZERO)) {
-      const lineDescription = isUpgrade
-        ? `Upgrade a plan ${newPlan.code} (con crédito por días no usados)`
-        : isDowngrade
-          ? `Cambio a plan ${newPlan.code} (ciclo nuevo, sin crédito)`
-          : `Plan ${newPlan.code} (${newPlan.billing_cycle})`;
       // Cycle resets server-side on confirmPendingChange, so the period the
       // user is actually paying for starts NOW and ends after one full cycle.
       const cycleDaysFresh = this.billingCycleDays(
         newPlan.billing_cycle ?? 'monthly',
       );
       const freshPeriodEnd = new Date(now.getTime() + cycleDaysFresh * DAY_MS);
+      const billedPeriodEnd = isPlanChange ? freshPeriodEnd : periodEnd;
+      // Una sola descripción canónica con la aclaración del cambio como nota. La
+      // anterior mezclaba inglés («Upgrade a plan…»), usaba el `code` en vez del
+      // nombre y no declaraba el período facturado.
+      const lineDescription = buildSubscriptionLineDescription({
+        planName: newPlan.name,
+        billingCycle: newPlan.billing_cycle,
+        periodStart: now,
+        periodEnd: billedPeriodEnd,
+        changeNote: isUpgrade
+          ? SUBSCRIPTION_UPGRADE_NOTE
+          : isDowngrade
+            ? SUBSCRIPTION_DOWNGRADE_NOTE
+            : null,
+      });
       invoicePreview = {
         total: this.round2(prorationAmount).toFixed(2),
         period_start: now.toISOString(),
-        period_end: (isPlanChange ? freshPeriodEnd : periodEnd).toISOString(),
+        period_end: billedPeriodEnd.toISOString(),
         line_items: [
           {
             description: lineDescription,
             quantity: 1,
             unit_price: prorationAmount.toFixed(2),
             total: prorationAmount.toFixed(2),
+            item_code: buildSubscriptionItemCode(newPlan.code),
+            unit_code: dianUnitCodeForBillingCycle(newPlan.billing_cycle),
+            vat_excluded: true,
             meta: {
               plan_id: newPlan.id,
               plan_code: newPlan.code,
@@ -500,6 +530,7 @@ export class SubscriptionProrationService {
           margin_pct_used: newPricing.margin_pct.toFixed(2),
           partner_org_id: newPricing.partner_org_id,
         },
+        document_discount: '0.00',
       };
     }
 
@@ -602,6 +633,20 @@ export class SubscriptionProrationService {
             throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
           }
 
+          // Este camino (trial → plan gratis) no emite factura, así que NO corre
+          // ningún gate de autopago después. Sin este resolvedor la tienda salía
+          // con `auto_renew: true` y sin tarjeta, que es exactamente el caso que
+          // falló en silencio: el cron intentaba cobrar contra el vacío.
+          const autoRenew =
+            await this.stateService.resolveAutoRenewForReactivation(tx, {
+              subscriptionId,
+              storeId: sub.store_id,
+              currentAutoRenew: sub.auto_renew,
+              metadata: sub.metadata,
+              source: 'plan_change',
+              now,
+            });
+
           const updated = await tx.store_subscriptions.update({
             where: { id: subscriptionId },
             data: {
@@ -625,7 +670,7 @@ export class SubscriptionProrationService {
               pending_change_kind: null,
               pending_change_started_at: null,
               pending_revert_state: null,
-              auto_renew: true,
+              ...autoRenew,
               resolved_features:
                 (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
                 Prisma.JsonNull,
@@ -851,6 +896,23 @@ export class SubscriptionProrationService {
         // Upgrade / same-tier path: apply immediately AND clear any prior
         // scheduled downgrade so the user does not get an unintended swap
         // at period_end after upgrading.
+        //
+        // Revertir una cancelación programada tampoco impone el autopago: se
+        // enciende solo si hay medio apto y, si no lo hay, la intención queda
+        // recordada para el rearme. Aquí el gate del cobro corre después y
+        // ganaría de todos modos, pero dejar la línea incondicional es la misma
+        // trampa que ya se pisó una vez.
+        const autoRenewOnUncancel = hadScheduledCancel
+          ? await this.stateService.resolveAutoRenewForReactivation(tx, {
+              subscriptionId,
+              storeId: sub.store_id,
+              currentAutoRenew: sub.auto_renew,
+              metadata,
+              source: 'plan_change',
+              now: new Date(),
+            })
+          : null;
+
         const updated = await tx.store_subscriptions.update({
           where: { id: subscriptionId },
           data: {
@@ -867,7 +929,7 @@ export class SubscriptionProrationService {
             scheduled_plan_change_at: null,
             scheduled_plan_id: null,
             ...(hadScheduledCancel
-              ? { scheduled_cancel_at: null, auto_renew: true }
+              ? { scheduled_cancel_at: null, ...(autoRenewOnUncancel ?? {}) }
               : {}),
             updated_at: new Date(),
           },
@@ -1095,6 +1157,20 @@ export class SubscriptionProrationService {
             : ({} as Record<string, unknown>);
         delete existingMeta['pending_credit'];
 
+        // La resuscripción tampoco impone el autopago. Se le pasa el metadata ya
+        // limpio para que la intención recordada no reviva `pending_credit`.
+        const autoRenew = await this.stateService.resolveAutoRenewForReactivation(
+          tx,
+          {
+            subscriptionId,
+            storeId: sub.store_id,
+            currentAutoRenew: sub.auto_renew,
+            metadata: existingMeta,
+            source: 'resubscribe',
+            now,
+          },
+        );
+
         const result = await tx.store_subscriptions.update({
           where: { id: subscriptionId },
           data: {
@@ -1111,12 +1187,14 @@ export class SubscriptionProrationService {
             grace_soft_until: null,
             grace_hard_until: null,
             suspend_at: null,
-            auto_renew: true,
-              resolved_features:
-                (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
-                Prisma.JsonNull,
+            resolved_features:
+              (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
+              Prisma.JsonNull,
             resolved_at: now,
             metadata: existingMeta as Prisma.InputJsonValue,
+            // Después de `metadata` a propósito: cuando el resolvedor recuerda la
+            // intención devuelve su propio metadata y debe ganar.
+            ...autoRenew,
             updated_at: now,
           },
         });

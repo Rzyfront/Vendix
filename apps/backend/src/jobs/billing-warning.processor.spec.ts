@@ -16,6 +16,7 @@ describe('BillingWarningProcessor', () => {
   let processor: BillingWarningProcessor;
   let billingWarningLogsCreate: jest.Mock;
   let subsFindFirst: jest.Mock;
+  let paymentsFindFirst: jest.Mock;
   let subscriptionEventsCreate: jest.Mock;
   let createAndBroadcast: jest.Mock;
   let emailQueueAdd: jest.Mock;
@@ -23,9 +24,20 @@ describe('BillingWarningProcessor', () => {
 
   const storeSub = { id: 999, store_id: 10 };
 
+  /**
+   * Defecto 8 — vocabulario de esta suite:
+   *   INVOICE_ID  = la factura del ciclo. Es el ancla del deduplicado: constante
+   *                 durante los 4 reintentos.
+   *   PAYMENT_ID  = el intento fallido. Cambia en cada reintento; era el ancla
+   *                 anterior y por eso el aviso se repetía hasta 4 veces.
+   */
+  const INVOICE_ID = 777;
+  const PAYMENT_ID = 5555;
+
   beforeEach(async () => {
     billingWarningLogsCreate = jest.fn().mockResolvedValue({ id: 1 });
     subsFindFirst = jest.fn().mockResolvedValue(storeSub);
+    paymentsFindFirst = jest.fn().mockResolvedValue({ invoice_id: INVOICE_ID });
     subscriptionEventsCreate = jest.fn().mockResolvedValue({ id: 1 });
     createAndBroadcast = jest.fn().mockResolvedValue({
       id: 1,
@@ -34,12 +46,19 @@ describe('BillingWarningProcessor', () => {
     emailQueueAdd = jest.fn().mockResolvedValue({ id: 'email-job-1' });
     billingWarningQueueAdd = jest.fn().mockResolvedValue({ id: 'job-1' });
 
+    // El processor accede a los modelos DIRECTO sobre GlobalPrismaService
+    // (`this.prisma.billing_warning_logs`), no vía `withoutScope()`. Se exponen
+    // por las dos vías para que el doble no se rompa si algún camino cambia.
+    const models = {
+      billing_warning_logs: { create: billingWarningLogsCreate },
+      store_subscriptions: { findFirst: subsFindFirst },
+      subscription_payments: { findFirst: paymentsFindFirst },
+      subscription_events: { create: subscriptionEventsCreate },
+    };
+
     const prismaMock = {
-      withoutScope: () => ({
-        billing_warning_logs: { create: billingWarningLogsCreate },
-        store_subscriptions: { findFirst: subsFindFirst },
-        subscription_events: { create: subscriptionEventsCreate },
-      }),
+      ...models,
+      withoutScope: () => models,
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -74,8 +93,8 @@ describe('BillingWarningProcessor', () => {
     it('inserts the dedupe row, fans out bell + email, and writes the audit row', async () => {
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
         storeSubscriptionId: 999,
       });
 
@@ -86,13 +105,19 @@ describe('BillingWarningProcessor', () => {
       expect(result.emailEnqueued).toBe(true);
 
       // Dedupe row (UNIQUE anchor — the idempotency primitive).
+      // ACTUALIZADO (defecto 8): el ancla es la FACTURA, no el intento. Antes
+      // este test afirmaba `source_event_id: 5555` (= paymentId), que es
+      // exactamente lo que hacía que el UNIQUE no colapsara nada.
       expect(billingWarningLogsCreate).toHaveBeenCalledWith({
         data: {
           store_id: 10,
           type: 'renewal_failed',
-          source_event_id: 5555,
+          source_event_id: INVOICE_ID,
         },
       });
+
+      // Con `invoiceId` explícito no hace falta leer la base para re-anclar.
+      expect(paymentsFindFirst).not.toHaveBeenCalled();
 
       // Audit row in subscription_events with the new enum value
       // `renewal_failed` and a monotonic event_id payload field.
@@ -102,8 +127,9 @@ describe('BillingWarningProcessor', () => {
       expect(evtArg.data.store_subscription_id).toBe(999);
       expect(evtArg.data.triggered_by_job).toBe('billing-warning');
       expect(evtArg.data.payload).toMatchObject({
-        source_event_id: 5555,
-        payment_id: 5555,
+        source_event_id: INVOICE_ID,
+        invoice_id: INVOICE_ID,
+        payment_id: PAYMENT_ID,
         store_subscription_id: 999,
         source: 'auto_renewal_failed',
       });
@@ -137,8 +163,8 @@ describe('BillingWarningProcessor', () => {
 
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
       });
 
       const result = await processor.process(job);
@@ -157,8 +183,8 @@ describe('BillingWarningProcessor', () => {
 
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
         storeSubscriptionId: 999,
       });
 
@@ -174,8 +200,8 @@ describe('BillingWarningProcessor', () => {
 
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
         storeSubscriptionId: 999,
       });
 
@@ -189,8 +215,8 @@ describe('BillingWarningProcessor', () => {
     it('resolves the canonical subscription when storeSubscriptionId is omitted', async () => {
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
       });
 
       await processor.process(job);
@@ -209,8 +235,8 @@ describe('BillingWarningProcessor', () => {
 
       const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
       });
 
       const result = await processor.process(job);
@@ -221,46 +247,171 @@ describe('BillingWarningProcessor', () => {
       expect(subscriptionEventsCreate).not.toHaveBeenCalled();
     });
 
-    it('returns noop for invalid storeId or sourceEventId without calling the DB', async () => {
-      const jobBadStore = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+    it('returns noop for an invalid storeId without touching the DB', async () => {
+      const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 0,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: INVOICE_ID,
+        paymentId: PAYMENT_ID,
       });
-      const jobBadEvent = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+
+      const result = await processor.process(job);
+
+      expect(result.inserted).toBe(false);
+      expect(billingWarningLogsCreate).not.toHaveBeenCalled();
+      expect(paymentsFindFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Defecto 8: el ancla del deduplicado es el ciclo, no el intento ──
+  describe('dedupe anchor resolution', () => {
+    it('two failed attempts of the SAME invoice collapse into ONE warning', async () => {
+      const p2002 = new Prisma.PrismaClientKnownRequestError(
+        'unique violation',
+        { code: 'P2002', clientVersion: 'test' },
+      );
+
+      // Intento 1 y 2 del mismo ciclo: distinto `paymentId`, misma factura.
+      const first = await processor.process(
+        makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+          storeId: 10,
+          invoiceId: INVOICE_ID,
+          paymentId: 5001,
+          storeSubscriptionId: 999,
+        }),
+      );
+
+      billingWarningLogsCreate.mockRejectedValueOnce(p2002);
+
+      const second = await processor.process(
+        makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+          storeId: 10,
+          invoiceId: INVOICE_ID,
+          paymentId: 5002,
+          storeSubscriptionId: 999,
+        }),
+      );
+
+      expect(first.inserted).toBe(true);
+      expect(second.inserted).toBe(false);
+
+      // Las dos inserciones apuntaron al MISMO `source_event_id`, que es lo que
+      // permite al UNIQUE colapsar el segundo aviso.
+      expect(billingWarningLogsCreate).toHaveBeenCalledTimes(2);
+      expect(
+        billingWarningLogsCreate.mock.calls.map(
+          (c: any[]) => c[0].data.source_event_id,
+        ),
+      ).toEqual([INVOICE_ID, INVOICE_ID]);
+
+      // Una sola campana y un solo correo por ciclo.
+      expect(createAndBroadcast).toHaveBeenCalledTimes(1);
+      expect(emailQueueAdd).toHaveBeenCalledTimes(1);
+    });
+
+    it('legacy job without invoiceId: re-anchors from paymentId to its invoice', async () => {
+      // Jobs que ya estaban en Redis al desplegar venían anclados al intento.
+      const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
         storeId: 10,
-        sourceEventId: 0,
-        paymentId: 5555,
+        paymentId: PAYMENT_ID,
+        storeSubscriptionId: 999,
       });
 
-      const r1 = await processor.process(jobBadStore);
-      const r2 = await processor.process(jobBadEvent);
+      const result = await processor.process(job);
 
-      expect(r1.inserted).toBe(false);
-      expect(r2.inserted).toBe(false);
+      expect(result.inserted).toBe(true);
+      expect(paymentsFindFirst).toHaveBeenCalledWith({
+        where: { id: PAYMENT_ID },
+        select: { invoice_id: true },
+      });
+      expect(billingWarningLogsCreate).toHaveBeenCalledWith({
+        data: {
+          store_id: 10,
+          type: 'renewal_failed',
+          source_event_id: INVOICE_ID,
+        },
+      });
+    });
+
+    it('falls back to the legacy sourceEventId only when no invoice can be resolved', async () => {
+      paymentsFindFirst.mockResolvedValueOnce(null);
+
+      const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+        storeId: 10,
+        sourceEventId: 4242,
+        paymentId: PAYMENT_ID,
+        storeSubscriptionId: 999,
+      });
+
+      const result = await processor.process(job);
+
+      expect(result.inserted).toBe(true);
+      expect(billingWarningLogsCreate).toHaveBeenCalledWith({
+        data: {
+          store_id: 10,
+          type: 'renewal_failed',
+          source_event_id: 4242,
+        },
+      });
+    });
+
+    it('tolerates a failing invoice lookup and still uses the legacy anchor', async () => {
+      paymentsFindFirst.mockRejectedValueOnce(new Error('db down'));
+
+      const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+        storeId: 10,
+        sourceEventId: 4242,
+        paymentId: PAYMENT_ID,
+        storeSubscriptionId: 999,
+      });
+
+      const result = await processor.process(job);
+
+      expect(result.inserted).toBe(true);
+      expect(
+        billingWarningLogsCreate.mock.calls[0][0].data.source_event_id,
+      ).toBe(4242);
+    });
+
+    it('returns noop when nothing can anchor the warning', async () => {
+      paymentsFindFirst.mockResolvedValueOnce(null);
+
+      const job = makeJob(BILLING_WARNING_RENEWAL_FAILED, {
+        storeId: 10,
+        paymentId: PAYMENT_ID,
+      });
+
+      const result = await processor.process(job);
+
+      expect(result.inserted).toBe(false);
+      expect(result.notificationDispatched).toBe(false);
+      expect(result.emailEnqueued).toBe(false);
       expect(billingWarningLogsCreate).not.toHaveBeenCalled();
     });
   });
 
   describe('@OnEvent(subscription.payment.retry.failed) listener', () => {
-    it('enqueues a billing-warning-renewal-failed job for valid payloads', async () => {
+    it('enqueues a billing-warning-renewal-failed job anchored to the invoice', async () => {
       await processor.handleRetryFailedEvent({
         invoiceId: 1,
         subscriptionId: 999,
         storeId: 10,
         attempt: 4,
-        paymentId: 5555,
+        paymentId: PAYMENT_ID,
       });
 
       expect(billingWarningQueueAdd).toHaveBeenCalledTimes(1);
       const [jobName, jobData] = billingWarningQueueAdd.mock.calls[0];
       expect(jobName).toBe(BILLING_WARNING_RENEWAL_FAILED);
+      // ACTUALIZADO (defecto 8): antes este test afirmaba `sourceEventId: 5555`
+      // (= paymentId). El emisor ahora manda la factura y ya no emite el campo
+      // legado.
       expect(jobData).toMatchObject({
         storeId: 10,
-        sourceEventId: 5555,
-        paymentId: 5555,
+        invoiceId: 1,
+        paymentId: PAYMENT_ID,
         storeSubscriptionId: 999,
       });
+      expect(jobData.sourceEventId).toBeUndefined();
     });
 
     it('drops events with missing fields without throwing', async () => {
@@ -282,7 +433,7 @@ describe('BillingWarningProcessor', () => {
           subscriptionId: 999,
           storeId: 10,
           attempt: 4,
-          paymentId: 5555,
+          paymentId: PAYMENT_ID,
         }),
       ).resolves.toBeUndefined();
     });

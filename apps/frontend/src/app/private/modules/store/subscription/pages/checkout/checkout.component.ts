@@ -9,9 +9,13 @@ import {
   IconComponent,
   ToastService,
   StickyHeaderComponent,
+  AddressFormFieldsComponent,
 } from '../../../../../../shared/components/index';
+import type { AddressPayload } from '../../../../../../shared/components/index';
+import { computeNitDv } from '../../../../../../shared/utils/nit.util';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import {
+  BillingAddressSource,
   BillingProfile,
   BillingProfileStatus,
   StoreSubscriptionService,
@@ -45,6 +49,23 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
   '41': 'Pasaporte',
 };
 
+/** Código DIAN del NIT. Es el único documento que lleva dígito de verificación. */
+const BILLING_DOCUMENT_TYPE_NIT = '31';
+
+/**
+ * Copia que explica de dónde salió la dirección precargada.
+ *
+ * `fiscal` no se anuncia: es el caso esperado y decirlo sería ruido. Los otros
+ * dos SÍ, porque son un respaldo — el cliente tiene que poder ver que la
+ * dirección propuesta no es la que declaró como fiscal antes de pagar con ella.
+ */
+const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>> = {
+  shipping:
+    'Precargamos una dirección que ya tienes registrada, pero no está marcada como tu dirección de facturación. Revísala antes de continuar.',
+  store:
+    'Precargamos la dirección de tu tienda porque no encontramos una dirección de facturación. Revísala antes de continuar.',
+};
+
 @Component({
   selector: 'app-checkout',
   standalone: true,
@@ -57,6 +78,7 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
     RouterLink,
     ReactiveFormsModule,
     StickyHeaderComponent,
+    AddressFormFieldsComponent,
   ],
   template: `
     <div class="w-full space-y-6">
@@ -349,7 +371,10 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
                       </li>
                       <li>
                         <strong>Método de pago:</strong>
-                        al pagar con tarjeta, Wompi habilitará el método para renovaciones automáticas.
+                        la renovación automática solo funciona con tarjeta: al pagar
+                        con tarjeta, Wompi la habilita para los cobros siguientes.
+                        Con PSE, transferencia o efectivo el autopago queda pausado
+                        hasta que registres una tarjeta.
                         Vendix no almacena el número completo de tu tarjeta ni el CVV.
                       </li>
                       <li>
@@ -553,18 +578,6 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
                     </label>
 
                     <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">Número</span>
-                      <input
-                        type="text"
-                        inputmode="numeric"
-                        [value]="billingTaxId()"
-                        (input)="setBillingField(billingTaxId, $event)"
-                        placeholder="900123456"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                    </label>
-
-                    <label class="flex flex-col gap-1">
                       <span class="text-xs font-medium text-text-secondary">Régimen de IVA</span>
                       <select
                         [value]="billingTaxRegime()"
@@ -577,6 +590,43 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
                     </label>
 
                     <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">Número</span>
+                      <input
+                        type="text"
+                        inputmode="numeric"
+                        [value]="billingTaxId()"
+                        (input)="setBillingField(billingTaxId, $event)"
+                        placeholder="900123456"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <!-- DV: se CALCULA del número, nunca se pide. Va deshabilitado
+                         a propósito — es un checksum, así que un valor tecleado
+                         solo puede coincidir con el NIT o estar mal. Se muestra
+                         porque el cliente necesita ver el NIT completo tal como
+                         saldrá en la factura electrónica. -->
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">
+                        Dígito de verificación (DV)
+                      </span>
+                      <input
+                        type="text"
+                        [value]="billingDvDisplay()"
+                        disabled
+                        aria-readonly="true"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-gray-50 text-text-secondary cursor-not-allowed"
+                      />
+                      <span class="text-[11px] text-text-secondary leading-tight">
+                        @if (billingDocumentIsNit()) {
+                          Se calcula del NIT. No se edita.
+                        } @else {
+                          Solo el NIT lleva dígito de verificación.
+                        }
+                      </span>
+                    </label>
+
+                    <label class="flex flex-col gap-1 sm:col-span-2">
                       <span class="text-xs font-medium text-text-secondary">
                         Correo de facturación
                       </span>
@@ -588,49 +638,43 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                       />
                     </label>
+                  </div>
 
-                    <label class="flex flex-col gap-1 sm:col-span-2">
-                      <span class="text-xs font-medium text-text-secondary">Dirección</span>
-                      <input
-                        type="text"
-                        [value]="billingAddressLine()"
-                        (input)="setBillingField(billingAddressLine, $event)"
-                        placeholder="Calle 10 # 20-30"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                    </label>
+                  <!-- Dirección fiscal. La captura entera la hace el componente
+                       compartido: el cliente elige departamento y municipio del
+                       catálogo DANE y el código se resuelve por detrás, así que
+                       no puede quedar «Riohacha / 44000» (código de La Guajira,
+                       el departamento) ni «Medellín / Cundinamarca». -->
+                  <div class="pt-1 space-y-2">
+                    <p class="text-xs font-medium text-text-secondary">
+                      Dirección fiscal
+                    </p>
 
-                    <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">Ciudad</span>
-                      <input
-                        type="text"
-                        [value]="billingCity()"
-                        (input)="setBillingField(billingCity, $event)"
-                        placeholder="Bogotá"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                    </label>
+                    @if (billingAddressSourceNotice(); as notice) {
+                      <div class="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <app-icon
+                          name="info"
+                          [size]="14"
+                          class="text-amber-700 mt-0.5 shrink-0"
+                        ></app-icon>
+                        <p class="text-xs text-amber-900 leading-tight">{{ notice }}</p>
+                      </div>
+                    }
 
-                    <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">
-                        Código DANE del municipio
-                      </span>
-                      <input
-                        type="text"
-                        inputmode="numeric"
-                        maxlength="5"
-                        [value]="billingMunicipalityCode()"
-                        (input)="setBillingField(billingMunicipalityCode, $event)"
-                        placeholder="11001"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                    </label>
+                    <!-- Sin teléfono: BillingAddressDto no tiene columna para
+                         él, así que un campo visible descartaría en silencio lo
+                         que el cliente escriba. -->
+                    <app-address-form-fields
+                      [initialAddress]="billingInitialAddress()"
+                      [showPhone]="false"
+                      (addressChange)="onBillingAddressChange($event)"
+                    ></app-address-form-fields>
                   </div>
 
                   @if (!billingProfileValid()) {
                     <p class="text-xs text-text-secondary">
-                      Completa razón social, número de documento, dirección,
-                      ciudad y el código DANE de 5 dígitos.
+                      Completa razón social, número de documento, dirección y el
+                      municipio de la lista DANE.
                     </p>
                   }
 
@@ -647,6 +691,36 @@ const BILLING_DOCUMENT_LABELS: Record<string, string> = {
                     </button>
                   }
                   }
+                </div>
+              }
+
+              <!-- Aviso de medio de pago. Va JUNTO al botón que abre la
+                   pasarela, que es el momento en que el cliente elige con qué
+                   paga: la selección real (tarjeta / PSE / efectivo) ocurre ya
+                   dentro del widget de Wompi, así que si el aviso no está aquí
+                   no está en ninguna parte. Un cliente compró creyendo que
+                   quedaba con autopago y su renovación falló en silencio. -->
+              @if (autoRenewCardWarningVisible()) {
+                <div class="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                  <app-icon
+                    name="credit-card"
+                    [size]="16"
+                    class="text-amber-700 mt-0.5 shrink-0"
+                  ></app-icon>
+                  <div class="space-y-1 min-w-0">
+                    <p class="text-xs font-semibold text-amber-900">
+                      La renovación automática solo funciona con tarjeta
+                    </p>
+                    <p class="text-xs text-amber-900/90 leading-relaxed">
+                      Si eliges tarjeta de crédito o débito, Wompi la habilita
+                      para los cobros de los siguientes ciclos y tu plan se
+                      renueva solo. Si pagas con PSE, transferencia, efectivo o
+                      cualquier otro medio, este pago se acredita igual pero el
+                      <strong>autopago queda pausado</strong>: tendrás que pagar
+                      manualmente cada renovación hasta que registres una
+                      tarjeta.
+                    </p>
+                  </div>
                 </div>
               }
 
@@ -826,11 +900,30 @@ export class CheckoutComponent implements OnInit {
   readonly billingTaxRegime = signal('49');
   readonly billingEmail = signal('');
   readonly billingAddressLine = signal('');
+  readonly billingAddressLine2 = signal('');
   readonly billingCity = signal('');
   readonly billingStateProvince = signal('');
   readonly billingMunicipalityCode = signal('');
+  readonly billingPostalCode = signal('');
+  readonly billingCountryCode = signal('CO');
   /** Derivado por el backend; solo se muestra, nunca se edita. */
   readonly billingVerificationDigit = signal('');
+  /**
+   * Escalón de la cascada del que salió la dirección precargada. Sirve para
+   * decirle al cliente que la dirección propuesta NO es la que declaró como
+   * fiscal, en vez de dejarlo pagar sobre un respaldo silencioso.
+   */
+  readonly billingAddressSource = signal<BillingAddressSource | null>(null);
+  /**
+   * Dirección con la que se precarga `app-address-form-fields`.
+   *
+   * Es una señal PROPIA y no un `computed` de las señales de dirección a
+   * propósito: el componente compartido reacciona a este input con un `effect`
+   * que hace `patchValue`, y su `addressChange` vuelve a escribir esas mismas
+   * señales. Derivarla de ellas cerraría el ciclo emisión → patch → emisión.
+   * Solo se escribe al cargar el perfil o al descartar una edición.
+   */
+  readonly billingInitialAddress = signal<AddressPayload | null>(null);
 
   /** Últimos valores en archivo, para poder descartar una edición. */
   private billingProfileSnapshot: BillingProfileStatus['profile'] = null;
@@ -900,6 +993,46 @@ export class CheckoutComponent implements OnInit {
       BILLING_DOCUMENT_LABELS[this.billingDocumentType()] ?? 'Documento',
   );
 
+  /** Solo el NIT lleva DV; una cédula no tiene checksum que mostrar. */
+  readonly billingDocumentIsNit = computed(
+    () => this.billingDocumentType() === BILLING_DOCUMENT_TYPE_NIT,
+  );
+
+  /**
+   * DV que se pinta en el formulario, deshabilitado.
+   *
+   * Se DERIVA del número tecleado con el mismo módulo 11 que usa el backend
+   * (`computeNitDv`), no se lee del perfil en archivo: mientras el cliente
+   * corrige su NIT, el DV guardado corresponde al número viejo y mostrarlo
+   * sería mostrar un checksum que no cuadra con lo que tiene delante. El valor
+   * en archivo solo se usa como respaldo cuando todavía no hay número escrito.
+   */
+  readonly billingDvDisplay = computed(() => {
+    if (!this.billingDocumentIsNit()) return 'No aplica';
+    const number = this.documentNumber();
+    if (!number) return this.billingVerificationDigit() || '—';
+    return computeNitDv(number) ?? '—';
+  });
+
+  /**
+   * Aviso cuando la dirección precargada NO salió de una dirección de
+   * facturación. Silencio en el caso normal: anunciar lo esperado es ruido.
+   */
+  readonly billingAddressSourceNotice = computed<string | null>(() => {
+    const source = this.billingAddressSource();
+    if (!source) return null;
+    return BILLING_ADDRESS_SOURCE_COPY[source] ?? null;
+  });
+
+  /**
+   * El aviso de «el autopago solo funciona con tarjeta» solo aplica cuando este
+   * checkout va a abrir la pasarela. Sin cobro no hay medio de pago que elegir
+   * y el aviso sería ruido.
+   */
+  readonly autoRenewCardWarningVisible = computed(
+    () => this.chargeNow() > 0 && !this.freePlan() && !this.trialSwapInfo(),
+  );
+
   /**
    * Documento con su DV cuando el backend ya lo derivó. Se muestra solo en
    * lectura: el DV nunca se pide, es un checksum del número.
@@ -911,12 +1044,20 @@ export class CheckoutComponent implements OnInit {
     return dv ? `${number}-${dv}` : number;
   });
 
-  /** Ciudad + código DANE, la línea que la DIAN exige del adquiriente. */
+  /**
+   * Municipio y departamento, por NOMBRE.
+   *
+   * El código DANE queda fuera de la interfaz a propósito: es un identificador
+   * de catálogo que no le dice nada al cliente, y exponerlo es exactamente cómo
+   * un tenant terminó guardando `44000` —el código de La Guajira, el
+   * departamento— como municipio de Riohacha (`44001`). Quien lo pone ahora es
+   * el selector del catálogo, y lo que el cliente confirma es el nombre.
+   */
   readonly billingCityDisplay = computed(() => {
     const city = this.billingCity().trim();
-    const code = this.billingMunicipalityCode().trim();
-    if (!city) return code || '—';
-    return code ? `${city} (${code})` : city;
+    const department = this.billingStateProvince().trim();
+    if (!city) return department || '—';
+    return department ? `${city}, ${department}` : city;
   });
 
   /** Abre el formulario sobre un perfil ya completo. */
@@ -1154,16 +1295,73 @@ export class CheckoutComponent implements OnInit {
   private applyBillingProfile(p: BillingProfileStatus['profile']): void {
     this.billingLegalName.set(p?.legal_name ?? '');
     this.billingTaxId.set(p?.tax_id ?? '');
-    this.billingDocumentType.set(p?.document_type ?? '31');
+    this.billingDocumentType.set(p?.document_type ?? BILLING_DOCUMENT_TYPE_NIT);
     this.billingTaxRegime.set(p?.tax_regime ?? '49');
     this.billingEmail.set(p?.email ?? '');
     this.billingVerificationDigit.set(p?.verification_digit ?? '');
 
     const addr = p?.address ?? null;
     this.billingAddressLine.set(addr?.address_line1 ?? '');
+    this.billingAddressLine2.set(addr?.address_line2 ?? '');
     this.billingCity.set(addr?.city ?? '');
     this.billingStateProvince.set(addr?.state_province ?? '');
     this.billingMunicipalityCode.set(addr?.municipality_code ?? '');
+    this.billingPostalCode.set(addr?.postal_code ?? '');
+    this.billingCountryCode.set(addr?.country_code ?? 'CO');
+    this.billingAddressSource.set(addr ? (p?.address_source ?? null) : null);
+
+    // Precarga del componente compartido. `null` cuando no hay dirección: así
+    // el widget arranca vacío en vez de patchear una fila de campos en blanco.
+    this.billingInitialAddress.set(
+      addr
+        ? {
+            address_line1: addr.address_line1 ?? null,
+            address_line2: addr.address_line2 ?? null,
+            city: addr.city ?? null,
+            state_province: addr.state_province ?? null,
+            country_code: addr.country_code ?? 'CO',
+            postal_code: addr.postal_code ?? null,
+            municipality_code: addr.municipality_code ?? null,
+            // La dirección fiscal no captura teléfono ni coordenadas: el DTO de
+            // facturación no las acepta y el municipio DANE ya fija la
+            // ubicación que la DIAN valida.
+            phone_number: null,
+            latitude: null,
+            longitude: null,
+          }
+        : null,
+    );
+  }
+
+  /**
+   * El componente compartido emitió la dirección completa.
+   *
+   * Se vuelca en las señales que ya gobernaban la validación y el payload, así
+   * que `billingProfileValid()` y `buildBillingProfile()` siguen siendo la
+   * única definición de «dirección suficiente» — el widget aporta la CAPTURA
+   * coherente (municipio del catálogo, ciudad y departamento escritos por él),
+   * no una segunda regla de validez.
+   */
+  onBillingAddressChange(address: AddressPayload): void {
+    this.billingAddressLine.set(address.address_line1 ?? '');
+    this.billingAddressLine2.set(address.address_line2 ?? '');
+    this.billingCity.set(address.city ?? '');
+    this.billingStateProvince.set(address.state_province ?? '');
+    this.billingMunicipalityCode.set(address.municipality_code ?? '');
+    this.billingPostalCode.set(address.postal_code ?? '');
+    this.billingCountryCode.set(address.country_code ?? 'CO');
+
+    // El aviso de procedencia solo se retira cuando la calle deja de ser la
+    // precargada. El widget re-emite la dirección al hidratarse —así confirma
+    // lo que patcheó—, y limpiar el aviso en toda emisión lo borraría antes de
+    // que el cliente alcanzara a leerlo.
+    const prefilled = this.billingInitialAddress();
+    if (
+      prefilled &&
+      (address.address_line1 ?? '') !== (prefilled.address_line1 ?? '')
+    ) {
+      this.billingAddressSource.set(null);
+    }
   }
 
   /** Reads a text input into the given signal. */
@@ -1184,12 +1382,17 @@ export class CheckoutComponent implements OnInit {
       document_type: this.billingDocumentType(),
       tax_regime: this.billingTaxRegime(),
       email: this.billingEmail().trim() || undefined,
+      // La dirección viaja ENTERA. `postal_code` y `address_line2` los captura
+      // el componente compartido y el DTO los acepta; dejarlos fuera hacía que
+      // un dato que el cliente sí escribió no llegara nunca a la factura.
       address: {
         address_line1: this.billingAddressLine().trim(),
+        address_line2: this.billingAddressLine2().trim() || undefined,
         city: this.billingCity().trim(),
         state_province: this.billingStateProvince().trim() || undefined,
         municipality_code: this.billingMunicipalityCode().trim(),
-        country_code: 'CO',
+        country_code: this.billingCountryCode().trim().toUpperCase() || 'CO',
+        postal_code: this.billingPostalCode().trim() || undefined,
       },
     };
   }

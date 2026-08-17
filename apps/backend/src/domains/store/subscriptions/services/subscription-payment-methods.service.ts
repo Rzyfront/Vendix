@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { Prisma, subscription_payment_method_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -47,6 +48,7 @@ export class SubscriptionPaymentMethodsService {
     private readonly wompiProcessor: WompiProcessor,
     private readonly wompiClientFactory: WompiClientFactory,
     private readonly stateService: SubscriptionStateService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listForStore() {
@@ -191,8 +193,14 @@ export class SubscriptionPaymentMethodsService {
       throw error;
     }
 
+    // Capturado dentro de la transacción y usado DESPUÉS del commit: el aviso de
+    // "autopago reactivado" (campana + correo) no puede salir sobre una escritura
+    // que todavía puede revertirse.
+    let rearmedAutoRenew = false;
+    let rearmedPmId: number | null = null;
+
     // ── 4 + 5. Idempotent upsert under advisory lock.
-    return this.prisma.$transaction(async (tx) => {
+    const response = await this.prisma.$transaction(async (tx) => {
       // Advisory lock keyed by (store_id, payment_source_id) hash. Prevents
       // a webhook handler race from inserting the same row twice. Auto
       // released at COMMIT/ROLLBACK.
@@ -306,35 +314,73 @@ export class SubscriptionPaymentMethodsService {
       // `payload.resolved_at === null`), tokenizing a fresh card is the
       // user-facing cure. Flip `auto_renew` back on and mark the audit row
       // resolved so the next charge success doesn't re-fire the warning.
-      await this.reEnableAutoRenewAfterCredential(
+      rearmedAutoRenew = await this.reEnableAutoRenewAfterCredential(
         tx,
         storeId,
         subscriptionId,
         created,
       );
+      if (rearmedAutoRenew) {
+        rearmedPmId = created.id;
+      }
 
       return this._mapPmResponse(created);
     });
+
+    if (rearmedAutoRenew && rearmedPmId != null) {
+      this.emitAutoRenewRearmed(storeId, subscriptionId, rearmedPmId);
+    }
+
+    return response;
+  }
+
+  /**
+   * Aviso de rearme, post-commit y a prueba de fallos.
+   *
+   * El listener (`SubscriptionPaymentBillingWarningListener`) es quien pinta la
+   * campana y encola el correo; aquí solo se emite. Un fallo del bus NO puede
+   * tumbar el alta de la tarjeta, que ya está confirmada.
+   */
+  private emitAutoRenewRearmed(
+    storeId: number,
+    subscriptionId: number,
+    paymentMethodId: number,
+  ): void {
+    try {
+      this.eventEmitter.emit('subscription.auto_renew.rearmed', {
+        storeId,
+        subscriptionId,
+        paymentMethodId,
+        source: 'tokenize_widget',
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `subscription.auto_renew.rearmed emit failed for store ${storeId}: ${e?.message ?? e}`,
+      );
+    }
   }
 
   /**
    * Hook called at the end of `tokenizeAndRegister`'s `create` branch.
    *
-   * Looks up the most-recent unresolved
-   * `subscription_events` row of type
-   * `auto_renew_disabled_no_credential` for this subscription. If one
-   * exists AND the new PM has `cof_registered_at` set (i.e. Wompi
-   * accepted the recurring credential), the row is "resolved":
-   *   1. `store_subscriptions.auto_renew` flips back to true.
-   *   2. The audit row's `payload.resolved_at` is stamped with `now` so
-   *      future dedupe hits skip both the bell and the email.
+   * GUARDAR UNA TARJETA REARMA EL AUTOPAGO. Es la decisión de producto del
+   * defecto 4: la intención del cliente quedó recordada en
+   * `store_subscriptions.metadata.auto_renew_intent` cuando el gate lo pausó, y
+   * esta es la cura. Hasta ahora esta función era código inalcanzable: exigía una
+   * fila de auditoría abierta que la ventana de reactivación pisaba en la misma
+   * transacción del checkout, así que el rearme nunca se disparaba.
    *
-   * Both writes run inside the SAME tx as the PM insert, so a failure
-   * here rolls back the tokenization — the merchant is asked to retry,
-   * never left in a half-state where the PM exists but auto_renew is
-   * still off.
+   * La secuencia (predicado → flag → cerrar auditoría) vive completa en
+   * `SubscriptionStateService.rearmAutoRenewAfterCredentialInTx`, compartida con
+   * el auto-registro de tarjeta del cobro por widget. Aquí solo se decide si hay
+   * credencial que valga la pena evaluar y se guarda el resultado para avisar
+   * después del commit.
    *
-   * Returns true when a re-enable happened (used by tests).
+   * Todo corre en la MISMA tx del insert del medio: un fallo revierte el alta y
+   * el comerciante reintenta, nunca queda medio guardado con autopago apagado por
+   * una escritura a medias.
+   *
+   * Devuelve true cuando el autopago pasó de apagado a encendido.
    */
   private async reEnableAutoRenewAfterCredential(
     tx: Prisma.TransactionClient,
@@ -346,61 +392,17 @@ export class SubscriptionPaymentMethodsService {
       return false;
     }
 
-    // Find the most-recent unresolved audit row. Prisma's JSON path filter
-    // for `payload.resolved_at === null` is brittle across Prisma 7 minor
-    // versions — fall back to a raw SQL filter to keep this dependency-
-    // free. Same effect either way: pick the latest unresolved row.
-    const unresolved = await tx.$queryRaw<
-      Array<{ id: number }>
-    >(Prisma.sql`
-      SELECT id FROM subscription_events
-      WHERE store_subscription_id = ${subscriptionId}
-        AND type = 'auto_renew_disabled_no_credential'
-        AND (
-          payload->>'resolved_at' IS NULL
-        )
-      ORDER BY id DESC
-      LIMIT 1
-    `);
-    const unresolvedRow = unresolved?.[0];
-    if (!unresolvedRow) {
-      return false;
-    }
-
-    const flipped = await this.stateService.reEnableAutoRenewInTx(tx, storeId);
-    // `flipped === false` means auto_renew was already on (manual toggle
-    // between charge and tokenize). We still stamp resolved_at so the
-    // dedupe row is settled and the listener won't re-fire on the next
-    // charge success.
-
-    // Read + merge: Prisma's JSON column doesn't accept jsonb_set directly
-    // through `update.data` — go through a normal read → write so the
-    // payload shape stays a plain JSON object for downstream readers.
-    const existing = await tx.subscription_events.findUnique({
-      where: { id: unresolvedRow.id },
-      select: { payload: true },
-    });
-    const prevPayload =
-      existing?.payload &&
-      typeof existing.payload === 'object' &&
-      !Array.isArray(existing.payload)
-        ? (existing.payload as Record<string, unknown>)
-        : {};
-    await tx.subscription_events.update({
-      where: { id: unresolvedRow.id },
-      data: {
-        payload: {
-          ...prevPayload,
-          resolved_at: new Date().toISOString(),
-        } as Prisma.InputJsonValue,
-      },
-    });
-
-    this.logger.log(
-      `BILLING_WARNING_RESOLVED store=${storeId} sub=${subscriptionId} pm=${created.id} auditEvent=${unresolvedRow.id} autoRenewFlipped=${flipped}`,
+    const result = await this.stateService.rearmAutoRenewAfterCredentialInTx(
+      tx,
+      { storeId, subscriptionId, source: 'tokenize_widget' },
     );
 
-    return true;
+    this.logger.log(
+      `BILLING_WARNING_RESOLVED store=${storeId} sub=${subscriptionId} pm=${created.id} ` +
+        `auditEvent=${result.resolvedEventId ?? 'none'} autoRenewFlipped=${result.rearmed}`,
+    );
+
+    return result.rearmed;
   }
 
   async setDefault(id: string) {

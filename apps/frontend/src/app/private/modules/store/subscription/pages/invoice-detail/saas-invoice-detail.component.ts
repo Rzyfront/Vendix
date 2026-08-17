@@ -41,6 +41,17 @@ interface InvoiceDetailVM {
   line_items: InvoiceLineItem[];
   split_breakdown: InvoiceSplitBreakdown | null;
   payments: InvoicePayment[];
+  /**
+   * Descuento a nivel de documento (crédito por downgrade), leído de
+   * `metadata.document_discount` con respaldo en `metadata.credit_applied`.
+   *
+   * El crédito dejó de viajar como línea negativa porque la DIAN rechaza esa
+   * forma (familia DAU02/DAU04/DAU06): ahora es un `cac:AllowanceCharge` de
+   * documento. Consecuencia para esta pantalla: la tabla de líneas suma el
+   * BRUTO mientras `invoice.amount` es el neto, así que sin esta fila la resta
+   * no cierra y el cliente ve dos cifras que no cuadran.
+   */
+  document_discount: number;
 }
 
 const STATE_LABELS: Record<string, string> = {
@@ -103,8 +114,17 @@ export class SaasInvoiceDetailComponent implements OnInit {
   readonly downloadingPdf = signal(false);
 
   readonly invoice = computed(() => this.detail()?.invoice ?? null);
-  readonly lineItems = computed<InvoiceLineItem[]>(
-    () => this.detail()?.line_items ?? [],
+  /**
+   * Líneas facturadas, sin las de importe no positivo.
+   *
+   * Es la misma regla que aplica el emisor DIAN al armar el XML: el crédito por
+   * downgrade viaja como descuento de documento, no como línea negativa. Las
+   * facturas anteriores a ese contrato siguen guardando la línea negativa en
+   * `line_items`, así que sin este filtro la pantalla mostraría una línea que
+   * el documento electrónico no declara.
+   */
+  readonly lineItems = computed<InvoiceLineItem[]>(() =>
+    (this.detail()?.line_items ?? []).filter((item) => Number(item.total) > 0),
   );
   readonly splitBreakdown = computed<InvoiceSplitBreakdown | null>(
     () => this.detail()?.split_breakdown ?? null,
@@ -113,6 +133,20 @@ export class SaasInvoiceDetailComponent implements OnInit {
     () => this.detail()?.payments ?? [],
   );
   readonly currency = computed(() => this.invoice()?.currency ?? 'COP');
+
+  /** Crédito aplicado al documento. `0` cuando no hay. */
+  readonly documentDiscount = computed(() => this.detail()?.document_discount ?? 0);
+
+  /**
+   * Bruto que declara el documento: la suma de las líneas positivas.
+   *
+   * Se deriva de `neto + descuento` y NO de sumar la tabla, por la misma razón
+   * que en el PDF: la cifra persistida es la autoridad, y sumar filas dejaría
+   * que un centavo de redondeo separe la pantalla de la factura.
+   */
+  readonly grossAmount = computed(
+    () => (this.invoice()?.amount ?? 0) + this.documentDiscount(),
+  );
 
   readonly billingCycleLabel = computed(() => {
     const first = this.lineItems()[0];
@@ -314,11 +348,23 @@ export class SaasInvoiceDetailComponent implements OnInit {
       ? (raw['payments'] as InvoicePayment[])
       : [];
 
+    // `document_discount` es la llave nueva; `credit_applied` es la histórica y
+    // sigue escribiéndose, así que las facturas anteriores al contrato fiscal
+    // también cuadran. Recortado en 0: un descuento negativo no existe.
+    const metadata = raw['metadata'];
+    const discountRaw =
+      metadata && typeof metadata === 'object'
+        ? ((metadata as Record<string, unknown>)['document_discount'] ??
+          (metadata as Record<string, unknown>)['credit_applied'])
+        : null;
+    const discount = Number(discountRaw ?? 0);
+
     return {
       invoice,
       line_items: lineItems,
       split_breakdown: splitBreakdown,
       payments,
+      document_discount: Number.isFinite(discount) && discount > 0 ? discount : 0,
     };
   }
 }

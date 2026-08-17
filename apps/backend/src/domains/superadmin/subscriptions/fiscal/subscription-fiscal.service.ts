@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { dianAmount } from '../../../store/invoicing/utils/dian-money.util';
+import {
+  dianAmount,
+  dianLineExtensionTotal,
+} from '../../../store/invoicing/utils/dian-money.util';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { createHash } from 'crypto';
 
@@ -35,11 +38,22 @@ import {
 import { DianXmlSignerService } from '../../../store/invoicing/providers/dian-direct/dian-xml-signer.service';
 import {
   ProviderInvoiceData,
+  ProviderInvoiceTax,
   ProviderResponse,
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+// Mismo servicio que el riel de tiendas, sin variantes: la consulta a
+// `GetNumberingRange` y el cruce contra `invoice_resolutions` tienen que dar el
+// MISMO veredicto para la plataforma que para un tenant, `technical_key_matches`
+// incluido.
+import {
+  ApplyNumberingRangesResult,
+  DianNumberingRangeService,
+  NumberingRangeReport,
+} from '../../../store/invoicing/dian-config/dian-numbering-range.service';
+import { ApplyNumberingRangesDto } from '../../../store/invoicing/dian-config/dto/apply-numbering-range.dto';
 import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
 import {
   buildNotePhaseView,
@@ -51,6 +65,38 @@ import {
   FiscalProductionReadinessService,
   ProductionReadinessCheck,
 } from '../../../store/invoicing/providers/fiscal-production-readiness.service';
+// CONTRATO FISCAL DE LA FACTURA DE SUSCRIPCIÓN — la forma fiscal del documento
+// (descripción, código de ítem, unidad, forma y medio de pago, leyenda de
+// exclusión del IVA y descuento de documento) vive en UN solo módulo compartido
+// con el riel de tienda. Acá se CONSUME; escribir cualquiera de esos literales de
+// nuevo es cómo la factura terminó con descripciones en inglés y sin leyenda.
+import {
+  InvoiceLineItem,
+  SubscriptionInvoiceMetadata,
+} from '../../../store/subscriptions/types/billing.types';
+import {
+  buildSubscriptionItemCode,
+  buildSubscriptionInvoiceNotes,
+  buildSubscriptionLineDescription,
+  dianUnitCodeForBillingCycle,
+  resolveSubscriptionDocumentDiscount,
+  resolveSubscriptionPaymentForm,
+  resolveSubscriptionPaymentMeans,
+} from '../../../store/subscriptions/types/subscription-invoice-fiscal.contract';
+// MISMA cascada de dirección del adquiriente que usa la emisión de tienda. No se
+// reimplementa: una segunda política de «cuál dirección declaro» se desincroniza
+// de la del emisor, y la forma de desincronizarse es la peor —elegir acá un
+// candidato que el builder rechaza después, ya dentro del camino que gasta el
+// consecutivo—.
+import {
+  AcquirerAddressCandidate,
+  ResolvedAcquirerAddress,
+  resolveAcquirerAddress,
+} from '../../../store/invoicing/providers/dian-direct/acquirer-address.resolver';
+import {
+  DianAddressFields,
+  UblDocumentLine,
+} from '../../../store/invoicing/providers/dian-direct/xml/ubl-common.builder';
 
 /**
  * A platform habilitación check. Same fields as the tenant
@@ -100,6 +146,14 @@ const DECIMAL_ZERO = new Prisma.Decimal(0);
  * resolutor paralelo, y dos resolutores del mismo hecho terminan discrepando.
  */
 const PLATFORM_ORGANIZATION_ID_FALLBACK = 1;
+/**
+ * Cuántas direcciones de la organización entran a la cascada del adquiriente.
+ *
+ * Mismo tope que usa la lectura del perfil de checkout: la cascada necesita
+ * VARIAS candidatas para poder preferir la fiscal, y un tenant con decenas de
+ * direcciones de envío no debe convertir la emisión en una consulta pesada.
+ */
+const ACQUIRER_ADDRESS_CANDIDATE_LIMIT = 10;
 
 interface SubscriptionFiscalSettings {
   is_enabled: boolean;
@@ -135,6 +189,13 @@ interface SubscriptionInvoiceForFiscal {
   total: Prisma.Decimal;
   currency: string;
   line_items: Prisma.JsonValue;
+  /**
+   * `subscription_invoices.metadata`. Es JSON sin tipar en la base: se lee SOLO
+   * por los resolvedores del contrato fiscal (`resolveSubscriptionDocumentDiscount`),
+   * nunca indexando la llave a mano. Ahí vive el descuento de documento —el
+   * crédito por cambio a plan inferior—, que antes viajaba como línea negativa.
+   */
+  metadata: Prisma.JsonValue;
   store_id: number;
   store_subscription_id: number;
   payments: Array<{
@@ -145,7 +206,16 @@ interface SubscriptionInvoiceForFiscal {
     created_at: Date;
   }>;
   store_subscription: {
-    plan: { name: string | null; code: string | null } | null;
+    plan: {
+      name: string | null;
+      code: string | null;
+      /**
+       * Califica la CANTIDAD de la línea: el ciclo decide la unidad de medida
+       * DIAN (`LUN` mes / `ANA` año). Sin él la línea declara «1 unidad» de un
+       * servicio que se prestó por un mes.
+       */
+      billing_cycle: string | null;
+    } | null;
     store: {
       id: number;
       name: string;
@@ -161,9 +231,16 @@ interface SubscriptionInvoiceForFiscal {
         tax_regime: string | null;
         fiscal_responsibilities: string[];
         /**
-         * Fiscal address of the adquiriente. Not duplicated on `organizations`:
-         * it is the `addresses` row with `type = 'billing'`, preferring the one
-         * flagged `is_primary`.
+         * CANDIDATAS a dirección del adquiriente, no la dirección ya elegida.
+         *
+         * Antes se leía UNA sola fila con `where: { type: 'billing' }`, sin
+         * respaldo: un tenant que guardó su domicilio fiscal con tipo `legal`
+         * —o con cualquier otro— emitía la factura SIN dirección de adquiriente,
+         * aunque el dato existiera en la base.
+         *
+         * Quién gana lo decide `resolveAcquirerAddress` (la MISMA cascada de la
+         * emisión de tienda), y para eso necesita `type`: es lo único que separa
+         * el escalón fiscal (`billing` / `legal`) del resto.
          */
         addresses: Array<{
           address_line1: string;
@@ -174,6 +251,7 @@ interface SubscriptionInvoiceForFiscal {
           postal_code: string | null;
           municipality_code: string | null;
           is_primary: boolean;
+          type: string;
         }>;
       } | null;
     };
@@ -214,6 +292,11 @@ export class SubscriptionFiscalService {
     // `DianTestService`: el reporte de readiness y la guarda de promoción tienen
     // que ser LOS MISMOS que ve un tenant.
     private readonly dianConfigService: DianConfigService,
+    // Mismo criterio: la consulta de rangos autorizados y la sincronización de la
+    // ClTec son las de tienda, ejecutadas bajo contexto de plataforma. Sin esto la
+    // resolución y la clave técnica de la plataforma se teclean a mano, que es la
+    // causa raíz del FAD06 que este servicio existe para cerrar.
+    private readonly dianNumberingRangeService: DianNumberingRangeService,
     // La ClTec se persiste en TRES columnas (plana, cifrada y huella) y
     // `reveal()` prefiere la cifrada. Escribir sólo la plana desde acá dejaría
     // la cifrada ANTERIOR al mando: el super admin vería su corrección
@@ -1048,6 +1131,109 @@ export class SubscriptionFiscalService {
     const { settings, configId } = await this.requireTestSetTargets();
     return this.runInPlatformContext(settings, () =>
       this.dianTestService.abandonTestSet(configId),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Numeración autorizada — la MISMA consulta que ve un tenant
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Comprueba que el id que llegó por ruta es LA configuración de la plataforma.
+   *
+   * ── POR QUÉ SE VALIDA Y NO SE IGNORA EL PARÁMETRO ──────────────────────────
+   *
+   * La plataforma tiene UNA sola configuración DIAN, y el `configId` autorizado
+   * lo resuelven los ajustes, no el llamador — igual que en
+   * `requireTestSetTargets`. Aceptar el id de la ruta tal cual convertiría estas
+   * dos rutas en una vía para consultar y, peor, ESCRIBIR la clave técnica de la
+   * configuración de cualquier tenant desde el riel de plataforma: el contexto
+   * que se monta abajo es el de la organización 1, así que la escritura caería en
+   * la entidad fiscal equivocada sin que nada la rechace.
+   *
+   * Se rechaza en vez de sustituirse en silencio: si la pantalla pidió otro id es
+   * porque su estado no es el que cree, y responderle sobre una configuración que
+   * no pidió le haría atribuir a la suya un veredicto ajeno.
+   *
+   * ── POR QUÉ NO SE EXIGE LA RESOLUCIÓN ──────────────────────────────────────
+   *
+   * `requireTestSetTargets` reclama `invoice_resolution_id` porque sin resolución
+   * no hay consecutivo que numerar. Aquí sería contradictorio: estas rutas
+   * existen precisamente para TRAER la resolución de la DIAN, así que exigirla
+   * las volvería inalcanzables justo cuando sirven. Mismo criterio que
+   * `getProductionReadiness`.
+   */
+  private async requirePlatformDianConfig(configId: number): Promise<{
+    settings: SubscriptionFiscalSettings;
+    configId: number;
+  }> {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+
+    if (config.id !== configId) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        `La configuración DIAN ${configId} no es la de la plataforma. Este riel opera sobre una sola configuración: recarga la pantalla para leer la que está vigente.`,
+        {
+          dian_configuration_id: configId,
+          platform_dian_configuration_id: config.id,
+        },
+      );
+    }
+
+    return { settings, configId: config.id };
+  }
+
+  /**
+   * Rangos que la DIAN tiene AUTORIZADOS para el NIT de la plataforma, cruzados
+   * con las resoluciones guardadas. NO escribe nada.
+   *
+   * ── POR QUÉ ESTE ENDPOINT NO EXISTÍA Y POR QUÉ IMPORTA ─────────────────────
+   *
+   * El riel de tiendas ya expone `GetNumberingRange`; el de plataforma no, así
+   * que la resolución y la clave técnica con las que Vendix factura sus propias
+   * suscripciones se teclean del portal MUISCA. Esa es la causa raíz exacta del
+   * FAD06: la «clave actual vigente» que muestra el portal es la que se usaría
+   * para una resolución NUEVA, y la DIAN recomputa el CUFE con la clave LIGADA a
+   * la resolución. Los dos chequeos de ClTec del readiness sólo leen nuestra
+   * propia base, así que ninguno puede detectarlo: `technical_key_matches` —que
+   * el servicio calcula EN EL SERVIDOR vía `technicalKeyVault.reveal()` y del que
+   * sólo sale un booleano— es el único dato que confronta lo guardado con lo que
+   * la DIAN tiene ligado a la resolución.
+   *
+   * La ClTec NO viaja al cliente en ninguna de las dos rutas.
+   */
+  async queryPlatformNumberingRanges(
+    configId: number,
+  ): Promise<NumberingRangeReport> {
+    const { settings, configId: target } =
+      await this.requirePlatformDianConfig(configId);
+    return this.runInPlatformContext(settings, () =>
+      this.dianNumberingRangeService.queryRanges(target),
+    );
+  }
+
+  /**
+   * Trae a `invoice_resolutions` los rangos SELECCIONADOS de la DIAN.
+   *
+   * El cuerpo sólo SELECCIONA por el par `(resolution_number, prefix)`: los
+   * valores —clave técnica incluida— salen de la respuesta de la DIAN, nunca del
+   * payload. Cada elemento se resuelve por su cuenta, así que un lote
+   * parcialmente aplicado es un desenlace legítimo y viaja en `results[]`.
+   *
+   * Va DENTRO de `runInPlatformContext` por lo mismo que `runTestSet`: la
+   * escritura resuelve su entidad fiscal desde el contexto, y fuera de él sería
+   * la del super admin —o ninguna—, dejando la resolución colgada de la entidad
+   * equivocada o invisible en los listados.
+   */
+  async applyPlatformNumberingRanges(
+    configId: number,
+    dto: ApplyNumberingRangesDto,
+  ): Promise<ApplyNumberingRangesResult> {
+    const { settings, configId: target } =
+      await this.requirePlatformDianConfig(configId);
+    return this.runInPlatformContext(settings, () =>
+      this.dianNumberingRangeService.applyRanges(target, dto),
     );
   }
 
@@ -2166,7 +2352,7 @@ export class SubscriptionFiscalService {
         payments: { orderBy: { created_at: 'desc' } },
         store_subscription: {
           include: {
-            plan: { select: { name: true, code: true } },
+            plan: { select: { name: true, code: true, billing_cycle: true } },
             store: {
               include: {
                 organizations: {
@@ -2181,10 +2367,15 @@ export class SubscriptionFiscalService {
                     person_type: true,
                     tax_regime: true,
                     fiscal_responsibilities: true,
+                    // TODAS las direcciones de la organización, no sólo las de
+                    // tipo `billing`: la cascada de la emisión agota primero las
+                    // fiscales (`billing` / `legal`) y después cualquier otra, y
+                    // no puede elegir entre candidatas que la consulta filtró.
+                    // El orden de la base entra tal cual —la principal primero—;
+                    // la POLÍTICA la aplica `resolveAcquirerAddress`.
                     addresses: {
-                      where: { type: 'billing' },
                       orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-                      take: 1,
+                      take: ACQUIRER_ADDRESS_CANDIDATE_LIMIT,
                       select: {
                         address_line1: true,
                         address_line2: true,
@@ -2194,6 +2385,7 @@ export class SubscriptionFiscalService {
                         postal_code: true,
                         municipality_code: true,
                         is_primary: true,
+                        type: true,
                       },
                     },
                   },
@@ -2387,12 +2579,21 @@ export class SubscriptionFiscalService {
     if (!org.legal_name?.trim()) missing.push('legal_name');
     if (!org.email?.trim()) missing.push('email');
 
-    const address = org.addresses?.[0];
-    if (!address) {
+    // LA MISMA cascada que va a emitir. Se pregunta acá, ANTES de asignar el
+    // consecutivo, porque un documento sin dirección de adquiriente lo quema
+    // igual: la DIAN lo rechaza para un adquiriente con NIT.
+    //
+    // La cascada exige que la dirección sea EMITIBLE (`canEmitAddress`), y para
+    // una dirección colombiana eso significa municipio de la lista DANE. No se
+    // relaja: emitir es estricto —el papel se va con el cliente y no se
+    // retracta—, al contrario de la LECTURA del perfil de checkout, que sí
+    // devuelve la fila cruda para que el tenant complete lo que falta.
+    if ((org.addresses?.length ?? 0) === 0) {
       missing.push('billing_address');
-    } else if (!address.municipality_code) {
-      // Without the DIAN municipality code the provider omits PhysicalLocation
-      // and RegistrationAddress entirely, which DIAN rejects for a NIT acquirer.
+    } else if (!this.resolveCustomerAddress(org)) {
+      // Hay direcciones, pero NINGUNA es emitible. Para una dirección
+      // colombiana la única causa es el municipio DANE, que es también lo único
+      // que el tenant puede corregir.
       missing.push('billing_address.municipality_code');
     }
 
@@ -2400,27 +2601,83 @@ export class SubscriptionFiscalService {
   }
 
   /**
-   * Shapes the adquiriente's billing address the way `DianDirectProvider`
-   * normalizes it (`address_line1` / `city` / `state_province` /
-   * `municipality_code`). Returns undefined when the organization has no
-   * billing address — the provider then omits PhysicalLocation entirely rather
-   * than emitting a half-filled one.
+   * Dirección del ADQUIRIENTE por la cascada única de la emisión: direcciones
+   * fiscales (`billing` / `legal`) primero, cualquier otra de la organización
+   * después. Devuelve además de qué escalón salió.
+   *
+   * El TERCER escalón de la cascada se deja deliberadamente vacío
+   * (`store_address: null`): el emisor de esta factura es Vendix, no el tenant,
+   * así que el domicilio del emisor JAMÁS puede ser el respaldo de la dirección
+   * del adquiriente. Rellenarlo declararía que la operación ocurrió en el
+   * municipio de Vendix, que es exactamente la clase de dato inventado que la
+   * cascada existe para evitar.
+   *
+   * `null` significa «no lo sé», y quien pregunte tiene que decirlo en voz alta
+   * —ver `missingCustomerFiscalData`—, no rellenarlo.
+   */
+  private resolveCustomerAddress(
+    org: SubscriptionInvoiceForFiscal['store_subscription']['store']['organizations'],
+  ): ResolvedAcquirerAddress | null {
+    const rows = org?.addresses ?? [];
+    if (rows.length === 0) return null;
+
+    const candidates: AcquirerAddressCandidate[] = rows.map((row) => ({
+      type: row.type,
+      address_line: [row.address_line1, row.address_line2]
+        .filter(Boolean)
+        .join(' '),
+      city_code: row.municipality_code ?? undefined,
+      city_name: row.city,
+      // El departamento se DERIVA del municipio, que es su prefijo Divipola.
+      // Resolverlo por nombre descartaría una fila con código bueno y
+      // departamento mal escrito.
+      department_code: row.municipality_code
+        ? row.municipality_code.slice(0, 2)
+        : undefined,
+      department_name: row.state_province ?? undefined,
+      country_code: row.country_code,
+      postal_code: row.postal_code ?? undefined,
+    }));
+
+    return resolveAcquirerAddress({ candidates, store_address: null });
+  }
+
+  /**
+   * Dirección del adquiriente que viaja en el payload, ya elegida por la
+   * cascada y en la forma canónica de la emisión (`DianAddressFields`).
+   *
+   * Devuelve `undefined` cuando ninguna dirección es emitible: el proveedor omite
+   * entonces el grupo entero en vez de emitir uno a medio llenar. En el camino
+   * normal eso no llega a pasar —`missingCustomerFiscalData` ya frenó la emisión
+   * antes de asignar el consecutivo—; este respaldo es para el llamador que
+   * construya el payload sin pasar por esa compuerta (p. ej. el `request_hash`).
+   *
+   * El RESPALDO SE ANUNCIA. Un respaldo silencioso es lo que produjo el defecto
+   * original en la emisión de tienda: el documento declaraba un municipio que
+   * nadie había elegido y no había forma de saberlo hasta el cruce de la DIAN.
+   * Acá se anuncia con la misma severidad y por la misma razón.
+   *
+   * El `type` NO viaja: el proveedor vuelve a correr la cascada sobre lo que
+   * recibe y, sin `type`, la clasifica como fiscal — que es lo que significa una
+   * dirección compuesta PARA ESTE documento (ver `classifyAcquirerAddressType`).
+   * Mandarlo obligaría además a una búsqueda de direcciones por `users` que en el
+   * riel de plataforma no aplica: el adquiriente es una organización.
    */
   private buildCustomerAddress(
     org: SubscriptionInvoiceForFiscal['store_subscription']['store']['organizations'],
-  ): Record<string, unknown> | undefined {
-    const address = org?.addresses?.[0];
-    if (!address) return undefined;
-    return {
-      address_line: [address.address_line1, address.address_line2]
-        .filter(Boolean)
-        .join(' '),
-      city: address.city,
-      municipality_code: address.municipality_code ?? undefined,
-      state_province: address.state_province ?? undefined,
-      country_code: address.country_code,
-      postal_code: address.postal_code ?? undefined,
-    };
+  ): DianAddressFields | undefined {
+    const resolved = this.resolveCustomerAddress(org);
+    if (!resolved) return undefined;
+    if (resolved.source !== 'fiscal') {
+      this.logger.warn(
+        `La organización ${org?.id ?? 'sin id'} no tiene dirección fiscal utilizable; ` +
+          `la factura de suscripción declarará la dirección de origen «${resolved.source}» ` +
+          `(municipio ${resolved.address.city_code ?? 'sin código'} — ${
+            resolved.address.city_name ?? 'sin nombre'
+          }).`,
+      );
+    }
+    return resolved.address;
   }
 
   private buildProviderData(
@@ -2430,32 +2687,46 @@ export class SubscriptionFiscalService {
   ): ProviderInvoiceData {
     const issuedAt = invoice.issued_at ?? invoice.payments[0]?.paid_at ?? new Date();
     const org = invoice.store_subscription.store.organizations;
-    const lineItems = Array.isArray(invoice.line_items)
-      ? (invoice.line_items as Array<Record<string, any>>)
-      : [];
-    const items =
-      lineItems.length > 0
-        ? lineItems.map((item) => ({
-            description: String(item.description ?? 'Plan Vendix'),
-            quantity: String(item.quantity ?? '1'),
-            unit_price: this.money(item.unit_price ?? item.total ?? invoice.subtotal),
-            discount_amount: '0.00',
-            tax_amount: this.money(item.tax_amount ?? 0),
-            total_amount: this.money(item.total ?? invoice.total),
-          }))
-        : [
-            {
-              description:
-                invoice.store_subscription.plan?.name ??
-                invoice.store_subscription.plan?.code ??
-                'Plan Vendix',
-              quantity: '1',
-              unit_price: this.money(invoice.subtotal),
-              discount_amount: '0.00',
-              tax_amount: this.money(invoice.tax_amount),
-              total_amount: this.money(invoice.total),
-            },
-          ];
+
+    // Las dos fechas se resuelven UNA vez y en la zona del obligado a facturar
+    // (Vendix), porque la forma de pago se decide comparándolas: `'2'` crédito
+    // cuando el vencimiento es posterior a la emisión.
+    const issueDate = localDateString(issuedAt, PLATFORM_TIMEZONE);
+    const dueDate = localDateString(invoice.due_at, PLATFORM_TIMEZONE);
+
+    // DESCUENTO A NIVEL DE DOCUMENTO — única lectura válida del crédito por
+    // cambio a plan inferior. Antes estaba fijado en `'0.00'`, así que el crédito
+    // sólo existía como línea negativa: la DIAN recompone bruto, base y total
+    // desde las líneas, y una línea negativa descuadra los tres (DAU02 / DAU04 /
+    // DAU06). Acá alimenta el `cac:AllowanceCharge` de documento.
+    const documentDiscount = resolveSubscriptionDocumentDiscount(
+      invoice.metadata,
+    );
+
+    const items = this.buildProviderItems(invoice, documentDiscount);
+
+    // El importe de impuestos de la CABECERA se deriva de las filas declaradas,
+    // no de la columna: si las dos discreparan, el documento diría en el total
+    // legal algo distinto de lo que desglosa. Con el servicio excluido ambas son
+    // cero, y el cero queda EXPLICADO por la leyenda de `notes`.
+    const taxes = this.buildTaxRows(invoice);
+    const taxTotal = this.money(
+      taxes.reduce(
+        (acc, row) => acc.plus(new Prisma.Decimal(row.tax_amount)),
+        DECIMAL_ZERO,
+      ),
+    );
+
+    // BRUTO DECLARADO: la misma función con la que el emisor calculará
+    // `cbc:LineExtensionAmount` y el `ValFac` del CUFE, para que la cabecera de
+    // este payload no pueda diferir de lo que el XML publique.
+    const grossAmount = dianLineExtensionTotal(items);
+    this.warnIfDocumentTotalDoesNotClose(
+      invoice,
+      grossAmount,
+      taxTotal,
+      documentDiscount,
+    );
 
     return {
       invoice_number: fiscalNumber,
@@ -2464,22 +2735,43 @@ export class SubscriptionFiscalService {
       // date and offset must come from the same tz-aware conversion, never from
       // a UTC clock with an offset appended (that names a different instant and
       // silently rolls the day between 00:00Z and the offset).
-      issue_date: localDateString(issuedAt, PLATFORM_TIMEZONE),
+      issue_date: issueDate,
       issue_time: localTimeString(issuedAt, PLATFORM_TIMEZONE),
-      due_date: localDateString(invoice.due_at, PLATFORM_TIMEZONE),
+      due_date: dueDate,
+      /**
+       * PERÍODO REALMENTE FACTURADO. Sin este campo el builder derivaba el grupo
+       * `cac:InvoicePeriod` de `issue_date` → `due_date`, o sea publicaba
+       * «emisión → vencimiento (+7 d)»: en una factura de ciclo mensual eso
+       * declara un mes de servicio de siete días. Las dos fechas se resuelven en
+       * la zona del obligado, no con el reloj del proceso.
+       */
+      invoice_period: {
+        start_date: localDateString(invoice.period_start, PLATFORM_TIMEZONE),
+        end_date: localDateString(invoice.period_end, PLATFORM_TIMEZONE),
+      },
       customer_name: org?.legal_name ?? org?.name ?? invoice.store_subscription.store.name,
       // NOT onlyDigits: most rows store the NIT with the DV inline, and
       // concatenating them yields a document number that belongs to nobody.
       customer_tax_id: org ? this.splitCustomerNit(org).number : undefined,
-      subtotal_amount: this.money(invoice.subtotal),
-      discount_amount: '0.00',
-      tax_amount: this.money(invoice.tax_amount ?? DECIMAL_ZERO),
+      // El BRUTO de las líneas, no `subscription_invoices.subtotal` —que ya viene
+      // NETO del crédito—. Es la cifra que el documento declara como
+      // `TaxExclusiveAmount`, y publicar acá la neta contra líneas brutas dejaba
+      // el payload contradiciéndose consigo mismo.
+      subtotal_amount: grossAmount,
+      discount_amount: documentDiscount,
+      tax_amount: taxTotal,
       withholding_amount: '0.00',
       total_amount: this.money(invoice.total),
       currency: invoice.currency,
       items,
-      taxes: this.buildTaxRows(invoice),
-      notes: `Factura electrónica generada desde factura SaaS ${invoice.invoice_number}`,
+      // Arreglo VACÍO, nunca una fila al 0 %: el servicio está EXCLUIDO del IVA,
+      // y un ítem excluido no informa el grupo de impuestos (FAX01), mientras uno
+      // EXENTO sí lo informa con `cbc:Percent` en 0,00. Ver `buildTaxRows`.
+      taxes,
+      // Trazabilidad + LEYENDA DE EXCLUSIÓN, compuestas por el contrato fiscal.
+      // Antes sólo iba la trazabilidad: un IVA en cero sin leyenda no distingue
+      // «excluido por ley» de «se olvidó calcularlo».
+      notes: buildSubscriptionInvoiceNotes(invoice.invoice_number),
       customer_email: org?.email ?? undefined,
       customer_address: this.buildCustomerAddress(org),
       // Read the adquiriente's real fiscal identity. The previous code inferred
@@ -2510,7 +2802,24 @@ export class SubscriptionFiscalService {
       customer_tax_responsibilities: org?.fiscal_responsibilities?.length
         ? org.fiscal_responsibilities
         : undefined,
-      payment_form: '1',
+      // FORMA de pago — `cac:PaymentMeans/cbc:ID`. La factura de suscripción vence
+      // a +7 días de la emisión, así que es una venta A CRÉDITO (`'2'`). Estaba
+      // fijada en `'1'` (contado), que se contradecía con el `cbc:PaymentDueDate`
+      // futuro que el propio documento publica.
+      //
+      // El vencimiento a crédito queda cubierto con `due_date`: el builder emite
+      // `cac:PaymentMeans/cbc:PaymentDueDate` incondicionalmente, así que no hace
+      // falta `cac:PaymentTerms` —ningún builder del repositorio lo emite—.
+      payment_form: resolveSubscriptionPaymentForm(issueDate, dueDate),
+      // MEDIO de pago — `cbc:PaymentMeansCode`, «con qué instrumento». Pago manual
+      // ⇒ `'42'` consignación bancaria; Wompi y el resto ⇒ `'1'` instrumento no
+      // definido, porque Wompi multiplexa tarjeta, PSE, Nequi y transferencia y el
+      // instrumento concreto no se persiste.
+      payment_means: resolveSubscriptionPaymentMeans(
+        invoice.payments[0]?.payment_method,
+      ),
+      // Campo INERTE: ningún builder lo lee. Se conserva por trazabilidad interna
+      // del payload; el instrumento que viaja al XML es `payment_means`.
       payment_method: invoice.payments[0]?.payment_method ?? 'subscription',
       order_reference: invoice.invoice_number,
       // LOS TRES CAMPOS DE NUMERACIÓN, que antes no viajaban.
@@ -2537,17 +2846,239 @@ export class SubscriptionFiscalService {
     };
   }
 
-  private buildTaxRows(invoice: SubscriptionInvoiceForFiscal) {
+  /**
+   * Tributos que declara una factura de suscripción: NINGUNO.
+   *
+   * El servicio de computación en la nube está EXCLUIDO del impuesto sobre las
+   * ventas por el artículo 476 numeral 21 del Estatuto Tributario (adicionado por
+   * la Ley 1819 de 2016; DIAN Concepto Unificado 017056 de 2017 y Oficio 900930 de
+   * 2022). La exclusión aplica al PROVEEDOR del servicio, y Vendix lo es.
+   *
+   * EXCLUIDO ≠ EXENTO. Un ítem excluido NO informa el grupo de impuestos (regla
+   * FAX01, espejo CAX01); uno exento SÍ lo informa, con `cbc:Percent` en 0,00. Por
+   * eso el arreglo va vacío en vez de llevar una fila de IVA al 0 %: la fila
+   * afirmaría que la operación está gravada a tarifa cero, que es otra figura
+   * jurídica. Quien DICE por qué no hay impuesto es la leyenda de `notes`.
+   *
+   * `subscription_invoices.tax_amount` se escribe siempre en cero, así que un
+   * valor distinto significa que alguien empezó a gravar este riel sin recorrer
+   * las 8 capas del contrato de `tax_type`. Se avisa en vez de dejarlo caer en
+   * silencio: emitirlo con el arreglo vacío descuadraría el total legal.
+   */
+  private buildTaxRows(
+    invoice: SubscriptionInvoiceForFiscal,
+  ): ProviderInvoiceTax[] {
     const tax = new Prisma.Decimal(invoice.tax_amount ?? 0);
-    if (tax.lessThanOrEqualTo(DECIMAL_ZERO)) return [];
+    if (tax.greaterThan(DECIMAL_ZERO)) {
+      this.logger.warn(
+        `La factura SaaS ${invoice.invoice_number} trae tax_amount=${tax.toFixed(2)} ` +
+          'pero el servicio de suscripción está excluido del IVA (art. 476 num. 21 ET). ' +
+          'No se declara ningún tributo; revisa el origen antes de transmitir.',
+      );
+    }
+    return [];
+  }
+
+  /**
+   * Líneas que el documento declara, en la forma que consume el emisor.
+   *
+   * REGLA CRÍTICA — CIERRA EL DOBLE DESCUENTO. Se descarta toda línea cuyo importe
+   * sea menor o igual a cero. Las facturas emitidas ANTES del contrato fiscal
+   * traen el crédito por cambio de plan DOS veces: como línea negativa y como
+   * `metadata.credit_applied`. Declarar las dos resta el crédito dos veces —el
+   * bruto que la DIAN recompone desde las líneas ya viene neto y encima se le
+   * aplica el `AllowanceCharge` de documento— y el documento se rechaza por DAU06.
+   *
+   * Con la regla, los dos formatos convergen en la misma aritmética:
+   * `Σ líneas positivas − descuento_de_documento = total` persistido.
+   */
+  private buildProviderItems(
+    invoice: SubscriptionInvoiceForFiscal,
+    documentDiscount: string,
+  ): UblDocumentLine[] {
+    const plan = invoice.store_subscription.plan;
+    const declared: UblDocumentLine[] = [];
+
+    for (const item of this.readPersistedLineItems(invoice.line_items)) {
+      const line = this.buildProviderItem(item, invoice);
+      if (line) declared.push(line);
+    }
+    if (declared.length > 0) return declared;
+
+    // RESPALDO: la factura no tiene ninguna línea declarable (JSON vacío, o sólo
+    // la línea negativa del crédito). Se declara UNA línea por el BRUTO —el total
+    // persistido MÁS el descuento— para que el `AllowanceCharge` de documento
+    // tenga sobre qué aplicarse y el total legal siga cerrando en `total`.
+    // Publicar acá el neto restaría el crédito por segunda vez.
+    const gross = new Prisma.Decimal(invoice.total).plus(documentDiscount);
     return [
       {
-        tax_name: 'IVA',
-        tax_rate: '19.00',
-        taxable_amount: this.money(invoice.subtotal),
-        tax_amount: this.money(tax),
+        description: buildSubscriptionLineDescription({
+          planName: plan?.name ?? plan?.code ?? 'Vendix',
+          billingCycle: plan?.billing_cycle,
+          periodStart: invoice.period_start,
+          periodEnd: invoice.period_end,
+          prorated: this.isProratedInvoice(invoice.metadata),
+        }),
+        quantity: '1',
+        unit_price: this.money(gross),
+        discount_amount: '0.00',
+        tax_amount: '0.00',
+        total_amount: this.money(gross),
+        item_code: buildSubscriptionItemCode(plan?.code),
+        unit_code: dianUnitCodeForBillingCycle(plan?.billing_cycle),
+        omit_tax_total: true,
       },
     ];
+  }
+
+  /**
+   * Una línea persistida traducida a línea del documento, o `null` cuando no debe
+   * declararse.
+   *
+   * `item_code` y `unit_code` PREFIEREN lo que trae la línea; los helpers del
+   * contrato son el respaldo para las facturas emitidas antes de que esos campos
+   * existieran. La descripción llega ya en español desde el origen y no se
+   * reconstruye: el respaldo sólo actúa si viene vacía.
+   */
+  private buildProviderItem(
+    item: Partial<InvoiceLineItem>,
+    invoice: SubscriptionInvoiceForFiscal,
+  ): UblDocumentLine | null {
+    const plan = invoice.store_subscription.plan;
+    const quantity =
+      this.decimalOrNull(item.quantity) ?? new Prisma.Decimal(1);
+    const unitPrice = this.decimalOrNull(item.unit_price);
+    const total =
+      this.decimalOrNull(item.total) ?? unitPrice?.times(quantity) ?? null;
+
+    // REGLA CRÍTICA: la línea negativa del crédito (y cualquier línea en cero) no
+    // se declara. Una línea cuyo importe no se puede leer tampoco: declararla con
+    // el total de la factura, como se hacía, publica el documento entero sobre una
+    // línea cuyo importe se desconoce.
+    if (!total || total.lessThanOrEqualTo(DECIMAL_ZERO)) return null;
+
+    const declaredPrice =
+      unitPrice ?? (quantity.isZero() ? total : total.div(quantity));
+
+    return {
+      description:
+        (item.description ?? '').trim() ||
+        buildSubscriptionLineDescription({
+          planName: plan?.name ?? plan?.code ?? 'Vendix',
+          billingCycle: item.meta?.billing_cycle ?? plan?.billing_cycle,
+          periodStart: invoice.period_start,
+          periodEnd: invoice.period_end,
+          prorated: item.meta?.prorated,
+        }),
+      quantity: quantity.toString(),
+      unit_price: this.money(declaredPrice),
+      // El descuento de esta factura es de DOCUMENTO, no de línea: repetirlo acá
+      // lo restaría dos veces (`documentDiscount` = descuento declarado − Σ
+      // descuentos de línea).
+      discount_amount: '0.00',
+      tax_amount: '0.00',
+      total_amount: this.money(total),
+      // Código de catálogo estable por plan (`schemeID="999"`). Sin él el XML
+      // publica el NÚMERO DE LÍNEA como identificación del ítem.
+      item_code: item.item_code?.trim() || buildSubscriptionItemCode(plan?.code),
+      // Unidad que califica la cantidad: mes `LUN`, año `ANA`. NO son `MON`/`ANN`
+      // —la DIAN publicó la lista UN/ECE con los códigos traducidos y su validador
+      // compara la lista corrompida—; `toDianUnitCode` degradaría esos dos a `EA`
+      // en silencio y la línea declararía «1 unidad».
+      unit_code:
+        item.unit_code?.trim() ||
+        dianUnitCodeForBillingCycle(item.meta?.billing_cycle ?? plan?.billing_cycle),
+      // Toda línea de suscripción está EXCLUIDA del IVA, así que NO emite el grupo
+      // `cac:TaxTotal` de línea (FAX01).
+      //
+      // El respaldo es `true` y no `false` a propósito: las facturas emitidas antes
+      // de este contrato no traen la bandera, y su ausencia significa «se emitió
+      // antes de que el dato existiera», no «grava». Emitir el grupo en cero
+      // afirmaría un ítem EXENTO, que es otra figura. Sólo una línea que declare
+      // explícitamente `vat_excluded: false` volvería a informarlo.
+      omit_tax_total: item.vat_excluded !== false,
+    };
+  }
+
+  /**
+   * `subscription_invoices.line_items` leído como lo que promete ser.
+   *
+   * Es JSON sin tipar en la base, así que el tipo es una PROMESA de forma y no una
+   * garantía del motor: cada campo se lee después con guardas. El cast vive UNA
+   * vez y acá —igual que en el emisor de la factura y en el PDF— en vez de
+   * repartirse como `Record<string, any>` por todo el armado del payload.
+   */
+  private readPersistedLineItems(
+    value: Prisma.JsonValue,
+  ): Array<Partial<InvoiceLineItem>> {
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (entry): entry is Prisma.JsonObject =>
+        !!entry && typeof entry === 'object' && !Array.isArray(entry),
+    ) as unknown as Array<Partial<InvoiceLineItem>>;
+  }
+
+  /**
+   * `metadata.prorated`, con guardas. Sólo alimenta el respaldo de la descripción:
+   * una factura de prorrateo descrita como ciclo completo declararía un período de
+   * servicio que no se prestó.
+   */
+  private isProratedInvoice(metadata: Prisma.JsonValue): boolean {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return false;
+    }
+    return (
+      (metadata as Record<keyof SubscriptionInvoiceMetadata, unknown>)
+        .prorated === true
+    );
+  }
+
+  /**
+   * `Prisma.Decimal` de un valor del JSON, o `null` si no es un número legible.
+   *
+   * Devolver `null` en vez de cero es deliberado: un cero silencioso convierte un
+   * dato ilegible en un importe válido, y el importe de una línea es justo lo que
+   * la DIAN recompone.
+   */
+  private decimalOrNull(value: unknown): Prisma.Decimal | null {
+    if (typeof value !== 'string' && typeof value !== 'number') return null;
+    try {
+      const decimal = new Prisma.Decimal(value);
+      return decimal.isFinite() ? decimal : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Comprueba el cierre aritmético que la DIAN recompone:
+   * `Σ líneas + impuestos − descuento de documento = total`.
+   *
+   * No lanza. La emisión ya tiene una red DURA aguas abajo —el proveedor recomputa
+   * el CUFE contra el XML y aborta antes de firmar si el `PayableAmount` no coincide
+   * con el total hasheado—, y lanzar acá rompería la confirmación del pago que
+   * dispara la emisión automática. Lo que aporta esta comprobación es NOMBRAR las
+   * dos cifras y el descuento en el log, porque el rechazo aguas abajo dice que no
+   * cuadra pero no de dónde salió cada número.
+   */
+  private warnIfDocumentTotalDoesNotClose(
+    invoice: SubscriptionInvoiceForFiscal,
+    grossAmount: string,
+    taxTotal: string,
+    documentDiscount: string,
+  ): void {
+    const declared = new Prisma.Decimal(grossAmount)
+      .plus(taxTotal)
+      .minus(documentDiscount);
+    const persisted = new Prisma.Decimal(this.money(invoice.total));
+    if (declared.equals(persisted)) return;
+    this.logger.warn(
+      `La factura SaaS ${invoice.invoice_number} no cierra: las líneas declaradas suman ` +
+        `${grossAmount} + ${taxTotal} de impuestos − ${documentDiscount} de descuento = ` +
+        `${declared.toFixed(2)}, y el total persistido es ${persisted.toFixed(2)}. ` +
+        'La DIAN recompone el total desde las líneas, así que el documento se rechazaría.',
+    );
   }
 
   private async markSubmitted(transmissionId: number): Promise<void> {

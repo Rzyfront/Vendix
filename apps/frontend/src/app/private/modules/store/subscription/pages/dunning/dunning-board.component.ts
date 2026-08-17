@@ -248,6 +248,16 @@ export class DunningBoardComponent {
       });
   }
 
+  /**
+   * Reintento de cobro contra la factura vencida. Ya NO está cableado a ningún
+   * botón del tablero: los dos CTA visibles ("Pagar ahora" y "Actualizar método
+   * de pago") navegan a la vista de pago del plan. Se conserva como punto de
+   * entrada del flujo `retryPayment` del store (y su manejo de toasts) para
+   * cuando exista una superficie que sí represente "reintentar el cobro".
+   *
+   * No lo vuelvas a colgar de un botón cuyo rótulo prometa otra cosa: ese fue
+   * exactamente el defecto que el cliente vivió como "error al procesar el pago".
+   */
   onRetryPayment(): void {
     if (this.retrying()) return;
     if (!this.hasInvoices()) {
@@ -268,24 +278,42 @@ export class DunningBoardComponent {
    * handles preview, Wompi widget, COF tokenize and PM persistence.
    */
   onPayNow(): void {
-    const sub = this.currentSubscription();
-    const planId = sub?.plan_id ?? sub?.paid_plan_id;
-    if (!planId) {
+    this.navigateToPlanPayment();
+  }
+
+  /**
+   * "Actualizar método de pago" NAVEGA — nunca cobra.
+   *
+   * Antes delegaba en `onRetryPayment()`, así que un botón rotulado
+   * "Actualizar método de pago" disparaba un cobro contra la factura vencida:
+   * el cliente que solo quería cambiar la tarjeta recibía "No hay invoices
+   * pendientes de pago" o el error del reintento del gateway. Ahora lleva a la
+   * vista de pago del plan, donde el checkout captura el método nuevo y el
+   * cobro ocurre únicamente cuando el cliente lo confirma.
+   *
+   * Mismo destino que `onPayNow()` a propósito: el dueño del producto reportó
+   * que "Pagar ahora" le resulta poco familiar al cliente y que este botón es
+   * el que realmente pulsa.
+   */
+  onUpdatePaymentMethod(): void {
+    this.navigateToPlanPayment();
+  }
+
+  /**
+   * Destino único de pago del tablero de mora: la vista de pago del plan
+   * vigente. No ejecuta ningún cargo — solo navega.
+   */
+  private navigateToPlanPayment(): void {
+    const sub = this.currentSubscription() as {
+      plan_id?: number | string | null;
+      paid_plan_id?: number | string | null;
+    } | null;
+    const planId = sub?.plan_id ?? sub?.paid_plan_id ?? null;
+    if (planId === null || planId === undefined || planId === '') {
       this.toast.error('No se encontró un plan vigente para renovar');
       return;
     }
     this.router.navigateByUrl(`/admin/subscription/checkout/${planId}`);
-  }
-
-  /**
-   * Trigger the canonical retry-payment flow. The backend mints a fresh Wompi
-   * widget config and `subscription-payment` auto-registers the new PM on
-   * APPROVED. This avoids redirecting the user to `/payment` (which is opt-in
-   * for managing already-saved methods) and keeps the recovery path inline
-   * with the dunning-board — same as clicking "Pagar ahora".
-   */
-  onUpdatePaymentMethod(): void {
-    this.onRetryPayment();
   }
 
   /**

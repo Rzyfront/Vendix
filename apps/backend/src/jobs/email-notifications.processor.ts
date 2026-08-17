@@ -130,6 +130,10 @@ export class EmailNotificationsProcessor extends WorkerHost {
           return await this.handleAutoRenewDisabledNoCredential(job);
         case 'subscription.billing.renewal-failed.email':
           return await this.handleAutoRenewChargeFailed(job);
+        // Rearme del autopago: el comerciante guardó una tarjeta y la renovación
+        // automática volvió a quedar armada. Simétrico al correo de pausa.
+        case 'subscription.billing.auto-renew-rearmed.email':
+          return await this.handleAutoRenewRearmed(job);
         // Future: when the corresponding gaps land, switch the stubs to
         // real handlers backed by SubscriptionEmailTemplates.
         case 'subscription.payment-failed.email':
@@ -620,6 +624,62 @@ export class EmailNotificationsProcessor extends WorkerHost {
       storeName: ctx.storeName,
       organizationName: ctx.organizationName,
       planName: planName || ctx.planName,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      paymentUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `subscription.billing.auto-renew-rearmed.email` handler — enqueued por
+   * `SubscriptionPaymentBillingWarningListener.onAutoRenewRearmed` cuando el
+   * comerciante guarda una tarjeta y el autopago vuelve a quedar armado.
+   *
+   * El aviso de rearme es la mitad que faltaba del contrato: el sistema ya sabía
+   * avisar la pausa, y el comerciante que arreglaba el problema no recibía ninguna
+   * confirmación de que su acción había servido.
+   *
+   * `cardLabel` se resuelve del medio de pago que originó el rearme; si no se
+   * puede leer, el correo sale igual sin la etiqueta — la confirmación importa más
+   * que el adorno.
+   */
+  private async handleAutoRenewRearmed(
+    job: Job<{
+      storeId: number;
+      subscriptionId?: number | null;
+      paymentMethodId?: number | null;
+    }>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { storeId, subscriptionId, paymentMethodId } = job.data;
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId ?? null);
+    if (!ctx) return { success: false };
+
+    let cardLabel: string | null = null;
+    if (paymentMethodId && Number.isInteger(paymentMethodId)) {
+      try {
+        const pm = await this.prisma
+          .withoutScope()
+          .subscription_payment_methods.findUnique({
+            where: { id: paymentMethodId },
+            select: { brand: true, last4: true },
+          });
+        if (pm?.last4) {
+          cardLabel = `${pm.brand ? String(pm.brand).toUpperCase() + ' ' : ''}****${pm.last4}`;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `EMAIL_CARD_LABEL_LOOKUP_FAILED name=${job.name} pm=${paymentMethodId} err=${err?.message ?? err}`,
+        );
+      }
+    }
+
+    const tpl = SubscriptionEmailTemplates.autoRenewRearmed({
+      storeName: ctx.storeName,
+      organizationName: ctx.organizationName,
+      planName: ctx.planName,
+      cardLabel,
+      nextChargeAt: ctx.nextBillingAt ?? null,
       // TODO(G10-email-adapter): real domain-aware URL helper.
       paymentUrl: undefined,
     });

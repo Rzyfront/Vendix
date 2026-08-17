@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import Redis from 'ioredis';
-import { store_subscription_state_enum } from '@prisma/client';
+import { Prisma, store_subscription_state_enum } from '@prisma/client';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import {
@@ -18,6 +18,7 @@ import {
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+import { AutoRenewWarningState } from '../renewal-eligibility.contract';
 
 export interface DunningOverdueInvoice {
   id: number;
@@ -561,6 +562,170 @@ export class SubscriptionAccessService {
       features_kept,
       payment_method_invalid,
     };
+  }
+
+  /**
+   * DEFECTO 5 — los tres campos `auto_renew_*` que `GET /store/subscriptions/current`
+   * añade a la fila de la suscripción, DERIVADOS EN LECTURA. Sin columnas nuevas.
+   *
+   * El panel ya leía estos tres nombres (`subscription.facade.ts`) y el backend no
+   * los devolvía nunca: el aviso en pantalla era código muerto y el comerciante
+   * solo se enteraba por correo — o no se enteraba.
+   *
+   * Fuentes (todas existentes):
+   *   - `subscription_events` tipo `auto_renew_disabled_no_credential` SIN
+   *     `payload.resolved_at` → el autopago está pausado por falta de tarjeta.
+   *     Se cura solo cuando el rearme estampa `resolved_at`.
+   *   - `billing_warning_logs` tipo `renewal_failed` anclado (defecto 8) a una
+   *     factura que sigue impaga → el cobro automático falló. Se apaga solo
+   *     cuando la factura queda pagada o anulada, así que no hace falta que nadie
+   *     "cierre" el aviso a mano.
+   *   - `notifications` → id de la campana correspondiente, para que el panel
+   *     pueda enlazar el aviso con la notificación que el comerciante ya tiene.
+   *
+   * PRECEDENCIA: `renewal_failed` gana sobre `auto_renew_disabled_no_credential`.
+   * Un cobro que falló es dinero pendiente hoy; una pausa es un riesgo a futuro.
+   *
+   * Nunca lanza: es un adorno de una respuesta de lectura. Si algo falla se
+   * devuelven los tres campos en null y `GET current` responde igual.
+   */
+  async getAutoRenewWarningState(
+    storeId: number,
+  ): Promise<AutoRenewWarningState> {
+    const empty: AutoRenewWarningState = {
+      auto_renew_warning_type: null,
+      auto_renew_warning_notification_id: null,
+      auto_renew_last_retry_at: null,
+    };
+
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      return empty;
+    }
+
+    try {
+      const sub = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: storeId },
+        select: { id: true },
+      });
+      if (!sub) {
+        return empty;
+      }
+
+      // ── 1. ¿Hay un cobro automático fallido todavía vivo?
+      //
+      // El `LEFT JOIN` doble cubre el ancla nueva (factura) y la legada (intento
+      // de pago) sin necesitar migrar filas viejas. `COALESCE` prefiere la
+      // factura, que es el ancla canónica desde el defecto 8.
+      // `withoutScope()` porque el wrapper de scope no expone `$queryRaw` (solo
+      // `$queryRawUnsafe`); el filtro de tenant va explícito en el WHERE, que es
+      // lo que exige `vendix-prisma-scopes` para SQL crudo.
+      const failedRows = await this.prisma.withoutScope().$queryRaw<
+        Array<{ created_at: Date; invoice_id: number | null }>
+      >(Prisma.sql`
+        SELECT w.created_at,
+               COALESCE(i_direct.id, i_pay.id) AS invoice_id
+        FROM billing_warning_logs w
+        LEFT JOIN subscription_invoices i_direct ON i_direct.id = w.source_event_id
+        LEFT JOIN subscription_payments p ON p.id = w.source_event_id
+        LEFT JOIN subscription_invoices i_pay ON i_pay.id = p.invoice_id
+        WHERE w.store_id = ${storeId}
+          AND w.type = 'renewal_failed'
+          AND COALESCE(i_direct.store_subscription_id, i_pay.store_subscription_id) = ${sub.id}
+          AND COALESCE(i_direct.state, i_pay.state) NOT IN ('paid', 'void', 'refunded', 'refunded_chargeback')
+        ORDER BY w.created_at DESC
+        LIMIT 1
+      `);
+      const failed = failedRows?.[0];
+
+      if (failed) {
+        // `auto_renew_last_retry_at` = último intento de cobro contra esa factura.
+        // Es el dato que el panel muestra como "último intento", no la fecha del
+        // aviso: el aviso se emite una vez por ciclo (defecto 8) y los intentos
+        // siguen ocurriendo después.
+        let lastRetryAt: Date = failed.created_at;
+        if (failed.invoice_id) {
+          const lastAttempt = await this.prisma.subscription_payments.findFirst({
+            where: { invoice_id: failed.invoice_id },
+            orderBy: { id: 'desc' },
+            select: { created_at: true, updated_at: true },
+          });
+          const candidate =
+            lastAttempt?.updated_at ?? lastAttempt?.created_at ?? null;
+          if (candidate && candidate.getTime() > lastRetryAt.getTime()) {
+            lastRetryAt = candidate;
+          }
+        }
+
+        return {
+          auto_renew_warning_type: 'auto_renew_charge_failed',
+          auto_renew_warning_notification_id: await this.findWarningNotificationId(
+            storeId,
+            'auto_renew_charge_failed',
+          ),
+          auto_renew_last_retry_at: lastRetryAt.toISOString(),
+        };
+      }
+
+      // ── 2. ¿El autopago está pausado por falta de tarjeta?
+      const pausedRows = await this.prisma.withoutScope().$queryRaw<
+        Array<{ created_at: Date }>
+      >(Prisma.sql`
+        SELECT created_at FROM subscription_events
+        WHERE store_subscription_id = ${sub.id}
+          AND type = 'auto_renew_disabled_no_credential'
+          AND payload->>'resolved_at' IS NULL
+        ORDER BY id DESC
+        LIMIT 1
+      `);
+      const paused = pausedRows?.[0];
+
+      if (paused) {
+        return {
+          auto_renew_warning_type: 'auto_renew_disabled_no_credential',
+          auto_renew_warning_notification_id: await this.findWarningNotificationId(
+            storeId,
+            'auto_renew_disabled_no_credential',
+          ),
+          // No hubo reintento: el instante relevante es cuándo quedó pausado.
+          auto_renew_last_retry_at: paused.created_at
+            ? new Date(paused.created_at).toISOString()
+            : null,
+        };
+      }
+
+      return empty;
+    } catch (err: any) {
+      this.logger.warn(
+        `AUTO_RENEW_WARNING_DERIVE_FAILED store=${storeId}: ${err?.message ?? err}`,
+      );
+      return empty;
+    }
+  }
+
+  /**
+   * Id de la campana que corresponde al aviso, o null.
+   *
+   * El panel la usa para enlazar el aviso con la notificación que el comerciante
+   * ya tiene en la bandeja. Null es un resultado válido: la campana es
+   * best-effort (el listener la traga si falla) y el aviso NO depende de ella.
+   */
+  private async findWarningNotificationId(
+    storeId: number,
+    type: 'auto_renew_charge_failed' | 'auto_renew_disabled_no_credential',
+  ): Promise<number | null> {
+    try {
+      const notification = await this.prisma.notifications.findFirst({
+        where: { store_id: storeId, type },
+        orderBy: { id: 'desc' },
+        select: { id: true },
+      });
+      return notification?.id ?? null;
+    } catch (err: any) {
+      this.logger.warn(
+        `AUTO_RENEW_WARNING_NOTIFICATION_LOOKUP_FAILED store=${storeId} type=${type}: ${err?.message ?? err}`,
+      );
+      return null;
+    }
   }
 
   private computeDunningDeadlines(

@@ -6,6 +6,10 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { InvoiceLineItem, InvoiceSplitBreakdown } from '../types/billing.types';
+import {
+  SUBSCRIPTION_DOWNGRADE_CREDIT_LABEL,
+  resolveSubscriptionDocumentDiscount,
+} from '../types/subscription-invoice-fiscal.contract';
 
 /**
  * S3.1 — Generates a customer-facing PDF for SaaS subscription invoices.
@@ -84,9 +88,16 @@ export class SubscriptionInvoicePdfService {
     const fiscalData = ((organization?.organization_settings as any)?.settings
       ?.fiscal_data ?? null) as Record<string, unknown> | null;
 
-    const lineItems: InvoiceLineItem[] = Array.isArray(invoice.line_items)
-      ? (invoice.line_items as unknown as InvoiceLineItem[])
-      : [];
+    // Solo líneas de importe positivo, la misma regla que aplica el emisor DIAN
+    // al armar el XML: el crédito por downgrade es un descuento de documento y
+    // ya se imprime como su propia fila en el recuadro de totales. Las facturas
+    // anteriores a ese contrato guardan además la línea negativa, y pintarla
+    // aquí la contaría dos veces a la vista del cliente.
+    const lineItems: InvoiceLineItem[] = (
+      Array.isArray(invoice.line_items)
+        ? (invoice.line_items as unknown as InvoiceLineItem[])
+        : []
+    ).filter((item) => Number(item.total) > 0);
 
     const splitRaw = invoice.split_breakdown;
     const splitBreakdown: InvoiceSplitBreakdown | null =
@@ -117,6 +128,13 @@ export class SubscriptionInvoicePdfService {
       },
       planName: invoice.store_subscription.plan?.name ?? null,
       lineItems,
+      // Se lee por el resolvedor del contrato fiscal, NO indexando el JSON: es la
+      // MISMA lectura que hace el emisor fiscal para el `cac:AllowanceCharge` del
+      // XML, así que el papel y el documento electrónico no pueden descontar
+      // cifras distintas.
+      documentDiscount: new Prisma.Decimal(
+        resolveSubscriptionDocumentDiscount(invoice.metadata),
+      ),
       splitBreakdown,
       payments: invoice.payments,
       currency,
@@ -156,6 +174,16 @@ export class SubscriptionInvoicePdfService {
     };
     planName: string | null;
     lineItems: InvoiceLineItem[];
+    /**
+     * Descuento a nivel de DOCUMENTO (crédito por cambio a plan inferior).
+     *
+     * Antes ese crédito era una LÍNEA NEGATIVA, así que la tabla de líneas
+     * cuadraba sola contra `subtotal`. Ahora es un descuento de documento —la
+     * forma que la DIAN acepta— y las líneas suman el BRUTO, de modo que el
+     * recuadro de totales tiene que restarlo o el PDF mostraría filas que suman
+     * más que su propio subtotal.
+     */
+    documentDiscount: Prisma.Decimal;
     splitBreakdown: InvoiceSplitBreakdown | null;
     payments: Array<{
       id: number;
@@ -296,6 +324,7 @@ export class SubscriptionInvoicePdfService {
         doc.moveDown(0.6);
         this.renderTotalsBox(doc, {
           subtotal: ctx.invoice.subtotal,
+          document_discount: ctx.documentDiscount,
           tax: ctx.invoice.tax_amount,
           total: ctx.invoice.total,
           amount_paid: ctx.invoice.amount_paid,
@@ -506,7 +535,10 @@ export class SubscriptionInvoicePdfService {
   private renderTotalsBox(
     doc: PDFKit.PDFDocument,
     money: {
+      /** `subscription_invoices.subtotal` — YA neto del descuento de documento. */
       subtotal: Prisma.Decimal;
+      /** Crédito por cambio a plan inferior; `0` en la gran mayoría de facturas. */
+      document_discount: Prisma.Decimal;
       tax: Prisma.Decimal;
       total: Prisma.Decimal;
       amount_paid: Prisma.Decimal;
@@ -540,7 +572,34 @@ export class SubscriptionInvoicePdfService {
       doc.y = y + lineHeight;
     };
 
-    drawRow('Subtotal', this.formatMoney(money.subtotal, money.currency));
+    // Sin descuento de documento (el caso normal) el recuadro sale IDÉNTICO al
+    // de siempre: una sola fila «Subtotal» con el valor persistido.
+    //
+    // Con descuento hay que publicar las dos cifras o el papel se contradice: las
+    // líneas ya no traen el crédito como fila negativa, así que suman el BRUTO
+    // mientras `subtotal` viene neto. El bruto se DERIVA de `subtotal + descuento`
+    // y no de sumar las filas, para que la resta cierre exactamente sobre la misma
+    // cifra que la base de datos.
+    const documentDiscount = this.toDecimal(money.document_discount);
+    if (documentDiscount.gt(0)) {
+      drawRow(
+        'Subtotal',
+        this.formatMoney(
+          this.toDecimal(money.subtotal).plus(documentDiscount),
+          money.currency,
+        ),
+      );
+      // Etiqueta CORTA a propósito: la columna del rótulo mide ~130 pt y
+      // `drawRow` avanza `doc.y` una altura fija, así que un texto que envuelva a
+      // tres renglones se solaparía con la fila siguiente. La razón completa
+      // (`SUBSCRIPTION_DOWNGRADE_CREDIT_REASON`) va al XML, que no tiene ancho.
+      drawRow(
+        SUBSCRIPTION_DOWNGRADE_CREDIT_LABEL,
+        `- ${this.formatMoney(documentDiscount, money.currency)}`,
+      );
+    } else {
+      drawRow('Subtotal', this.formatMoney(money.subtotal, money.currency));
+    }
     drawRow('Impuestos', this.formatMoney(money.tax, money.currency));
 
     // Separator

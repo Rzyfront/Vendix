@@ -73,6 +73,20 @@ export interface ProviderInvoiceData {
   issue_date: string;
   issue_time?: string;
   due_date?: string;
+  /**
+   * Período REALMENTE facturado → `cac:InvoicePeriod`.
+   *
+   * Antes no existía, y el builder derivaba el grupo de `issue_date` →
+   * `due_date`: para una suscripción eso publica «emisión → vencimiento (+7 d)»,
+   * que NO es el período del servicio. En una factura de ciclo el período es el
+   * dato que dice qué se prestó; derivarlo del vencimiento declara un mes de
+   * servicio de siete días.
+   *
+   * OPCIONAL a propósito: ausente ⇒ el builder conserva EXACTAMENTE la
+   * derivación histórica desde `due_date`. El riel de tenant usa el mismo builder
+   * y no debe cambiar de comportamiento por este campo.
+   */
+  invoice_period?: ProviderInvoicePeriod;
   customer_name?: string;
   customer_tax_id?: string;
   customer_address?: any;
@@ -167,6 +181,20 @@ export interface ProviderInvoiceData {
    * antes de la columna se transmiten exactamente igual que antes.
    */
   note_concept_code?: string;
+}
+
+/**
+ * Extremos del período facturado, para `cac:InvoicePeriod`.
+ *
+ * Fechas `YYYY-MM-DD` YA resueltas en la zona del obligado a facturar, igual que
+ * `issue_date` y `due_date`: el builder las escribe tal cual, sin reinterpretar
+ * zonas. Pasar un instante UTC crudo es cómo se llega a un período corrido un día.
+ */
+export interface ProviderInvoicePeriod {
+  /** `cbc:StartDate` — primer día del período facturado. */
+  start_date: string;
+  /** `cbc:EndDate` — último día del período facturado. */
+  end_date: string;
 }
 
 export interface ProviderInvoiceItem {

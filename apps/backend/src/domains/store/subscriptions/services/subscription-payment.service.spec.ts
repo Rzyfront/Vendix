@@ -791,13 +791,41 @@ describe('SubscriptionPaymentService', () => {
      * that wire the REAL `SubscriptionStateService` (see `useRealStateService`)
      * to prove the store actually ends up operational.
      */
-    function makeSeamTxMock(initialState: string) {
+    function makeSeamTxMock(
+      initialState: string,
+      opts: { eligibleCard?: boolean } = {},
+    ) {
       const row: any = {
         ...pendingSubFixture({ state: initialState }),
         current_period_end: null,
         scheduled_cancel_at: null,
+        auto_renew: true,
+        metadata: null,
       };
       const events: any[] = [];
+
+      // El predicado de elegibilidad (renewal-eligibility.contract.ts) lee los
+      // medios de la suscripción: la ventana de reactivación ya no impone
+      // `auto_renew: true`. Por defecto hay tarjeta apta para que estas pruebas
+      // sigan midiendo la ruta de estados; la variante sin tarjeta es su propio
+      // caso.
+      const paymentMethods =
+        opts.eligibleCard === false
+          ? []
+          : [
+              {
+                id: 900,
+                type: 'card',
+                state: 'active',
+                provider_token: 'tok_live_x',
+                provider_payment_source_id: 'ps_live_x',
+                cof_registered_at: new Date('2026-01-01T00:00:00.000Z'),
+                expiry_month: '12',
+                expiry_year: '2999',
+                consecutive_failures: 0,
+                is_default: true,
+              },
+            ];
 
       const tx: any = {
         $queryRaw: jest.fn(async () => [
@@ -828,6 +856,9 @@ describe('SubscriptionPaymentService', () => {
         subscription_plans: {
           findUniqueOrThrow: jest.fn(async () => targetPlanFixture()),
           findUnique: jest.fn(async () => ({ billing_cycle: 'monthly' })),
+        },
+        subscription_payment_methods: {
+          findMany: jest.fn(async () => paymentMethods),
         },
       };
 
@@ -1073,10 +1104,38 @@ describe('SubscriptionPaymentService', () => {
       // And the seam owns the window/cleanup it used to duplicate here.
       expect(seam.row.current_period_end).toBeInstanceOf(Date);
       expect(seam.row.scheduled_cancel_at).toBeNull();
+      // `true` porque la suscripción TIENE una tarjeta apta en el doble. La
+      // aserción antes pasaba sin ningún medio de pago: la ventana imponía `true`
+      // y pisaba el apagado del gate escrito antes en la misma transacción.
       expect(seam.row.auto_renew).toBe(true);
       expect(seam.row.cancel_at).toBeNull();
       expect(seam.row.suspend_at).toBeNull();
       expect(seam.row.lock_reason).toBeNull();
+    });
+
+    it('REGRESSION: reactivation does NOT re-arm autopay when no card can renew', async () => {
+      const seam = makeSeamTxMock('cancelled', { eligibleCard: false });
+      // El gate corrió antes en esta misma transacción y dejó el autopago en
+      // pausa. Ese apagado es lo que la ventana de reactivación borraba.
+      seam.row.auto_renew = false;
+      useRealStateService();
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm({ change_kind: 'resubscribe' }),
+        seam.tx,
+      );
+
+      expect(seam.row.state).toBe('active');
+      // La tienda queda operativa (pagó) pero el autopago NO se enciende solo.
+      expect(seam.row.auto_renew).toBe(false);
+      expect(seam.row.metadata).toMatchObject({
+        auto_renew_intent: {
+          desired: true,
+          paused_by: 'reactivation_window',
+          rearmed_at: null,
+        },
+      });
     });
 
     it('confirmed payment on a `pending_payment` store still promotes in one hop', async () => {
@@ -1377,15 +1436,21 @@ describe('SubscriptionPaymentService', () => {
   // ── Billing-warning gate: disableAutoRenewForMissingCredential ───────────
   //
   // Called inside handleChargeSuccess.executeWrites immediately after the
-  // PM auto-register attempt. Asserts:
-  //   * A recurring PM on file → no-op (returns null, no audit row, no flip).
-  //   * No recurring PM → flips auto_renew off, stamps subscription_events,
-  //     returns the new event id (the post-commit emit feeds it to the
-  //     billing-warning listener).
+  // PM auto-register attempt. Ahora delega en
+  // `pauseAutoRenewForMissingCredentialInTx`, que consulta EL predicado
+  // (`renewal-eligibility.contract.ts`) en vez de reimplementar la condición:
+  //   * Medio APTO en la suscripción → no-op (null, sin flip, sin auditoría).
+  //   * Sin medio apto → apaga `auto_renew`, RECUERDA la intención en
+  //     `metadata.auto_renew_intent` y estampa la fila de auditoría, devolviendo
+  //     su id para el emit post-commit.
+  //   * Una fila de auditoría ya abierta NO genera otra: el aviso es uno por
+  //     ciclo de pausa, no uno por intento de cobro.
   describe('disableAutoRenewForMissingCredential', () => {
-    let pmFindFirst: jest.Mock;
-    let subUpdateMany: jest.Mock;
+    let pmFindMany: jest.Mock;
+    let subFindFirst: jest.Mock;
+    let subUpdate: jest.Mock;
     let eventsCreate: jest.Mock;
+    let queryRaw: jest.Mock;
     let txMock: any;
 
     const invoice = {
@@ -1400,18 +1465,33 @@ describe('SubscriptionPaymentService', () => {
       split_breakdown: null,
     };
 
+    const eligiblePm = {
+      id: 555,
+      type: 'card',
+      state: 'active',
+      provider_token: 'tok_live_x',
+      provider_payment_source_id: 'ps_live_x',
+      cof_registered_at: new Date('2026-01-01T00:00:00.000Z'),
+      expiry_month: '12',
+      expiry_year: '2999',
+      consecutive_failures: 0,
+      is_default: true,
+    };
+
     beforeEach(() => {
-      pmFindFirst = jest.fn();
-      subUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      pmFindMany = jest.fn().mockResolvedValue([]);
+      subFindFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 200, auto_renew: true, metadata: null });
+      subUpdate = jest.fn().mockResolvedValue({ id: 200 });
       eventsCreate = jest.fn().mockResolvedValue({ id: 9991 });
+      // Sin fila de auditoría abierta salvo que la prueba diga lo contrario.
+      queryRaw = jest.fn().mockResolvedValue([]);
       txMock = {
-        subscription_payment_methods: {
-          findFirst: pmFindFirst,
-        },
-        store_subscriptions: {
-          updateMany: subUpdateMany,
-        },
+        subscription_payment_methods: { findMany: pmFindMany },
+        store_subscriptions: { findFirst: subFindFirst, update: subUpdate },
         subscription_events: { create: eventsCreate },
+        $queryRaw: queryRaw,
       };
     });
 
@@ -1425,32 +1505,44 @@ describe('SubscriptionPaymentService', () => {
       );
     }
 
-    it('returns null when a recurring PM is already on file', async () => {
-      pmFindFirst.mockResolvedValue({ id: 555 });
+    it('returns null when a renewal-eligible PM is already on file', async () => {
+      pmFindMany.mockResolvedValue([eligiblePm]);
 
       const result = await invoke('webhook');
 
       expect(result).toBeNull();
-      expect(subUpdateMany).not.toHaveBeenCalled();
+      expect(subUpdate).not.toHaveBeenCalled();
       expect(eventsCreate).not.toHaveBeenCalled();
     });
 
-    it('flips auto_renew off and stamps an audit row when no PM exists', async () => {
-      pmFindFirst.mockResolvedValue(null);
+    it('pauses even when a NON-card PM exists (Nequi/PSE cannot renew)', async () => {
+      // Éste es el defecto 3 en una sola aserción: la implementación anterior del
+      // cobrador aceptaba cualquier tipo y el gate solo miraba la credencial.
+      pmFindMany.mockResolvedValue([{ ...eligiblePm, type: 'nequi' }]);
 
+      const result = await invoke('webhook');
+
+      expect(subUpdate).toHaveBeenCalledTimes(1);
+      expect(result).toBe(9991);
+    });
+
+    it('flips auto_renew off, remembers the intent and stamps an audit row', async () => {
       const result = await invoke('checkout_commit');
 
-      // auto_renew flipped off, scoped to this store only.
-      expect(subUpdateMany).toHaveBeenCalledTimes(1);
-      expect(subUpdateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            store_id: 10,
-            auto_renew: true,
-          }),
-          data: expect.objectContaining({ auto_renew: false }),
-        }),
-      );
+      expect(subUpdate).toHaveBeenCalledTimes(1);
+      const updateArg = subUpdate.mock.calls[0][0];
+      expect(updateArg).toMatchObject({ where: { id: 200 } });
+      expect(updateArg.data.auto_renew).toBe(false);
+      // La intención viaja en el JSON que YA existe — sin columnas nuevas — y es
+      // lo que autoriza el rearme automático al guardar una tarjeta.
+      expect(updateArg.data.metadata).toMatchObject({
+        auto_renew_intent: {
+          desired: true,
+          reason: 'no_card_credential',
+          paused_by: 'checkout_commit',
+          rearmed_at: null,
+        },
+      });
 
       // Audit row inserted.
       expect(eventsCreate).toHaveBeenCalledTimes(1);
@@ -1473,8 +1565,36 @@ describe('SubscriptionPaymentService', () => {
       expect(result).toBe(9991);
     });
 
+    it('does NOT stamp a second audit row while one is still unresolved', async () => {
+      // Fila abierta encontrada por el SQL de dedupe.
+      queryRaw.mockResolvedValue([{ id: 4242 }]);
+
+      const result = await invoke('webhook');
+
+      // El apagado se re-asegura (idempotente)…
+      expect(subUpdate).toHaveBeenCalledTimes(1);
+      // …pero NO hay evento nuevo, así que el listener no vuelve a mandar campana
+      // ni correo. Sin esta guarda el comerciante recibía un aviso por intento.
+      expect(eventsCreate).not.toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+
+    it('does not overwrite an auto_renew the merchant himself turned off', async () => {
+      subFindFirst.mockResolvedValue({
+        id: 200,
+        auto_renew: false,
+        metadata: null,
+      });
+
+      await invoke('webhook');
+
+      // No inventamos una intención que el cliente no expresó.
+      expect(subUpdate).not.toHaveBeenCalled();
+      // El aviso sí se estampa: sigue sin poder renovar.
+      expect(eventsCreate).toHaveBeenCalledTimes(1);
+    });
+
     it('uses "webhook" as triggered_by_job when called from the webhook path', async () => {
-      pmFindFirst.mockResolvedValue(null);
       eventsCreate.mockResolvedValue({ id: 9992 });
 
       await invoke('webhook');

@@ -151,6 +151,11 @@ export class WompiCardWidgetComponent {
         // Reset on close so the next open runs the flow again.
         this.hasOpened = false;
         this.loadError.set(false);
+        // Y suelta la config: su `reference` es de un solo uso
+        // (`vendix_saas_tokenize_{storeId}_{Date.now()}`). Reciclarla en una
+        // segunda apertura reabre el widget con una referencia ya consumida, así
+        // que cada apertura pide una nueva a `payment-methods/widget-config`.
+        this.widgetConfig = null;
         return;
       }
       if (this.hasOpened) return;
@@ -276,7 +281,11 @@ export class WompiCardWidgetComponent {
             card_holder: extra.card_holder ?? '',
           });
 
-          this.toastService.success('Tarjeta tokenizada exitosamente');
+          // Tokenizar NO es habilitar: el consumidor todavía tiene que
+          // registrar el método contra el backend. Anunciar "exitosamente" acá
+          // dejaba un toast de éxito seguido de uno de error cuando el POST
+          // fallaba. El éxito real lo canta quien persiste.
+          this.toastService.info('Tarjeta validada. Habilitándola…');
           this.onClose();
           return;
         }

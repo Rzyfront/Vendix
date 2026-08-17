@@ -127,6 +127,21 @@ export class AddressFormFieldsComponent {
    */
   readonly requirePhone = input<boolean>(false);
   /**
+   * Opt-out: when false, the phone field is not rendered at all. Default true
+   * keeps the historical behavior for every existing consumer.
+   *
+   * Exists because not every address destination has a phone column: the
+   * subscription billing profile persists through `BillingAddressDto`, which has
+   * none, so a rendered phone field would silently discard whatever the client
+   * types into it. Hiding it is the honest option.
+   *
+   * Hiding never blocks the form: `phone_number` only carries a pattern
+   * validator unless {@link requirePhone} is set, and an empty value satisfies
+   * it. Do not combine `showPhone: false` with `requirePhone: true` — that would
+   * demand a value through a field nobody can see.
+   */
+  readonly showPhone = input<boolean>(true);
+  /**
    * Opt-in: when true, the component renders inline error feedback for the
    * required fields (and phone when {@link requirePhone} is set) and marks the
    * form as touched. Default false → no visual change for existing consumers.

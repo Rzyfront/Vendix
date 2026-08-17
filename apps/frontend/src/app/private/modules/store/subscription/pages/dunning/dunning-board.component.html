@@ -107,7 +107,8 @@
     </app-card>
   </div>
 
-  <!-- S2.2 — Payment method recovery CTA (during grace_soft/grace_hard with invalid PM) -->
+  <!-- S2.2 — Payment method recovery CTA (during grace_soft/grace_hard with invalid PM).
+       El botón NAVEGA a la vista de pago del plan; no ejecuta ningún cobro. -->
   @if (needsPaymentMethodUpdate()) {
     <app-card customClasses="border-l-4 border-l-amber-500 bg-amber-50/40">
       <div
@@ -126,8 +127,12 @@
               Tu método de pago no es válido
             </p>
             <p class="text-xs text-text-secondary mt-1">
-              Actualiza tu método de pago para reintentar el cobro y recuperar el
-              acceso completo.
+              Te llevaremos a la vista de pago de tu plan para registrar un
+              método válido y completar el pago pendiente. No se hará ningún
+              cargo hasta que lo confirmes ahí.
+            </p>
+            <p class="text-xs text-text-secondary mt-1">
+              Recuerda: la renovación automática solo funciona con tarjeta.
             </p>
           </div>
         </div>
@@ -137,7 +142,7 @@
           (clicked)="onUpdatePaymentMethod()"
         >
           <span class="flex items-center gap-2">
-            <app-icon slot="icon" name="refresh-ccw" [size]="18"></app-icon>
+            <app-icon slot="icon" name="credit-card" [size]="18"></app-icon>
             Actualizar método de pago
           </span>
         </app-button>
@@ -157,7 +162,9 @@
           Regulariza tu pago para recuperar el acceso completo
         </p>
         <p class="text-xs text-text-secondary mt-1">
-          Te llevaremos al checkout para renovar tu plan actual.
+          Te llevaremos a la vista de pago de tu plan actual. La renovación
+          automática solo funciona con tarjeta: si pagas por otro medio deberás
+          pagar cada período manualmente.
         </p>
       </div>
       <app-button

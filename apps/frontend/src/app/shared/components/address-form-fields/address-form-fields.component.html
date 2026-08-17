@@ -136,21 +136,23 @@
       ></app-input>
     </div>
 
-    <div class="field-block">
-      <app-input
-        label="Teléfono"
-        formControlName="phone_number"
-        type="tel"
-        placeholder="Teléfono de contacto"
-        [control]="form.get('phone_number')!"
-        [required]="requirePhone()"
-      ></app-input>
-      @if (showErrors() && requirePhone() && phoneInvalid()) {
-        <p class="field-error" role="alert">
-          <app-icon name="alert-triangle" [size]="14"></app-icon>
-          <span>El teléfono es obligatorio para el envío.</span>
-        </p>
-      }
-    </div>
+    @if (showPhone()) {
+      <div class="field-block">
+        <app-input
+          label="Teléfono"
+          formControlName="phone_number"
+          type="tel"
+          placeholder="Teléfono de contacto"
+          [control]="form.get('phone_number')!"
+          [required]="requirePhone()"
+        ></app-input>
+        @if (showErrors() && requirePhone() && phoneInvalid()) {
+          <p class="field-error" role="alert">
+            <app-icon name="alert-triangle" [size]="14"></app-icon>
+            <span>El teléfono es obligatorio para el envío.</span>
+          </p>
+        }
+      </div>
+    }
   </form>
 </div>

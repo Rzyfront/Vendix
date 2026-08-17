@@ -529,7 +529,12 @@ export class OnboardingWizardService {
             city: setupOrgDto.city,
             state_province: setupOrgDto.state_province,
             postal_code: setupOrgDto.postal_code,
-            country_code: setupOrgDto.country_code || 'MX',
+            // Colombia por defecto: esta es la dirección FISCAL de la
+            // organización y de acá sale el país que declara la factura
+            // electrónica. El `'MX'` heredado dejaba a una empresa colombiana
+            // que no enviara el país con un domicilio en México, y la DIAN
+            // exige el literal «CO» en el emisor (FAJ16).
+            country_code: setupOrgDto.country_code || 'CO',
             is_primary: true,
             updated_at: new Date(),
           },
@@ -543,7 +548,10 @@ export class OnboardingWizardService {
             city: setupOrgDto.city,
             state_province: setupOrgDto.state_province,
             postal_code: setupOrgDto.postal_code,
-            country_code: setupOrgDto.country_code || 'MX',
+            // Ver la nota del `update` de arriba: la dirección `billing` de la
+            // organización es la que viaja a la factura electrónica, así que su
+            // país por defecto es Colombia, no México.
+            country_code: setupOrgDto.country_code || 'CO',
             type: 'billing',
             is_primary: true,
           },
@@ -882,7 +890,11 @@ export class OnboardingWizardService {
                     city: setupStoreDto.city ?? '',
                     state_province: setupStoreDto.state_province ?? null,
                     postal_code: setupStoreDto.postal_code ?? null,
-                    country_code: setupStoreDto.country_code || 'MX',
+                    // Esta es la dirección del EMISOR de la factura electrónica.
+                    // La DIAN exige el literal `CO` en el domicilio fiscal del
+                    // emisor (FAJ16 lanza), así que el `'MX'` heredado dejaba a
+                    // una tienda colombiana sin poder emitir.
+                    country_code: setupStoreDto.country_code || 'CO',
                     type: 'store_physical',
                     is_primary: true,
                   }

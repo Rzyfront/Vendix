@@ -43,6 +43,11 @@ import {
   CheckoutPreviewResult,
   CouponPreviewInfo,
 } from '../../../store/subscriptions/types/billing.types';
+import {
+  buildSubscriptionItemCode,
+  buildSubscriptionLineDescription,
+  dianUnitCodeForBillingCycle,
+} from '../../../store/subscriptions/types/subscription-invoice-fiscal.contract';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -384,10 +389,20 @@ export class OrgSubscriptionsController {
           period_end: periodEnd.toISOString(),
           line_items: [
             {
-              description: `Plan ${targetPlan.code} (${targetPlan.billing_cycle})`,
+              // `issueInvoice` persiste este `line_items` TAL CUAL cuando recibe
+              // el preview, así que la forma fiscal de la línea se decide acá.
+              description: buildSubscriptionLineDescription({
+                planName: targetPlan.name,
+                billingCycle: targetPlan.billing_cycle,
+                periodStart: now,
+                periodEnd,
+              }),
               quantity: 1,
               unit_price: targetPricing.effective_price.toFixed(2),
               total: targetPricing.effective_price.toFixed(2),
+              item_code: buildSubscriptionItemCode(targetPlan.code),
+              unit_code: dianUnitCodeForBillingCycle(targetPlan.billing_cycle),
+              vat_excluded: true,
               meta: {
                 plan_id: targetPlan.id,
                 plan_code: targetPlan.code,
@@ -402,6 +417,7 @@ export class OrgSubscriptionsController {
             margin_pct_used: targetPricing.margin_pct.toFixed(2),
             partner_org_id: targetPricing.partner_org_id,
           },
+          document_discount: '0.00',
         };
 
         const result: CheckoutPreviewResult = {
@@ -441,10 +457,18 @@ export class OrgSubscriptionsController {
           period_end: periodEnd.toISOString(),
           line_items: [
             {
-              description: `Plan ${targetPlan.code} (${targetPlan.billing_cycle})`,
+              description: buildSubscriptionLineDescription({
+                planName: targetPlan.name,
+                billingCycle: targetPlan.billing_cycle,
+                periodStart: now,
+                periodEnd,
+              }),
               quantity: 1,
               unit_price: targetPricing.effective_price.toFixed(2),
               total: targetPricing.effective_price.toFixed(2),
+              item_code: buildSubscriptionItemCode(targetPlan.code),
+              unit_code: dianUnitCodeForBillingCycle(targetPlan.billing_cycle),
+              vat_excluded: true,
               meta: {
                 plan_id: targetPlan.id,
                 plan_code: targetPlan.code,
@@ -459,6 +483,7 @@ export class OrgSubscriptionsController {
             margin_pct_used: targetPricing.margin_pct.toFixed(2),
             partner_org_id: targetPricing.partner_org_id,
           },
+          document_discount: '0.00',
         };
       } else {
         try {

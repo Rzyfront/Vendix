@@ -20,7 +20,30 @@ import { NotificationsService } from '../../notifications/notifications.service'
 interface NoCredentialEventPayload {
   subscriptionEventId: number;
   storeId: number | undefined;
-  paymentId: number;
+  /**
+   * Intento de pago que originó la pausa. OPCIONAL: el cron de renovación y el
+   * pago manual del administrador pausan sin que exista un intento de cobro
+   * asociado, y ahí el aviso es igual de necesario.
+   */
+  paymentId?: number | null;
+  source?: string;
+}
+
+/**
+ * Payload de `subscription.auto_renew.rearmed`, emitido después del commit por
+ * los DOS caminos que guardan una tarjeta:
+ *   - `SubscriptionPaymentMethodsService.tokenizeAndRegister` (alta explícita).
+ *   - `SubscriptionPaymentService.handleChargeSuccess` (tarjeta con la que se
+ *     pagó una factura por el widget).
+ *
+ * `paymentMethodId` puede venir null desde el cobro (el auto-registro no devuelve
+ * la fila al llamador); el listener lo resuelve para tener un ancla de dedupe
+ * estable.
+ */
+interface AutoRenewRearmedEventPayload {
+  storeId: number | undefined;
+  subscriptionId?: number | null;
+  paymentMethodId?: number | null;
   source?: string;
 }
 
@@ -111,8 +134,8 @@ export class SubscriptionPaymentBillingWarningListener {
         await this.notificationsService.createAndBroadcast(
           storeId,
           'auto_renew_disabled_no_credential',
-          'Tu autopago no se pudo activar',
-          'Tu renovación automática quedó desactivada porque el cargo no incluyó una credencial recurrente. Agrega un método de pago para reactivar la renovación y evitar la interrupción del servicio.',
+          'Tu autopago quedó en pausa',
+          'El autopago solo funciona con tarjeta: el medio con el que pagaste no permite cobros automáticos, así que pausamos la renovación para no cobrarte en silencio. Guarda una tarjeta y la reactivamos al instante.',
           {
             subscriptionEventId,
             route: '/admin/subscription/payment',
@@ -148,6 +171,144 @@ export class SubscriptionPaymentBillingWarningListener {
         `subscription.payment.no_credential handler crashed: ${err?.message ?? err}`,
         err?.stack,
       );
+    }
+  }
+
+  /**
+   * Aviso del OTRO extremo del ciclo: el autopago volvió a quedar armado.
+   *
+   * La decisión de producto del defecto 4 exige avisar en los DOS momentos —
+   * pausa y rearme — en pantalla y por correo. Avisar solo la pausa deja al
+   * comerciante sin saber si su acción sirvió, y la duda lo lleva a pagar dos
+   * veces o a llamar a soporte.
+   *
+   * Deduplicado con el MISMO mecanismo que la pausa: `billing_warning_logs`
+   * (columna `type` es VARCHAR, así que el valor `auto_renew_rearmed` no necesita
+   * migración) anclado al medio de pago que rearmó. Dos caminos que guardan la
+   * misma tarjeta (widget + auto-registro del cobro) colapsan en un aviso.
+   *
+   * La campana reutiliza `notification_type_enum.subscription_reactivated` con
+   * `data.kind = 'auto_renew_rearmed'`: no hay valor propio en el enum y añadirlo
+   * exige migración, que aquí está prohibida. Queda reportado como gap.
+   */
+  @OnEvent('subscription.auto_renew.rearmed')
+  async onAutoRenewRearmed(
+    payload: AutoRenewRearmedEventPayload,
+  ): Promise<void> {
+    try {
+      const rawStoreId = payload?.storeId;
+      if (!Number.isInteger(rawStoreId) || (rawStoreId as number) <= 0) {
+        this.logger.warn(
+          'subscription.auto_renew.rearmed: invalid payload, missing storeId',
+        );
+        return;
+      }
+      const storeId = rawStoreId as number;
+
+      const anchorId = await this.resolveRearmAnchor(storeId, payload);
+      if (anchorId == null) {
+        this.logger.warn(
+          `subscription.auto_renew.rearmed: no anchor resolvable for store=${storeId}; skipping bell+email`,
+        );
+        return;
+      }
+
+      try {
+        await this.prisma.billing_warning_logs.create({
+          data: {
+            store_id: storeId,
+            type: 'auto_renew_rearmed',
+            source_event_id: anchorId,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code !== 'P2002') {
+          throw e;
+        }
+        this.logger.log(
+          `billing_warning_logs dedupe hit for store=${storeId} type=auto_renew_rearmed anchor=${anchorId}; skipping bell+email`,
+        );
+        return;
+      }
+
+      try {
+        await this.notificationsService.createAndBroadcast(
+          storeId,
+          'subscription_reactivated',
+          'Autopago reactivado',
+          'Guardamos tu tarjeta y volvimos a activar la renovación automática. Te cobraremos con ella al final de cada periodo y te avisaremos antes de cada cobro.',
+          {
+            kind: 'auto_renew_rearmed',
+            paymentMethodId: anchorId,
+            route: '/admin/subscription/payment',
+          },
+        );
+      } catch (e: any) {
+        this.logger.warn(
+          `createAndBroadcast failed for store=${storeId} rearm anchor=${anchorId}: ${e?.message ?? e}`,
+        );
+      }
+
+      try {
+        await this.emailQueue.add(
+          'subscription.billing.auto-renew-rearmed.email',
+          {
+            storeId,
+            subscriptionId: payload?.subscriptionId ?? null,
+            paymentMethodId: anchorId,
+          },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: { age: 3600, count: 100 },
+            removeOnFail: { age: 86400 },
+          },
+        );
+      } catch (e: any) {
+        this.logger.warn(
+          `email-notifications enqueue failed for store=${storeId} rearm anchor=${anchorId}: ${e?.message ?? e}`,
+        );
+      }
+
+      this.logger.log(
+        `AUTO_RENEW_REARM_NOTIFIED store=${storeId} anchor=${anchorId} source=${payload?.source ?? 'unknown'}`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `subscription.auto_renew.rearmed handler crashed: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  /**
+   * Ancla de dedupe del rearme: el medio de pago que lo causó.
+   *
+   * El auto-registro del cobro no devuelve la fila creada al llamador, así que
+   * cuando el evento llega sin `paymentMethodId` se resuelve el medio activo más
+   * reciente de la tienda — que es exactamente el que acaba de guardarse.
+   */
+  private async resolveRearmAnchor(
+    storeId: number,
+    payload: AutoRenewRearmedEventPayload,
+  ): Promise<number | null> {
+    const explicit = payload?.paymentMethodId;
+    if (explicit && Number.isInteger(explicit) && explicit > 0) {
+      return explicit;
+    }
+
+    try {
+      const latest = await this.prisma.subscription_payment_methods.findFirst({
+        where: { store_id: storeId, state: 'active' },
+        orderBy: { id: 'desc' },
+        select: { id: true },
+      });
+      return latest?.id ?? null;
+    } catch (e: any) {
+      this.logger.warn(
+        `rearm anchor lookup failed for store=${storeId}: ${e?.message ?? e}`,
+      );
+      return null;
     }
   }
 }

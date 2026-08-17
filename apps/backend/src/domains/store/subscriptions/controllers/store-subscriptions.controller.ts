@@ -226,6 +226,13 @@ export class StoreSubscriptionsController {
 
     const resolved = await this.resolver.resolveSubscription(storeId);
 
+    // DEFECTO 5 — los tres campos `auto_renew_*` que el panel ya leía y que el
+    // backend nunca devolvía. Derivados en lectura desde `subscription_events` +
+    // `billing_warning_logs` + `notifications`: NO hay columnas nuevas y los
+    // nombres son exactamente los que espera `subscription.facade.ts`.
+    const autoRenewWarning =
+      await this.accessService.getAutoRenewWarningState(storeId);
+
     // RNC-39: stores in `no_plan` state have plan_id IS NULL (canonical), so
     // sub.plan naturally resolves to null via the relation. Always expose the
     // live resolver output so Store Admin does not depend on stale snapshots.
@@ -233,6 +240,7 @@ export class StoreSubscriptionsController {
       {
         ...sub,
         resolved_features: resolved.features,
+        ...autoRenewWarning,
       },
       'Subscription retrieved',
     );

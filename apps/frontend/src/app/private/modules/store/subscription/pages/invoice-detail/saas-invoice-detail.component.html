@@ -185,9 +185,19 @@
                     Subtotal
                   </td>
                   <td class="px-5 py-3 text-right text-sm font-medium text-text-primary">
-                    {{ (inv.amount | currency: currency()) ?? '-' }}
+                    {{ (grossAmount() | currency: currency()) ?? '-' }}
                   </td>
                 </tr>
+                @if (documentDiscount() > 0) {
+                  <tr class="bg-muted/30">
+                    <td class="px-5 py-2 text-sm font-medium text-text-secondary" colspan="3">
+                      Crédito aplicado
+                    </td>
+                    <td class="px-5 py-2 text-right text-sm font-medium text-text-primary">
+                      -{{ (documentDiscount() | currency: currency()) ?? '-' }}
+                    </td>
+                  </tr>
+                }
                 <tr class="bg-muted/30">
                   <td class="px-5 py-2 text-sm font-medium text-text-secondary" colspan="3">
                     Impuestos
@@ -248,8 +258,16 @@
             <div class="px-5 py-4 bg-muted/40 space-y-1.5 text-sm">
               <div class="flex justify-between">
                 <span class="text-text-secondary">Subtotal</span>
-                <span class="text-text-primary">{{ (inv.amount | currency: currency()) ?? '-' }}</span>
+                <span class="text-text-primary">{{ (grossAmount() | currency: currency()) ?? '-' }}</span>
               </div>
+              @if (documentDiscount() > 0) {
+                <div class="flex justify-between">
+                  <span class="text-text-secondary">Crédito aplicado</span>
+                  <span class="text-text-primary">
+                    -{{ (documentDiscount() | currency: currency()) ?? '-' }}
+                  </span>
+                </div>
+              }
               <div class="flex justify-between">
                 <span class="text-text-secondary">Impuestos</span>
                 <span class="text-text-primary">{{ (inv.tax | currency: currency()) ?? '-' }}</span>

@@ -36,6 +36,12 @@ describe('SubscriptionStateService', () => {
       subscription_plans: {
         findUnique: jest.fn(),
       },
+      // El predicado de elegibilidad (renewal-eligibility.contract.ts) lee los
+      // medios de pago de la suscripción para decidir si una reactivación puede
+      // encender `auto_renew`. Por defecto: sin medios ⇒ autopago en pausa.
+      subscription_payment_methods: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
       $queryRaw: jest.fn(),
     };
@@ -698,6 +704,24 @@ describe('SubscriptionStateService', () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
 
     /**
+     * Tarjeta que SÍ puede sostener una renovación: activa, tipo `card`, con
+     * credencial recurrente, vigente y por debajo del techo de fallos. Satisface
+     * `isRenewalEligible` de `renewal-eligibility.contract.ts`.
+     */
+    const ELIGIBLE_CARD = {
+      id: 900,
+      type: 'card',
+      state: 'active',
+      provider_token: 'tok_live_x',
+      provider_payment_source_id: 'ps_live_x',
+      cof_registered_at: new Date('2026-01-01T00:00:00.000Z'),
+      expiry_month: '12',
+      expiry_year: '2999',
+      consecutive_failures: 0,
+      is_default: true,
+    };
+
+    /**
      * Primes `$queryRaw` for the seam's lock read + one read per expected hop,
      * plus the exit-guard `findFirst`.
      *
@@ -713,6 +737,8 @@ describe('SubscriptionStateService', () => {
       scheduledCancelAt?: Date | null;
       /** State the exit guard re-reads. Defaults to the last hop. */
       finalState?: string;
+      /** `false` ⇒ la suscripción no tiene ningún medio apto para renovar. */
+      eligibleCard?: boolean;
     }) {
       prismaMock.$queryRaw.mockReset();
 
@@ -745,7 +771,19 @@ describe('SubscriptionStateService', () => {
         state: opts.finalState ?? cursor,
         current_period_end: null,
         scheduled_cancel_at: null,
+        // Leído por `applyReactivationWindow` antes del guard de salida para
+        // resolver `auto_renew` y preservar el resto del `metadata`.
+        auto_renew: true,
+        metadata: null,
       });
+
+      // Elegibilidad de renovación. `auto_renew: true` en una reactivación ya NO
+      // es incondicional: exige un medio apto. Por defecto se prima una tarjeta
+      // apta para que estos casos midan la ventana de facturación y no el
+      // predicado; el caso sin tarjeta tiene su propia prueba.
+      prismaMock.subscription_payment_methods.findMany.mockResolvedValue(
+        opts.eligibleCard === false ? [] : [ELIGIBLE_CARD],
+      );
     }
 
     /** Last `store_subscriptions.update` = the reactivation-window write. */
@@ -921,6 +959,10 @@ describe('SubscriptionStateService', () => {
       // A reactivation voids any scheduled cancellation: no cron may cancel
       // what the customer just paid for.
       expect(data.scheduled_cancel_at).toBeNull();
+      // `auto_renew: true` porque `primeRoute` primó una tarjeta apta. Antes esta
+      // aserción pasaba SIN ningún medio de pago en el mock, que es justo lo que
+      // blindaba el defecto: la ventana de reactivación imponía `true` y pisaba el
+      // apagado que el gate acababa de escribir en la misma transacción.
       expect(data.auto_renew).toBe(true);
       // Stale dunning deadlines must not survive either.
       expect(data.suspend_at).toBeNull();
@@ -928,6 +970,62 @@ describe('SubscriptionStateService', () => {
       // The seam never touches plan ownership (ADR-7).
       expect(data.plan_id).toBeUndefined();
       expect(data.paid_plan_id).toBeUndefined();
+    });
+
+    it('reactivating WITHOUT an eligible card leaves auto_renew off and remembers the intent', async () => {
+      primeRoute({
+        from: 'grace_hard',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 2 * DAY_MS),
+        eligibleCard: false,
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'monthly',
+      });
+
+      await service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' });
+
+      const data = lastUpdateData();
+      // ESTA es la regla nueva: la reactivación no impone el autopago. Pagar con
+      // un medio que no renueva (Nequi/PSE) dejaba la tienda "activa con
+      // autopago" y sin nada con qué cobrar — la renovación fallaba en silencio.
+      expect(data.auto_renew).toBe(false);
+      // La intención del cliente queda recordada en el JSON que YA existe, que es
+      // lo que autoriza el rearme automático al guardar una tarjeta.
+      expect(data.metadata).toMatchObject({
+        auto_renew_intent: {
+          desired: true,
+          reason: 'no_card_credential',
+          paused_by: 'reactivation_window',
+          rearmed_at: null,
+        },
+      });
+      // El resto de la reactivación no cambia: la ventana se recalcula igual.
+      expect(data.scheduled_cancel_at).toBeNull();
+      expect(data.current_period_end).toBeInstanceOf(Date);
+    });
+
+    it('reactivating with an ineligible card (Nequi-like, no card type) also holds autopay off', async () => {
+      primeRoute({
+        from: 'suspended',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 1 * DAY_MS),
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'monthly',
+      });
+      // Medio guardado que NO es tarjeta: Wompi no lo puede cobrar con
+      // `recurrent: true`, así que no sostiene una renovación.
+      prismaMock.subscription_payment_methods.findMany.mockResolvedValue([
+        { ...ELIGIBLE_CARD, type: 'nequi' },
+      ]);
+
+      await service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' });
+
+      const data = lastUpdateData();
+      expect(data.auto_renew).toBe(false);
     });
 
     it('applies the discount on top of an explicit ctx.periodEnd', async () => {

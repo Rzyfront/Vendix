@@ -74,6 +74,13 @@ export class SubscriptionRenewalBillingJob {
           current_period_end: true,
           next_billing_at: true,
           scheduled_cancel_at: true,
+          // Defecto 2: el cobro automático se decide con estas dos columnas + EL
+          // predicado. Antes el cron cobraba por `next_billing_at` y estado, sin
+          // mirar `auto_renew`, y el docstring del gate ("el cron omite esta
+          // tienda hasta que el usuario tokenice una tarjeta") describía un
+          // contrato que no existía en el código.
+          auto_renew: true,
+          metadata: true,
           plan: {
             select: {
               state: true,
@@ -189,6 +196,32 @@ export class SubscriptionRenewalBillingJob {
             `Issued invoice ${invoice.id} for subscription ${sub.id}`,
           );
 
+          // Defecto 2 — COBRAR SOLO SI SE PUEDE COBRAR.
+          //
+          // La factura se emite igual (es la vía del cliente para pagar a mano y
+          // lo que el tablero de mora suma como deuda), pero el cargo automático
+          // exige `auto_renew` encendido Y un medio apto según EL predicado. Sin
+          // eso el cargo terminaba en `WOMPI_CHARGE_PATH path=no_pm`, fallaba, y
+          // ese fallo alimentaba hasta 4 campanas y 4 correos de "renovación
+          // fallida" por ciclo, mintiendo sobre la causa: nunca hubo tarjeta.
+          const chargeable = await this.resolveChargeability(sub);
+
+          if (!chargeable.canCharge) {
+            this.logger.warn(
+              `RENEWAL_CHARGE_SKIPPED sub=${sub.id} store=${sub.store_id} ` +
+                `invoice=${invoice.id} auto_renew=${chargeable.autoRenew} ` +
+                `eligible_pm=${chargeable.hasEligiblePm} reason=${chargeable.reason}`,
+            );
+
+            if (chargeable.reason === 'no_eligible_payment_method') {
+              // Pausa + aviso (campana y correo, deduplicados por el gate) en vez
+              // de cobrar contra el vacío.
+              await this.pauseAutoRenewForRenewalCron(sub, invoice.id);
+            }
+
+            continue;
+          }
+
           // Attempt the immediate first charge inline. If the gateway accepts,
           // we are done. If it rejects (state='failed') or throws, we hand off
           // to the BullMQ retry queue with exponential backoff.
@@ -210,6 +243,84 @@ export class SubscriptionRenewalBillingJob {
       );
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  /**
+   * ¿Se puede cobrar automáticamente esta suscripción?
+   *
+   * Dos condiciones, y ninguna se evalúa aquí a mano:
+   *   1. `auto_renew` encendido — la voluntad del cliente.
+   *   2. Un medio apto según `renewal-eligibility.contract.ts` — la capacidad
+   *      técnica. Se consulta por `SubscriptionPaymentService`, el mismo servicio
+   *      que hará el cargo, para que cron y cobrador no puedan discrepar.
+   *
+   * `auto_renew=false` NO es un error: es la tienda que apagó el autopago (o que
+   * el gate pausó). La factura ya quedó emitida y el cliente puede pagarla a mano;
+   * lo que no se hace es golpear la pasarela sin credencial.
+   */
+  private async resolveChargeability(sub: {
+    id: number;
+    store_id: number;
+    auto_renew: boolean | null;
+  }): Promise<{
+    canCharge: boolean;
+    autoRenew: boolean;
+    hasEligiblePm: boolean;
+    reason: 'ok' | 'auto_renew_off' | 'no_eligible_payment_method';
+  }> {
+    const autoRenew = sub.auto_renew === true;
+    const hasEligiblePm =
+      await this.paymentService.hasRenewalEligiblePaymentMethod(sub.id);
+
+    if (!autoRenew) {
+      return {
+        canCharge: false,
+        autoRenew,
+        hasEligiblePm,
+        reason: 'auto_renew_off',
+      };
+    }
+
+    if (!hasEligiblePm) {
+      return {
+        canCharge: false,
+        autoRenew,
+        hasEligiblePm,
+        reason: 'no_eligible_payment_method',
+      };
+    }
+
+    return { canCharge: true, autoRenew, hasEligiblePm, reason: 'ok' };
+  }
+
+  /**
+   * `auto_renew` encendido sin medio apto: se pausa y se avisa (campana + correo,
+   * deduplicados por el gate) en vez de cobrar contra el vacío.
+   *
+   * Nunca lanza: la renovación de las demás tiendas no se detiene porque un aviso
+   * no se pudo emitir.
+   */
+  private async pauseAutoRenewForRenewalCron(
+    sub: { id: number; store_id: number },
+    invoiceId: number,
+  ): Promise<void> {
+    try {
+      await this.paymentService.pauseAutoRenewForMissingCredential({
+        subscriptionId: sub.id,
+        storeId: sub.store_id,
+        source: 'renewal_cron',
+        triggeredByJob: 'subscription-renewal-billing',
+        auditSource: 'renewal_cron_no_credential',
+        eventKey: `renewal-cron-${sub.id}-${invoiceId}`,
+        payload: { invoice_id: invoiceId },
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `AUTO_RENEW_PAUSE_FAILED sub=${sub.id} store=${sub.store_id} ` +
+          `invoice=${invoiceId}: ${err?.message ?? err}`,
+        err?.stack,
+      );
     }
   }
 
@@ -393,6 +504,18 @@ export class SubscriptionRenewalBillingJob {
    * Enqueue the customer-visible billing warning when the retry budget is
    * exhausted. Wrapped in try/catch — a lost enqueue is logged but never
    * breaks the renewal loop.
+   *
+   * DEFECTO 8 — el ancla del deduplicado es la FACTURA, no el intento.
+   *
+   * `charge()` crea un `subscription_payments` nuevo por intento, así que usar
+   * `payment.id` como `source_event_id` hacía que el UNIQUE
+   * `(store_id, type, source_event_id)` de `billing_warning_logs` no colapsara
+   * nada: hasta 4 campanas y 4 correos por ciclo diciendo lo mismo. La factura es
+   * constante durante todo el ciclo de reintentos, así que el aviso queda uno por
+   * ciclo — estrictamente más estricto, nunca más laxo.
+   *
+   * `paymentId` se sigue enviando (lo usa el cuerpo del correo y la traza), pero
+   * ya no decide la identidad del aviso.
    */
   private async enqueueBillingWarningOnRetryExhausted(
     invoiceId: number,
@@ -405,14 +528,13 @@ export class SubscriptionRenewalBillingJob {
       orderBy: { id: 'desc' },
       select: { id: true },
     });
-    const sourceEventId = payment?.id ?? invoiceId;
 
     try {
       await this.billingWarningQueue.add(
         'billing-warning-renewal-failed',
         {
           storeId,
-          sourceEventId,
+          invoiceId,
           paymentId: payment?.id ?? invoiceId,
           storeSubscriptionId: subscriptionId,
         },

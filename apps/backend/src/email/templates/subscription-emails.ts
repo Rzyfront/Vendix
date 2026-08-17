@@ -180,6 +180,21 @@ export interface AutoRenewChargeFailedData {
 }
 
 /**
+ * `subscription.billing.auto-renew-rearmed.email` payload — el autopago volvió a
+ * quedar armado porque el comerciante guardó una tarjeta cobrable.
+ */
+export interface AutoRenewRearmedData {
+  storeName: string;
+  planName: string;
+  organizationName?: string;
+  paymentUrl?: string;
+  /** Etiqueta legible de la tarjeta, ej. `VISA ****4242`. */
+  cardLabel?: string | null;
+  /** Fecha del próximo cobro, ya formateada para el lector. */
+  nextChargeAt?: string | null;
+}
+
+/**
  * `subscription.archived-plan-ending.email` payload.
  *
  * Bucket-aware exactly like {@link TrialEndingData}: the notifier walks the
@@ -451,32 +466,75 @@ export const SubscriptionEmailTemplates = {
   },
 
   /**
-   * `subscription.billing.no-credential.email` — fired when auto-renew was
-   * disabled because the originating charge arrived without a tokenizable
-   * credential. The customer MUST add a card to reactivate autopay.
+   * `subscription.billing.no-credential.email` — el autopago quedó en pausa
+   * porque el medio con el que se pagó no puede sostener un cobro recurrente.
+   *
+   * La causa se dice EXPLÍCITA y en primera línea: *el autopago solo funciona con
+   * tarjeta*. La versión anterior hablaba de una "credencial recurrente", término
+   * interno que el comerciante no puede accionar — pagó con Nequi o PSE, le
+   * dijeron que faltaba una credencial, y volvió a pagar igual. Nadie le dijo qué
+   * medio sirve.
+   *
+   * También se dice que el rearme es automático al guardar la tarjeta: es la
+   * conducta real del sistema y evita el segundo pago "por si acaso".
    */
   autoRenewDisabledNoCredential(data: AutoRenewDisabledNoCredentialData) {
-    const subject = `Tu autopago no se pudo activar`;
+    const subject = `Tu autopago quedó en pausa — el autopago solo funciona con tarjeta`;
     const paymentUrl =
       data.paymentUrl ||
       `https://<store-slug>.vendix.com/admin/subscription/payment`;
     const body = `
-      <p style="font-size:18px;font-weight:600;margin-top:0;color:#B91C1C;">Tu autopago no se pudo activar</p>
-      <p>Tu renovación automática quedó desactivada porque el cobro no incluyó una credencial recurrente.</p>
-      <p>Para reactivar la renovación automática del plan <strong>${data.planName}</strong> (tienda <strong>${data.storeName}</strong>), agrega un método de pago desde tu panel. Si no lo haces, el servicio se interrumpirá al final del periodo actual.</p>
+      <p style="font-size:18px;font-weight:600;margin-top:0;color:#B91C1C;">Tu autopago quedó en pausa</p>
+      <p><strong>El autopago solo funciona con tarjeta.</strong> El medio con el que pagaste (por ejemplo Nequi, PSE o una transferencia) no permite cobros automáticos, así que pausamos la renovación automática en vez de intentar un cobro que iba a fallar en silencio.</p>
+      <p>Tu pago quedó registrado y tu plan <strong>${data.planName}</strong> (tienda <strong>${data.storeName}</strong>) sigue activo hasta el final del periodo actual. Lo único que quedó en pausa es la renovación automática.</p>
+      <p>Guarda una tarjeta desde tu panel y <strong>reactivamos el autopago al instante</strong>, sin que tengas que hacer nada más. Si prefieres no dejar tarjeta, tendrás que pagar cada renovación a mano antes de que termine el periodo.</p>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${paymentUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Agregar método de pago</a>
+        <a href="${paymentUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Guardar mi tarjeta</a>
       </p>
       ${NO_REFUND_NOTICE_HTML}
     `;
     const text =
       `${subject}\n\n` +
-      `Tu renovación automática quedó desactivada porque el cobro no incluyó una credencial recurrente.\n\n` +
+      `El autopago solo funciona con tarjeta. El medio con el que pagaste (Nequi, PSE o transferencia) no permite cobros automáticos, así que pausamos la renovación automática en vez de intentar un cobro que iba a fallar en silencio.\n\n` +
       `Plan: ${data.planName} — Tienda: ${data.storeName}\n\n` +
-      `Agrega un método de pago para reactivar la renovación automática y evitar la interrupción del servicio.\n\n` +
-      `Agregar método de pago: ${paymentUrl}\n\n` +
+      `Tu pago quedó registrado y el plan sigue activo hasta el final del periodo actual. Guarda una tarjeta y reactivamos el autopago al instante.\n\n` +
+      `Guardar mi tarjeta: ${paymentUrl}\n\n` +
       `${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
-    return { subject, html: wrapHtml('Tu autopago no se pudo activar', body), text };
+    return { subject, html: wrapHtml('Tu autopago quedó en pausa', body), text };
+  },
+
+  /**
+   * `subscription.billing.auto-renew-rearmed.email` — el comerciante guardó una
+   * tarjeta y el autopago volvió a quedar armado.
+   *
+   * Simétrico al correo de pausa: avisar solo la pausa deja al comerciante sin
+   * confirmación de que su acción sirvió, y esa duda termina en un segundo pago o
+   * en un ticket de soporte.
+   */
+  autoRenewRearmed(data: AutoRenewRearmedData) {
+    const subject = `Autopago reactivado — ya renovamos tu plan automáticamente`;
+    const manageUrl =
+      data.paymentUrl ||
+      `https://<store-slug>.vendix.com/admin/subscription/payment`;
+    const cardLabel = data.cardLabel ? ` (${data.cardLabel})` : '';
+    const body = `
+      <p style="font-size:18px;font-weight:600;margin-top:0;color:#2F6F4E;">Tu autopago quedó reactivado</p>
+      <p>Guardamos tu tarjeta${cardLabel} y volvimos a activar la renovación automática del plan <strong>${data.planName}</strong> para la tienda <strong>${data.storeName}</strong>.</p>
+      <p>De aquí en adelante cobramos con esa tarjeta al final de cada periodo${data.nextChargeAt ? `, el próximo <strong>${data.nextChargeAt}</strong>` : ''}. Te avisamos antes de cada cobro y puedes apagar el autopago cuando quieras desde tu panel.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${manageUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Ver mi suscripción</a>
+      </p>
+      ${NO_REFUND_NOTICE_HTML}
+    `;
+    const text =
+      `${subject}\n\n` +
+      `Guardamos tu tarjeta${cardLabel} y volvimos a activar la renovación automática.\n\n` +
+      `Plan: ${data.planName} — Tienda: ${data.storeName}\n` +
+      (data.nextChargeAt ? `Próximo cobro: ${data.nextChargeAt}\n` : '') +
+      `\nPuedes apagar el autopago cuando quieras desde tu panel.\n\n` +
+      `Ver mi suscripción: ${manageUrl}\n\n` +
+      `${NO_REFUND_NOTICE_TEXT}\n\nSoporte: ${SUPPORT_EMAIL}`;
+    return { subject, html: wrapHtml('Autopago reactivado', body), text };
   },
 
   /**

@@ -23,7 +23,11 @@ describe('SubscriptionRenewalBillingJob', () => {
     subscription_payments?: { findFirst: jest.Mock };
   };
   let billing: { issueInvoice: jest.Mock };
-  let payment: { chargeInvoice: jest.Mock };
+  let payment: {
+    chargeInvoice: jest.Mock;
+    hasRenewalEligiblePaymentMethod: jest.Mock;
+    pauseAutoRenewForMissingCredential: jest.Mock;
+  };
   let state: { transition: jest.Mock };
   let retryQueue: { add: jest.Mock };
   let billingWarningQueue: { add: jest.Mock };
@@ -39,6 +43,11 @@ describe('SubscriptionRenewalBillingJob', () => {
     current_period_end: new Date('2026-04-01T00:00:00Z'),
     next_billing_at: new Date('2026-04-01T00:00:00Z'),
     scheduled_cancel_at: null as Date | null,
+    // El cobro automático exige voluntad (`auto_renew`) Y capacidad (un medio
+    // apto según renewal-eligibility.contract.ts). El cron ya no cobra por
+    // `next_billing_at` a secas.
+    auto_renew: true,
+    metadata: null as unknown,
     plan: {
       state: 'active',
       archived_at: null as Date | null,
@@ -63,7 +72,12 @@ describe('SubscriptionRenewalBillingJob', () => {
       },
     };
     billing = { issueInvoice: jest.fn().mockResolvedValue(invoice) };
-    payment = { chargeInvoice: jest.fn() };
+    payment = {
+      chargeInvoice: jest.fn(),
+      // EL predicado, consultado por el mismo servicio que cobra.
+      hasRenewalEligiblePaymentMethod: jest.fn().mockResolvedValue(true),
+      pauseAutoRenewForMissingCredential: jest.fn().mockResolvedValue(1),
+    };
     state = { transition: jest.fn().mockResolvedValue(undefined) };
     retryQueue = { add: jest.fn().mockResolvedValue(undefined) };
     billingWarningQueue = { add: jest.fn().mockResolvedValue(undefined) };
@@ -152,10 +166,14 @@ describe('SubscriptionRenewalBillingJob', () => {
     expect(name).toBe('billing-warning-renewal-failed');
     expect(payload).toMatchObject({
       storeId: subRow.store_id,
-      sourceEventId: 999,
+      // DEFECTO 8: el aviso se ancla a la FACTURA, que es constante durante todo
+      // el ciclo de reintentos. Con `payment.id` (999) como ancla el UNIQUE de
+      // `billing_warning_logs` no colapsaba nada y salían hasta 4 avisos.
+      invoiceId: invoice.id,
       paymentId: 999,
       storeSubscriptionId: subRow.id,
     });
+    expect(payload.sourceEventId).toBeUndefined();
     expect(opts.attempts).toBe(3);
     expect(opts.backoff).toEqual({ type: 'exponential', delay: 5000 });
   });
@@ -198,7 +216,7 @@ describe('SubscriptionRenewalBillingJob', () => {
     expect(billingWarningQueue.add).not.toHaveBeenCalled();
   });
 
-  it('billing warning enqueue: tolerates missing subscription_payments row by falling back to invoiceId', async () => {
+  it('billing warning enqueue: tolerates missing subscription_payments row', async () => {
     (prisma as any).subscription_payments = {
       findFirst: jest.fn().mockResolvedValue(null),
     };
@@ -209,9 +227,54 @@ describe('SubscriptionRenewalBillingJob', () => {
 
     expect(billingWarningQueue.add).toHaveBeenCalledTimes(1);
     const [, payload] = billingWarningQueue.add.mock.calls[0];
-    // Fallback chain: prefer payment.id, fall back to invoice.id.
-    expect(payload.sourceEventId).toBe(invoice.id);
+    // El ancla es la factura siempre, exista o no un intento de pago.
+    expect(payload.invoiceId).toBe(invoice.id);
     expect(payload.paymentId).toBe(invoice.id);
+  });
+
+  // ── Defecto 2: el cron ya no cobra contra el vacío ──────────────────────
+
+  it('auto_renew off: issues the invoice but never charges', async () => {
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      { ...subRow, auto_renew: false },
+    ]);
+
+    await job.handleRenewalBilling();
+
+    // La factura sí se emite: es la vía del cliente para pagar a mano y lo que el
+    // tablero de mora suma como deuda.
+    expect(billing.issueInvoice).toHaveBeenCalledWith(subRow.id);
+    // Pero no se golpea la pasarela ni se abre la escalera de reintentos.
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(retryQueue.add).not.toHaveBeenCalled();
+    // Y no se avisa de nada: el autopago está apagado por decisión, no por falla.
+    expect(payment.pauseAutoRenewForMissingCredential).not.toHaveBeenCalled();
+    expect(billingWarningQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('auto_renew on with NO eligible card: pauses and warns instead of charging', async () => {
+    payment.hasRenewalEligiblePaymentMethod.mockResolvedValue(false);
+
+    await job.handleRenewalBilling();
+
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(payment.pauseAutoRenewForMissingCredential).toHaveBeenCalledTimes(1);
+    const [args] = payment.pauseAutoRenewForMissingCredential.mock.calls[0];
+    expect(args).toMatchObject({
+      subscriptionId: subRow.id,
+      storeId: subRow.store_id,
+      source: 'renewal_cron',
+      triggeredByJob: 'subscription-renewal-billing',
+    });
+  });
+
+  it('pause failure does not break the renewal loop', async () => {
+    payment.hasRenewalEligiblePaymentMethod.mockResolvedValue(false);
+    payment.pauseAutoRenewForMissingCredential.mockRejectedValue(
+      new Error('db down'),
+    );
+
+    await expect(job.handleRenewalBilling()).resolves.toBeUndefined();
   });
 
   it('billing warning enqueue: throws do not break the renewal loop', async () => {

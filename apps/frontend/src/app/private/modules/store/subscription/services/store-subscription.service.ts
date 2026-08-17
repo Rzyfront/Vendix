@@ -43,6 +43,31 @@ export interface BillingProfileAddress {
   postal_code?: string | null;
 }
 
+/**
+ * De qué escalón de la cascada salió la dirección que el backend devuelve:
+ * `fiscal` (una dirección `billing`/`legal` de la organización), `shipping`
+ * (cualquier otra suya) o `store`. Se muestra en pantalla porque un respaldo
+ * silencioso es cómo el checkout terminó pidiendo de nuevo una dirección que ya
+ * estaba guardada.
+ */
+export type BillingAddressSource = 'fiscal' | 'shipping' | 'store';
+
+/**
+ * Dirección tal como el backend la DEVUELVE. Distinta del tipo de escritura:
+ * una organización a medio configurar tiene fila de dirección sin municipio
+ * DANE y sin departamento, así que acá esos campos son opcionales. Exigirlos en
+ * la lectura sería describir un contrato que el servidor no cumple.
+ */
+export interface BillingProfileAddressRead {
+  address_line1: string | null;
+  address_line2?: string | null;
+  city: string | null;
+  state_province?: string | null;
+  municipality_code?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+}
+
 export interface BillingProfile {
   legal_name: string;
   tax_id: string;
@@ -69,9 +94,11 @@ export interface BillingProfileStatus {
    */
   locked: boolean;
   profile:
-    | (Partial<BillingProfile> & {
+    | (Partial<Omit<BillingProfile, 'address'>> & {
         verification_digit?: string | null;
-        address: BillingProfileAddress | null;
+        address: BillingProfileAddressRead | null;
+        /** Escalón del que salió `address`. `null` cuando no hay dirección. */
+        address_source?: BillingAddressSource | null;
       })
     | null;
 }

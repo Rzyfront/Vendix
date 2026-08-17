@@ -30,24 +30,55 @@ export type SubscriptionUiState =
   | { kind: 'suspended' }
   | { kind: 'blocked' }
   | { kind: 'no_plan' }
-  // Billing-warning detection — surfaced ONLY when the subscription is
-  // otherwise `active` (otherwise the existing terminal/lifecycle kind wins).
-  // Both surface a warning banner that links to /admin/subscription/payment
-  // and references the originating notification id so the bell can be
-  // marked-read alongside the banner.
+  // Billing-warning detection — as the PRIMARY kind these surface only when the
+  // subscription is otherwise `active`, because a terminal/lifecycle kind is
+  // more urgent and owns the CTA. That is NOT the same as hiding the warning in
+  // those states: {@link SubscriptionFacade.autoRenewWarning} exposes it
+  // independently of the union so grace/suspended banners can carry it as a
+  // secondary line. The client must learn that auto-pay is off in EVERY state —
+  // the reported case fell into `grace_soft` and saw nothing.
   | {
       kind: 'auto_renew_disabled_no_credential';
       paymentMethodEditUrl: string;
-      notificationId: number;
+      notificationId: number | null;
     }
   | {
       kind: 'renewal_failed';
       paymentMethodEditUrl: string;
-      notificationId: number;
+      notificationId: number | null;
       lastRetryAt: string | null;
     };
 
+/** Warning type as the backend derives it on `GET current`. */
+export type AutoRenewWarningType =
+  | 'auto_renew_charge_failed'
+  | 'auto_renew_disabled_no_credential';
+
+/**
+ * Auto-renewal warning, decoupled from {@link SubscriptionUiState} so it stays
+ * visible in states where a more urgent lifecycle kind wins the banner.
+ */
+export interface AutoRenewWarning {
+  readonly type: AutoRenewWarningType;
+  /**
+   * Originating bell notification, when there is one. Nullable on purpose: the
+   * backend derives the warning from `subscription_events` + `billing_warning_logs`,
+   * and a warning can exist without a notification row (dedupe collapsed it, or
+   * the event predates the notification). Gating the banner on a non-null id
+   * would reproduce the very silent failure this fixes.
+   */
+  readonly notificationId: number | null;
+  readonly lastRetryAt: string | null;
+  readonly paymentMethodEditUrl: string;
+}
+
 const EXPIRING_SOON_THRESHOLD_DAYS = 7;
+
+/**
+ * Canonical payment-method page. Both the union kinds and
+ * {@link AutoRenewWarning} point here so there is one route to change.
+ */
+const AUTO_RENEW_PAYMENT_METHOD_URL = '/admin/subscription/payment';
 
 function daysBetween(future: string | Date | null | undefined): number {
   if (!future) return 0;
@@ -185,6 +216,44 @@ export class SubscriptionFacade {
   });
 
   /**
+   * Auto-renewal warning, derived from the `auto_renew_warning_*` fields the
+   * backend computes on `GET current` out of `subscription_events` +
+   * `billing_warning_logs` (derive-in-read — there are no such columns).
+   *
+   * Deliberately independent of {@link subscriptionUiState}: the reported case
+   * was a client whose auto-renewal was paused for lack of a card and who then
+   * fell into `grace_soft`, where the grace kind wins the banner. Deriving the
+   * warning only inside the `active` branch meant that client never saw it in
+   * any surface. The product rule is that this must always reach the client, so
+   * the banner reads this signal as a secondary line whatever the primary kind.
+   */
+  readonly autoRenewWarning = computed<AutoRenewWarning | null>(() => {
+    const sub = this.current() as Record<string, unknown> | null;
+    if (!sub) return null;
+
+    const type = sub['auto_renew_warning_type'];
+    if (
+      type !== 'auto_renew_charge_failed' &&
+      type !== 'auto_renew_disabled_no_credential'
+    ) {
+      return null;
+    }
+
+    return {
+      type,
+      notificationId:
+        typeof sub['auto_renew_warning_notification_id'] === 'number'
+          ? (sub['auto_renew_warning_notification_id'] as number)
+          : null,
+      lastRetryAt:
+        typeof sub['auto_renew_last_retry_at'] === 'string'
+          ? (sub['auto_renew_last_retry_at'] as string)
+          : null,
+      paymentMethodEditUrl: AUTO_RENEW_PAYMENT_METHOD_URL,
+    };
+  });
+
+  /**
    * RNC-PaidPlan — Single source of truth for "what should the UI tell the
    * user about their subscription right now". Cascade order is significant:
    * grace and terminal lifecycle states win over any pending-change concern
@@ -278,48 +347,29 @@ export class SubscriptionFacade {
         return { kind: 'expiring_soon', daysUntilRenewal };
       }
 
-      // Billing-warning detection — only meaningful on an otherwise-healthy
-      // subscription. Reads `auto_renew_warning_*` fields that Agent A wires
-      // up on `store_subscriptions`. Defensive optional-chain + typeof guards
-      // so the kind stays absent when the backend hasn't yet populated the
-      // fields (e.g. mid-deploy or older row revisions), instead of throwing.
+      // Billing-warning detection — as the PRIMARY kind, only meaningful on an
+      // otherwise-healthy subscription. The derivation itself lives in
+      // {@link autoRenewWarning} so it stays reachable from the grace and
+      // suspended banners too, where a more urgent kind owns the CTA.
       //
-      // `paymentMethodEditUrl` is hardcoded to the canonical PM-edit route.
-      // No new route injection — the page already exists and any future
-      // route can be swapped here without changing the union shape.
-      const PM_EDIT_URL = '/admin/subscription/payment';
-      const warningType: string | null =
-        typeof sub.auto_renew_warning_type === 'string'
-          ? (sub.auto_renew_warning_type as string)
-          : null;
-      const warningNotificationId: number | null =
-        typeof sub.auto_renew_warning_notification_id === 'number'
-          ? (sub.auto_renew_warning_notification_id as number)
-          : null;
-      const lastRetryAt: string | null =
-        typeof sub.auto_renew_last_retry_at === 'string'
-          ? (sub.auto_renew_last_retry_at as string)
-          : null;
-
-      if (
-        warningType === 'auto_renew_charge_failed' &&
-        warningNotificationId != null
-      ) {
+      // The notification id is NOT part of the gate: a warning derived from a
+      // subscription event without a notification row is still a warning the
+      // client must see. Requiring it kept this banner dark for the very case
+      // that motivated the fix.
+      const warning = this.autoRenewWarning();
+      if (warning?.type === 'auto_renew_charge_failed') {
         return {
           kind: 'renewal_failed',
-          paymentMethodEditUrl: PM_EDIT_URL,
-          notificationId: warningNotificationId,
-          lastRetryAt,
+          paymentMethodEditUrl: warning.paymentMethodEditUrl,
+          notificationId: warning.notificationId,
+          lastRetryAt: warning.lastRetryAt,
         };
       }
-      if (
-        warningType === 'auto_renew_disabled_no_credential' &&
-        warningNotificationId != null
-      ) {
+      if (warning?.type === 'auto_renew_disabled_no_credential') {
         return {
           kind: 'auto_renew_disabled_no_credential',
-          paymentMethodEditUrl: PM_EDIT_URL,
-          notificationId: warningNotificationId,
+          paymentMethodEditUrl: warning.paymentMethodEditUrl,
+          notificationId: warning.notificationId,
         };
       }
     }

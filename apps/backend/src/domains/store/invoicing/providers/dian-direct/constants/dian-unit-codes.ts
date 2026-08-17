@@ -170,6 +170,30 @@ export const DIAN_UNIT_CODES = {
   HOUR: 'HUR',
   /** `DAY` «día». */
   DAY: 'DAY',
+  /**
+   * `LUN` «mes». **NO es `MON`, y eso NO es una errata de quien lo lea.**
+   *
+   * Es uno de los códigos que la traducción automática corrompió: UN/ECE define
+   * el mes como `MON`, y la herramienta tradujo «Mon(day)» a «Lun(es)». La
+   * corrupción está en el `.gc` Y en el Schematron, así que `LUN` es lo que el
+   * validador de la DIAN realmente acepta y `MON` es lo que rechazaría. Ver el
+   * «AVISO GRAVE» de la cabecera de este archivo, que lo enumera junto con los
+   * otros 15 casos.
+   *
+   * Confirmado presente en `DIAN_UNIT_CODES_RAW`, así que `isDianUnitCode` lo
+   * acepta; `MON` no está y `toDianUnitCode` lo degradaría a `EA` sin avisar.
+   *
+   * La unidad CALIFICA la cantidad: enviarla exige que `quantity` esté expresada
+   * en meses. Una suscripción trimestral con `quantity = 1` debe seguir en `EA`,
+   * no en `LUN`, o el documento afirmaría un mes donde se facturaron tres.
+   */
+  MONTH: 'LUN',
+  /**
+   * `ANA` «año». **NO es `ANN`** — misma corrupción por traducción que `LUN`
+   * (UN/ECE `ANN` ← «annum»), y también verificado dentro de
+   * `DIAN_UNIT_CODES_RAW`. Ver la nota de `MONTH` y el «AVISO GRAVE» de arriba.
+   */
+  YEAR: 'ANA',
 
   // ---- Energía ---------------------------------------------------------
   /** `KWH` «kilovatios hora». */

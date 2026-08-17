@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal, DestroyRef, computed } from '@angula
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  AlertBannerComponent,
   CardComponent,
   ButtonComponent,
   IconComponent,
@@ -9,29 +10,45 @@ import {
   StickyHeaderActionButton,
   ToastService,
 } from '../../../../../../shared/components/index';
+import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { PaymentMethod } from '../../interfaces/store-subscription.interface';
+import {
+  WompiCardWidgetComponent,
+  WompiTokenizeResult,
+} from '../../components/wompi-card-widget/wompi-card-widget.component';
 
 /**
- * Read-only payment-methods management page.
+ * Payment-methods management page.
  *
- * Canonical UX: payment methods are NEVER added explicitly here. Wompi enables
- * them for automatic renewals as a side-effect of the first successful real
- * invoice charge (see `SubscriptionPaymentService.autoRegisterPaymentMethodFromGateway`).
+ * Alta de tarjeta: la página abre el widget de tokenización de Wompi
+ * (`app-wompi-card-widget` → `GET payment-methods/widget-config`) y registra el
+ * resultado con `POST payment-methods/tokenize`. Hasta ahora esa pareja de
+ * endpoints existía en backend y estaba envuelta en el servicio frontend, pero
+ * ningún componente la llamaba: la página era un callejón sin salida que le
+ * decía al cliente que la tarjeta "se habilita al pagar", y la campana de
+ * autopago mandaba a todo el mundo justo aquí.
  *
- * From this page the user can only:
- *   - View payment methods enabled for renewals (brand, last4, expiry, default flag).
- *   - Mark another method as default.
- *   - Remove a method (soft-delete: state -> removed).
+ * Desde esta página el usuario puede:
+ *   - Agregar una tarjeta para renovaciones automáticas (Wompi COF).
+ *   - Ver los métodos habilitados (marca, últimos 4, vencimiento, predeterminado).
+ *   - Marcar otro método como predeterminado.
+ *   - Eliminar un método (soft-delete: state -> removed).
  *
- * If there are no PMs enabled yet, the page renders an informational empty
- * state pointing the user back to the subscription panel — payment is the
- * canonical entry point, not a standalone "add card" flow.
+ * La renovación automática SOLO funciona con tarjeta; el aviso se muestra
+ * siempre, con métodos o sin ellos.
  */
 @Component({
   selector: 'app-payment-method',
   standalone: true,
-  imports: [CardComponent, ButtonComponent, IconComponent, StickyHeaderComponent],
+  imports: [
+    AlertBannerComponent,
+    CardComponent,
+    ButtonComponent,
+    IconComponent,
+    StickyHeaderComponent,
+    WompiCardWidgetComponent,
+  ],
   template: `
     <div class="w-full min-h-full">
       <app-sticky-header
@@ -45,7 +62,16 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
 
-      <div class="max-w-5xl mx-auto px-4 py-6 lg:py-8">
+      <div class="max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-4">
+        <!-- Aviso permanente: exigencia del dueño del producto. Un cliente
+             activó la renovación automática pagando por un medio que no
+             renueva y su renovación falló en silencio. -->
+        <app-alert-banner variant="warning" icon="credit-card">
+          La renovación automática solo funciona con tarjeta. Si pagas por otro
+          medio (PSE, Nequi, transferencia o efectivo), tu plan no se renovará
+          solo y deberás pagar cada período manualmente.
+        </app-alert-banner>
+
         <app-card [padding]="false">
           @if (loading()) {
             <div class="p-6 md:p-8" aria-busy="true">
@@ -63,13 +89,23 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
 
           @if (!loading() && hasMethods()) {
             <div class="space-y-4 p-4 md:p-6">
-              <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 class="text-base font-semibold text-text-primary">Métodos habilitados para renovaciones</h2>
                   <p class="text-sm text-text-secondary">
                     Protegido por Wompi. Vendix no almacena el número completo de tu tarjeta ni el CVV.
                   </p>
                 </div>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [loading]="mutating()"
+                  [disabled]="mutating()"
+                  (clicked)="openAddCard()"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  Agregar tarjeta
+                </app-button>
               </div>
 
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
@@ -173,23 +209,41 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
               </div>
               <div class="space-y-2">
                 <p class="text-base md:text-lg font-semibold text-text-primary">
-                  Aún no tienes un método habilitado para renovaciones automáticas
+                  Aún no tienes una tarjeta habilitada para renovaciones automáticas
                 </p>
                 <p class="text-sm text-text-secondary max-w-lg mx-auto">
-                  Al completar el pago de tu primera factura con tarjeta, Wompi habilitará
-                  el método de pago para renovaciones automáticas. Vendix no almacena el
-                  número completo de tu tarjeta ni el CVV.
+                  Agrega una tarjeta y Wompi la habilitará para cobrar tus
+                  renovaciones automáticamente. Vendix no almacena el número
+                  completo de tu tarjeta ni el CVV.
                 </p>
               </div>
-              <app-button variant="outline" (clicked)="goToPanel()">
-                <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
-                Ir al panel de suscripción
-              </app-button>
+              <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                <app-button
+                  variant="primary"
+                  [loading]="mutating()"
+                  [disabled]="mutating()"
+                  (clicked)="openAddCard()"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  Agregar tarjeta
+                </app-button>
+                <app-button variant="outline" (clicked)="goToPanel()">
+                  <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
+                  Ir al panel de suscripción
+                </app-button>
+              </div>
             </div>
           }
         </app-card>
       </div>
     </div>
+
+    <!-- Widget de tokenización de Wompi. Se auto-abre al pasar isOpen a true y
+         emite (tokenized) con el tok_* + los tokens legales bit-exactos. -->
+    <app-wompi-card-widget
+      [(isOpen)]="showAddCard"
+      (tokenized)="onCardTokenized($event)"
+    ></app-wompi-card-widget>
   `,
 })
 export class PaymentMethodComponent implements OnInit {
@@ -197,10 +251,20 @@ export class PaymentMethodComponent implements OnInit {
   private router = inject(Router);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
+  /**
+   * El estado de suscripción vive en NgRx. Tras dar de alta una tarjeta hay que
+   * refrescarlo por la acción del store (`loadCurrent`) y no con un GET suelto:
+   * un HTTP directo se salta el effect y deja banner, pill y sidebar rancios
+   * mostrando todavía "tu autopago no se pudo activar".
+   */
+  private subscriptionFacade = inject(SubscriptionFacade);
 
   readonly paymentMethods = signal<PaymentMethod[]>([]);
   readonly loading = signal(false);
   readonly mutating = signal(false);
+
+  /** Visibilidad del widget de tokenización de Wompi. */
+  readonly showAddCard = signal(false);
 
   readonly hasMethods = computed(() => this.paymentMethods().length > 0);
   readonly headerBadgeText = computed(() => {
@@ -209,6 +273,14 @@ export class PaymentMethodComponent implements OnInit {
     return count === 1 ? '1 método' : `${count} métodos`;
   });
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'add-card',
+      label: 'Agregar tarjeta',
+      variant: 'primary',
+      icon: 'plus',
+      loading: this.mutating(),
+      disabled: this.mutating(),
+    },
     {
       id: 'panel',
       label: 'Panel de suscripción',
@@ -244,6 +316,67 @@ export class PaymentMethodComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     if (actionId === 'panel') this.goToPanel();
+    if (actionId === 'add-card') this.openAddCard();
+  }
+
+  /** Abre el widget de Wompi. El componente carga su config y se auto-abre. */
+  openAddCard(): void {
+    if (this.mutating()) return;
+    this.showAddCard.set(true);
+  }
+
+  /**
+   * El widget tokenizó la tarjeta: la registramos como método recurrente (COF)
+   * vía `POST payment-methods/tokenize`.
+   *
+   * `acceptance_token` y `personal_auth_token` viajan bit-exactos tal como los
+   * aceptó el usuario en el widget — Wompi rechaza el `payment_source` si se
+   * alteran. El widget ya los echa de vuelta desde su `widget-config`.
+   */
+  onCardTokenized(result: WompiTokenizeResult): void {
+    if (!result.card_token) {
+      this.toastService.error(
+        'Wompi no devolvió el token de la tarjeta. Intenta de nuevo.',
+      );
+      return;
+    }
+
+    this.mutating.set(true);
+    this.subscriptionService
+      .addPaymentMethod({
+        card_token: result.card_token,
+        acceptance_token: result.acceptance_token,
+        personal_auth_token: result.personal_auth_token,
+        type: result.type,
+        last4: result.last4,
+        brand: result.brand,
+        expiry_month: result.expiry_month,
+        expiry_year: result.expiry_year,
+        card_holder: result.card_holder,
+        // Primera tarjeta: queda predeterminada para que la renovación
+        // automática tenga con qué cobrar sin un segundo paso del usuario.
+        is_default: !this.hasMethods(),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.mutating.set(false);
+          this.toastService.success(
+            'Tarjeta habilitada para renovaciones automáticas',
+          );
+          this.loadPaymentMethods();
+          // Refresco por el store: la acción dispara el effect que relee
+          // `/store/subscriptions/current`, y con eso el banner de autopago
+          // deja de anunciar un problema ya resuelto.
+          this.subscriptionFacade.loadCurrent();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.mutating.set(false);
+          this.toastService.error(
+            err?.error?.message ?? 'No se pudo habilitar la tarjeta',
+          );
+        },
+      });
   }
 
   setDefault(method: PaymentMethod): void {
