@@ -39,6 +39,7 @@ import {
 import { ToastService } from '../../../../../shared/components/index';
 import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
+import { environment } from '../../../../../../environments/environment';
 
 import {
   OrganizationAccountType,
@@ -154,6 +155,14 @@ export class OrganizationEditModalComponent {
 
   /** Form-status signal — populated by the constructor once `form` is ready. */
   readonly formStatus = signal<'VALID' | 'INVALID' | 'PENDING' | 'DISABLED'>('VALID');
+
+  /**
+   * Base del API (p. ej. `https://api.vendix.com/api`). El modal reusa el
+   * `app-address-form-fields` y le pasa explícitamente el endpoint DANE
+   * super-admin porque el default apunta a `/store/addresses/dian/...`
+   * (gateado por `store:addresses:read`, que un super-admin no tiene).
+   */
+  readonly apiBase: string = environment.apiUrl;
 
   /** Live slug preview that updates as the user types. */
   readonly slugPreviewUrl = signal<string>('');

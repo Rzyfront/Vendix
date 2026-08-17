@@ -113,6 +113,13 @@ export class AddressFormFieldsComponent {
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
   /**
+   * Base del endpoint DANE a usar para `resolveByName`. Default:
+   * `/store/addresses/dian/municipalities` (gateado por `store:addresses:read`).
+   * El super-admin org modal pasa `/superadmin/addresses/dian/municipalities`
+   * porque su JWT no tiene el permiso de tienda.
+   */
+  readonly dianEndpointBase = input<string | null>(null);
+  /**
    * Opt-in: when true, `phone_number` becomes REQUIRED and therefore affects
    * `validChange` / `form.valid`. Default false keeps the historical behavior
    * for existing consumers (customer-modal, dispatch-note editor, shipping
@@ -144,6 +151,8 @@ export class AddressFormFieldsComponent {
   private readonly geocoding = inject(GeocodingService);
   private readonly municipalities = inject(DianMunicipalityLookupService);
   private readonly destroyRef = inject(DestroyRef);
+
+
 
   readonly form: FormGroup = this.fb.group({
     address_line1: [
@@ -247,6 +256,19 @@ export class AddressFormFieldsComponent {
   );
 
   constructor() {
+    // Si el consumidor del form pasó un base DANE distinto (e.g. super-admin
+    // reusando este componente en el modal de orgs), reconfiguramos el servicio
+    // compartido antes de cualquier lookup. Sin esto, el `resolveByName` que
+    // dispara el reverse-geocode apuntaría al endpoint de tienda (403).
+    //
+    // `dianEndpointBase` es un `input()` (signal) — su valor puede NO estar
+    // disponible en el constructor (Angular setea los inputs DESPUÉS de la
+    // construcción), así que lo observamos con effect.
+    effect(() => {
+      const base = this.dianEndpointBase();
+      if (base) this.municipalities.setBaseUrl(base);
+    });
+
     // Prefill when `initialAddress` arrives (create → null, edit → snapshot).
     effect(() => {
       const addr = this.initialAddress();

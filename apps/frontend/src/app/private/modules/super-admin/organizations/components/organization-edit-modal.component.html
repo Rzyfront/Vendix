@@ -686,6 +686,7 @@
                 [initialAddress]="addressFromOrg()"
                 [requirePhone]="false"
                 [showErrors]="false"
+                [dianEndpointBase]="apiBase + '/superadmin/addresses/dian/municipalities'"
                 (addressChange)="onAddressChange($event)"
                 (validChange)="onAddressValid($event)"
               />

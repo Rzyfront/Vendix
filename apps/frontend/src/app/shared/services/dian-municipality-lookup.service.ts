@@ -71,7 +71,19 @@ interface SuccessEnvelope<T> {
 @Injectable({ providedIn: 'root' })
 export class DianMunicipalityLookupService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = `${environment.apiUrl}/store/addresses/dian/municipalities`;
+  /**
+   * Base del endpoint DANE. Por defecto `/store/addresses/dian/municipalities`
+   * (gateado por `store:addresses:read`). El super-admin reusa este servicio
+   * pero consume el espejo bajo `/superadmin/addresses/dian/municipalities`
+   * — el form debe setearlo vía `setBaseUrl` antes de la primera consulta,
+   * idealmente en su constructor o `ngOnInit`.
+   */
+  private baseUrl = `${environment.apiUrl}/store/addresses/dian/municipalities`;
+
+  /** Cambia la base del endpoint DANE (e.g. super-admin reusa este servicio). */
+  setBaseUrl(url: string): void {
+    this.baseUrl = url;
+  }
 
   /** Búsquedas ya resueltas, por `término|límite`. */
   private readonly searches = new Map<

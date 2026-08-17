@@ -3,6 +3,7 @@ import { GlobalPrismaService } from '../../prisma/services/global-prisma.service
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DomainsModule } from './domains/domains.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { SuperadminAddressesModule } from './addresses/superadmin-addresses.module';
 import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { AuditModule } from './audit/audit.module';
@@ -34,6 +35,7 @@ import { SuperadminTenantConfigModule } from './tenant-config/superadmin-tenant-
     DashboardModule,
     DomainsModule,
     OrganizationsModule,
+    SuperadminAddressesModule,
     PermissionsModule,
     RolesModule,
     StoresModule,
