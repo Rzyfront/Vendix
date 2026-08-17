@@ -319,4 +319,264 @@ describe('InvoiceNumberGenerator', () => {
       ).resolves.toMatchObject({ resolution_id: 9 });
     });
   });
+
+  /**
+   * SERIE INTERNA: la numeración que ponemos nosotros no puede bloquear.
+   *
+   * Emitir una nota exigía una fila de `invoice_resolutions` que nadie creaba
+   * nunca —no hay seed, y la pantalla de resoluciones pide los datos de una
+   * Autorización de Numeración que para una nota no existe—, así que ninguna
+   * factura se podía corregir. El bloqueo no protegía nada: la DIAN no autoriza
+   * numeración de notas (Oficio 346 de 2018) y el consecutivo es del emisor.
+   *
+   * Lo que estos tests fijan no es que las notas funcionen, sino la FRONTERA:
+   * cada automatismo tiene su contraprueba en un tipo con rango autorizado. Que
+   * el generador fabrique o amplíe numeración de una factura de venta es peor
+   * que el bloqueo que vino a quitar — son documentos emitidos fuera de la
+   * autorización, rechazados uno por uno, cada rechazo quemando un número.
+   */
+  describe('serie interna', () => {
+    /** Fixture sin fila previa, con los dos carriles de escritura espiables. */
+    const withoutRow = (created: any = null) => {
+      const create = jest.fn().mockResolvedValue(
+        created ?? {
+          id: 31,
+          prefix: 'NC',
+          current_number: 0,
+          range_from: 1,
+          range_to: 1000,
+          technical_key: null,
+        },
+      );
+      return {
+        invoice_resolutions: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create,
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ id: 31, prefix: 'NC', current_number: 1 }),
+        },
+      };
+    };
+
+    it('abre la serie de una nota crédito cuando no hay ninguna fila', async () => {
+      const overrides = withoutRow();
+      const { service, tx } = createService(overrides);
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual({ invoice_number: 'NC1', resolution_id: 31 });
+
+      expect(tx.invoice_resolutions.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+          prefix: 'NC',
+          resolution_number: 'INTERNA-NC',
+          range_from: 1,
+          current_number: 0,
+          // Sin ClTec: el CUDE de una nota se firma con el Software-PIN, y una
+          // clave aquí haría que `invoice-flow` inyectara la equivocada.
+          technical_key: null,
+          // A la entidad contable, no a una tienda: la búsqueda de consecutivo
+          // no filtra por tienda, y sellarlo daría un `NC1` por tienda.
+          store_id: null,
+        }),
+      });
+    });
+
+    /** CONTRAPRUEBA del auto-alta. */
+    it('NO fabrica numeración para una factura de venta sin resolución', async () => {
+      const { service, tx } = createService(withoutRow());
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'sales_invoice',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'FISCAL_RESOLUTION_MISSING' });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Pedir una resolución concreta y no encontrarla no es «no hay serie»: es
+     * que ESA fila no sirve. Abrir otra ignoraría en silencio lo que se pidió.
+     */
+    it('no abre serie cuando el llamador nombró una resolución que no apareció', async () => {
+      const { service, tx } = createService(withoutRow());
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+          resolution_id: 404,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'FISCAL_RESOLUTION_MISSING' });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `findFirst` filtra por `is_active` y vigencia. Una serie interna caducada
+     * no aparece, y crear otra con el MISMO prefijo reiniciaría el cursor en 1 y
+     * emitiría `NC1` por segunda vez. Dos documentos fiscales con el mismo
+     * número es peor que el bloqueo que este código quita.
+     */
+    it('revive la serie dormida en vez de abrir una segunda con el mismo prefijo', async () => {
+      const dormant = {
+        id: 31,
+        prefix: 'NC',
+        current_number: 42,
+        range_from: 1,
+        range_to: 1000,
+        technical_key: null,
+      };
+      const invoice_resolutions = {
+        // Vacío en la búsqueda con filtros; presente en la de reutilización.
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(dormant),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({ ...dormant, is_active: true }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ ...dormant, current_number: 43 }),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual({ invoice_number: 'NC43', resolution_id: 31 });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.update).toHaveBeenCalledWith({
+        where: { id: 31 },
+        data: expect.objectContaining({ is_active: true }),
+      });
+    });
+
+    it('amplía el rango de una nota agotada en vez de bloquear', async () => {
+      const exhausted = {
+        id: 31,
+        prefix: 'NC',
+        current_number: 1000,
+        range_from: 1,
+        range_to: 1000,
+        technical_key: null,
+      };
+      // Primer intento contra el techo viejo: nada que asignar. Segundo, ya
+      // ampliado: asigna.
+      const updateMany = jest
+        .fn()
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+      const invoice_resolutions = {
+        findFirst: jest.fn().mockResolvedValue(exhausted),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({ ...exhausted, range_to: 2000 }),
+        updateMany,
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ ...exhausted, current_number: 1001 }),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual({ invoice_number: 'NC1001', resolution_id: 31 });
+
+      expect(tx.invoice_resolutions.update).toHaveBeenCalledWith({
+        where: { id: 31 },
+        data: { range_to: 2000 },
+      });
+      // El segundo intento mide contra el techo NUEVO. Repetir el viejo dejaría
+      // la fila ampliada y el documento sin numerar igualmente.
+      expect(updateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 31, current_number: { lt: 2000 } },
+        data: { current_number: 1001 },
+      });
+    });
+
+    /** Un segundo fallo ya no es agotamiento: el techo acaba de subir. */
+    it('no reintenta en bucle si tampoco asigna después de ampliar', async () => {
+      const invoice_resolutions = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 31,
+          prefix: 'NC',
+          current_number: 1000,
+          range_from: 1,
+          range_to: 1000,
+          technical_key: null,
+        }),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn(),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'FISCAL_RESOLUTION_EXHAUSTED' });
+
+      expect(tx.invoice_resolutions.updateMany).toHaveBeenCalledTimes(2);
+      expect(tx.invoice_resolutions.update).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Reportar el techo viejo describiría un agotamiento que ya no existe y
+     * mandaría a quien lea la traza a ampliar un rango que acaba de crecer.
+     */
+    it('reporta el techo ampliado, no el que acaba de quedar obsoleto', async () => {
+      const invoice_resolutions = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 31,
+          prefix: 'NC',
+          current_number: 1000,
+          range_from: 1,
+          range_to: 1000,
+          technical_key: null,
+        }),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn(),
+      };
+      const { service } = createService({ invoice_resolutions });
+
+      const error: any = await service
+        .generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        })
+        .catch((e: any) => e);
+
+      expect(error.errorCode).toBe('FISCAL_RESOLUTION_EXHAUSTED');
+      expect(error.getResponse().details).toMatchObject({ range_to: 2000 });
+    });
+  });
 });

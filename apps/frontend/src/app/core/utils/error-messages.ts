@@ -625,9 +625,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   FISCAL_ACCOUNTING_BLOCKED:
     'La contabilidad fiscal esta bloqueada hasta que exista aceptacion DIAN.',
   FISCAL_RESOLUTION_MISSING:
-    'No hay una resolucion DIAN activa para esta entidad fiscal.',
+    'Este documento se numera contra una Autorizacion de Numeracion de la DIAN y no hay ninguna vigente. Registrala en Facturacion > Resoluciones.',
   FISCAL_RESOLUTION_EXHAUSTED:
-    'La numeracion DIAN de esta resolucion esta agotada.',
+    'Se acabaron los consecutivos del rango que autorizo la DIAN. Registra un rango nuevo en Facturacion > Resoluciones.',
   FISCAL_DOCUMENT_UNSUPPORTED:
     'Este tipo de documento fiscal aun no esta implementado para DIAN propio.',
   FISCAL_PERIOD_CLOSED:
