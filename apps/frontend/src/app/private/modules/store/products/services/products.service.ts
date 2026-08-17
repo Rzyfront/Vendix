@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, from, map, switchMap } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AnalyticsService } from '../../analytics/services/analytics.service';
 import {
   Product,
   ProductVariant,
@@ -67,7 +68,10 @@ export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private analytics: AnalyticsService,
+  ) {}
 
   // CRUD Básico
   getProducts(
@@ -136,6 +140,11 @@ export class ProductsService {
       .post<ApiResponse<Product>>(`${this.apiUrl}/store/products`, product)
       .pipe(
         map((response) => response.data),
+        // Invalidar el cache de analytics: nuevos productos / cambios de
+        // stock_quantity / track_inventory afectan las métricas (Unidades
+        // en Mano, Valor en Stock, Bajo Stock). El flag global se consume
+        // en el siguiente read del AnalyticsService.
+        tap(() => this.analytics.requestInvalidation()),
         // Ruta de error DEDICADA: preserva `error_code` para el modal de
         // requisitos (NO usa el `handleError` compartido que aplana a string).
         catchError(this.handleSaveError),
@@ -149,6 +158,8 @@ export class ProductsService {
       >(`${this.apiUrl}/store/products/${id}`, product)
       .pipe(
         map((response) => response.data),
+        // Invalidar cache de analytics por cambios de stock/state.
+        tap(() => this.analytics.requestInvalidation()),
         // Ruta de error DEDICADA: preserva `error_code` para el modal de
         // requisitos (NO usa el `handleError` compartido que aplana a string).
         catchError(this.handleSaveError),
@@ -185,7 +196,11 @@ export class ProductsService {
   deleteProduct(id: number): Observable<void> {
     return this.http
       .delete<void>(`${this.apiUrl}/store/products/${id}`)
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Invalidar cache de analytics por eliminación de producto.
+        tap(() => this.analytics.requestInvalidation()),
+        catchError(this.handleError),
+      );
   }
 
   // Gestión de Variantes
