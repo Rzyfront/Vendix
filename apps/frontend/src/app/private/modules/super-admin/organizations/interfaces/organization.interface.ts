@@ -1,23 +1,112 @@
-import { Organization } from '../../../../../core/models/organization.model';
+/**
+ * Legacy interface barrel for the super-admin organization slice.
+ *
+ * @deprecated Use '../contracts/organization.contract' for new code. This file
+ * is kept as a thin re-export for backward compatibility with existing
+ * consumers.
+ *
+ * The single source of truth now lives in
+ * `apps/frontend/src/app/private/modules/super-admin/organizations/contracts/organization.contract.ts`.
+ * This file re-exports the contract's types under the historical names so
+ * existing consumers keep compiling while we migrate.
+ *
+ * Adding a NEW field here is a bug: extend the contract instead.
+ */
 
-export type OrganizationMode = 'production' | 'demo' | 'test';
+import type { Organization } from '../../../../../core/models/organization.model';
 
-export interface OrganizationListItem {
-  id: number;
-  name: string;
-  slug: string;
-  email: string;
-  status: Organization['status'];
-  plan: Organization['plan'];
-  mode: OrganizationMode;
-  createdAt: string;
-  settings: {
-    maxStores: number;
-    maxUsers: number;
-    allowMultipleStores: boolean;
-  };
-}
+import type {
+  OrganizationListItem as ContractOrganizationListItem,
+  OrganizationDetail as ContractOrganizationDetail,
+  OrganizationUpdatePayload,
+  OrganizationCreatePayload,
+  OrganizationState,
+  OrganizationMode,
+  OrganizationAccountType,
+  OrganizationOperatingScope,
+  OrganizationFiscalScope,
+  OrganizationPrimaryAddress,
+  OrganizationPartner,
+  OrganizationFraud,
+  EditableField,
+  JsonbSettingsKey,
+  AddressField,
+  AddressPayload,
+} from '../contracts/organization.contract';
 
+import {
+  OrganizationState as OrganizationStateValue,
+  OrganizationMode as OrganizationModeValue,
+  OrganizationAccountType as OrganizationAccountTypeValue,
+  OrganizationOperatingScope as OrganizationOperatingScopeValue,
+  OrganizationFiscalScope as OrganizationFiscalScopeValue,
+  EDITABLE_FIELDS,
+  JSONB_SETTINGS_KEYS,
+  ADDRESS_FIELDS,
+} from '../contracts/organization.contract';
+
+/* -------------------------------------------------------------------------- */
+/*  Re-export the const enums under their historical names                    */
+/* -------------------------------------------------------------------------- */
+
+export {
+  EDITABLE_FIELDS,
+  JSONB_SETTINGS_KEYS,
+  ADDRESS_FIELDS,
+  OrganizationStateValue as OrganizationStateConst,
+  OrganizationModeValue as OrganizationModeConst,
+  OrganizationAccountTypeValue as OrganizationAccountTypeConst,
+  OrganizationOperatingScopeValue as OrganizationOperatingScopeConst,
+  OrganizationFiscalScopeValue as OrganizationFiscalScopeConst,
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Type re-exports from the contract                                         */
+/* -------------------------------------------------------------------------- */
+
+export type {
+  EditableField,
+  JsonbSettingsKey,
+  AddressField,
+  AddressPayload,
+  OrganizationState,
+  OrganizationMode,
+  OrganizationAccountType,
+  OrganizationOperatingScope,
+  OrganizationFiscalScope,
+  OrganizationPrimaryAddress,
+  OrganizationPartner,
+  OrganizationFraud,
+  OrganizationCreatePayload,
+  OrganizationUpdatePayload,
+};
+
+// Historical aliases — `OrganizationListItem` and `OrganizationDetail` come
+// straight from the contract.
+export type OrganizationListItem = ContractOrganizationListItem;
+export type OrganizationDetail = ContractOrganizationDetail;
+
+/* -------------------------------------------------------------------------- */
+/*  Legacy types preserved for backward compatibility                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Historical `OrganizationMode` was a union type. The contract now exports
+ * both the const + type. Re-export the historical alias so consumers like
+ * `organizations.component.ts` keep compiling.
+ */
+export type { OrganizationMode as OrganizationModeUnion };
+
+/**
+ * Historical alias for the rich detail shape. Was `OrganizationDetails` in
+ * the legacy interface (note the trailing `s`). Prefer
+ * `OrganizationDetail` from the contract for new code.
+ *
+ * The historical interface extended `Organization` from the core model and
+ * carried `stats` + `recentActivity` arrays. We keep it standalone to avoid
+ * forcing a structural compatibility with the normalized `OrganizationDetail`
+ * shape (different keys, different counts, different address shape).
+ */
 export interface OrganizationDetails extends Organization {
   stats: {
     totalStores: number;
@@ -37,6 +126,10 @@ export interface OrganizationDetails extends Organization {
     };
   }>;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Form / query / column helpers preserved from the legacy file              */
+/* -------------------------------------------------------------------------- */
 
 export interface CreateOrganizationForm {
   basicInfo: {

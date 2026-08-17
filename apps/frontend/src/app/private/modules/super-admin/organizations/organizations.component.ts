@@ -16,6 +16,8 @@ import {
   OrganizationMode,
 } from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
+import { OrganizationDetail, OrganizationUpdatePayload } from './contracts/organization.contract';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 // Import new components
 import {
@@ -171,12 +173,13 @@ import './organizations.component.css';
         ></app-organization-create-modal>
       }
 
-      @defer (when isEditModalOpen) {
+      @defer (when isEditModalOpen()) {
         <app-organization-edit-modal
-          [isOpen]="isEditModalOpen"
-          [isSubmitting]="isUpdatingOrganization"
-          [organization]="selectedOrganization"
+          [isOpen]="isEditModalOpen()"
+          [isSubmitting]="isUpdatingOrganization()"
+          [organization]="selectedOrganizationDetail()"
           (isOpenChange)="onEditModalChange($event)"
+          (opened)="loadSelectedOrganizationDetail(selectedOrganization()?.id)"
           (submit)="updateOrganization($event)"
           (cancel)="onEditModalCancel()"
         ></app-organization-edit-modal>
@@ -367,9 +370,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   createOrganizationForm!: FormGroup;
 
   // Edit Modal state
-  isEditModalOpen = false;
-  isUpdatingOrganization = false;
-  selectedOrganization?: OrganizationListItem;
+  isEditModalOpen = signal(false);
+  isUpdatingOrganization = signal(false);
+  selectedOrganization = signal<OrganizationListItem | null>(null);
+  selectedOrganizationDetail = signal<OrganizationDetail | null>(null);
 
   private subscriptions: Subscription[] = [];
 
@@ -704,58 +708,94 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   editOrganization(org: OrganizationListItem): void {
-    this.selectedOrganization = org;
-    this.isEditModalOpen = true;
+    this.selectedOrganization.set(org);
+    this.selectedOrganizationDetail.set(null);
+    this.loadSelectedOrganizationDetail(org.id);
+    this.isEditModalOpen.set(true);
+  }
+
+  /**
+   * Pre-fetchea la forma normalizada (OrganizationDetail) que el modal necesita.
+   * Se dispara desde `editOrganization` y como safety-net desde `(opened)` del modal
+   * para sortear la race condition de `@defer`.
+   */
+  loadSelectedOrganizationDetail(id: number | undefined): void {
+    if (!id) return;
+    const sub = this.organizationsService
+      .getOrganizationById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response?.success && response.data) {
+            this.selectedOrganizationDetail.set(response.data as OrganizationDetail);
+          }
+        },
+        error: (err) => {
+          console.error('[orgs] failed to load org detail', err);
+          this.toastService.error('No se pudo cargar la información de la organización');
+        },
+      });
+    this.subscriptions.push(sub);
   }
 
   onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
+    this.isEditModalOpen.set(isOpen);
     if (!isOpen) {
-      this.selectedOrganization = undefined;
+      this.selectedOrganization.set(null);
+      this.selectedOrganizationDetail.set(null);
     }
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
-    this.selectedOrganization = undefined;
+    this.isEditModalOpen.set(false);
+    this.selectedOrganization.set(null);
+    this.selectedOrganizationDetail.set(null);
   }
 
-  updateOrganization(organizationData: any): void {
-    if (!this.selectedOrganization) return;
+  /**
+   * Handler `(submit)` del modal. El modal ya construyó un `OrganizationUpdatePayload`
+   * tipado; lo pasamos derecho al backend. Errores de validación se parsean
+   * con `parseApiError` y se listan como toasts individuales.
+   */
+  updateOrganization(payload: OrganizationUpdatePayload): void {
+    const current = this.selectedOrganization();
+    if (!current) return;
 
-    this.isUpdatingOrganization = true;
-
-    // Transform data to match the UpdateOrganizationDto interface from backend
-    const updateData = {
-      name: organizationData.name,
-      slug: this.selectedOrganization.slug, // Keep existing slug
-      legal_name: organizationData.legal_name,
-      tax_id: organizationData.tax_id,
-      email: organizationData.email,
-      phone: organizationData.phone,
-      website: organizationData.website,
-      description: organizationData.description,
-      state: organizationData.state,
-      mode: organizationData.mode,
-    };
+    this.isUpdatingOrganization.set(true);
 
     const sub = this.organizationsService
-      .updateOrganization(this.selectedOrganization.id, updateData)
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      .updateOrganization(current.id, payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
         next: (response) => {
           if (response.success) {
-            this.isEditModalOpen = false;
-            this.selectedOrganization = undefined;
-            this.loadOrganizations(); // Reload the list
-            this.loadStats(); // Reload stats
+            this.isEditModalOpen.set(false);
+            this.selectedOrganization.set(null);
+            this.selectedOrganizationDetail.set(null);
+            this.loadOrganizations();
+            this.loadStats();
+            this.organizationsService.invalidateCache();
             this.toastService.success('Organización actualizada exitosamente');
           }
-          this.isUpdatingOrganization = false;
+          this.isUpdatingOrganization.set(false);
         },
         error: (error) => {
           console.error('Error updating organization:', error);
-          this.toastService.error('Error al actualizar la organización');
-          this.isUpdatingOrganization = false;
+          const parsed = parseApiError(error);
+          const validationErrors = (parsed.details?.validationErrors ?? []) as string[];
+          if (validationErrors.length > 0) {
+            this.toastService.error(
+              `${validationErrors.length} error${validationErrors.length === 1 ? '' : 'es'} de validación`,
+              'Validación',
+              8000,
+            );
+            for (const message of validationErrors) {
+              this.toastService.error(message, 'Validación', 6000);
+            }
+          } else {
+            this.toastService.error(parsed.userMessage || 'Error al actualizar la organización');
+          }
+          this.isUpdatingOrganization.set(false);
         },
       });
 

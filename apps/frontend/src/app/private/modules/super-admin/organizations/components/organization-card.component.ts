@@ -43,7 +43,7 @@ import { IconComponent } from '../../../../../shared/components/index';
               </span>
               <span>
                 <app-icon name="store" [size]="14" class="mr-1"></app-icon>
-                {{ organization().settings.maxStores || 0 }} stores max
+                {{ organization().settings?.maxStores || 0 }} stores max
               </span>
             </div>
           </div>
@@ -166,8 +166,10 @@ export class OrganizationCardComponent {
         return 'bg-yellow-100 text-yellow-800';
       case 'suspended':
         return 'bg-red-100 text-red-800';
-      case 'pending':
+      case 'draft':
         return 'bg-blue-100 text-blue-800';
+      case 'archived':
+        return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -182,8 +184,10 @@ export class OrganizationCardComponent {
         return 'Inactive';
       case 'suspended':
         return 'Suspended';
-      case 'pending':
-        return 'Pending';
+      case 'draft':
+        return 'Draft';
+      case 'archived':
+        return 'Archived';
       default:
         return organization.status;
     }
