@@ -5,6 +5,15 @@ import {
   dianLineExtensionTotal,
 } from '../../../store/invoicing/utils/dian-money.util';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+// Mismas funciones que el generador de numeración de tiendas, sin copia local:
+// la forma de una ClTec no puede tener dos definiciones, o el carril que valida
+// con la laxa emite lo que el otro rechaza.
+import {
+  isWellFormedTechnicalKey,
+  normalizeTechnicalKey,
+  TECHNICAL_KEY_LENGTHS,
+  TECHNICAL_KEY_LENGTHS_LABEL,
+} from '../../../store/invoicing/fiscal-document-requirements';
 import { createHash } from 'crypto';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -18,6 +27,10 @@ import {
   PLATFORM_TIMEZONE,
 } from '../../../../common/constants/platform-fiscal.constants';
 import { normalizeNit } from '../../../../common/utils/nit.util';
+import {
+  normalizeAcquirerTaxRegime,
+  normalizePersonType,
+} from '../../../../common/utils/dian-party-vocabulary.util';
 import {
   PlatformOrgService,
   PlatformOrgContext,
@@ -54,6 +67,22 @@ import {
   NumberingRangeReport,
 } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
 import { ApplyNumberingRangesDto } from '../../../store/invoicing/dian-config/dto/apply-numbering-range.dto';
+// LOS DOS PREVALIDADORES DEL CARRIL DE TIENDAS, sin copia ni variante.
+//
+// Ambos son `@Injectable()` PUROS —no tocan Prisma, no conocen la tienda— así
+// que la plataforma los usa tal cual. Tener reglas propias acá es exactamente
+// cómo se llega a que un carril emita lo que el otro rechaza, y el 17/08/2026
+// costó el rechazo de la primera factura de suscripción: el carril de plataforma
+// no tenía ninguna de las 48 reglas aritméticas ni las 40 de identidad.
+import {
+  CustomerFiscalIdentityInput,
+  CustomerFiscalIdentityValidator,
+} from '../../../store/invoicing/validators/customer-fiscal-identity.validator';
+import {
+  FiscalDocumentComputedTotals,
+  FiscalDocumentValidationInput,
+  FiscalDocumentValidator,
+} from '../../../store/invoicing/validators/fiscal-document.validator';
 import { resolveTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
 import {
   buildNotePhaseView,
@@ -264,12 +293,61 @@ interface SubscriptionInvoiceForFiscal {
  * Se declara sobre `InvoiceControlSource` para que el resolvedor único la acepte
  * tal cual, y se le añade lo que el XML pide aparte del bloque de control: la
  * clave técnica (`ClTec`, que alimenta el CUFE) y el número de resolución.
+ *
+ * `current_number` NO está en `InvoiceControlSource` porque aquel helper solo
+ * valida la coherencia del rango y de la vigencia — el cursor no le hace falta.
+ * Acá sí: lo leen el suelo del sondeo (`evaluateEmitReadiness`) y el informe de
+ * `emit-readiness`, ambos para anticipar qué número se asignaría sin escribirlo.
+ * La fila de Prisma se carga entera (sin `select`), así que el campo siempre
+ * viene; declararlo es lo que hace que `tsc` lo vea, porque swc no typechequea
+ * y el watch de Docker no lo habría delatado.
  */
 type PlatformInvoiceResolution = InvoiceControlSource & {
   id: number;
   technical_key: string | null;
   document_type: string;
+  current_number: number;
 };
+
+/**
+ * Un motivo por el que la factura no puede emitirse todavía, o un aviso de que
+ * se emitiría diciendo menos de lo que debería.
+ *
+ * `source` existe para que quien lea el informe sepa DÓNDE se arregla sin tener
+ * que reconocer el código: `completeness` y `identity` mandan a los datos
+ * fiscales de la organización; `document` manda a la factura o a la resolución.
+ */
+export interface SubscriptionEmitBlocker {
+  source: 'completeness' | 'identity' | 'document';
+  code: string;
+  field: string;
+  problem: string;
+  fix: string;
+  details?: Record<string, unknown>;
+  /** Regla del Anexo Técnico que este hallazgo anticipa, si la hay. */
+  dian_rule?: string | null;
+}
+
+/**
+ * Veredicto sobre si una factura de suscripción puede emitirse, SIN emitirla.
+ *
+ * `computed` son los importes que el XML va a declarar, recomputados con las
+ * mismas funciones que los escriben. Sin ellos, un descuadre obliga a
+ * reconstruir a mano la aritmética del emisor.
+ */
+export interface SubscriptionEmitReadiness {
+  emittable: boolean;
+  subscription_invoice_id: number;
+  /**
+   * El consecutivo que se asignaría. Es un SONDEO: leerlo no lo consume, y esa
+   * es la diferencia entre este informe y emitir para ver qué pasa.
+   */
+  document_number_preview: string;
+  resolution_id: number;
+  blockers: SubscriptionEmitBlocker[];
+  warnings: SubscriptionEmitBlocker[];
+  computed: FiscalDocumentComputedTotals;
+}
 
 @Injectable()
 export class SubscriptionFiscalService {
@@ -303,6 +381,11 @@ export class SubscriptionFiscalService {
     // guardada y el CUFE se seguiría hashando con la clave vieja. Llega por
     // `EncryptionModule`, que es @Global.
     private readonly technicalKeyVault: TechnicalKeyVaultService,
+    // Los dos prevalidadores del carril de tiendas. Puros y sin estado: la única
+    // razón de inyectarlos en vez de instanciarlos es que Nest los comparta con
+    // el otro carril, para que actualizar una regla actualice los dos.
+    private readonly identityValidator: CustomerFiscalIdentityValidator,
+    private readonly documentValidator: FiscalDocumentValidator,
   ) {}
 
   async getStatus() {
@@ -1429,18 +1512,89 @@ export class SubscriptionFiscalService {
     }
 
     const config = await this.getActiveConfig(settings);
+
+    // La resolución que respalda el consecutivo de esta transmisión. Se carga aquí
+    // y no dentro de `buildProviderData` porque esa función es sincrónica y debe
+    // seguir siéndolo: armar el payload no debe poder tocar la base.
+    //
+    // SUBIÓ de después de `ensureTransmission` a antes, y no es cosmético: la
+    // prevalidación de abajo necesita la resolución para juzgar el número, el
+    // rango y la ClTec, y toda comprobación que ocurra DESPUÉS de
+    // `ensureTransmission` llega tarde — ahí el consecutivo ya está gastado. La
+    // llamada es de sólo lectura, así que adelantarla no tiene efectos.
+    const resolution = await this.loadInvoiceResolution(settings);
+
+    // ── PREVALIDACIÓN, Y VA AQUÍ POR UNA RAZÓN CONCRETA ──────────────────────
+    //
+    // El carril de tiendas lo dice literal en `invoice-flow.service.ts:1274-1278`:
+    // «va acá y no en `send()` porque después de `send()` el consecutivo ya se
+    // gastó: el 14/08/2026 una ClTec de 38 caracteres hizo rechazar una factura
+    // real y quemó un consecutivo autorizado que no se recupera».
+    //
+    // El carril de plataforma no tenía NADA de esto. Entre la única comprobación
+    // que existía (`missingCustomerFiscalData`, seis campos y sólo por presencia)
+    // y el envío a la DIAN mediaban `ensureTransmission` —que consume el
+    // consecutivo— y nada más. El 17/08/2026 eso costó el rechazo de la primera
+    // factura de suscripción emitida.
+    //
+    // Los dos validadores que se corren son los MISMOS del carril de tiendas, sin
+    // copia ni variante: son `@Injectable()` puros, sin Prisma, y el precedente de
+    // reuso cross-carril ya está establecido en este archivo con
+    // `DianNumberingRangeService`. Que la plataforma juzgue con reglas propias es
+    // exactamente cómo se llega a que un carril emita lo que el otro rechaza.
+    const readiness = this.evaluateEmitReadiness(invoice, resolution);
+    if (!readiness.emittable) {
+      const detail = {
+        subscription_invoice_id: invoiceId,
+        document_number_preview: readiness.document_number_preview,
+        blockers: readiness.blockers,
+        warnings: readiness.warnings,
+        computed: readiness.computed,
+      };
+      if (opts.manual) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_FISCAL_001,
+          `La factura no se puede emitir todavía: ${readiness.blockers[0]?.problem ?? 'hay datos fiscales incompletos'} ${
+            readiness.blockers[0]?.fix ?? ''
+          }`.trim(),
+          detail,
+        );
+      }
+      this.logger.warn(
+        `Subscription fiscal issue skipped invoice=${invoiceId}: prevalidation failed (${readiness.blockers
+          .map((b) => b.code)
+          .join(', ')})`,
+      );
+      return {
+        skipped: true,
+        reason: 'prevalidation_failed',
+        blockers: readiness.blockers,
+        warnings: readiness.warnings,
+      };
+    }
+
+    // Los avisos no bloquean —son ausencias que hacen al documento decir menos,
+    // no decir algo falso— pero sí se registran: son la lista de lo que hoy se
+    // emite a medias.
+    for (const warning of readiness.warnings) {
+      this.logger.warn(
+        `Subscription invoice #${invoiceId} — ${warning.code} (${warning.field}): ${warning.problem}`,
+      );
+    }
+
     const transmission = await this.ensureTransmission(invoice, settings, config);
     if (transmission.transmission_status === 'accepted') {
       return { skipped: false, transmission, already_accepted: true };
     }
 
-    // La resolución que respalda el consecutivo de esta transmisión. Se carga aquí
-    // y no dentro de `buildProviderData` porque esa función es sincrónica y debe
-    // seguir siéndolo: armar el payload no debe poder tocar la base.
-    const resolution = await this.loadInvoiceResolution(settings);
+    // FUERA del `try` a propósito. `markSubmitted` ahora lanza cuando la
+    // transmisión ya es terminal (`accepted` / `cancelled`), y dentro del `try`
+    // ese throw caería en el `catch` de abajo, que llama a `markError`: la
+    // transmisión ACEPTADA quedaría reescrita como fallida por el mismo guardián
+    // que existe para protegerla. El error tiene que salir crudo.
+    await this.markSubmitted(transmission.id);
 
     try {
-      await this.markSubmitted(transmission.id);
       const response = await RequestContextService.runIsolated(
         {
           organization_id: settings.platform_organization_id!,
@@ -1479,6 +1633,230 @@ export class SubscriptionFiscalService {
     return this.prisma.withoutScope().fiscal_transmissions.findUnique({
       where: { id: transmission.id },
     });
+  }
+
+  /**
+   * ¿Puede emitirse esta factura de suscripción, SIN emitirla?
+   *
+   * Espejo de `GET /store/invoicing/:id/emit-readiness`
+   * (`invoicing.controller.ts:285`), que el carril de tiendas expone para que
+   * nadie tenga que gastar un consecutivo para descubrir que faltaba un dato.
+   *
+   * No escribe nada: ni transmisión, ni número, ni estado. Corre exactamente las
+   * mismas comprobaciones que `issueForInvoice` corre antes de numerar, con un
+   * número de SONDEO —el que se asignaría— para que las reglas de rango y de
+   * formato se juzguen sobre el valor real y no sobre un hueco.
+   */
+  async getEmitReadiness(invoiceId: number): Promise<SubscriptionEmitReadiness> {
+    const settings = await this.getSettings();
+    const invoice = await this.loadSubscriptionInvoice(invoiceId);
+    const resolution = await this.loadInvoiceResolution(settings);
+    return this.evaluateEmitReadiness(invoice, resolution);
+  }
+
+  /**
+   * El motor de la prevalidación, compartido por la puerta de emisión y por el
+   * endpoint de sólo lectura.
+   *
+   * Sincrónico y sin base de datos a propósito: quien lo llama ya cargó factura y
+   * resolución, y así el mismo veredicto se puede ejercitar en un test con
+   * literales. Si tocara la base, el endpoint de consulta y la puerta de emisión
+   * acabarían leyendo estados distintos y dando respuestas distintas — que es
+   * justo la divergencia que esto existe para cerrar.
+   */
+  private evaluateEmitReadiness(
+    invoice: SubscriptionInvoiceForFiscal,
+    resolution: PlatformInvoiceResolution,
+  ): SubscriptionEmitReadiness {
+    const blockers: SubscriptionEmitBlocker[] = [];
+    const warnings: SubscriptionEmitBlocker[] = [];
+
+    // 1. Completitud — la comprobación que ya existía. Se conserva porque nombra
+    //    los campos por su nombre de negocio («tax_id», «address»), que es lo que
+    //    quien tiene que arreglarlos reconoce.
+    const missing = this.missingCustomerFiscalData(invoice);
+    for (const field of missing) {
+      blockers.push({
+        source: 'completeness',
+        code: 'CUSTOMER_FISCAL_DATA_MISSING',
+        field,
+        problem: `La organización no tiene «${field}», y la DIAN lo exige para identificar al adquiriente.`,
+        fix: 'Complétalo en los datos fiscales de la organización antes de emitir.',
+      });
+    }
+
+    // 2. Número de SONDEO — el que se asignaría, con el mismo suelo que aplica
+    //    `allocateFiscalNumber`. Sin nivelar, una resolución cuyo cursor derivó a
+    //    cero sondearía el número 1 y la regla de rango lo denunciaría por un
+    //    motivo que la asignación real ya corrige: un falso positivo.
+    const floor = resolution.range_from - 1;
+    const cursor =
+      resolution.current_number < floor ? floor : resolution.current_number;
+    const document_number_preview = `${resolution.prefix}${cursor + 1}`;
+
+    // 3. Identidad del adquiriente. `nominative` sin discusión: una factura de
+    //    suscripción se emite A NOMBRE del cliente que la paga; el Consumidor
+    //    Final es la venta de mostrador a quien no pide factura nominativa, y no
+    //    existe en este riel.
+    const identity = this.identityValidator.validate(
+      this.buildCustomerIdentityInput(invoice),
+    );
+    for (const finding of identity.findings) {
+      const entry: SubscriptionEmitBlocker = {
+        source: 'identity',
+        code: finding.code,
+        field: finding.field,
+        problem: finding.problem,
+        fix: finding.fix,
+        details: finding.details,
+      };
+      if (finding.severity === 'blocker') blockers.push(entry);
+      else warnings.push(entry);
+    }
+
+    // 4. El documento completo, armado EXACTAMENTE como se va a emitir. Se usa el
+    //    mismo `buildProviderData` que alimenta al proveedor: prevalidar un
+    //    payload distinto del que viaja es aprobar un documento que no existe.
+    const provider_data = this.buildProviderData(
+      invoice,
+      document_number_preview,
+      resolution,
+    );
+    const document = this.documentValidator.validate(
+      this.buildFiscalDocumentInput(provider_data, resolution),
+    );
+    for (const finding of document.findings) {
+      const entry: SubscriptionEmitBlocker = {
+        source: 'document',
+        code: finding.code,
+        field: finding.field,
+        problem: finding.problem,
+        fix: finding.fix,
+        details: finding.details,
+        dian_rule: finding.dian_rule?.id ?? null,
+      };
+      if (finding.severity === 'blocker') blockers.push(entry);
+      else warnings.push(entry);
+    }
+
+    return {
+      emittable: blockers.length === 0,
+      subscription_invoice_id: invoice.id,
+      document_number_preview,
+      resolution_id: resolution.id,
+      blockers,
+      warnings,
+      computed: document.computed,
+    };
+  }
+
+  /**
+   * El adquiriente, en el contrato que juzga `CustomerFiscalIdentityValidator`.
+   *
+   * Se compone desde `buildProviderData` y no desde la fila de organización
+   * directamente, para que el validador juzgue los MISMOS valores que el emisor
+   * va a escribir —incluida la partición NIT/DV, que no es trivial: la mayoría de
+   * filas guardan el NIT con el DV incrustado, y concatenarlos produce un número
+   * que no es de nadie.
+   */
+  private buildCustomerIdentityInput(
+    invoice: SubscriptionInvoiceForFiscal,
+  ): CustomerFiscalIdentityInput {
+    const org = invoice.store_subscription.store.organizations;
+    const { number, dv } = org
+      ? this.splitCustomerNit(org)
+      : { number: undefined, dv: undefined };
+    const address = this.buildCustomerAddress(org);
+
+    return {
+      identification_mode: 'nominative',
+      document_type: org?.document_type ?? (org?.tax_id ? '31' : '13'),
+      document_number: number ?? null,
+      verification_digit: dv ?? null,
+      // `organizations.person_type` guarda el CÓDIGO DIAN (`'1'`/`'2'`), no el
+      // enum del validador. Sin traducir, cada factura de suscripción levantaba
+      // un `PERSON_TYPE_UNKNOWN` sobre un dato correcto, y una advertencia que
+      // siempre aparece deja de leerse.
+      person_type: normalizePersonType(org?.person_type),
+      legal_name:
+        org?.legal_name ??
+        org?.name ??
+        invoice.store_subscription.store.name ??
+        null,
+      tax_regime: normalizeAcquirerTaxRegime(org?.tax_regime),
+      tax_responsibilities: org?.fiscal_responsibilities?.length
+        ? org.fiscal_responsibilities
+        : null,
+      email: org?.email ?? null,
+      address: address
+        ? {
+            address_line: address.address_line ?? null,
+            city_code: address.city_code ?? null,
+            city_name: address.city_name ?? null,
+            department_code: address.department_code ?? null,
+            department_name: address.department_name ?? null,
+            country_code: address.country_code ?? null,
+            postal_code: address.postal_code ?? null,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * El documento, en el contrato que juzga `FiscalDocumentValidator`.
+   *
+   * `operation_type` viaja como `null` porque `ProviderInvoiceData` no lo lleva:
+   * la factura de suscripción es una operación estándar y el builder emite el
+   * `cbc:CustomizationID` por defecto. Declarar aquí un valor inventado activaría
+   * `OPERATION_TYPE_UNKNOWN` sobre un campo que el XML no publica.
+   */
+  private buildFiscalDocumentInput(
+    provider_data: ProviderInvoiceData,
+    resolution: PlatformInvoiceResolution,
+  ): FiscalDocumentValidationInput {
+    return {
+      document_type: 'sales_invoice',
+      invoice_number: provider_data.invoice_number,
+      issue_date: provider_data.issue_date,
+      timezone: PLATFORM_TIMEZONE,
+      currency: provider_data.currency,
+      operation_type: null,
+      subtotal_amount: provider_data.subtotal_amount,
+      discount_amount: provider_data.discount_amount,
+      tax_amount: provider_data.tax_amount,
+      withholding_amount: provider_data.withholding_amount,
+      total_amount: provider_data.total_amount,
+      items: provider_data.items.map((item, index) => ({
+        line_number: index + 1,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        tax_amount: item.tax_amount,
+        unit_code: item.unit_code ?? null,
+      })),
+      taxes: provider_data.taxes.map((tax) => ({
+        tax_name: tax.tax_name,
+        tax_type: tax.tax_type ?? null,
+        tax_rate: tax.tax_rate,
+        taxable_amount: tax.taxable_amount,
+        tax_amount: tax.tax_amount,
+      })),
+      resolution: {
+        id: resolution.id,
+        resolution_number: resolution.resolution_number,
+        prefix: resolution.prefix,
+        range_from: resolution.range_from,
+        range_to: resolution.range_to,
+        current_number: resolution.current_number,
+        valid_from: resolution.valid_from,
+        valid_to: resolution.valid_to,
+        is_active: resolution.is_active,
+        // Por la BÓVEDA, la misma lectura que hashea el CUFE. Leer aquí la plana
+        // sería validar una clave distinta de la que se va a firmar.
+        technical_key: this.technicalKeyVault.reveal(resolution) ?? null,
+      },
+    };
   }
 
   async retryTransmission(transmissionId: number) {
@@ -2526,12 +2904,66 @@ export class SubscriptionFiscalService {
       throw new BadRequestException('No active DIAN sales invoice resolution found');
     }
 
+    // ── ClTec ANTES de mover el cursor ────────────────────────────────────────
+    //
+    // Copiado de `invoice-number-generator.ts:181-201`, que lo aprendió caro: el
+    // 14/08/2026 una clave técnica de 38 caracteres hizo rechazar una factura
+    // real por «CUFE mal calculado» y quemó un consecutivo autorizado que no se
+    // recupera. Comprobarlo aquí —bajo el candado consultivo que ya serializa la
+    // asignación y ANTES del `updateMany`— es la diferencia entre un error
+    // barato y un número perdido.
+    //
+    // Se valida por la BÓVEDA y no por la columna plana, porque `reveal()`
+    // prefiere la cifrada y es esa la que después se hashea: una fila con la
+    // plana corregida y la cifrada rancia pasaría con 40 hex impecables y
+    // firmaría con la vieja.
+    const technical_key = normalizeTechnicalKey(
+      this.technicalKeyVault.reveal(resolution),
+    );
+    if (!isWellFormedTechnicalKey(technical_key)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_011,
+        `La resolución ${resolution.prefix}${resolution.resolution_number} de la plataforma no tiene una clave técnica (ClTec) utilizable: ` +
+          `${technical_key.length === 0 ? 'está vacía' : `tiene ${technical_key.length} caracteres`} y la DIAN la emite de ` +
+          `${TECHNICAL_KEY_LENGTHS_LABEL} en hexadecimal. Corrígela antes de emitir: con una clave equivocada la DIAN rechaza la ` +
+          'factura por CUFE mal calculado y el consecutivo autorizado que gasta no se recupera. No se asignó numeración.',
+        {
+          resolution_id: resolution.id,
+          document_type: 'sales_invoice',
+          technical_key_length: technical_key.length,
+          expected_lengths: [...TECHNICAL_KEY_LENGTHS],
+        },
+      );
+    }
+
+    // ── Suelo del rango autorizado ────────────────────────────────────────────
+    //
+    // `{ increment: 1 }` a ciegas sobre una resolución cuyo `current_number`
+    // derivó a 0 emite el número 1: fuera del rango que la DIAN autorizó, y la
+    // DIAN los rechaza todos, uno por uno. Con el suelo aplicado, el primer
+    // número de una resolución nueva o derivada es exactamente `range_from`.
+    //
+    // La asignación pasa a ser ABSOLUTA (`cursor + 1`) y no incremental, porque
+    // lo que tiene que aterrizar es el valor ya nivelado. Es seguro bajo el
+    // candado consultivo: ninguna asignación concurrente cabe entre la lectura y
+    // esta escritura. Espejo de `invoice-number-generator.ts:203-232`.
+    const floor = resolution.range_from - 1;
+    const cursor =
+      resolution.current_number < floor ? floor : resolution.current_number;
+
+    if (cursor !== resolution.current_number) {
+      this.logger.warn(
+        `Resolución de plataforma #${resolution.id}: el cursor ${resolution.current_number} estaba por debajo de su suelo ` +
+          `autorizado ${floor}; se asigna desde ${resolution.range_from} en vez de emitir numeración fuera de rango`,
+      );
+    }
+
     const updatedCount = await tx.invoice_resolutions.updateMany({
       where: {
         id: resolution.id,
         current_number: { lt: resolution.range_to },
       },
-      data: { current_number: { increment: 1 } },
+      data: { current_number: cursor + 1 },
     });
     if (updatedCount.count !== 1) {
       throw new BadRequestException('DIAN invoice resolution is exhausted');
@@ -3081,15 +3513,60 @@ export class SubscriptionFiscalService {
     );
   }
 
+  /**
+   * Marca la transmisión como enviada, PERO sólo si todavía puede enviarse.
+   *
+   * Era un `update` plano: escribía `submitted` sobre cualquier estado, incluido
+   * `accepted`. Dos emisiones concurrentes sobre la misma factura —el cron
+   * automático y un reintento manual, por ejemplo— dejaban la segunda pisando el
+   * `accepted` de la primera, y a partir de ahí la factura ya aceptada por la
+   * DIAN figuraba como en vuelo: se reintenta, se vuelve a enviar el mismo CUFE
+   * y se pierde la única marca que decía «esto ya está bien».
+   *
+   * `updateMany` con `notIn` + verificación del `count` convierte la escritura en
+   * una comprobación: si nadie cambió nada, es que la transmisión ya estaba en un
+   * estado terminal y quien llamó tiene que enterarse, no seguir. Espejo de
+   * `fiscal-transmission-ledger.service.ts:121-141`, que es donde el carril de
+   * tiendas resolvió lo mismo.
+   */
   private async markSubmitted(transmissionId: number): Promise<void> {
-    await this.prisma.withoutScope().fiscal_transmissions.update({
-      where: { id: transmissionId },
-      data: {
-        transmission_status: 'submitted',
-        sent_at: new Date(),
-        updated_at: new Date(),
+    const updated = await this.prisma
+      .withoutScope()
+      .fiscal_transmissions.updateMany({
+        where: {
+          id: transmissionId,
+          transmission_status: { notIn: ['accepted', 'cancelled'] },
+        },
+        data: {
+          transmission_status: 'submitted',
+          sent_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+
+    if (updated.count === 1) return;
+
+    // Cero filas: o la transmisión no existe, o ya es terminal. Se relee para
+    // decirlo con precisión — «no se pudo marcar» sin el estado obliga a abrir la
+    // base de datos para entender qué pasó.
+    const current = await this.prisma
+      .withoutScope()
+      .fiscal_transmissions.findUnique({
+        where: { id: transmissionId },
+        select: { transmission_status: true },
+      });
+
+    throw new VendixHttpException(
+      ErrorCodes.SUBSCRIPTION_FISCAL_001,
+      current
+        ? `La transmisión ${transmissionId} ya está en estado «${current.transmission_status}» y no se puede volver a enviar. ` +
+          'Una transmisión aceptada por la DIAN no se reenvía: emite una nota crédito si hay que corregirla.'
+        : `La transmisión ${transmissionId} no existe.`,
+      {
+        transmission_id: transmissionId,
+        transmission_status: current?.transmission_status ?? null,
       },
-    });
+    );
   }
 
   private async markAccepted(

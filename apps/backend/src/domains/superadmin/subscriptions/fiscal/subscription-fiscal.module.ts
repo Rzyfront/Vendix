@@ -31,6 +31,13 @@ import { FiscalProductionReadinessService } from '../../../store/invoicing/provi
 // Se importa por su path y NO vía `InvoicingModule`: ese módulo importa este riel
 // y traerlo aquí cerraría el ciclo.
 import { DianNumberingRangeService } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
+// Los dos prevalidadores del carril de tiendas, reutilizados tal cual. Son
+// `@Injectable()` puros —sin Prisma, sin contexto de tienda— así que no arrastran
+// dependencias: se declaran como providers locales por el mismo motivo que
+// `DianNumberingRangeService`, para no importar `InvoicingModule` y cerrar el
+// ciclo de módulos.
+import { CustomerFiscalIdentityValidator } from '../../../store/invoicing/validators/customer-fiscal-identity.validator';
+import { FiscalDocumentValidator } from '../../../store/invoicing/validators/fiscal-document.validator';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { SubscriptionFiscalController } from './subscription-fiscal.controller';
 import { SubscriptionFiscalListener } from './subscription-fiscal.listener';
@@ -60,6 +67,8 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
     // por `PrismaModule`, `DianTestService` como provider de arriba y
     // `TechnicalKeyVaultService` por `EncryptionModule`, que es @Global.
     DianNumberingRangeService,
+    CustomerFiscalIdentityValidator,
+    FiscalDocumentValidator,
     SubscriptionFiscalService,
     SubscriptionFiscalListener,
   ],

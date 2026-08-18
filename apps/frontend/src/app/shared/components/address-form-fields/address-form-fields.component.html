@@ -120,13 +120,20 @@
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <app-input
+      <!--
+        País por catálogo, no texto libre: se muestra el nombre («Colombia»)
+        pero el control sigue guardando el código ISO («CO»), que es lo que lee
+        `showMunicipality()` para ofrecer el municipio DANE y lo que espera el
+        backend. Con el input de texto el cliente veía el código crudo y podía
+        escribir cualquier cosa.
+      -->
+      <app-selector
         label="País"
         formControlName="country_code"
-        placeholder="Código de país (CO)"
-        [control]="form.get('country_code')!"
+        placeholder="Selecciona el país"
+        [options]="countryOptions()"
         [required]="true"
-      ></app-input>
+      ></app-selector>
 
       <app-input
         label="Código postal"

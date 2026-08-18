@@ -7,6 +7,7 @@ import { GatewayController } from './gateway.controller';
 import { PlatformGatewayService } from './platform-gateway.service';
 import { PlatformWompiConfigValidator } from './validators/platform-wompi-config.validator';
 import { PlatformWompiWebhookValidatorService } from './platform-wompi-webhook-validator.service';
+import { PlatformWebhookLogService } from './platform-webhook-log.service';
 import { PlatformWebhookController } from './platform-webhook.controller';
 
 @Module({
@@ -25,7 +26,12 @@ import { PlatformWebhookController } from './platform-webhook.controller';
     PlatformWompiConfigValidator,
     PlatformGatewayService,
     PlatformWompiWebhookValidatorService,
+    PlatformWebhookLogService,
   ],
-  exports: [PlatformGatewayService, PlatformWompiWebhookValidatorService],
+  exports: [
+    PlatformGatewayService,
+    PlatformWompiWebhookValidatorService,
+    PlatformWebhookLogService,
+  ],
 })
 export class PlatformGatewayModule {}

@@ -281,3 +281,119 @@ describe('UblCommonBuilder monetary totals', () => {
     });
   });
 });
+
+/**
+ * Regresión del rechazo `FAU04` del 17/08/2026.
+ *
+ * `TaxExclusiveAmount` se emitía siempre como el bruto de líneas. La DIAN lo
+ * compara contra
+ * `sum(//cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount)`, y una
+ * línea que omite su grupo de tributos —un EXCLUIDO, art. 476 ET— no aporta
+ * ninguna base. La suscripción de $69.900 declaró 69900 contra una suma de 0.
+ *
+ * La guarda de `buildTaxTotals` sola NO corregía esto: son dos defectos
+ * independientes en el mismo documento.
+ */
+describe('UblCommonBuilder TaxExclusiveAmount — base declarada (FAU04)', () => {
+  function createRoot(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function line(overrides: Record<string, any>): any {
+    return {
+      description: 'Producto',
+      quantity: '1',
+      unit_price: '1000.00',
+      discount_amount: '0.00',
+      tax_amount: '0.00',
+      total_amount: '1000.00',
+      ...overrides,
+    };
+  }
+
+  function totalsOf(data: {
+    discount_amount: string;
+    tax_amount: string;
+    items: any[];
+  }): Record<string, string> {
+    const doc = createRoot();
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data as any, 'COP');
+    const xml = doc.end({ prettyPrint: false });
+    const out: Record<string, string> = {};
+    for (const m of xml.matchAll(/<cbc:(\w+) currencyID="COP">([^<]*)<\/cbc:\1>/g)) {
+      out[m[1]] = m[2];
+    }
+    return out;
+  }
+
+  it('una operación 100 % excluida declara base imponible CERO, no el bruto', () => {
+    // El caso exacto de la suscripción rechazada: una línea, excluida de IVA.
+    const totals = totalsOf({
+      discount_amount: '0.00',
+      tax_amount: '0.00',
+      items: [
+        line({ unit_price: '69900.00', total_amount: '69900.00', omit_tax_total: true }),
+      ],
+    });
+
+    expect(totals.LineExtensionAmount).toBe('69900.00');
+    expect(totals.TaxExclusiveAmount).toBe('0.00');
+    // FAU06 y FAU14 no se tocan: el cliente sigue debiendo lo mismo.
+    expect(totals.TaxInclusiveAmount).toBe('69900.00');
+    expect(totals.PayableAmount).toBe('69900.00');
+  });
+
+  it('en un documento mixto sólo suman las líneas que declaran tributo', () => {
+    const totals = totalsOf({
+      discount_amount: '0.00',
+      tax_amount: '190.00',
+      items: [
+        line({ unit_price: '1000.00', tax_amount: '190.00', total_amount: '1190.00' }),
+        line({ unit_price: '500.00', total_amount: '500.00', omit_tax_total: true }),
+      ],
+    });
+
+    expect(totals.LineExtensionAmount).toBe('1500.00');
+    expect(totals.TaxExclusiveAmount).toBe('1000.00');
+    expect(totals.TaxInclusiveAmount).toBe('1690.00');
+    expect(totals.PayableAmount).toBe('1690.00');
+  });
+
+  it('sin la bandera, la base sigue siendo el total de líneas — los tenants no cambian', () => {
+    // Las 4 transmisiones aceptadas en producción tienen todas sus líneas
+    // gravadas, así que el filtro no descarta ninguna y el valor es idéntico.
+    const totals = totalsOf({
+      discount_amount: '0.00',
+      tax_amount: '190.00',
+      items: [line({ unit_price: '1000.00', tax_amount: '190.00', total_amount: '1190.00' })],
+    });
+
+    expect(totals.LineExtensionAmount).toBe('1000.00');
+    expect(totals.TaxExclusiveAmount).toBe('1000.00');
+  });
+
+  it('`omit_tax_total: false` es explícitamente una línea gravada', () => {
+    const totals = totalsOf({
+      discount_amount: '0.00',
+      tax_amount: '190.00',
+      items: [
+        line({
+          unit_price: '1000.00',
+          tax_amount: '190.00',
+          total_amount: '1190.00',
+          omit_tax_total: false,
+        }),
+      ],
+    });
+
+    expect(totals.TaxExclusiveAmount).toBe('1000.00');
+  });
+});

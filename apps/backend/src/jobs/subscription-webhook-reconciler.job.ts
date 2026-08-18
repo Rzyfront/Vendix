@@ -8,6 +8,7 @@ import {
   DecryptedCreds,
 } from '../domains/superadmin/subscriptions/gateway/platform-gateway.service';
 import { SubscriptionWebhookService } from '../domains/store/subscriptions/services/subscription-webhook.service';
+import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import { PlatformGatewayEnvironmentEnum } from '../domains/superadmin/subscriptions/gateway/dto/upsert-gateway.dto';
 import {
@@ -34,10 +35,18 @@ interface ReconcileSummary {
 /**
  * Reconciles SaaS subscription invoices whose Wompi webhook may have been
  * lost or never delivered. Polls Wompi's REST API for transactions associated
- * with `issued` invoices that still have a `pending` payment row, and
- * synthesizes a webhook event into `SubscriptionWebhookService` so the rest
- * of the pipeline (commission accrual, state promotion, emails) runs as if
- * the webhook had arrived normally.
+ * with `issued` **and `void`** invoices that still have a `pending` payment
+ * row, and synthesizes a webhook event into `SubscriptionWebhookService` so
+ * the rest of the pipeline (commission accrual, state promotion, emails) runs
+ * as if the webhook had arrived normally.
+ *
+ * Por qué `void` también entra al barrido (incidente 17/08/2026, Multimarcas
+ * Ever): `ReconcileStuckPendingJob` corre CADA 5 MINUTOS y anula toda factura
+ * `issued` con más de 60 min sin webhook; este reparador corre CADA 30. En una
+ * ventana de media hora el destructor siempre gana: en cuanto la factura pasa
+ * a `void` desaparecía de este `where` y el pago aprobado quedaba
+ * irrecuperable por cron — hubo que reparar la base a mano. Mirar sólo
+ * `issued` no era un filtro conservador, era una carrera perdida de antemano.
  *
  * Idempotency: `SubscriptionWebhookService.handleWompiEvent` is idempotent
  * via the `webhook_event_dedup` table (UNIQUE(processor, event_id) +
@@ -66,6 +75,11 @@ export class SubscriptionWebhookReconcilerJob {
     private readonly wompiProcessor: WompiProcessor,
     private readonly platformGw: PlatformGatewayService,
     private readonly webhookService: SubscriptionWebhookService,
+    // Sólo se usa para la vía de reapertura de facturas `void`. Es el seam que
+    // sabe reabrir una anulada y restaurar los `pending_*` que el cron
+    // destructivo puso en NULL; internamente reutiliza
+    // `markPaymentSucceededFromWebhook`, así que no duplica lógica de éxito.
+    private readonly paymentService: SubscriptionPaymentService,
     private readonly gateConfig: SubscriptionGateConfig,
   ) {}
 
@@ -111,17 +125,29 @@ export class SubscriptionWebhookReconcilerJob {
 
     // withoutScope: cron has no tenant context. Schema reference:
     // subscription_invoices.state in {draft,issued,paid,partially_paid,
-    // overdue,void,refunded}; we look at `issued` only.
+    // overdue,void,refunded}.
+    //
+    // `void` entra al barrido a propósito: es el estado al que
+    // `ReconcileStuckPendingJob` empuja la factura a los 60 min sin webhook, y
+    // ese cron NO toca la fila de pago — la deja en `pending`, así que el
+    // filtro `payments.some.state = 'pending'` sigue casando. Sin `void` en
+    // este `in`, un pago APPROVED cuya factura ya fue anulada no tenía ninguna
+    // vía automática de recuperación.
+    //
+    // El filtro temporal se conserva tal cual: `issued_at` sobrevive a la
+    // anulación (el destructor sólo escribe `state` y `updated_at`), así que
+    // sigue acotando la ventana a 24h también para las anuladas.
     const candidates = await this.prisma
       .withoutScope()
       .subscription_invoices.findMany({
         where: {
-          state: 'issued',
+          state: { in: ['issued', 'void'] },
           issued_at: { gte: oneDayAgo },
           payments: { some: { state: 'pending' } },
         },
         select: {
           id: true,
+          state: true,
           store_subscription_id: true,
           store_id: true,
           payments: {
@@ -172,8 +198,10 @@ export class SubscriptionWebhookReconcilerJob {
         event: 'WEBHOOK_RECONCILE',
         run_id: runId,
         invoice_id: inv.id,
+        invoice_state: inv.state,
         subscription_id: inv.store_subscription_id,
       };
+      const wasVoided = inv.state === 'void';
       try {
         const payment = inv.payments?.[0];
         if (!payment) {
@@ -242,6 +270,26 @@ export class SubscriptionWebhookReconcilerJob {
           continue;
         }
 
+        // Una factura ya anulada sólo se toca si la pasarela dice APPROVED.
+        // Con DECLINED/ERROR/VOIDED no hay nada que recuperar: el `void` ya es
+        // el desenlace correcto y el cron destructivo ya revirtió la
+        // suscripción. Sintetizar el webhook igualmente quemaría la clave de
+        // dedup (`wompi_platform`, txn.id) sin cambiar ningún estado, y dejaría
+        // ciego un webhook real posterior sobre esa misma transacción.
+        if (wasVoided && status !== 'APPROVED') {
+          summary.noop++;
+          this.logger.debug(
+            JSON.stringify({
+              ...baseLog,
+              action: 'no_action',
+              outcome: 'noop',
+              wompi_status: status,
+              error_message: 'void_invoice_non_approved',
+            }),
+          );
+          continue;
+        }
+
         if (
           status === 'APPROVED' ||
           status === 'DECLINED' ||
@@ -254,10 +302,64 @@ export class SubscriptionWebhookReconcilerJob {
             this.logger.log(
               JSON.stringify({
                 ...baseLog,
-                action: 'recovered_payment',
+                action: wasVoided
+                  ? 'reopened_void_invoice'
+                  : 'recovered_payment',
                 outcome: 'success',
                 wompi_status: status,
                 dry_run: true,
+              }),
+            );
+            continue;
+          }
+
+          if (wasVoided) {
+            // Reapertura de anulada. NO se sintetiza el webhook por
+            // `handleWompiEvent`: ese camino promueve la suscripción pero no
+            // sabe que el cron destructivo dejó los `pending_*` en NULL, y el
+            // cambio de plan pagado se perdería. `syncInvoiceFromGateway` es
+            // el seam que reabre la factura y restaura esos campos, y por
+            // dentro reutiliza `markPaymentSucceededFromWebhook` — la MISMA
+            // lógica de éxito del webhook, sin duplicarla acá.
+            //
+            // Ojo con la clave de búsqueda: ese servicio releo la transacción
+            // por su cuenta usando `metadata.reference`, mientras este job la
+            // resolvió con `gateway_reference ?? metadata.reference`. Si un
+            // pago tiene la referencia sólo en `gateway_reference`, el sync
+            // devolverá `pending` y la factura seguirá anulada; queda contado
+            // como noop y visible en el log, no silenciado.
+            const syncResult = await this.paymentService.syncInvoiceFromGateway(
+              inv.id,
+            );
+
+            if (syncResult.status !== 'paid') {
+              summary.noop++;
+              this.logger.warn(
+                JSON.stringify({
+                  ...baseLog,
+                  action: 'reopen_void_invoice_failed',
+                  outcome: 'noop',
+                  wompi_status: status,
+                  wompi_txn_id: txn.id ?? null,
+                  sync_status: syncResult.status,
+                }),
+              );
+              continue;
+            }
+
+            summary.recovered++;
+            // WARN a propósito y con evento greppeable: reabrir una factura
+            // anulada nunca es rutina — significa que el cron destructivo se
+            // adelantó a un pago real y que un cliente estuvo sin servicio.
+            this.logger.warn(
+              JSON.stringify({
+                event: 'RECONCILER_REOPENED_VOID_INVOICE',
+                run_id: runId,
+                invoice_id: inv.id,
+                subscription_id: inv.store_subscription_id,
+                store_id: inv.store_id,
+                transaction_id: txn.id ?? null,
+                wompi_status: status,
               }),
             );
             continue;

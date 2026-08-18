@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { computeNitDv, normalizeNit } from '@common/utils/nit.util';
+import {
+  normalizeAcquirerTaxRegime,
+  normalizePersonType,
+} from '@common/utils/dian-party-vocabulary.util';
 import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.constants';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
@@ -11,6 +15,15 @@ import {
   classifyAcquirerAddressType,
   resolveAcquirerAddress,
 } from '../../invoicing/providers/dian-direct/acquirer-address.resolver';
+// El MISMO prevalidador que gobierna la emisión de tiendas. Se reutiliza tal
+// cual —es `@Injectable()` puro, sin Prisma ni contexto de tienda— para que el
+// checkout no pueda aceptar una identidad que el emisor después rechace: dos
+// implementaciones del mismo juicio es exactamente cómo nace esa divergencia.
+import {
+  CustomerFiscalIdentityFinding,
+  CustomerFiscalIdentityInput,
+  CustomerFiscalIdentityValidator,
+} from '../../invoicing/validators/customer-fiscal-identity.validator';
 
 /**
  * Fila de `addresses` tal como `get()` la lee para precargar el checkout.
@@ -54,6 +67,20 @@ interface IndexedAcquirerAddressCandidate extends AcquirerAddressCandidate {
 const BILLING_ADDRESS_CANDIDATE_LIMIT = 10;
 
 /**
+ * Veredicto de «¿esta organización puede recibir una factura electrónica?»,
+ * calculado SIN efectos y sin tocar ningún consecutivo.
+ *
+ * `blockers` y `warnings` viajan con la forma que devuelve
+ * `CustomerFiscalIdentityValidator` (`code`, `field`, `problem`, `fix`) para que
+ * la pantalla nombre el clic exacto en vez de decir «datos inválidos».
+ */
+export interface BillingProfileEmitReadiness {
+  emittable: boolean;
+  blockers: CustomerFiscalIdentityFinding[];
+  warnings: CustomerFiscalIdentityFinding[];
+}
+
+/**
  * Persists the fiscal identity of the organization that pays for a subscription.
  *
  * Vendix invoices its own subscriptions electronically, which makes the paying
@@ -70,7 +97,10 @@ const BILLING_ADDRESS_CANDIDATE_LIMIT = 10;
 export class SubscriptionBillingProfileService {
   private readonly logger = new Logger(SubscriptionBillingProfileService.name);
 
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly identityValidator: CustomerFiscalIdentityValidator,
+  ) {}
 
   /**
    * Upserts the organization's fiscal identity and its `billing` address.
@@ -403,6 +433,21 @@ export class SubscriptionBillingProfileService {
    * Requiring it on every commit would break renewals and free-plan swaps for
    * organizations whose data has been on file for months; requiring it on none
    * is how the platform ended up with 87% of organizations lacking a NIT.
+   *
+   * ## La segunda compuerta (3.5)
+   *
+   * Capturar no es lo mismo que poder emitir. Los seis campos pueden estar
+   * TODOS presentes y el documento seguir sin salir: un DV que no corresponde
+   * al NIT, un municipio que no pertenece al departamento declarado, un correo
+   * sin forma de correo. Ese defecto no se ve hasta que la DIAN contesta —y
+   * para entonces el consecutivo autorizado ya se gastó y el cliente ya pagó.
+   *
+   * Por eso, cuando el commit VA A COBRAR, se corre además el prevalidador de
+   * identidad del carril de tiendas y se corta con 422 antes de crear la
+   * factura y de abrir el widget. Es la misma disciplina del POS: el backend es
+   * la autoridad, no el formulario. El 17/08/2026 el formulario dejó pasar una
+   * compra porque `getBillingProfile()` había fallado y la sección fiscal se
+   * apagó sola en el cliente.
    */
   async ensureCaptured(
     organizationId: number,
@@ -421,28 +466,182 @@ export class SubscriptionBillingProfileService {
     // request would still reach here, so the write is dropped server-side.
     // Dropped, not rejected: the client legitimately echoes back the prefilled
     // values, and failing a payment over a no-op write helps nobody.
-    if (complete && (await this.fiscalModuleActive(organizationId))) {
+    const fiscalOwned =
+      complete && (await this.fiscalModuleActive(organizationId));
+
+    if (fiscalOwned) {
       if (profile) {
         this.logger.warn(
           `Billing profile edit ignored for organization=${organizationId}: ` +
             'fiscal module is active and owns the fiscal identity',
         );
       }
-      return;
+    } else if (profile) {
+      await this.save(organizationId, profile);
+    } else if (opts.required && !complete) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_FISCAL_001,
+        'Necesitamos los datos de facturación de tu empresa para emitir la factura electrónica de esta suscripción.',
+        { organization_id: organizationId, field: 'billing_profile' },
+      );
     }
 
-    if (profile) {
-      await this.save(organizationId, profile);
-      return;
-    }
+    // Sin cobro no hay documento que emitir, así que no hay nada que
+    // prevalidar. Bloquear acá un cambio de plan gratuito por un DV torcido
+    // sería cobrarle al cliente un trámite por una factura que no existe.
     if (!opts.required) return;
-    if (complete) return;
+
+    // Se relee de la base a propósito, no se juzga el DTO: lo que la DIAN va a
+    // recibir es lo PERSISTIDO, incluidas las derivaciones que `save()` aplica
+    // (el DV se recalcula del NIT, `person_type` se deriva del tipo de
+    // documento). Validar el payload de entrada aprobaría un documento que no
+    // es el que se va a emitir.
+    const readiness = await this.evaluateEmitReadiness(organizationId);
+
+    for (const warning of readiness.warnings) {
+      this.logger.warn(
+        `Billing profile warning organization=${organizationId} ` +
+          `${warning.code} (${warning.field}): ${warning.problem}`,
+      );
+    }
+
+    if (readiness.emittable) return;
 
     throw new VendixHttpException(
-      ErrorCodes.SUBSCRIPTION_FISCAL_001,
-      'Necesitamos los datos de facturación de tu empresa para emitir la factura electrónica de esta suscripción.',
-      { organization_id: organizationId, field: 'billing_profile' },
+      ErrorCodes.SUBSCRIPTION_FISCAL_002,
+      'Los datos de facturación de tu empresa tienen errores que impiden emitir la factura electrónica. Corrígelos antes de continuar con el pago.',
+      {
+        organization_id: organizationId,
+        field: 'billing_profile',
+        blockers: readiness.blockers,
+        warnings: readiness.warnings,
+      },
     );
+  }
+
+  /**
+   * ¿La identidad fiscal de esta organización produce un documento emitible?
+   *
+   * Solo lectura y sin efectos: se puede llamar desde una pantalla, desde el
+   * commit del checkout o desde un diagnóstico sin gastar nada.
+   *
+   * El NIT se lee de `organizations.tax_id` con `normalizeNit`, EXACTAMENTE
+   * como lo hace `SubscriptionFiscalService.splitCustomerNit` al armar el
+   * payload que viaja a la DIAN. No se usa acá el resolvedor permisivo que
+   * alimenta a `get()`: esa asimetría es deliberada —leer para precargar un
+   * formulario admite datos a medias; predecir una emisión, no— y una compuerta
+   * más laxa que el emisor no es una compuerta.
+   */
+  async evaluateEmitReadiness(
+    organizationId: number,
+  ): Promise<BillingProfileEmitReadiness> {
+    const input = await this.buildIdentityInput(organizationId);
+    if (!input) {
+      // No es un hallazgo fiscal: no hay adquiriente que juzgar. Fabricar un
+      // `blocker` con un código de identidad haría que la pantalla le pidiera
+      // al usuario corregir un NIT de una organización que no existe.
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001, undefined, {
+        organization_id: organizationId,
+      });
+    }
+
+    const report = this.identityValidator.validate(input);
+    return {
+      emittable: report.emittable,
+      blockers: report.blockers,
+      warnings: report.warnings,
+    };
+  }
+
+  /**
+   * La organización, en el contrato que juzga `CustomerFiscalIdentityValidator`.
+   *
+   * `identification_mode: 'nominative'` no es un valor por defecto: una factura
+   * de suscripción SIEMPRE nombra a su adquiriente. El Consumidor Final es una
+   * decisión legítima del mostrador, nunca de un cobro recurrente con contrato.
+   *
+   * La dirección pasa por la cascada ESTRICTA (`resolveAcquirerAddress`), la
+   * misma de la emisión: una dirección colombiana sin municipio DANE se
+   * descarta acá igual que allá. `resolveProfileAddress`, el respaldo permisivo,
+   * existe solo para precargar el formulario.
+   */
+  private async buildIdentityInput(
+    organizationId: number,
+  ): Promise<CustomerFiscalIdentityInput | null> {
+    const org = await this.prisma.withoutScope().organizations.findUnique({
+      where: { id: organizationId },
+      select: {
+        name: true,
+        legal_name: true,
+        tax_id: true,
+        document_type: true,
+        verification_digit: true,
+        person_type: true,
+        tax_regime: true,
+        fiscal_responsibilities: true,
+        email: true,
+        addresses: {
+          orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+          take: BILLING_ADDRESS_CANDIDATE_LIMIT,
+          select: {
+            address_line1: true,
+            address_line2: true,
+            city: true,
+            state_province: true,
+            country_code: true,
+            postal_code: true,
+            municipality_code: true,
+            type: true,
+          },
+        },
+      },
+    });
+    if (!org) return null;
+
+    const parsed = normalizeNit(org.tax_id);
+    if (parsed.dv_mismatch) {
+      this.logger.warn(
+        `Acquirer NIT ${parsed.number} carries DV ${parsed.provided_dv} but its ` +
+          `modulo-11 DV is ${parsed.dv}; using the derived one`,
+      );
+    }
+
+    const resolved = resolveAcquirerAddress({
+      candidates: this.toAcquirerCandidates(
+        (org.addresses ?? []) as BillingProfileAddressRow[],
+      ),
+      store_address: null,
+    });
+
+    return {
+      identification_mode: 'nominative',
+      // Sin `document_type` en columna, la presencia de un NIT es la única
+      // señal disponible — la misma inferencia que hace el emisor.
+      document_type: org.document_type ?? (org.tax_id ? '31' : '13'),
+      // `normalizeNit` devuelve cadena VACÍA, no `undefined`, cuando no hay
+      // NIT. Con `??` esa cadena pasaría el filtro y el validador juzgaría un
+      // número presente-pero-vacío en vez de reportar que falta.
+      document_number: parsed.number || null,
+      verification_digit: parsed.dv || null,
+      person_type: normalizePersonType(org.person_type),
+      legal_name: org.legal_name ?? org.name ?? null,
+      tax_regime: normalizeAcquirerTaxRegime(org.tax_regime),
+      tax_responsibilities: org.fiscal_responsibilities?.length
+        ? org.fiscal_responsibilities
+        : null,
+      email: org.email ?? null,
+      address: resolved
+        ? {
+            address_line: resolved.address.address_line ?? null,
+            city_code: resolved.address.city_code ?? null,
+            city_name: resolved.address.city_name ?? null,
+            department_code: resolved.address.department_code ?? null,
+            department_name: resolved.address.department_name ?? null,
+            country_code: resolved.address.country_code ?? null,
+            postal_code: resolved.address.postal_code ?? null,
+          }
+        : null,
+    };
   }
 
   /**
@@ -503,9 +702,53 @@ export class SubscriptionBillingProfileService {
     // el emisor luego rechaza — justo la divergencia que este espejo evita.
     return (
       resolveAcquirerAddress({
-        candidates: (org.addresses ?? []) as AcquirerAddressCandidate[],
+        candidates: this.toAcquirerCandidates(
+          (org.addresses ?? []) as BillingProfileAddressRow[],
+        ),
         store_address: null,
       }) !== null
     );
+  }
+
+  /**
+   * Fila de `addresses` → candidato de la cascada.
+   *
+   * Existe porque los dos contratos NO comparten nombres: la tabla guarda
+   * `address_line1` / `city` / `municipality_code`, y el resolvedor lee
+   * `address_line` / `city_name` / `city_code`. Un `as AcquirerAddressCandidate`
+   * sobre la fila cruda compila —el cast es explícito, TypeScript lo acepta— y
+   * produce en tiempo de ejecución un candidato con los TRES campos en
+   * `undefined`.
+   *
+   * `hasAnyAddressData` descarta entonces cada fila, la cascada devuelve `null`
+   * y `isComplete` responde `false` para TODA organización, incluso una con su
+   * dirección fiscal perfecta. Las consecuencias no eran cosméticas: `locked`
+   * quedaba siempre `false`, así que el checkout se creía autorizado a
+   * reescribir un NIT del que el módulo fiscal del cliente ya es dueño, y el
+   * perfil se volvía a exigir en cada compra.
+   *
+   * Traducir en un solo sitio es lo que impide que el próximo llamador repita
+   * el cast.
+   */
+  private toAcquirerCandidates(
+    rows: BillingProfileAddressRow[],
+  ): AcquirerAddressCandidate[] {
+    return rows.map((row) => ({
+      type: row.type,
+      address_line: [row.address_line1, row.address_line2]
+        .filter(Boolean)
+        .join(' '),
+      city_code: row.municipality_code ?? undefined,
+      city_name: row.city,
+      // El departamento se DERIVA del municipio, que es su prefijo Divipola.
+      // Resolverlo por nombre descartaría una fila con código bueno y
+      // departamento mal escrito.
+      department_code: row.municipality_code
+        ? row.municipality_code.slice(0, 2)
+        : undefined,
+      department_name: row.state_province ?? undefined,
+      country_code: row.country_code,
+      postal_code: row.postal_code ?? undefined,
+    }));
   }
 }

@@ -19,15 +19,20 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
-import { debounceTime, distinctUntilChanged, startWith } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, map, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
 import {
   GeocodingService,
   NormalizedAddress,
 } from '../../../private/modules/ecommerce/services/geocoding.service';
+import { CountryService } from '../../../core/services/country.service';
 import { InputComponent } from '../input/input.component';
 import { IconComponent } from '../icon/icon.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../selector/selector.component';
 import { DianMunicipalitySelectComponent } from '../dian-municipality-select/dian-municipality-select.component';
 import {
   DianMunicipalityLookupService,
@@ -100,6 +105,7 @@ export interface AddressPayload {
     AddressMapPickerComponent,
     InputComponent,
     IconComponent,
+    SelectorComponent,
     DianMunicipalitySelectComponent,
   ],
   templateUrl: './address-form-fields.component.html',
@@ -165,7 +171,40 @@ export class AddressFormFieldsComponent {
   private readonly fb = inject(FormBuilder);
   private readonly geocoding = inject(GeocodingService);
   private readonly municipalities = inject(DianMunicipalityLookupService);
+  private readonly countryService = inject(CountryService);
   private readonly destroyRef = inject(DestroyRef);
+
+  /**
+   * Catálogo de países como opciones del selector: la etiqueta es el nombre y
+   * el valor es el código ISO — el mismo reparto etiqueta/valor que usan los
+   * demás formularios del repo (`address-modal`, `legal-data-form`).
+   *
+   * Esa separación es el punto: el cliente elige «Colombia» y el control
+   * `country_code` sigue guardando `CO`, que es lo que leen
+   * {@link showMunicipality} para decidir si ofrece el catálogo DANE y el
+   * backend para persistir la dirección. Un campo de texto libre dejaba al
+   * cliente viendo el código crudo y le permitía teclear cualquier cosa.
+   *
+   * OJO — en el repo conviven DOS `CountryService`:
+   *   - `core/services/country.service.ts` (el que se usa acá): ~67 países,
+   *     `getCountries(): Observable<Country[]>`.
+   *   - `services/country.service.ts`: ~13 países, `getCountries(): Country[]`
+   *     síncrono, y es el que importan los otros 12 consumidores.
+   * Se toma el de `core` a propósito: es un superconjunto, así que ningún
+   * cliente fuera de esos 13 países se queda sin poder elegir el suyo. Unificar
+   * los dos catálogos es un refactor aparte, pendiente.
+   *
+   * `getCountries()` devuelve un `of(...)` estático, así que el signal ya trae
+   * la lista en el primer render; el `initialValue` solo cubre ese instante.
+   */
+  readonly countryOptions = toSignal(
+    this.countryService.getCountries().pipe(
+      map((list): SelectorOption[] =>
+        list.map((c) => ({ value: c.code, label: c.name })),
+      ),
+    ),
+    { initialValue: [] as SelectorOption[] },
+  );
 
 
 
@@ -301,13 +340,23 @@ export class AddressFormFieldsComponent {
           longitude: addr.longitude ?? null,
           municipality_code: addr.municipality_code ?? null,
         },
-        // `emitEvent: true` SOLO para municipality_code no es posible en un
-        // patchValue conjunto, así que el signal se refresca explícitamente
-        // abajo: `municipalityCode` se alimenta de `valueChanges` y con
-        // `emitEvent:false` no se enteraría de la precarga, dejando ciudad y
-        // departamento editables sobre una dirección que sí tiene código.
+        // El patch va silencioso porque `address_line1` tiene un watcher que
+        // geocodifica lo que se teclea: emitir aquí dispararía una búsqueda
+        // sobre la dirección precargada y pisaría con una aproximación las
+        // coordenadas que vienen en el snapshot.
+        //
+        // El precio es que los dos controles puenteados a signal
+        // (`country_code` y `municipality_code`, ambos alimentados de
+        // `valueChanges`) no se enterarían de la precarga, así que se
+        // re-escriben explícitamente abajo. Sin eso, `showMunicipality()` se
+        // quedaría en el 'CO' inicial aunque llegara otro país, y
+        // `cityLockedByMunicipality()` dejaría ciudad y departamento editables
+        // sobre una dirección que sí trae código DANE.
         { emitEvent: false },
       );
+      this.form
+        .get('country_code')!
+        .setValue(addr.country_code ?? 'CO', { emitEvent: true });
       this.form
         .get('municipality_code')!
         .setValue(addr.municipality_code ?? null, { emitEvent: true });
@@ -465,9 +514,15 @@ export class AddressFormFieldsComponent {
         ?.setValue(address.state_province, { emitEvent: false });
     }
     if (address.country_code) {
+      // Este SÍ emite, al revés que sus vecinos: `country_code` está puenteado
+      // a signal por `valueChanges`, y en silencio `showMunicipality()` seguiría
+      // creyendo que la dirección es colombiana después de que el mapa la
+      // llevara a otro país — ofreciendo un catálogo Divipola que allí no
+      // existe. No hay watcher colgado de este control, así que emitir es
+      // inocuo.
       this.form
         .get('country_code')
-        ?.setValue(address.country_code.toUpperCase(), { emitEvent: false });
+        ?.setValue(address.country_code.toUpperCase(), { emitEvent: true });
     }
     if (address.postal_code) {
       this.form

@@ -545,9 +545,12 @@ describe('FiscalDocumentValidator', () => {
         (f) => f.code === 'TECHNICAL_KEY_MALFORMED',
       );
       expect(finding).toBeDefined();
+      // La DIAN emite ClTec de DOS anchuras (40 y 64), así que el hallazgo
+      // reporta las dos. La aserción quedó en la anchura única de antes y
+      // dejaba en rojo un validador correcto.
       expect(finding!.details).toEqual({
         technical_key_length: 38,
-        expected_length: 40,
+        expected_lengths: [40, 64],
       });
     });
 

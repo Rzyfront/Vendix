@@ -1,5 +1,9 @@
 import { SubscriptionBillingProfileService } from './subscription-billing-profile.service';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
+// El validador REAL, no un doble. Un doble que siempre dice «emitible» probaría
+// que el cableado existe y nada más; el punto de la compuerta es que el juicio
+// sea el MISMO que el de la emisión, y eso solo se prueba con el juez de verdad.
+import { CustomerFiscalIdentityValidator } from '../../invoicing/validators/customer-fiscal-identity.validator';
 
 /**
  * The fiscal identity of the paying organization has two guards around it:
@@ -49,6 +53,10 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
         country_code: 'CO',
         postal_code: null,
         municipality_code: '11001',
+        // `type` decide el escalón de la cascada. Sin él, la dirección fiscal
+        // de la organización se clasificaba como «cualquier otra» y el fixture
+        // dejaba de describir el caso que representa.
+        type: 'billing',
       },
     ],
   };
@@ -109,7 +117,10 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
     const prisma = { withoutScope: () => client };
 
     return {
-      service: new SubscriptionBillingProfileService(prisma as any),
+      service: new SubscriptionBillingProfileService(
+        prisma as any,
+        new CustomerFiscalIdentityValidator(),
+      ),
       organizations,
       addresses,
       client,
@@ -203,6 +214,230 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
       await expect(
         service.ensureCaptured(ORG_ID, undefined, { required: true }),
       ).rejects.toMatchObject({ errorCode: 'SUBSCRIPTION_FISCAL_001' });
+    });
+  });
+
+  /**
+   * La segunda compuerta (3.5). Capturar los seis campos no es lo mismo que
+   * poder emitir: pueden estar TODOS y el documento seguir sin salir.
+   *
+   * El 17/08/2026 una compra pasó porque `getBillingProfile()` falló en el
+   * cliente, la sección fiscal se apagó sola y el formulario dejó pasar el
+   * cobro. Desde acá la autoridad es el backend, como en el POS: se corta con
+   * 422 ANTES de crear la factura y de abrir el widget, para que el cliente no
+   * quede pagado y sin documento.
+   */
+  describe('ensureCaptured — prevalidación de emisión (SUBSCRIPTION_FISCAL_002)', () => {
+    const PLATFORM_LIVE = { is_enabled: true, environment: 'production' };
+
+    /** Organización completa salvo por el campo que cada caso rompe. */
+    const orgWith = (patch: Record<string, unknown>) => ({
+      ...completeOrg,
+      ...patch,
+    });
+
+    /**
+     * `details` no es una propiedad de `VendixHttpException`: viaja dentro del
+     * cuerpo que `HttpException` guarda. Leerla como `error.details` daba
+     * `undefined` y el `toMatchObject` pasaba sin comprobar nada.
+     */
+    const detailsOf = (error: unknown): Record<string, any> =>
+      (error as { getResponse(): { details?: Record<string, any> } }).getResponse()
+        .details ?? {};
+
+    it('deja pasar una identidad que sí emite', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: true }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('no se deja bloquear por un verification_digit rancio en columna', async () => {
+      // El fixture guarda '4' pero el NIT 800987654 deriva otro DV. El emisor
+      // usa SIEMPRE el derivado, así que la compuerta tiene que juzgar ese y no
+      // el de la columna — si juzgara la columna, cortaría compras sanas.
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ verification_digit: '9' }) as any,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: true }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('corta con 422 cuando el correo del adquiriente no es un correo', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ email: 'facturacion-arroba-norte' }) as any,
+      });
+
+      const error = await service
+        .ensureCaptured(ORG_ID, profile, { required: true })
+        .catch((e) => e);
+
+      expect(error).toMatchObject({ errorCode: 'SUBSCRIPTION_FISCAL_002' });
+      expect(detailsOf(error).blockers.map((b: any) => b.code)).toContain(
+        'EMAIL_MALFORMED',
+      );
+    });
+
+    it('corta con 422 cuando el NIT es un relleno y no un NIT', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ tax_id: '123' }) as any,
+      });
+
+      const error = await service
+        .ensureCaptured(ORG_ID, profile, { required: true })
+        .catch((e) => e);
+
+      expect(error).toMatchObject({ errorCode: 'SUBSCRIPTION_FISCAL_002' });
+      expect(detailsOf(error).blockers.map((b: any) => b.code)).toContain(
+        'DOCUMENT_NUMBER_PLACEHOLDER',
+      );
+    });
+
+    it('corta con 422 cuando el NIT tiene una longitud imposible', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ tax_id: '80098765432109876' }) as any,
+      });
+
+      const error = await service
+        .ensureCaptured(ORG_ID, profile, { required: true })
+        .catch((e) => e);
+
+      expect(error).toMatchObject({ errorCode: 'SUBSCRIPTION_FISCAL_002' });
+      expect(detailsOf(error).blockers.map((b: any) => b.code)).toContain(
+        'DOCUMENT_NUMBER_IMPLAUSIBLE_LENGTH',
+      );
+    });
+
+    it('cada bloqueo nombra el campo y la pantalla donde se arregla', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ email: 'sin-arroba' }) as any,
+      });
+
+      const error = await service
+        .ensureCaptured(ORG_ID, profile, { required: true })
+        .catch((e) => e);
+
+      const [blocker] = detailsOf(error).blockers;
+      expect(blocker.field).toBe('email');
+      expect(blocker.problem.length).toBeGreaterThan(0);
+      expect(blocker.fix.length).toBeGreaterThan(0);
+    });
+
+    it('no prevalida cuando el commit no cobra: sin documento no hay nada que juzgar', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({ email: 'sin-arroba' }) as any,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: false }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('no prevalida mientras la plataforma no emite facturas reales', async () => {
+      const { service } = createService({
+        platform: null,
+        org: orgWith({ email: 'sin-arroba' }) as any,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: true }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('también corta cuando el módulo fiscal del cliente es el dueño de la identidad', async () => {
+      // Que el cliente sea dueño del dato no lo hace emitible. Saltarse la
+      // compuerta acá dejaba abierta la misma puerta por la que entró el
+      // incidente, solo que para los tenants que ya facturan.
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: true,
+        org: orgWith({ email: 'sin-arroba' }) as any,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: true }),
+      ).rejects.toMatchObject({ errorCode: 'SUBSCRIPTION_FISCAL_002' });
+    });
+  });
+
+  /**
+   * `isComplete` traducía mal la fila de `addresses`: casteaba la fila cruda
+   * (`address_line1`, `city`, `municipality_code`) al contrato de la cascada
+   * (`address_line`, `city_name`, `city_code`). El cast compila y en ejecución
+   * deja los tres campos en `undefined`, así que TODA organización salía
+   * incompleta — incluida una con su dirección fiscal perfecta.
+   */
+  describe('isComplete — traducción fila → candidato', () => {
+    it('reconoce como completa una organización con dirección fiscal emitible', async () => {
+      const { service } = createService({
+        platform: { is_enabled: true, environment: 'production' },
+      });
+
+      await expect(service.isComplete(ORG_ID)).resolves.toBe(true);
+    });
+
+    it('sigue rechazando una dirección colombiana sin municipio DANE', async () => {
+      const { service } = createService({
+        platform: { is_enabled: true, environment: 'production' },
+        org: {
+          ...completeOrg,
+          addresses: [
+            { ...completeOrg.addresses[0], municipality_code: null },
+          ],
+        } as any,
+      });
+
+      await expect(service.isComplete(ORG_ID)).resolves.toBe(false);
+    });
+  });
+
+  describe('evaluateEmitReadiness', () => {
+    it('reporta sin lanzar y sin escribir, para que una pantalla pueda consultarlo', async () => {
+      const { service, organizations, addresses } = createService({
+        platform: { is_enabled: true, environment: 'production' },
+        org: { ...completeOrg, email: 'sin-arroba' } as any,
+      });
+
+      const result = await service.evaluateEmitReadiness(ORG_ID);
+
+      expect(result.emittable).toBe(false);
+      expect(result.blockers.map((b) => b.code)).toContain('EMAIL_MALFORMED');
+      expect(organizations.update).not.toHaveBeenCalled();
+      expect(addresses.update).not.toHaveBeenCalled();
+    });
+
+    it('el régimen «49» del checkout no se reporta como desconocido', async () => {
+      // '48'/'49' son códigos DIAN, no `tax_regime_enum`. Juzgarlos con el
+      // catálogo equivocado producía una advertencia permanente sobre un dato
+      // correcto — y una advertencia que sale siempre deja de leerse.
+      const { service } = createService({
+        platform: { is_enabled: true, environment: 'production' },
+      });
+
+      const result = await service.evaluateEmitReadiness(ORG_ID);
+
+      expect(result.emittable).toBe(true);
+      expect([...result.blockers, ...result.warnings].map((f) => f.code)).not.toContain(
+        'TAX_REGIME_UNKNOWN',
+      );
     });
   });
 

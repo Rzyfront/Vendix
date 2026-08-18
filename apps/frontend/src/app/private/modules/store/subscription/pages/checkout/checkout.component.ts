@@ -94,7 +94,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
 
       <!-- Loading skeleton -->
       @if (loadingPreview()) {
-        <div class="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 animate-pulse" aria-busy="true">
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_480px] gap-6 animate-pulse" aria-busy="true">
           <div class="space-y-4">
             <div class="h-8 w-1/2 bg-gray-200 rounded"></div>
             <div class="h-4 w-2/3 bg-gray-200 rounded"></div>
@@ -223,7 +223,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
           </div>
         }
 
-        <div class="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_480px] gap-6">
           <!-- Left: Plan detail + proration kind -->
           <app-card>
             <div class="p-5 md:p-6 space-y-5">
@@ -608,7 +608,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                          saldrá en la factura electrónica. -->
                     <label class="flex flex-col gap-1">
                       <span class="text-xs font-medium text-text-secondary">
-                        Dígito de verificación (DV)
+                        Dígito de verificación
                       </span>
                       <input
                         type="text"
@@ -617,13 +617,6 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                         aria-readonly="true"
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-gray-50 text-text-secondary cursor-not-allowed"
                       />
-                      <span class="text-[11px] text-text-secondary leading-tight">
-                        @if (billingDocumentIsNit()) {
-                          Se calcula del NIT. No se edita.
-                        } @else {
-                          Solo el NIT lleva dígito de verificación.
-                        }
-                      </span>
                     </label>
 
                     <label class="flex flex-col gap-1 sm:col-span-2">
@@ -712,13 +705,8 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                       La renovación automática solo funciona con tarjeta
                     </p>
                     <p class="text-xs text-amber-900/90 leading-relaxed">
-                      Si eliges tarjeta de crédito o débito, Wompi la habilita
-                      para los cobros de los siguientes ciclos y tu plan se
-                      renueva solo. Si pagas con PSE, transferencia, efectivo o
-                      cualquier otro medio, este pago se acredita igual pero el
-                      <strong>autopago queda pausado</strong>: tendrás que pagar
-                      manualmente cada renovación hasta que registres una
-                      tarjeta.
+                      Solo con <strong>tarjeta</strong> se renueva sola. Con PSE,
+                      efectivo o transferencia tendrás que pagar cada mes a mano.
                     </p>
                   </div>
                 </div>

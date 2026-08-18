@@ -25,6 +25,10 @@ import {
   UblStructureValidator,
   summarizeUblViolations,
 } from '../providers/dian-direct/xml/ubl-structure.validator';
+import {
+  DianTotalsValidator,
+  summarizeDianTotalsViolations,
+} from '../providers/dian-direct/xml/dian-totals.validator';
 import { CufeCalculator } from '../utils/cufe-calculator';
 import {
   DianIssuerData,
@@ -1320,6 +1324,7 @@ export class DianTestService {
 
       // Sign XML if certificate available
       this.assertStructurallyValid(xml);
+      this.assertTotalsCoherent(xml);
 
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
@@ -1480,6 +1485,7 @@ export class DianTestService {
       });
 
       this.assertStructurallyValid(xml);
+      this.assertTotalsCoherent(xml);
 
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
@@ -1612,6 +1618,7 @@ export class DianTestService {
       });
 
       this.assertStructurallyValid(xml);
+      this.assertTotalsCoherent(xml);
 
       if (p12_buffer && cert_password) {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
@@ -3599,6 +3606,40 @@ export class DianTestService {
       {
         document_root: result.root,
         violation_count: result.violations.length,
+        violations: summary,
+      },
+    );
+  }
+
+  /**
+   * Aborta el set de pruebas si la totalización de un documento no cierra.
+   *
+   * Se replica aquí por el mismo motivo que la estructural: el set firma por su
+   * cuenta y no pasa por `DianDirectProvider.signXml`. El set de habilitación es
+   * justo donde una operación excluida de IVA debería descubrirse — antes de
+   * tocar producción y sin consecutivo autorizado de por medio.
+   */
+  private assertTotalsCoherent(xml: string): void {
+    const result = DianTotalsValidator.validate(xml);
+    if (result.valid) return;
+
+    const summary = summarizeDianTotalsViolations(result.violations);
+    this.logger.error(
+      `Set de pruebas: XML con totalización inválida ` +
+        `(${result.root ?? 'raíz desconocida'}): ${result.violations.length} ` +
+        `violación(es). ${summary.join(' | ')}`,
+    );
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_XSD_002,
+      'Uno de los documentos del set de pruebas declara unos totales que la ' +
+        'DIAN rechaza, así que el set no se envió. Es un defecto del generador ' +
+        'de XML, no de la configuración de la tienda — repórtalo con el detalle ' +
+        'que acompaña este error.',
+      {
+        document_root: result.root,
+        violation_count: result.violations.length,
+        rules: [...new Set(result.violations.map((v) => v.rule))],
         violations: summary,
       },
     );

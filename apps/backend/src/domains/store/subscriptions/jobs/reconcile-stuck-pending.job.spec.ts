@@ -120,13 +120,24 @@ describe('ReconcileStuckPendingJob — legacy stuck-payment pass', () => {
  * swallowed it into its per-subscription catch, and the cron re-failed every 5
  * minutes while the store stayed locked out (store 99 sat there 11 days).
  * A mocked state service cannot see that — it happily "reverts" to anything.
+ *
+ * NOTA: desde el incidente de Multimarcas Ever, el Escenario A ya no anula sin
+ * antes preguntarle a la pasarela. Estos casos "sí anula" fijan la respuesta de
+ * `syncInvoiceFromGateway` en `no_transaction_for_reference`, que es la única
+ * que prueba que no hubo cobro.
  */
 describe('ReconcileStuckPendingJob — ADR-2 scenario A (webhook never arrived)', () => {
   const STORE_ID = 99;
   const SUB_ID = 60;
   const INVOICE_ID = 13;
 
-  const buildScenarioA = (revertState: string | null) => {
+  const buildScenarioA = (
+    revertState: string | null,
+    syncImpl: () => Promise<any> = async () => ({
+      status: 'pending',
+      reason: 'no_transaction_for_reference',
+    }),
+  ) => {
     const startedAt = new Date(Date.now() - 11 * 24 * 60 * 60 * 1000);
 
     const sub = {
@@ -181,8 +192,11 @@ describe('ReconcileStuckPendingJob — ADR-2 scenario A (webhook never arrived)'
       { emit: jest.fn() } as any,
     );
 
+    const syncInvoiceFromGateway = jest.fn().mockImplementation(syncImpl);
+
     const job = new ReconcileStuckPendingJob(prisma, stateService as any, {
       confirmPendingChange: jest.fn(),
+      syncInvoiceFromGateway,
     } as any);
 
     const logger = {
@@ -193,13 +207,29 @@ describe('ReconcileStuckPendingJob — ADR-2 scenario A (webhook never arrived)'
     };
     (job as any).logger = logger;
 
-    return { job, tx, logger };
+    return { job, tx, logger, syncInvoiceFromGateway };
   };
 
+  /** Devuelve los eventos JSON emitidos por `logger.warn`. */
+  const warnEvents = (logger: any): any[] =>
+    logger.warn.mock.calls
+      .map(([arg]: any[]) => {
+        try {
+          return typeof arg === 'string' ? JSON.parse(arg) : arg;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
   it('reverts a stuck trial conversion back to trial (real state machine)', async () => {
-    const { job, tx, logger } = buildScenarioA('trial');
+    const { job, tx, logger, syncInvoiceFromGateway } =
+      buildScenarioA('trial');
 
     await expect(job.reconcile()).resolves.toBeUndefined();
+
+    // La anulación pasa por la pasarela, siempre y antes de escribir nada.
+    expect(syncInvoiceFromGateway).toHaveBeenCalledWith(INVOICE_ID);
 
     // The invoice is voided…
     expect(tx.subscription_invoices.update).toHaveBeenCalledWith(
@@ -249,5 +279,156 @@ describe('ReconcileStuckPendingJob — ADR-2 scenario A (webhook never arrived)'
     );
     expect(stateWrite[0].data.state).toBe('cancelled');
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // El incidente Multimarcas Ever (17/08/2026): Wompi aprobó a las 14:47, el
+  // webhook llegó a las 14:47:48 y no se procesó, y a las 15:45 este cron anuló
+  // la factura 17 y devolvió la tienda a `grace_soft`. El cliente había pagado
+  // $69.900. Estos casos fijan la regla nueva: sin una respuesta de la pasarela
+  // que PRUEBE que no hubo cobro, no se anula nada.
+  // ---------------------------------------------------------------------------
+
+  it('NO anula cuando la pasarela dice que la transacción fue aprobada', async () => {
+    const { job, tx, logger, syncInvoiceFromGateway } = buildScenarioA(
+      'grace_soft',
+      async () => ({
+        status: 'paid',
+        transaction_id: '1439162-1786996019-19335',
+      }),
+    );
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(syncInvoiceFromGateway).toHaveBeenCalledWith(INVOICE_ID);
+    expect(tx.subscription_invoices.update).not.toHaveBeenCalled();
+    expect(tx.store_subscriptions.update).not.toHaveBeenCalled();
+
+    const events = warnEvents(logger);
+    const recovered = events.find(
+      (e) => e.event === 'RECONCILE_RECOVERED_BEFORE_VOID',
+    );
+    expect(recovered).toBeDefined();
+    expect(recovered.sub_id).toBe(SUB_ID);
+    expect(recovered.store_id).toBe(STORE_ID);
+    expect(recovered.invoice_id).toBe(INVOICE_ID);
+    expect(recovered.transaction_id).toBe('1439162-1786996019-19335');
+    expect(recovered.stuck_minutes).toBeGreaterThan(60);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('NO anula cuando la pasarela es inalcanzable (gateway_unreachable)', async () => {
+    const { job, tx, logger } = buildScenarioA('grace_soft', async () => ({
+      status: 'pending',
+      payment_status: 'pending',
+      reason: 'gateway_unreachable',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).not.toHaveBeenCalled();
+    expect(tx.store_subscriptions.update).not.toHaveBeenCalled();
+
+    const deferred = warnEvents(logger).find(
+      (e) => e.event === 'RECONCILE_VOID_DEFERRED_GATEWAY_UNREACHABLE',
+    );
+    expect(deferred).toBeDefined();
+    expect(deferred.reason).toBe('gateway_unreachable');
+    expect(deferred.invoice_id).toBe(INVOICE_ID);
+  });
+
+  it('NO anula cuando el pago no tiene referencia con la que preguntar', async () => {
+    const { job, tx, logger } = buildScenarioA('grace_soft', async () => ({
+      status: 'pending',
+      reason: 'no_reference',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).not.toHaveBeenCalled();
+    const deferred = warnEvents(logger).find(
+      (e) => e.event === 'RECONCILE_VOID_DEFERRED_GATEWAY_UNREACHABLE',
+    );
+    expect(deferred?.reason).toBe('no_reference');
+  });
+
+  it('NO anula cuando la transacción sigue viva en la pasarela (gateway_pending)', async () => {
+    const { job, tx, logger } = buildScenarioA('grace_soft', async () => ({
+      status: 'pending',
+      reason: 'gateway_pending',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).not.toHaveBeenCalled();
+    const deferred = warnEvents(logger).find(
+      (e) => e.event === 'RECONCILE_VOID_DEFERRED_GATEWAY_PENDING',
+    );
+    expect(deferred).toBeDefined();
+    expect(deferred.reason).toBe('gateway_pending');
+  });
+
+  it('NO anula cuando la consulta a la pasarela lanza', async () => {
+    const { job, tx, logger } = buildScenarioA('grace_soft', async () => {
+      throw new Error('ECONNRESET');
+    });
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).not.toHaveBeenCalled();
+    expect(tx.store_subscriptions.update).not.toHaveBeenCalled();
+
+    const deferred = warnEvents(logger).find(
+      (e) => e.event === 'RECONCILE_VOID_DEFERRED_GATEWAY_UNREACHABLE',
+    );
+    expect(deferred).toBeDefined();
+    expect(deferred.error).toContain('ECONNRESET');
+    // Un throw esperado no debe escalar al catch por-suscripción del cron.
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('SÍ anula cuando la pasarela no conoce ninguna transacción con esa referencia', async () => {
+    const { job, tx, logger } = buildScenarioA('grace_soft', async () => ({
+      status: 'pending',
+      reason: 'no_transaction_for_reference',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: INVOICE_ID },
+        data: expect.objectContaining({ state: 'void' }),
+      }),
+    );
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('SÍ anula cuando no hay siquiera fila de pago que consultar', async () => {
+    const { job, tx } = buildScenarioA('grace_soft', async () => ({
+      status: 'no_transaction',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ state: 'void' }),
+      }),
+    );
+  });
+
+  it('SÍ anula cuando la pasarela reporta el cobro como fallido', async () => {
+    const { job, tx } = buildScenarioA('grace_soft', async () => ({
+      status: 'failed',
+    }));
+
+    await expect(job.reconcile()).resolves.toBeUndefined();
+
+    expect(tx.subscription_invoices.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ state: 'void' }),
+      }),
+    );
   });
 });
