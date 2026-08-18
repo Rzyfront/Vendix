@@ -1600,6 +1600,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "53a0ead3",
+      "created_by": "rzy",
+      "created_at": "2026-08-18T20:56:03Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

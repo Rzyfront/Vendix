@@ -115,6 +115,46 @@ export class VexiActivityService {
     }
   }
 
+  /**
+   * Deja en la conversación el acuse del cambio que sí se aplicó.
+   *
+   * La fila de auditoría que escribe `recordApplied` va con `content: ''` a
+   * propósito, y el navegador solo pinta el acuse en vivo, en la respuesta del
+   * POST. Resultado: al reabrir la conversación quedaban dos propuestas
+   * seguidas y ningún desenlace — se leía como que Vexi pidió permiso dos veces
+   * y nunca hizo nada, justo lo contrario de lo que pasó.
+   *
+   * Va como mensaje `assistant` y SIN `tool_calls`, así que el feed de
+   * actividad —que filtra por `tool_calls: { not: null }`— no lo cuenta dos
+   * veces: la fila de auditoría sigue siendo la única evidencia del cambio.
+   * También es la señal que corta la detección de propuestas pendientes en el
+   * turno siguiente.
+   *
+   * Best-effort, igual que `recordApplied`: el cambio ya aterrizó en el
+   * negocio y perder su acuse no puede convertirse en un error para la persona.
+   */
+  async recordAppliedNarration(input: {
+    conversationId?: number;
+    summary?: string | null;
+  }): Promise<void> {
+    const summary = input.summary?.trim();
+    if (!input.conversationId || !summary) return;
+
+    try {
+      await this.prisma.ai_messages.create({
+        data: {
+          conversation_id: input.conversationId,
+          role: 'assistant',
+          content: summary,
+        },
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Could not record the applied-write acknowledgement: ${error?.message}`,
+      );
+    }
+  }
+
   async list(limit = DEFAULT_LIMIT): Promise<ActivityEntry[]> {
     // Checked, not used as a filter: without a store in context the scoped client
     // has nothing to scope by, and answering with an empty list beats answering

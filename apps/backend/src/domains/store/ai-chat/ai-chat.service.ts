@@ -40,6 +40,40 @@ import {
 const PERSISTED_TOOL_RESULT_CHARS = 1000;
 
 /**
+ * Le dice al modelo que su propia propuesta sigue esperando en pantalla.
+ *
+ * POR QUÉ EXISTE
+ * --------------
+ * La aprobación viaja por `POST /store/vexi/confirmations/apply`, no por el
+ * chat, así que el turno siguiente llega sin ninguna señal de que hay una
+ * tarjeta abierta. Cuando la persona contesta "sí, créala" en texto —que es lo
+ * natural: acaba de leer "confírmalo y lo aplico"—, el modelo ve una petición
+ * de escritura sin aplicar y hace lo único razonable con la información que
+ * tiene: volver a proponer. Se acuña otro token, sale otra tarjeta idéntica, y
+ * desde el lado de la persona Vexi pide permiso en círculos sin ejecutar nunca.
+ *
+ * El bloque no debilita el consentimiento: la escritura sigue exigiendo el
+ * token que prueba que ESA persona vio ESE diff. Solo evita que el modelo
+ * responda a un "sí" fabricando una propuesta nueva en vez de señalar la que ya
+ * está ahí.
+ */
+/**
+ * Ventana en la que una propuesta cuenta como viva, igual al TTL del token que
+ * la respalda (`VexiConfirmationService`, 300 s). Después no queda nada que
+ * aprobar, así que tampoco hay nada que recordarle al modelo.
+ */
+const PENDING_CONFIRMATION_TTL_MS = 300_000;
+
+const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
+  [
+    'ESTADO DEL TURNO — tienes una propuesta de cambio SIN APLICAR.',
+    `Propusiste: ${operation}.`,
+    'La tarjeta con «Aprobar» y «Rechazar» ya está en pantalla, encima de este mensaje.',
+    'Si la persona confirma en palabras («sí», «dale», «hazlo», «apruebo»), NO vuelvas a llamar `write_endpoint`: eso solo genera otra tarjeta idéntica y se ve como si le pidieras permiso en círculos. Contéstale en una frase que toque «Aprobar» en la tarjeta que ya tiene.',
+    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos.',
+  ].join(' ');
+
+/**
  * What the chat SSE turn can emit.
  *
  * The voice frames are a union on top of `AIStreamChunk` rather than new members
@@ -418,6 +452,13 @@ export class AIChatService {
     let fullContent = '';
     let totalTokens = 0;
     let toolsUsed: Array<{ name: string; args: any; result: string }> = [];
+    /**
+     * La ruta que quedó propuesta y sin aplicar, para marcarla en el mensaje
+     * que se persiste. El turno siguiente la lee con `findPendingProposal` y
+     * así sabe que la tarjeta sigue abierta: la aprobación viaja por otro
+     * endpoint y no deja rastro en la conversación hasta que se aplica.
+     */
+    let pendingProposal: string | null = null;
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -499,6 +540,13 @@ export class AIChatService {
         voice?.push(fullContent);
       }
       if (result.pending_confirmation) {
+        const args = (result.pending_confirmation.arguments ?? {}) as Record<
+          string,
+          any
+        >;
+        pendingProposal =
+          [args.method, args.path].filter(Boolean).join(' ') ||
+          result.pending_confirmation.tool;
         yield {
           type: 'tool_result',
           tool: {
@@ -581,6 +629,16 @@ export class AIChatService {
                 result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
               })) as Prisma.InputJsonValue)
             : undefined,
+          // La propuesta no entra en `tool_calls`: la rama de confirmación del
+          // bucle sale por `continue` sin registrarla como herramienta usada.
+          // Sin esta marca, el turno siguiente no tiene forma de saber que hay
+          // una tarjeta esperando, y contestar "sí" en texto acuñaba otra
+          // propuesta idéntica en vez de señalar la que ya está en pantalla.
+          ...(pendingProposal && {
+            metadata: {
+              pending_confirmation: pendingProposal,
+            } as Prisma.InputJsonValue,
+          }),
         },
       });
 
@@ -695,10 +753,72 @@ export class AIChatService {
       }
     }
 
+    // Pegado al turno nuevo, no al principio de la ventana: lo que gobierna es
+    // cómo se responde a ESTE mensaje, y la señal se pierde veinte mensajes
+    // atrás si viaja con el historial.
+    const pending = this.findPendingProposal(conversation.messages);
+    if (pending) {
+      messages.push({
+        role: 'system',
+        content: PENDING_CONFIRMATION_BLOCK(pending),
+      });
+    }
+
     if (newMessage !== undefined) {
       messages.push({ role: 'user', content: newMessage });
     }
 
     return messages;
+  }
+
+  /**
+   * La última propuesta de escritura que quedó sin aplicar, descrita en una
+   * frase, o `null` si no hay ninguna esperando.
+   *
+   * Se recorre hacia atrás y se corta en la primera evidencia, en este orden:
+   *
+   *  - Una fila `tool` — la que escribe `VexiActivityService.recordApplied`
+   *    cuando el cambio aterriza ⇒ la propuesta anterior YA se aplicó y no hay
+   *    nada pendiente. Ésta es la razón de recorrer al revés en lugar de buscar
+   *    la última propuesta y preguntar después: la respuesta está en cuál de
+   *    las dos filas es más reciente.
+   *  - Un `assistant` marcado con `metadata.pending_confirmation` ⇒ hay una
+   *    tarjeta abierta.
+   *
+   * La marca vive en `metadata` y no en `tool_calls` porque el bucle NUNCA
+   * registra la propuesta como herramienta usada: la rama de confirmación
+   * empuja el resultado a la conversación del modelo y sale por `continue` sin
+   * tocar `toolsUsed`. Buscarla ahí no encontraba nada nunca.
+   */
+  private findPendingProposal(
+    messages: ConversationWithMessages['messages'],
+  ): string | null {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+
+      if (message.role === 'tool') return null;
+      if (message.role !== 'assistant') continue;
+
+      // Solo el ÚLTIMO assistant decide. Seguir hacia atrás resucitaría una
+      // propuesta vieja que la conversación ya dejó atrás.
+      const pending = (message.metadata as any)?.pending_confirmation;
+      if (!pending) return null;
+
+      // El token que respalda la tarjeta vive 5 minutos en Redis
+      // (`VexiConfirmationService.TOKEN_TTL_SECONDS`). Pasado ese punto no hay
+      // nada que aprobar aunque la tarjeta siga dibujada, y sin este corte una
+      // propuesta rechazada —el "Rechazar" no escribe fila ninguna— dejaría al
+      // modelo mandando a tocar un botón muerto para siempre.
+      const age = Date.now() - new Date(message.created_at).getTime();
+      if (!Number.isFinite(age) || age > PENDING_CONFIRMATION_TTL_MS) {
+        return null;
+      }
+
+      return typeof pending === 'string' && pending.trim()
+        ? pending
+        : 'un cambio';
+    }
+
+    return null;
   }
 }
