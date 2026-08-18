@@ -440,6 +440,7 @@ interface ReceiveLine {
                           <th class="py-2">Fecha</th>
                           <th class="py-2 text-right w-24">Monto</th>
                           <th class="py-2 text-right w-24">Estado</th>
+                          <th class="py-2 text-right w-16">Acción</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -453,6 +454,20 @@ interface ReceiveLine {
                                 [class]="getPaymentScheduleStatusClass(schedule.status)">
                                 {{ getPaymentScheduleStatusLabel(schedule.status) }}
                               </span>
+                            </td>
+                            <td class="py-2 text-right">
+                              @if (schedule.status === 'planned') {
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center justify-center w-7 h-7 rounded-md text-primary hover:bg-primary/10 transition-colors"
+                                  (click)="payInstallment(schedule)"
+                                  [attr.aria-label]="'Pagar cuota ' + (i + 1)"
+                                  [attr.title]="'Pagar esta cuota'"
+                                  data-testid="po-pay-installment"
+                                >
+                                  <app-icon name="dollar-sign" [size]="14" />
+                                </button>
+                              }
                             </td>
                           </tr>
                         }
@@ -571,7 +586,10 @@ interface ReceiveLine {
     <app-po-payment-modal
       [isOpen]="showPaymentModal()"
       [order]="orderForPayment()"
-      (close)="showPaymentModal.set(false)"
+      [view]="paymentModalView()"
+      [presetAmount]="paymentModalPreset()?.amount ?? null"
+      [presetDate]="paymentModalPreset()?.date ?? null"
+      (close)="onPaymentModalClose()"
       (saved)="onPaymentSaved()"
     />
 
@@ -805,6 +823,16 @@ export class StorePurchaseOrderDetailComponent {
     return this.remaining() > 0;
   });
 
+  /**
+   * Vista inicial del modal unificado de pago.
+   *  - 'pay'  → botón header "Pagar" o ícono "Pagar" de una cuota del plan.
+   *  - 'plan' → botón header "Configurar pago".
+   * Una vez abierto, el usuario puede alternar entre vistas con el toggle interno.
+   */
+  readonly paymentModalView = signal<'pay' | 'plan'>('pay');
+  /** Pre-relleno opcional desde el ícono "Pagar" de una cuota del plan. */
+  readonly paymentModalPreset = signal<{ amount: number; date: string | null } | null>(null);
+
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const acts: StickyHeaderActionButton[] = [];
     const loading = this.actionLoading();
@@ -815,7 +843,11 @@ export class StorePurchaseOrderDetailComponent {
       acts.push({ id: 'receive', label: 'Recibir', variant: 'primary', icon: 'package-check', disabled: loading, visible: true });
     }
     if (this.canRegisterPayment()) {
-      acts.push({ id: 'pay', label: 'Configurar pago', variant: 'outline', icon: 'dollar-sign', disabled: loading, visible: true });
+      // QUI-647 — dos entry points en el header: "Pagar" (vista pago, OCR +
+      // registro de pago inmediato) y "Configurar pago" (vista plan, 4 modos).
+      // Ambos abren el MISMO modal con diferente `view` inicial.
+      acts.push({ id: 'pay', label: 'Pagar', variant: 'primary', icon: 'dollar-sign', disabled: loading, visible: true });
+      acts.push({ id: 'plan', label: 'Configurar pago', variant: 'outline', icon: 'calendar', disabled: loading, visible: true });
     }
     if (this.canCancel()) {
       acts.push({ id: 'cancel', label: 'Cancelar', variant: 'outline-danger', icon: 'x-circle', loading, disabled: loading, visible: true });
@@ -918,10 +950,61 @@ export class StorePurchaseOrderDetailComponent {
     switch (id) {
       case 'approve': void this.approve(); break;
       case 'receive': this.scrollToReception(); break;
-      case 'pay': this.showPaymentModal.set(true); break;
+      case 'pay':
+        this.openPaymentModal('pay');
+        break;
+      case 'plan':
+        this.openPaymentModal('plan');
+        break;
       case 'cancel': void this.cancel(); break;
       case 'print': this.print(); break;
     }
+  }
+
+  /**
+   * Abre el modal unificado en la vista indicada, limpiando cualquier prefill
+   * previo (los presets son por apertura, no por sesión).
+   */
+  private openPaymentModal(view: 'pay' | 'plan'): void {
+    this.paymentModalView.set(view);
+    this.paymentModalPreset.set(null);
+    this.showPaymentModal.set(true);
+  }
+
+  /**
+   * Ícono "Pagar" en cada fila de `paymentSchedules()` con `status='planned'`.
+   * Abre el modal en vista `pay` con monto + fecha pre-llenados desde la cuota.
+   * El usuario puede editar antes de submit.
+   *
+   * El backend devuelve `scheduled_date` como ISO datetime (`2026-08-18T00:00:00.000Z`)
+   * pero el input[type=date] del modal exige `yyyy-MM-dd`. Cortamos a date-only
+   * acá para que el modal no reciba un string que el input rechace en silencio
+   * y termine mostrando el campo vacío.
+   */
+  payInstallment(schedule: PoPaymentSchedule): void {
+    this.paymentModalView.set('pay');
+    this.paymentModalPreset.set({
+      amount: Number(schedule.amount),
+      date: this.toDateOnly(schedule.scheduled_date),
+    });
+    this.showPaymentModal.set(true);
+  }
+
+  /**
+   * Normaliza cualquier ISO datetime / Date a `yyyy-MM-dd` (date-only).
+   * Si ya es date-only (10 chars sin `T`), lo devuelve tal cual.
+   */
+  private toDateOnly(v?: string | null): string | null {
+    if (!v) return null;
+    if (typeof v !== 'string') return null;
+    if (v.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+    return null;
+  }
+
+  /** Reset preset al cerrar el modal. */
+  onPaymentModalClose(): void {
+    this.showPaymentModal.set(false);
+    this.paymentModalPreset.set(null);
   }
 
   private scrollToReception(): void {
