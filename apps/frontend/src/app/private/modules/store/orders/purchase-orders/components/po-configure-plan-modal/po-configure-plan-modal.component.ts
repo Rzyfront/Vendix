@@ -17,7 +17,8 @@ import {
   Validators,
 } from '@angular/forms';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { startWith } from 'rxjs/operators';
+import { merge } from 'rxjs';
+import { scan } from 'rxjs/operators';
 
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -394,13 +395,22 @@ export class PoConfigurePlanModalComponent {
 
   readonly installmentsArray = new FormArray<FormGroup>([]);
 
-  private readonly formStatus = toSignal(
-    this.form.statusChanges.pipe(startWith(this.form.status)),
-    { initialValue: this.form.status },
+  /**
+   * Tick monotónico alimentado por `form.valueChanges` (cualquier `setValue`
+   * emite un objeto nuevo) y `installmentsArray.valueChanges` (el FormArray vive
+   * fuera del FormGroup y no se entera por `form.statusChanges`). `scan` garantiza
+   * un valor distinto por emisión, así que `Object.is` no anula la invalidación
+   * y los `computed` que leen `formTick()` se re-evalúan en zoneless.
+   */
+  private readonly formTick = toSignal(
+    merge(this.form.valueChanges, this.installmentsArray.valueChanges).pipe(
+      scan((n) => n + 1, 0),
+    ),
+    { initialValue: 0 },
   );
 
   readonly mode = computed<ConfigurePaymentPlanMode>(() => {
-    this.formStatus();
+    this.formTick();
     return this.form.controls.mode.value;
   });
 
@@ -410,7 +420,7 @@ export class PoConfigurePlanModalComponent {
   });
 
   readonly pendingBalance = computed<number>(() => {
-    this.formStatus();
+    this.formTick();
     const total = Number(this.order()?.total_amount ?? 0);
     const m = this.mode();
     const down =
@@ -419,7 +429,7 @@ export class PoConfigurePlanModalComponent {
   });
 
   readonly installmentsTotal = computed<number>(() => {
-    this.formStatus();
+    this.formTick();
     return round2(
       this.installmentsArray.controls.reduce(
         (s, g) => s + Number(g.controls['amount'].value ?? 0),
@@ -439,7 +449,7 @@ export class PoConfigurePlanModalComponent {
   );
 
   readonly isValid = computed<boolean>(() => {
-    this.formStatus();
+    this.formTick();
     const m = this.mode();
     if (m === 'immediate') return true;
     if (m === 'partial') {
@@ -455,8 +465,20 @@ export class PoConfigurePlanModalComponent {
       return !!due && due >= this.todayMin;
     }
     if (m === 'installments') {
-      if (this.installmentsArray.controls.length === 0) return false;
-      return this.installmentsBalanced();
+      const groups = this.installmentsArray.controls;
+      if (groups.length === 0) return false;
+      // Paridad con backend (purchase-orders.service.ts:4530-4534):
+      // toda cuota debe tener fecha ≥ hoy y monto ≥ 0.01, y la suma debe
+      // cuadrar contra `total_amount` (no `pendingBalance`).
+      const total = Number(this.order()?.total_amount ?? 0);
+      const today = this.todayMin;
+      for (const g of groups) {
+        const date = g.controls['scheduled_date'].value;
+        const amount = Number(g.controls['amount'].value ?? 0);
+        if (!date || date < today) return false;
+        if (!(amount >= 0.01)) return false;
+      }
+      return Math.abs(this.installmentsTotal() - total) <= 0.01;
     }
     return false;
   });
