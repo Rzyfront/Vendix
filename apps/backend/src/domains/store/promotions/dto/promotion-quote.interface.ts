@@ -27,6 +27,24 @@ export interface PromotionQuoteItemInput {
   category_ids?: Array<number | string> | null;
   unit_price: number;
   quantity: number;
+  /**
+   * Presentación de venta aplicada a la línea (`price_tiers.id`). Su sola
+   * presencia le dice al motor que `unit_price` YA es el precio del paquete
+   * completo y `quantity` YA cuenta paquetes.
+   *
+   * Sin este dato, un producto que además declara escala (`price_unit_quantity
+   * > 1`) recibe el precio del paquete y lo vuelve a dividir por la escala:
+   * cobra de menos. El motor tiene el predicado desde siempre
+   * (`isSoldByPresentation`); lo que faltaba era que los callers lo alimentaran.
+   */
+  applied_price_tier_id?: number | null;
+  /**
+   * Unidades de stock que consume la línea (`quantity × pack_size`). Viaja
+   * junto a `applied_price_tier_id` y cumple el mismo papel de señal: el motor
+   * acepta cualquiera de los dos por si una superficie llega con el snapshot a
+   * medias.
+   */
+  stock_units_consumed?: number | null;
 }
 
 export interface PromotionQuoteInput {

@@ -254,6 +254,10 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Precio de venta de UNA unidad de inventario, sin impuestos. Es el precio del que parten las tarifas: un descuento por tipo de cliente y el precio de una presentación se calculan sobre este número.',
+  })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio base no puede ser negativo' })
@@ -264,40 +268,68 @@ export class CreateProductDto {
   @MaxLength(100)
   sku?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Código de barras del producto suelto. El de cada presentación se fija aparte, en el override de esa tarifa.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
   barcode?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Existencias totales. Solo para la creación inicial; después el stock se mueve por entradas, ventas y ajustes, no editando este campo.',
+  })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number = 0;
 
+  @ApiPropertyOptional({
+    description:
+      'Alias histórico de base_price. Si mandas los dos, manda el mismo valor; para editar el precio usa base_price.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })
   price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Costo unitario del producto. No se toca al vender: lo recalcula el sistema cuando entra mercancía por una orden de compra.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de costo no puede ser negativo' })
   cost_price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Margen de ganancia del producto en porcentaje sobre el costo. Si mandas base_price y profit_margin a la vez, gana el precio y el margen se recalcula solo.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El margen de ganancia no puede ser negativo' })
   profit_margin?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Enciende el precio promocional (sale_price). Apagado, el producto se vende a base_price.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_on_sale?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si aparece publicado en la tienda en línea.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -308,32 +340,56 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_featured?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si el cajero puede cambiarle el precio a mano en el Punto de Venta.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   allow_pos_price_override?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Enciende multi-tarifa en el producto: habilita venderlo en varias presentaciones o con varios niveles de precio. Sin esto encendido, enabled_price_tier_ids no tiene efecto.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se le puede vender directamente a un cliente. Un insumo de cocina normalmente va apagado.',
+  })
   // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_sellable?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se usa como insumo en la receta de otro producto.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_ingredient?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si es un combo armado con otros productos.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_combo?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se produce por lotes en vez de prepararse por pedido.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -353,6 +409,10 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_eligible_for_home_service?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Unidad en la que se lleva el inventario y en la que está expresado base_price (gramo, mililitro, unidad).',
+  })
   // ===== Control exacto de UoM (Fase UoM) =====
   // FKs al catálogo global units_of_measure. El factor de conversión
   // purchase→stock NO se confía del cliente: el backend lo deriva de
@@ -362,17 +422,29 @@ export class CreateProductDto {
   @Type(() => Number)
   stock_uom_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Unidad en la que se le compra al proveedor (bulto, caja, kilo), cuando es distinta de la de inventario.',
+  })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   purchase_uom_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Cuántas unidades de inventario entran por cada unidad comprada. Una bolsa de 1000 g que se inventaría en gramos lleva 1000: comprar 5 bolsas suma 5000 al stock.',
+  })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   @Min(1)
   purchase_to_stock_factor?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Sobre cuántas unidades de inventario está expresado el precio mostrado. Sirve para productos que se cotizan por 100 g o por metro.',
+  })
   /**
    * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
    * Un cable medido en milímetros guarda `base_price = 5000` y
@@ -386,6 +458,10 @@ export class CreateProductDto {
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Manda \'convert\' para que el stock existente se recalcule al cambiar la unidad de inventario. Sin esto, cambiar la unidad deja las cantidades como estaban.',
+  })
   /**
    * Autorización explícita para convertir existencias, reservas, capas de
    * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
@@ -396,11 +472,19 @@ export class CreateProductDto {
   @IsIn(['convert'])
   stock_uom_conversion?: 'convert';
 
+  @ApiPropertyOptional({
+    description:
+      'Las tarifas habilitadas para ESTE producto, por id. Es un allowlist duro: vender con una tarifa que no esté en la lista se rechaza. La lista reemplaza a la anterior, no se suma — para agregar una presentación manda todas las que quieres dejar. El precio y el empaque de cada una se fijan aparte, en el override del producto para esa tarifa. Un producto tiene presentaciones O variantes, nunca ambas.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   enabled_price_tier_ids?: number[];
 
+  @ApiPropertyOptional({
+    description:
+      'Precio promocional mientras is_on_sale esté activo. Deja base_price intacto como precio normal.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
@@ -421,6 +505,10 @@ export class CreateProductDto {
     height: number;
   };
 
+  @ApiPropertyOptional({
+    description:
+      'Si el producto descuenta stock al venderse. Apagado, se puede vender sin existencias.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -450,6 +538,10 @@ export class CreateProductDto {
   @Min(0, { message: 'La cantidad de reorden no puede ser negativa' })
   reorder_quantity?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Si cada unidad se identifica con un serial al entrar y al salir.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -464,10 +556,18 @@ export class CreateProductDto {
   @IsEnum(ProductState)
   state?: ProductState = ProductState.ACTIVE;
 
+  @ApiPropertyOptional({
+    description:
+      'Cómo se mide lo que se vende: por unidad, por peso o por volumen.',
+  })
   @IsOptional()
   @IsEnum(PricingType)
   pricing_type?: PricingType = PricingType.UNIT;
 
+  @ApiPropertyOptional({
+    description:
+      'Qué clase de producto es: físico, servicio, digital o preparado en cocina.',
+  })
   @IsOptional()
   @IsEnum(ProductType)
   product_type?: ProductType = ProductType.PHYSICAL;
@@ -505,6 +605,10 @@ export class CreateProductDto {
   @IsString()
   service_instructions?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Minutos que tarda la cocina en prepararlo. Manda la urgencia de la ficha en la pantalla de cocina.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -546,11 +650,19 @@ export class CreateProductDto {
   @Type(() => Number)
   preconsultation_template_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Categorías a las que pertenece. La lista reemplaza a la anterior.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
 
+  @ApiPropertyOptional({
+    description:
+      'Impuestos que se le aplican al venderlo. La lista reemplaza a la anterior.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -561,6 +673,10 @@ export class CreateProductDto {
   @IsString({ each: true })
   image_urls?: string[];
 
+  @ApiPropertyOptional({
+    description:
+      'Existencias iniciales repartidas por bodega o tienda.',
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -613,6 +729,10 @@ export class UpdateProductDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Precio de venta de UNA unidad de inventario, sin impuestos. Es el precio del que parten las tarifas: un descuento por tipo de cliente y el precio de una presentación se calculan sobre este número.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
@@ -624,50 +744,86 @@ export class UpdateProductDto {
   @MaxLength(100)
   sku?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Código de barras del producto suelto. El de cada presentación se fija aparte, en el override de esa tarifa.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
   barcode?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Existencias totales. Solo para la creación inicial; después el stock se mueve por entradas, ventas y ajustes, no editando este campo.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Si el producto descuenta stock al venderse. Apagado, se puede vender sin existencias.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   track_inventory?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si cada unidad se identifica con un serial al entrar y al salir.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   requires_serial_numbers?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Alias histórico de base_price. Si mandas los dos, manda el mismo valor; para editar el precio usa base_price.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })
   price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Costo unitario del producto. No se toca al vender: lo recalcula el sistema cuando entra mercancía por una orden de compra.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de costo no puede ser negativo' })
   cost_price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Margen de ganancia del producto en porcentaje sobre el costo. Si mandas base_price y profit_margin a la vez, gana el precio y el margen se recalcula solo.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El margen de ganancia no puede ser negativo' })
   profit_margin?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Enciende el precio promocional (sale_price). Apagado, el producto se vende a base_price.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_on_sale?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si aparece publicado en la tienda en línea.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -678,32 +834,56 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   is_featured?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si el cajero puede cambiarle el precio a mano en el Punto de Venta.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   allow_pos_price_override?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Enciende multi-tarifa en el producto: habilita venderlo en varias presentaciones o con varios niveles de precio. Sin esto encendido, enabled_price_tier_ids no tiene efecto.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se le puede vender directamente a un cliente. Un insumo de cocina normalmente va apagado.',
+  })
   // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_sellable?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se usa como insumo en la receta de otro producto.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_ingredient?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si es un combo armado con otros productos.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_combo?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Si se produce por lotes en vez de prepararse por pedido.',
+  })
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -723,6 +903,10 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   is_eligible_for_home_service?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Unidad en la que se lleva el inventario y en la que está expresado base_price (gramo, mililitro, unidad).',
+  })
   // ===== Control exacto de UoM (Fase UoM) =====
   // FKs al catálogo global units_of_measure. El factor de conversión
   // purchase→stock NO se confía del cliente: el backend lo deriva de
@@ -732,17 +916,29 @@ export class UpdateProductDto {
   @Type(() => Number)
   stock_uom_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Unidad en la que se le compra al proveedor (bulto, caja, kilo), cuando es distinta de la de inventario.',
+  })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   purchase_uom_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Cuántas unidades de inventario entran por cada unidad comprada. Una bolsa de 1000 g que se inventaría en gramos lleva 1000: comprar 5 bolsas suma 5000 al stock.',
+  })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   @Min(1)
   purchase_to_stock_factor?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Sobre cuántas unidades de inventario está expresado el precio mostrado. Sirve para productos que se cotizan por 100 g o por metro.',
+  })
   /**
    * A cuántas unidades de stock corresponde `base_price` (price unit de SAP).
    * Un cable medido en milímetros guarda `base_price = 5000` y
@@ -756,6 +952,10 @@ export class UpdateProductDto {
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Manda \'convert\' para que el stock existente se recalcule al cambiar la unidad de inventario. Sin esto, cambiar la unidad deja las cantidades como estaban.',
+  })
   /**
    * Autorización explícita para convertir existencias, reservas, capas de
    * costo, lotes y recetas al cambiar `stock_uom_id` en un producto que ya
@@ -766,11 +966,19 @@ export class UpdateProductDto {
   @IsIn(['convert'])
   stock_uom_conversion?: 'convert';
 
+  @ApiPropertyOptional({
+    description:
+      'Las tarifas habilitadas para ESTE producto, por id. Es un allowlist duro: vender con una tarifa que no esté en la lista se rechaza. La lista reemplaza a la anterior, no se suma — para agregar una presentación manda todas las que quieres dejar. El precio y el empaque de cada una se fijan aparte, en el override del producto para esa tarifa. Un producto tiene presentaciones O variantes, nunca ambas.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   enabled_price_tier_ids?: number[];
 
+  @ApiPropertyOptional({
+    description:
+      'Precio promocional mientras is_on_sale esté activo. Deja base_price intacto como precio normal.',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
@@ -795,10 +1003,18 @@ export class UpdateProductDto {
   @IsEnum(ProductState)
   state?: ProductState;
 
+  @ApiPropertyOptional({
+    description:
+      'Cómo se mide lo que se vende: por unidad, por peso o por volumen.',
+  })
   @IsOptional()
   @IsEnum(PricingType)
   pricing_type?: PricingType;
 
+  @ApiPropertyOptional({
+    description:
+      'Qué clase de producto es: físico, servicio, digital o preparado en cocina.',
+  })
   @IsOptional()
   @IsEnum(ProductType)
   product_type?: ProductType;
@@ -836,6 +1052,10 @@ export class UpdateProductDto {
   @IsString()
   service_instructions?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Minutos que tarda la cocina en prepararlo. Manda la urgencia de la ficha en la pantalla de cocina.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -877,11 +1097,19 @@ export class UpdateProductDto {
   @Type(() => Number)
   preconsultation_template_id?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Categorías a las que pertenece. La lista reemplaza a la anterior.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
 
+  @ApiPropertyOptional({
+    description:
+      'Impuestos que se le aplican al venderlo. La lista reemplaza a la anterior.',
+  })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -892,17 +1120,29 @@ export class UpdateProductDto {
   @IsString({ each: true })
   image_urls?: string[];
 
+  @ApiPropertyOptional({
+    description:
+      'Existencias iniciales repartidas por bodega o tienda.',
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => StockByLocationDto)
   stock_by_location?: StockByLocationDto[];
 
+  @ApiPropertyOptional({
+    description:
+      'Qué hacer con el stock existente cuando cambia la estructura del producto: \'first\' lo deja todo en la primera ubicación, \'distribute\' lo reparte, \'reset\' lo pone en cero.',
+  })
   @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 
+  @ApiPropertyOptional({
+    description:
+      'Qué hacer con el stock de una variante que se elimina: \'first\' pasa al producto base, \'distribute\' se reparte entre las que quedan, \'reset\' se descarta.',
+  })
   @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])

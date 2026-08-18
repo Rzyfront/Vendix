@@ -16,7 +16,14 @@ export interface HelpArticle {
   title: string;
   slug: string;
   summary: string;
-  content: string;
+  /**
+   * Ausente en los resultados de `searchArticles` salvo que se pidan con
+   * `includeContent`: la búsqueda responde con `content_preview` y el cuerpo
+   * entero se trae con `getArticleBySlug`.
+   */
+  content?: string;
+  /** Adelanto en texto plano que devuelve la búsqueda. */
+  content_preview?: string;
   type: 'TUTORIAL' | 'FAQ' | 'GUIDE' | 'ANNOUNCEMENT' | 'RELEASE_NOTE';
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   category_id: number;

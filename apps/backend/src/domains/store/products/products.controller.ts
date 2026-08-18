@@ -12,6 +12,7 @@ import {
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
+import { ApiOperation } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { ProductVariantService } from './services/product-variant.service';
 import {
@@ -40,6 +41,10 @@ export class ProductsController {
     private readonly productVariantService: ProductVariantService,
     private readonly responseService: ResponseService,
   ) {}
+  @ApiOperation({
+    summary:
+      'Redactar con IA la descripción comercial de un producto a partir de su nombre y sus datos',
+  })
   @Post('generate-description')
   @Permissions('store:products:create')
   async generateDescription(@Body() dto: GenerateProductDescriptionDto) {
@@ -58,6 +63,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Mejorar con IA la foto de un producto',
+  })
   @Post('enhance-image')
   @Permissions('store:products:create', 'store:products:update')
   async enhanceImage(@Body() dto: GenerateProductImageEnhancementDto) {
@@ -65,6 +74,10 @@ export class ProductsController {
     return this.responseService.success(result, 'Imagen mejorada exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Crear un producto: nombre, precios, costo, impuestos, categorías, marca, unidades de medida, stock inicial y variantes',
+  })
   @Post()
   @Permissions('store:products:create')
   async create(
@@ -90,6 +103,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Listar los productos de la tienda con búsqueda, filtros y paginación',
+  })
   @Get()
   @Permissions('store:products:read')
   async findAll(
@@ -120,6 +137,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Ver qué promociones tiene aplicadas un producto',
+  })
   @Get(':id/promotions')
   @Permissions('store:products:read')
   async getProductPromotions(@Param('id', ParseIntPipe) id: number) {
@@ -138,6 +159,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Cambiar a qué promociones pertenece un producto',
+  })
   @Patch(':id/promotions')
   @Permissions('store:products:update')
   async updateProductPromotions(
@@ -177,6 +202,10 @@ export class ProductsController {
    * orden de declaración y `:id` capturaría `ids` como parámetro, haciendo
    * fallar el `ParseIntPipe` con un 400.
    */
+  @ApiOperation({
+    summary:
+      'Listar solo los identificadores de los productos que cumplen un filtro, para operaciones masivas',
+  })
   @Get('ids')
   @Permissions('store:products:read')
   async findIds(@Query() query: ProductQueryDto) {
@@ -195,6 +224,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el detalle completo de un producto: precios, impuestos, stock, variantes, imágenes y presentaciones de venta',
+  })
   @Get(':id')
   @Permissions('store:products:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -213,6 +246,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Listar los productos de una tienda concreta',
+  })
   @Get('store/:storeId')
   @Permissions('store:products:read')
   async findByStore(@Param('storeId', ParseIntPipe) storeId: number) {
@@ -231,6 +268,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Buscar un producto por su slug dentro de una tienda',
+  })
   @Get('slug/:slug/store/:storeId')
   @Permissions('store:products:read')
   async findBySlug(
@@ -252,6 +293,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Editar un producto: nombre, descripción, precio, costo, margen, impuestos, categorías, marca, unidades de medida, presentaciones de venta habilitadas, stock por ubicación y variantes',
+  })
   @Patch(':id')
   @Permissions('store:products:update')
   async update(
@@ -275,6 +320,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Generar el enlace de compra directa del producto en la tienda en línea',
+  })
   @Post(':id/online-purchase-link')
   @Permissions('store:products:update')
   async generateOnlinePurchaseLink(@Param('id', ParseIntPipe) id: number) {
@@ -293,6 +342,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Desactivar un producto para que deje de venderse, sin borrarlo',
+  })
   @Patch(':id/deactivate')
   @Permissions('store:products:delete')
   async deactivate(@Param('id', ParseIntPipe) id: number) {
@@ -311,6 +364,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Archivar un producto definitivamente',
+  })
   @Delete(':id')
   @Permissions('store:products:admin_delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
@@ -326,6 +383,10 @@ export class ProductsController {
     }
   }
   // Product Variants endpoints
+  @ApiOperation({
+    summary:
+      'Agregar una variante al producto (talla, color, sabor) con su propio precio y stock',
+  })
   @Post(':id/variants')
   @Permissions('store:products:create')
   async createVariant(
@@ -359,6 +420,10 @@ export class ProductsController {
    * orquestador de producto completo (`PATCH /products/:id`). Ver el
    * JSDoc de `ProductVariantService.updateVariant` para más detalle.
    */
+  @ApiOperation({
+    summary:
+      'Editar una variante del producto',
+  })
   @Patch('variants/:variantId')
   @Permissions('store:products:update')
   async updateVariant(
@@ -380,6 +445,10 @@ export class ProductsController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Eliminar una variante del producto',
+  })
   @Delete('variants/:variantId')
   @Permissions('store:products:delete')
   async removeVariant(@Param('variantId', ParseIntPipe) variantId: number) {
@@ -397,6 +466,10 @@ export class ProductsController {
   }
 
   // Product Images endpoints
+  @ApiOperation({
+    summary:
+      'Agregar una imagen al producto',
+  })
   @Post(':id/images')
   @Permissions('store:products:update')
   async addImage(
@@ -418,6 +491,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Quitar una imagen del producto',
+  })
   @Delete('images/:imageId')
   @Permissions('store:products:update')
   async removeImage(@Param('imageId', ParseIntPipe) imageId: number) {
@@ -435,6 +512,10 @@ export class ProductsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el resumen de productos de la tienda: totales, activos, sin stock y bajo mínimo',
+  })
   @Get('stats/store/:storeId')
   @Permissions('store:products:read')
   async getProductStats(@Param('storeId', ParseIntPipe) storeId: number) {

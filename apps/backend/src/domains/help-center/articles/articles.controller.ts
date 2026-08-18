@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ArticlesService } from './articles.service';
 import { ArticleQueryDto } from './dto/article-query.dto';
+import { ArticleSearchQueryDto } from './dto/article-search-query.dto';
 import { Public } from '../../../common/decorators/public.decorator';
 
 @ApiTags('Help Center - Articles')
@@ -21,10 +22,17 @@ export class ArticlesController {
   @Get('search')
   @Public()
   @ApiOperation({
-    summary: 'Search help articles by title, summary, and content',
+    summary:
+      'Buscar en los artículos de ayuda por palabras clave. Devuelve título, ' +
+      'resumen y un adelanto de cada artículo; el texto completo se lee ' +
+      'después con el slug del artículo',
   })
-  async search(@Query('q') q: string, @Query('limit') limit?: string) {
-    return this.articles_service.search(q, limit ? +limit : 10);
+  async search(@Query() query: ArticleSearchQueryDto) {
+    return this.articles_service.search(
+      query.q,
+      query.limit ?? 10,
+      query.include_content ?? false,
+    );
   }
 
   @Get(':slug')

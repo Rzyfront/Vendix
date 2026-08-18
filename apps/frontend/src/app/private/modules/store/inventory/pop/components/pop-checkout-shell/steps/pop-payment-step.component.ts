@@ -7,9 +7,9 @@ import {
   signal,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { startWith } from 'rxjs/operators';
+import { merge } from 'rxjs';
+import { scan } from 'rxjs/operators';
 import {
-  AbstractControl,
   FormArray,
   FormControl,
   FormGroup,
@@ -40,30 +40,8 @@ export interface PopPaymentPlan {
   payment_installments: Array<{ scheduled_date: string; amount: number }>;
 }
 
-/** Fecha mínima viva (getter): se re-validó en cada cambio, no al crear el formulario. */
-function minDateValidator(getMin: () => string) {
-  return (control: AbstractControl) => {
-    const value: string = control.value;
-    if (!value) return null;
-    const min = getMin();
-    return value < min ? { minDate: { min } } : null;
-  };
-}
-
-/** Tope superior vivo (getter): el máximo se lee en cada validación (tope en vivo). */
-function maxValueValidator(getMax: () => number) {
-  return (control: AbstractControl) => {
-    const value = control.value;
-    if (value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    if (!Number.isFinite(n)) return { max: { max: getMax() } };
-    return n > getMax() ? { max: { max: getMax() } } : null;
-  };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+/** Helpers extraídos a `payment-validators.ts` para reuso entre el wizard POP y otros modales. */
+import { minDateValidator, maxValueValidator, round2 } from './payment-validators';
 
 export const POP_PAYMENT_MODES: Array<{
   value: PopPaymentMode;
@@ -132,15 +110,19 @@ export class PopPaymentStepComponent {
   });
 
   /**
-   * Puente zoneless del estado del formulario → señal. El status de un
-   * ReactiveForm es una propiedad plana; leerla dentro de una computed nunca
-   * la re-evaluaría. `toSignal(statusChanges)` hace que TODAS las computeds que
-   * leen `this.formStatus()` se re-evalúen ante cualquier cambio de valor o
-   * validador (patrón address-form-fields).
+   * Tick monotónico alimentado por `form.valueChanges` y por el FormArray de
+   * cuotas (vive dentro del FormGroup pero su `valueChanges` también lo cubre
+   * el merge). `scan` garantiza un valor distinto por emisión, así que
+   * `Object.is` no anula la invalidación en zoneless — el `mode` no tiene
+   * validadores, por lo que `statusChanges` deduplica `'VALID' → 'VALID'` y
+   * deja congeladas las computeds que aquí declaran su dependencia (ver
+   * `vendix-zoneless-signals`: puentea `valueChanges`, nunca `statusChanges`).
    */
-  private readonly formStatus = toSignal(
-    this.form.statusChanges.pipe(startWith(this.form.status)),
-    { initialValue: this.form.status },
+  private readonly formTick = toSignal(
+    merge(this.form.valueChanges, this.form.controls.installments.valueChanges).pipe(
+      scan((n) => n + 1, 0),
+    ),
+    { initialValue: 0 },
   );
 
   // ── Fecha mínima (date-only, timezone de la tienda) ──────────────────────
@@ -156,14 +138,14 @@ export class PopPaymentStepComponent {
     }).format(instant);
   }
 
-  // ── Estado derivado (reactive vía formStatus) ────────────────────────────
+  // ── Estado derivado (reactive vía formTick) ──────────────────────────────
   readonly installmentGroups = computed<FormGroup[]>(() => {
-    this.formStatus();
+    this.formTick();
     return this.form.controls.installments.controls as FormGroup[];
   });
 
   readonly downPaymentAmount = computed<number>(() => {
-    this.formStatus();
+    this.formTick();
     return Number(this.form.controls.downPayment.value ?? 0);
   });
 
@@ -174,14 +156,14 @@ export class PopPaymentStepComponent {
    * modo previo contamine el cuadre de cuotas o el plan.
    */
   readonly pendingBalance = computed<number>(() => {
-    this.formStatus();
+    this.formTick();
     const mode = this.form.controls.mode.value;
     const down = mode === 'partial' ? Number(this.form.controls.downPayment.value ?? 0) : 0;
     return round2(this.orderTotal() - down);
   });
 
   readonly installmentsTotal = computed<number>(() => {
-    this.formStatus();
+    this.formTick();
     return round2(
       this.installmentGroups().reduce(
         (sum, g) => sum + Number(g.controls['amount'].value ?? 0),
@@ -196,7 +178,7 @@ export class PopPaymentStepComponent {
 
   /** Plan emitido al shell/padre, vigente en cada cambio del formulario. */
   readonly plan = computed<PopPaymentPlan>(() => {
-    this.formStatus();
+    this.formTick();
     const paymentMode = this.form.controls.mode.value;
     return {
       payment_plan: paymentMode,
@@ -217,7 +199,7 @@ export class PopPaymentStepComponent {
 
   /** Validez del paso: bloquea "Siguiente" cuando el modo elegido no cierra. */
   readonly isValid = computed<boolean>(() => {
-    this.formStatus();
+    this.formTick();
     const paymentMode = this.form.controls.mode.value;
     if (paymentMode === 'partial') {
       const value = this.downPaymentAmount();
@@ -271,7 +253,7 @@ export class PopPaymentStepComponent {
     } else if (mode === 'deferred') {
       due.setValidators([Validators.required, minDateValidator(() => this.todayISO())]);
     }
-    // Recompute el estado completo con evento: el puente formStatus debe ver el
+    // Recompute el estado completo con evento: el puente formTick debe ver el
     // nuevo set de validadores, no el previo al cambio de modo.
     this.form.updateValueAndValidity();
   }

@@ -32,10 +32,17 @@ export class HelpCenterService {
     return this.http.get<HelpArticlesResponse>(`${this.api_url}/articles`, { params });
   }
 
-  searchArticles(q: string, limit = 10): Observable<HelpArticle[]> {
-    const params = new HttpParams()
+  /**
+   * `includeContent` en falso por defecto: la búsqueda devuelve título, resumen
+   * y un adelanto. Solo lo pide quien renderiza el cuerpo del artículo dentro
+   * del resultado — hoy la tarjeta expandible del centro de ayuda.
+   */
+  searchArticles(q: string, limit = 10, includeContent = false): Observable<HelpArticle[]> {
+    let params = new HttpParams()
       .set('q', q)
       .set('limit', limit.toString());
+
+    if (includeContent) params = params.set('include_content', 'true');
 
     return this.http.get<HelpArticle[]>(`${this.api_url}/articles/search`, { params });
   }

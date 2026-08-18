@@ -21,6 +21,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { RequestContextService } from '@common/context/request-context.service';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('store/products/bulk-images')
 @UseGuards(PermissionsGuard)
@@ -33,6 +34,10 @@ export class ProductsBulkImageController {
   /**
    * Download ZIP template (example or store-specific SKUs)
    */
+  @ApiOperation({
+    summary:
+      'Descargar la plantilla para cargar imágenes de productos en lote',
+  })
   @Get('template/download')
   @Permissions('store:products:create')
   async downloadTemplate(
@@ -74,6 +79,10 @@ export class ProductsBulkImageController {
   /**
    * Upload ZIP for analysis (dry-run before actual upload)
    */
+  @ApiOperation({
+    summary:
+      'Revisar el archivo de imágenes y devolver a qué producto quedaría asociada cada una, sin subir nada todavía',
+  })
   @Post('analyze')
   @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))
@@ -103,6 +112,10 @@ export class ProductsBulkImageController {
   /**
    * Process images from a previously analyzed session
    */
+  @ApiOperation({
+    summary:
+      'Aplicar la carga masiva de imágenes ya revisada en una sesión de análisis',
+  })
   @Post('upload-session')
   @Permissions('store:products:create')
   async uploadFromSession(@Body() body: { session_id: string }) {
@@ -138,6 +151,10 @@ export class ProductsBulkImageController {
   /**
    * Cancel an analysis session
    */
+  @ApiOperation({
+    summary:
+      'Descartar una sesión de carga masiva de imágenes sin aplicarla',
+  })
   @Delete('session/:id')
   @Permissions('store:products:create')
   async cancelSession(@Param('id') sessionId: string) {
@@ -155,6 +172,10 @@ export class ProductsBulkImageController {
   /**
    * Upload a ZIP file with product images organized by SKU folders
    */
+  @ApiOperation({
+    summary:
+      'Subir imágenes de productos en lote',
+  })
   @Post('upload')
   @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))

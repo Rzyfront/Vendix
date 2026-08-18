@@ -7,7 +7,13 @@ import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
-import { resolveDefaultSaleUnit } from '../../store/products/services/default-sale-unit.util';
+import {
+  resolveDefaultSaleUnit,
+  resolveDefaultSaleUnits,
+  type DefaultSaleUnit,
+} from '../../store/products/services/default-sale-unit.util';
+import { listPublicSaleUnitsForProducts } from '../../store/products/services/public-sale-unit.util';
+import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import {
   MenuAvailabilityCheckerService,
@@ -25,6 +31,7 @@ export class CatalogService {
     private readonly storePrisma: StorePrismaService,
     private readonly s3Service: S3Service,
     private readonly priceResolverService: PriceResolverService,
+    private readonly storefrontPrice: StorefrontPriceService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -329,6 +336,7 @@ export class CatalogService {
         // O simplemente devolvemos vacío si es muy complejo.
         // Lo mejor: Comportamiento normal (orderBy created_at) para page > 1
       } else {
+        await this.hydrateSaleUnitsForListing(finalData);
         const activePromotionsByProductId =
           await this.resolveActivePromotionsForListing(finalData);
         const availabilityByProductId =
@@ -399,6 +407,7 @@ export class CatalogService {
       this.prisma.products.count({ where }),
     ]);
 
+    await this.hydrateSaleUnitsForListing(data);
     const activePromotionsByProductId =
       await this.resolveActivePromotionsForListing(data);
     const availabilityByProductId =
@@ -502,6 +511,7 @@ export class CatalogService {
     // the card byte-for-byte (identical unit_price + category_ids inputs).
     // Never break the detail because of promotions: the helper already
     // swallows errors and degrades to an empty map.
+    await this.hydrateSaleUnitsForListing([product]);
     const activePromotionsByProductId =
       await this.resolveActivePromotionsForListing([product]);
     const activePromotion =
@@ -656,6 +666,7 @@ export class CatalogService {
 
   private async getCatalogSettings(storeId?: number | null): Promise<{
     show_out_of_stock?: boolean;
+    enable_sale_unit_selector?: boolean;
   }> {
     if (!storeId) return {};
 
@@ -666,7 +677,37 @@ export class CatalogService {
 
     return ((settings?.settings as any)?.ecommerce?.catalog ?? {}) as {
       show_out_of_stock?: boolean;
+      enable_sale_unit_selector?: boolean;
     };
+  }
+
+  /**
+   * ¿La tienda publica el selector de presentaciones? (QUI-648, fase 2b)
+   *
+   * DEFAULT `false`, y por eso la comparación es `=== true` y NO el
+   * `!== false` que usan `allow_reviews` o `show_variants`: esos nacieron
+   * encendidos, éste nace apagado. Con `!== false`, una tienda que jamás oyó
+   * hablar del selector —settings sin la clave— lo estrenaría encendido, y
+   * publicar presentaciones que el comercio no revisó es exactamente lo que el
+   * flag existe para impedir.
+   *
+   * El flag gatea la LECTURA (esta proyección) y la ESCRITURA (la autorización
+   * del carrito, en `public-sale-unit.util.ts`). Si solo gateara el display, un
+   * `curl` con `price_tier_id` compraría en una presentación no publicada.
+   */
+  private async isSaleUnitSelectorEnabled(
+    storeId?: number | null,
+  ): Promise<boolean> {
+    const id = storeId ?? RequestContextService.getStoreId();
+    if (!id) return false;
+    try {
+      const settings = await this.getCatalogSettings(id);
+      return settings.enable_sale_unit_selector === true;
+    } catch {
+      // Sin settings legibles no se publica el selector: fallar cerrado deja la
+      // vitrina exactamente como antes de la feature.
+      return false;
+    }
   }
 
   private async areReviewsEnabled(): Promise<boolean> {
@@ -837,6 +878,7 @@ export class CatalogService {
     }
 
     // Mapeo con el pipeline compartido (idéntico a getProducts)
+    await this.hydrateSaleUnitsForListing(collected);
     const activePromotionsByProductId =
       await this.resolveActivePromotionsForListing(collected);
     const availabilityByProductId = await this.resolveAvailabilityForProducts(
@@ -908,10 +950,33 @@ export class CatalogService {
     );
     // Para listado: si tiene variantes, considerar disponible si cualquier
     // stock_level (incluyendo variantes) tiene unidades; si no, sólo base.
-    const availableStock = variantCount > 0
-      ? totalLevelsAvailable
-      : baseAvailable;
-    const isAvailable = !effectiveTracking || availableStock > 0;
+    const availableStockUnits =
+      variantCount > 0 ? totalLevelsAvailable : baseAvailable;
+
+    // QUI-648 — cuando el producto se publica en una presentación, la vitrina
+    // cuenta PAQUETES, no unidades: con 30 kg en bodega y un Bulto×50 no hay
+    // ni un bulto que vender, así que la card debe decir "agotado".
+    //
+    // Es un cambio de comportamiento DELIBERADO: hoy esa card se muestra
+    // comprable, el cliente la agrega y el checkout la rechaza en
+    // `assertPackagedStockAvailability`. Mover el "no hay" a la vitrina es
+    // mostrarle al cliente la misma verdad que ya aplica el cobro. Sin
+    // presentación, packSize = 1 y la aritmética queda idéntica a la histórica.
+    const packSize = this.resolveProductPackSize(product);
+    const availablePackages =
+      packSize > 1
+        ? Math.floor(availableStockUnits / packSize)
+        : availableStockUnits;
+    const isAvailable = !effectiveTracking || availablePackages > 0;
+
+    // Fase 2b — el ABANICO de presentaciones. `[]` con el flag apagado o sin
+    // presentaciones publicadas, y en ese caso la card queda idéntica a la
+    // histórica: `sale_unit_count: 0` y `price_from: null` son aditivos.
+    const saleUnitOptions = this.buildAvailableSaleUnits(
+      product,
+      availableStockUnits,
+      effectiveTracking,
+    );
 
     return {
       id: product.id,
@@ -924,7 +989,8 @@ export class CatalogService {
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       // Presentación en la que se publica y se vende. `null` = unidad principal.
-      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      // NO cambia con el selector: sigue siendo la marcada por defecto, que es
+      // la garantía de cero regresión para el cliente que no se actualice.
       sale_unit: product.__default_sale_unit
         ? {
             price_tier_id: product.__default_sale_unit.tier.id,
@@ -933,14 +999,30 @@ export class CatalogService {
               product.__default_sale_unit.tier.units_per_package,
           }
         : null,
+      // Cuántas presentaciones ofrece el producto. `> 1` es la señal de que el
+      // comprador tiene algo que ELEGIR y la card no puede agregar a ciegas —
+      // mismo criterio que `variant_count`.
+      sale_unit_count: saleUnitOptions.length,
+      // Mínimo de `available_sale_units[].price`, para el "desde $2.380".
+      // `final_price` sigue siendo el de la presentación por defecto.
+      price_from:
+        saleUnitOptions.length > 0
+          ? Math.min(...saleUnitOptions.map((o) => o.price))
+          : null,
       // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
       // sobre un producto que se mide en milímetros.
       price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
-      // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
-      stock_quantity: availableStock,
-      available_stock: effectiveTracking ? availableStock : null,
+      // Mantener compatibilidad: stock_quantity ahora se calcula desde
+      // stock_levels y sigue expresado en UNIDADES DE STOCK (sin cambio).
+      stock_quantity: availableStockUnits,
+      // Expresado en PAQUETES: es lo que el cliente puede llegar a comprar.
+      available_stock: effectiveTracking ? availablePackages : null,
+      // Crudo, en unidades de stock. Necesario para que el frontend pueda
+      // explicar "quedan 30 unidades, el bulto es de 50" sin volver a
+      // preguntar.
+      available_stock_units: availableStockUnits,
       is_available: isAvailable,
       // Menu availability (carta horario) — independiente del stock. Productos
       // retail (sin ventana de carta) quedan siempre disponibles.
@@ -1002,16 +1084,35 @@ export class CatalogService {
     // - Con variantes: el frontend muestra variant pickers; el flag a nivel
     //   producto refleja "al menos una variante disponible".
     // - Sin variantes: usar el stock base desde stock_levels.
-    const productAvailableStock = hasVariants
+    const productAvailableStockUnits = hasVariants
       ? variants.reduce(
           (sum: number, v: any) =>
             sum + (typeof v.available_stock === 'number' ? v.available_stock : 0),
           0,
         )
       : this.sumBaseProductStock(product);
+
+    // Mismo desdoblamiento que la card (ver `mapProductToResponse`). El camino
+    // con variantes nunca coexiste con presentación —un producto publicado en
+    // presentación no expone variantes (`mapVariantsToResponse` devuelve [])—,
+    // así que ahí packSize siempre vale 1.
+    const packSize = this.resolveProductPackSize(product);
+    const productAvailablePackages =
+      packSize > 1
+        ? Math.floor(productAvailableStockUnits / packSize)
+        : productAvailableStockUnits;
     const productIsAvailable = hasVariants
       ? variants.some((v: any) => v.is_available)
-      : !effectiveTracking || productAvailableStock > 0;
+      : !effectiveTracking || productAvailablePackages > 0;
+
+    // Fase 2b — el abanico completo, que es lo que pinta el selector del
+    // detalle. Se mide contra el MISMO stock que `available_stock`, así que un
+    // chip "Agotado" y el badge del producto no pueden contradecirse.
+    const saleUnitOptions = this.buildAvailableSaleUnits(
+      product,
+      productAvailableStockUnits,
+      effectiveTracking,
+    );
 
     return {
       id: product.id,
@@ -1024,7 +1125,8 @@ export class CatalogService {
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       // Presentación en la que se publica y se vende. `null` = unidad principal.
-      // La vitrina no ofrece selector: elegir entre varias es propio del POS.
+      // NO cambia con el selector: sigue siendo la marcada por defecto, que es
+      // la garantía de cero regresión para el cliente que no se actualice.
       sale_unit: product.__default_sale_unit
         ? {
             price_tier_id: product.__default_sale_unit.tier.id,
@@ -1033,14 +1135,27 @@ export class CatalogService {
               product.__default_sale_unit.tier.units_per_package,
           }
         : null,
+      // Presentaciones entre las que el comprador puede elegir. SIEMPRE
+      // presente: `[]` con el flag apagado o sin presentaciones publicadas.
+      // Invariante: `find(u => u.is_default).price === final_price`.
+      available_sale_units: saleUnitOptions,
+      // Los mismos dos campos del listado, para que `ProductDetail` no tenga un
+      // contrato más pobre que la card de la que viene el usuario.
+      sale_unit_count: saleUnitOptions.length,
+      price_from:
+        saleUnitOptions.length > 0
+          ? Math.min(...saleUnitOptions.map((o) => o.price))
+          : null,
       // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
       // sobre un producto que se mide en milímetros.
       price_unit: this.buildPriceUnit(product),
       active_promotion: activePromotion,
       sku: product.sku,
-      // Mantener compatibilidad: ahora reflejan stock_levels.
-      stock_quantity: productAvailableStock,
-      available_stock: effectiveTracking ? productAvailableStock : null,
+      // Mantener compatibilidad: sigue en UNIDADES DE STOCK (sin cambio).
+      stock_quantity: productAvailableStockUnits,
+      // Expresado en PAQUETES: es lo que el cliente puede llegar a comprar.
+      available_stock: effectiveTracking ? productAvailablePackages : null,
+      available_stock_units: productAvailableStockUnits,
       is_available: productIsAvailable,
       // Menu availability (carta horario) — independiente del stock. Productos
       // retail (sin ventana de carta) quedan siempre disponibles.
@@ -1136,48 +1251,218 @@ export class CatalogService {
   }
 
   /**
-   * Calculates the final price of a product including taxes and active offers.
-   * Supports variant price overrides.
+   * Precio publicado CON IMPUESTO.
+   *
+   * QUI-648 — cuando el producto tiene presentación por defecto, el precio
+   * publicado es el del PAQUETE. Tiene que coincidir con lo que cobra el
+   * checkout: si la vitrina mostrara el precio unitario, el total cambiaría al
+   * pagar.
+   *
+   * La aritmética vive en `StorefrontPriceService` para que la vitrina, el
+   * carrito y el cobro no puedan volver a dar tres cifras distintas del mismo
+   * producto. El default se hidrata antes (`__default_sale_unit`), en lote para
+   * los listados y por producto en el detalle.
    */
   private calculateFinalPrice(product: any, variant?: any): number {
-    const totalTaxRate = this.getTotalTaxRate(product);
-    // QUI-648 — cuando el producto tiene presentación por defecto, el precio
-    // publicado es el del PAQUETE. Tiene que coincidir con lo que cobra el
-    // checkout: si la vitrina mostrara el precio unitario, el total cambiaría al
-    // pagar. El default se hidrata en los mapeadores (`__default_sale_unit`).
-    const saleUnit = product?.__default_sale_unit;
-    if (saleUnit) {
-      const tierResult = this.priceResolverService.resolveWithTier({
-        product: {
-          base_price: Number(product.base_price),
-          is_on_sale: product.is_on_sale,
-          sale_price:
-            product.sale_price != null ? Number(product.sale_price) : null,
-          track_inventory: product.track_inventory,
-          has_multiple_price_tiers: true,
-        },
-        variant: variant
-          ? {
-              id: variant.id,
-              price_override:
-                variant.price_override != null
-                  ? Number(variant.price_override)
-                  : null,
-              is_on_sale: variant.is_on_sale,
-              sale_price:
-                variant.sale_price != null ? Number(variant.sale_price) : null,
-              track_inventory_override: variant.track_inventory_override ?? null,
-            }
-          : undefined,
-        priceTier: saleUnit.tier,
-        tierOverrides: saleUnit.overrides,
-        taxRate: totalTaxRate,
-      });
-      return Math.round(tierResult.unitPriceWithTax * 100) / 100;
+    return this.storefrontPrice.resolveLine({
+      product,
+      variant: variant ?? null,
+      saleUnit: product?.__default_sale_unit ?? null,
+      taxRate: this.storefrontPrice.getTotalTaxRate(product),
+    }).gross_unit_price;
+  }
+
+  /**
+   * Unidades de stock que ocupa UN paquete de la presentación publicada.
+   * `1` cuando el producto se vende en su unidad principal.
+   */
+  private resolveProductPackSize(product: any): number {
+    return this.storefrontPrice.resolvePackSizeForSaleUnit(
+      product?.__default_sale_unit ?? null,
+    );
+  }
+
+  /**
+   * Hidrata `__default_sale_unit` de TODO un listado en una sola pasada.
+   *
+   * Tiene que correr ANTES de `resolveActivePromotionsForListing`: ese helper
+   * cotiza la promoción sobre `calculateFinalPrice`, y sin la presentación
+   * hidratada la cotiza sobre el precio de la UNIDAD mientras la card publica
+   * el del PAQUETE — el badge de descuento no cuadraba con el precio tachado
+   * que estaba al lado.
+   *
+   * Los productos sin presentación quedan marcados explícitamente en `null`
+   * (no `undefined`) para que el guard de `hydrateDefaultSaleUnit` convierta en
+   * no-op la llamada por producto de los mapeadores: ese era el N+1.
+   */
+  private async hydrateSaleUnitsForListing(products: any[]): Promise<void> {
+    if (!Array.isArray(products) || products.length === 0) return;
+
+    const pending = products.filter(
+      (p) => p && p.id != null && p.__default_sale_unit === undefined,
+    );
+
+    if (pending.length > 0) {
+      let saleUnits = new Map<number, DefaultSaleUnit>();
+      try {
+        saleUnits = await resolveDefaultSaleUnits(
+          this.prisma as any,
+          pending.map((p) => Number(p.id)),
+        );
+      } catch {
+        // Una falla leyendo las presentaciones no debe tumbar la vitrina: sin
+        // default, cada producto se publica en su unidad principal (cascada
+        // legacy). Se marca `null` igual para no disparar el N+1 de reintentos
+        // producto por producto en los mapeadores.
+        saleUnits = new Map();
+      }
+
+      for (const product of pending) {
+        product.__default_sale_unit = saleUnits.get(Number(product.id)) ?? null;
+      }
     }
-    const priceResult = this.resolvePrice(product, variant, totalTaxRate);
-    const finalPrice = priceResult.unitPriceWithTax;
-    return Math.round(finalPrice * 100) / 100;
+
+    // Fase 2b: el ABANICO de presentaciones viaja por el MISMO punto de
+    // hidratación por lote que el default. Engancharlo acá —y no dentro de los
+    // mapeadores— es lo que impide el N+1: `getProducts`, `getFeaturedWithFill`
+    // y `getProductBySlug` ya pasan todos por aquí.
+    await this.hydratePublicSaleUnits(products);
+  }
+
+  /**
+   * Hidrata `__public_sale_units` (todas las presentaciones publicables) y
+   * `__public_default_tier_id` para un lote de productos.
+   *
+   * Se marca SIEMPRE, aunque el flag esté apagado o la lectura falle: el valor
+   * por defecto es `[]`, de modo que la proyección degrada a la respuesta
+   * histórica exacta en vez de quedar `undefined` y tentar a un mapeador a
+   * releer producto por producto.
+   *
+   * Nunca lanza: la vitrina no puede caerse porque el catálogo de tarifas esté
+   * ilegible.
+   */
+  private async hydratePublicSaleUnits(products: any[]): Promise<void> {
+    const pending = products.filter(
+      (p) => p && p.id != null && p.__public_sale_units === undefined,
+    );
+    if (pending.length === 0) return;
+
+    for (const product of pending) {
+      product.__public_sale_units = [];
+      product.__public_default_tier_id = null;
+    }
+
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return;
+    if (!(await this.isSaleUnitSelectorEnabled(storeId))) return;
+
+    try {
+      const { byProduct, defaultTierByProduct } =
+        await listPublicSaleUnitsForProducts(
+          this.prisma as any,
+          pending.map((p) => Number(p.id)),
+          storeId,
+        );
+      for (const product of pending) {
+        const id = Number(product.id);
+        product.__public_sale_units = byProduct.get(id) ?? [];
+        product.__public_default_tier_id =
+          defaultTierByProduct.get(id) ?? null;
+      }
+    } catch {
+      // Ya quedaron marcados en `[]` arriba: sin presentaciones publicadas la
+      // respuesta es byte a byte la de antes de la feature.
+    }
+  }
+
+  /**
+   * Proyecta las presentaciones publicables de un producto (`available_sale_units`).
+   *
+   * REGLAS DE DINERO Y STOCK (las tres se rompen juntas si se toca una):
+   *
+   * 1. `price` es el precio del PAQUETE ENTERO y viene CON IMPUESTO, la MISMA
+   *    escala que `final_price`. Sale de `StorefrontPriceService.resolveLine`
+   *    con `quantity: 1`. Jamás se multiplica dinero por `units_per_package`:
+   *    el precio del bulto YA es el precio del bulto, y multiplicarlo inflaría
+   *    el cobro por el tamaño del empaque.
+   * 2. `compare_at_price` sale del resolver en escala NETA (así lo documenta
+   *    `StorefrontLinePrice`), así que acá se le aplica la tasa para que el
+   *    precio tachado y el vigente no queden en dos escalas distintas dentro
+   *    del mismo chip.
+   * 3. `available_packages = floor(unidades / packSize)`, con el packSize que
+   *    el propio resolver eligió (`line.pack_size`, cascada
+   *    `override_units_per_package ?? tier.units_per_package ?? 1`). Se toma de
+   *    ahí y no de una segunda lectura para que el dinero y el stock no puedan
+   *    elegir filas de override distintas.
+   *
+   * `is_default` marca la presentación preseleccionada: la MISMA que alimenta
+   * `sale_unit` y `final_price`, de modo que
+   * `available_sale_units.find(u => u.is_default).price === final_price`.
+   */
+  private buildAvailableSaleUnits(
+    product: any,
+    availableStockUnits: number,
+    effectiveTracking: boolean,
+  ): Array<{
+    price_tier_id: number;
+    name: string;
+    units_per_package: number | null;
+    is_default: boolean;
+    price: number;
+    compare_at_price: number | null;
+    available_packages: number | null;
+    is_available: boolean;
+  }> {
+    const options: DefaultSaleUnit[] = Array.isArray(
+      product?.__public_sale_units,
+    )
+      ? product.__public_sale_units
+      : [];
+    if (options.length === 0) return [];
+
+    // El default sale del assignment (`is_default` por producto). Se cae al
+    // tier ya hidratado para el caso en que el lote no lo trajera.
+    const defaultTierId: number | null =
+      product?.__public_default_tier_id ??
+      product?.__default_sale_unit?.tier?.id ??
+      null;
+    const taxRate = this.storefrontPrice.getTotalTaxRate(product);
+
+    // El orden es el que devuelve `listPublicSaleUnitsForProducts`
+    // (`price_tier.sort_order`): el comercio decide en qué orden se ofrecen.
+    return options.map((saleUnit) => {
+      const line = this.storefrontPrice.resolveLine({
+        product,
+        variant: null,
+        saleUnit,
+        quantity: 1,
+        taxRate,
+      });
+      const packSize = line.pack_size;
+      const availablePackages = effectiveTracking
+        ? packSize > 1
+          ? Math.floor(availableStockUnits / packSize)
+          : availableStockUnits
+        : null;
+
+      return {
+        price_tier_id: saleUnit.tier.id,
+        name: saleUnit.tier.name,
+        // packSize EFECTIVO. `null` —y no `1`— cuando la presentación no
+        // empaqueta nada, igual que `sale_unit.units_per_package`: el frontend
+        // usa la ausencia para no pintar "(1 und)".
+        units_per_package: packSize > 1 ? packSize : null,
+        is_default:
+          defaultTierId != null && saleUnit.tier.id === defaultTierId,
+        price: line.gross_unit_price,
+        compare_at_price:
+          line.compare_at_price != null
+            ? Math.round(line.compare_at_price * (1 + taxRate) * 100) / 100
+            : null,
+        available_packages: availablePackages,
+        is_available: !effectiveTracking || (availablePackages ?? 0) > 0,
+      };
+    });
   }
 
   /**
@@ -1186,10 +1471,13 @@ export class CatalogService {
    * asíncrona. Devuelve el mismo objeto recibido.
    */
   private async hydrateDefaultSaleUnit(product: any): Promise<any> {
-    if (!product?.id || product.__default_sale_unit !== undefined) {
-      return product;
-    }
+    if (!product?.id) return product;
+    // La unidad de stock se hidrata SIEMPRE, aunque la presentación ya venga
+    // resuelta del lote: `buildPriceUnit` la lee para publicar "$5.000 por
+    // metro". Si viviera detrás del guard de abajo, el listado hidratado en
+    // lote perdería la unidad y la etiqueta degradaba a "por 1.000 unidades".
     await this.hydrateStockUnit(product);
+    if (product.__default_sale_unit !== undefined) return product;
     try {
       product.__default_sale_unit = await resolveDefaultSaleUnit(
         this.prisma as any,
@@ -1212,6 +1500,8 @@ export class CatalogService {
    * producto para mostrar dos palabras.
    */
   private async hydrateStockUnit(product: any): Promise<void> {
+    // Idempotente: ahora se llama desde dos caminos (lote y por producto).
+    if (product?.__stock_unit !== undefined) return;
     if (!product?.stock_uom_id) {
       product.__stock_unit = null;
       return;
@@ -1293,18 +1583,13 @@ export class CatalogService {
     };
   }
 
+  /**
+   * Delega en `StorefrontPriceService`: catálogo y carrito mantenían dos copias
+   * idénticas de este recorrido, y dos copias de una base gravable terminan
+   * publicando dos precios del mismo producto.
+   */
   private getTotalTaxRate(product: any): number {
-    let totalTaxRate = 0;
-    if (product.product_tax_assignments) {
-      for (const assignment of product.product_tax_assignments) {
-        if (assignment.tax_categories?.tax_rates) {
-          for (const tax of assignment.tax_categories.tax_rates) {
-            totalTaxRate += Number(tax.rate);
-          }
-        }
-      }
-    }
-    return totalTaxRate;
+    return this.storefrontPrice.getTotalTaxRate(product);
   }
 
   private resolvePrice(product: any, variant?: any, taxRate?: number) {

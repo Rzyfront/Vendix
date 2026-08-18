@@ -9,7 +9,11 @@ import {
   computed,
 } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
-import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
+import { resolvePackSize } from '../../../../../shared/services/pricing';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -18,8 +22,9 @@ import { SpinnerComponent } from '../../../../../shared/components/spinner/spinn
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
-import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
-import { CartService } from '../../services/cart.service';
+import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, SaleUnitOption, formatMenuNextAvailable } from '../../services/catalog.service';
+import { AddProductOptions, CartService } from '../../services/cart.service';
+import { SaleUnitSelectorComponent } from '../sale-unit-selector/sale-unit-selector.component';
 import { TableContextService } from '../../services/table-context.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
 
@@ -37,6 +42,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     QuantityControlComponent,
     ShareModalComponent,
     CurrencyPipe,
+    SaleUnitSelectorComponent,
   ],
   template: `
     <app-modal
@@ -55,7 +61,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
       <!-- Product Content -->
       @if (!isLoading() && product(); as prod) {
-        <div class="quick-view-content">
+        <div class="quick-view-content" [attr.data-currency]="currencyCode()">
           <!-- Image Section -->
           <div class="quick-view-image-col">
             <div class="quick-view-image">
@@ -111,6 +117,20 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
               }
             </div>
+
+            <!-- Presentaciones de venta (multitarifa). Por QUI-648 un
+                 producto tiene presentaciones O variantes, nunca ambas: los
+                 dos selectores no coexisten. -->
+            @if (hasSaleUnitChoice()) {
+              <div class="sale-unit-selector-wrap">
+                <label class="variant-label">Presentación:</label>
+                <app-sale-unit-selector
+                  [options]="saleUnits()"
+                  [selectedTierId]="selectedTierId()"
+                  (selectedTierIdChange)="onSaleUnitChange($event)"
+                />
+              </div>
+            }
 
             <!-- Variant Selector -->
             @if (prod.variants && prod.variants.length > 0) {
@@ -174,14 +194,23 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             <!-- Quantity Selector -->
             <div class="quantity-selector">
               <label>Cantidad:</label>
+              <!-- Cuenta PAQUETES; unitsPerPackage sólo pinta el hint
+                   "= N u." y jamás multiplica dinero. -->
               <app-quantity-control
                 [value]="quantity()"
                 [min]="1"
                 [max]="isOnDemand() ? 999 : (displayStock() || 99)"
+                [unitsPerPackage]="packSize()"
                 [size]="'sm'"
                 (valueChange)="quantity.set($event)"
               />
             </div>
+
+            @if (selectedSaleUnit(); as unit) {
+              <!-- Nombre VERBATIM ("2 Rollo 20 m"): derivar el plural español
+                   de un nombre libre produce "Rollo 20 ms". -->
+              <p class="sale-unit-line">{{ quantity() }} {{ unit.name }}</p>
+            }
 
             <!-- Actions -->
             @if (!hideDineInPurchase()) {
@@ -493,6 +522,20 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       }
     }
 
+    .sale-unit-selector-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .sale-unit-line {
+      margin: 0.35rem 0 0;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+    }
+
     .quantity-selector {
       display: flex;
       align-items: center;
@@ -599,12 +642,50 @@ export class ProductQuickViewModalComponent {
   readonly quantity = signal(1);
   readonly shareModalOpen = signal(false);
 
+  // ── Multitarifa: presentaciones de venta ──────────────────────────────
+  /**
+   * Presentación elegida. Se siembra en el `next` del subscribe de
+   * `loadProduct`, NUNCA desde un `effect()`: escribirla en un effect
+   * alimentaría `selectedSaleUnit` / `packSize` / `displayPrice` en el mismo
+   * tick en que se leen, que es lo que zoneless prohíbe.
+   */
+  readonly selectedTierId = signal<number | null>(null);
+
+  readonly saleUnits = computed<SaleUnitOption[]>(
+    () => this.product()?.available_sale_units ?? [],
+  );
+
+  /** El comprador DEBE elegir presentación. Mismo criterio que el detalle. */
+  readonly hasSaleUnitChoice = computed<boolean>(() => {
+    const p = this.product();
+    if (!p) return false;
+    const count = p.sale_unit_count ?? this.saleUnits().length;
+    return count > 1 && this.saleUnits().length > 1;
+  });
+
+  readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
+    const tierId = this.selectedTierId();
+    if (tierId === null) return null;
+    return (
+      this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null
+    );
+  });
+
+  /** packSize efectivo (>= 1). Sólo stock/envío/texto — nunca dinero. */
+  readonly packSize = computed<number>(() =>
+    resolvePackSize(this.selectedSaleUnit()?.units_per_package ?? null),
+  );
+
   readonly hasVariants = computed(() => {
     const p = this.product();
     return !!p?.variants && p.variants.length > 0;
   });
 
   readonly displayPrice = computed(() => {
+    // El `price` de la presentación YA es el del PAQUETE ENTERO con impuesto,
+    // resuelto por el backend. El frontend nunca resuelve precios.
+    const unit = this.selectedSaleUnit();
+    if (unit) return unit.price;
     const v = this.selectedVariant();
     if (v) return v.final_price;
     return this.product()?.final_price || 0;
@@ -625,6 +706,11 @@ export class ProductQuickViewModalComponent {
   );
 
   readonly displayStock = computed<number | null>(() => {
+    // Con presentación elegida el stock son PAQUETES de ESA presentación.
+    // `available_packages === null` = no rastrea inventario (NO agotado).
+    const unit = this.selectedSaleUnit();
+    if (unit) return unit.available_packages ?? 999;
+
     const v = this.selectedVariant();
     if (v && !this.variantTracksInventory(v)) return 999;
     if (v) return v.stock_quantity;
@@ -644,6 +730,8 @@ export class ProductQuickViewModalComponent {
 
   readonly purchaseDisabled = computed(() => {
     if (this.isOffSchedule()) return true;
+    // Sin presentación elegida no hay precio ni escala que cobrar.
+    if (this.hasSaleUnitChoice() && !this.selectedSaleUnit()) return true;
     if (this.hasVariants() && !this.selectedVariant()) return true;
     const variant = this.selectedVariant();
     if (variant && !this.isVariantAvailable(variant)) return true;
@@ -703,12 +791,21 @@ export class ProductQuickViewModalComponent {
   private catalogService = inject(CatalogService);
   private cartService = inject(CartService);
   private router = inject(Router);
+  private currencyFormat = inject(CurrencyFormatService);
+  /**
+   * Moneda del tenant, leída por la plantilla vía `data-currency`. El
+   * `CurrencyPipe` de Vendix es IMPURO: sin este atributo el modal OnPush se
+   * queda con el formato de fallback si la moneda resuelve tras el primer
+   * paint.
+   */
+  protected readonly currencyCode = this.currencyFormat.currencyCode;
   /** QR-mode-aware visibility (Step 7) — Hides purchase CTAs when the
    *  active scan mode (`menu_only` / pre-session `mark_occupied` /
    *  pre-session `require_staff`) forbids ordering right now. */
   protected readonly tableContext = inject(TableContextService);
 
   constructor() {
+    this.currencyFormat.loadCurrency();
     effect(() => {
       if (this.isOpen() && this.productSlug()) {
         this.loadProduct();
@@ -755,6 +852,7 @@ export class ProductQuickViewModalComponent {
     this.hasError.set(false);
     this.product.set(null);
     this.selectedVariant.set(null);
+    this.selectedTierId.set(null);
     this.quantity.set(1);
 
     this.catalogService
@@ -765,6 +863,9 @@ export class ProductQuickViewModalComponent {
           if (response.success) {
             const prod = response.data;
             this.product.set(prod);
+            // Preselección de presentación AQUÍ, en el `next` de la carga, y
+            // no en un `effect()` (ver `selectedTierId`).
+            this.seedSaleUnit(prod);
             // Auto-select first available variant
             if (prod.variants?.length > 0) {
               const firstAvailable = prod.variants.find((variant) =>
@@ -784,6 +885,62 @@ export class ProductQuickViewModalComponent {
       });
   }
 
+  /**
+   * Siembra `selectedTierId` con la presentación por defecto DISPONIBLE.
+   * Si ninguna es usable se deja en `null` y `purchaseDisabled` bloquea el
+   * CTA — más honesto que preseleccionar algo que no se puede comprar.
+   */
+  private seedSaleUnit(product: ProductDetail): void {
+    const units = product.available_sale_units ?? [];
+    if (units.length === 0) {
+      this.selectedTierId.set(null);
+      return;
+    }
+    // `available_packages === null` = no rastrea inventario, NO agotado.
+    const usable = (u: SaleUnitOption) =>
+      u.is_available !== false && u.available_packages !== 0;
+    const chosen =
+      units.find((u) => u.is_default && usable(u)) ?? units.find(usable);
+    this.selectedTierId.set(chosen?.price_tier_id ?? null);
+    this.quantity.set(1);
+  }
+
+  /**
+   * Cambio de presentación: la cantidad SIEMPRE vuelve a 1, sin convertir
+   * magnitudes (el POS convierte porque el cajero ya capturó una medida
+   * física; aquí el comprador sólo tocó un chip). El par
+   * `[selectedTierId]` + `(selectedTierIdChange)` — en vez del azúcar
+   * `[(...)]` — es lo que da el seam para hacer ese reset sin un `effect()`.
+   */
+  onSaleUnitChange(tierId: number | null): void {
+    if (this.selectedTierId() === tierId) return;
+    this.selectedTierId.set(tierId);
+    this.quantity.set(1);
+  }
+
+  /**
+   * Opciones de adición: variante O presentación (QUI-648 garantiza que nunca
+   * coexisten). `saleUnitInfo.price` es el precio del PAQUETE ENTERO.
+   */
+  private buildAddOptions(): AddProductOptions {
+    const sv = this.selectedVariant();
+    const unit = this.selectedSaleUnit();
+    return {
+      variantId: sv?.id,
+      variantInfo: sv
+        ? { name: sv.name, sku: sv.sku, price: sv.final_price }
+        : undefined,
+      priceTierId: unit?.price_tier_id,
+      saleUnitInfo: unit
+        ? {
+            name: unit.name,
+            units_per_package: unit.units_per_package,
+            price: unit.price,
+          }
+        : undefined,
+    };
+  }
+
   onAddToCart(): void {
     const product = this.product();
     if (!product) return;
@@ -798,17 +955,12 @@ export class ProductQuickViewModalComponent {
       });
       return;
     }
-    const sv = this.selectedVariant();
-    const variantId = sv?.id;
-    const variantInfo = sv
-      ? { name: sv.name, sku: sv.sku, price: sv.final_price }
-      : undefined;
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    // Sobrecarga de objeto para poder mandar la presentación elegida.
     const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
-      variantId,
-      variantInfo,
+      this.buildAddOptions(),
     );
     if (result) {
       result.subscribe();
@@ -831,17 +983,12 @@ export class ProductQuickViewModalComponent {
       });
       return;
     }
-    const sv = this.selectedVariant();
-    const variantId = sv?.id;
-    const variantInfo = sv
-      ? { name: sv.name, sku: sv.sku, price: sv.final_price }
-      : undefined;
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    // Sobrecarga de objeto para poder mandar la presentación elegida.
     const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
-      variantId,
-      variantInfo,
+      this.buildAddOptions(),
     );
     if (result) {
       result.subscribe({
@@ -874,6 +1021,7 @@ export class ProductQuickViewModalComponent {
     // Reset state
     this.product.set(null);
     this.selectedVariant.set(null);
+    this.selectedTierId.set(null);
     this.hasError.set(false);
     this.quantity.set(1);
   }

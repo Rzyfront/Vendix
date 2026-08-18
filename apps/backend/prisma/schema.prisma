@@ -1558,6 +1558,7 @@ model payments {
   cash_register_movements cash_register_movements[]
 
   @@index([gateway_reference])
+  @@index([order_id])
 }
 
 model product_categories {
@@ -1890,6 +1891,7 @@ model price_tiers {
   order_items         order_items[]                    @relation("order_items_applied_price_tier")
   quotation_items     quotation_items[]                @relation("quotation_items_applied_price_tier")
   sales_order_items   sales_order_items[]              @relation("sales_order_items_applied_price_tier")
+  cart_items          cart_items[]                     @relation("cart_items_applied_price_tier")
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -1927,9 +1929,11 @@ model product_price_tier_overrides {
 model product_price_tier_assignments {
   product_id    Int
   price_tier_id Int
-  /// Presentación por defecto del producto: la que rige en TODA superficie de
-  /// venta (tienda online, POS, cotizaciones). Elegir entre varias es una
-  /// capacidad exclusiva del POS; el storefront usa esta y no expone selector.
+  /// Presentación por defecto del producto: preselección de la vitrina y
+  /// fallback de toda superficie de venta (tienda online, POS, cotizaciones)
+  /// cuando la línea no trae presentación explícita. En la tienda online el
+  /// comprador puede elegir otra si el flag
+  /// `ecommerce.catalog.enable_sale_unit_selector` está activo.
   ///
   /// La unicidad la garantiza un índice único PARCIAL que Prisma no puede
   /// expresar en el schema y vive solo en la migración:
@@ -2022,6 +2026,8 @@ model refunds {
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([order_id])
 }
 
 model reviews {
@@ -2408,6 +2414,7 @@ model expenses {
   created_by_user_id  Int?
   approved_by_user_id Int?
   approved_at         DateTime?           @db.Timestamp(6)
+  paid_at             DateTime?           @db.Timestamp(6)
   refunded_at         DateTime?           @db.Timestamp(6)
   refunded_by_user_id Int?
   refund_reason       String?             @db.VarChar(500)
@@ -2424,6 +2431,8 @@ model expenses {
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
+  @@index([store_id, paid_at])
+  @@index([organization_id, paid_at])
   @@index([state])
   @@index([category_id])
 }
@@ -3021,12 +3030,34 @@ model cart_items {
   unit_price         Decimal   @db.Decimal(12, 2)
   created_at         DateTime? @default(now()) @db.Timestamp(6)
 
+  /// Presentacion de venta elegida por el comprador (bulto/kilo, rollo/metro).
+  /// NULL = el servidor resuelve la presentacion por defecto del producto, que
+  /// es el comportamiento historico y el de cualquier cliente sin actualizar.
+  applied_price_tier_id Int?
+  /// Unidades de stock que consume la linea = quantity * packSize. Es CACHE,
+  /// no verdad: el checkout siempre lo recalcula desde la presentacion
+  /// autorizada. Vive aqui para que getCartSummary pueda alimentar el
+  /// predicado `isSoldByPresentation` del motor de promociones sin una lectura
+  /// extra por linea.
+  stock_units_consumed  Int?
+
   cart            carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
   product         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
 
-  @@unique([cart_id, product_id, product_variant_id])
+  applied_price_tier price_tiers? @relation("cart_items_applied_price_tier", fields: [applied_price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  /// OJO: la unicidad REAL la impone un indice `NULLS NOT DISTINCT` que Prisma
+  /// no sabe expresar y que vive SOLO en la migracion
+  /// `20260818140000_cart_items_sale_unit`. Bajo el default de Postgres
+  /// (NULLS DISTINCT) esta declaracion no protege nada en el caso que importa:
+  /// los productos con presentacion NO tienen variantes (regla tiers (+)
+  /// variantes, QUI-648), asi que product_variant_id es siempre NULL ahi y dos
+  /// NULL nunca colisionan. No regeneres esta tabla sin reponer el indice
+  /// manual -- mismo criterio que product_price_tier_assignments.is_default.
+  @@unique([cart_id, product_id, product_variant_id, applied_price_tier_id], map: "cart_items_line_identity_key")
   @@index([cart_id])
+  @@index([applied_price_tier_id])
 }
 
 model wishlists {

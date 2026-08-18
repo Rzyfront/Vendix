@@ -50,6 +50,33 @@ export interface ActiveStorePromotion {
   min_purchase_amount: number | null;
 }
 
+/**
+ * Una presentación de venta ofrecida al comprador (`price_tiers.kind='sale_unit'`):
+ * "Bulto 50kg", "Rollo 100m", "Kilo suelto".
+ *
+ * REGLA DE DINERO (no negociable): `price` es el precio del PAQUETE COMPLETO,
+ * ya resuelto por el backend en la MISMA base que `final_price` (con impuesto
+ * incluido). La cantidad de una línea cuenta PAQUETES, de modo que el total es
+ * `price * quantity`. NUNCA se multiplica dinero por `units_per_package`: el
+ * packSize solo sirve para stock, peso de envío y el texto informativo
+ * ("= 100 u."). Multiplicarlo por el precio inflaría el cobro por el tamaño
+ * del empaque, que es exactamente el bug que este contrato previene.
+ */
+export interface SaleUnitOption {
+  price_tier_id: number;
+  /** Etiqueta lista para pintar, p.ej. "Bulto 50kg". */
+  name: string;
+  /** packSize efectivo: el backend ya aplicó la cascada override ?? tier ?? 1. */
+  units_per_package: number | null;
+  /** Precio del PAQUETE entero (ver regla de dinero arriba). */
+  price: number;
+  compare_at_price: number | null;
+  /** Paquetes disponibles. `null` = el producto no rastrea inventario. */
+  available_packages: number | null;
+  is_default: boolean;
+  is_available: boolean;
+}
+
 export interface EcommerceProduct {
   id: number;
   name: string;
@@ -97,6 +124,34 @@ export interface EcommerceProduct {
     reference_unit_code: string | null;
     label: string;
   } | null;
+  /**
+   * Presentación de venta por defecto del producto. El backend YA la devuelve
+   * hoy; simplemente no estaba declarada, así que los consumidores la leían
+   * como `any` o la ignoraban. Declararla es puro saneo de contrato.
+   */
+  sale_unit?: {
+    price_tier_id: number;
+    name: string;
+    units_per_package: number | null;
+  } | null;
+  /**
+   * Nº de presentaciones ofrecidas (LISTADO). `> 1` significa que el comprador
+   * debe ELEGIR, así que la card no puede añadir a ciegas: manda al detalle.
+   * Mismo criterio que `variant_count`.
+   */
+  sale_unit_count?: number;
+  /**
+   * Precio de la presentación más barata, para pintar el "desde $X" en la card
+   * cuando hay varias (LISTADO). `final_price` sigue siendo el de la
+   * presentación por defecto.
+   */
+  price_from?: number | null;
+  /**
+   * Stock expresado en unidades MÍNIMAS. Se separa porque, con multi-tarifa,
+   * `available_stock` pasa a estar en PAQUETES de la presentación por defecto:
+   * mezclar ambas escalas en un mismo campo produce agotados fantasma.
+   */
+  available_stock_units?: number;
 }
 
 export interface ProductVariantDetail {
@@ -130,6 +185,12 @@ export interface ProductDetail extends EcommerceProduct {
   avg_rating: number;
   review_count: number;
   booking_mode?: 'provider_required' | 'free_booking';
+  /**
+   * Presentaciones de venta ofrecidas en el detalle. `[]` o un solo elemento
+   * significa que NO hay nada que elegir y el selector no debe renderizarse
+   * (evita añadir una decisión al comprador donde no existe alternativa).
+   */
+  available_sale_units?: SaleUnitOption[];
 }
 
 export interface Category {

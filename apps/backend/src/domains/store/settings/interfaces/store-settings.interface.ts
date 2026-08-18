@@ -158,6 +158,10 @@ export interface EcommerceSettings {
     show_variants: boolean;
     show_related_products: boolean;
     enable_filters: boolean;
+    // Opt-in: habilita el selector de presentación de venta (multi-tarifa
+    // `price_tiers.kind='sale_unit'`) en la ficha de producto del storefront.
+    // Ausente ⇒ apagado (default `false`); se lee con `=== true`.
+    enable_sale_unit_selector: boolean;
   };
   cart?: {
     allow_guest_checkout: boolean;

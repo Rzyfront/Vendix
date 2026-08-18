@@ -367,6 +367,15 @@ export class EcommerceCatalogDto {
   @IsOptional()
   @IsBoolean()
   enable_filters?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Habilita el selector de presentación de venta en la ficha de producto: muestra las presentaciones configuradas (bulto, kilo, rollo…) con su precio para que el comprador elija en cuál comprar. Opt-in: ausente ⇒ apagado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_sale_unit_selector?: boolean;
 }
 
 /**

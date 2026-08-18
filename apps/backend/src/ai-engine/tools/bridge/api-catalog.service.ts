@@ -31,6 +31,17 @@ import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.de
  */
 const SWAGGER_API_OPERATION_METADATA = 'swagger/apiOperation';
 
+/**
+ * Clave que `@ApiProperty` graba por propiedad del DTO.
+ *
+ * Mismo literal-por-contrato y misma razón de no importarla que la de arriba.
+ * Solo se le pide la `description`: el tipo y la obligatoriedad los sigue
+ * decidiendo class-validator, que es lo que de verdad acepta o rechaza el
+ * request. Swagger aquí aporta la frase y nada más, así que un DTO sin
+ * `@ApiProperty` publica exactamente lo mismo que antes.
+ */
+const SWAGGER_API_MODEL_PROPERTIES = 'swagger/apiModelProperties';
+
 /** Verbs the bridge can execute. Anything else is not catalogued. */
 export type CatalogMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
@@ -108,6 +119,18 @@ export interface CatalogField {
   type: string;
   required: boolean;
   enumValues?: string[];
+  /**
+   * Qué significa el campo, tomada de `@ApiProperty({ description })`.
+   *
+   * El nombre y el tipo dicen cómo mandar el dato, nunca cuándo mandarlo. Un
+   * `enabled_price_tier_ids: array` no le dice a nadie que asignar
+   * presentaciones a un producto se hace por el endpoint del producto y que la
+   * lista es un allowlist duro. Ese conocimiento vivía en docblocks de
+   * TypeScript, que no existen en runtime: esto es el canal que sí llega.
+   *
+   * Opcional por diseño — la mayoría de los DTOs del repo no la traen todavía.
+   */
+  description?: string;
 }
 
 const CATALOGUED_VERBS = new Map<number, CatalogMethod>([
@@ -444,10 +467,33 @@ export class ApiCatalogService implements OnApplicationBootstrap {
         if (!property) continue;
 
         const entry = byProperty.get(property) ?? { constraints: [] };
-        const type = String((metadata as { type?: unknown }).type ?? '');
+
+        // El discriminador es `name`, no `type`.
+        //
+        // class-validator construye casi todos sus decoradores con `ValidateBy`,
+        // y esos registran `type: 'customValidation'` — el mismo valor para
+        // `@IsString`, `@IsInt`, `@IsBoolean`, `@IsEnum` y `@IsIn`. Leyendo
+        // `type` (84 de 144 metadatas de `UpdateProductDto` son
+        // `customValidation`) `inferFieldType` no podía distinguir nada y el
+        // catálogo publicaba `type: 'unknown'` en casi todos los campos de casi
+        // todos los DTO. El nombre del validador sí viene en `name`
+        // (`isString`, `isInt`, `isIn`...); `type` queda de respaldo para las
+        // pocas metadatas que no lo traen (`nestedValidation`).
+        const type = String(
+          (metadata as { name?: unknown }).name ??
+            (metadata as { type?: unknown }).type ??
+            '',
+        );
         entry.constraints.push(type);
 
-        if (type.toLowerCase() === 'isenum') {
+        // `isIn` cuenta igual que `isEnum`. 131 archivos DTO del backend
+        // restringen un string con `@IsIn([...])` en vez de un enum de
+        // TypeScript, y hasta acá todos salían como `type: 'unknown'` y sin un
+        // solo valor permitido. El caso que lo hizo evidente es
+        // `price_tiers.kind: 'customer_tier' | 'sale_unit'` — el eje entero de
+        // multi-tarifa, que el agente tenía que adivinar.
+        const normalized = type.toLowerCase();
+        if (normalized === 'isenum' || normalized === 'isin') {
           entry.enumValues = this.enumValuesOf(metadata);
         }
 
@@ -455,18 +501,24 @@ export class ApiCatalogService implements OnApplicationBootstrap {
       }
 
       const fields = Array.from(byProperty.entries())
-        .map(([name, entry]) => ({
-          name,
-          type: this.inferFieldType(entry.constraints),
-          // `@IsOptional()` registers itself as a conditional validation, so its
-          // presence — not the absence of `@IsDefined()` — is what marks a field
-          // as optional. Reading it the other way round labelled every field of
-          // every DTO as optional.
-          required: !entry.constraints.some((constraint) =>
-            /conditionalValidation|isOptional/i.test(constraint),
-          ),
-          ...(entry.enumValues?.length ? { enumValues: entry.enumValues } : {}),
-        }))
+        .map(([name, entry]) => {
+          const description = this.fieldDescriptionOf(dto, name);
+          return {
+            name,
+            type: this.inferFieldType(entry.constraints),
+            // `@IsOptional()` registers itself as a conditional validation, so its
+            // presence — not the absence of `@IsDefined()` — is what marks a field
+            // as optional. Reading it the other way round labelled every field of
+            // every DTO as optional.
+            required: !entry.constraints.some((constraint) =>
+              /conditionalValidation|isOptional/i.test(constraint),
+            ),
+            ...(entry.enumValues?.length
+              ? { enumValues: entry.enumValues }
+              : {}),
+            ...(description ? { description } : {}),
+          };
+        })
         .sort((a, b) => a.name.localeCompare(b.name));
 
       return fields.length ? fields : undefined;
@@ -477,12 +529,16 @@ export class ApiCatalogService implements OnApplicationBootstrap {
   }
 
   /**
-   * The accepted members of an `@IsEnum()`.
+   * The accepted members of an `@IsEnum()` or an `@IsIn()`.
    *
-   * class-validator stores the enum object itself in `constraints[0]`. Numeric
-   * TypeScript enums produce a reverse mapping (`{0:'A', A:0}`), so numeric keys
-   * are dropped — publishing them would tell the model that `0` is a valid value
-   * for a field whose DTO only accepts `'A'`.
+   * Las dos guardan lo permitido en `constraints[0]`, pero con formas distintas:
+   * `@IsEnum` deja el objeto enum y `@IsIn` deja el array literal. El array hay
+   * que leerlo tal cual — pasarlo por el filtro de claves numéricas del enum lo
+   * vacía entero, porque las claves de un array SON números.
+   *
+   * En el enum sí se descartan las claves numéricas: un enum numérico de
+   * TypeScript produce el mapeo inverso (`{0:'A', A:0}`) y publicar `0` le
+   * diría al modelo que es un valor válido para un campo que solo acepta `'A'`.
    */
   private enumValuesOf(metadata: unknown): string[] | undefined {
     const constraints = (metadata as { constraints?: unknown[] }).constraints;
@@ -490,26 +546,64 @@ export class ApiCatalogService implements OnApplicationBootstrap {
 
     if (!target || typeof target !== 'object') return undefined;
 
-    const values = Object.entries(target as Record<string, unknown>)
-      .filter(([key]) => !/^\d+$/.test(key))
-      .map(([, value]) => String(value));
+    const values = Array.isArray(target)
+      ? target
+          .filter((value) => value !== null && value !== undefined)
+          .map((value) => String(value))
+      : Object.entries(target as Record<string, unknown>)
+          .filter(([key]) => !/^\d+$/.test(key))
+          .map(([, value]) => String(value));
 
     return values.length ? values.slice(0, 40) : undefined;
   }
 
-  /** Coarse type from the validator names applied to a property. */
+  /**
+   * La `description` que `@ApiProperty` dejó sobre esa propiedad del DTO.
+   *
+   * Best-effort y silencioso: la clave de metadata es un literal por contrato
+   * (ver `SWAGGER_API_MODEL_PROPERTIES`) y un DTO sin el decorador simplemente
+   * no aporta nada. Nunca puede tumbar la construcción del catálogo — perder
+   * una frase es aceptable, perder el mapa entero de rutas no.
+   */
+  private fieldDescriptionOf(
+    dto: new (...args: any[]) => unknown,
+    property: string,
+  ): string | undefined {
+    try {
+      const meta = Reflect.getMetadata(
+        SWAGGER_API_MODEL_PROPERTIES,
+        dto.prototype,
+        property,
+      ) as { description?: unknown } | undefined;
+
+      const description = meta?.description;
+      return typeof description === 'string' && description.trim()
+        ? description.trim()
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Tipo grueso a partir de los nombres de validador aplicados a la propiedad. */
   private inferFieldType(constraints: string[]): string {
     const has = (pattern: RegExp) =>
       constraints.some((constraint) => pattern.test(constraint));
 
-    if (has(/isEnum/i)) return 'enum';
-    if (has(/isBoolean/i)) return 'boolean';
-    if (has(/isInt/i)) return 'integer';
-    if (has(/isNumber|isDecimal|isPositive|min$|max$/i)) return 'number';
-    if (has(/isDate/i)) return 'date';
-    if (has(/isArray|arrayM(in|ax)Size|arrayNotEmpty/i)) return 'array';
-    if (has(/nestedValidation|isObject/i)) return 'object';
-    if (has(/isString|length|isEmail|matches/i)) return 'string';
+    // El contenedor manda sobre el tipo del elemento: `@IsArray()` con
+    // `@IsInt({ each: true })` es un array de enteros, no un entero. Los valores
+    // permitidos del elemento siguen viajando aparte, en `enumValues`.
+    if (has(/^(isArray|arrayM(in|ax)Size|arrayNotEmpty|arrayUnique)$/i))
+      return 'array';
+    if (has(/^is(Enum|In)$/i)) return 'enum';
+    if (has(/^isBoolean$/i)) return 'boolean';
+    if (has(/^isInt$/i)) return 'integer';
+    if (has(/^(isNumber|isDecimal|isPositive|isNegative|min|max)$/i))
+      return 'number';
+    if (has(/^isDate(String)?$/i)) return 'date';
+    if (has(/^(nestedValidation|isObject)$/i)) return 'object';
+    if (has(/^(isString|isEmail|isUrl|isUUID|matches|length|minLength|maxLength)$/i))
+      return 'string';
     return 'unknown';
   }
 

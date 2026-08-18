@@ -31,6 +31,7 @@ import {
   BulkUploadResultDto,
   BulkUploadTemplateDto,
 } from './dto';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('store/products/bulk')
 @UseGuards(PermissionsGuard)
@@ -45,6 +46,10 @@ export class ProductsBulkController {
   /**
    * Carga masiva desde JSON directo
    */
+  @ApiOperation({
+    summary:
+      'Cargar productos en lote desde una lista ya validada',
+  })
   @Post('upload')
   @Permissions('store:products:create')
   async uploadProducts(
@@ -76,6 +81,10 @@ export class ProductsBulkController {
   /**
    * Descarga la plantilla en formato Excel (.xlsx)
    */
+  @ApiOperation({
+    summary:
+      'Descargar la plantilla de Excel para cargar productos en lote',
+  })
   @Get('template/download')
   @Permissions('store:products:bulk:template') // Asumiendo que existe este permiso, o store:products:create
   async downloadTemplate(
@@ -109,6 +118,10 @@ export class ProductsBulkController {
    * formato de la plantilla de Carga Masiva + 3 columnas informativas.
    * Pensado para auditoría rápida y para que el cliente edite y re-cargue.
    */
+  @ApiOperation({
+    summary:
+      'Exportar los productos actuales a Excel, con el mismo formato que la plantilla de carga',
+  })
   @Get('export')
   @Permissions('store:products:read')
   async exportCurrentProducts(@Res() res: Response) {
@@ -136,6 +149,10 @@ export class ProductsBulkController {
   /**
    * Carga masiva desde archivo Excel/CSV
    */
+  @ApiOperation({
+    summary:
+      'Cargar productos en lote subiendo el archivo de la plantilla',
+  })
   @Post('upload/file')
   @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))
@@ -188,6 +205,10 @@ export class ProductsBulkController {
   /**
    * Analiza archivo Excel/CSV sin procesar (dry-run)
    */
+  @ApiOperation({
+    summary:
+      'Revisar el archivo de carga masiva y devolver fila por fila qué está bien y qué falla, sin crear nada todavía',
+  })
   @Post('analyze')
   @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))
@@ -218,6 +239,10 @@ export class ProductsBulkController {
   /**
    * Procesa carga masiva desde sesión de análisis
    */
+  @ApiOperation({
+    summary:
+      'Aplicar la carga masiva que ya fue revisada en una sesión de análisis',
+  })
   @Post('upload-session')
   @Permissions('store:products:create')
   async uploadFromSession(
@@ -279,6 +304,10 @@ export class ProductsBulkController {
   /**
    * Cancela sesión de análisis
    */
+  @ApiOperation({
+    summary:
+      'Descartar una sesión de carga masiva sin aplicarla',
+  })
   @Delete('session/:id')
   @Permissions('store:products:create')
   async cancelSession(@Param('id') sessionId: string) {

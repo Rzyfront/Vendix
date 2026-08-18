@@ -129,7 +129,12 @@ import {
             <span class="ci-sku">SKU: {{ item().variant?.sku || item().product.sku }}</span>
             @if (item().price_tier; as tier) {
               <span class="ci-tier" [title]="'Presentación: ' + tier.label">
-                {{ tier.label }} ({{ tier.units_per_package }} und) —
+                {{ tier.label }}@if (tier.units_per_package > 1) {
+                  <!-- El "(N und)" sólo informa cuando el paquete AGRUPA
+                       varias unidades. Con packSize 1 ("Metro", "Unidad")
+                       pintar "(1 und)" sólo añade ruido. -->
+                  <span> ({{ tier.units_per_package }} und)</span>
+                } —
                 {{ tier.presentation_price | currency }}
               </span>
             } @else if (item().quantity > 1) {

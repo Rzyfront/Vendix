@@ -85,6 +85,16 @@ export interface CheckoutRequest {
     product_id: number;
     product_variant_id?: number;
     quantity: number;
+    /**
+     * Presentación de venta elegida (`price_tiers.id`). Sin ella el backend
+     * resuelve la presentación por defecto y el pedido sale al precio
+     * unitario, no al del paquete que eligió el comprador.
+     *
+     * Viaja SIN riesgo dentro del `FormData`: `checkout()` serializa el
+     * request COMPLETO con `JSON.stringify(request)` bajo la clave `data`, es
+     * decir recorre el objeto genéricamente y no una lista fija de campos.
+     */
+    price_tier_id?: number;
   }>;
   guest_customer?: GuestCheckoutCustomer;
   /**
@@ -271,6 +281,8 @@ export class CheckoutService {
       product_id: number;
       product_variant_id?: number;
       quantity: number;
+      /** Ver `CheckoutRequest.items.price_tier_id`. */
+      price_tier_id?: number;
     }>,
     guestCustomer?: GuestCheckoutCustomer | null,
     shippingAddress?: CheckoutShippingAddress | null,

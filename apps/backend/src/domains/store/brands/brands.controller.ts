@@ -23,6 +23,7 @@ import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('store/brands')
 @UseGuards(PermissionsGuard)
@@ -32,6 +33,10 @@ export class BrandsController {
     private readonly responseService: ResponseService,
   ) {}
 
+  @ApiOperation({
+    summary:
+      'Crear una marca de productos',
+  })
   @Post()
   @Permissions('store:brands:create')
   async create(
@@ -42,6 +47,10 @@ export class BrandsController {
     return this.responseService.created(brand, 'Marca creada exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Listar las marcas de productos de la tienda',
+  })
   @Get()
   @Permissions('store:brands:read')
   async findAll(@Query() query: BrandQueryDto) {
@@ -63,6 +72,10 @@ export class BrandsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Listar las marcas de una tienda concreta',
+  })
   @Get('store/:storeId')
   @Permissions('store:brands:read')
   async findByStore(
@@ -87,6 +100,10 @@ export class BrandsController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Subir el logo de una marca',
+  })
   @Post('upload-logo')
   @Permissions('store:brands:update')
   @UseInterceptors(FileInterceptor('file'))
@@ -107,6 +124,10 @@ export class BrandsController {
     return this.responseService.created(result, 'Logo subido exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el detalle de una marca',
+  })
   @Get(':id')
   @Permissions('store:brands:read')
   async findOne(
@@ -119,6 +140,10 @@ export class BrandsController {
     return this.responseService.success(brand, 'Marca obtenida exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Editar una marca: nombre, descripción o logo',
+  })
   @Patch(':id')
   @Permissions('store:brands:update')
   async update(
@@ -133,6 +158,10 @@ export class BrandsController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Archivar una marca',
+  })
   @Delete(':id')
   @Permissions('store:brands:admin_delete')
   async remove(

@@ -629,6 +629,50 @@ export class AIAgentService {
             };
           }
         }
+
+        // Un turno que propone un cambio TERMINA ahí.
+        //
+        // Sin este corte el bucle seguía girando con `requires_confirmation:
+        // true` en el último resultado, y el modelo —que no tiene forma de
+        // aprobar nada— volvía a llamar la misma herramienta de escritura. Cada
+        // reintento acuñaba un token nuevo, pisaba `pendingConfirmation` y
+        // emitía otro "esperando confirmación": la persona veía a Vexi pidiendo
+        // permiso una y otra vez dentro del mismo turno, y terminaba en la rama
+        // de iteraciones agotadas. La tarjeta que sí llega al navegador es la
+        // del token que sobrevivió, no la del cambio que la persona leyó
+        // primero.
+        //
+        // La frase la compone el servidor a partir del preview, por la misma
+        // razón que la salida sin tool_calls: con una escritura pendiente no se
+        // le confía al modelo la redacción de lo que pasó.
+        if (pendingConfirmation) {
+          this.eventEmitter.emit('ai.agent.completed', {
+            iterations: iteration,
+            tools_used: toolsUsed.length,
+            total_tokens: totalTokens,
+            store_id: context?.store_id,
+          });
+
+          const narration = this.describePendingWrite(pendingConfirmation);
+          yield { type: 'text', content: narration };
+          yield {
+            type: 'done',
+            usage: {
+              promptTokens: 0,
+              completionTokens: 0,
+              totalTokens,
+            },
+          };
+
+          return {
+            content: narration,
+            iterations: iteration,
+            tools_used: toolsUsed,
+            total_tokens: totalTokens,
+            success: true,
+            pending_confirmation: pendingConfirmation,
+          };
+        }
       }
 
       // Iterations exhausted.

@@ -24,6 +24,10 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
+import {
+  COMPLETED_SALE_STATES,
+  sqlStateList,
+} from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -114,8 +118,14 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  // States that count as completed sales
-  private readonly COMPLETED_STATES = ['delivered', 'finished'];
+  /**
+   * States that count as a completed sale. DERIVED from the contract, never
+   * re-typed: a private copy is exactly how the trend chart and the panel cards
+   * drifted apart (the chart read one list, the cards another, and both looked
+   * right in isolation). Change the meaning in
+   * `analytics-metrics.contract.ts` and every consumer follows.
+   */
+  private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -699,7 +709,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN ('delivered', 'finished')
+        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
         ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
@@ -762,7 +772,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN ('delivered', 'finished')
+        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
         AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date
             = (NOW() AT TIME ZONE ${tzSql})::date
         ${channel ? Prisma.sql`AND o.channel = ${channel}::order_channel_enum` : Prisma.empty}

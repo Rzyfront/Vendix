@@ -180,6 +180,9 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           show_variants: true,
           show_related_products: false,
           enable_filters: false,
+          // Opt-in: apagado por defecto para que las tiendas existentes
+          // conserven la presentación por defecto hasta activarlo.
+          enable_sale_unit_selector: false,
         },
         cart: {
           allow_guest_checkout: true,

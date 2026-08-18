@@ -959,6 +959,15 @@
         color: var(--color-text-primary);
     }
 
+    /* Presentación de venta elegida ("Rollo 20 m"): sin ella dos líneas del
+       mismo producto se ven idénticas en el resumen del pedido. */
+    .item-tier {
+        display: block;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-muted);
+    }
+
     .item-price {
         color: var(--color-text-secondary);
     }

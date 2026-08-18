@@ -29,6 +29,7 @@ import { DefaultTaxesSeederService } from '@common/services/default-taxes-seeder
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('store/taxes')
 @UseGuards(PermissionsGuard)
@@ -40,6 +41,10 @@ export class TaxesController {
     private readonly fiscalScope: FiscalScopeService,
   ) {}
 
+  @ApiOperation({
+    summary:
+      'Crear de una vez los impuestos estándar del país de la tienda',
+  })
   @Post('seed-default')
   @Permissions('store:taxes:create')
   @HttpCode(HttpStatus.CREATED)
@@ -73,6 +78,10 @@ export class TaxesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Crear una categoría de impuesto (IVA, INC, exento) con su tarifa y su tipo fiscal',
+  })
   @Post()
   @Permissions('store:taxes:create')
   async create(
@@ -96,6 +105,10 @@ export class TaxesController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Listar las categorías de impuesto de la tienda',
+  })
   @Get()
   @Permissions('store:taxes:read')
   async findAll(@Query() query: TaxCategoryQueryDto) {
@@ -124,6 +137,10 @@ export class TaxesController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el detalle de una categoría de impuesto',
+  })
   @Get(':id')
   @Permissions('store:taxes:read')
   async findOne(
@@ -144,6 +161,10 @@ export class TaxesController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Editar una categoría de impuesto: nombre, tarifa o tipo fiscal',
+  })
   @Patch(':id')
   @Permissions('store:taxes:update')
   async update(
@@ -169,6 +190,10 @@ export class TaxesController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Archivar una categoría de impuesto',
+  })
   @Delete(':id')
   @Permissions('store:taxes:delete')
   async remove(

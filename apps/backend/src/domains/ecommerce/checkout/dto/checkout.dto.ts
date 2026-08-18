@@ -10,8 +10,10 @@ import {
   IsDateString,
   Matches,
   IsEmail,
+  IsPositive,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 class CheckoutCartItemDto {
   @IsInt()
@@ -26,6 +28,16 @@ class CheckoutCartItemDto {
   @IsInt()
   @Min(1)
   quantity: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Presentacion de venta elegida por el comprador (price_tiers.kind=sale_unit): "Bulto 50kg", "Kilo", "Rollo 20 m". Omitirlo conserva la presentacion por defecto del producto. La tarifa se autoriza en el servidor contra la tienda y el producto, y exige el flag ecommerce.catalog.enable_sale_unit_selector. quantity siempre cuenta PAQUETES de esta presentacion, nunca unidades de stock.',
+    example: 67,
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  price_tier_id?: number;
 }
 
 export class GuestCheckoutCustomerDto {

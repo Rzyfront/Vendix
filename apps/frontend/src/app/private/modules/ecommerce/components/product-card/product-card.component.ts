@@ -35,7 +35,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
     NextAvailableNoticeComponent,
   ],
   template: `
-    <article class="product-card" [class.product-card--off]="product().is_available_now === false" (click)="onCardClick($event)">
+    <article class="product-card" [class.product-card--off]="product().is_available_now === false" [attr.data-currency]="currencyCode()" (click)="onCardClick($event)">
       <div class="product-image">
         @if (product().image_url) {
           <img [src]="product().image_url" [alt]="product().name" loading="lazy">
@@ -59,7 +59,11 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
         } @else if (product().track_inventory !== false) {
           <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
           @if (!hasVariants()) {
-            @if (product().available_stock !== null && product().available_stock! <= 5 && product().available_stock! > 0) {
+            <!-- El contador se oculta con multitarifa: available_stock
+                 llega en PAQUETES de la presentación por defecto, así que
+                 "¡Últimas 3!" significaría cosas distintas según la
+                 presentación que el comprador acabe eligiendo. -->
+            @if (!hasSaleUnitChoice() && product().available_stock !== null && product().available_stock! <= 5 && product().available_stock! > 0) {
               <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
                 ¡Últimas {{ product().available_stock }}!
               </app-badge>
@@ -115,7 +119,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
         }
 
         <!-- QR table open_tab — quantity stepper for "Agregar a mi cuenta" -->
-        @if (!isUnavailable() && tableContext.isOpenTab() && !hasVariants()) {
+        @if (!isUnavailable() && tableContext.isOpenTab() && !hasVariants() && !hasSaleUnitChoice()) {
           <div class="open-tab-qty" (click)="$event.stopPropagation()">
             <app-quantity-control
               [value]="qtyToAdd()"
@@ -161,6 +165,12 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             </div>
           }
           <div class="product-price">
+            @if (hasSaleUnitChoice()) {
+              <!-- Con varias presentaciones no hay UN precio: se anuncia el
+                   más barato (price_from, resuelto por el backend) y la
+                   elección real ocurre en el detalle. -->
+              <span class="price-from-label">desde</span>
+            }
             <span class="price" [class.sale-price]="hasActiveDiscount()">
               {{ displayPrice() | currency }}
             </span>
@@ -439,6 +449,13 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       gap: 0.14rem;
     }
 
+    .price-from-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      margin-right: 0.15rem;
+    }
+
     .product-price {
       display: flex;
       flex-wrap: wrap;
@@ -611,6 +628,13 @@ export class ProductCardComponent {
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
+  /**
+   * Moneda del tenant, leída por la plantilla vía `data-currency`. El
+   * `CurrencyPipe` de Vendix es IMPURO: sin este atributo la card OnPush se
+   * queda con el formato de fallback si la moneda resuelve tras el primer
+   * paint.
+   */
+  protected readonly currencyCode = this.currencyService.currencyCode;
   public readonly tableContext = inject(TableContextService);
   // Chokepoint (D3): the mesa-vs-cart routing lives here so we can absorb the
   // D5 ad-hoc mesa branch from `onAddToCart`.
@@ -647,6 +671,15 @@ export class ProductCardComponent {
 
   hasVariants(): boolean {
     return !!this.product().variant_count && this.product().variant_count! > 0;
+  }
+
+  /**
+   * True cuando el producto se vende en VARIAS presentaciones y el comprador
+   * tiene que elegir una. Mismo criterio que `hasVariants()`: el listado no
+   * puede agregar a ciegas una decisión que el comprador no ha tomado.
+   */
+  hasSaleUnitChoice(): boolean {
+    return (this.product().sale_unit_count ?? 0) > 1;
   }
 
   hasActiveDiscount(): boolean {
@@ -721,6 +754,17 @@ export class ProductCardComponent {
    */
   displayPrice(): number {
     const product = this.product();
+
+    // Multitarifa: el precio anunciado es el de la presentación MÁS BARATA,
+    // que resuelve el backend en `price_from`. `final_price` es el de la
+    // presentación por defecto y anunciarlo como "desde" mentiría cuando la
+    // por defecto no es la más barata. Si el backend todavía no publica
+    // `price_from`, se cae al comportamiento de siempre.
+    if (this.hasSaleUnitChoice()) {
+      const from = Number(product.price_from);
+      if (Number.isFinite(from) && from > 0) return from;
+    }
+
     const promo = product.active_promotion;
     const promoPrice = promo ? Number(promo.promotional_price) : NaN;
     if (Number.isFinite(promoPrice) && promoPrice > 0) {
@@ -771,7 +815,7 @@ export class ProductCardComponent {
       this.router.navigate(['/book', this.product().id]);
       return;
     }
-    if (this.hasVariants()) {
+    if (this.hasVariants() || this.hasSaleUnitChoice()) {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
@@ -794,7 +838,10 @@ export class ProductCardComponent {
       this.router.navigate(['/book', this.product().id]);
       return;
     }
-    if (this.hasVariants()) {
+    // Mismo precedente que las variantes: con varias presentaciones el botón
+    // rápido NO agrega — el comprador aún no ha elegido QUÉ presentación
+    // compra, y agregar la por defecto le cobraría una escala que no pidió.
+    if (this.hasVariants() || this.hasSaleUnitChoice()) {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
@@ -813,9 +860,17 @@ export class ProductCardComponent {
       result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.qtyToAdd.set(1));
       return;
     }
-    // Non-mesa path: emit `add_to_cart` for any parent listeners (e.g. cart
-    // animation trigger). The chokepoint already added the item, so the
-    // container's handler is a no-op via the mesa-guard below.
+    // Ruta sin mesa: el chokepoint de arriba YA agregó el ítem. `add_to_cart`
+    // se emite solo como NOTIFICACIÓN para los contenedores (animación del
+    // carrito, toast, analítica).
+    //
+    // El comentario anterior afirmaba que el handler del padre era "a no-op via
+    // the mesa-guard below": era FALSO. Ese guard es
+    // `table_context_service.isActive()` y solo cubre mesa QR, así que en
+    // tienda normal el padre volvía a llamar `addProduct(product.id, 1)` y el
+    // producto entraba DOS veces, además con cantidades distintas (aquí
+    // `qtyToAdd()`, allá 1). Los contenedores ya no agregan; si alguien
+    // reintroduce un `addProduct` en un listener de `add_to_cart`, vuelve el bug.
     if (result) {
       result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
@@ -847,7 +902,7 @@ export class ProductCardComponent {
     if (this.product().requires_booking && this.product().product_type === 'service') {
       return 'calendar-check';
     }
-    if (this.hasVariants()) return 'eye';
+    if (this.hasVariants() || this.hasSaleUnitChoice()) return 'eye';
     // QR table open_tab → cuenta icon
     if (this.tableContext.isOpenTab()) return 'concierge-bell';
     return 'shopping-cart';
@@ -857,7 +912,7 @@ export class ProductCardComponent {
     if (this.product().requires_booking && this.product().product_type === 'service') {
       return 'Agendar';
     }
-    if (this.hasVariants()) return 'Ver opciones';
+    if (this.hasVariants() || this.hasSaleUnitChoice()) return 'Ver opciones';
     // QR table open_tab → cuenta label
     if (this.tableContext.isOpenTab()) return 'Agregar a mi cuenta';
     return 'Agregar al carrito';

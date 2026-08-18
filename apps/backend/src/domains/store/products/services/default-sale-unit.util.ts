@@ -1,10 +1,15 @@
 /**
  * Presentación de venta POR DEFECTO de un producto.
  *
- * Decisión de producto (QUI-648): la presentación por defecto rige en TODA
- * superficie de venta — tienda online, POS y cotizaciones —. Elegir entre
- * varias presentaciones es capacidad exclusiva del POS; el storefront usa esta
- * y no expone selector.
+ * `is_default` es la PRESELECCIÓN de la vitrina y el FALLBACK para cualquier
+ * cliente que no envíe presentación — sigue rigiendo en POS y cotizaciones
+ * igual que antes.
+ *
+ * Ya no es la única presentación posible en la tienda online: cuando el flag
+ * `ecommerce.catalog.enable_sale_unit_selector` está activo, el comprador
+ * puede elegir entre las presentaciones publicadas y el carrito autoriza esa
+ * elección por `public-sale-unit.util.ts`. Un producto sin presentaciones, o
+ * una tienda con el flag apagado, se comporta exactamente como antes.
  *
  * La marca vive en `product_price_tier_assignments.is_default` (por producto),
  * no en `price_tiers.is_default` (que es por tienda). Solo una fila por

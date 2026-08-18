@@ -36,10 +36,14 @@
           />
         </div>
 
-        @for (item of cart.items; track item.id) {
+        <!-- track por line_key (producto:variante:tarifa), NO por item.id:
+             en el carrito invitado `id` vale `product_id`, así que dos
+             presentaciones del mismo producto colisionaban (NG0955) y el
+             spinner de "actualizando" se pintaba en la fila equivocada. -->
+        @for (item of cart.items; track lineKey(item)) {
           <app-cart-item-card
             [item]="item"
-            [updating]="updating_item_id() === item.id"
+            [updating]="updating_line_key() === lineKey(item)"
             [maxQuantity]="maxQuantityPerItem()"
             (quantityChange)="updateQuantity(item, $event)"
             (remove)="removeItem(item)"

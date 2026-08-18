@@ -148,6 +148,10 @@ export interface EcommerceConfig {
     show_variants: boolean;
     show_related_products: boolean;
     enable_filters: boolean;
+    // Opt-in: selector de presentación de venta (multi-tarifa) en la ficha de
+    // producto. Default `false`, así que se lee con `=== true` (ausente ⇒ off),
+    // NO con el patrón `!== false` que usa `show_variants` (default `true`).
+    enable_sale_unit_selector: boolean;
   };
   cart?: {
     allow_guest_checkout: boolean;
