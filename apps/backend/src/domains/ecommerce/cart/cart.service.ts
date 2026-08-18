@@ -948,8 +948,13 @@ export class CartService {
       }
       // The cart_items rows do not denormalize the product name; pull the
       // names in a single batch query to avoid N+1.
+      // `Set<number>` explícito: el cliente Prisma con alcance devuelve el
+      // carrito sin tipar, así que sin la anotación el conjunto sale
+      // `Set<unknown>` y `listSaleUnitsForProducts(number[])` no compila. El
+      // `where: { in }` de Prisma sí lo aceptaba, que es por lo que el error
+      // solo aparecía al construir con tsc.
       const cartProductIds = Array.from(
-        new Set(cart.cart_items.map((ci) => ci.product_id)),
+        new Set<number>(cart.cart_items.map((ci: any) => ci.product_id)),
       );
       const cartProducts = await this.prisma.products.findMany({
         where: { id: { in: cartProductIds } },

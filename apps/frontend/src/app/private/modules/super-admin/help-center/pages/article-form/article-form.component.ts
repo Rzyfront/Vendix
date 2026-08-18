@@ -397,7 +397,10 @@ export class ArticleFormComponent implements OnInit {
           is_featured: article.is_featured,
           sort_order: article.sort_order,
         });
-        this.contentValue.set(article.content);
+        // `content` es opcional en el modelo porque la BÚSQUEDA ya no lo
+        // devuelve salvo que se pida. Esta lectura es por id y siempre lo trae;
+        // el `?? ''` solo mantiene el tipo honesto.
+        this.contentValue.set(article.content ?? '');
         if (article.cover_image_url) {
           // Backend returns a signed URL on read. Use it for the preview and
           // resubmit it untouched on update (backend re-extracts the S3 key).

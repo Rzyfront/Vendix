@@ -155,7 +155,6 @@ function describeWrite(
 /** Domain segment → how a person would name it. Falls back to the segment. */
 const SUBJECTS: Record<string, string> = {
   'price-tiers': 'una tarifa',
-  categories: 'una categoría',
   brands: 'una marca',
   taxes: 'un impuesto',
   expenses: 'un gasto',
