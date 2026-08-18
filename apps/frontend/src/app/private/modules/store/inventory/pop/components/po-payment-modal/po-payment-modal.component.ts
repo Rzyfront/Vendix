@@ -671,9 +671,15 @@ export class PoPaymentModalComponent {
    * una cuota del plan (`paymentSchedules[i]`). Si vienen set, el form de la
    * vista `pay` arranca con esos valores; el usuario los puede editar antes
    * de submit.
+   *
+   * `presetScheduleId` propaga el id de la cuota al payload del POST /payments
+   * como `payment_schedule_id` para que el backend marque esa fila de
+   * `purchase_order_payment_schedules` como `paid` (QUI-647 — fix de status
+   * que quedaba en `planned` aunque el pago se registrara).
    */
   readonly presetAmount = input<number | null>(null);
   readonly presetDate = input<string | null>(null);
+  readonly presetScheduleId = input<number | null>(null);
 
   readonly close = output<void>();
   readonly saved = output<unknown>();
@@ -1184,6 +1190,15 @@ export class PoPaymentModalComponent {
     };
     if (this.reference().trim()) payload['reference'] = this.reference().trim();
     if (this.notes().trim()) payload['notes'] = this.notes().trim();
+    // QUI-647 — si el modal se abrió desde el ícono "Pagar" de una cuota del
+    // plan, propagamos el id de la cuota. El backend lo usa para marcar la fila
+    // de `purchase_order_payment_schedules` como `paid` dentro del mismo
+    // $transaction que crea el payment (no deja el schedule en estado
+    // inconsistente si la creación del pago falla).
+    const schedId = this.presetScheduleId();
+    if (schedId !== null && schedId > 0) {
+      payload['payment_schedule_id'] = schedId;
+    }
 
     this.purchaseOrdersService.registerPurchaseOrderPayment(o.id, payload).subscribe({
       next: (res: any) => {
