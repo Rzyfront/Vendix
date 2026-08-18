@@ -38,8 +38,7 @@ import {
   PurchaseOrderAttachment,
 } from '../../../../inventory/interfaces';
 import { PurchaseOrderPrintService } from '../../services/purchase-order-print.service';
-import { PoPaymentModalComponent } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
-import { PoConfigurePlanModalComponent } from '../../components/po-configure-plan-modal/po-configure-plan-modal.component';
+import { PoPaymentModalComponent, PoPaymentModalOrder } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
 import { PoTimelineComponent } from '../../../../inventory/pop/components/po-timeline/po-timeline.component';
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
@@ -122,7 +121,6 @@ interface ReceiveLine {
     SpinnerComponent,
     StickyHeaderComponent,
     PoPaymentModalComponent,
-    PoConfigurePlanModalComponent,
     PoTimelineComponent,
     SerialBulkLoadModalComponent,
   ],
@@ -480,23 +478,7 @@ interface ReceiveLine {
 
               <!-- Payment progress -->
               <app-card>
-                <div class="flex items-center justify-between mb-3">
-                  <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider">Pagos</h2>
-                  <div class="flex items-center gap-2">
-                    @if (canConfigurePaymentPlan()) {
-                      <app-button variant="outline" size="sm" (clicked)="showPlanModal.set(true)">
-                        <app-icon name="settings-2" [size]="13" slot="icon" />
-                        Configurar plan
-                      </app-button>
-                    }
-                    @if (canRegisterPayment()) {
-                      <app-button variant="outline" size="sm" (clicked)="showPaymentModal.set(true)">
-                        <app-icon name="dollar-sign" [size]="13" slot="icon" />
-                        Registrar
-                      </app-button>
-                    }
-                  </div>
-                </div>
+                <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Pagos</h2>
                 <div class="h-2.5 bg-border rounded-full overflow-hidden">
                   <div class="h-full rounded-full transition-all duration-500"
                     [class]="paymentProgress() >= 100 ? 'bg-success' : 'bg-primary'"
@@ -585,29 +567,13 @@ interface ReceiveLine {
       </div>
     </div>
 
-    <!-- Register payment modal (reused, zoneless-correct) -->
+    <!-- QUI-647 — Modal unificado de pago (configura plan + registra pago) -->
     <app-po-payment-modal
       [isOpen]="showPaymentModal()"
-      [orderId]="po()?.id || null"
-      [totalAmount]="num(po()?.total_amount)"
-      [paidAmount]="totalPaid()"
+      [order]="orderForPayment()"
       (close)="showPaymentModal.set(false)"
-      (paymentRegistered)="onPaymentRegistered()"
+      (saved)="onPaymentSaved()"
     />
-
-    <!-- QUI-647 — Configure payment plan modal (PATCH payment-plan) -->
-    @if (po(); as currentPo) {
-      <app-po-configure-plan-modal
-        [isOpen]="showPlanModal()"
-        [order]="{
-          id: currentPo.id,
-          total_amount: num(currentPo.total_amount),
-          payment_plan: currentPo.payment_plan
-        }"
-        (closed)="showPlanModal.set(false)"
-        (configured)="onPlanConfigured()"
-      />
-    }
 
     <!-- QUI-431 serial capture modal (collect mode) -->
     <app-serial-bulk-load-modal
@@ -668,7 +634,6 @@ export class StorePurchaseOrderDetailComponent {
 
   // Payment modal
   readonly showPaymentModal = signal(false);
-  readonly showPlanModal = signal(false);
 
   // QUI-431 serial capture state
   readonly serialsByLine = signal<Map<number, string[]>>(new Map());
@@ -710,6 +675,23 @@ export class StorePurchaseOrderDetailComponent {
   readonly totalPaid = computed(() =>
     this.payments().reduce((sum, p) => sum + this.num(p.amount), 0),
   );
+
+  /**
+   * Forma unificada que consume `app-po-payment-modal` (QUI-647 — single
+   * `order` input). Combina `po()` con `totalPaid()` para entregar el
+   * `paid_amount` que el modal necesita sin redefinir el tipo en el padre.
+   */
+  readonly orderForPayment = computed<PoPaymentModalOrder | null>(() => {
+    const o = this.po();
+    if (!o) return null;
+    return {
+      id: o.id,
+      total_amount: o.total_amount ?? 0,
+      paid_amount: this.totalPaid(),
+      payment_plan: o.payment_plan ?? null,
+      status: o.status ?? null,
+    };
+  });
 
   readonly remaining = computed(() =>
     Math.max(0, this.num(this.po()?.total_amount) - this.totalPaid()),
@@ -809,18 +791,6 @@ export class StorePurchaseOrderDetailComponent {
     return s === 'approved' || s === 'partial';
   });
 
-  /**
-   * QUI-647 — El plan de pago se puede reconfigurar mientras la OC esté
-   * draft/approved y NO tenga pagos reales registrados (el backend rechaza
-   * con PO_PAYMENT_006 si ya hay pagos). Mostrar el botón en el detalle
-   * evita ofrecer un flujo que terminaría en error.
-   */
-  readonly canConfigurePaymentPlan = computed(() => {
-    const s = this.po()?.status;
-    if (s !== 'draft' && s !== 'approved' && s !== 'partial') return false;
-    return this.payments().length === 0;
-  });
-
   // `partial` y `received` quedan fuera a propósito: con mercancía ya ingresada
   // la reversión es una devolución a proveedor, no una cancelación. El backend
   // responde PO_CANCEL_RECEIVED_001 y ofrecer el botón solo llevaba al error.
@@ -845,7 +815,7 @@ export class StorePurchaseOrderDetailComponent {
       acts.push({ id: 'receive', label: 'Recibir', variant: 'primary', icon: 'package-check', disabled: loading, visible: true });
     }
     if (this.canRegisterPayment()) {
-      acts.push({ id: 'pay', label: 'Registrar pago', variant: 'outline', icon: 'dollar-sign', disabled: loading, visible: true });
+      acts.push({ id: 'pay', label: 'Configurar pago', variant: 'outline', icon: 'dollar-sign', disabled: loading, visible: true });
     }
     if (this.canCancel()) {
       acts.push({ id: 'cancel', label: 'Cancelar', variant: 'outline-danger', icon: 'x-circle', loading, disabled: loading, visible: true });
@@ -1169,14 +1139,13 @@ export class StorePurchaseOrderDetailComponent {
   }
 
   // ============ Payments ============
-  onPaymentRegistered(): void {
+  /**
+   * QUI-647 — el modal unificado emite `saved` tanto si solo configuró el plan
+   * de pago como si además registró un pago. En ambos casos hay que releer la
+   * OC completa (estado, plan y pagos vienen del mismo `findOne`).
+   */
+  onPaymentSaved(): void {
     this.showPaymentModal.set(false);
-    this.reload();
-  }
-
-  /** QUI-647 — tras reconfigurar el plan de pago (PATCH payment-plan). */
-  onPlanConfigured(): void {
-    this.showPlanModal.set(false);
     this.reload();
   }
 

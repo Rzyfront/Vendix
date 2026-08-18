@@ -15,7 +15,7 @@ import {
   PurchaseOrderPayment,
 } from '../../../interfaces';
 import { PoReceiveModalComponent } from '../po-receive-modal/po-receive-modal.component';
-import { PoPaymentModalComponent } from '../po-payment-modal/po-payment-modal.component';
+import { PoPaymentModalComponent, PoPaymentModalOrder } from '../po-payment-modal/po-payment-modal.component';
 import { PoPaymentDetailModalComponent } from '../po-payment-detail-modal/po-payment-detail-modal.component';
 import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -715,11 +715,9 @@ interface PoPaymentSchedule {
 
     <app-po-payment-modal
       [isOpen]="showPaymentModal()"
-      [orderId]="order()?.id || null"
-      [totalAmount]="order()?.total_amount || 0"
-      [paidAmount]="totalPaid()"
+      [order]="orderForPayment()"
       (close)="showPaymentModal.set(false)"
-      (paymentRegistered)="onPaymentRegistered()"
+      (saved)="onPaymentRegistered()"
     ></app-po-payment-modal>
 
     <!-- FASE TRACK B4 — Modal de detalle de pago con preview del comprobante -->
@@ -874,6 +872,23 @@ export class PoDetailModalComponent {
   readonly totalPaid = computed(() =>
     this.payments().reduce((sum, p) => sum + Number(p.amount || 0), 0)
   );
+
+  /**
+   * Forma unificada que consume `app-po-payment-modal` (QUI-647 — single
+   * `order` input). Combina `order()` con `totalPaid()` para entregar el
+   * `paid_amount` que el modal necesita sin redefinir el tipo en el padre.
+   */
+  readonly orderForPayment = computed<PoPaymentModalOrder | null>(() => {
+    const o = this.order();
+    if (!o) return null;
+    return {
+      id: o.id,
+      total_amount: o.total_amount ?? 0,
+      paid_amount: this.totalPaid(),
+      payment_plan: (o as { payment_plan?: string | null }).payment_plan ?? null,
+      status: (o as { status?: string | null }).status ?? null,
+    };
+  });
 
   readonly remainingBalance = computed(() =>
     Math.max(0, Number(this.order()?.total_amount || 0) - this.totalPaid())

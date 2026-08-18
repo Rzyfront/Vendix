@@ -10,7 +10,6 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { merge } from 'rxjs';
 import { scan } from 'rxjs/operators';
 import {
-  AbstractControl,
   FormArray,
   FormControl,
   FormGroup,
@@ -41,30 +40,8 @@ export interface PopPaymentPlan {
   payment_installments: Array<{ scheduled_date: string; amount: number }>;
 }
 
-/** Fecha mínima viva (getter): se re-validó en cada cambio, no al crear el formulario. */
-function minDateValidator(getMin: () => string) {
-  return (control: AbstractControl) => {
-    const value: string = control.value;
-    if (!value) return null;
-    const min = getMin();
-    return value < min ? { minDate: { min } } : null;
-  };
-}
-
-/** Tope superior vivo (getter): el máximo se lee en cada validación (tope en vivo). */
-function maxValueValidator(getMax: () => number) {
-  return (control: AbstractControl) => {
-    const value = control.value;
-    if (value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    if (!Number.isFinite(n)) return { max: { max: getMax() } };
-    return n > getMax() ? { max: { max: getMax() } } : null;
-  };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+/** Helpers extraídos a `payment-validators.ts` para reuso entre el wizard POP y otros modales. */
+import { minDateValidator, maxValueValidator, round2 } from './payment-validators';
 
 export const POP_PAYMENT_MODES: Array<{
   value: PopPaymentMode;
