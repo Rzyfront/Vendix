@@ -186,18 +186,30 @@ export class PopSupplierQuickCreateComponent {
 
     this.suppliersService.createSupplier(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
-        if (response.success && response.data) {
+        // Tolera `ApiResponse<T>` (sobre) y el objeto crudo que entrega el
+        // HttpClient cuando un interceptor ya desenvuelve. Sin esto, una
+        // respuesta válida con `data` directo nunca cierra el modal.
+        const created =
+          response?.data?.id != null
+            ? response.data
+            : response?.id != null
+              ? response
+              : null;
+
+        if (created && response?.success !== false) {
           this.toastService.success('Proveedor creado correctamente');
-          this.supplierCreated.emit(response.data);
+          this.supplierCreated.emit(created as Supplier);
           this.resetForm();
           this.isOpen.set(false);
           this.close.emit();
+          this.isLoading.set(false);
         } else {
+          console.error('Supplier create non-success response:', response);
           this.toastService.error(
-            response.message || 'Error al crear el proveedor',
+            response?.message || 'Error al crear el proveedor',
           );
+          this.isLoading.set(false);
         }
-        this.isLoading.set(false);
       },
       error: (error: any) => {
         console.error('Error creating supplier:', error);
