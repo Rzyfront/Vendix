@@ -57,6 +57,13 @@ const PERSISTED_TOOL_RESULT_CHARS = 1000;
  * responda a un "sí" fabricando una propuesta nueva en vez de señalar la que ya
  * está ahí.
  */
+/**
+ * Ventana en la que una propuesta cuenta como viva, igual al TTL del token que
+ * la respalda (`VexiConfirmationService`, 300 s). Después no queda nada que
+ * aprobar, así que tampoco hay nada que recordarle al modelo.
+ */
+const PENDING_CONFIRMATION_TTL_MS = 300_000;
+
 const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
   [
     'ESTADO DEL TURNO — tienes una propuesta de cambio SIN APLICAR.',
@@ -792,8 +799,20 @@ export class AIChatService {
       if (message.role === 'tool') return null;
       if (message.role !== 'assistant') continue;
 
+      // Solo el ÚLTIMO assistant decide. Seguir hacia atrás resucitaría una
+      // propuesta vieja que la conversación ya dejó atrás.
       const pending = (message.metadata as any)?.pending_confirmation;
-      if (!pending) continue;
+      if (!pending) return null;
+
+      // El token que respalda la tarjeta vive 5 minutos en Redis
+      // (`VexiConfirmationService.TOKEN_TTL_SECONDS`). Pasado ese punto no hay
+      // nada que aprobar aunque la tarjeta siga dibujada, y sin este corte una
+      // propuesta rechazada —el "Rechazar" no escribe fila ninguna— dejaría al
+      // modelo mandando a tocar un botón muerto para siempre.
+      const age = Date.now() - new Date(message.created_at).getTime();
+      if (!Number.isFinite(age) || age > PENDING_CONFIRMATION_TTL_MS) {
+        return null;
+      }
 
       return typeof pending === 'string' && pending.trim()
         ? pending
