@@ -27,6 +27,7 @@ import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import {
   resolveEffectiveRefundChannel,
+  awaitsExternalReversal,
   API_REVERSIBLE_REFUND_PROCESSORS,
   type EffectiveRefundChannel,
 } from './refund-channel.util';
@@ -158,6 +159,12 @@ export class RefundFlowService {
       dto.refund_method,
       paymentType,
     );
+    // ¿Hay una pasarela real que va a reversar y promover este refund? Sólo en
+    // ese caso es legítimo dejarlo en un estado NO terminal. El canal
+    // `gateway` por sí solo no alcanza: también es el valor de fallback para
+    // tipos de pago desconocidos, y en esos no existe processor ni endpoint de
+    // aprobación, así que aparcarlos los atasca para siempre.
+    const awaitsReversal = awaitsExternalReversal(dto.refund_method, paymentType);
 
     // Execute everything in a transaction
     return this.prisma
@@ -356,8 +363,7 @@ export class RefundFlowService {
         // que NO es un valor válido de `refunds_state_enum` (el enum declara
         // `requested | pending_approval | approved | processing | completed`)
         // y provocaba SYS_INTERNAL_001 en `tx.refunds.update()`.
-        const finalState =
-          effectiveChannel === 'gateway' ? 'pending_approval' : 'completed';
+        const finalState = awaitsReversal ? 'pending_approval' : 'completed';
         const completedRefund = await tx.refunds.update({
           where: { id: refund.id },
           data: {
@@ -390,7 +396,7 @@ export class RefundFlowService {
         // Así, `original_payment` sobre `cash` o `bank_transfer` NO entra al
         // processor (su promesa se cumplió en la tx) y el refund ya está
         // `completed`.
-        if (effectiveChannel === 'gateway') {
+        if (awaitsReversal) {
           // FIX refund 500: el processor emit + downstream listener es
           // no-bloqueante para el refund row (que ya está committed). Si
           // falla, NO propagamos el throw al cliente — el refund sigue

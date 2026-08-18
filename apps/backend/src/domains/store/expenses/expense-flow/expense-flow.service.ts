@@ -145,10 +145,16 @@ export class ExpenseFlowService {
 
     this.validateTransition(expense.state, 'paid');
 
+    // `paid_at` es el instante real en que el dinero salió de la caja. El
+    // dashboard en base caja resta el gasto por ESTE instante, no por
+    // `expense_date` (fecha del documento) ni por `approved_at` (autorización).
+    // Es columna de instante: se guarda en UTC y el bucketing por día lo hace
+    // la capa de analítica con el timezone de la tienda.
     const updated = await this.prisma.expenses.update({
       where: { id },
       data: {
         state: 'paid',
+        paid_at: new Date(),
       },
       include: EXPENSE_INCLUDE,
     });

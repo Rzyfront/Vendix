@@ -2408,6 +2408,7 @@ model expenses {
   created_by_user_id  Int?
   approved_by_user_id Int?
   approved_at         DateTime?           @db.Timestamp(6)
+  paid_at             DateTime?           @db.Timestamp(6)
   refunded_at         DateTime?           @db.Timestamp(6)
   refunded_by_user_id Int?
   refund_reason       String?             @db.VarChar(500)
@@ -2424,6 +2425,8 @@ model expenses {
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
+  @@index([store_id, paid_at])
+  @@index([organization_id, paid_at])
   @@index([state])
   @@index([category_id])
 }

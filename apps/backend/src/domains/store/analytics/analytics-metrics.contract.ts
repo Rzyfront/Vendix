@@ -328,3 +328,134 @@ export const WITHHOLDING_TAX_TYPES = [
 export const WITHHOLDING_SET: ReadonlySet<string> = new Set(
   WITHHOLDING_TAX_TYPES,
 );
+
+// =============================================================================
+// CASH BASIS (base caja) — el panel principal
+// -----------------------------------------------------------------------------
+// Todo lo de arriba mide DEVENGO: reconoce la venta cuando la orden se
+// consuma (`COMPLETED_SALE_STATES`), sin importar si el cliente pagó. El panel
+// principal mide otra cosa: CAJA — cuánto dinero entró y salió ese día. Son
+// dos preguntas distintas y ambas son válidas; lo que no es válido es
+// mezclarlas dentro de una misma tarjeta.
+//
+// Regla divisoria: si la cifra responde "¿cuánto vendí?" usa el bloque de
+// devengo. Si responde "¿cuánta plata entró?" usa este bloque.
+// =============================================================================
+
+/**
+ * Estados de `payments` en los que EL DINERO YA ENTRÓ a la tienda.
+ *
+ * `refunded` y `partially_refunded` están incluidos DELIBERADAMENTE, y omitirlos
+ * es el error más fácil de cometer aquí. `RefundFlowService.createRefund` muta el
+ * pago original a `refunded`/`partially_refunded` cuando se procesa la
+ * devolución (refund-flow.service.ts, "4. Update payment state"). Si el filtro
+ * de ingresos sólo aceptara `succeeded`/`captured`, un cobro hecho hoy y
+ * devuelto hoy DESAPARECERÍA del numerador y ADEMÁS se restaría en la línea de
+ * reembolsos — se descontaría dos veces. Medido en producción el 2026-08-18:
+ * 218 pagos ya están en esos dos estados.
+ *
+ * El dinero entró: eso es un hecho histórico que una devolución posterior no
+ * borra. La devolución se refleja por separado, en la fecha en que salió.
+ *
+ * Excluidos y por qué:
+ *  - `pending`   — cobro iniciado, plata no confirmada.
+ *  - `failed`    — nunca entró.
+ *  - `cancelled` — anulado antes de entrar.
+ *  - `authorized`— autorizado pero NO capturado; el cupo está reservado en la
+ *                  tarjeta del cliente, la plata no está en la tienda.
+ */
+export const CASH_INCOME_PAYMENT_STATES = [
+  'succeeded',
+  'captured',
+  'refunded',
+  'partially_refunded',
+] as const;
+
+/**
+ * Estados de `refunds` en los que EL DINERO YA SALIÓ de la tienda.
+ *
+ * `pending_approval`, `requested` y `processing` quedan fuera: representan una
+ * devolución INTENCIONADA, no ejecutada. Contarlas restaría plata que sigue en
+ * la caja.
+ *
+ * Esto obliga a una garantía del lado del flujo de devoluciones: ningún refund
+ * puede quedar aparcado para siempre en un estado no terminal. Un refund
+ * atascado es plata que salió en la vida real y nunca aparece en la analítica.
+ * `RefundFlowService` sólo puede aparcar en `pending_approval` cuando existe una
+ * pasarela reversible por API que lo va a promover; ver
+ * `refund-channel.util.ts`. La analítica expone además el conteo pendiente
+ * (`refunds.pending_count`) para que un atasco sea VISIBLE en vez de silencioso.
+ */
+export const REFUND_CASH_OUT_STATES = ['completed', 'approved'] as const;
+
+/**
+ * Estados de `refunds` que representan una devolución declarada pero AÚN NO
+ * ejecutada. Se reportan como advertencia, nunca se restan de la caja.
+ */
+export const REFUND_PENDING_STATES = [
+  'requested',
+  'pending_approval',
+  'processing',
+] as const;
+
+/**
+ * Estados de `expenses` en los que EL DINERO YA SALIÓ.
+ *
+ * Más estricto que {@link RECOGNIZED_EXPENSE_STATES} a propósito: `approved` es
+ * causación (el gasto se reconoce), `paid` es caja (el efectivo se fue). La
+ * tarjeta Gastos usa el set de causación; el Balance usa este.
+ */
+export const EXPENSE_CASH_OUT_STATES = ['paid'] as const;
+
+/**
+ * Impuestos que la tienda RECAUDA PARA EL ESTADO y por tanto nunca son ingreso
+ * propio, aunque entren por caja junto al precio.
+ *
+ * `iva` e `inc` son trasladables: el comerciante los cobra al cliente y los
+ * gira a la DIAN. `ica` NO entra aquí — es un impuesto municipal a cargo del
+ * comerciante sobre sus ingresos, es decir un GASTO suyo, no un recaudo de
+ * terceros. Las retenciones (`withholding`/`reteiva`/`reteica`) tampoco: son
+ * anticipos que el cliente descuenta del pago, no algo que la tienda recaude.
+ *
+ * Ojo con `orders.tax_amount`: es la suma de LOS SEIS tipos. Restarlo entero
+ * como si fuera IVA descuenta retenciones e ICA de más. Para el neto sin
+ * impuestos trasladables hay que ir a `order_item_taxes` filtrando por estos
+ * dos tipos.
+ */
+export const PASSTHROUGH_TAX_TYPES = ['iva', 'inc'] as const;
+
+/** Forma runtime de {@link PASSTHROUGH_TAX_TYPES} para chequeos `.has`. */
+export const PASSTHROUGH_TAX_SET: ReadonlySet<string> = new Set(
+  PASSTHROUGH_TAX_TYPES,
+);
+
+/**
+ * Prorratea un componente de la orden (IVA, COGS) en proporción a lo COBRADO.
+ *
+ * Necesario porque en base caja el numerador son pagos, no órdenes. Si un
+ * cliente abona el 40 % de una venta, a ese ingreso le corresponde el 40 % de su
+ * IVA y el 40 % de su costo. Traer el componente completo con un abono parcial
+ * hunde la ganancia y puede volverla negativa; no traer nada la infla al 100 %
+ * de margen.
+ *
+ * @param orderComponent  Valor total del componente en la orden (IVA o COGS).
+ * @param paymentAmount   Monto del pago recibido.
+ * @param orderTotal      `orders.grand_total` de esa orden.
+ * @returns La fracción del componente imputable a ese pago. `0` cuando
+ *          `orderTotal <= 0`, para no dividir por cero ni invertir el signo.
+ *
+ * El ratio se recorta a 1: un sobrepago (propina registrada como pago, o un
+ * abono duplicado) no debe imputar más costo del que la orden tiene.
+ */
+export function prorateByPayment(
+  orderComponent: number,
+  paymentAmount: number,
+  orderTotal: number,
+): number {
+  const total = Number(orderTotal) || 0;
+  if (total <= 0) return 0;
+  const component = Number(orderComponent) || 0;
+  const paid = Number(paymentAmount) || 0;
+  const ratio = Math.min(paid / total, 1);
+  return component * ratio;
+}
