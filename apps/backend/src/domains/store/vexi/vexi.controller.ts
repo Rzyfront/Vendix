@@ -124,6 +124,14 @@ export class VexiController {
     // two renderings of one truth, never two truths.
     const summary = this.applySummary(output);
 
+    // Persistido aparte del registro de auditoría: esa fila va sin prosa, y sin
+    // esta el transcripto de una conversación reabierta mostraba la propuesta y
+    // ningún desenlace.
+    await this.activity.recordAppliedNarration({
+      conversationId: dto.conversation_id,
+      summary,
+    });
+
     // Voice mode only. A spoken approval that answers only in writing leaves the
     // person waiting for a reply they were never going to hear, which is exactly
     // how an applied change ends up looking like a hung one.
