@@ -3969,6 +3969,27 @@ export class PurchaseOrdersService {
           },
         });
 
+        // QUI-647 — si el frontend manda `payment_schedule_id` (caso del
+        // ícono "Pagar" en una cuota del plan), marcamos la cuota como
+        // `status='paid'` en la MISMA transacción. Sin esto el schedule
+        // quedaba en `planned` aunque el pago se registrara — el bug
+        // original del usuario. UPDATE acotado al `id` correcto para no
+        // pisar cuotas vecinas si por error llegan schedules de otra OC
+        // (defensa por FK cruzada).
+        if (dto.payment_schedule_id) {
+          await tx.purchase_order_payment_schedules.updateMany({
+            where: {
+              id: dto.payment_schedule_id,
+              purchase_order_id: purchaseOrderId,
+              status: 'planned',
+            },
+            data: {
+              status: 'paid',
+              materialized_at: new Date(),
+            },
+          });
+        }
+
         // FASE 3 — PUENTE PO→AP: si la OC ya tiene una CxP, espejar el pago
         // hacia ap_payments (source='po_bridge') y bajar balance/paid_amount.
         // El espejo NO emite ap.payment_registered (no doble caja contable).
