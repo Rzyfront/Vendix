@@ -23,11 +23,13 @@ import {
   ProductVariantDetail,
   EcommerceProduct,
   CatalogQuery,
+  SaleUnitOption,
   formatMenuNextAvailable,
 } from '../../services/catalog.service';
+import { SaleUnitSelectorComponent } from '../../components/sale-unit-selector/sale-unit-selector.component';
 import { formatNextAvailableDetailed } from '../../services/next-available.util';
 import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
-import { CartService } from '../../services/cart.service';
+import { AddProductOptions, CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
 import { TableContextService } from '../../services/table-context.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
@@ -39,9 +41,15 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
-import { PriceResolverService } from '../../../../../shared/services/pricing';
+import {
+  PriceResolverService,
+  resolvePackSize,
+} from '../../../../../shared/services/pricing';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
-import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
 @Component({
@@ -63,9 +71,10 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
     EmptyStateComponent,
     CurrencyPipe,
     NextAvailableNoticeComponent,
+    SaleUnitSelectorComponent,
   ],
   template: `
-    <div class="product-detail-page">
+    <div class="product-detail-page" [attr.data-currency]="currencyCode()">
       @if (isLoading()) {
         <div class="loading-state">
           <app-spinner
@@ -211,6 +220,22 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                 }
               </div>
 
+              <!-- Presentaciones de venta (multitarifa).
+                   Por la regla QUI-648 un producto tiene presentaciones O
+                   variantes, nunca ambas, así que este selector y el de
+                   variantes de abajo no coexisten jamás: no hay convivencia
+                   que diseñar. -->
+              @if (hasSaleUnitChoice()) {
+                <div class="options-group">
+                  <label class="attr-group-label">Presentación</label>
+                  <app-sale-unit-selector
+                    [options]="saleUnits()"
+                    [selectedTierId]="selectedTierId()"
+                    (selectedTierIdChange)="onSaleUnitChange($event)"
+                  />
+                </div>
+              }
+
               <!-- Options: Attribute-based groups -->
               @if (hasAttributeGroups()) {
                 <div class="options-group">
@@ -282,10 +307,15 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
               <!-- Purchase Section -->
               @if (!hideDineInPurchase()) {
                 <div class="purchase-box">
+                  <!-- La cantidad cuenta PAQUETES de la presentación
+                       elegida: max es available_packages y unitsPerPackage
+                       sólo pinta el hint "= N u.". Nada de esto multiplica
+                       dinero. -->
                   <app-quantity-control
                     [value]="quantity()"
                     [min]="1"
                     [max]="isOnDemand() ? 999 : displayStock() || 99"
+                    [unitsPerPackage]="packSize()"
                     [size]="'sm'"
                     (valueChange)="quantity.set($event)"
                   />
@@ -316,6 +346,15 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                     <app-icon slot="icon" name="share" [size]="18" />
                   </app-button>
                 </div>
+
+                <!-- Resumen de la elección. El nombre se pinta VERBATIM
+                     ("2 Rollo 20 m"): derivar el plural español de un nombre
+                     libre produce engendros como "Rollo 20 ms". -->
+                @if (selectedSaleUnit(); as unit) {
+                  <p class="sale-unit-line">
+                    {{ quantity() }} {{ unit.name }}
+                  </p>
+                }
 
                 <!-- Buy Now -->
                 <app-button
@@ -356,7 +395,11 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                   <span class="s-text">Agotado</span>
                 } @else if (displayStock() <= 5) {
                   <span class="s-dot warn"></span>
-                  <span class="s-text">Pocas unidades</span>
+                  <!-- Con una presentación empaquetada el contador está en
+                       PAQUETES; decir "unidades" ahí engañaría al comprador. -->
+                  <span class="s-text">{{
+                    packSize() > 1 ? 'Pocos paquetes' : 'Pocas unidades'
+                  }}</span>
                 } @else {
                   <span class="s-dot"></span>
                   <span class="s-text">En stock</span>
@@ -873,6 +916,13 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
         display: flex;
         flex-wrap: wrap;
         gap: 0.5rem;
+      }
+
+      .sale-unit-line {
+        margin: 0.4rem 0 0;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--color-text-secondary);
       }
 
       .purchase-box {
@@ -1443,8 +1493,17 @@ export class ProductDetailComponent implements OnInit {
   private reviewsService = inject(EcommerceReviewsService);
   private priceResolver = inject(PriceResolverService);
   private tenantFacade = inject(TenantFacade);
+  private currencyFormat = inject(CurrencyFormatService);
   /** Single source of truth for QR-mode-aware purchase visibility (Step 7). */
   protected readonly tableContext = inject(TableContextService);
+
+  /**
+   * Moneda del tenant, leída en la plantilla vía `data-currency`. El
+   * `CurrencyPipe` de Vendix es IMPURO: sin un atributo que dependa de la
+   * moneda, esta página OnPush no repinta los precios si la moneda resuelve
+   * después del primer paint.
+   */
+  protected readonly currencyCode = this.currencyFormat.currencyCode;
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -1458,6 +1517,57 @@ export class ProductDetailComponent implements OnInit {
   selectedVariantId = signal<number | null>(null);
   isDescriptionExpanded = signal(false);
   quantity = signal(1);
+
+  // ── Multitarifa: presentaciones de venta ────────────────────────────────
+  /**
+   * `price_tiers.id` de la presentación elegida.
+   *
+   * Se siembra en el `next` del subscribe de `loadProduct`, NUNCA desde un
+   * `effect()`: escribir una señal en un effect que alimenta `computed`s
+   * leídos en el mismo tick es la trampa central de zoneless. El propio
+   * `app-sale-unit-selector` tampoco auto-selecciona por la misma razón — el
+   * padre siembra.
+   */
+  readonly selectedTierId = signal<number | null>(null);
+
+  /** Presentaciones publicadas por el backend para este producto. */
+  readonly saleUnits = computed<SaleUnitOption[]>(
+    () => this.product()?.available_sale_units ?? [],
+  );
+
+  /**
+   * True cuando el comprador DEBE elegir presentación.
+   *
+   * Se prefiere `sale_unit_count` (el contrato explícito del backend) y se
+   * cae a la longitud del array si el detalle todavía no lo publica; además
+   * se exige que haya opciones reales que pintar, porque un contador > 1 sin
+   * array dejaría un hueco con etiqueta y sin chips.
+   */
+  readonly hasSaleUnitChoice = computed<boolean>(() => {
+    const p = this.product();
+    if (!p) return false;
+    const count = p.sale_unit_count ?? this.saleUnits().length;
+    return count > 1 && this.saleUnits().length > 1;
+  });
+
+  /** Presentación elegida, o `null` mientras no haya elección válida. */
+  readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
+    const tierId = this.selectedTierId();
+    if (tierId === null) return null;
+    return (
+      this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null
+    );
+  });
+
+  /**
+   * packSize efectivo de la presentación elegida (>= 1).
+   *
+   * SÓLO se usa para stock, peso de envío y el texto "= N u.". Multiplicar
+   * dinero por este número inflaría el cobro por el tamaño del empaque.
+   */
+  readonly packSize = computed<number>(() =>
+    resolvePackSize(this.selectedSaleUnit()?.units_per_package ?? null),
+  );
 
   // Attribute-based variant selection
   selectedAttributes = signal<Record<string, string>>({});
@@ -1584,6 +1694,12 @@ export class ProductDetailComponent implements OnInit {
   });
 
   displayPrice = computed((): number => {
+    // Presentación elegida: su `price` YA es el precio del PAQUETE ENTERO con
+    // impuesto, resuelto por el backend. El frontend nunca resuelve precios —
+    // hacerlo obligaría a publicar descuentos y overrides (o sea, la política
+    // comercial y los márgenes) a cualquiera que abra devtools.
+    const unit = this.selectedSaleUnit();
+    if (unit) return unit.price;
     const variant = this.selectedVariant();
     const p = this.product();
     if (variant) return variant.final_price;
@@ -1618,6 +1734,12 @@ export class ProductDetailComponent implements OnInit {
   });
 
   displayStock = computed((): number => {
+    // Con presentación elegida el stock se mide en PAQUETES de ESA
+    // presentación. `available_packages === null` significa "no rastrea
+    // inventario" (NO agotado), de ahí el 999 en vez de 0.
+    const unit = this.selectedSaleUnit();
+    if (unit) return unit.available_packages ?? 999;
+
     const variant = this.selectedVariant();
     const p = this.product();
     if (variant && !this.variantTracksInventory(variant)) return 999;
@@ -1671,6 +1793,10 @@ export class ProductDetailComponent implements OnInit {
   readonly purchaseDisabled = computed((): boolean => {
     if (this.isOffSchedule()) return true;
     if (this.hasMissingVariantAttributes()) return true;
+    // Multitarifa: sin presentación elegida no hay precio ni escala que
+    // cobrar. La preselección normalmente evita este estado; queda como red
+    // de seguridad si TODAS las presentaciones llegan agotadas.
+    if (this.hasSaleUnitChoice() && !this.selectedSaleUnit()) return true;
     if (this.isService()) return false;
     if (this.selectedVariantUnavailable()) return true;
     return !this.isOnDemand() && this.displayStock() === 0;
@@ -1790,6 +1916,11 @@ export class ProductDetailComponent implements OnInit {
           const product = response.data;
           this.product.set(product);
           this.activeImageUrl.set(product.image_url);
+          // Preselección de presentación AQUÍ, en el `next` de la carga, y no
+          // en un `effect()`: escribir la señal desde un effect alimentaría
+          // `selectedSaleUnit` / `packSize` / `displayPrice` en el mismo tick
+          // en que se leen, que es la trampa que zoneless prohíbe.
+          this.seedSaleUnit(product);
           if (product.variants?.length) {
             const firstVariant =
               product.variants.find((variant) =>
@@ -1836,6 +1967,49 @@ export class ProductDetailComponent implements OnInit {
         this.isLoading.set(false);
       },
     });
+  }
+
+  /**
+   * Siembra `selectedTierId` con la presentación por defecto DISPONIBLE.
+   *
+   * Orden: `is_default` usable → primera usable → `null`. Dejarlo en `null`
+   * (todas agotadas) es deliberado: `purchaseDisabled` lo convierte en un CTA
+   * bloqueado, que es más honesto que preseleccionar algo que no se puede
+   * comprar.
+   */
+  private seedSaleUnit(product: ProductDetail): void {
+    const units = product.available_sale_units ?? [];
+    if (units.length === 0) {
+      this.selectedTierId.set(null);
+      return;
+    }
+    // `available_packages === null` = no rastrea inventario, NO agotado.
+    const usable = (u: SaleUnitOption) =>
+      u.is_available !== false && u.available_packages !== 0;
+    const chosen =
+      units.find((u) => u.is_default && usable(u)) ?? units.find(usable);
+    this.selectedTierId.set(chosen?.price_tier_id ?? null);
+    this.quantity.set(1);
+  }
+
+  /**
+   * Cambio de presentación desde el selector.
+   *
+   * La cantidad SIEMPRE vuelve a 1: no se convierten magnitudes. El POS sí
+   * convierte (~25 líneas delicadas en `pos-cart.service.ts`) porque el
+   * cajero ya capturó una medida física que no puede perder; aquí el
+   * comprador acaba de tocar un chip y no ha capturado nada. Replicar esa
+   * conversión sería el mayor riesgo de la fase, y está fuera de alcance.
+   *
+   * Se usa el par `[selectedTierId]` + `(selectedTierIdChange)` en vez del
+   * azúcar `[(...)]` precisamente para tener este seam: con banana-in-a-box
+   * la señal se escribiría sola y el reset de cantidad tendría que vivir en
+   * un `effect()`, que es lo que zoneless prohíbe.
+   */
+  onSaleUnitChange(tierId: number | null): void {
+    if (this.selectedTierId() === tierId) return;
+    this.selectedTierId.set(tierId);
+    this.quantity.set(1);
   }
 
   /** Retry loading the current product after a generic load error. */
@@ -2023,17 +2197,13 @@ export class ProductDetailComponent implements OnInit {
       });
       return;
     }
-    const variantId = this.selectedVariantId() ?? undefined;
-    const variant = this.selectedVariant();
-    const variantInfo = variant
-      ? { name: variant.name, sku: variant.sku, price: variant.final_price }
-      : undefined;
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    // Se usa la SOBRECARGA de objeto para poder mandar la presentación
+    // elegida; la forma posicional sigue disponible para el resto del app.
     const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
-      variantId,
-      variantInfo,
+      this.buildAddOptions(),
     );
     if (result) {
       result.subscribe();
@@ -2059,23 +2229,44 @@ export class ProductDetailComponent implements OnInit {
       return;
     }
     // For regular products or services without booking, add to cart and go to cart
-    const variantId = this.selectedVariantId() ?? undefined;
-    const variant = this.selectedVariant();
-    const variantInfo = variant
-      ? { name: variant.name, sku: variant.sku, price: variant.final_price }
-      : undefined;
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    // Se usa la SOBRECARGA de objeto para poder mandar la presentación
+    // elegida; la forma posicional sigue disponible para el resto del app.
     const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
-      variantId,
-      variantInfo,
+      this.buildAddOptions(),
     );
     if (result) {
       result.subscribe(() => this.router.navigate(['/cart']));
     } else {
       this.router.navigate(['/cart']);
     }
+  }
+
+  /**
+   * Opciones de adición: variante O presentación (QUI-648 garantiza que nunca
+   * coexisten). `saleUnitInfo.price` es el precio del PAQUETE ENTERO — el
+   * carrito invitado lo cachea tal cual y multiplica por cantidad, jamás por
+   * `units_per_package`.
+   */
+  private buildAddOptions(): AddProductOptions {
+    const variant = this.selectedVariant();
+    const unit = this.selectedSaleUnit();
+    return {
+      variantId: this.selectedVariantId() ?? undefined,
+      variantInfo: variant
+        ? { name: variant.name, sku: variant.sku, price: variant.final_price }
+        : undefined,
+      priceTierId: unit?.price_tier_id,
+      saleUnitInfo: unit
+        ? {
+            name: unit.name,
+            units_per_package: unit.units_per_package,
+            price: unit.price,
+          }
+        : undefined,
+    };
   }
 
   private variantTracksInventory(variant: ProductVariantDetail): boolean {

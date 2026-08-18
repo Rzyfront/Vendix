@@ -126,7 +126,10 @@
             <div class="cart-items">
               @if (cart(); as cart) {
               @if (cart.items.length > 0) {
-              @for (item of cart.items; track item.id) {
+              <!-- track por line_key: en el carrito invitado `id` vale
+                   `product_id`, así que dos presentaciones del mismo producto
+                   colisionaban (NG0955). -->
+              @for (item of cart.items; track cartLineKeyOf(item)) {
               <div class="cart-item">
                 <div class="item-image">
                   @if (item.product.image_url) {
@@ -139,6 +142,12 @@
                 </div>
                 <div class="item-details">
                   <p class="item-name">{{ item.product.name }}</p>
+                  @if (item.price_tier; as tier) {
+                  <!-- La presentación elegida tiene que sobrevivir hasta aquí:
+                       sin la etiqueta, dos líneas del mismo producto se ven
+                       idénticas y sólo se distinguen por el precio. -->
+                  <p class="item-variant">{{ tier.label }}</p>
+                  }
                   <p class="item-price">{{ item.unit_price | currency }}</p>
 
                   <div class="item-controls">

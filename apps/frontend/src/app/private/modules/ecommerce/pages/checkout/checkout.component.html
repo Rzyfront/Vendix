@@ -762,10 +762,18 @@
 
           @if (cart()) {
             <div class="summary-items">
-              @for (item of cart()!.items; track item.id) {
+              <!-- track por line_key (producto:variante:tarifa): en el
+                   carrito invitado `id` vale `product_id`, así que dos
+                   presentaciones del mismo producto colisionaban (NG0955). -->
+              @for (item of cart()!.items; track lineKey(item)) {
                 <div class="summary-item">
                   <span class="item-qty">{{ item.quantity }}x</span>
-                  <span class="item-name">{{ item.product.name }}</span>
+                  <span class="item-name">
+                    {{ item.product.name }}
+                    @if (item.price_tier; as tier) {
+                      <span class="item-tier">{{ tier.label }}</span>
+                    }
+                  </span>
                   <span class="item-price">{{
                     item.total_price | currency
                   }}</span>

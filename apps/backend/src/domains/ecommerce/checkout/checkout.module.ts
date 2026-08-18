@@ -21,6 +21,7 @@ import { CustomersModule } from '../../store/customers/customers.module';
 import { PromotionsModule } from '../../store/promotions/promotions.module';
 import { CouponsModule } from '../../store/coupons/coupons.module';
 import { MenusModule } from '../../store/menus/menus.module';
+import { StorefrontSharedModule } from '../shared/storefront-shared.module';
 
 @Module({
   imports: [
@@ -50,6 +51,10 @@ import { MenusModule } from '../../store/menus/menus.module';
     // (StorePrismaService inside).
     PromotionsModule,
     CouponsModule,
+    // StorefrontPriceService: misma resolucion de precio que catalogo y
+    // carrito. Queda disponible aqui para que el bloque de precios del
+    // checkout deje de mantener su tercera copia de la cascada.
+    StorefrontSharedModule,
     // 5 MB max upload — matches what the checkout controller's
     // FileInterceptor advertises so multer rejects oversized uploads early
     // (before the buffer is even allocated).

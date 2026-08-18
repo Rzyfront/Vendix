@@ -542,6 +542,8 @@ export class EcommerceComponent {
         show_variants: [true],
         show_related_products: [false],
         enable_filters: [false],
+        // Opt-in: apagado por defecto (capacidad nueva de multi-tarifa).
+        enable_sale_unit_selector: [false],
       }),
 
       // Carrito
@@ -631,6 +633,9 @@ export class EcommerceComponent {
   }
   get enableFiltersControl() {
     return this.catalogGroup.get('enable_filters') as any;
+  }
+  get enableSaleUnitSelectorControl() {
+    return this.catalogGroup.get('enable_sale_unit_selector') as any;
   }
 
   // Cart

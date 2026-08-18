@@ -22,6 +22,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { cartLineKey } from '../../utils/cart-line-key.util';
 import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -144,6 +145,22 @@ export class CheckoutComponent implements OnInit {
     if (!this.use_new_address()) return this.selected_address_id() != null;
     return this.addressFormValid();
   });
+
+  /**
+   * Identidad de la línea (producto:variante:tarifa) para el `track` del
+   * resumen. `CartService` ya la rellena en `line_key`; el fallback la
+   * recalcula para que el `@for` nunca reciba `undefined`.
+   */
+  lineKey(item: CartItem): string {
+    return (
+      item.line_key ??
+      cartLineKey(
+        item.product_id,
+        item.product_variant_id,
+        item.price_tier?.id ?? null,
+      )
+    );
+  }
 
   address_form!: FormGroup;
   readonly notes = signal('');
@@ -1667,6 +1684,10 @@ export class CheckoutComponent implements OnInit {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id || undefined,
         quantity: item.quantity,
+        // La presentación elegida viaja al backend: sin ella el pedido sale
+        // al precio de la presentación por defecto (típicamente la unitaria)
+        // y el comprador paga otra cosa de la que eligió.
+        price_tier_id: item.price_tier?.id ?? undefined,
       })),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       // Send coupon code as raw string; backend validates and recomputes
@@ -1925,16 +1946,29 @@ export class CheckoutComponent implements OnInit {
     this.quickViewOpen.set(true);
   }
 
-  onAddToCartFromSlider(product: EcommerceProduct): void {
-    // QR dine-in (Step 8): if a mesa is active, the originating product-card
-    // (Step 7 visibility) already routed via the mesa chokepoint. Re-adding
-    // here would double the items on the bill (BUG A). Defense-in-depth guard.
-    if (this.tableContext.isActive()) {
-      return;
-    }
-    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
-    const result = this.cart_service.addProduct(product.id, 1);
-    if (result) result.subscribe();
+  /**
+   * Reacción POSTERIOR a una adición que YA ocurrió. NO agrega nada.
+   *
+   * Este handler cuelga de DOS fuentes y ambas agregan por su cuenta antes de
+   * emitir, así que volver a llamar `addProduct` duplicaba la línea:
+   *
+   *  1. `(add_to_cart)` del `app-product-card` dentro del carrusel: la card ya
+   *     llamó `cartService.addProduct(id, qtyToAdd())` (chokepoint D3).
+   *  2. `(addedToCart)` del `app-product-quick-view-modal`: el modal ya llamó
+   *     `addProduct(id, quantity(), variantId, variantInfo)`. Aquí era peor que
+   *     una simple duplicación — el segundo `addProduct(product.id, 1)` perdía
+   *     la variante elegida y la cantidad, creando una línea espuria del
+   *     producto base. Home y catálogo ya lo resolvían bien con un handler
+   *     aparte (`onModalAddedToCart`, que solo cierra el modal).
+   *
+   * El guard `tableContext.isActive()` solo cubría mesa QR, de modo que en
+   * tienda normal la duplicación nunca estuvo protegida.
+   *
+   * La página se refresca sola: lee `cart_service.cart$`, que la adición del
+   * chokepoint ya actualiza. NO restaurar `addProduct` aquí.
+   */
+  onAddToCartFromSlider(_product: EcommerceProduct): void {
+    // Sin efectos por ahora: la adición ya ocurrió en la card o en el modal.
   }
 
   // Helper getters for displaying selected location names in confirmation

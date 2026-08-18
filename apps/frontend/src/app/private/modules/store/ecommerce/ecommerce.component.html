@@ -839,6 +839,11 @@
                 label="Habilitar filtros"
                 description="Filtros avanzados"
               ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="enableSaleUnitSelectorControl"
+                label="Permitir elegir presentación de venta"
+                description="Muestra en la ficha del producto las presentaciones disponibles (bulto, kilo, rollo…) con su precio, para que el comprador elija en cuál comprar. Requiere que el producto tenga más de una presentación configurada."
+              ></app-setting-toggle>
             </div>
           </div>
           <!-- SECCIÓN 5.1: CONFIGURACIÓN DE SLIDER (solo visible si "Mostrar slider principal" está activo) -->

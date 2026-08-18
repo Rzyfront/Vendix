@@ -4,7 +4,12 @@ import { Observable, Subject, of } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
-import { CatalogService, EcommerceProduct } from './catalog.service';
+import {
+  CatalogService,
+  EcommerceProduct,
+  SaleUnitOption,
+} from './catalog.service';
+import { cartLineKey } from '../utils/cart-line-key.util';
 import { TableContextService } from './table-context.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -21,6 +26,19 @@ export interface CartItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  /**
+   * Identidad de la línea: `producto:variante:tarifa` (ver `cartLineKey`).
+   *
+   * Es lo que la UI debe usar en `@for (... ; track ...)` y para marcar qué
+   * línea está ocupada. `id` NO sirve: en el carrito invitado vale
+   * `product_id`, así que dos presentaciones del mismo producto colisionan y
+   * Angular lanza NG0955 ("duplicate keys") además de repintar la fila
+   * equivocada.
+   *
+   * Opcional en el tipo por compatibilidad con cualquier payload construido
+   * fuera del servicio; `CartService` SIEMPRE lo rellena vía `normalizeCart`.
+   */
+  line_key?: string;
   // Bug 8: presentación comercial (Caja 12und, Bulto 50kg). Presente
   // cuando el producto tiene has_multiple_price_tiers y el cliente eligió
   // una tier de tipo 'sale_unit'. El render del cart muestra label +
@@ -151,6 +169,21 @@ export interface Cart {
   tier_progress?: CartTierProgress[];
 }
 
+/**
+ * Línea del carrito invitado en localStorage — **esquema v2**.
+ *
+ * Los campos de presentación de venta (multitarifa) se añaden TODOS como
+ * opcionales a propósito: así un registro v1 escrito por una pestaña vieja
+ * ES un v2 válido, y no hace falta ni versionar la clave de storage ni
+ * escribir un migrador. Un migrador que "limpiara" lo desconocido vaciaría
+ * carritos vivos de compradores reales por un cambio puramente aditivo, que
+ * es exactamente el riesgo que este diseño elimina.
+ *
+ * REGLA DE DINERO: `sale_unit_price` es el precio del PAQUETE ENTERO
+ * (impuesto incluido, resuelto por el backend) y `quantity` cuenta PAQUETES.
+ * `sale_unit_units_per_package` NUNCA multiplica dinero: sólo sirve para el
+ * texto informativo "= 100 u.", el stock y el peso de envío.
+ */
 interface LocalCartItem {
   product_id: number;
   product_variant_id?: number;
@@ -159,11 +192,47 @@ interface LocalCartItem {
   variant_name?: string;
   variant_sku?: string;
   variant_price?: number;
+  // ── v2: presentación de venta elegida (price_tiers.kind='sale_unit') ──
+  /** `price_tiers.id` de la presentación elegida. */
+  price_tier_id?: number;
+  /** Etiqueta de la presentación ("Rollo 20 m"), para pintar sin re-consultar. */
+  sale_unit_name?: string;
+  /** packSize efectivo. Sólo informativo/stock — jamás multiplica dinero. */
+  sale_unit_units_per_package?: number;
+  /** Precio del PAQUETE ENTERO. */
+  sale_unit_price?: number;
 }
 
 interface StoredLocalCart {
   items: LocalCartItem[];
   updated_at: string;
+}
+
+/**
+ * Opciones de `addProduct` / `addToCart`.
+ *
+ * Existe porque la firma posicional original (`id, qty, variantId,
+ * variantInfo`) no tenía hueco para la tarifa, y un quinto posicional
+ * (`addProduct(id, q, undefined, undefined, tier)`) es ilegible en el punto
+ * de llamada. Las sobrecargas mantienen la forma posicional viva, así que
+ * NINGÚN call site existente necesitó cambiar.
+ */
+export interface AddProductOptions {
+  /** Variante elegida (`product_variants.id`). */
+  variantId?: number;
+  /** Snapshot de la variante para pintar el carrito invitado. */
+  variantInfo?: { name: string; sku: string; price: number };
+  /** Presentación de venta elegida (`price_tiers.id`). */
+  priceTierId?: number;
+  /**
+   * Snapshot de la presentación para el carrito invitado. `price` es el
+   * precio del PAQUETE ENTERO (ver regla de dinero en `LocalCartItem`).
+   */
+  saleUnitInfo?: {
+    name: string;
+    units_per_package: number | null;
+    price: number;
+  };
 }
 
 @Injectable({
@@ -255,24 +324,77 @@ export class CartService {
           .subscribe({
             next: (response) => {
               const products: EcommerceProduct[] = response.data;
-              const cartItems: CartItem[] = items
+
+              // Auto-sanación: una tarifa guardada puede haber desaparecido o
+              // haberse marcado no disponible mientras el carrito dormía en
+              // localStorage. Se repara ANTES de construir las líneas, y sólo
+              // con evidencia positiva (ver `healLocalTier`).
+              const healed: string[] = [];
+              const items_v2 = items.map((localItem) => {
+                const product = products.find(
+                  (p) => p.id === localItem.product_id,
+                );
+                if (!product) return localItem;
+                const outcome = this.healLocalTier(localItem, product);
+                if (outcome.healedTo) {
+                  healed.push(`${product.name} → ${outcome.healedTo}`);
+                }
+                return outcome.item;
+              });
+
+              if (healed.length > 0) {
+                // Se persiste SIN recargar (writeLocalCart, no saveLocalCart)
+                // para no reentrar en este mismo método.
+                this.writeLocalCart(items_v2);
+                this.toastService.warning(
+                  healed.length === 1
+                    ? `La presentación elegida ya no está disponible. Ajustamos: ${healed[0]}`
+                    : `Algunas presentaciones ya no están disponibles. Ajustamos: ${healed.join('; ')}`,
+                );
+              }
+
+              const cartItems: CartItem[] = items_v2
                 .map((localItem) => {
                   const product = products.find(
                     (p) => p.id === localItem.product_id,
                   );
                   if (!product) return null;
 
-                  const price = localItem.variant_price
-                    ? Number(localItem.variant_price)
-                    : Number(product.final_price || product.base_price);
+                  // Precio de la LÍNEA. `sale_unit_price` ya es el precio del
+                  // PAQUETE ENTERO, así que manda sobre variante y producto y
+                  // el total sigue siendo `price * quantity` (paquetes).
+                  // NUNCA se multiplica por units_per_package.
+                  const price =
+                    localItem.sale_unit_price != null
+                      ? Number(localItem.sale_unit_price)
+                      : localItem.variant_price
+                        ? Number(localItem.variant_price)
+                        : Number(product.final_price || product.base_price);
 
                   return {
                     id: localItem.product_id,
+                    line_key: cartLineKey(
+                      product.id,
+                      localItem.product_variant_id,
+                      localItem.price_tier_id,
+                    ),
                     product_id: product.id,
                     product_variant_id: localItem.product_variant_id || null,
                     quantity: localItem.quantity,
                     unit_price: price,
                     total_price: price * localItem.quantity,
+                    price_tier: localItem.price_tier_id
+                      ? {
+                          id: localItem.price_tier_id,
+                          label:
+                            localItem.sale_unit_name ??
+                            product.sale_unit?.name ??
+                            'Presentación',
+                          units_per_package:
+                            localItem.sale_unit_units_per_package ?? 1,
+                          presentation_price: price,
+                        }
+                      : null,
                     product: {
                       name: product.name,
                       slug: product.slug,
@@ -302,7 +424,7 @@ export class CartService {
                 item_count: cartItems.reduce((sum, i) => sum + i.quantity, 0),
                 items: cartItems,
               };
-              this.cart.set(cart);
+              this.cart.set(this.normalizeCart(cart));
               // Centrally enrich the cart signal with promotional discounts +
               // tier progress from the stateless summary endpoint (localStorage
               // carts are not persisted server-side).
@@ -317,6 +439,84 @@ export class CartService {
     } else {
       this.emitEmptyCart();
     }
+  }
+
+  /**
+   * Rellena `line_key` en todas las líneas del carrito.
+   *
+   * Se aplica en CADA `cart.set(...)` (API y localStorage) para que la UI
+   * tenga siempre una identidad estable por línea, incluso en las respuestas
+   * del backend, donde la tarifa llega en `price_tier.id`.
+   */
+  private normalizeCart(cart: Cart): Cart {
+    if (!cart?.items?.length) return cart;
+    return {
+      ...cart,
+      items: cart.items.map((item) => ({
+        ...item,
+        line_key: cartLineKey(
+          item.product_id,
+          item.product_variant_id,
+          item.price_tier?.id ?? null,
+        ),
+      })),
+    };
+  }
+
+  /**
+   * Repara la presentación guardada de una línea invitada cuando la tarifa
+   * dejó de existir o dejó de estar disponible.
+   *
+   * Reglas duras:
+   *  - Sólo se sana con EVIDENCIA POSITIVA (el catálogo devolvió la lista de
+   *    presentaciones y la guardada no está en ella o está agotada). Sin esa
+   *    lista no se toca nada: sanar a ciegas rompería carritos sanos cuando el
+   *    backend todavía no publica el campo.
+   *  - Si NINGUNA presentación es usable (todo agotado), se deja la línea tal
+   *    cual. Nunca se elimina ni se vacía el carrito en silencio: el backend
+   *    rechazará el checkout con un mensaje concreto, que es mejor que perder
+   *    la compra.
+   */
+  private healLocalTier(
+    localItem: LocalCartItem,
+    product: EcommerceProduct,
+  ): { item: LocalCartItem; healedTo: string | null } {
+    const tierId = localItem.price_tier_id;
+    if (!tierId) return { item: localItem, healedTo: null };
+
+    // `available_sale_units` está declarado en `ProductDetail`; el endpoint de
+    // listado puede publicarlo o no. Se lee de forma tolerante.
+    const units = (
+      product as EcommerceProduct & {
+        available_sale_units?: SaleUnitOption[];
+      }
+    ).available_sale_units;
+    if (!Array.isArray(units) || units.length === 0) {
+      return { item: localItem, healedTo: null };
+    }
+
+    // `available_packages === null` significa "no rastrea inventario", que NO
+    // es agotado — comparación estricta contra 0.
+    const usable = (u: SaleUnitOption) =>
+      u.is_available !== false && u.available_packages !== 0;
+
+    const stored = units.find((u) => u.price_tier_id === tierId);
+    if (stored && usable(stored)) return { item: localItem, healedTo: null };
+
+    const fallback =
+      units.find((u) => u.is_default && usable(u)) ?? units.find(usable);
+    if (!fallback) return { item: localItem, healedTo: null };
+
+    return {
+      item: {
+        ...localItem,
+        price_tier_id: fallback.price_tier_id,
+        sale_unit_name: fallback.name,
+        sale_unit_units_per_package: fallback.units_per_package ?? undefined,
+        sale_unit_price: fallback.price,
+      },
+      healedTo: fallback.name,
+    };
   }
 
   private emitEmptyCart() {
@@ -350,12 +550,21 @@ export class CartService {
     return [];
   }
 
-  private saveLocalCart(items: LocalCartItem[]): void {
+  /**
+   * Escribe el carrito invitado SIN recargarlo. Lo usa la auto-sanación, que
+   * corre DENTRO de `loadLocalCart` y volvería a entrar en él si llamara a
+   * `saveLocalCart`.
+   */
+  private writeLocalCart(items: LocalCartItem[]): void {
     const payload: StoredLocalCart = {
       items,
       updated_at: new Date().toISOString(),
     };
     localStorage.setItem(this.local_storage_key, JSON.stringify(payload));
+  }
+
+  private saveLocalCart(items: LocalCartItem[]): void {
+    this.writeLocalCart(items);
     this.loadLocalCart();
   }
 
@@ -392,12 +601,21 @@ export class CartService {
     quantity: number,
     product_variant_id?: number,
     variantInfo?: { name: string; sku: string; price: number },
+    options?: Pick<AddProductOptions, 'priceTierId' | 'saleUnitInfo'>,
   ): void {
     const items = this.getLocalCart();
+    // La identidad de línea incluye la TARIFA: sin ella, "Rollo 20 m" y
+    // "Metro" del mismo producto se fusionarían en una sola línea, perdiendo
+    // la elección del comprador y mezclando dos escalas de precio.
+    const target = cartLineKey(
+      product_id,
+      product_variant_id,
+      options?.priceTierId,
+    );
     const existing = items.find(
       (i) =>
-        i.product_id === product_id &&
-        i.product_variant_id === product_variant_id,
+        cartLineKey(i.product_id, i.product_variant_id, i.price_tier_id) ===
+        target,
     );
 
     if (existing) {
@@ -416,6 +634,11 @@ export class CartService {
         variant_name: variantInfo?.name,
         variant_sku: variantInfo?.sku,
         variant_price: variantInfo?.price,
+        price_tier_id: options?.priceTierId,
+        sale_unit_name: options?.saleUnitInfo?.name,
+        sale_unit_units_per_package:
+          options?.saleUnitInfo?.units_per_package ?? undefined,
+        sale_unit_price: options?.saleUnitInfo?.price,
       });
     }
 
@@ -430,12 +653,14 @@ export class CartService {
     product_id: number,
     quantity: number,
     product_variant_id?: number,
+    price_tier_id?: number,
   ): void {
     const items = this.getLocalCart();
+    const target = cartLineKey(product_id, product_variant_id, price_tier_id);
     const item = items.find(
       (i) =>
-        i.product_id === product_id &&
-        i.product_variant_id === product_variant_id,
+        cartLineKey(i.product_id, i.product_variant_id, i.price_tier_id) ===
+        target,
     );
 
     if (item) {
@@ -448,14 +673,17 @@ export class CartService {
   /**
    * @deprecated Use removeCartItem() instead which automatically handles authentication state
    */
-  removeFromLocalCart(product_id: number, product_variant_id?: number): void {
+  removeFromLocalCart(
+    product_id: number,
+    product_variant_id?: number,
+    price_tier_id?: number,
+  ): void {
     let items = this.getLocalCart();
+    const target = cartLineKey(product_id, product_variant_id, price_tier_id);
     items = items.filter(
       (i) =>
-        !(
-          i.product_id === product_id &&
-          i.product_variant_id === product_variant_id
-        ),
+        cartLineKey(i.product_id, i.product_variant_id, i.price_tier_id) !==
+        target,
     );
     this.saveLocalCart(items);
   }
@@ -475,7 +703,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart.set(response.data);
+            this.cart.set(this.normalizeCart(response.data));
             this.enrichCartWithSummary();
           }
         }),
@@ -486,17 +714,27 @@ export class CartService {
     product_id: number,
     quantity: number,
     product_variant_id?: number,
+    price_tier_id?: number,
   ): Observable<any> {
     return this.http
       .post(
         `${this.api_url}/items`,
-        { product_id, quantity, product_variant_id },
+        {
+          product_id,
+          quantity,
+          product_variant_id,
+          // Sólo se envía la clave cuando hay tarifa elegida: un
+          // `price_tier_id: undefined` desaparece al serializar, pero
+          // mantenerlo condicional deja explícito que la ruta sin
+          // presentaciones sigue mandando exactamente el mismo body de antes.
+          ...(price_tier_id ? { price_tier_id } : {}),
+        },
         { headers: this.getHeaders() },
       )
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart.set(response.data);
+            this.cart.set(this.normalizeCart(response.data));
             this.enrichCartWithSummary();
             this.item_added_subject.next();
           }
@@ -514,7 +752,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart.set(response.data);
+            this.cart.set(this.normalizeCart(response.data));
             this.enrichCartWithSummary();
           }
         }),
@@ -529,7 +767,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart.set(response.data);
+            this.cart.set(this.normalizeCart(response.data));
             this.enrichCartWithSummary();
           }
         }),
@@ -547,13 +785,26 @@ export class CartService {
   }
 
   syncFromLocalStorage(): Observable<any> {
-    const items = this.getLocalCart();
+    // Se mapea explícitamente en vez de mandar el registro v2 crudo: los
+    // campos de presentación son un CACHÉ DE PINTADO local (`sale_unit_name`,
+    // `sale_unit_price`, ...) y el backend no debe recibirlos ni confiar en
+    // ellos — sólo necesita saber QUÉ tarifa eligió el comprador para volver
+    // a resolver el precio él mismo.
+    const items = this.getLocalCart().map((i) => ({
+      product_id: i.product_id,
+      product_variant_id: i.product_variant_id,
+      quantity: i.quantity,
+      variant_name: i.variant_name,
+      variant_sku: i.variant_sku,
+      variant_price: i.variant_price,
+      ...(i.price_tier_id ? { price_tier_id: i.price_tier_id } : {}),
+    }));
     return this.http
       .post(`${this.api_url}/sync`, { items }, { headers: this.getHeaders() })
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart.set(response.data);
+            this.cart.set(this.normalizeCart(response.data));
             this.enrichCartWithSummary();
             // Limpiar localStorage INMEDIATAMENTE después de sincronizar
             localStorage.removeItem(this.local_storage_key);
@@ -573,6 +824,7 @@ export class CartService {
       product_id: number;
       product_variant_id?: number | null;
       quantity: number;
+      price_tier_id?: number;
     }[],
   ): Observable<CartSummaryData & { success?: boolean; data?: CartSummaryData }> {
     return this.http.post<
@@ -623,10 +875,14 @@ export class CartService {
       return;
     }
 
+    // La presentación elegida DEBE viajar: sin ella el backend resuelve la
+    // presentación por defecto y cotiza la promoción sobre el precio unitario
+    // (1 Rollo de $95.000 se descontaba como $5.000 → -$500 en vez de -$9.500).
     const summaryItems = items.map((i) => ({
       product_id: i.product_id,
       product_variant_id: i.product_variant_id ?? null,
       quantity: i.quantity,
+      price_tier_id: i.price_tier?.id ?? undefined,
     }));
 
     const seq = ++this.summary_seq;
@@ -659,6 +915,29 @@ export class CartService {
   // These methods automatically detect authentication state and use the appropriate storage
 
   /**
+   * Normaliza las dos formas de llamada (posicional legacy vs objeto de
+   * opciones) a un único `AddProductOptions`.
+   *
+   * La discriminación es `typeof arg3 === 'number'`: el tercer posicional
+   * histórico es siempre un `product_variant_id` numérico, así que un objeto
+   * en esa posición sólo puede ser el nuevo contrato. Un `undefined` (call
+   * sites que saltan la variante para pasar `variantInfo`) cae al último
+   * `return` y conserva el comportamiento de antes.
+   */
+  private toAddOptions(
+    variantOrOptions?: number | AddProductOptions,
+    variantInfo?: { name: string; sku: string; price: number },
+  ): AddProductOptions {
+    if (typeof variantOrOptions === 'number') {
+      return { variantId: variantOrOptions, variantInfo };
+    }
+    if (variantOrOptions && typeof variantOrOptions === 'object') {
+      return variantOrOptions;
+    }
+    return { variantInfo };
+  }
+
+  /**
    * Agrega un producto al carrito.
    * Detecta automáticamente si usar API (autenticado) o localStorage (guest).
    */
@@ -667,7 +946,20 @@ export class CartService {
     quantity: number,
     product_variant_id?: number,
     variantInfo?: { name: string; sku: string; price: number },
+  ): Observable<any> | void;
+  addToCart(
+    product_id: number,
+    quantity: number,
+    options: AddProductOptions,
+  ): Observable<any> | void;
+  addToCart(
+    product_id: number,
+    quantity: number,
+    variantOrOptions?: number | AddProductOptions,
+    variantInfo?: { name: string; sku: string; price: number },
   ): Observable<any> | void {
+    const options = this.toAddOptions(variantOrOptions, variantInfo);
+
     // Store closed: re-show the branded banner. The backend still hard-blocks
     // checkout; this reinforces the UX at the earliest customer action.
     if (this.store_availability.unavailable()) {
@@ -675,13 +967,22 @@ export class CartService {
     }
 
     if (this.is_authenticated) {
-      return this.addItem(product_id, quantity, product_variant_id);
+      return this.addItem(
+        product_id,
+        quantity,
+        options.variantId,
+        options.priceTierId,
+      );
     } else {
       this.addToLocalCart(
         product_id,
         quantity,
-        product_variant_id,
-        variantInfo,
+        options.variantId,
+        options.variantInfo,
+        {
+          priceTierId: options.priceTierId,
+          saleUnitInfo: options.saleUnitInfo,
+        },
       );
     }
   }
@@ -704,13 +1005,32 @@ export class CartService {
    * token rename. The mesa success/error toast is centralised here (was
    * previously duplicated in product-card / menus-showcase / menus-page via
    * the D5 ad-hoc branches).
+   *
+   * MULTITARIFA: la presentación de venta entra por la SOBRECARGA de objeto
+   * (`addProduct(id, qty, { priceTierId, saleUnitInfo })`). La forma
+   * posicional histórica sigue viva sin cambios, así que los ~13 call sites
+   * existentes compilan intactos. No se añadió un 5º posicional porque
+   * `addProduct(id, q, undefined, undefined, tier)` es ilegible.
    */
   addProduct(
     product_id: number,
-    quantity: number,
+    quantity?: number,
     product_variant_id?: number,
     variantInfo?: { name: string; sku: string; price: number },
+  ): Observable<any> | void;
+  addProduct(
+    product_id: number,
+    quantity: number,
+    options: AddProductOptions,
+  ): Observable<any> | void;
+  addProduct(
+    product_id: number,
+    quantity: number = 1,
+    variantOrOptions?: number | AddProductOptions,
+    variantInfo?: { name: string; sku: string; price: number },
   ): Observable<any> | void {
+    const options = this.toAddOptions(variantOrOptions, variantInfo);
+
     // Store closed: re-show the branded banner. The backend still hard-blocks
     // checkout; this reinforces the UX at the earliest customer action.
     if (this.store_availability.unavailable()) {
@@ -726,7 +1046,10 @@ export class CartService {
           {
             product_id,
             quantity,
-            product_variant_id,
+            product_variant_id: options.variantId,
+            ...(options.priceTierId
+              ? { price_tier_id: options.priceTierId }
+              : {}),
           },
         ])
         .pipe(
@@ -763,12 +1086,7 @@ export class CartService {
     }
 
     // (3) Standard ecommerce path — auth-aware (API vs localStorage).
-    return this.addToCart(
-      product_id,
-      quantity,
-      product_variant_id,
-      variantInfo,
-    );
+    return this.addToCart(product_id, quantity, options);
   }
 
   /**
@@ -781,6 +1099,11 @@ export class CartService {
       item_id?: number;
       product_id?: number;
       product_variant_id?: number;
+      /**
+       * Tarifa de la línea. Sin ella el carrito invitado edita la PRIMERA
+       * línea del producto, que con multitarifa puede ser otra presentación.
+       */
+      price_tier_id?: number;
     },
     quantity: number,
   ): Observable<any> | void {
@@ -791,6 +1114,7 @@ export class CartService {
         identifier.product_id,
         quantity,
         identifier.product_variant_id,
+        identifier.price_tier_id,
       );
     }
   }
@@ -802,6 +1126,8 @@ export class CartService {
     item_id?: number;
     product_id?: number;
     product_variant_id?: number;
+    /** Ver `updateCartItem`: identifica la línea, no sólo el producto. */
+    price_tier_id?: number;
   }): Observable<any> | void {
     if (this.is_authenticated && identifier.item_id) {
       return this.removeItem(identifier.item_id);
@@ -809,6 +1135,7 @@ export class CartService {
       this.removeFromLocalCart(
         identifier.product_id,
         identifier.product_variant_id,
+        identifier.price_tier_id,
       );
     }
   }

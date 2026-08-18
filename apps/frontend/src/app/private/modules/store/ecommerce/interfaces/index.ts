@@ -68,6 +68,7 @@ export interface EcommerceSettings {
     show_variants?: boolean;
     show_related_products?: boolean;
     enable_filters?: boolean;
+    enable_sale_unit_selector?: boolean;
   };
 
   // Carrito

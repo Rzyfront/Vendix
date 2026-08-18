@@ -4,6 +4,7 @@ import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prism
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -90,6 +91,7 @@ describe('CatalogService reviews', () => {
             })),
           },
         },
+        StorefrontPriceService,
         { provide: PromotionEngineService, useValue: promotionEngine },
         {
           provide: MenuAvailabilityCheckerService,
@@ -229,6 +231,7 @@ describe('CatalogService active promotions on listing', () => {
             })),
           },
         },
+        StorefrontPriceService,
         { provide: PromotionEngineService, useValue: promotionEngine },
         {
           provide: MenuAvailabilityCheckerService,
@@ -464,6 +467,7 @@ describe('CatalogService featured fill cascade', () => {
             })),
           },
         },
+        StorefrontPriceService,
         { provide: PromotionEngineService, useValue: promotionEngine },
         {
           provide: MenuAvailabilityCheckerService,
@@ -611,5 +615,270 @@ describe('CatalogService featured fill cascade', () => {
 
     // Ruta normal de listado sí consulta count; la cascada nunca lo hace.
     expect(prisma.products.count).toHaveBeenCalled();
+  });
+});
+
+/**
+ * QUI-648 fase 2b — proyección de presentaciones en el catálogo público.
+ *
+ * Estos tests usan el `PriceResolverService` REAL (no un mock) a propósito: lo
+ * que se está protegiendo es ARITMÉTICA DE DINERO, y un resolver mockeado
+ * dejaría pasar exactamente el bug que importa (mezclar la escala del paquete
+ * con la de la unidad).
+ */
+describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
+  let service: CatalogService;
+  let prisma: any;
+  let storeIdSpy: jest.SpyInstance;
+
+  const SALE_UNIT_PRODUCT = {
+    id: 500,
+    name: 'Cable',
+    slug: 'cable',
+    description: null,
+    base_price: 5,
+    sale_price: null,
+    is_on_sale: false,
+    is_featured: false,
+    sku: 'CABLE',
+    track_inventory: true,
+    stock_uom_id: null,
+    product_images: [],
+    brands: null,
+    product_categories: [],
+    product_variants: [],
+    product_tax_assignments: [],
+    product_type: 'physical',
+    requires_booking: false,
+    service_duration_minutes: null,
+    service_modality: null,
+    booking_mode: null,
+    // 88.500 unidades de stock, todas en la fila base (sin variantes).
+    stock_levels: [{ product_variant_id: null, quantity_available: 88500 }],
+    _count: { product_variants: 0 },
+  };
+
+  // Metro (default): 1.000 unidades por paquete, precio explícito 5.000.
+  // Rollo 20 m: 20.000 unidades por paquete, precio explícito 95.000.
+  const ASSIGNMENTS = [
+    {
+      product_id: 500,
+      price_tier_id: 71,
+      is_default: true,
+      price_tier: {
+        id: 71,
+        name: 'Metro',
+        discount_percentage: 0,
+        is_package_unit: true,
+        units_per_package: 1000,
+      },
+    },
+    {
+      product_id: 500,
+      price_tier_id: 72,
+      is_default: false,
+      price_tier: {
+        id: 72,
+        name: 'Rollo 20 m',
+        discount_percentage: 0,
+        is_package_unit: true,
+        units_per_package: 20000,
+      },
+    },
+  ];
+
+  const OVERRIDES = [
+    {
+      product_id: 500,
+      price_tier_id: 71,
+      variant_id: null,
+      override_price: 5000,
+      override_units_per_package: null,
+    },
+    {
+      product_id: 500,
+      price_tier_id: 72,
+      variant_id: null,
+      override_price: 95000,
+      override_units_per_package: null,
+    },
+  ];
+
+  const buildModule = async (selectorEnabled: boolean | undefined) => {
+    prisma = {
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {
+            ecommerce: {
+              catalog: {
+                allow_reviews: false,
+                // `undefined` reproduce la tienda que jamás oyó hablar del
+                // selector: el default del flag es APAGADO.
+                ...(selectorEnabled === undefined
+                  ? {}
+                  : { enable_sale_unit_selector: selectorEnabled }),
+              },
+            },
+          },
+        }),
+      },
+      products: {
+        findFirst: jest.fn().mockResolvedValue({ ...SALE_UNIT_PRODUCT }),
+        findMany: jest.fn().mockResolvedValue([{ ...SALE_UNIT_PRODUCT }]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      reviews: {
+        aggregate: jest.fn().mockResolvedValue({ _avg: { rating: 0 } }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      promotions: { findMany: jest.fn().mockResolvedValue([]) },
+      product_categories: { findMany: jest.fn().mockResolvedValue([]) },
+      units_of_measure: { findMany: jest.fn().mockResolvedValue([]) },
+      product_price_tier_assignments: {
+        findMany: jest.fn(async (args: any) =>
+          // `resolveDefaultSaleUnits` filtra por `is_default`;
+          // `listPublicSaleUnitsForProducts` no. El mock respeta el where para
+          // que las dos lecturas no se pisen.
+          args?.where?.is_default
+            ? ASSIGNMENTS.filter((a) => a.is_default)
+            : ASSIGNMENTS,
+        ),
+      },
+      product_price_tier_overrides: {
+        findMany: jest.fn().mockResolvedValue(OVERRIDES),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CatalogService,
+        { provide: EcommercePrismaService, useValue: prisma },
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: S3Service,
+          useValue: { signUrl: jest.fn(async (key) => key ?? null) },
+        },
+        // Resolver REAL: la aritmética del paquete es lo que se está probando.
+        PriceResolverService,
+        StorefrontPriceService,
+        {
+          provide: PromotionEngineService,
+          useValue: {
+            findActiveAutoPromotionsForProducts: jest
+              .fn()
+              .mockResolvedValue(new Map()),
+          },
+        },
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getAvailabilityMap: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
+        { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get(CatalogService);
+  };
+
+  beforeEach(() => {
+    storeIdSpy = jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(10);
+  });
+
+  afterEach(() => {
+    storeIdSpy.mockRestore();
+  });
+
+  it('publica las presentaciones y mantiene las invariantes de escala cuando el flag está encendido', async () => {
+    await buildModule(true);
+
+    const detail: any = await service.getProductBySlug('cable');
+
+    expect(detail.available_sale_units).toHaveLength(2);
+    // Orden = el de `listPublicSaleUnitsForProducts` (sort_order), no reordenado.
+    expect(detail.available_sale_units.map((u: any) => u.price_tier_id)).toEqual(
+      [71, 72],
+    );
+
+    const [metro, rollo] = detail.available_sale_units;
+    // `price` es el precio del PAQUETE ENTERO: nunca `precio * units_per_package`.
+    expect(metro.price).toBe(5000);
+    expect(rollo.price).toBe(95000);
+    // available_packages = floor(unidades / packSize efectivo).
+    expect(metro.available_packages).toBe(88); // floor(88500 / 1000)
+    expect(rollo.available_packages).toBe(4); // floor(88500 / 20000)
+    expect(metro.units_per_package).toBe(1000);
+    expect(rollo.units_per_package).toBe(20000);
+    expect(metro.is_default).toBe(true);
+    expect(rollo.is_default).toBe(false);
+
+    // Invariante 1: la presentación por defecto cotiza EXACTAMENTE `final_price`.
+    expect(metro.price).toBe(detail.final_price);
+    // Invariante 2: `price_from` es el mínimo publicado.
+    expect(detail.price_from).toBe(
+      Math.min(...detail.available_sale_units.map((u: any) => u.price)),
+    );
+    expect(detail.sale_unit_count).toBe(2);
+  });
+
+  it('deja la respuesta idéntica a la histórica cuando el flag está apagado', async () => {
+    await buildModule(false);
+    const off: any = await service.getProductBySlug('cable');
+
+    await buildModule(true);
+    const on: any = await service.getProductBySlug('cable');
+
+    // Lo NUEVO desaparece...
+    expect(off.available_sale_units).toEqual([]);
+    expect(off.sale_unit_count).toBe(0);
+    expect(off.price_from).toBeNull();
+
+    // ...y lo VIEJO no se mueve ni un centavo. Ésta es la garantía de cero
+    // regresión para el cliente que no se actualice.
+    expect(off.final_price).toBe(on.final_price);
+    expect(off.sale_unit).toEqual(on.sale_unit);
+    expect(off.available_stock).toBe(on.available_stock);
+    expect(off.available_stock_units).toBe(on.available_stock_units);
+    expect(off.stock_quantity).toBe(on.stock_quantity);
+  });
+
+  it('trata la AUSENCIA del flag como apagado (el default es false, no true)', async () => {
+    await buildModule(undefined);
+
+    const detail: any = await service.getProductBySlug('cable');
+
+    // Si alguien copiara el patrón `!== false` de `show_variants`, esta tienda
+    // —cuyos settings ni mencionan la clave— estrenaría el selector encendido.
+    expect(detail.available_sale_units).toEqual([]);
+    expect(detail.sale_unit_count).toBe(0);
+    expect(detail.price_from).toBeNull();
+    // La presentación por defecto sigue rigiendo el precio publicado.
+    expect(detail.final_price).toBe(5000);
+    expect(detail.sale_unit).toEqual({
+      price_tier_id: 71,
+      name: 'Metro',
+      units_per_package: 1000,
+    });
+  });
+
+  it('proyecta sale_unit_count y price_from en el LISTADO sin tocar final_price', async () => {
+    await buildModule(true);
+
+    const listing: any = await service.getProducts({ page: 1, limit: 10 } as any);
+    const card = listing.data[0];
+
+    expect(card.sale_unit_count).toBe(2);
+    expect(card.price_from).toBe(5000);
+    expect(card.final_price).toBe(5000);
+    expect(card.available_stock).toBe(88);
+    expect(card.available_stock_units).toBe(88500);
+    // El listado hidrata en LOTE: una sola lectura de asignaciones por página,
+    // nunca una por producto.
+    expect(
+      prisma.product_price_tier_assignments.findMany,
+    ).toHaveBeenCalledTimes(2); // 1 default en lote + 1 abanico en lote
   });
 });

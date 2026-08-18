@@ -8,6 +8,7 @@ import { InventoryModule } from '../../store/inventory/inventory.module';
 import { ProductsModule } from '../../store/products/products.module';
 import { PromotionsModule } from '../../store/promotions/promotions.module';
 import { MenusModule } from '../../store/menus/menus.module';
+import { StorefrontSharedModule } from '../shared/storefront-shared.module';
 
 @Module({
   imports: [
@@ -21,6 +22,10 @@ import { MenusModule } from '../../store/menus/menus.module';
     PromotionsModule,
     // MenuAvailabilityCheckerService enforces strict carta schedule on add.
     MenusModule,
+    // StorefrontPriceService: misma aritmetica de precio que catalogo y
+    // checkout. Sin el, el carrito volvia a resolver por su cuenta y publicaba
+    // el precio de la unidad donde la vitrina publicaba el del paquete.
+    StorefrontSharedModule,
   ],
   controllers: [CartController],
   providers: [CartService],

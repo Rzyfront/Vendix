@@ -14,6 +14,9 @@ import { StockLevelManager } from '../../store/inventory/shared/services/stock-l
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { resolveDefaultSaleUnits } from '../../store/products/services/default-sale-unit.util';
+import type { DefaultSaleUnit } from '../../store/products/services/default-sale-unit.util';
+import { resolvePublicSaleUnitSelections } from '../../store/products/services/public-sale-unit.util';
+import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
@@ -117,6 +120,10 @@ export class CheckoutService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly stockValidatorService: StockValidatorService,
     private readonly priceResolverService: PriceResolverService,
+    // Misma aritmética de precio que vitrina y carrito. El checkout toma de
+    // `resolveLine` la escala NETA (`net_unit_price`) y arma el impuesto por su
+    // propio camino (`taxes_service.calculateProductTaxes`).
+    private readonly storefrontPrice: StorefrontPriceService,
     private readonly wompiClientFactory: WompiClientFactory,
     private readonly wompiProcessor: WompiProcessor,
     private readonly paymentEncryption: PaymentEncryptionService,
@@ -502,6 +509,13 @@ export class CheckoutService {
       product_variant_id: number | null;
       quantity: number;
       net_price: number;
+      /**
+       * Presentación aplicada a la línea. Su presencia le dice al motor de
+       * promociones que `net_price` YA es el precio del paquete y `quantity`
+       * YA cuenta paquetes.
+       */
+      applied_price_tier_id?: number | null;
+      stock_units_consumed?: number | null;
     }>;
     customerId: number | null;
     couponCode?: string | null;
@@ -545,6 +559,14 @@ export class CheckoutService {
         category_ids: categoryMap.get(item.product_id) ?? [],
         unit_price: this.roundMoney(item.net_price),
         quantity: item.quantity,
+        // Sin estos dos campos el motor no sabe que la línea ya viene en
+        // escala de paquete y, para un producto que ADEMÁS declara escala
+        // (`price_unit_quantity > 1`), vuelve a dividir el precio del paquete
+        // por esa escala: cotiza —y cobra— de menos. El predicado
+        // `isSoldByPresentation` existe desde siempre; lo que faltaba era que
+        // los callers lo alimentaran.
+        applied_price_tier_id: item.applied_price_tier_id ?? null,
+        stock_units_consumed: item.stock_units_consumed ?? null,
       })),
       customer_id: params.customerId,
     });
@@ -662,6 +684,87 @@ export class CheckoutService {
     }
   }
 
+  /**
+   * Presentación de venta de CADA LÍNEA del carrito, **alineada por índice**.
+   *
+   * Nunca un `Map` por `product_id`. Con el selector encendido, "2 bultos + 3
+   * kilos de arroz" son DOS líneas legítimas del mismo producto, y un mapa por
+   * producto las colapsa en una: la segunda pisa a la primera. El modo de fallo
+   * no es un error sino una reserva de inventario silenciosamente incorrecta —
+   * el pedido se crea, el cliente paga, y el stock descontado no corresponde a
+   * lo vendido.
+   *
+   * Cascada por línea, en este orden:
+   *
+   *   1. La tarifa que trae la línea (`applied_price_tier_id` del `cart_item`,
+   *      o `price_tier_id` del DTO del invitado), **autorizada** por
+   *      `resolvePublicSaleUnitSelections`: tenant, `kind='sale_unit'`,
+   *      tarifa activa, asignada a ESE producto, y flag del comercio encendido.
+   *   2. La presentación `is_default` del producto — el comportamiento de hoy.
+   *   3. `null` ⇒ cascada legacy de precio — el comportamiento de hoy.
+   *
+   * Ninguna línea con tarifa explícita ⇒ ni una sola consulta extra respecto
+   * del flujo previo (la autorización corta en seco y el flag ni se lee), así
+   * que la feature es no-regresiva por construcción.
+   */
+  private async resolveSaleUnitsForLines(
+    items: Array<{
+      product_id: number;
+      applied_price_tier_id?: number | null;
+      price_tier_id?: number | null;
+    }>,
+  ): Promise<Array<DefaultSaleUnit | null>> {
+    if (items.length === 0) return [];
+
+    const requested = items.map((item) => ({
+      product_id: item.product_id,
+      price_tier_id: item.applied_price_tier_id ?? item.price_tier_id ?? null,
+    }));
+    const hasExplicitTier = requested.some((r) => r.price_tier_id != null);
+
+    let selected: Array<DefaultSaleUnit | null> = items.map(() => null);
+
+    if (hasExplicitTier) {
+      const store_id = RequestContextService.getStoreId();
+      if (!store_id) {
+        // Sin contexto de tienda no hay forma de aislar el tenant de la tarifa:
+        // se rechaza en vez de resolverla contra cualquier tienda.
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
+      }
+
+      // El flag gatea lectura Y escritura. Si solo gateara el display, un
+      // `curl` con `price_tier_id` vendería en una presentación que el comercio
+      // nunca publicó.
+      let selectionEnabled = false;
+      try {
+        const settings = await this.settingsService.getSettings();
+        selectionEnabled =
+          (settings as any)?.ecommerce?.catalog?.enable_sale_unit_selector ===
+          true;
+      } catch {
+        selectionEnabled = false;
+      }
+
+      selected = await resolvePublicSaleUnitSelections(
+        this.prisma,
+        requested,
+        { storeId: store_id, selectionEnabled },
+      );
+    }
+
+    // El default sigue siendo el fallback de toda línea sin elección explícita.
+    // Aquí el mapa por producto SÍ es correcto: es una lectura de catálogo
+    // (un producto, una presentación por defecto), no estado de línea.
+    const defaults = await resolveDefaultSaleUnits(
+      this.prisma,
+      items.map((item) => item.product_id),
+    );
+
+    return items.map(
+      (item, index) => selected[index] ?? defaults.get(item.product_id) ?? null,
+    );
+  }
+
   async checkout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
 
@@ -736,6 +839,10 @@ export class CheckoutService {
             product_id: item.product_id,
             product_variant_id: item.product_variant_id || null,
             quantity: item.quantity,
+            // Presentación elegida por el comprador. Se normaliza al MISMO
+            // nombre que persiste `cart_items` para que la resolución por línea
+            // no tenga que saber de qué origen viene el carrito.
+            applied_price_tier_id: item.price_tier_id ?? null,
             product,
             product_variant,
           } as any;
@@ -958,22 +1065,19 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
-    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
-    // presentación marcada por defecto y no expone selector: elegir entre varias
-    // es capacidad exclusiva del POS. Un producto sin default conserva la
-    // cascada legacy sin cambio alguno.
-    const defaultSaleUnits = await resolveDefaultSaleUnits(
-      this.prisma,
-      cart_items.map((item) => item.product_id),
-    );
-    // Unidades reales de stock por línea, para que la RESERVA use el mismo
-    // número que el commit posterior (`stock_units_consumed ?? quantity`).
-    const stockUnitsByLine = new Map<string, number>();
-    const lineKey = (productId: number, variantId?: number | null): string =>
-      `${productId}:${variantId ?? 'null'}`;
+    // QUI-648 — presentación de venta POR LÍNEA. La elección del comprador
+    // (cuando el comercio habilita el selector) manda; si no la hay, rige la
+    // presentación por defecto del producto; si tampoco, la cascada legacy.
+    const saleUnitsByIndex = await this.resolveSaleUnitsForLines(cart_items);
+    // Unidades reales de stock POR LÍNEA, alineadas por índice, para que la
+    // RESERVA use el mismo número que el commit posterior
+    // (`stock_units_consumed ?? quantity`). Indexar por `product_id` colapsaría
+    // dos líneas del mismo producto en presentaciones distintas y reservaría
+    // solo una de las dos.
+    const stockUnitsByIndex: Array<number | null> = cart_items.map(() => null);
 
     const itemsWithTaxes = await Promise.all(
-      cart_items.map(async (item) => {
+      cart_items.map(async (item, index) => {
         const productWithTaxes = await this.prisma.products.findUnique({
           where: { id: item.product_id },
           include: {
@@ -989,84 +1093,24 @@ export class CheckoutService {
           },
         });
 
-        const priceResult = this.priceResolverService.resolvePrice({
-          product: {
-            base_price: Number(productWithTaxes.base_price),
-            is_on_sale: productWithTaxes.is_on_sale,
-            sale_price:
-              productWithTaxes.sale_price != null
-                ? Number(productWithTaxes.sale_price)
-                : null,
-            track_inventory: productWithTaxes.track_inventory,
-          },
-          variant: item.product_variant
-            ? {
-                price_override:
-                  item.product_variant.price_override != null
-                    ? Number(item.product_variant.price_override)
-                    : null,
-                is_on_sale: item.product_variant.is_on_sale,
-                sale_price:
-                  item.product_variant.sale_price != null
-                    ? Number(item.product_variant.sale_price)
-                    : null,
-                track_inventory_override:
-                  item.product_variant.track_inventory_override,
-              }
-            : undefined,
+        // Precio de la línea, resuelto por el MISMO servicio que usan vitrina
+        // y carrito. REGLA DE DINERO: con presentación, `net_unit_price` es el
+        // precio del PAQUETE ENTERO y `quantity` cuenta PAQUETES, así que
+        // `total = precio × quantity`. `pack_size` NUNCA multiplica dinero:
+        // solo desdobla el inventario. Se pide la escala NETA (sin `taxRate`)
+        // porque el checkout arma el impuesto aparte con `TaxesService`.
+        const saleUnit = saleUnitsByIndex[index] ?? null;
+        const line = this.storefrontPrice.resolveLine({
+          product: productWithTaxes as any,
+          variant: item.product_variant ?? null,
+          saleUnit,
+          quantity: item.quantity,
         });
 
-        // Con presentación por defecto el precio de la línea es el del PAQUETE
-        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
-        // default ya es una decisión explícita del comercio, así que se fuerza en
-        // true para no depender de un flag que puede quedar desincronizado.
-        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
-        const tierPriceResult = defaultSaleUnit
-          ? this.priceResolverService.resolveWithTier({
-              product: {
-                base_price: Number(productWithTaxes.base_price),
-                is_on_sale: productWithTaxes.is_on_sale,
-                sale_price:
-                  productWithTaxes.sale_price != null
-                    ? Number(productWithTaxes.sale_price)
-                    : null,
-                track_inventory: productWithTaxes.track_inventory,
-                has_multiple_price_tiers: true,
-              },
-              variant: item.product_variant
-                ? {
-                    id: item.product_variant.id,
-                    price_override:
-                      item.product_variant.price_override != null
-                        ? Number(item.product_variant.price_override)
-                        : null,
-                    is_on_sale: item.product_variant.is_on_sale,
-                    sale_price:
-                      item.product_variant.sale_price != null
-                        ? Number(item.product_variant.sale_price)
-                        : null,
-                    track_inventory_override:
-                      item.product_variant.track_inventory_override,
-                  }
-                : undefined,
-              priceTier: defaultSaleUnit.tier,
-              tierOverrides: defaultSaleUnit.overrides,
-            })
-          : null;
+        const netPrice = line.net_unit_price;
 
-        const netPrice = tierPriceResult
-          ? tierPriceResult.unitPrice
-          : priceResult.unitPrice;
-
-        const packSize = tierPriceResult?.unitsPerPackage ?? null;
-        const stockUnitsConsumed =
-          packSize && packSize > 1 ? item.quantity * packSize : null;
-        if (stockUnitsConsumed != null) {
-          stockUnitsByLine.set(
-            lineKey(item.product_id, item.product_variant_id),
-            stockUnitsConsumed,
-          );
-        }
+        const stockUnitsConsumed = line.stock_units_consumed;
+        stockUnitsByIndex[index] = stockUnitsConsumed;
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1089,8 +1133,8 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
-          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
-          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          applied_price_tier_id: line.applied_price_tier_id,
+          applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
         };
       }),
@@ -1117,8 +1161,7 @@ export class CheckoutService {
     // ANTES de crear la orden y el pago.
     await this.assertPackagedStockAvailability(
       cart_items,
-      stockUnitsByLine,
-      lineKey,
+      stockUnitsByIndex,
       deferredPreparedProductIds,
     );
 
@@ -1130,6 +1173,8 @@ export class CheckoutService {
         product_variant_id: item.product_variant_id ?? null,
         quantity: item.quantity,
         net_price: item.net_price,
+        applied_price_tier_id: item.applied_price_tier_id,
+        stock_units_consumed: item.stock_units_consumed,
       })),
       customerId: resolved_customer_id,
       couponCode: dto.coupon_code,
@@ -1266,7 +1311,11 @@ export class CheckoutService {
       },
     });
 
-    for (const item of cart_items) {
+    // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
+    // distintas son dos reservas independientes, y la suma de ambas es lo que
+    // debe salir del inventario.
+    for (let index = 0; index < cart_items.length; index++) {
+      const item = cart_items[index];
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
@@ -1283,9 +1332,7 @@ export class CheckoutService {
           // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
           // así que reservar `quantity` dejaría la reserva y el descuento en
           // números distintos y el inventario se desincronizaría.
-          stockUnitsByLine.get(
-            lineKey(item.product_id, item.product_variant_id),
-          ) ?? item.quantity,
+          stockUnitsByIndex[index] ?? item.quantity,
           'order',
           order.id,
           undefined,
@@ -1472,6 +1519,8 @@ export class CheckoutService {
       product_id: number;
       product_variant_id: number | null;
       quantity: number;
+      /** Presentación elegida por el comprador; `null` ⇒ default del producto. */
+      applied_price_tier_id?: number | null;
       product: any;
       product_variant: any;
     }>;
@@ -1508,6 +1557,9 @@ export class CheckoutService {
             product_id: item.product_id,
             product_variant_id: item.product_variant_id || null,
             quantity: item.quantity,
+            // Mismo normalizado que el checkout web: la presentación elegida
+            // viaja con el nombre que persiste `cart_items`.
+            applied_price_tier_id: item.price_tier_id ?? null,
             product,
             product_variant,
           };
@@ -1593,22 +1645,19 @@ export class CheckoutService {
 
     const order_number = await this.generateOrderNumber();
 
-    // QUI-648 — presentación por defecto. La tienda online vende SIEMPRE en la
-    // presentación marcada por defecto y no expone selector: elegir entre varias
-    // es capacidad exclusiva del POS. Un producto sin default conserva la
-    // cascada legacy sin cambio alguno.
-    const defaultSaleUnits = await resolveDefaultSaleUnits(
-      this.prisma,
-      cart_items.map((item) => item.product_id),
-    );
-    // Unidades reales de stock por línea, para que la RESERVA use el mismo
-    // número que el commit posterior (`stock_units_consumed ?? quantity`).
-    const stockUnitsByLine = new Map<string, number>();
-    const lineKey = (productId: number, variantId?: number | null): string =>
-      `${productId}:${variantId ?? 'null'}`;
+    // QUI-648 — presentación de venta POR LÍNEA. La elección del comprador
+    // (cuando el comercio habilita el selector) manda; si no la hay, rige la
+    // presentación por defecto del producto; si tampoco, la cascada legacy.
+    const saleUnitsByIndex = await this.resolveSaleUnitsForLines(cart_items);
+    // Unidades reales de stock POR LÍNEA, alineadas por índice, para que la
+    // RESERVA use el mismo número que el commit posterior
+    // (`stock_units_consumed ?? quantity`). Indexar por `product_id` colapsaría
+    // dos líneas del mismo producto en presentaciones distintas y reservaría
+    // solo una de las dos.
+    const stockUnitsByIndex: Array<number | null> = cart_items.map(() => null);
 
     const itemsWithTaxes = await Promise.all(
-      cart_items.map(async (item) => {
+      cart_items.map(async (item, index) => {
         const productWithTaxes = await this.prisma.products.findUnique({
           where: { id: item.product_id },
           include: {
@@ -1624,84 +1673,24 @@ export class CheckoutService {
           },
         });
 
-        const priceResult = this.priceResolverService.resolvePrice({
-          product: {
-            base_price: Number(productWithTaxes.base_price),
-            is_on_sale: productWithTaxes.is_on_sale,
-            sale_price:
-              productWithTaxes.sale_price != null
-                ? Number(productWithTaxes.sale_price)
-                : null,
-            track_inventory: productWithTaxes.track_inventory,
-          },
-          variant: item.product_variant
-            ? {
-                price_override:
-                  item.product_variant.price_override != null
-                    ? Number(item.product_variant.price_override)
-                    : null,
-                is_on_sale: item.product_variant.is_on_sale,
-                sale_price:
-                  item.product_variant.sale_price != null
-                    ? Number(item.product_variant.sale_price)
-                    : null,
-                track_inventory_override:
-                  item.product_variant.track_inventory_override,
-              }
-            : undefined,
+        // Precio de la línea, resuelto por el MISMO servicio que usan vitrina
+        // y carrito. REGLA DE DINERO: con presentación, `net_unit_price` es el
+        // precio del PAQUETE ENTERO y `quantity` cuenta PAQUETES, así que
+        // `total = precio × quantity`. `pack_size` NUNCA multiplica dinero:
+        // solo desdobla el inventario. Se pide la escala NETA (sin `taxRate`)
+        // porque el checkout arma el impuesto aparte con `TaxesService`.
+        const saleUnit = saleUnitsByIndex[index] ?? null;
+        const line = this.storefrontPrice.resolveLine({
+          product: productWithTaxes as any,
+          variant: item.product_variant ?? null,
+          saleUnit,
+          quantity: item.quantity,
         });
 
-        // Con presentación por defecto el precio de la línea es el del PAQUETE
-        // completo. `resolveWithTier` exige `has_multiple_price_tiers`; el
-        // default ya es una decisión explícita del comercio, así que se fuerza en
-        // true para no depender de un flag que puede quedar desincronizado.
-        const defaultSaleUnit = defaultSaleUnits.get(item.product_id);
-        const tierPriceResult = defaultSaleUnit
-          ? this.priceResolverService.resolveWithTier({
-              product: {
-                base_price: Number(productWithTaxes.base_price),
-                is_on_sale: productWithTaxes.is_on_sale,
-                sale_price:
-                  productWithTaxes.sale_price != null
-                    ? Number(productWithTaxes.sale_price)
-                    : null,
-                track_inventory: productWithTaxes.track_inventory,
-                has_multiple_price_tiers: true,
-              },
-              variant: item.product_variant
-                ? {
-                    id: item.product_variant.id,
-                    price_override:
-                      item.product_variant.price_override != null
-                        ? Number(item.product_variant.price_override)
-                        : null,
-                    is_on_sale: item.product_variant.is_on_sale,
-                    sale_price:
-                      item.product_variant.sale_price != null
-                        ? Number(item.product_variant.sale_price)
-                        : null,
-                    track_inventory_override:
-                      item.product_variant.track_inventory_override,
-                  }
-                : undefined,
-              priceTier: defaultSaleUnit.tier,
-              tierOverrides: defaultSaleUnit.overrides,
-            })
-          : null;
+        const netPrice = line.net_unit_price;
 
-        const netPrice = tierPriceResult
-          ? tierPriceResult.unitPrice
-          : priceResult.unitPrice;
-
-        const packSize = tierPriceResult?.unitsPerPackage ?? null;
-        const stockUnitsConsumed =
-          packSize && packSize > 1 ? item.quantity * packSize : null;
-        if (stockUnitsConsumed != null) {
-          stockUnitsByLine.set(
-            lineKey(item.product_id, item.product_variant_id),
-            stockUnitsConsumed,
-          );
-        }
+        const stockUnitsConsumed = line.stock_units_consumed;
+        stockUnitsByIndex[index] = stockUnitsConsumed;
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
@@ -1724,8 +1713,8 @@ export class CheckoutService {
           total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
-          applied_price_tier_id: defaultSaleUnit?.tier.id ?? null,
-          applied_price_tier_name_snapshot: defaultSaleUnit?.tier.name ?? null,
+          applied_price_tier_id: line.applied_price_tier_id,
+          applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
         };
       }),
@@ -1748,8 +1737,7 @@ export class CheckoutService {
 
     await this.assertPackagedStockAvailability(
       cart_items,
-      stockUnitsByLine,
-      lineKey,
+      stockUnitsByIndex,
       deferredPreparedProductIds,
     );
 
@@ -1761,6 +1749,8 @@ export class CheckoutService {
         product_variant_id: item.product_variant_id ?? null,
         quantity: item.quantity,
         net_price: item.net_price,
+        applied_price_tier_id: item.applied_price_tier_id,
+        stock_units_consumed: item.stock_units_consumed,
       })),
       customerId: resolved_customer_id,
       couponCode: dto.coupon_code,
@@ -1901,7 +1891,11 @@ export class CheckoutService {
       currency: order.currency,
     });
 
-    for (const item of cart_items) {
+    // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
+    // distintas son dos reservas independientes, y la suma de ambas es lo que
+    // debe salir del inventario.
+    for (let index = 0; index < cart_items.length; index++) {
+      const item = cart_items[index];
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
@@ -1918,9 +1912,7 @@ export class CheckoutService {
           // 1: el commit posterior descuenta `stock_units_consumed ?? quantity`,
           // así que reservar `quantity` dejaría la reserva y el descuento en
           // números distintos y el inventario se desincronizaría.
-          stockUnitsByLine.get(
-            lineKey(item.product_id, item.product_variant_id),
-          ) ?? item.quantity,
+          stockUnitsByIndex[index] ?? item.quantity,
           'order',
           order.id,
           undefined,
@@ -2532,48 +2524,102 @@ export class CheckoutService {
   }
 
   /**
-   * Segunda validación de stock, esta vez en UNIDADES DE STOCK.
+   * Segunda validación de stock, esta vez en UNIDADES DE STOCK y AGREGADA.
    *
-   * La validación temprana del carrito mide `item.quantity` (líneas lógicas),
-   * pero la reserva descuenta `stock_units_consumed`: vender 1 bulto de 50 kg
-   * validaba contra 1 y reservaba 50. Con 10 kg en bodega el carrito pasaba y
-   * `reserveStock` reventaba DESPUÉS de crear la orden y el pago, dejando una
-   * orden huérfana con HTTP de error.
+   * Dos defectos distintos que se arreglan en el mismo lugar porque comparten
+   * el número que se valida:
    *
-   * Sólo revisa las líneas con presentación (packSize > 1); las demás ya
-   * quedaron validadas correctamente arriba. Usa el MISMO predicado que el
-   * bucle de reserva para que no puedan discrepar.
+   * 1. **Escala.** La validación temprana del carrito mide `item.quantity`
+   *    (paquetes), pero la reserva descuenta `stock_units_consumed`: vender 1
+   *    bulto de 50 kg validaba contra 1 y reservaba 50. Con 10 kg en bodega el
+   *    carrito pasaba y `reserveStock` reventaba DESPUÉS de crear la orden y el
+   *    pago, dejando una orden huérfana con HTTP de error.
+   *
+   * 2. **Agregación.** Con selector de presentación, "1 bulto + 3 kilos de
+   *    cemento" son dos líneas del MISMO producto que compiten por el MISMO
+   *    stock. Validarlas por separado deja pasar un carrito donde cada línea
+   *    cabe pero la suma no, y las dos reservas juntas sobrevenden. Por eso la
+   *    demanda se suma por `(product_id, product_variant_id)` — que es la
+   *    granularidad real del inventario— antes de preguntar disponibilidad.
+   *    Este agregado NO es el colapso por producto que hay que evitar: el
+   *    estado de la línea (precio, tarifa, unidades) sigue viviendo por índice;
+   *    lo único que se agrupa es la DEMANDA contra una existencia compartida.
+   *
+   * `stockUnitsByIndex` está alineado por índice con `cart_items`; `null`
+   * significa "sin desdoblamiento paquete↔unidad", y esa línea demanda su
+   * `quantity` tal cual.
+   *
+   * Usa el MISMO predicado que el bucle de reserva (`shouldReserveStock`) para
+   * que la validación y la reserva no puedan discrepar sobre qué líneas cuentan.
    */
   private async assertPackagedStockAvailability(
     cart_items: any[],
-    stockUnitsByLine: Map<string, number>,
-    lineKey: (productId: number, variantId?: number | null) => string,
+    stockUnitsByIndex: Array<number | null>,
     deferredPreparedProductIds: Set<number>,
   ): Promise<void> {
-    if (stockUnitsByLine.size === 0) return;
+    if (cart_items.length === 0) return;
 
-    for (const item of cart_items) {
-      const stockUnits = stockUnitsByLine.get(
-        lineKey(item.product_id, item.product_variant_id),
-      );
-      if (!stockUnits || stockUnits <= item.quantity) continue;
+    type StockDemand = {
+      product_id: number;
+      product_variant_id: number | null;
+      /** Unidades de stock que exige el conjunto de líneas de esta existencia. */
+      units: number;
+      /** Máximo ya validado por el bucle temprano, para no repetir consultas. */
+      alreadyValidated: number;
+      product: any;
+      product_variant: any;
+    };
+
+    const demandByStock = new Map<string, StockDemand>();
+
+    for (let index = 0; index < cart_items.length; index++) {
+      const item = cart_items[index];
       if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+
+      const units = stockUnitsByIndex[index] ?? item.quantity;
+      if (!units || units <= 0) continue;
+
+      const variantId = item.product_variant_id ?? null;
+      const key = `${item.product_id}:${variantId ?? 'null'}`;
+      const existing = demandByStock.get(key);
+      if (existing) {
+        existing.units += units;
+        existing.alreadyValidated = Math.max(
+          existing.alreadyValidated,
+          item.quantity,
+        );
+      } else {
+        demandByStock.set(key, {
+          product_id: item.product_id,
+          product_variant_id: variantId,
+          units,
+          alreadyValidated: item.quantity,
+          product: item.product,
+          product_variant: item.product_variant,
+        });
+      }
+    }
+
+    for (const demand of demandByStock.values()) {
+      // El bucle temprano ya validó `quantity` para cada línea por separado; si
+      // la demanda agregada no lo supera, no hay nada nuevo que preguntar.
+      if (demand.units <= demand.alreadyValidated) continue;
 
       const availability =
         await this.stockValidatorService.validateAvailability(
-          item.product_id,
-          item.product_variant_id ?? undefined,
-          stockUnits,
+          demand.product_id,
+          demand.product_variant_id ?? undefined,
+          demand.units,
         );
 
       if (!availability.isAvailable) {
-        const productName = item.product?.name ?? `#${item.product_id}`;
-        const variantInfo = item.product_variant?.name
-          ? ` (${item.product_variant.name})`
+        const productName = demand.product?.name ?? `#${demand.product_id}`;
+        const variantInfo = demand.product_variant?.name
+          ? ` (${demand.product_variant.name})`
           : '';
         throw new VendixHttpException(
           ErrorCodes.ECOM_CART_003,
-          `Insufficient stock for ${productName}${variantInfo}: requested ${stockUnits}, available ${availability.available}`,
+          `Insufficient stock for ${productName}${variantInfo}: requested ${demand.units}, available ${availability.available}`,
         );
       }
     }

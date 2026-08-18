@@ -43,6 +43,21 @@ export class ShippingAddressDto {
   @IsOptional()
   postal_code?: string;
 
+  /**
+   * Código DANE del municipio, resuelto por el selector de ciudad del checkout.
+   *
+   * El storefront lo envía desde `checkout.component.ts` desde el 2026-07-31
+   * (commit 7a6590893), pero el DTO nunca lo declaró. Con
+   * `forbidNonWhitelisted` activo eso no se ignora: devuelve
+   * `400 SYS_VALIDATION_001 "property municipality_code should not exist"` y
+   * deja `shipping_options` vacío, lo que **bloquea el botón Continuar del
+   * checkout web para toda compra con envío**. Declararlo es la corrección
+   * mínima; el campo se acepta y hoy no se usa para cotizar.
+   */
+  @IsString()
+  @IsOptional()
+  municipality_code?: string;
+
   @IsOptional()
   @IsNumber()
   @Min(-90)

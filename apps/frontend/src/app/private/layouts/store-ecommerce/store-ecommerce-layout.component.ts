@@ -16,7 +16,11 @@ import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
-import { CartService } from '../../modules/ecommerce/services/cart.service';
+import {
+  CartItem,
+  CartService,
+} from '../../modules/ecommerce/services/cart.service';
+import { cartLineKey } from '../../modules/ecommerce/utils/cart-line-key.util';
 import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
@@ -577,7 +581,24 @@ export class StoreEcommerceLayoutComponent {
     }
   }
 
-  updateCartQuantity(item: any, newQuantity: number): void {
+  /**
+   * Identidad de la línea del mini-carrito.
+   *
+   * `CartService` ya la rellena en `line_key`; el fallback la recalcula para
+   * que el `track` del `@for` nunca reciba `undefined`.
+   */
+  cartLineKeyOf(item: CartItem): string {
+    return (
+      item.line_key ??
+      cartLineKey(
+        item.product_id,
+        item.product_variant_id,
+        item.price_tier?.id ?? null,
+      )
+    );
+  }
+
+  updateCartQuantity(item: CartItem, newQuantity: number): void {
     if (newQuantity === item.quantity) return;
     if (newQuantity <= 0) {
       this.removeCartItem(item);
@@ -589,15 +610,19 @@ export class StoreEcommerceLayoutComponent {
         .pipe(takeUntilDestroyed(this.destroy_ref))
         .subscribe();
     } else {
+      // La tarifa forma parte de la identidad de la línea: sin ella el
+      // mini-carrito editaba la PRIMERA línea del producto, que con
+      // multitarifa puede ser otra presentación.
       this.cart_service.updateLocalCartItem(
         item.product_id,
         newQuantity,
         item.product_variant_id || undefined,
+        item.price_tier?.id,
       );
     }
   }
 
-  removeCartItem(item: any): void {
+  removeCartItem(item: CartItem): void {
     if (this.is_authenticated()) {
       this.cart_service
         .removeItem(item.id)
@@ -607,6 +632,7 @@ export class StoreEcommerceLayoutComponent {
       this.cart_service.removeFromLocalCart(
         item.product_id,
         item.product_variant_id || undefined,
+        item.price_tier?.id,
       );
     }
   }

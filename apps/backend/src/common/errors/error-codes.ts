@@ -443,6 +443,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Item not in wishlist',
   },
+  // El comprador mandó una presentación de venta (price_tier_id) pero la tienda
+  // no publicó el selector. 422 y no 403: no es un problema de identidad del
+  // comprador — ningún comprador puede elegir presentación mientras el comercio
+  // tenga la capacidad apagada.
+  ECOM_SALE_UNIT_001: {
+    code: 'ECOM_SALE_UNIT_001',
+    httpStatus: 422,
+    devMessage:
+      'Esta tienda no permite elegir la presentación de venta del producto',
+  },
 
   // Support
   SUP_TICKET_001: {

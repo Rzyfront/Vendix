@@ -353,29 +353,28 @@ export class HomeComponent implements OnInit {
     return typeof value === 'string' ? value.trim() : '';
   }
 
-  onAddToCart(product: EcommerceProduct): void {
-    // Guard: bookable services go to booking page
-    if (product.requires_booking && product.product_type === 'service') {
-      this.router.navigate(['/book', product.id]);
-      return;
-    }
-    // Guard: variant products must go through detail page for variant selection
-    if (product.variant_count && product.variant_count > 0) {
-      this.router.navigate(['/products', product.slug]);
-      return;
-    }
-    // QR dine-in (Step 8): product-card.onAddToCart already dispatched via
-    // the mesa chokepoint — do NOT call addProduct again here, that would
-    // double the items on the bill. Step 7 already hid purchase CTAs in
-    // mesa-mode at the surface, so this guard is defense-in-depth.
-    if (this.table_context_service.isActive()) {
-      return;
-    }
-    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
-    const result = this.cart_service.addProduct(product.id, 1);
-    if (result) {
-      result.subscribe();
-    }
+  /**
+   * Reacción POSTERIOR a que la card ya agregó el producto. NO agrega nada.
+   *
+   * `product-card.onAddToCart` es el chokepoint (D3): ya llama a
+   * `cartService.addProduct(id, qtyToAdd())` y DESPUÉS emite `add_to_cart`.
+   * Este contenedor volvía a llamar `addProduct(product.id, 1)`, así que en
+   * tienda normal el producto se agregaba DOS veces, y encima con cantidades
+   * distintas (la card manda su stepper, el padre mandaba 1).
+   *
+   * El guard `table_context_service.isActive()` que "protegía" esto solo cubre
+   * mesa QR; fuera de mesa nunca se activaba y la doble adición pasaba
+   * inadvertida. Por eso la cura no es otro guard, es no volver a agregar.
+   *
+   * Las guardas de servicio-con-reserva y de variantes tampoco se replican
+   * aquí: la card ya retorna temprano en ambos casos y ni siquiera emite, así
+   * que eran código inalcanzable que aparentaba ser la protección real.
+   *
+   * Se conserva el handler como costura para efectos post-adición (animación
+   * del carrito, toast, analítica). NO restaurar `addProduct` aquí.
+   */
+  onAddToCart(_product: EcommerceProduct): void {
+    // Sin efectos por ahora: la adición ya ocurrió en el chokepoint de la card.
   }
 
   onModalAddedToCart(_product: EcommerceProduct): void {
