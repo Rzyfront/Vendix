@@ -314,6 +314,37 @@ function documentFieldOf(
 }
 
 /**
+ * Los parámetros que la ruta sí acepta, cuando el rechazo fue por uno inventado.
+ *
+ * El `ValidationPipe` global corre con `forbidNonWhitelisted: true`, así que un
+ * parámetro que el DTO no declara no se ignora: la petición muere con 400 y un
+ * mensaje que solo nombra al intruso («property q should not exist»). Sin la
+ * lista de los válidos, el modelo prueba sinónimos —`q`, `name`, `search`— y
+ * cada intento gasta una iteración del turno; medido en producción, el turno se
+ * agotó antes de llegar a hacer nada y la persona leyó «no pude completar eso».
+ *
+ * Solo se agrega ante un 400 y solo si el catálogo tiene el esquema de query:
+ * es una pista para corregir, no un veredicto sobre por qué falló la petición.
+ */
+function acceptedQueryNote(
+  entry: { querySchema?: CatalogField[] },
+  query: unknown,
+  status: number,
+): { parametros_aceptados?: string[]; note?: string } {
+  if (status !== 400 || !entry.querySchema?.length) return {};
+
+  const accepted = entry.querySchema.map((field) => field.name);
+  const sent = Object.keys((query as Record<string, unknown>) ?? {});
+  const unknown = sent.filter((key) => !accepted.includes(key));
+  if (!unknown.length) return {};
+
+  return {
+    parametros_aceptados: accepted,
+    note: `La ruta no acepta ${unknown.map((key) => `\`${key}\``).join(', ')}. Reintenta UNA vez con uno de \`parametros_aceptados\`; si ninguno sirve para lo que buscas, pide el listado sin filtros y busca tú en la respuesta.`,
+  };
+}
+
+/**
  * Generic bridge onto the REST surface.
  *
  * Covers the long tail of domains that have no typed tool. It executes over
@@ -379,7 +410,7 @@ export function createApiBridgeTools({
       domain: 'api-bridge',
       readOnly: true,
       description:
-        'Lista TODO lo que este usuario puede consultar y modificar en la aplicación, agrupado por dominio, con el verbo de cada ruta. Es tu mapa técnico del sistema: si no sabes cómo hacer algo, empieza por list_capabilities y baja acá cuando necesites la ruta exacta. Cubre la cola larga que no tiene herramienta propia — mesas, cartas, recetas, membresías, gastos, reservas, usuarios, roles, promociones, nómina, configuración. Las herramientas tipadas (productos, inventario, órdenes, clientes, contabilidad) siguen siendo preferibles donde existan porque son más precisas. Para dudas de USO (cómo se hace algo, no qué dato hay), consulta `help-center/articles/search` con el parámetro `q`: son pocos artículos y cubren primeros pasos, venta en POS, tienda en línea, órdenes de compra, ajuste de inventario y métodos de pago. Si no hay artículo para lo que preguntan, no lo inventes: explícalo tú desde el mapa de rutas.',
+        'Lista TODO lo que este usuario puede consultar y modificar en la aplicación, agrupado por dominio, con el verbo de cada ruta. Es tu mapa técnico del sistema: si no sabes cómo hacer algo, empieza por list_capabilities y baja acá cuando necesites la ruta exacta. Cubre la cola larga que no tiene herramienta propia — mesas, cartas, recetas, membresías, gastos, reservas, usuarios, roles, promociones, nómina, configuración. Las herramientas tipadas (productos, inventario, órdenes, clientes, contabilidad) siguen siendo preferibles donde existan porque son más precisas. Para dudas de USO (cómo se hace algo, no qué dato hay), consulta `help-center/articles/search` con el parámetro `q`: hay decenas de artículos publicados y cubren la operación diaria de todos los módulos. Búscalo con UNA o DOS palabras clave, nunca con la frase entera de la persona. La búsqueda devuelve título y resumen; el artículo completo se lee por su slug. Si no hay artículo para lo que preguntan, no lo inventes: explícalo tú desde el mapa de rutas.',
       parameters: {
         type: 'object',
         properties: {
@@ -429,6 +460,7 @@ export function createApiBridgeTools({
             requires: e.requiredPermissions,
             ...(e.summary ? { hace: e.summary } : {}),
             ...(e.bodySchema ? { campos: e.bodySchema } : {}),
+            ...(e.querySchema ? { filtros: e.querySchema } : {}),
             ...(e.multipart
               ? { necesita_documento: true, campo_archivo: e.fileField }
               : {}),
@@ -440,7 +472,7 @@ export function createApiBridgeTools({
               : {}),
             ...(irreversibleWarning(e.path) ? { irreversible: true } : {}),
           })),
-          note: 'GET se ejecuta con call_endpoint. POST, PATCH, PUT y DELETE con write_endpoint, que pide confirmación al usuario antes de aplicar. `campos` trae el nombre EXACTO, el tipo, si es obligatorio y los valores que acepta: úsalos tal cual, no los traduzcas ni los pases a otra convención. Cuando un campo trae `description`, ahí está qué significa y cuándo mandarlo: léela antes de decidir el valor, sobre todo si el nombre solo no lo aclara. Un `:algo` en la ruta se reemplaza por el id real. Una ruta con `necesita_documento` exige un adjunto y una con `acepta_documento` puede llevarlo: en ambos casos pásale `attachment_id` a write_endpoint y no toques el campo del documento a mano.',
+          note: 'GET se ejecuta con call_endpoint. POST, PATCH, PUT y DELETE con write_endpoint, que pide confirmación al usuario antes de aplicar. `campos` trae el nombre EXACTO, el tipo, si es obligatorio y los valores que acepta: úsalos tal cual, no los traduzcas ni los pases a otra convención. `filtros` es lo mismo para los parámetros de la query: son los ÚNICOS que la ruta acepta — mandar uno que no esté en la lista no se ignora, devuelve 400. Si `filtros` no trae ningún parámetro de búsqueda, la ruta no busca: pide el listado y filtra tú. Cuando un campo trae `description`, ahí está qué significa y cuándo mandarlo: léela antes de decidir el valor, sobre todo si el nombre solo no lo aclara. Un `:algo` en la ruta se reemplaza por el id real. Una ruta con `necesita_documento` exige un adjunto y una con `acepta_documento` puede llevarlo: en ambos casos pásale `attachment_id` a write_endpoint y no toques el campo del documento a mano.',
         });
       },
     },
@@ -522,6 +554,12 @@ export function createApiBridgeTools({
             return JSON.stringify({
               error: `La consulta a "${entry.path}" devolvió ${response.status}.`,
               detail: body.slice(0, 500),
+              // El 400 de `forbidNonWhitelisted` nombra el parámetro sobrante y
+              // ninguno de los válidos, así que el modelo entraba a adivinar:
+              // medido en prod, cuatro intentos con `q`, `name` y `search`
+              // sobre la misma ruta hasta agotar las iteraciones del turno. La
+              // lista de aceptados convierte ese bucle en una corrección.
+              ...acceptedQueryNote(entry, args.query, response.status),
             });
           }
 
