@@ -86,6 +86,12 @@ const REQUIRED_COLUMNS = [
   'order_items.sale_unit_code_snapshot',
   'order_items.sale_quantity_snapshot',
 
+  // --- Unidad suelta en la vitrina (migración 20260818180000) -------------
+  // Prisma selecciona TODOS los escalares del modelo cuando la consulta no
+  // enumera `select`, así que sin esta columna no falla una escritura rara:
+  // falla CUALQUIER lectura de producto — catálogo público, POS y editor.
+  'products.offer_loose_unit',
+
   // --- Alcance fiscal (lo que cubría el guard anterior, ahora del lado DB) -
   'organizations.fiscal_scope',
   'accounting_entities.fiscal_scope',
