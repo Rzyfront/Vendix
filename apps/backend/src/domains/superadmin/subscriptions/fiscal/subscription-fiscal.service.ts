@@ -269,6 +269,7 @@ type PlatformInvoiceResolution = InvoiceControlSource & {
   id: number;
   technical_key: string | null;
   document_type: string;
+  current_number: number;
 };
 
 @Injectable()
