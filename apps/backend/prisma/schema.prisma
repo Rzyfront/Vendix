@@ -1745,6 +1745,26 @@ model products {
   // (product_price_tier_overrides.override_units_per_package). The product
   // no longer owns packaging fields.
   has_multiple_price_tiers       Boolean                          @default(false)
+  /// Si la vitrina pública ofrece TAMBIÉN la unidad suelta del producto, además
+  /// de sus presentaciones (bulto, caja, six-pack).
+  ///
+  /// QUÉ: es la opción que el POS llama "Default (sin tarifa)" —la línea sin
+  /// `price_tier_id`, cobrada al precio base—. El ecommerce nunca la ofrecía:
+  /// solo listaba las tarifas `sale_unit` asignadas, así que un producto con
+  /// UNA presentación no mostraba selector (el frontend exige más de una
+  /// opción) y su "desde" salía al precio del paquete en vez del de la unidad.
+  ///
+  /// POR QUÉ ES UNA COLUMNA Y NO UNA CONSTANTE: hay negocios que venden la
+  /// botella y la caja, y otros que solo venden por caja aunque el inventario
+  /// se lleve en botellas. Para los segundos, ofrecer la unidad suelta es
+  /// publicar un precio al que no piensan vender.
+  ///
+  /// `true` por defecto — el comportamiento nuevo es el que se parece al POS, y
+  /// apagarlo es la decisión explícita del comercio. Con la unidad suelta
+  /// apagada, la presentación por defecto pasa a ser la marcada en
+  /// `product_price_tier_assignments.is_default`, o la primera publicable si no
+  /// hay ninguna marcada.
+  offer_loose_unit               Boolean                          @default(true)
   /// Subcuenta PUC de INGRESO propia de este producto (p. ej. `413550` para una
   /// línea de comercio al por menor que el contador quiere separar de `4135`).
   ///

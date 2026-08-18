@@ -206,7 +206,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               />
             </div>
 
-            @if (selectedSaleUnit(); as unit) {
+            @if (selectedPresentation(); as unit) {
               <!-- Nombre VERBATIM ("2 Rollo 20 m"): derivar el plural español
                    de un nombre libre produce "Rollo 20 ms". -->
               <p class="sale-unit-line">{{ quantity() }} {{ unit.name }}</p>
@@ -663,12 +663,22 @@ export class ProductQuickViewModalComponent {
     return count > 1 && this.saleUnits().length > 1;
   });
 
+  /**
+   * Opción elegida. `selectedTierId() === null` es la UNIDAD SUELTA —una opción
+   * publicada por el backend con `price_tier_id: null`—, no "sin elección".
+   * Mismo contrato que el detalle de producto.
+   */
   readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
     const tierId = this.selectedTierId();
-    if (tierId === null) return null;
     return (
       this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null
     );
+  });
+
+  /** La elección solo cuando es una presentación real (nunca la unidad suelta). */
+  readonly selectedPresentation = computed<SaleUnitOption | null>(() => {
+    const unit = this.selectedSaleUnit();
+    return unit && unit.price_tier_id !== null ? unit : null;
   });
 
   /** packSize efectivo (>= 1). Sólo stock/envío/texto — nunca dinero. */
@@ -924,13 +934,14 @@ export class ProductQuickViewModalComponent {
    */
   private buildAddOptions(): AddProductOptions {
     const sv = this.selectedVariant();
-    const unit = this.selectedSaleUnit();
+    // Unidad suelta ⇒ línea sin tarifa ni etiqueta de presentación.
+    const unit = this.selectedPresentation();
     return {
       variantId: sv?.id,
       variantInfo: sv
         ? { name: sv.name, sku: sv.sku, price: sv.final_price }
         : undefined,
-      priceTierId: unit?.price_tier_id,
+      priceTierId: unit?.price_tier_id ?? undefined,
       saleUnitInfo: unit
         ? {
             name: unit.name,

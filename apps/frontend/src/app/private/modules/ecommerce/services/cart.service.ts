@@ -364,12 +364,22 @@ export class CartService {
                   // PAQUETE ENTERO, así que manda sobre variante y producto y
                   // el total sigue siendo `price * quantity` (paquetes).
                   // NUNCA se multiplica por units_per_package.
+                  //
+                  // La línea SIN tarifa es la UNIDAD SUELTA, y su precio es
+                  // `loose_unit_price`, no `final_price`: con el selector
+                  // encendido `final_price` es el de la presentación marcada
+                  // por defecto, así que usarlo cobraba el bulto por la
+                  // botella. `loose_unit_price` sólo llega cuando el producto
+                  // ofrece la unidad; si no, se cae a la cascada histórica.
+                  const looseUnitPrice = product.loose_unit_price;
                   const price =
                     localItem.sale_unit_price != null
                       ? Number(localItem.sale_unit_price)
                       : localItem.variant_price
                         ? Number(localItem.variant_price)
-                        : Number(product.final_price || product.base_price);
+                        : looseUnitPrice != null
+                          ? Number(looseUnitPrice)
+                          : Number(product.final_price || product.base_price);
 
                   return {
                     id: localItem.product_id,
@@ -506,6 +516,24 @@ export class CartService {
     const fallback =
       units.find((u) => u.is_default && usable(u)) ?? units.find(usable);
     if (!fallback) return { item: localItem, healedTo: null };
+
+    // La UNIDAD SUELTA (`price_tier_id: null`) es un destino legítimo de la
+    // reparación, y sanar hacia ella significa que la línea deja de tener
+    // presentación: hay que BORRAR la etiqueta y el packSize cacheados, no solo
+    // el id. Conservarlos dejaría una línea sin tarifa mostrando "Bulto 50kg
+    // (50 und)" y calculando el peso de envío por 50 unidades que ya no compra.
+    if (fallback.price_tier_id === null) {
+      return {
+        item: {
+          ...localItem,
+          price_tier_id: undefined,
+          sale_unit_name: undefined,
+          sale_unit_units_per_package: undefined,
+          sale_unit_price: undefined,
+        },
+        healedTo: fallback.name,
+      };
+    }
 
     return {
       item: {

@@ -360,6 +360,15 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({
     description:
+      'Si la tienda en línea ofrece TAMBIÉN la unidad suelta del producto, además de sus presentaciones (bulto, caja, six-pack). Encendido por defecto. Apágalo cuando el producto solo se venda por presentación: la vitrina deja de mostrar el chip de la unidad y la presentación por defecto pasa a regir el precio publicado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  offer_loose_unit?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       'Si se le puede vender directamente a un cliente. Un insumo de cocina normalmente va apagado.',
   })
   // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
@@ -851,6 +860,15 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Si la tienda en línea ofrece TAMBIÉN la unidad suelta del producto, además de sus presentaciones (bulto, caja, six-pack). Encendido por defecto. Apágalo cuando el producto solo se venda por presentación: la vitrina deja de mostrar el chip de la unidad y la presentación por defecto pasa a regir el precio publicado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  offer_loose_unit?: boolean;
 
   @ApiPropertyOptional({
     description:
@@ -1910,6 +1928,10 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  offer_loose_unit?: boolean;
 
   // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
   @IsOptional()

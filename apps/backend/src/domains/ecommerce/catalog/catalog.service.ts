@@ -24,6 +24,24 @@ import type {
   ActivePromotionProductInput,
 } from '../../store/promotions/dto/promotion-quote.interface';
 
+/**
+ * Una opción del selector de presentación de la vitrina
+ * (`available_sale_units[]`).
+ *
+ * `price_tier_id: null` es la UNIDAD SUELTA: la línea sin tarifa, el
+ * equivalente exacto del "Default (sin tarifa)" que el POS ofrece de primero.
+ */
+type PublicSaleUnitProjection = {
+  price_tier_id: number | null;
+  name: string;
+  units_per_package: number | null;
+  is_default: boolean;
+  price: number;
+  compare_at_price: number | null;
+  available_packages: number | null;
+  is_available: boolean;
+};
+
 @Injectable()
 export class CatalogService {
   constructor(
@@ -1009,6 +1027,13 @@ export class CatalogService {
         saleUnitOptions.length > 0
           ? Math.min(...saleUnitOptions.map((o) => o.price))
           : null,
+      // Precio de la UNIDAD SUELTA, o `null` cuando el producto no la ofrece.
+      // El listado no publica `available_sale_units` (pesa), pero el carrito
+      // invitado SÍ necesita poder cotizar una línea SIN tarifa, y para eso
+      // `final_price` no sirve: con el selector encendido `final_price` es el
+      // de la presentación marcada por defecto, no el de la unidad. Sin este
+      // campo la línea suelta se pintaba con el precio de la presentación.
+      loose_unit_price: this.looseUnitPriceOf(saleUnitOptions),
       // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
       // sobre un producto que se mide en milímetros.
       price_unit: this.buildPriceUnit(product),
@@ -1146,6 +1171,10 @@ export class CatalogService {
         saleUnitOptions.length > 0
           ? Math.min(...saleUnitOptions.map((o) => o.price))
           : null,
+      // Mismo campo que el listado, para que el detalle no tenga un contrato
+      // más pobre. Aquí es derivable de `available_sale_units`, pero se publica
+      // igual: el carrito lee productos de las dos fuentes.
+      loose_unit_price: this.looseUnitPriceOf(saleUnitOptions),
       // Escala del precio publicado: "$5.000 por metro" y no "$5.000" a secas
       // sobre un producto que se mide en milímetros.
       price_unit: this.buildPriceUnit(product),
@@ -1368,11 +1397,46 @@ export class CatalogService {
         product.__public_sale_units = byProduct.get(id) ?? [];
         product.__public_default_tier_id =
           defaultTierByProduct.get(id) ?? null;
+        this.applyLooseUnitPolicy(product);
       }
     } catch {
       // Ya quedaron marcados en `[]` arriba: sin presentaciones publicadas la
       // respuesta es byte a byte la de antes de la feature.
     }
+  }
+
+  /**
+   * Cierra el hueco que deja `offer_loose_unit = false`.
+   *
+   * Con la unidad suelta apagada, la vitrina no ofrece la línea sin
+   * `price_tier_id` — pero `final_price`, `sale_unit` y `price_unit` siguen
+   * leyendo `__default_sale_unit`, que solo se llena si alguna asignación está
+   * marcada `is_default`. Sin esta política, un producto con la unidad suelta
+   * apagada y ninguna presentación marcada publicaba el precio de la unidad que
+   * acaba de retirar de la venta: el número más caro para el comercio y el más
+   * confuso para el comprador.
+   *
+   * Se elige la marcada por defecto y, si no hay ninguna, la primera publicable
+   * (el orden ya es el `sort_order` que definió el comercio). Así se conserva la
+   * invariante que documenta `buildAvailableSaleUnits`:
+   * `available_sale_units.find(u => u.is_default).price === final_price`.
+   */
+  private applyLooseUnitPolicy(product: any): void {
+    if (product?.offer_loose_unit !== false) return;
+    const options: DefaultSaleUnit[] = Array.isArray(product.__public_sale_units)
+      ? product.__public_sale_units
+      : [];
+    if (options.length === 0) return;
+
+    const markedId = product.__public_default_tier_id;
+    const chosen =
+      (markedId != null
+        ? options.find((option) => option.tier.id === markedId)
+        : null) ?? options[0];
+    if (!chosen) return;
+
+    product.__public_default_tier_id = chosen.tier.id;
+    product.__default_sale_unit = chosen;
   }
 
   /**
@@ -1403,16 +1467,7 @@ export class CatalogService {
     product: any,
     availableStockUnits: number,
     effectiveTracking: boolean,
-  ): Array<{
-    price_tier_id: number;
-    name: string;
-    units_per_package: number | null;
-    is_default: boolean;
-    price: number;
-    compare_at_price: number | null;
-    available_packages: number | null;
-    is_available: boolean;
-  }> {
+  ): PublicSaleUnitProjection[] {
     const options: DefaultSaleUnit[] = Array.isArray(
       product?.__public_sale_units,
     )
@@ -1428,9 +1483,33 @@ export class CatalogService {
       null;
     const taxRate = this.storefrontPrice.getTotalTaxRate(product);
 
+    // La UNIDAD SUELTA va primero, igual que el POS abre su menú con "Default
+    // (sin tarifa)".
+    //
+    // Es la línea sin `price_tier_id`: el mismo camino que el carrito ya
+    // resuelve por la cascada de siempre, así que publicarla no abre ninguna
+    // puerta de escritura nueva. Sin ella, un producto con UNA sola
+    // presentación se quedaba sin selector (el frontend exige más de una
+    // opción) y su "desde" salía al precio del paquete — el comprador leía
+    // "$632.580" sobre una botella de $56.190.
+    //
+    // `is_default` recae en ella solo cuando ninguna presentación está marcada:
+    // esa es exactamente la condición en la que `final_price` es el precio de
+    // la unidad, que es lo que mantiene la invariante del docblock.
+    const looseUnit: PublicSaleUnitProjection[] =
+      product?.offer_loose_unit === false
+        ? []
+        : [this.buildLooseUnitOption(
+            product,
+            availableStockUnits,
+            effectiveTracking,
+            taxRate,
+            defaultTierId === null,
+          )];
+
     // El orden es el que devuelve `listPublicSaleUnitsForProducts`
     // (`price_tier.sort_order`): el comercio decide en qué orden se ofrecen.
-    return options.map((saleUnit) => {
+    return looseUnit.concat(options.map((saleUnit) => {
       const line = this.storefrontPrice.resolveLine({
         product,
         variant: null,
@@ -1462,7 +1541,68 @@ export class CatalogService {
         available_packages: availablePackages,
         is_available: !effectiveTracking || (availablePackages ?? 0) > 0,
       };
+    }));
+  }
+
+  /**
+   * La unidad suelta como una opción más del selector.
+   *
+   * `price_tier_id: null` no es un hueco: es el contrato de "esta línea no
+   * lleva presentación", el mismo que el carrito y el checkout ya interpretan
+   * como la cascada histórica. El frontend lo usa como clave de selección igual
+   * que cualquier otro chip.
+   *
+   * El precio sale del MISMO resolver que las presentaciones
+   * (`resolveLine` con `saleUnit: null`), no de `final_price`: cuando la unidad
+   * suelta deja de ser la default, `final_price` es el de la presentación y
+   * copiarlo acá pondría el precio del bulto en el chip de la botella.
+   */
+  /**
+   * Precio de la unidad suelta dentro de un abanico ya construido, o `null`
+   * cuando el producto no la ofrece (`offer_loose_unit = false`) o cuando el
+   * abanico está vacío (selector apagado / sin presentaciones).
+   *
+   * `null` significa "cotiza como siempre": el consumidor cae a `final_price`,
+   * que es exactamente el comportamiento histórico.
+   */
+  private looseUnitPriceOf(
+    options: PublicSaleUnitProjection[],
+  ): number | null {
+    const loose = options.find((option) => option.price_tier_id === null);
+    return loose ? loose.price : null;
+  }
+
+  private buildLooseUnitOption(
+    product: any,
+    availableStockUnits: number,
+    effectiveTracking: boolean,
+    taxRate: number,
+    isDefault: boolean,
+  ): PublicSaleUnitProjection {
+    const line = this.storefrontPrice.resolveLine({
+      product,
+      variant: null,
+      saleUnit: null,
+      quantity: 1,
+      taxRate,
     });
+
+    return {
+      price_tier_id: null,
+      // El nombre de la unidad de stock ("Botella", "Kilogramo") cuando el
+      // producto la declara; "Unidad" cuando no, que es lo que el comerciante
+      // escribiría igual.
+      name: product?.__stock_unit?.name || 'Unidad',
+      units_per_package: null,
+      is_default: isDefault,
+      price: line.gross_unit_price,
+      compare_at_price:
+        line.compare_at_price != null
+          ? Math.round(line.compare_at_price * (1 + taxRate) * 100) / 100
+          : null,
+      available_packages: effectiveTracking ? availableStockUnits : null,
+      is_available: !effectiveTracking || availableStockUnits > 0,
+    };
   }
 
   /**

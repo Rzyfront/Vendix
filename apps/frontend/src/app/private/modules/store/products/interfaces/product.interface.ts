@@ -101,6 +101,12 @@ export interface Product {
   // Packaging (units-per-package) now lives on the price tier / override,
   // not on the product.
   has_multiple_price_tiers?: boolean;
+  /**
+   * Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
+   * presentaciones. `undefined` en respuestas anteriores a la columna ⇒ se
+   * ofrece (el default de la base es `true`).
+   */
+  offer_loose_unit?: boolean;
   enabled_price_tier_ids?: number[];
   // ===== Restaurant Suite toggles (Fase A defaults) =====
   // is_sellable=true, is_ingredient=false, is_combo=false, is_batch_produced=false.
@@ -415,6 +421,12 @@ export interface CreateProductDto {
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
   // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
+  /**
+   * Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
+   * presentaciones. `undefined` en respuestas anteriores a la columna ⇒ se
+   * ofrece (el default de la base es `true`).
+   */
+  offer_loose_unit?: boolean;
   enabled_price_tier_ids?: number[];
   /**
    * Subcuenta PUC de ingreso del producto. `null` la limpia y devuelve el
@@ -477,6 +489,12 @@ export interface UpdateProductDto {
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
   // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
+  /**
+   * Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
+   * presentaciones. `undefined` en respuestas anteriores a la columna ⇒ se
+   * ofrece (el default de la base es `true`).
+   */
+  offer_loose_unit?: boolean;
   enabled_price_tier_ids?: number[];
   /** Subcuenta PUC de ingreso. `null` la limpia. Ver `CreateProductDto`. */
   account_code?: string | null;

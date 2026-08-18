@@ -19,8 +19,13 @@ import {
  * Selector de presentación de venta (multitarifa) para la vitrina pública.
  *
  * Pinta las `available_sale_units` de un producto como chips táctiles grandes
- * ("Bulto 50kg" / "$100.000", "Kilo" / "$2.380") dentro de un `radiogroup`
+ * ("Unidad" / "$2.380", "Bulto 50kg" / "$100.000") dentro de un `radiogroup`
  * accesible, y devuelve el `price_tier_id` elegido por two-way binding:
+ *
+ * La primera opción suele ser la UNIDAD SUELTA, con `price_tier_id: null` —el
+ * equivalente del "Default (sin tarifa)" que el POS ofrece de primero—. Para
+ * este componente es un chip como cualquier otro; `null` viaja al padre y el
+ * carrito lo interpreta como línea sin presentación.
  *
  *   <app-sale-unit-selector
  *     [options]="product().available_sale_units ?? []"
@@ -59,7 +64,7 @@ import {
         [attr.data-currency]="currencyCode()"
         (keydown)="onKeydown($event)"
       >
-        @for (option of options(); track option.price_tier_id) {
+        @for (option of options(); track optionKey(option)) {
           <button
             #chipRef
             type="button"
@@ -71,10 +76,8 @@ import {
             [attr.aria-checked]="
               option.price_tier_id === selectedTierId() ? 'true' : 'false'
             "
-            [attr.tabindex]="
-              option.price_tier_id === rovingTierId() ? 0 : -1
-            "
-            [attr.data-tier-id]="option.price_tier_id"
+            [attr.tabindex]="optionKey(option) === rovingKey() ? 0 : -1"
+            [attr.data-tier-id]="option.price_tier_id ?? 'loose'"
             (click)="select(option)"
           >
             <span class="su-name">{{ option.name }}</span>
@@ -253,11 +256,23 @@ export class SaleUnitSelectorComponent {
     viewChildren<ElementRef<HTMLButtonElement>>('chipRef');
 
   /**
+   * Clave estable de una opción para `track` y para el roving tabindex.
+   *
+   * `price_tier_id` es `null` en la unidad suelta, y `null` no puede
+   * distinguirse de "ninguna opción" cuando se compara contra el resultado de
+   * un `find`. `-1` le da a la unidad suelta una identidad propia sin inventar
+   * un id de tarifa que no existe.
+   */
+  protected optionKey(option: SaleUnitOption): number {
+    return option.price_tier_id ?? -1;
+  }
+
+  /**
    * Chip que participa en el orden de tabulación (roving tabindex): el
    * seleccionado si es elegible, si no el primer chip elegible. Así el
    * radiogroup completo ocupa una sola parada de TAB, como manda WAI-ARIA.
    */
-  protected readonly rovingTierId = computed<number | null>(() => {
+  protected readonly rovingKey = computed<number | null>(() => {
     const options = this.options();
     const selected = this.selectedTierId();
 
@@ -265,11 +280,11 @@ export class SaleUnitSelectorComponent {
       (option) => option.price_tier_id === selected,
     );
     if (selectedOption && !this.isSoldOut(selectedOption)) {
-      return selectedOption.price_tier_id;
+      return this.optionKey(selectedOption);
     }
 
     const firstSelectable = options.find((option) => !this.isSoldOut(option));
-    return firstSelectable?.price_tier_id ?? null;
+    return firstSelectable ? this.optionKey(firstSelectable) : null;
   });
 
   /** Sin stock de paquetes, o marcada no disponible por el backend. */
@@ -335,12 +350,15 @@ export class SaleUnitSelectorComponent {
 
     const target = selectable[next];
     this.selectedTierId.set(target.price_tier_id);
-    this.focusChip(target.price_tier_id);
+    this.focusChip(target);
   }
 
-  private focusChip(tierId: number): void {
+  private focusChip(option: SaleUnitOption): void {
+    // El chip lleva `data-tier-id="loose"` en la unidad suelta: mismo valor que
+    // pinta la plantilla, para que el foco no dependa de un id que no existe.
+    const key = option.price_tier_id === null ? 'loose' : String(option.price_tier_id);
     const chip = this.chipRefs().find(
-      (ref) => ref.nativeElement.dataset['tierId'] === String(tierId),
+      (ref) => ref.nativeElement.dataset['tierId'] === key,
     );
     chip?.nativeElement.focus();
   }

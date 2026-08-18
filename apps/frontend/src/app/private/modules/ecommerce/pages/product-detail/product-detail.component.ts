@@ -350,7 +350,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                 <!-- Resumen de la elección. El nombre se pinta VERBATIM
                      ("2 Rollo 20 m"): derivar el plural español de un nombre
                      libre produce engendros como "Rollo 20 ms". -->
-                @if (selectedSaleUnit(); as unit) {
+                @if (selectedPresentation(); as unit) {
                   <p class="sale-unit-line">
                     {{ quantity() }} {{ unit.name }}
                   </p>
@@ -1550,13 +1550,34 @@ export class ProductDetailComponent implements OnInit {
     return count > 1 && this.saleUnits().length > 1;
   });
 
-  /** Presentación elegida, o `null` mientras no haya elección válida. */
+  /**
+   * Opción elegida, o `null` mientras no haya elección válida.
+   *
+   * `selectedTierId() === null` ya NO significa "no eligió": significa que
+   * eligió la UNIDAD SUELTA, que el backend publica como una opción más con
+   * `price_tier_id: null`. Por eso la búsqueda se hace siempre contra la lista
+   * y no se corta antes: cortarla dejaba la unidad suelta sin precio ni stock
+   * propios y el CTA bloqueado por la red de seguridad de `purchaseDisabled`.
+   */
   readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
     const tierId = this.selectedTierId();
-    if (tierId === null) return null;
     return (
       this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null
     );
+  });
+
+  /**
+   * La elección SOLO cuando es una presentación de verdad (bulto, caja, rollo).
+   *
+   * La unidad suelta es la AUSENCIA de presentación: la línea viaja sin
+   * `price_tier_id` y sin `saleUnitInfo`, exactamente igual que antes de que
+   * existiera el selector. Distinguirlo acá es lo que evita que el carrito
+   * etiquete "1 Unidad" una línea que siempre se llamó por el nombre del
+   * producto.
+   */
+  readonly selectedPresentation = computed<SaleUnitOption | null>(() => {
+    const unit = this.selectedSaleUnit();
+    return unit && unit.price_tier_id !== null ? unit : null;
   });
 
   /**
@@ -1970,12 +1991,16 @@ export class ProductDetailComponent implements OnInit {
   }
 
   /**
-   * Siembra `selectedTierId` con la presentación por defecto DISPONIBLE.
+   * Siembra `selectedTierId` con la opción por defecto DISPONIBLE.
    *
-   * Orden: `is_default` usable → primera usable → `null`. Dejarlo en `null`
-   * (todas agotadas) es deliberado: `purchaseDisabled` lo convierte en un CTA
-   * bloqueado, que es más honesto que preseleccionar algo que no se puede
-   * comprar.
+   * Orden: `is_default` usable → primera usable → `null`. El backend marca
+   * `is_default` en la opción que alimenta `final_price`: la presentación que
+   * el comercio eligió, o la unidad suelta cuando no marcó ninguna. Así, si el
+   * comerciante marca "Caja" por defecto, la vitrina abre en Caja.
+   *
+   * `null` como resultado del último tramo (todo agotado) cae en la unidad
+   * suelta si el producto la ofrece —y ésa también está agotada, así que el CTA
+   * queda bloqueado por stock— o en ninguna opción si no la ofrece.
    */
   private seedSaleUnit(product: ProductDetail): void {
     const units = product.available_sale_units ?? [];
@@ -2252,13 +2277,15 @@ export class ProductDetailComponent implements OnInit {
    */
   private buildAddOptions(): AddProductOptions {
     const variant = this.selectedVariant();
-    const unit = this.selectedSaleUnit();
+    // Unidad suelta ⇒ `null`: ni `priceTierId` ni `saleUnitInfo`, que es
+    // literalmente la línea de siempre.
+    const unit = this.selectedPresentation();
     return {
       variantId: this.selectedVariantId() ?? undefined,
       variantInfo: variant
         ? { name: variant.name, sku: variant.sku, price: variant.final_price }
         : undefined,
-      priceTierId: unit?.price_tier_id,
+      priceTierId: unit?.price_tier_id ?? undefined,
       saleUnitInfo: unit
         ? {
             name: unit.name,

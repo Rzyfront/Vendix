@@ -63,8 +63,15 @@ export interface ActiveStorePromotion {
  * del empaque, que es exactamente el bug que este contrato previene.
  */
 export interface SaleUnitOption {
-  price_tier_id: number;
-  /** Etiqueta lista para pintar, p.ej. "Bulto 50kg". */
+  /**
+   * `null` es la UNIDAD SUELTA del producto: la línea sin tarifa, cobrada al
+   * precio base. Es una opción de pleno derecho —el backend la publica de
+   * primera, igual que el POS abre su menú con "Default (sin tarifa)"— y se usa
+   * como clave de selección igual que cualquier otro chip. Enviar `null` al
+   * carrito es exactamente omitir `price_tier_id`.
+   */
+  price_tier_id: number | null;
+  /** Etiqueta lista para pintar, p.ej. "Bulto 50kg" o "Unidad". */
   name: string;
   /** packSize efectivo: el backend ya aplicó la cascada override ?? tier ?? 1. */
   units_per_package: number | null;
@@ -146,6 +153,15 @@ export interface EcommerceProduct {
    * presentación por defecto.
    */
   price_from?: number | null;
+  /**
+   * Precio de la UNIDAD SUELTA (la opción sin tarifa). `null`/ausente cuando el
+   * producto no la ofrece o el selector está apagado, y en ese caso el precio
+   * de una línea sin tarifa vuelve a ser `final_price`.
+   *
+   * Existe porque el LISTADO no publica `available_sale_units` y el carrito
+   * invitado necesita cotizar una línea sin presentación sin pedir el detalle.
+   */
+  loose_unit_price?: number | null;
   /**
    * Stock expresado en unidades MÍNIMAS. Se separa porque, con multi-tarifa,
    * `available_stock` pasa a estar en PAQUETES de la presentación por defecto:
