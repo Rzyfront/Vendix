@@ -69,9 +69,19 @@ const QUICK_LINKS: QuickLink[] = [
            se restauran en otra superficie; aquí solo dejamos Ingresos /
            Balance / Gastos / Reembolsos. -->
       <div class="stats-container">
+        <!-- Las cuatro tarjetas leen BASE CAJA (cash.*): el día de negocio es el
+             de la tienda y cada cifra se bucketea por el instante en que la plata
+             se movió, no por la fecha del documento.
+
+             Los fondos de ícono usan los tokens *-light y no bg-*/10: en Tailwind
+             3 un token declarado como var(--color-x) plano NO admite el
+             modificador de opacidad, así que bg-success/10, bg-info/10 y
+             bg-error/10 no compilaban a ninguna regla y esas tres tarjetas venían
+             sin fondo desde antes, en silencio. bg-primary/10 sí funciona porque
+             ese token es rgba(var(--color-primary-rgb), alpha). -->
         <app-stats
           title="Ingresos"
-          [value]="formatCurrency(profitLoss()?.revenue?.total_invoiced || 0)"
+          [value]="formatCurrency(profitLoss()?.cash?.income || 0)"
           [smallText]="ingresosSubText()"
           iconName="dollar-sign"
           iconBgColor="bg-primary/10"
@@ -79,30 +89,30 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
+          title="Ganancias"
+          [value]="formatCurrency(profitLoss()?.cash?.net_profit || 0)"
+          [smallText]="gananciasSubText()"
+          iconName="trending-up"
+          iconBgColor="bg-success-light"
+          iconColor="text-success"
+          [loading]="loading()"
+        />
+        <app-stats
           title="Balance"
-          [value]="formatCurrency(profitLoss()?.bottom_line?.balance || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.balance_growth)"
+          [value]="formatCurrency(profitLoss()?.cash?.balance || 0)"
+          [smallText]="balanceSubText()"
           iconName="wallet"
-          iconBgColor="bg-info/10"
+          iconBgColor="bg-info-light"
           iconColor="text-info"
           [loading]="loading()"
         />
         <app-stats
           title="Gastos"
           [value]="formatCurrency(profitLoss()?.operating_expenses || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.expenses_growth)"
+          [smallText]="gastosSubText()"
           iconName="trending-down"
-          iconBgColor="bg-error/10"
+          iconBgColor="bg-error-light"
           iconColor="text-error"
-          [loading]="loading()"
-        />
-        <app-stats
-          title="Reembolsos"
-          [value]="formatCurrency(profitLoss()?.refunds?.total_refunds || 0)"
-          [smallText]="getGrowthText(profitLoss()?.comparison?.refunds_growth)"
-          iconName="rotate-ccw"
-          iconBgColor="bg-accent/10"
-          iconColor="text-accent"
           [loading]="loading()"
         />
       </div>
@@ -735,35 +745,97 @@ export class DashboardComponent {
   }
 
   /**
-   * Sub-label for the "Ingresos" card.
-   * Primary number on that card is `total_invoiced` (VAT included, what the
-   * customer paid). The sub-label shows the CONTRACT `operating_revenue`
-   * (subtotal − discounts + freight, VAT excluded) so the merchant can
-   * reconcile against the analytics-metrics contract, and appends the
-   * period's refunds when there are any (QUI-662).
+   * Sub-etiqueta de INGRESOS. El número grande es `cash.income`: toda la plata
+   * que entró en el día, BRUTA. Abajo van las dos cifras que el comerciante
+   * necesita para leerlo bien:
+   *  - "Sin IVA": el ingreso menos el impuesto trasladado (IVA + INC) que viene
+   *    dentro, prorrateado por la fracción efectivamente cobrada de cada orden.
+   *  - "Reembolsos": lo que salió de vuelta ESE día, bucketeado por la fecha del
+   *    reembolso y nunca por la de la venta original.
+   * Si además hay reembolsos solicitados sin desembolsar, se avisan: no están
+   * restados en ninguna cifra porque la plata todavía no se movió.
+   *
+   * Las partes se unen con ' · ' y no con '\n': `.stat-small` del componente
+   * compartido no declara `white-space: pre-line` y clampa a 2 líneas, así que
+   * un salto de línea se colapsaba a espacio y las cifras quedaban pegadas.
    */
   readonly ingresosSubText = computed(() => {
-    const data = this.profitLoss();
-    const sinIva = `Sin IVA: ${this.formatCurrency(data?.revenue?.operating_revenue || 0)}`;
-    const refunds = data?.refunds?.total_refunds || 0;
+    const cash = this.profitLoss()?.cash;
+    const parts = [`Sin IVA: ${this.formatCurrency(cash?.income_without_tax || 0)}`];
+    const refunds = cash?.refunds || 0;
     if (refunds > 0) {
-      return `${sinIva}\nReembolsos: ${this.formatCurrency(refunds)}`;
+      parts.push(`Reembolsos: ${this.formatCurrency(refunds)}`);
     }
-    return sinIva;
+    const pending = cash?.refunds_pending || 0;
+    if (pending > 0) {
+      parts.push(`Por reembolsar: ${this.formatCurrency(pending)}`);
+    }
+    return parts.join(' · ');
   });
 
-  /** True when some sold units have no cost snapshot, so profit is overstated. */
+  /**
+   * Sub-etiqueta de GANANCIAS. El número grande ya está neto de IVA, de costo y
+   * de reembolsos; abajo va la misma ganancia después de los gastos que salieron
+   * de la caja — lo que de verdad quedó en el bolsillo.
+   */
+  readonly gananciasSubText = computed(() => {
+    const cash = this.profitLoss()?.cash;
+    if (!cash) return '';
+    const parts = [
+      `Tras gastos: ${this.formatCurrency(cash.net_profit_after_expenses || 0)}`,
+    ];
+    if (cash.net_margin) {
+      parts.push(this.getMarginText(cash.net_margin));
+    }
+    return parts.join(' · ');
+  });
+
+  /**
+   * Sub-etiqueta de BALANCE. El número grande es la posición de caja del día
+   * (entró − devuelto − pagado); abajo va la caja acumulada, que es LA MISMA
+   * serie sin límite inferior: por construcción no puede contradecir a la diaria.
+   */
+  readonly balanceSubText = computed(() => {
+    const cash = this.profitLoss()?.cash;
+    if (!cash) return '';
+    return `Caja acumulada: ${this.formatCurrency(cash.balance_accumulated || 0)}`;
+  });
+
+  /**
+   * Sub-etiqueta de GASTOS. El número grande sigue siendo el gasto RECONOCIDO
+   * del periodo (aprobado + pagado), igual que siempre. Cuando lo pagado no
+   * coincide con lo reconocido se muestra la parte pagada, que es la que el
+   * Balance resta — sin eso la resta del panel no cuadraría a la vista.
+   */
+  readonly gastosSubText = computed(() => {
+    const data = this.profitLoss();
+    const parts = [this.getGrowthText(data?.comparison?.expenses_growth)];
+    const recognized = data?.operating_expenses || 0;
+    const paid = data?.cash?.expenses_paid || 0;
+    if (data && paid !== recognized) {
+      parts.push(`Pagado: ${this.formatCurrency(paid)}`);
+    }
+    return parts.join(' · ');
+  });
+
+  /**
+   * True when some sold units have no cost snapshot, so profit is overstated.
+   * Lee la cobertura de la BASE CAJA porque es la que alimenta la tarjeta de
+   * Ganancias; leer la contable avisaría sobre un COGS que el panel no muestra.
+   */
   readonly hasIncompleteCost = computed(() => {
-    const coverage = this.profitLoss()?.costs?.cost_coverage;
+    const coverage = this.profitLoss()?.cash?.cost_coverage;
     return !!coverage && coverage.units_without_cost > 0;
   });
 
   /** Human sentence for the incomplete-cost warning. */
   readonly incompleteCostText = computed(() => {
-    const coverage = this.profitLoss()?.costs?.cost_coverage;
+    const coverage = this.profitLoss()?.cash?.cost_coverage;
     if (!coverage || coverage.units_without_cost === 0) return '';
     const pct = (coverage.coverage_ratio * 100).toFixed(0);
-    return `${coverage.units_without_cost} de ${coverage.units_total} unidades vendidas no tienen costo registrado (cobertura ${pct} %). La ganancia mostrada está sobreestimada hasta que se registre ese costo.`;
+    const units = Math.round(coverage.units_without_cost);
+    const total = Math.round(coverage.units_total);
+    return `${units} de ${total} unidades vendidas no tienen costo registrado (cobertura ${pct} %). La ganancia mostrada está sobreestimada hasta que se registre ese costo.`;
   });
 
   navigateTo(path: string): void {

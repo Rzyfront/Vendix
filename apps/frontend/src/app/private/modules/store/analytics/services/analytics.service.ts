@@ -130,6 +130,58 @@ export interface ReviewsSummary {
 // Financial interfaces
 export interface ProfitLossSummary {
   period: { start_date: string; end_date: string };
+  /**
+   * BASE CAJA — el bloque que leen las cuatro tarjetas del panel principal.
+   * Hermano del bloque contable (`revenue`/`costs`/`bottom_line`), que sigue
+   * alimentando el estado de resultados y su export. Mismo periodo, base
+   * distinta: el panel es una caja, el reporte es un P&L.
+   */
+  cash: {
+    /** INGRESOS: la plata que entró en el periodo, BRUTA de reembolsos. */
+    income: number;
+    /** Sub-etiqueta "Sin IVA": ingreso menos el impuesto trasladado que lleva dentro. */
+    income_without_tax: number;
+    /** IVA + INC prorrateado sobre la plata reconocida. */
+    passthrough_tax: number;
+    /** COGS prorrateado sobre la plata reconocida. */
+    cost_of_goods_sold: number;
+    /** Auditoría de ese COGS — unidades fraccionarias por el prorrateo. */
+    cost_coverage: CostCoverage;
+    /** GANANCIAS: income − IVA − COGS − reembolsos (netos de su impuesto). */
+    net_profit: number;
+    /** La misma ganancia antes de netear reembolsos, para reconciliar. */
+    net_profit_before_refunds: number;
+    /** Sub-etiqueta de GANANCIAS: la ganancia después de los gastos pagados. */
+    net_profit_after_expenses: number;
+    net_margin: number;
+    /** Sub-etiqueta "Reembolsos" en INGRESOS: plata que efectivamente volvió. */
+    refunds: number;
+    refunds_count: number;
+    refunds_tax: number;
+    /** Solicitados y aún sin salir: se avisan, nunca se restan. */
+    refunds_pending: number;
+    refunds_pending_count: number;
+    /** Gastos que salieron de la caja en el periodo (`expenses.paid_at`). */
+    expenses_paid: number;
+    /** BALANCE: income − reembolsos − gastos pagados. */
+    balance: number;
+    /** Sub-etiqueta de BALANCE: la misma serie sin límite inferior. */
+    balance_accumulated: number;
+    /** Órdenes que recibieron plata en el periodo (no órdenes creadas). */
+    order_count: number;
+    comparison: {
+      income: number;
+      net_profit: number;
+      balance: number;
+      expenses_paid: number;
+      refunds: number;
+      income_growth: number | null;
+      net_profit_growth: number | null;
+      balance_growth: number | null;
+      expenses_paid_growth: number | null;
+      refunds_growth: number | null;
+    };
+  };
   revenue: {
     gross_revenue: number;
     discounts: number;
