@@ -293,11 +293,20 @@ interface SubscriptionInvoiceForFiscal {
  * Se declara sobre `InvoiceControlSource` para que el resolvedor único la acepte
  * tal cual, y se le añade lo que el XML pide aparte del bloque de control: la
  * clave técnica (`ClTec`, que alimenta el CUFE) y el número de resolución.
+ *
+ * `current_number` NO está en `InvoiceControlSource` porque aquel helper solo
+ * valida la coherencia del rango y de la vigencia — el cursor no le hace falta.
+ * Acá sí: lo leen el suelo del sondeo (`evaluateEmitReadiness`) y el informe de
+ * `emit-readiness`, ambos para anticipar qué número se asignaría sin escribirlo.
+ * La fila de Prisma se carga entera (sin `select`), así que el campo siempre
+ * viene; declararlo es lo que hace que `tsc` lo vea, porque swc no typechequea
+ * y el watch de Docker no lo habría delatado.
  */
 type PlatformInvoiceResolution = InvoiceControlSource & {
   id: number;
   technical_key: string | null;
   document_type: string;
+  current_number: number;
 };
 
 /**
