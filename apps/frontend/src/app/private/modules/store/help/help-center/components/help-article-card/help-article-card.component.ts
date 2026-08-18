@@ -247,7 +247,13 @@ export class HelpArticleCardComponent {
   readonly isExpanded = input<boolean>(false);
   readonly expanded = output<HelpArticle | null>();
 
-  readonly renderedContent = computed(() => this.markdownToHtml(this.article().content));
+  readonly renderedContent = computed(() =>
+    // `content` es opcional desde que la búsqueda dejó de arrastrar el cuerpo
+    // entero de cada artículo. Esta tarjeta pide el resultado con
+    // `includeContent`, así que en la práctica siempre llega; el adelanto es el
+    // respaldo honesto si algún día la llaman sin él.
+    this.markdownToHtml(this.article().content ?? this.article().content_preview ?? ''),
+  );
 
   toggle(): void {
     // Emit null to collapse (parent sets expandedSlug to null), or emit article to expand

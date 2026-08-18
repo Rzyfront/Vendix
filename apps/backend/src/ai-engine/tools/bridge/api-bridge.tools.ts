@@ -154,6 +154,10 @@ function describeWrite(
 
 /** Domain segment → how a person would name it. Falls back to the segment. */
 const SUBJECTS: Record<string, string> = {
+  'price-tiers': 'una tarifa',
+  categories: 'una categoría',
+  brands: 'una marca',
+  taxes: 'un impuesto',
   expenses: 'un gasto',
   users: 'un usuario',
   roles: 'un rol',
@@ -437,7 +441,7 @@ export function createApiBridgeTools({
               : {}),
             ...(irreversibleWarning(e.path) ? { irreversible: true } : {}),
           })),
-          note: 'GET se ejecuta con call_endpoint. POST, PATCH, PUT y DELETE con write_endpoint, que pide confirmación al usuario antes de aplicar. `campos` trae el nombre EXACTO, el tipo, si es obligatorio y los valores que acepta: úsalos tal cual, no los traduzcas ni los pases a otra convención. Un `:algo` en la ruta se reemplaza por el id real. Una ruta con `necesita_documento` exige un adjunto y una con `acepta_documento` puede llevarlo: en ambos casos pásale `attachment_id` a write_endpoint y no toques el campo del documento a mano.',
+          note: 'GET se ejecuta con call_endpoint. POST, PATCH, PUT y DELETE con write_endpoint, que pide confirmación al usuario antes de aplicar. `campos` trae el nombre EXACTO, el tipo, si es obligatorio y los valores que acepta: úsalos tal cual, no los traduzcas ni los pases a otra convención. Cuando un campo trae `description`, ahí está qué significa y cuándo mandarlo: léela antes de decidir el valor, sobre todo si el nombre solo no lo aclara. Un `:algo` en la ruta se reemplaza por el id real. Una ruta con `necesita_documento` exige un adjunto y una con `acepta_documento` puede llevarlo: en ambos casos pásale `attachment_id` a write_endpoint y no toques el campo del documento a mano.',
         });
       },
     },

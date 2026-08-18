@@ -22,6 +22,7 @@ import {
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscription-gate.decorator';
+import { ApiOperation } from '@nestjs/swagger';
 
 /**
  * Store-scoped CRUD for multi-tarifa (price tiers).
@@ -52,6 +53,10 @@ export class PriceTiersController {
 
   // ------------------------------------------------------- CRUD on tiers
 
+  @ApiOperation({
+    summary:
+      'Crear una tarifa de la tienda: una presentación de venta (bulto, caja, rollo) cuando kind es sale_unit, o un nivel de precio por tipo de cliente cuando kind es customer_tier',
+  })
   @Post()
   @Permissions('store:price-tiers:create')
   async create(@Body() dto: CreatePriceTierDto) {
@@ -62,6 +67,10 @@ export class PriceTiersController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Listar las tarifas de la tienda: presentaciones de venta y niveles de precio por cliente',
+  })
   @Get()
   @Permissions('store:price-tiers:read')
   async findAll(@Query() query: PriceTierQueryDto) {
@@ -75,6 +84,10 @@ export class PriceTiersController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el detalle de una tarifa',
+  })
   @Get(':id')
   @Permissions('store:price-tiers:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -82,6 +95,10 @@ export class PriceTiersController {
     return this.responseService.success(result, 'Tarifa obtenida exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Editar una tarifa: nombre, código, descuento, unidades por paquete u orden de aparición',
+  })
   @Patch(':id')
   @Permissions('store:price-tiers:update')
   async update(
@@ -95,6 +112,10 @@ export class PriceTiersController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Desactivar una tarifa. Los productos que la tenían habilitada dejan de venderse en ella',
+  })
   @Delete(':id')
   @Permissions('store:price-tiers:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
@@ -102,6 +123,10 @@ export class PriceTiersController {
     return this.responseService.deleted('Tarifa desactivada exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Reactivar una tarifa desactivada',
+  })
   @Post(':id/restore')
   @Permissions('store:price-tiers:update')
   async restore(@Param('id', ParseIntPipe) id: number) {
@@ -114,6 +139,10 @@ export class PriceTiersController {
 
   // --------------------------------------------- Overrides por producto
 
+  @ApiOperation({
+    summary:
+      'Ver qué precio, empaque, margen y código de barras tiene un producto en cada una de sus presentaciones',
+  })
   @Get('products/:productId/overrides')
   @Permissions('store:price-tiers:read')
   async listProductOverrides(
@@ -127,6 +156,10 @@ export class PriceTiersController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Fijar para un producto el precio, las unidades por paquete, el margen, el código de barras o la presentación por defecto de una tarifa concreta. El precio es el del PAQUETE ENTERO. La tarifa ya tiene que estar habilitada en el producto',
+  })
   @Put('products/:productId/overrides/:tierId')
   @Permissions('store:price-tiers:update')
   async upsertProductOverride(
@@ -145,6 +178,10 @@ export class PriceTiersController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Quitar el precio propio que un producto tenía en una tarifa y volver a la regla general de esa tarifa',
+  })
   @Delete('products/:productId/overrides/:tierId')
   @Permissions('store:price-tiers:update')
   async removeProductOverride(

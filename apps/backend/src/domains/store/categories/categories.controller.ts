@@ -24,6 +24,7 @@ import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('store/categories')
 @UseGuards(PermissionsGuard)
@@ -33,6 +34,10 @@ export class CategoriesController {
     private readonly responseService: ResponseService,
   ) {}
 
+  @ApiOperation({
+    summary:
+      'Crear una categoría de productos',
+  })
   @Post()
   @Permissions('store:categories:create')
   async create(
@@ -49,6 +54,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Listar las categorías de productos de la tienda',
+  })
   @Get()
   @Permissions('store:categories:read')
   async findAll(@Query() query: CategoryQueryDto) {
@@ -68,6 +77,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Buscar categorías de productos por nombre',
+  })
   @Get('search')
   @Permissions('store:categories:read')
   async search(@Query() query: CategoryQueryDto) {
@@ -81,6 +94,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Subir la imagen de una categoría',
+  })
   @Post('upload-image')
   @Permissions('store:categories:update')
   @UseInterceptors(FileInterceptor('file'))
@@ -101,6 +118,10 @@ export class CategoriesController {
     return this.responseService.created(result, 'Imagen subida exitosamente');
   }
 
+  @ApiOperation({
+    summary:
+      'Ver el detalle de una categoría',
+  })
   @Get(':id')
   @Permissions('store:categories:read')
   async findOne(
@@ -116,6 +137,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Editar una categoría: nombre, descripción, imagen o categoría padre',
+  })
   @Patch(':id')
   @Permissions('store:categories:update')
   async update(
@@ -134,6 +159,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Reemplazar por completo los datos de una categoría',
+  })
   @Put(':id')
   @Permissions('store:categories:update')
   async replace(
@@ -152,6 +181,10 @@ export class CategoriesController {
     );
   }
 
+  @ApiOperation({
+    summary:
+      'Archivar una categoría',
+  })
   @Delete(':id')
   @Permissions('store:categories:delete')
   async remove(

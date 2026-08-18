@@ -6,6 +6,7 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { BulkArchiveProductsDto, BulkEditProductsDto } from './dto';
+import { ApiOperation } from '@nestjs/swagger';
 
 /**
  * Edición masiva de productos (QUI-567).
@@ -80,6 +81,10 @@ export class ProductsBulkEditController {
    * Es POST y no GET porque el cuerpo lleva la selección de ids y el objeto de
    * cambios propuestos, que no caben razonablemente en query params.
    */
+  @ApiOperation({
+    summary:
+      'Mostrar qué cambiaría en cada producto de la selección antes de aplicar una edición masiva',
+  })
   @Post('preview')
   @Permissions('store:products:bulk_update')
   async preview(@Body() dto: BulkEditProductsDto, @Req() request: any) {
@@ -106,6 +111,10 @@ export class ProductsBulkEditController {
    * parcialmente tolerante a fallos, así que un `failed > 0` sigue siendo una
    * respuesta exitosa a nivel HTTP.
    */
+  @ApiOperation({
+    summary:
+      'Aplicar una edición masiva sobre varios productos a la vez: precios, costos, impuestos, categorías, marca, banderas de venta y presentaciones habilitadas',
+  })
   @Post()
   @Permissions('store:products:bulk_update')
   async apply(@Body() dto: BulkEditProductsDto, @Req() request: any) {
@@ -169,6 +178,10 @@ export class ProductsBulkEditController {
    * Dry-run del archivado: clasifica cada producto (bloqueos y avisos) sin
    * escribir nada. Es la antesala obligatoria de la confirmación reforzada.
    */
+  @ApiOperation({
+    summary:
+      'Mostrar qué productos se archivarían y cuáles no antes de archivar en lote',
+  })
   @Post('archive/preview')
   @Permissions('store:products:admin_delete')
   async previewArchive(@Body() dto: BulkArchiveProductsDto, @Req() request: any) {
@@ -197,6 +210,10 @@ export class ProductsBulkEditController {
    * No existe contraparte de restauración, ni masiva ni individual: ver la nota de
    * IRREVERSIBILIDAD arriba.
    */
+  @ApiOperation({
+    summary:
+      'Archivar varios productos a la vez',
+  })
   @Post('archive')
   @Permissions('store:products:admin_delete')
   async archive(@Body() dto: BulkArchiveProductsDto, @Req() request: any) {

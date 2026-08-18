@@ -453,7 +453,11 @@ export class HelpCenterComponent {
 
   private performSearch(query: string): void {
     this.isLoading.set(true);
-    this.helpCenterService.searchArticles(query)
+    // Con `content`: estas tarjetas renderizan el cuerpo del artículo al
+    // expandirse (`help-article-card` → `renderedContent`), así que aquí sí
+    // hace falta. El overlay de búsqueda, que solo pinta título y resumen, lo
+    // pide sin cuerpo.
+    this.helpCenterService.searchArticles(query, 10, true)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
