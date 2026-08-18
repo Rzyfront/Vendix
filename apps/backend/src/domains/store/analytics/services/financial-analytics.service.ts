@@ -16,6 +16,11 @@ import {
   COMPLETED_SALE_STATES,
   RECOGNIZED_EXPENSE_STATES,
   PURCHASE_COMMITTED_STATES,
+  CASH_INCOME_PAYMENT_STATES,
+  REFUND_CASH_OUT_STATES,
+  REFUND_PENDING_STATES,
+  EXPENSE_CASH_OUT_STATES,
+  PASSTHROUGH_TAX_TYPES,
   CostCoverage,
   buildCostCoverage,
   computeGrowth,
@@ -587,12 +592,13 @@ export class FinancialAnalyticsService {
     // Tenant + period scoped key: store_id isolates the tenant; the date-range
     // inputs (preset/from/to) capture the period. Relative presets like "today"
     // keep a stable key and rely on the short TTL for freshness.
-    // `v3` = payload shape that carries revenue.total_invoiced, bottom_line.balance
-    // and comparison.balance / balance_growth, and that nets refundSubtotal /
-    // refundShipping into operating_revenue. Bumped with the shape so a rolling
-    // deploy cannot serve a v2-shaped object to a frontend that reads the new
-    // fields.
-    const cacheKey = `analytics:financial:profit-loss:v3:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v4` = payload shape that carries the CASH BASIS `cash` block the four
+    // dashboard cards read (income / net_profit / balance / expenses_paid plus
+    // their sub-label figures), on top of the v3 accrual shape
+    // (revenue.total_invoiced, bottom_line.balance, comparison.balance). Bumped
+    // with the shape so a rolling deploy cannot serve a v3-shaped object to a
+    // frontend that reads `cash.*` and would render every card as 0.
+    const cacheKey = `analytics:financial:profit-loss:v4:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -605,7 +611,7 @@ export class FinancialAnalyticsService {
   }
 
   /**
-   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v3:*` para
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v4:*` para
    * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
    * llega `expense.state_changed`, `payment.received` o `refund.completed`.
    *
@@ -616,7 +622,7 @@ export class FinancialAnalyticsService {
    * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
    */
   async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
-    const keyPrefix = `analytics:financial:${prefix}:v3:${storeId}:`;
+    const keyPrefix = `analytics:financial:${prefix}:v4:${storeId}:`;
     const pattern = `${keyPrefix}*`;
     try {
       const store: any = (this.cache as any).store;
@@ -709,6 +715,264 @@ export class FinancialAnalyticsService {
     };
   }
 
+  /**
+   * CASH INCOME for one window, with the VAT and COGS that ride on that money.
+   *
+   * Basis: CASH, not accrual. The window is applied to the payment instant
+   * (`COALESCE(paid_at, created_at)`) because 64 % of `succeeded` payments in
+   * production have `paid_at` NULL — anchoring only on `paid_at` would silently
+   * drop two thirds of the real income. `startDate`/`endDate` already come from
+   * `parseDateRange(query, tz)`, so the day boundaries are the store's local
+   * calendar days; these are INSTANT columns, so no naive-space conversion.
+   *
+   * `startDate = null` removes the lower bound and yields the ACCUMULATED cash
+   * position up to `endDate` (used by the Balance sub-label).
+   *
+   * Payment states come from {@link CASH_INCOME_PAYMENT_STATES} and deliberately
+   * include `refunded` / `partially_refunded`: production already holds 218
+   * payments mutated to those states by the refund flow, and excluding them
+   * would subtract the refund twice (once by omitting the income, once by the
+   * refund row itself).
+   *
+   * PRORATION — a payment is a fraction of its order, so the order's VAT and
+   * COGS enter the period in that same fraction. The ratio is computed per ORDER
+   * over the payments that fell inside the window and capped at 1 so an
+   * overpayment can never import more tax/cost than the order actually carries.
+   * `grand_total = 0` (fully discounted order) makes the ratio undefined; the
+   * `COALESCE(..., 0)` then contributes 0 tax and 0 cost instead of NULL-ing the
+   * whole aggregate.
+   *
+   * VAT is read from `order_item_taxes` filtered to {@link PASSTHROUGH_TAX_TYPES}
+   * (`iva` + `inc`) rather than from `orders.tax_amount`: that column mixes
+   * withholdings and ICA, which are not money the customer handed over as tax.
+   *
+   * `units_without_cost` rides along because `COALESCE(cost_price, 0)` turns
+   * "cost unknown" into "cost zero", indistinguishable from a real 100 % margin.
+   * It is prorated on the same ratio, so it is a fractional-unit figure — it
+   * measures cost coverage of the money recognized, not a physical unit count.
+   *
+   * `withoutScope()` is required ($queryRaw is not on the scoped client);
+   * `storeId` comes from the validated request context and is pinned in the
+   * WHERE clause of every branch.
+   */
+  private async aggregateCashIncome(
+    storeId: number,
+    startDate: Date | null,
+    endDate: Date,
+  ): Promise<{
+    income: number;
+    passthroughTax: number;
+    cogs: number;
+    coverage: CostCoverage;
+    orderCount: number;
+  }> {
+    const paymentStates = sqlStateList([...CASH_INCOME_PAYMENT_STATES]);
+    const taxTypes = sqlStateList([...PASSTHROUGH_TAX_TYPES]);
+    const lowerBound = startDate
+      ? Prisma.sql`AND COALESCE(p.paid_at, p.created_at) >= ${startDate}`
+      : Prisma.empty;
+
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        income: unknown;
+        passthrough_tax: unknown;
+        cogs: unknown;
+        units: unknown;
+        units_without_cost: unknown;
+        order_count: unknown;
+      }>
+    >`
+      WITH paid_per_order AS (
+        SELECT p.order_id, SUM(p.amount) AS paid_in_window
+        FROM payments p
+        INNER JOIN orders o ON o.id = p.order_id
+        WHERE o.store_id = ${storeId}
+          AND p.state IN (${paymentStates})
+          ${lowerBound}
+          AND COALESCE(p.paid_at, p.created_at) <= ${endDate}
+        GROUP BY p.order_id
+      ),
+      order_tax AS (
+        -- tz-audit:ignore — el SUM es de order_item_taxes.tax_amount (nivel ÍTEM,
+        -- una fila por impuesto por ítem), NO de orders.tax_amount: el JOIN a
+        -- order_items no multiplica ninguna fila-orden, así que no hay fan-out.
+        SELECT oi.order_id, SUM(oit.tax_amount) AS passthrough_tax -- tz-audit:ignore
+        FROM order_item_taxes oit
+        INNER JOIN order_items oi ON oi.id = oit.order_item_id
+        WHERE oi.order_id IN (SELECT order_id FROM paid_per_order)
+          AND oit.tax_type IN (${taxTypes})
+        GROUP BY oi.order_id
+      ),
+      order_cost AS (
+        SELECT
+          oi.order_id,
+          SUM(oi.quantity * COALESCE(oi.cost_price, 0)) AS cogs,
+          SUM(oi.quantity) AS units,
+          SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END) AS units_without_cost
+        FROM order_items oi
+        WHERE oi.order_id IN (SELECT order_id FROM paid_per_order)
+        GROUP BY oi.order_id
+      ),
+      recognized AS (
+        SELECT
+          ppo.paid_in_window,
+          COALESCE(LEAST(ppo.paid_in_window / NULLIF(o.grand_total, 0), 1), 0) AS pay_ratio,
+          COALESCE(ot.passthrough_tax, 0) AS passthrough_tax,
+          COALESCE(oc.cogs, 0) AS cogs,
+          COALESCE(oc.units, 0) AS units,
+          COALESCE(oc.units_without_cost, 0) AS units_without_cost
+        FROM paid_per_order ppo
+        INNER JOIN orders o ON o.id = ppo.order_id
+        LEFT JOIN order_tax ot ON ot.order_id = ppo.order_id
+        LEFT JOIN order_cost oc ON oc.order_id = ppo.order_id
+      )
+      SELECT
+        COALESCE(SUM(paid_in_window), 0) AS income,
+        COALESCE(SUM(passthrough_tax * pay_ratio), 0) AS passthrough_tax,
+        COALESCE(SUM(cogs * pay_ratio), 0) AS cogs,
+        COALESCE(SUM(units * pay_ratio), 0) AS units,
+        COALESCE(SUM(units_without_cost * pay_ratio), 0) AS units_without_cost,
+        COUNT(*) AS order_count
+      FROM recognized
+    `;
+
+    const row = rows[0];
+    return {
+      income: Number(row?.income ?? 0),
+      passthroughTax: Number(row?.passthrough_tax ?? 0),
+      cogs: Number(row?.cogs ?? 0),
+      coverage: buildCostCoverage(
+        Number(row?.units ?? 0),
+        Number(row?.units_without_cost ?? 0),
+      ),
+      orderCount: Number(row?.order_count ?? 0),
+    };
+  }
+
+  /**
+   * REFUND CASH OUT for one window — money that actually left, bucketed by the
+   * day the refund happened, never by the day the original sale happened. That
+   * asymmetry was the defect behind the panel: $60.000 of a day's refunds
+   * belonged to April sales, so netting them against that day's invoicing
+   * produced a phantom negative.
+   *
+   * The instant is `COALESCE(processed_at, requested_at, created_at)`:
+   * `processed_at` is the real disbursement, and `approved` refunds may not have
+   * it yet. States come from {@link REFUND_CASH_OUT_STATES}.
+   *
+   * `startDate = null` removes the lower bound (accumulated position).
+   */
+  private async aggregateRefundCashOut(
+    storeId: number,
+    startDate: Date | null,
+    endDate: Date,
+  ): Promise<{
+    amount: number;
+    subtotal: number;
+    tax: number;
+    shipping: number;
+    count: number;
+  }> {
+    const states = sqlStateList([...REFUND_CASH_OUT_STATES]);
+    const lowerBound = startDate
+      ? Prisma.sql`AND COALESCE(r.processed_at, r.requested_at, r.created_at) >= ${startDate}`
+      : Prisma.empty;
+
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        amount: unknown;
+        subtotal_refund: unknown;
+        tax_refund: unknown;
+        shipping_refund: unknown;
+        refund_count: unknown;
+      }>
+    >`
+      SELECT
+        COALESCE(SUM(r.amount), 0) AS amount,
+        COALESCE(SUM(r.subtotal_refund), 0) AS subtotal_refund,
+        COALESCE(SUM(r.tax_refund), 0) AS tax_refund,
+        COALESCE(SUM(r.shipping_refund), 0) AS shipping_refund,
+        COUNT(*) AS refund_count
+      FROM refunds r
+      INNER JOIN orders o ON o.id = r.order_id
+      WHERE o.store_id = ${storeId}
+        AND r.state IN (${states})
+        ${lowerBound}
+        AND COALESCE(r.processed_at, r.requested_at, r.created_at) <= ${endDate}
+    `;
+
+    const row = rows[0];
+    return {
+      amount: Number(row?.amount ?? 0),
+      subtotal: Number(row?.subtotal_refund ?? 0),
+      tax: Number(row?.tax_refund ?? 0),
+      shipping: Number(row?.shipping_refund ?? 0),
+      count: Number(row?.refund_count ?? 0),
+    };
+  }
+
+  /**
+   * REFUNDS REQUESTED BUT NOT YET PAID OUT ({@link REFUND_PENDING_STATES}),
+   * bucketed by request instant. Surfaced so a refund parked in
+   * `pending_approval` is visible instead of silently inflating the day: it is
+   * NOT subtracted from cash (the money has not moved) but the panel can warn.
+   * Production held 5 such refunds worth $2.125.000 with the order already
+   * `refunded`.
+   */
+  private async aggregatePendingRefunds(
+    storeId: number,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<{ amount: number; count: number }> {
+    const states = sqlStateList([...REFUND_PENDING_STATES]);
+
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ amount: unknown; refund_count: unknown }>
+    >`
+      SELECT
+        COALESCE(SUM(r.amount), 0) AS amount,
+        COUNT(*) AS refund_count
+      FROM refunds r
+      INNER JOIN orders o ON o.id = r.order_id
+      WHERE o.store_id = ${storeId}
+        AND r.state IN (${states})
+        AND COALESCE(r.requested_at, r.created_at) >= ${startDate}
+        AND COALESCE(r.requested_at, r.created_at) <= ${endDate}
+    `;
+
+    const row = rows[0];
+    return {
+      amount: Number(row?.amount ?? 0),
+      count: Number(row?.refund_count ?? 0),
+    };
+  }
+
+  /**
+   * EXPENSES THAT LEFT THE TILL in one window ({@link EXPENSE_CASH_OUT_STATES}),
+   * bucketed by `expenses.paid_at` — an INSTANT column added precisely for this.
+   * `expense_date` is the document date and `approved_at` the authorization; the
+   * cash Balance must use neither. Rows already `paid` before the column existed
+   * were backfilled from `approved_at`, falling back to midday of
+   * `expense_date` so a date-only value cannot slide to the previous local day.
+   *
+   * `startDate = null` removes the lower bound (accumulated position).
+   */
+  private async aggregateExpenseCashOut(
+    startDate: Date | null,
+    endDate: Date,
+  ): Promise<number> {
+    const result = await this.prisma.expenses.aggregate({
+      where: {
+        state: { in: [...EXPENSE_CASH_OUT_STATES] },
+        paid_at: startDate
+          ? { gte: startDate, lte: endDate }
+          : { lte: endDate, not: null },
+      },
+      _sum: { amount: true },
+    });
+    return Number(result._sum.amount || 0);
+  }
+
   private async computeProfitLossSummary(
     query: AnalyticsQueryDto,
     storeId: number,
@@ -778,6 +1042,82 @@ export class FinancialAnalyticsService {
         },
       }),
     ]);
+
+    // ── CASH BASIS ────────────────────────────────────────────────────────────
+    // The four dashboard cards read from here. The accrual block above stays
+    // untouched because the P&L statement and its XLSX export are legitimately
+    // accrual — the panel is a till, the report is a P&L, and each needs its own
+    // basis. Every window below is the store's local calendar day
+    // (`parseDateRange(query, tz)`) applied to INSTANT columns.
+    const [
+      cashCurrent,
+      refundCashCurrent,
+      pendingRefunds,
+      expenseCashCurrent,
+      cashPrevious,
+      refundCashPrevious,
+      expenseCashPrevious,
+      cashAccumulated,
+      refundCashAccumulated,
+      expenseCashAccumulated,
+    ] = await Promise.all([
+      this.aggregateCashIncome(storeId, startDate, endDate),
+      this.aggregateRefundCashOut(storeId, startDate, endDate),
+      this.aggregatePendingRefunds(storeId, startDate, endDate),
+      this.aggregateExpenseCashOut(startDate, endDate),
+      this.aggregateCashIncome(storeId, previousStartDate, previousEndDate),
+      this.aggregateRefundCashOut(storeId, previousStartDate, previousEndDate),
+      this.aggregateExpenseCashOut(previousStartDate, previousEndDate),
+      // Accumulated position: same series, no lower bound, so the sub-label can
+      // never disagree with the daily figure by construction.
+      this.aggregateCashIncome(storeId, null, endDate),
+      this.aggregateRefundCashOut(storeId, null, endDate),
+      this.aggregateExpenseCashOut(null, endDate),
+    ]);
+
+    // INGRESOS — every peso that came in during the day, GROSS. Includes
+    // instalments collected today against older credit sales, and excludes
+    // today's sales still uncollected: that is what "entró a caja" means.
+    const cashIncome = cashCurrent.income;
+    // The passthrough tax (IVA + INC) inside that money is never the merchant's.
+    const cashTax = cashCurrent.passthroughTax;
+    const cashIncomeWithoutTax = cashIncome - cashTax;
+    const cashCogs = cashCurrent.cogs;
+    // Refunds are netted OUT of profit (money handed back is not earnings) but
+    // their own tax portion went back too, so only the net-of-tax part reduces it.
+    const refundNetOfTax = refundCashCurrent.amount - refundCashCurrent.tax;
+    // GANANCIAS — net-net: cash in, minus the tax that was never ours, minus the
+    // cost of what we handed over, minus what we gave back.
+    const cashProfitBeforeRefunds = cashIncomeWithoutTax - cashCogs;
+    const cashProfit = cashProfitBeforeRefunds - refundNetOfTax;
+    // Sub-label of the Ganancias card: the same profit after the day's cash
+    // expenses, i.e. what actually stayed in the pocket.
+    const cashProfitAfterExpenses = cashProfit - expenseCashCurrent;
+    const cashProfitBase = cashIncomeWithoutTax - refundNetOfTax;
+    const cashMargin =
+      cashProfitBase > 0 ? (cashProfit / cashProfitBase) * 100 : 0;
+    // BALANCE — the day's till position: what came in, minus what went back,
+    // minus what was paid out. COGS is excluded on purpose: it consumes an asset
+    // already bought, it is not a cash outflow of this day.
+    const cashBalance =
+      cashIncome - refundCashCurrent.amount - expenseCashCurrent;
+    const cashBalanceAccumulated =
+      cashAccumulated.income -
+      refundCashAccumulated.amount -
+      expenseCashAccumulated;
+
+    // Previous equivalent period, on identical definitions, so each growth badge
+    // compares the same metric it sits under.
+    const previousCashIncome = cashPrevious.income;
+    const previousRefundNetOfTax =
+      refundCashPrevious.amount - refundCashPrevious.tax;
+    const previousCashProfit =
+      cashPrevious.income -
+      cashPrevious.passthroughTax -
+      cashPrevious.cogs -
+      previousRefundNetOfTax;
+    const previousCashBalance =
+      cashPrevious.income - refundCashPrevious.amount - expenseCashPrevious;
 
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
@@ -879,6 +1219,65 @@ export class FinancialAnalyticsService {
       period: {
         start_date: startDate.toISOString(),
         end_date: endDate.toISOString(),
+      },
+      /**
+       * CASH BASIS — the block the four dashboard cards read. Sibling of the
+       * accrual `revenue`/`costs`/`bottom_line` blocks below, which keep feeding
+       * the P&L statement and its export. Same period, different basis; both are
+       * correct in their own place, and no consumer has to guess which one it is
+       * looking at.
+       */
+      cash: {
+        /** INGRESOS card. Money in during the window, GROSS of refunds. */
+        income: this.round2(cashIncome),
+        /** Sub-label "Sin IVA": income minus the passthrough tax inside it. */
+        income_without_tax: this.round2(cashIncomeWithoutTax),
+        /** Passthrough tax (iva + inc) prorated over the money recognized. */
+        passthrough_tax: this.round2(cashTax),
+        /** COGS prorated over the money recognized. */
+        cost_of_goods_sold: this.round2(cashCogs),
+        /** Auditability of that COGS — fractional units, see `aggregateCashIncome`. */
+        cost_coverage: cashCurrent.coverage,
+        /** GANANCIAS card: income − tax − COGS − refunds(net of tax). */
+        net_profit: this.round2(cashProfit),
+        /** Same profit before netting refunds, for reconciliation. */
+        net_profit_before_refunds: this.round2(cashProfitBeforeRefunds),
+        /** Sub-label of GANANCIAS: profit after the window's cash expenses. */
+        net_profit_after_expenses: this.round2(cashProfitAfterExpenses),
+        net_margin: this.round2(cashMargin),
+        /** Sub-label "Reembolsos" on INGRESOS: money that actually went back. */
+        refunds: this.round2(refundCashCurrent.amount),
+        refunds_count: refundCashCurrent.count,
+        refunds_tax: this.round2(refundCashCurrent.tax),
+        /** Requested, not yet disbursed — warned about, never subtracted. */
+        refunds_pending: this.round2(pendingRefunds.amount),
+        refunds_pending_count: pendingRefunds.count,
+        /** Expenses that actually left the till in the window (`paid_at`). */
+        expenses_paid: this.round2(expenseCashCurrent),
+        /** BALANCE card: income − refunds − expenses paid. */
+        balance: this.round2(cashBalance),
+        /** Sub-label of BALANCE: same series with no lower bound. */
+        balance_accumulated: this.round2(cashBalanceAccumulated),
+        /** Orders that received money in the window (not orders created). */
+        order_count: cashCurrent.orderCount,
+        comparison: {
+          income: this.round2(previousCashIncome),
+          net_profit: this.round2(previousCashProfit),
+          balance: this.round2(previousCashBalance),
+          expenses_paid: this.round2(expenseCashPrevious),
+          refunds: this.round2(refundCashPrevious.amount),
+          income_growth: computeGrowth(cashIncome, previousCashIncome),
+          net_profit_growth: computeGrowth(cashProfit, previousCashProfit),
+          balance_growth: computeGrowth(cashBalance, previousCashBalance),
+          expenses_paid_growth: computeGrowth(
+            expenseCashCurrent,
+            expenseCashPrevious,
+          ),
+          refunds_growth: computeGrowth(
+            refundCashCurrent.amount,
+            refundCashPrevious.amount,
+          ),
+        },
       },
       revenue: {
         gross_revenue: this.round2(revenue),

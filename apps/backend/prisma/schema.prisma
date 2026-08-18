@@ -1558,6 +1558,7 @@ model payments {
   cash_register_movements cash_register_movements[]
 
   @@index([gateway_reference])
+  @@index([order_id])
 }
 
 model product_categories {
@@ -2022,6 +2023,8 @@ model refunds {
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([order_id])
 }
 
 model reviews {
