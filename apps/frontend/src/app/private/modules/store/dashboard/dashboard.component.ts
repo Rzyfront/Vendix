@@ -383,21 +383,9 @@ export class DashboardComponent {
   loadingTrends = signal(true);
   loadingChannels = signal(true);
   loadingAlerts = signal(true);
-  // Hotfix post-PR-576: la tarjeta Órdenes del dashboard se alimenta
-  // de su propio endpoint (mismo que /admin/orders/sales). Antes P1
-  // referenciaba `loadingOrders()` sin definirlo: TS2339.
-  loadingOrders = signal(true);
 
   // Data
   profitLoss = signal<ProfitLossSummary | null>(null);
-  // Hotfix post-PR-576: tarjeta Órdenes — count de órdenes en el periodo.
-  ordersCount = signal<number | null>(null);
-  // Sub-label de la tarjeta Órdenes: texto corto que muestra el % de
-  // crecimiento, igual que las otras tarjetas.
-  ordersSubText = computed(() => {
-    const g = this.profitLoss()?.comparison?.orders_growth;
-    return this.getGrowthText(g);
-  });
   trends = signal<SalesTrend[]>([]);
   trendGranularity = signal<'hour' | 'day'>('day');
   channels = signal<SalesByChannel[]>([]);
@@ -465,7 +453,6 @@ export class DashboardComponent {
     this.loadingTrends.set(true);
     this.loadingChannels.set(true);
     this.loadingAlerts.set(true);
-    this.loadingOrders.set(true);
 
     // 1. Profit & Loss → the FOUR money cards. Single source on purpose: revenue,
     // cost, expenses, profit and their growth all come from one aggregation, so
@@ -477,17 +464,10 @@ export class DashboardComponent {
         next: (response) => {
           this.profitLoss.set(response.data);
           this.loading.set(false);
-          // Hotfix post-PR-576: alimentar la tarjeta Órdenes desde la
-          // sección `comparison.order_count` que ya viene en el payload.
-          // Si por alguna razón no viene, dejamos `ordersCount` en null
-          // y la tarjeta muestra "0".
-          this.ordersCount.set(response.data?.comparison?.order_count ?? null);
-          this.loadingOrders.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar el resumen');
           this.loading.set(false);
-          this.loadingOrders.set(false);
         },
       });
 
