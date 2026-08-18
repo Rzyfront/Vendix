@@ -950,6 +950,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // Caja registradora — cierre contra un esperado rancio (QUI-572)
   CASH_SESSION_EXPECTED_STALE_001:
     'El efectivo esperado cambió mientras contabas el arqueo. Revisá el resumen actualizado antes de cerrar la caja.',
+
+  // Escáner de facturas de compra (POP). Ninguno estaba mapeado: el modal
+  // mostraba el devMessage crudo en inglés («AI OCR response parsed but is
+  // missing required fields»), que no le dice al usuario qué hacer.
+  INV_SCAN_NO_FILE: 'Selecciona la factura que quieres escanear.',
+  INV_SCAN_INVALID_FILE:
+    'Formato no soportado. Sube la factura como JPG, PNG, WebP o PDF.',
+  INV_SCAN_AI_FAIL:
+    'No pudimos leer la factura. Vuelve a intentarlo; si persiste, sube una foto más nítida o carga los productos manualmente.',
+  INV_SCAN_PARSE_FAIL:
+    'La lectura de la factura llegó dañada. Vuelve a intentarlo con una imagen más nítida.',
+  INV_SCAN_INCOMPLETE:
+    'No se pudieron leer los datos mínimos de la factura (proveedor y productos). Sube una imagen más nítida o la página donde aparece el detalle de los productos.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

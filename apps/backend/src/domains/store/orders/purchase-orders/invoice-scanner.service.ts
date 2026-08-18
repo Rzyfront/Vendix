@@ -711,13 +711,18 @@ export class InvoiceScannerService {
   ): InvoiceScanResult {
     const parsed = raw as any;
 
+    // El total impreso NO es un campo requerido. Una factura multipágina —o un
+    // tiquete cuyo pie no alcanza a leerse— devuelve `supplier` y las N líneas
+    // perfectas con `total: null`, y exigirlo aquí tiraba TODO el escaneo con
+    // INV_SCAN_INCOMPLETE (422) pese a que no faltaba ni un renglón. El total
+    // es derivable de las líneas; el proveedor y las líneas no.
     if (
       !parsed?.supplier ||
       !Array.isArray(parsed.line_items) ||
-      parsed.total == null
+      parsed.line_items.length === 0
     ) {
       throw new Error(
-        'AI response missing required fields: supplier, line_items, or total',
+        'AI response missing required fields: supplier or line_items',
       );
     }
 
@@ -744,7 +749,31 @@ export class InvoiceScannerService {
     );
     const subtotal = money(parsed.subtotal);
     const taxAmount = money(parsed.tax_amount);
-    const total = money(parsed.total);
+
+    // Total del documento: se usa el impreso cuando existe y se deriva de las
+    // líneas cuando no. `line_items[].total` es el total IMPRESO de la línea
+    // (reparado, nunca aplanado a neto en normalizeLineItem), así que la suma
+    // vive en la misma base que el total de pie y son directamente comparables.
+    // Un `total: 0` cuenta como ilegible: antes pasaba la guarda y producía una
+    // OC con total cero en silencio, porque checkTotalsConsistency también se
+    // salta el cero.
+    const printedTotal = parsed.total == null ? null : money(parsed.total);
+    const lineTotalsSum = lineItems.reduce(
+      (acc, item) => acc + (Number(item.total) || 0),
+      0,
+    );
+    const totalWasDerived = printedTotal == null || printedTotal === 0;
+    const total = totalWasDerived ? lineTotalsSum : printedTotal;
+
+    if (totalWasDerived) {
+      scanWarnings.push(
+        lineTotalsSum > 0
+          ? 'No se pudo leer el total impreso de la factura; se calculó sumando las ' +
+            'líneas. Verifícalo antes de confirmar.'
+          : 'No se pudo leer el total de la factura ni calcularlo desde las líneas. ' +
+            'Ingrésalo manualmente antes de confirmar.',
+      );
+    }
 
     if (repairs.count > 0) {
       this.logger.warn(
@@ -756,11 +785,15 @@ export class InvoiceScannerService {
       );
     }
 
-    const totalsWarning = checkTotalsConsistency(
-      lineItems.map((item) => item.total),
-      total,
-      currency.code,
-    );
+    // Solo tiene sentido contrastar contra un total IMPRESO. Con el derivado se
+    // compararía la suma de las líneas consigo misma: gap 0, aviso imposible.
+    const totalsWarning = totalWasDerived
+      ? null
+      : checkTotalsConsistency(
+          lineItems.map((item) => item.total),
+          total,
+          currency.code,
+        );
     if (totalsWarning) scanWarnings.push(totalsWarning);
 
     // QUI-661 Fase 4 — descuentos de cabecera.
