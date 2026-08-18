@@ -223,7 +223,7 @@ jobs:
     name: Backend Tests (jest)
     runs-on: ubuntu-latest
     needs: changes
-    if: false  # disabled per @lider-dev 2026-08-14: jest too heavy for GH runners, see PRs #587-#601
+    if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
