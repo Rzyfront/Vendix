@@ -444,9 +444,16 @@ export class PoConfigurePlanModalComponent {
       this.installmentsArray.controls.length > 0,
   );
 
-  readonly installmentsCount = computed<number>(
-    () => this.installmentsArray.controls.length,
-  );
+  /**
+   * Lee `formTick()` igual que el resto: sin una dependencia reactiva el
+   * `computed` no tiene qué invalidarlo, así que evaluaba una sola vez y el
+   * input de cantidad se quedaba en el valor inicial ante `addInstallment()`
+   * o `removeInstallment()`.
+   */
+  readonly installmentsCount = computed<number>(() => {
+    this.formTick();
+    return this.installmentsArray.controls.length;
+  });
 
   readonly isValid = computed<boolean>(() => {
     this.formTick();
