@@ -589,6 +589,7 @@ interface ReceiveLine {
       [view]="paymentModalView()"
       [presetAmount]="paymentModalPreset()?.amount ?? null"
       [presetDate]="paymentModalPreset()?.date ?? null"
+      [presetScheduleId]="paymentModalPreset()?.paymentScheduleId ?? null"
       (close)="onPaymentModalClose()"
       (saved)="onPaymentSaved()"
     />
@@ -830,8 +831,17 @@ export class StorePurchaseOrderDetailComponent {
    * Una vez abierto, el usuario puede alternar entre vistas con el toggle interno.
    */
   readonly paymentModalView = signal<'pay' | 'plan'>('pay');
-  /** Pre-relleno opcional desde el ícono "Pagar" de una cuota del plan. */
-  readonly paymentModalPreset = signal<{ amount: number; date: string | null } | null>(null);
+  /**
+   * Pre-relleno opcional desde el ícono "Pagar" de una cuota del plan.
+   * `paymentScheduleId` se propaga al payload del POST /payments como
+   * `payment_schedule_id` para que el backend marque esa fila de
+   * `purchase_order_payment_schedules` como `paid` (QUI-647).
+   */
+  readonly paymentModalPreset = signal<{
+    amount: number;
+    date: string | null;
+    paymentScheduleId: number | null;
+  } | null>(null);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const acts: StickyHeaderActionButton[] = [];
@@ -843,11 +853,11 @@ export class StorePurchaseOrderDetailComponent {
       acts.push({ id: 'receive', label: 'Recibir', variant: 'primary', icon: 'package-check', disabled: loading, visible: true });
     }
     if (this.canRegisterPayment()) {
-      // QUI-647 — dos entry points en el header: "Pagar" (vista pago, OCR +
-      // registro de pago inmediato) y "Configurar pago" (vista plan, 4 modos).
-      // Ambos abren el MISMO modal con diferente `view` inicial.
+      // QUI-647 — un solo entry point en el header: "Pagar" (vista pago, OCR +
+      // registro de pago inmediato). El modal dual tiene un toggle interno que
+      // permite alternar a "Configurar plan" desde la misma vista, por lo que
+      // el segundo botón del header era redundante.
       acts.push({ id: 'pay', label: 'Pagar', variant: 'primary', icon: 'dollar-sign', disabled: loading, visible: true });
-      acts.push({ id: 'plan', label: 'Configurar pago', variant: 'outline', icon: 'calendar', disabled: loading, visible: true });
     }
     if (this.canCancel()) {
       acts.push({ id: 'cancel', label: 'Cancelar', variant: 'outline-danger', icon: 'x-circle', loading, disabled: loading, visible: true });
@@ -953,9 +963,6 @@ export class StorePurchaseOrderDetailComponent {
       case 'pay':
         this.openPaymentModal('pay');
         break;
-      case 'plan':
-        this.openPaymentModal('plan');
-        break;
       case 'cancel': void this.cancel(); break;
       case 'print': this.print(); break;
     }
@@ -986,6 +993,7 @@ export class StorePurchaseOrderDetailComponent {
     this.paymentModalPreset.set({
       amount: Number(schedule.amount),
       date: this.toDateOnly(schedule.scheduled_date),
+      paymentScheduleId: schedule.id,
     });
     this.showPaymentModal.set(true);
   }
