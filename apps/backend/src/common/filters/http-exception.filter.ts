@@ -157,10 +157,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
 
     // Dev-friendly error details
-    if (process.env.NODE_ENV !== 'production') {
+    //
+    // Política:
+    // - production → NUNCA filtrar stack ni el objeto error. Aunque
+    //   `NODE_ENV !== 'production'` ya bloqueaba prod, el bug que vimos en
+    //   api.vendix.com era el camino inverso: cuando NODEENV estaba unset,
+    //   `undefined !== 'production'` resuelve a true y el stack con paths
+    //   internos (`/app/src/main.ts:303:27`, `@nestjs/core/...`) se filtraba
+    //   a internet. Ahora la rama unset cae en "no exponer".
+    // - dev (`development`/`dev`/`local`) → exponer para diagnosticar.
+    // - staging/test/UNSET → no exponer por defecto. Si el operador quiere
+    //   stack en staging debe setear `EXPOSE_DEV_ERRORS=true` explícito.
+    const isProd = process.env.NODE_ENV === 'production';
+    const exposeDevDetails =
+      !isProd &&
+      (['development', 'dev', 'local'].includes(
+        process.env.NODE_ENV ?? '',
+      ) ||
+        process.env.EXPOSE_DEV_ERRORS === 'true');
+
+    if (exposeDevDetails) {
+      // Solo nombre + stack. NO se incluye `error: exception` (objeto entero)
+      // porque en excepciones con `response.body` puede traer payload gigante
+      // o referencias circulares que revientan JSON.stringify.
       responseBody['devDetails'] = {
         name: exception instanceof Error ? exception.name : 'UnknownException',
-        error: exception,
         stack: exception instanceof Error ? exception.stack : undefined,
       };
     }

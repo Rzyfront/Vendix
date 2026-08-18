@@ -507,6 +507,22 @@ async function bootstrapApi(role: VendixProcessRole) {
   // API prefix
   app.setGlobalPrefix(process.env.API_PREFIX || 'api');
 
+  // Root endpoint (`GET /`) — status JSON estático. Se registra por adapter
+  // Express (no por controlador NestJS) para que corra ANTES del router de
+  // NestJS, evitando el 404 filtrado por AllExceptionsFilter que filtraba
+  // stack con paths internos cuando NODE_ENV estaba unset. Mismo patrón que
+  // `/api/health` justo debajo.
+  app.getHttpAdapter().get('/', (_req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      service: 'Vendix API',
+      version: process.env.npm_package_version || '1.0.0',
+      node: process.version,
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Health check endpoint
   app.getHttpAdapter().get('/api/health', (req, res) => {
     const mem = process.memoryUsage();
