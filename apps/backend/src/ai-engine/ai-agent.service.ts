@@ -171,9 +171,17 @@ export class AIAgentService {
           preview.label.trim().slice(1)
         : null;
 
+    // Una creación no tiene valor anterior, así que `from` llega `undefined` e
+    // interpolarlo escribía "Nombre: undefined → Six-pack QA" en la narración,
+    // mientras la tarjeta —que sí distingue el caso— mostraba "—". Sin valor
+    // previo se enuncia solo el nuevo.
     const diff = (preview?.changes ?? [])
       .filter((change) => typeof change?.label === 'string')
-      .map((change) => `${change.label}: ${change.from} → ${change.to}`)
+      .map((change) =>
+        change.from === undefined || change.from === null || change.from === ''
+          ? `${change.label}: ${change.to}`
+          : `${change.label}: ${change.from} → ${change.to}`,
+      )
       .join('; ');
 
     const head = label

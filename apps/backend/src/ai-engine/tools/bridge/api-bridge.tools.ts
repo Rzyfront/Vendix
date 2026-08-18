@@ -839,8 +839,32 @@ export function createApiBridgeTools({
             );
           }
 
+          // El acuse que lee la persona cuando aprueba.
+          //
+          // `POST /store/vexi/confirmations/apply` lo extrae de este JSON y el
+          // navegador lo pinta como la respuesta al "Aprobar". Sin este campo el
+          // frontend caía al `message` de la PROPUESTA — "Confírmalo y lo
+          // aplico." — así que un cambio ya aplicado terminaba anunciándose con
+          // la frase que pide permiso, y el comerciante lo leía como que Vexi
+          // seguía preguntando lo mismo.
+          const appliedName =
+            typeof (args.body as Record<string, unknown> | undefined)?.[
+              'name'
+            ] === 'string'
+              ? String((args.body as Record<string, unknown>)['name']).trim()
+              : '';
+          const appliedVerb =
+            method === 'POST'
+              ? 'creé'
+              : method === 'DELETE'
+                ? 'archivé'
+                : 'actualicé';
+
           return JSON.stringify({
             applied: true,
+            summary: appliedName
+              ? `Listo, ${appliedVerb} «${appliedName}».`
+              : `Listo, lo ${appliedVerb}.`,
             data:
               responseBody.length > MAX_RESPONSE_CHARS
                 ? responseBody.slice(0, MAX_RESPONSE_CHARS)
