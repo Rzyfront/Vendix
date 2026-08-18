@@ -348,12 +348,14 @@ export class VexiEffects {
                 tool: proposal.tool,
                 output: result.output,
                 domain: proposal.preview?.domain,
-                // Falls back to the sentence the card was already showing. The
-                // tool is the better source — it re-computes against the values in
-                // force at confirm time — but a change that landed must always
-                // produce a visible acknowledgement, even from a tool that wrote
-                // no summary at all.
-                summary: result.summary ?? proposal.preview?.message ?? null,
+                // Solo el acuse que escribe la herramienta al aplicar. El
+                // `message` de la propuesta NO sirve de respaldo: es la frase
+                // que pide permiso ("Confírmalo y lo aplico."), así que usarla
+                // después de aplicar anunciaba el cambio ya hecho como si
+                // todavía lo estuviera pidiendo. Cuando no hay acuse, el
+                // reducer pone "Listo, apliqué el cambio." — honesto y en
+                // pasado.
+                summary: result.summary ?? null,
                 audioBase64: result.audio_base64,
                 contentType: result.content_type,
               }),
