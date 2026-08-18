@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject} from '@angular/core';
+import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject, viewChild} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -391,13 +391,21 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   readonly shellNeedsConfig = signal(false);
 
-  /** Opciones del paso Configuración del wizard (dueño de data: pop-header). */
-  readonly shellSupplierOptions = computed<SelectorOption[]>(() =>
-    this.header?.supplierOptions() ?? [],
-  );
-  readonly shellLocationOptions = computed<SelectorOption[]>(() =>
-    this.header?.locationOptions() ?? [],
-  );
+  /** Opciones del paso Configuración del wizard (dueño de data: pop-header).
+   *  Usamos el signal `headerRef()` para registrar el ViewChild como dep del
+   *  computed: cuando Angular resuelve el header, el signal cambia, el computed
+   *  re-corre, y entonces `header.supplierOptions()` se lee y queda registrado.
+   *  Sin esto el optional-chain `?.` cortocircuitaba en la primera evaluación
+   *  (header todavía undefined) y las options nunca se enteraban de la
+   *  actualización que traía el backend. */
+  readonly shellSupplierOptions = computed<SelectorOption[]>(() => {
+    const header = this.headerRef();
+    return header ? header.supplierOptions() : [];
+  });
+  readonly shellLocationOptions = computed<SelectorOption[]>(() => {
+    const header = this.headerRef();
+    return header ? header.locationOptions() : [];
+  });
   readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
 
   /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
@@ -1380,17 +1388,42 @@ export class PopComponent implements OnInit, OnDestroy {
       });
   }
 
-  @ViewChild(PopHeaderComponent) header!: PopHeaderComponent;
   @ViewChild(PopProductSelectionComponent)
   productSelection!: PopProductSelectionComponent;
 
+  /**
+   * ViewChild reactivo del header. Usar la forma `viewChild(...)` (signal) en
+   * lugar del decorador `@ViewChild` era el bug raíz del modal de Configuración:
+   * el computed `shellSupplierOptions` dependía del short-circuit
+   * `this.header?.supplierOptions()` que, cuando el header aún era `undefined`
+   * en la primera evaluación, dejaba `supplierOptions` FUERA de los deps y la
+   * signal nunca notificaba al computed cuando llegaba. El pop-header tiene
+   * `supplierOptions` y `locationOptions` como signals, así que la forma signal
+   * del query propaga la dependencia del ViewChild Y de los options al
+   * computed, y el wizard muestra la lista apenas el header termina de
+   * hidratar suppliers/locations vía los endpoints del backend.
+   */
+  private readonly headerRef = viewChild(PopHeaderComponent);
+
+  /** Getter compat para los call-sites imperativos (`this.header.addX(...)`),
+   *  templates antiguos (`<app-pop-header #header>`) y referencias dentro de
+   *  observables (suscripción sin reactividad). Devuelve `undefined` antes de
+   *  que Angular resuelva el ViewChild. */
+  get header(): PopHeaderComponent | undefined {
+    return this.headerRef();
+  }
+
   onSupplierCreated(supplier: { id: number; name: string; code?: string }): void {
-    this.header.addSupplier(supplier);
+    if (this.header) {
+      this.header.addSupplier(supplier);
+    }
     this.popCartService.setSupplier(supplier.id);
   }
 
   onWarehouseCreated(warehouse: { id: number; name: string; code?: string }): void {
-    this.header.addLocation(warehouse);
+    if (this.header) {
+      this.header.addLocation(warehouse);
+    }
     this.popCartService.setLocation(warehouse.id);
   }
 
@@ -2343,3 +2376,4 @@ export class PopComponent implements OnInit, OnDestroy {
     });
   }
 }
+// triggered rebuild at Tue Aug 18 14:43:20 -05 2026

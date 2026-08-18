@@ -9,7 +9,9 @@ import {
   PATH_METADATA,
   METHOD_METADATA,
   INTERCEPTORS_METADATA,
+  ROUTE_ARGS_METADATA,
 } from '@nestjs/common/constants';
+import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { getMetadataStorage } from 'class-validator';
 import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.decorator';
 
@@ -94,6 +96,24 @@ export interface CatalogEntry {
    * actually decide whether the request is accepted.
    */
   bodySchema?: CatalogField[];
+  /**
+   * Los parámetros de query que el endpoint acepta, con su tipo y su
+   * obligatoriedad.
+   *
+   * Sin esto el catálogo describía CÓMO escribir y nada sobre cómo consultar:
+   * `bodySchema` se calculaba solo para los verbos de escritura, así que
+   * cualquier GET con filtros llegaba al modelo como una ruta pelada. Y el
+   * backend valida con `forbidNonWhitelisted`, de modo que un parámetro
+   * inventado no se ignora — devuelve 400. Medido en producción el 18/08/2026:
+   * el agente pidió `store/categories/search` con `q`, luego con `name`, luego
+   * con `search`, y se quedó sin iteraciones antes de llegar a escribir, con la
+   * persona mirando "no pude completar eso". El parámetro correcto estaba
+   * declarado en `CategoryQueryDto` desde siempre; simplemente no se publicaba.
+   *
+   * Se calcula para TODOS los verbos: un POST con paginación en la query tiene
+   * el mismo problema que un GET.
+   */
+  querySchema?: CatalogField[];
   /**
    * True when the handler is wrapped in a multer interceptor, so the request
    * must be sent as `multipart/form-data` and not JSON.
@@ -256,7 +276,16 @@ export class ApiCatalogService implements OnApplicationBootstrap {
         const bodySchema =
           method === 'GET'
             ? undefined
-            : this.bodySchemaOf(prototype, methodName);
+            : this.bodySchemaOf(prototype, methodName, wrapper.metatype);
+
+        // Para todos los verbos: un GET sin sus filtros publicados obliga al
+        // modelo a adivinarlos, y `forbidNonWhitelisted` castiga cada intento
+        // con un 400 en vez de ignorar el parámetro sobrante.
+        const querySchema = this.querySchemaOf(
+          prototype,
+          methodName,
+          wrapper.metatype,
+        );
 
         const multipart = this.isMultipart(handler, wrapper.metatype);
 
@@ -271,6 +300,7 @@ export class ApiCatalogService implements OnApplicationBootstrap {
           summary,
           bodyFields: bodySchema?.map((field) => field.name),
           bodySchema,
+          ...(querySchema ? { querySchema } : {}),
           ...(multipart
             ? { multipart: true, fileField: fileFieldFor(fullPath) }
             : {}),
@@ -432,22 +462,96 @@ export class ApiCatalogService implements OnApplicationBootstrap {
    * they are both more complete and a truer description of what the endpoint
    * will take.
    *
-   * The DTO is identified by naming convention (`*Dto`) among the handler's
-   * parameter types. Best-effort by design: a handler with no DTO simply
-   * publishes no fields, and the model falls back to asking the person.
+   * Best-effort by design: a handler with no DTO simply publishes no fields,
+   * and the model falls back to asking the person.
    */
   private bodySchemaOf(
     prototype: object,
     methodName: string,
+    controller: unknown,
+  ): CatalogField[] | undefined {
+    return this.schemaOfParam(
+      prototype,
+      methodName,
+      controller,
+      RouteParamtypes.BODY,
+    );
+  }
+
+  /** Lo mismo que `bodySchemaOf`, para el DTO que viaja en `@Query()`. */
+  private querySchemaOf(
+    prototype: object,
+    methodName: string,
+    controller: unknown,
+  ): CatalogField[] | undefined {
+    return this.schemaOfParam(
+      prototype,
+      methodName,
+      controller,
+      RouteParamtypes.QUERY,
+    );
+  }
+
+  /**
+   * El DTO que el handler recibe en una posición concreta de decorador.
+   *
+   * Nest graba en la CLASE del controlador un mapa `__routeArguments__` con la
+   * forma `"<paramtype>:<índice>"`, y `design:paramtypes` trae los tipos por
+   * índice. Cruzando ambos se sabe cuál de los parámetros es el `@Body()` y
+   * cuál el `@Query()`, cosa que la convención de nombre sola no distingue: un
+   * handler con los dos publicaba el primero que apareciera, y si ese era el de
+   * query el modelo terminaba mandando filtros como si fueran el cuerpo.
+   *
+   * Si el mapa no está (handler sin decoradores de parámetro), se degrada al
+   * heurístico anterior — el primer `*Dto` de la firma — para no perder los
+   * campos que el catálogo ya publicaba.
+   */
+  private dtoForParam(
+    prototype: object,
+    methodName: string,
+    controller: unknown,
+    wanted: RouteParamtypes,
+  ): (new (...args: any[]) => unknown) | undefined {
+    const paramTypes: unknown[] =
+      Reflect.getMetadata('design:paramtypes', prototype, methodName) ?? [];
+
+    const isDto = (t: unknown): t is new (...args: any[]) => unknown =>
+      typeof t === 'function' && /Dto$/.test((t as Function).name);
+
+    const routeArgs =
+      typeof controller === 'function'
+        ? (Reflect.getMetadata(ROUTE_ARGS_METADATA, controller, methodName) as
+            | Record<string, { index?: number }>
+            | undefined)
+        : undefined;
+
+    if (routeArgs) {
+      for (const [key, meta] of Object.entries(routeArgs)) {
+        // La clave es `<paramtype>:<índice>`; el sufijo tras `:` no siempre es
+        // el índice (los decoradores custom lo usan de otra forma), así que el
+        // índice se lee del valor.
+        if (Number(key.split(':')[0]) !== wanted) continue;
+        const index = meta?.index;
+        if (typeof index !== 'number') continue;
+        const candidate = paramTypes[index];
+        // `@Query('q') q: string` es un parámetro con nombre, no un DTO: sin
+        // este filtro se publicaría `String` como si fuera el esquema.
+        if (isDto(candidate)) return candidate;
+      }
+      return undefined;
+    }
+
+    return paramTypes.find(isDto);
+  }
+
+  private schemaOfParam(
+    prototype: object,
+    methodName: string,
+    controller: unknown,
+    wanted: RouteParamtypes,
   ): CatalogField[] | undefined {
     try {
-      const paramTypes: unknown[] =
-        Reflect.getMetadata('design:paramtypes', prototype, methodName) ?? [];
-
-      const dto = paramTypes.find(
-        (t): t is new (...args: any[]) => unknown =>
-          typeof t === 'function' && /Dto$/.test((t as Function).name),
-      );
+      const dto = this.dtoForParam(prototype, methodName, controller, wanted);
       if (!dto) return undefined;
 
       const metadatas = getMetadataStorage().getTargetValidationMetadatas(
