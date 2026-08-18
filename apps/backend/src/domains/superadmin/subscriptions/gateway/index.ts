@@ -12,6 +12,12 @@ export {
   PlatformWompiValidationResult,
   PlatformWompiValidationReason,
 } from './platform-wompi-webhook-validator.service';
+export {
+  PlatformWebhookLogService,
+  PlatformWebhookOutcome,
+  RecordWebhookInput,
+  FinalizeWebhookInput,
+} from './platform-webhook-log.service';
 export { PlatformWompiConfigValidator } from './validators/platform-wompi-config.validator';
 export {
   UpsertGatewayDto,

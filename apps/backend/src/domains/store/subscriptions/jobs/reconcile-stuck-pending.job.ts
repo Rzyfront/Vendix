@@ -3,7 +3,10 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
-import { SubscriptionPaymentService } from '../services/subscription-payment.service';
+import {
+  SubscriptionPaymentService,
+  SyncInvoiceFromGatewayResult,
+} from '../services/subscription-payment.service';
 
 /**
  * Safety-net cron that catches subscriptions stuck in `pending_payment`
@@ -18,7 +21,10 @@ import { SubscriptionPaymentService } from '../services/subscription-payment.ser
  *
  * ADR-2 path (new): subscriptions with a pending plan change tracked via
  * `pending_change_invoice_id` may get stuck when:
- *   A) The invoice is still in `issued` state after 60 min (webhook never arrived)
+ *   A) The invoice is still in `issued` state after 60 min (webhook never
+ *      arrived). Antes de anular NADA se le pregunta a la pasarela: un webhook
+ *      perdido y un cobro inexistente se ven idénticos desde la base de datos,
+ *      y sólo la pasarela puede distinguirlos.
  *   B) The invoice is `paid` but `confirmPendingChange()` failed after the webhook
  *   C) The invoice is `failed`/`void` but the pending_* fields were not cleared
  *
@@ -125,7 +131,8 @@ export class ReconcileStuckPendingJob {
    * Reconcile a single subscription with a stuck pending plan change.
    *
    * Scenarios:
-   *   - invoice.state === 'issued': webhook never arrived → void invoice + revert state
+   *   - invoice.state === 'issued': webhook never arrived → PREGUNTAR a la
+   *     pasarela y sólo entonces decidir si se anula (ver `shouldVoidStuckInvoice`)
    *   - invoice.state === 'paid':   webhook arrived but confirmPendingChange() failed → re-execute
    *   - invoice.state === 'failed' | 'void': payment failed → clean up orphaned pending_* fields
    */
@@ -135,10 +142,37 @@ export class ReconcileStuckPendingJob {
       return;
     }
 
+    const stuckMinutes = Math.round(
+      (Date.now() - new Date(sub.pending_change_started_at).getTime()) / 60000,
+    );
+
+    if (invoice.state === 'issued') {
+      // I/O DE RED, y por eso va FUERA de la transacción: una consulta HTTP a
+      // Wompi dentro de un `$transaction` mantiene abierta una conexión del pool
+      // y un lock de fila durante todo el timeout de la pasarela.
+      const shouldVoid = await this.shouldVoidStuckInvoice(
+        sub,
+        invoice,
+        stuckMinutes,
+      );
+
+      // Cualquier respuesta que no pruebe que NO hubo cobro deja la factura
+      // viva para el siguiente ciclo (corre cada 5 min). Anular a ciegas es lo
+      // que anuló la factura 17 de Multimarcas Ever ya pagada por Nequi.
+      if (!shouldVoid) {
+        // OJO: si la pasarela acreditó, `syncInvoiceFromGateway` ya escribió
+        // invoice=paid y promovió la suscripción. El `invoice` que tenemos en
+        // memoria viene de la relación cargada ANTES de esa escritura: está
+        // rancio. No se reutiliza para nada más — se sale.
+        return;
+      }
+    }
+
     await this.prisma.withoutScope().$transaction(
       async (tx: Prisma.TransactionClient) => {
         if (invoice.state === 'issued') {
           // ── Scenario A: Invoice stuck without a webhook after 60 min ─────────
+          // La pasarela ya confirmó que no hay cobro contra esta referencia.
           // Void the invoice and revert the subscription state.
           await tx.subscription_invoices.update({
             where: { id: invoice.id },
@@ -158,10 +192,6 @@ export class ReconcileStuckPendingJob {
           });
 
           const revertState = sub.pending_revert_state ?? 'cancelled';
-          const stuckMinutes = Math.round(
-            (Date.now() - new Date(sub.pending_change_started_at).getTime()) /
-              60000,
-          );
 
           await this.stateService.transitionInTx(
             tx,
@@ -249,6 +279,106 @@ export class ReconcileStuckPendingJob {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
     );
+  }
+
+  /**
+   * ¿Puede este job anular la factura atascada?
+   *
+   * El defecto que cerró este método: el Escenario A anulaba una factura de 60
+   * minutos SIN preguntarle a la pasarela. El 17/08/2026 Wompi había aprobado
+   * `1439162-1786996019-19335` a las 14:47; el webhook llegó a las 14:47:48 y no
+   * se procesó; a las 15:45 este cron anuló la factura 17 y devolvió la tienda a
+   * `grace_soft`. El cliente había pagado $69.900. `reconcile_stuck_pending_change`
+   * ya había disparado 6 veces sobre 5 suscripciones distintas: no fue un caso
+   * aislado, fue la política.
+   *
+   * La política ahora es: SÓLO se anula cuando la pasarela AFIRMA que no hubo
+   * cobro. El silencio de la pasarela no es un "no" — es un "no sé", y un "no sé"
+   * cuesta cero si se difiere (el cron vuelve en 5 minutos) mientras que anular
+   * mal cuesta una factura pagada, una tienda degradada y una reparación manual.
+   *
+   * @returns `true` sólo si consta que no hubo cobro.
+   */
+  private async shouldVoidStuckInvoice(
+    sub: any,
+    invoice: any,
+    stuckMinutes: number,
+  ): Promise<boolean> {
+    const base = {
+      sub_id: sub.id,
+      store_id: sub.store_id,
+      invoice_id: invoice.id,
+      stuck_minutes: stuckMinutes,
+    };
+
+    let result: SyncInvoiceFromGatewayResult;
+    try {
+      result = await this.paymentService.syncInvoiceFromGateway(invoice.id);
+    } catch (err: any) {
+      // Lanzar es la forma más ruidosa de "no sé": credenciales de plataforma
+      // ausentes, factura ilegible, red caída. Nunca autoriza a anular.
+      this.logger.warn(
+        JSON.stringify({
+          ...base,
+          event: 'RECONCILE_VOID_DEFERRED_GATEWAY_UNREACHABLE',
+          reason: 'sync_threw',
+          error: err?.message ?? String(err),
+        }),
+      );
+      return false;
+    }
+
+    if (result.status === 'paid') {
+      // La pasarela ya acreditó por el camino del webhook (o lo acaba de hacer
+      // esta misma llamada, que reutiliza `markPaymentSucceededFromWebhook`).
+      // El job sólo deja constancia y sale: no hay nada que anular ni que
+      // revertir, y el estado de `invoice` en memoria ya es rancio.
+      this.logger.warn(
+        JSON.stringify({
+          ...base,
+          event: 'RECONCILE_RECOVERED_BEFORE_VOID',
+          transaction_id: result.transaction_id ?? null,
+        }),
+      );
+      return false;
+    }
+
+    if (result.status === 'pending') {
+      if (result.reason === 'gateway_pending') {
+        // La transacción sigue VIVA en la pasarela: todavía puede aprobar.
+        this.logger.warn(
+          JSON.stringify({
+            ...base,
+            event: 'RECONCILE_VOID_DEFERRED_GATEWAY_PENDING',
+            reason: result.reason,
+          }),
+        );
+        return false;
+      }
+
+      if (result.reason === 'no_transaction_for_reference') {
+        // Único `pending` que es una RESPUESTA y no una ausencia de respuesta:
+        // la pasarela contestó y no conoce esa referencia. Consta que no hubo
+        // cobro → se anula.
+        return true;
+      }
+
+      // `gateway_unreachable`, `no_reference`, o un `reason` que este job no
+      // conoce todavía. Todos significan "no pude preguntar". Se difiere.
+      this.logger.warn(
+        JSON.stringify({
+          ...base,
+          event: 'RECONCILE_VOID_DEFERRED_GATEWAY_UNREACHABLE',
+          reason: result.reason ?? 'unknown',
+        }),
+      );
+      return false;
+    }
+
+    // `failed` (la pasarela rechazó o la transacción está en estado terminal
+    // negativo) y `no_transaction` (no hay siquiera fila de pago que consultar).
+    // En ambos consta que no hay dinero cobrado contra esta factura.
+    return true;
   }
 
   // ---------------------------------------------------------------------------

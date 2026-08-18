@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
   Prisma,
+  subscription_invoices,
   subscription_payments,
   subscription_payment_method_state_enum,
 } from '@prisma/client';
@@ -94,6 +95,54 @@ export interface SaasWompiWidgetConfig {
   signature_integrity: string;
   redirect_url: string;
   customer_email: string;
+}
+
+/**
+ * Por qué `status: 'pending'` no basta.
+ *
+ * `syncInvoiceFromGateway` devolvía `'pending'` en CUATRO situaciones que no
+ * significan lo mismo, y quien lo llamaba no las podía separar:
+ *
+ *   - `no_reference`                  → el pago no trae `metadata.reference`:
+ *                                       NO HAY con qué preguntarle a la pasarela.
+ *   - `gateway_unreachable`           → se preguntó y la llamada reventó (red,
+ *                                       timeout, credenciales): NO SABEMOS NADA.
+ *   - `no_transaction_for_reference`  → la pasarela respondió y NO existe
+ *                                       ninguna transacción con esa referencia:
+ *                                       consta que no hubo cobro.
+ *   - `gateway_pending`               → la pasarela respondió y la transacción
+ *                                       sigue viva en PENDING: hay cobro en
+ *                                       curso, todavía puede aprobar.
+ *
+ * La distinción no es cosmética: «no pude preguntar» y «pregunté y me dijo que
+ * no» exigen decisiones OPUESTAS. Confundirlas es exactamente lo que anuló la
+ * factura 17 de Multimarcas Ever (17/08/2026): el cron `reconcile-stuck-pending`
+ * leyó un `'pending'` que en realidad era «Wompi no contestó», dio por hecho que
+ * no había cobro, anuló una factura ya pagada y devolvió la tienda a
+ * `grace_soft`. El cliente pagó $69.900 y quedó degradado.
+ *
+ * Regla de lectura para cualquier consumidor: sólo los `reason` que provienen de
+ * una RESPUESTA de la pasarela (`no_transaction_for_reference`) autorizan a
+ * tratar la factura como no cobrada. Los que provienen de la AUSENCIA de
+ * respuesta (`gateway_unreachable`, `no_reference`) obligan a diferir, y
+ * `gateway_pending` obliga a esperar.
+ *
+ * El campo es ADITIVO y opcional: los llamadores que sólo miran `status` siguen
+ * comportándose igual.
+ */
+export type SyncInvoiceFromGatewayReason =
+  | 'no_reference'
+  | 'gateway_unreachable'
+  | 'no_transaction_for_reference'
+  | 'gateway_pending';
+
+export interface SyncInvoiceFromGatewayResult {
+  status: 'paid' | 'failed' | 'pending' | 'no_transaction';
+  already_paid?: boolean;
+  transaction_id?: string;
+  payment_status?: string;
+  /** Sólo se puebla cuando `status === 'pending'`. Ver el bloque de arriba. */
+  reason?: SyncInvoiceFromGatewayReason;
 }
 
 @Injectable()
@@ -307,13 +356,13 @@ export class SubscriptionPaymentService {
    * Reusing the webhook handlers (instead of duplicating success logic)
    * guarantees parity: a charge confirmed via this path is indistinguishable
    * from one confirmed via the actual Wompi webhook.
+   *
+   * El `reason` del resultado discrimina los cuatro `pending` que antes eran
+   * indistinguibles — ver `SyncInvoiceFromGatewayReason`.
    */
-  async syncInvoiceFromGateway(invoiceId: number): Promise<{
-    status: 'paid' | 'failed' | 'pending' | 'no_transaction';
-    already_paid?: boolean;
-    transaction_id?: string;
-    payment_status?: string;
-  }> {
+  async syncInvoiceFromGateway(
+    invoiceId: number,
+  ): Promise<SyncInvoiceFromGatewayResult> {
     const invoice = await this.prisma.subscription_invoices.findUnique({
       where: { id: invoiceId },
     });
@@ -324,9 +373,20 @@ export class SubscriptionPaymentService {
     if (invoice.state === 'paid') {
       return { status: 'paid', already_paid: true };
     }
-    if (invoice.state === 'void' || invoice.state === 'refunded') {
+    // `refunded` corta en seco: ahí SÍ hubo devolución real de dinero, así que
+    // la pasarela puede decir APPROVED de la transacción original y aun así la
+    // factura no debe revivir.
+    if (invoice.state === 'refunded') {
       return { status: 'failed', already_paid: false };
     }
+
+    // `void` YA NO corta. Una factura anulada por el cron de reconciliación es
+    // precisamente el caso donde hay que preguntarle a la pasarela: si Wompi
+    // dice APPROVED, el dinero entró y la anulación fue un error nuestro que hay
+    // que deshacer. Antes este `return` temprano hacía la anulación
+    // irreversible: la factura pagada quedaba `void` para siempre y sólo se
+    // arreglaba a mano en base de datos.
+    const reopeningVoidedInvoice = invoice.state === 'void';
 
     // Locate the most recent pending payment for this invoice. The
     // `metadata.reference` is the one passed to the Wompi widget — that is
@@ -352,16 +412,34 @@ export class SubscriptionPaymentService {
       payment.metadata && typeof payment.metadata === 'object'
         ? (payment.metadata as Record<string, unknown>)
         : {};
+    // `metadata.reference` primero porque es la clave que se le pasó al widget
+    // y la que este camino lleva usando desde siempre. `gateway_reference` es
+    // RESPALDO, no preferencia: hay caminos que le escriben el id de la
+    // transacción en vez de la referencia (ver el `gateway_reference:
+    // transactionId` de `recordWidgetTransaction`), así que anteponerlo
+    // cambiaría consultas que hoy funcionan.
+    //
+    // El respaldo existe porque `SubscriptionWebhookReconcilerJob` sí lo lee
+    // (`gateway_reference ?? metadata.reference`): sin él, un pago cuya
+    // referencia vive SOLO en la columna era encontrado por el reconciliador y
+    // no por este seam, y la factura se quedaba anulada para siempre — el
+    // desenlace exacto que este bloque de cambios existe para impedir.
     const reference =
       typeof meta.reference === 'string' && meta.reference.length > 0
         ? meta.reference
-        : null;
+        : payment.gateway_reference || null;
 
     if (!reference) {
       this.logger.warn(
         `syncInvoiceFromGateway: payment ${payment.id} has no metadata.reference`,
       );
-      return { status: 'pending', payment_status: payment.state };
+      // No hay clave de join contra `GET /transactions?reference=`: NO se
+      // preguntó. Silencio nuestro, no de la pasarela.
+      return {
+        status: 'pending',
+        payment_status: payment.state,
+        reason: 'no_reference',
+      };
     }
 
     const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
@@ -384,11 +462,24 @@ export class SubscriptionPaymentService {
       this.logger.warn(
         `syncInvoiceFromGateway: Wompi lookup failed for invoice ${invoiceId} ref=${reference}: ${err?.message ?? err}`,
       );
-      return { status: 'pending', payment_status: payment.state };
+      // Se preguntó y la llamada reventó (red, timeout, credenciales). No
+      // sabemos NADA del cobro; el llamador no puede concluir que no existe.
+      return {
+        status: 'pending',
+        payment_status: payment.state,
+        reason: 'gateway_unreachable',
+      };
     }
 
     if (txns.length === 0) {
-      return { status: 'pending', payment_status: payment.state };
+      // La pasarela SÍ respondió y no conoce ninguna transacción con esa
+      // referencia. Éste es el único `pending` que autoriza a tratar la factura
+      // como no cobrada.
+      return {
+        status: 'pending',
+        payment_status: payment.state,
+        reason: 'no_transaction_for_reference',
+      };
     }
 
     // Prefer an APPROVED txn if any; otherwise fall back to the most
@@ -405,6 +496,13 @@ export class SubscriptionPaymentService {
     const status = String(txn.status).toUpperCase();
 
     if (status === 'APPROVED') {
+      // Se pone en true dentro de la transacción, sólo cuando la factura venía
+      // `void` y el dedup no cortó: es decir, cuando esta corrida REABRIÓ de
+      // verdad una factura que el cron había anulado. Si la transacción hace
+      // rollback nunca llegamos al log de abajo, así que el flag no puede
+      // mentir.
+      let reopenApplied = false;
+
       // Idempotent dedup INSERT inside an atomic tx + reuse the webhook
       // success path so subscription promotion + auto-PM + outbox all run
       // identically to a real webhook. processor='wompi_sync' so a
@@ -427,6 +525,11 @@ export class SubscriptionPaymentService {
             return;
           }
 
+          if (reopeningVoidedInvoice) {
+            reopenApplied = true;
+            await this.restorePendingChangeForReopenedInvoice(tx, invoice);
+          }
+
           await this.markPaymentSucceededFromWebhook(
             {
               paymentId: payment.id,
@@ -439,6 +542,20 @@ export class SubscriptionPaymentService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
       );
+
+      if (reopenApplied) {
+        // WARN a propósito: reabrir una factura anulada significa que algo
+        // aguas arriba (el cron, un operador) la dio por muerta estando
+        // cobrada. Es un evento que alguien debe mirar, no ruido.
+        this.logger.warn(
+          JSON.stringify({
+            event: 'INVOICE_REOPENED_FROM_GATEWAY',
+            invoice_id: invoiceId,
+            transaction_id: txn.id,
+            previous_state: 'void',
+          }),
+        );
+      }
 
       // Post-commit side effects — mirror SubscriptionWebhookService.
       try {
@@ -486,8 +603,84 @@ export class SubscriptionPaymentService {
       };
     }
 
-    // PENDING / unknown — caller continues polling.
-    return { status: 'pending', payment_status: payment.state };
+    // PENDING / unknown — caller continues polling. La transacción sigue VIVA
+    // en la pasarela: todavía puede aprobar, así que nadie debe darla por
+    // muerta ni anular la factura contra ella.
+    return {
+      status: 'pending',
+      payment_status: payment.state,
+      reason: 'gateway_pending',
+    };
+  }
+
+  /**
+   * Reconstruye los campos `pending_*` de la suscripción a partir de la propia
+   * factura, justo antes de reabrirla.
+   *
+   * POR QUÉ existe. Cuando `reconcile-stuck-pending` anula una factura
+   * (Escenario A) BORRA `pending_plan_id`, `pending_change_invoice_id`,
+   * `pending_change_kind`, `pending_change_started_at` y `pending_revert_state`.
+   * Si después resulta que la pasarela sí cobró y reabrimos la factura, el
+   * camino de éxito llega a `confirmPendingChange`, cuya guarda del paso 2 exige
+   * `sub.pending_plan_id === invoice.to_plan_id`. Con los campos en null esa
+   * guarda cae en `CONFIRM_PENDING_MISMATCH` y hace NO-OP: el pago queda
+   * `succeeded`, la factura `paid`… y la tienda sigue en `grace_soft` con el
+   * plan viejo. Cobrado y degradado — el peor desenlace posible, y exactamente
+   * lo que hubo que reparar a mano en producción.
+   *
+   * Restaurarlos DENTRO de la misma transacción y ANTES de
+   * `markPaymentSucceededFromWebhook` es lo que hace que la reapertura sea
+   * atómica: o promueve el plan o no cobra.
+   *
+   * `pending_revert_state` se rearma con el estado ACTUAL de la suscripción (no
+   * con el que tenía antes de la anulación, que ya no existe en ninguna parte)
+   * para que, si algo vuelve a fallar, el revertido siga siendo un salto legal
+   * de la máquina de estados.
+   *
+   * Sólo se invoca en el camino de reapertura. En el camino normal los
+   * `pending_*` ya están puestos por el checkout y reescribirlos sería pisar
+   * estado vivo.
+   */
+  private async restorePendingChangeForReopenedInvoice(
+    tx: Prisma.TransactionClient,
+    invoice: Pick<
+      subscription_invoices,
+      | 'id'
+      | 'store_subscription_id'
+      | 'to_plan_id'
+      | 'change_kind'
+      | 'issued_at'
+      | 'created_at'
+    >,
+  ): Promise<void> {
+    // Sin `to_plan_id` no hay cambio de plan que confirmar: la factura es una
+    // renovación/reactivación y `handleChargeSuccess` va por
+    // `ensureOperationalInTx`, que no lee los `pending_*`. Nada que restaurar.
+    if (invoice.to_plan_id == null) {
+      return;
+    }
+
+    const sub = await tx.store_subscriptions.findUnique({
+      where: { id: invoice.store_subscription_id },
+      select: { id: true, state: true },
+    });
+    if (!sub) {
+      return;
+    }
+
+    const data: Prisma.store_subscriptionsUncheckedUpdateInput = {
+      pending_plan_id: invoice.to_plan_id,
+      pending_change_invoice_id: invoice.id,
+      pending_change_kind: invoice.change_kind,
+      // `issued_at` es nullable; `created_at` sólo cubre el hueco para que la
+      // columna no quede nula. No se usa para decidir nada, únicamente para que
+      // el propio cron pueda volver a leer la fila si la confirmación fallara.
+      pending_change_started_at: invoice.issued_at ?? invoice.created_at,
+      pending_revert_state: sub.state,
+      updated_at: new Date(),
+    };
+
+    await tx.store_subscriptions.update({ where: { id: sub.id }, data });
   }
 
   /**

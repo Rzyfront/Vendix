@@ -1346,12 +1346,37 @@ export class UblCommonBuilder {
 
   /**
    * Builds tax total elements from invoice taxes.
+   *
+   * ## Un documento SIN tributos no informa el grupo
+   *
+   * FAS01b rechaza «cuando una factura no tiene impuestos pero aparece el nodo
+   * `<cac:TaxTotal>`», y enumera entre sus causas «se reportan ítems excluidos de
+   * impuestos, pero se detalla una totalización de impuestos con tarifa igual a
+   * 0 %». Sin la guarda, un arreglo vacío emitía el elemento con `TaxAmount` en
+   * 0,00 y CERO `cac:TaxSubtotal` dentro: un grupo de totales que no declara
+   * ninguna base. La DIAN recompone la base gravable desde los subtotales, no
+   * encuentra ninguno, y lo contrasta contra la suma de las líneas → rechazo.
+   *
+   * La señal es la LISTA VACÍA, no el importe en cero, porque las dos figuras
+   * jurídicas se distinguen justo ahí:
+   *
+   *   · EXCLUIDO (art. 476 ET) — no sujeto. NO informa tributo en ninguna parte
+   *     y no aporta base gravable. Llega como `taxes: []`.
+   *   · EXENTO (art. 477 ET) — gravado a tarifa 0 %. SÍ informa su
+   *     `cac:TaxSubtotal` con `cbc:Percent` en 0,00 y SÍ aporta base. Llega como
+   *     una fila con `tax_amount: '0.00'`, que esta guarda no toca.
+   *
+   * Es la misma guarda que `buildWithholdingTaxTotal` ya tenía. La asimetría
+   * entre las dos funciones hermanas era el defecto: la línea sabía callarse
+   * (`UblDocumentLine.omit_tax_total`, FAX01) y la cabecera no.
    */
   static buildTaxTotals(
     parent: any,
     taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
+    if (!taxes?.length) return;
+
     // Group taxes by DIAN scheme code (tax_type-aware): IVA→01, INC→04, ICA→03.
     // This is the document-level TaxTotal DIAN validates, so IVA and INC must
     // land in separate TaxSubtotal blocks with their own scheme.
@@ -1638,10 +1663,33 @@ export class UblCommonBuilder {
    * Invariants enforced here:
    * - `LineExtensionAmount` = Σ line `LineExtensionAmount` (same function, so
    *   the two cannot drift) — rule `FAU14`.
-   * - `TaxExclusiveAmount` = net taxable base.
-   * - `TaxInclusiveAmount` = net base + taxes.
+   * - `TaxExclusiveAmount` = base gravable REALMENTE DECLARADA — ver abajo.
+   * - `TaxInclusiveAmount` = Σ líneas + tributos.
    * - `PayableAmount` = `TaxInclusiveAmount − AllowanceTotalAmount`, computed
    *   rather than copied, so the identity holds by construction.
+   *
+   * ## `TaxExclusiveAmount` NO es el bruto de líneas
+   *
+   * FAU04 no compara contra el subtotal: compara contra la SUMA DE LAS BASES QUE
+   * LAS LÍNEAS DECLARAN.
+   *
+   *   round(//cbc:TaxExclusiveAmount)
+   *     == round(sum(//cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount))
+   *
+   * Una línea que OMITE su grupo de tributos (`omit_tax_total`, FAX01: ítems
+   * excluidos, régimen simple grupo I, conceptos de AIU fuera de la base
+   * gravable) no aporta ningún `cbc:TaxableAmount`, así que tampoco puede sumar
+   * acá. Publicar el bruto mientras las líneas callan es exactamente el descuadre
+   * que la DIAN reporta como «Base Imponible es distinto a la suma de los valores
+   * de las bases imponibles de todas líneas de detalle».
+   *
+   * Con TODAS las líneas gravadas el filtro no descarta ninguna y el valor es
+   * idéntico al anterior — por eso este cambio es un no-op sobre los documentos
+   * que hoy se aceptan. Sólo cambia para el documento 100 % excluido (pasa a
+   * 0,00) y para el mixto (pasa a declarar sólo la porción gravada).
+   *
+   * `LineExtensionAmount` sigue siendo el bruto de TODAS las líneas: la identidad
+   * FAU14 (cabecera = Σ líneas) es otra regla y no se toca.
    *
    * Shared by invoice, credit note, debit note and support document — the block
    * was duplicated four times and drifted independently.
@@ -1686,6 +1734,16 @@ export class UblCommonBuilder {
       | 'RequestedMonetaryTotal' = 'LegalMonetaryTotal',
   ): void {
     const line_extension = dianLineExtensionTotal(data.items);
+
+    // FAU04: sólo las líneas que DECLARAN su grupo de tributos aportan
+    // `cbc:TaxableAmount`, así que sólo ellas pueden sumar a la base imponible
+    // de la cabecera. `omit_tax_total` vive en `UblDocumentLine`, que extiende
+    // `ProviderInvoiceItem`; los productores que no lo usan dejan la bandera
+    // ausente y el filtro conserva la línea, que es el comportamiento previo.
+    const taxable_base = dianLineExtensionTotal(
+      data.items.filter((item) => !(item as UblDocumentLine).omit_tax_total),
+    );
+
     const document_discount = UblCommonBuilder.documentDiscount(data);
     const tax_inclusive = dianArithmetic([
       { value: line_extension, sign: 1 },
@@ -1704,7 +1762,7 @@ export class UblCommonBuilder {
     monetary
       .ele(UBL_NAMESPACES.CBC, 'TaxExclusiveAmount')
       .att('currencyID', currency)
-      .txt(line_extension);
+      .txt(taxable_base);
     monetary
       .ele(UBL_NAMESPACES.CBC, 'TaxInclusiveAmount')
       .att('currencyID', currency)
@@ -1974,6 +2032,15 @@ export class UblCommonBuilder {
    * esas se reenvían tal cual años después. Incluida su tarifa: acá se formatea
    * con `dianRate` sin el saneamiento por-mil del ICA, al contrario que el camino
    * nuevo. Cambiarlo alteraría documentos históricos.
+   *
+   * ## 3. Sin desglose Y sin cabecera — la línea NO emite el grupo
+   *
+   * Antes este caso caía a una tarifa cableada de IVA 19 % con cuota 0,00, así
+   * que una factura sin ningún tributo salía afirmando un impuesto inexistente en
+   * cada línea. Ningún documento aceptado tomó esa rama —el camino histórico
+   * hereda de `header_taxes[0]`, que acá por definición no existe—, de modo que
+   * callar la línea no altera nada ya emitido. Ver FAS01b y la guarda espejo de
+   * `buildTaxTotals`.
    */
   private static buildLineTaxTotal(
     line: any,
@@ -1981,8 +2048,24 @@ export class UblCommonBuilder {
     header_taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
-    const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
     const line_taxes = item.taxes ?? [];
+
+    // Sin tributo de línea Y sin tributo de cabecera del que heredar, la línea no
+    // tiene NADA que declarar. Antes se emitía igual, heredando una tarifa
+    // cableada de IVA 19 % con cuota 0,00: el XML afirmaba un impuesto que la
+    // operación no causa. Una tienda que vende sólo productos excluidos salía con
+    // 19 % en todas sus líneas, y FAS01b rechaza justamente «se reportan ítems
+    // excluidos de impuestos, pero se detalla una totalización de impuestos con
+    // tarifa igual a 0 %».
+    //
+    // Callar la línea la deja como las que ya usan `omit_tax_total` (FAX01), y es
+    // coherente con la guarda de cabecera de `buildTaxTotals`. NO afecta al camino
+    // histórico: ése hereda de `header_taxes[0]`, que acá por definición no existe.
+    if (line_taxes.length === 0 && header_taxes.length === 0) {
+      return;
+    }
+
+    const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
 
     if (line_taxes.length === 0) {
       line_tax_total
@@ -1995,12 +2078,8 @@ export class UblCommonBuilder {
       // resolved tax_type-first for correctness on single-tax invoices (a pure
       // INC restaurant bill emits scheme 04, not 01). Mixed IVA+INC invoices
       // are reconciled at the authoritative document-level TaxTotal above.
-      const tax_rate =
-        header_taxes.length > 0 ? header_taxes[0].tax_rate : '19.00';
-      const tax_code =
-        header_taxes.length > 0
-          ? UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0])
-          : DIAN_TAX_CODES.IVA;
+      const tax_rate = header_taxes[0].tax_rate;
+      const tax_code = UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0]);
 
       const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
       subtotal

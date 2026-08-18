@@ -453,3 +453,85 @@ describe('UblCommonBuilder.toTaxLevelCode — enumeración cerrada (FAJ26)', () 
     expect(UblCommonBuilder.toTaxLevelCode(' O-13 ; O-47 ')).toBe('O-13;O-47');
   });
 });
+
+/**
+ * Regresión del rechazo `FAS01b` del 17/08/2026.
+ *
+ * `buildTaxTotals` creaba el elemento `cac:TaxTotal` ANTES del bucle que añade
+ * los `cac:TaxSubtotal`. Con una lista de tributos vacía —el caso de una
+ * operación EXCLUIDA de IVA— emitía un grupo huérfano: `cbc:TaxAmount` en 0.00
+ * y ningún subtotal. La DIAN recompone la base gravable desde los subtotales,
+ * no encuentra ninguno y rechaza.
+ *
+ * Su hermana `buildWithholdingTaxTotal` sí tenía la guarda. La asimetría entre
+ * las dos era el defecto.
+ */
+describe('UblCommonBuilder.buildTaxTotals — grupo vacío (FAS01b)', () => {
+  function createRoot(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function build(taxes: any[]): string {
+    const doc = createRoot();
+    UblCommonBuilder.buildTaxTotals(doc, taxes as any, 'COP');
+    return doc.end({ prettyPrint: false });
+  }
+
+  function countTag(xml: string, tag: string): number {
+    return xml.split(`<${tag}`).length - 1;
+  }
+
+  it('no emite NINGÚN cac:TaxTotal cuando el documento no tiene tributos', () => {
+    const xml = build([]);
+
+    expect(countTag(xml, 'cac:TaxTotal')).toBe(0);
+    expect(xml).not.toContain('cbc:TaxAmount');
+  });
+
+  it('tampoco lo emite si la lista llega nula o indefinida', () => {
+    expect(countTag(build(null as any), 'cac:TaxTotal')).toBe(0);
+    expect(countTag(build(undefined as any), 'cac:TaxTotal')).toBe(0);
+  });
+
+  it('un EXENTO sí informa su grupo: tarifa 0.00 con subtotal, que no es lo mismo que excluido', () => {
+    // Art. 477 ET: gravado a tarifa cero. Informa `cac:TaxSubtotal` y aporta
+    // base gravable. La señal de «no informar» es la lista vacía, nunca el
+    // importe en cero.
+    const xml = build([
+      {
+        tax_name: 'IVA',
+        tax_rate: '0.00',
+        taxable_amount: '69900.00',
+        tax_amount: '0.00',
+      },
+    ]);
+
+    expect(countTag(xml, 'cac:TaxTotal')).toBe(1);
+    expect(countTag(xml, 'cac:TaxSubtotal')).toBe(1);
+    expect(xml).toContain('<cbc:TaxableAmount currencyID="COP">69900.00</cbc:TaxableAmount>');
+    expect(xml).toContain('<cbc:Percent>0.00</cbc:Percent>');
+  });
+
+  it('con tributos sigue emitiendo el grupo completo, sin cambios', () => {
+    const xml = build([
+      {
+        tax_name: 'IVA',
+        tax_rate: '19.00',
+        taxable_amount: '1000.00',
+        tax_amount: '190.00',
+      },
+    ]);
+
+    expect(countTag(xml, 'cac:TaxTotal')).toBe(1);
+    expect(countTag(xml, 'cac:TaxSubtotal')).toBe(1);
+    expect(xml).toContain('<cbc:TaxAmount currencyID="COP">190.00</cbc:TaxAmount>');
+  });
+});

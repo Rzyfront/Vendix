@@ -9494,16 +9494,68 @@ model commission_accrual_pending {
   @@index([state, created_at])
 }
 
+/// Reclamo + confirmación de eventos de pasarela.
+///
+/// La fila NO significa «procesado»: significa «este evento existió y llegó».
+/// Esa distinción es el arreglo del incidente 17/08/2026, donde el INSERT del
+/// dedup vivía como paso 1 DENTRO de la transacción de negocio y cualquier
+/// throw posterior lo revertía junto con todo lo demás — borrando la única
+/// evidencia de que el webhook había llegado. Por eso `processed_at`:
+///   · fila ausente        ⇒ el evento nunca llegó
+///   · fila + processed_at NULL     ⇒ llegó, el negocio no terminó ⇒ REPROCESAR
+///   · fila + processed_at NOT NULL ⇒ llegó y terminó ⇒ descartar duplicado
+///
+/// Sólo `processor='wompi_platform'` + `event_type='transaction.updated'` lee
+/// `processed_at`. Los demás productores (`chargeback`, `wompi_sync`) conservan
+/// la semántica vieja «la fila sola ya es duplicado» a propósito; el porqué de
+/// cada uno está documentado en subscription-webhook.service.ts.
 model webhook_event_dedup {
-  id          Int      @id @default(autoincrement())
-  processor   String   @db.VarChar(64)
-  event_id    String   @db.VarChar(255)
-  event_type  String?  @db.VarChar(64)
-  received_at DateTime @default(now()) @db.Timestamp(6)
+  id           Int       @id @default(autoincrement())
+  processor    String    @db.VarChar(64)
+  event_id     String    @db.VarChar(255)
+  event_type   String?   @db.VarChar(64)
+  received_at  DateTime  @default(now()) @db.Timestamp(6)
+  processed_at DateTime? @db.Timestamp(6)
 
   @@unique([processor, event_id])
   @@index([processor, event_id])
   @@index([received_at])
+}
+
+/// Bitácora de TODO webhook de plataforma (SaaS) que toca el endpoint, sin
+/// importar cómo termine.
+///
+/// Existe porque el 17/08/2026 un pago aprobado de Wompi recibió ACK 201 y no
+/// dejó rastro alguno: ni fila de dedup (la borró el rollback), ni log (el
+/// despliegue de las 15:57 destruyó el contenedor). La causa raíz del ACK vacío
+/// nunca pudo probarse. Esta tabla la haría probable la próxima vez.
+///
+/// Invariantes de escritura (ver PlatformWebhookLogService):
+///   · Se escribe ANTES de la transacción de negocio y en su PROPIA conexión,
+///     nunca dentro de un $transaction — si viviera dentro tendría el mismo
+///     agujero que vino a tapar.
+///   · Se escribe en los CUATRO caminos del controlador, incluido el de
+///     SAAS_WEBHOOK_ENABLED=false.
+///   · Que la bitácora falle nunca tumba el ACK.
+///   · `raw_body` va saneado: `payment_method.extra` y el checksum de la firma
+///     se redactan antes de persistir. Nunca PAN, CVV ni tokens.
+model platform_webhook_log {
+  id                Int       @id @default(autoincrement())
+  processor         String    @db.VarChar(64)
+  event_type        String?   @db.VarChar(128)
+  reference         String?   @db.VarChar(255)
+  transaction_id    String?   @db.VarChar(255)
+  status            String?   @db.VarChar(64)
+  signature_valid   Boolean?
+  validation_reason String?   @db.VarChar(64)
+  outcome           String    @db.VarChar(32)
+  error_message     String?   @db.Text
+  raw_body          Json?
+  received_at       DateTime  @default(now()) @db.Timestamp(6)
+  processed_at      DateTime? @db.Timestamp(6)
+
+  @@index([processor, transaction_id])
+  @@index([received_at(sort: Desc)])
 }
 
 /// Dedupe primitive for billing-warning notifications and emails.

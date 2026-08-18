@@ -680,6 +680,14 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.webhook_event_dedup;
   }
 
+  // Bitácora forense del endpoint de webhooks de plataforma. Global y sin
+  // tenant scope como webhook_event_dedup: el evento llega ANTES de que se
+  // sepa a qué tienda pertenece —y a veces no pertenece a ninguna, que es
+  // justo el caso que hay que poder registrar.
+  get platform_webhook_log() {
+    return this.baseClient.platform_webhook_log;
+  }
+
   // Dedupe table for billing-warning notifications + emails
   // (auto_renew_disabled_no_credential + renewal_failed). Mirrors
   // webhook_event_dedup pattern: global, no tenant scope.

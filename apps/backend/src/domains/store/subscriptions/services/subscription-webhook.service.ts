@@ -42,6 +42,73 @@ export class SubscriptionWebhookService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * ── RECLAMO + CONFIRMACIÓN ────────────────────────────────────────────────
+   *
+   * El INSERT en `webhook_event_dedup` era el paso 1 DENTRO de la transacción
+   * de negocio. Se cambió porque esa forma tenía un agujero que sólo se ve
+   * cuando algo falla: si cualquier paso posterior lanzaba, el rollback
+   * borraba la fila de dedup — es decir, borraba **la única evidencia de que
+   * el evento había llegado**. El sistema quedaba indistinguible de uno al que
+   * el webhook nunca le llegó.
+   *
+   * Eso es exactamente lo que se vio el 17/08/2026: Wompi aprobó un pago de
+   * $69.900, entregó el webhook, el endpoint respondió 201 `{"received":true}`
+   * y no quedó ni una fila ni un log. Sin evidencia no se pudo probar la causa
+   * raíz, y es la hipótesis que explica que fallaran a la vez el webhook y el
+   * reconciliador, ambos sin dejar rastro. A las 15:45 un cron anuló la factura
+   * de un cliente que ya había pagado.
+   *
+   * De ahí las dos mitades:
+   *
+   *   · El RECLAMO se escribe antes de abrir la transacción y en su propia
+   *     conexión, porque la fila tiene que sobrevivir al rollback: es la
+   *     evidencia de que el evento existió, no el resultado de haberlo
+   *     procesado.
+   *   · Y por eso mismo el reclamo SOLO no puede significar «procesado». Un
+   *     reclamo sin `processed_at` es un intento que no terminó, y lo correcto
+   *     ante un intento que no terminó es REPROCESAR, no descartar. Sólo el
+   *     sello `processed_at`, escrito después del commit, convierte el reclamo
+   *     en un duplicado descartable.
+   *
+   * Lo que se cede a cambio, conscientemente: el INSERT dentro de la
+   * transacción serializaba dos entregas concurrentes (la segunda esperaba el
+   * lock de fila y salía con 0 filas). Fuera de la transacción esa
+   * serialización desaparece y dos entregas simultáneas pueden entrar las dos.
+   * Es aceptable porque la idempotencia real nunca vivió aquí: vive en
+   * `markPayment*FromWebhook`, que cortan en estado terminal
+   * (succeeded/failed/refunded) — la defensa en profundidad que esta misma
+   * clase ya documenta como invariante para que una reentrega no promueva dos
+   * veces una `partner_commission`. Preferimos procesar de más a perder la
+   * prueba de que el evento llegó.
+   *
+   * ── Los otros dos usuarios de `webhook_event_dedup` ──────────────────────
+   *
+   * Sólo este camino (`processor='wompi_platform'`, `event_type='transaction.
+   * updated'`) lee `processed_at`. Los otros dos se revisaron y se dejan con
+   * la semántica vieja —«la fila sola ya descarta»— a propósito:
+   *
+   *   · `handleChargebackEvent` (más abajo, `event_type='chargeback'`): su
+   *     trabajo pasa por `fraudService.handleChargeback`, que incrementa
+   *     `organizations.chargeback_count`, un contador NO idempotente con un
+   *     umbral que bloquea la organización (RNC-30). Reprocesar ahí no es
+   *     inocuo: inflaría el contador y podría bloquear a un cliente por un
+   *     contracargo que sólo ocurrió una vez. Además su reclamo YA sobrevive
+   *     al fallo, porque la tx del dedup se cierra antes de los pasos de
+   *     negocio y éstos van en try/catch que no propagan. Sí sella
+   *     `processed_at` al terminar, pero como dato de observabilidad: la
+   *     decisión de duplicado allí sigue siendo «existe la fila».
+   *   · `SubscriptionPaymentService.syncInvoiceFromGateway`
+   *     (`processor='wompi_sync'`): ahí el reclamo SÍ debe morir con el
+   *     rollback, y por eso no se toca. No es una entrega irrepetible de un
+   *     tercero sino un pull que el frontend repite en cada ciclo de polling
+   *     mientras la suscripción siga en `pending_payment`; si el intento
+   *     falla, lo que hace falta es que la siguiente pasada pueda reintentar,
+   *     y el reclamo borrado es justamente lo que se lo permite. No se pierde
+   *     evidencia porque nadie «entregó» nada: la transacción sigue estando en
+   *     Wompi, consultable. Ese archivo pertenece a otro frente de trabajo y
+   *     no se modificó.
+   */
   async handleWompiEvent(input: SubscriptionWebhookInput): Promise<void> {
     const { subscriptionId, invoiceId, body } = input;
     const txn = body?.data?.transaction;
@@ -99,19 +166,45 @@ export class SubscriptionWebhookService {
       return;
     }
 
-    // ── Atomic dedup + payment processing ────────────────────────────────
+    // ── Paso 1: RECLAMO, fuera de la transacción ─────────────────────────
     //
-    // The INSERT ON CONFLICT and all payment-state writes execute inside a
-    // single ReadCommitted transaction.  The dedup INSERT acquires a row-level
-    // lock on (processor, event_id), so two concurrent identical webhooks
-    // will serialize: the second INSERT returns 0 rows and the inner block
-    // returns early — before any payment write is attempted.
+    // El reclamo es una escritura autónoma, en su propia conexión, ANTES de
+    // abrir la transacción de negocio. Ver el bloque «RECLAMO + CONFIRMACIÓN»
+    // en la cabecera de handleWompiEvent: la fila es la evidencia de que el
+    // evento existió y por eso tiene que sobrevivir al rollback.
+    //
+    // `duplicate` corta aquí. `retry` NO corta: es un intento previo que no
+    // llegó a sellarse, y descartarlo sería repetir el fallo del 17/08/2026 —
+    // dar por procesado un evento que nadie procesó.
+    if (dedupTxnId) {
+      const claim = await this.claimWebhookEvent(
+        dedupTxnId,
+        'transaction.updated',
+      );
+      if (claim === 'duplicate') {
+        this.logger.log(
+          `Duplicate Wompi webhook detected for transaction ${dedupTxnId} (invoice ${invoiceId}), returning 200`,
+        );
+        return;
+      }
+      if (claim === 'retry') {
+        this.logger.warn(
+          `Reprocesando webhook Wompi ${dedupTxnId} (invoice ${invoiceId}): ` +
+            `existe reclamo sin sellar, el intento anterior no terminó`,
+        );
+      }
+    }
+
+    // ── Paso 2: proceso de negocio, dentro de una única transacción ──────
+    //
+    // Todas las escrituras de estado de pago siguen viajando en una sola
+    // transacción ReadCommitted: lo que salió de ella es el reclamo, no el
+    // negocio.
     //
     // NOTE: eventEmitter.emit calls are intentionally placed OUTSIDE the
     // transaction block so they fire only after the commit succeeds.
     // ──────────────────────────────────────────────────────────────────────
     type TxResult = {
-      isDuplicate: boolean;
       paymentNotFound: boolean;
       updatedPayment: Awaited<
         ReturnType<typeof this.paymentService.markPaymentSucceededFromWebhook>
@@ -121,31 +214,7 @@ export class SubscriptionWebhookService {
 
     const txResult = await this.prisma.withoutScope().$transaction(
       async (tx) => {
-        // Step 1: Deduplication INSERT — must be first so the lock is
-        // acquired before any reads, preventing both workers from
-        // continuing past this point simultaneously.
-        if (dedupTxnId) {
-          const inserted = await tx.$executeRaw<number>(
-            Prisma.sql`
-                INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
-                VALUES ('wompi_platform', ${dedupTxnId}, 'transaction.updated', NOW())
-                ON CONFLICT (processor, event_id) DO NOTHING
-              `,
-          );
-          if (inserted === 0) {
-            this.logger.log(
-              `Duplicate Wompi webhook detected for transaction ${dedupTxnId} (invoice ${invoiceId}), returning 200`,
-            );
-            return {
-              isDuplicate: true,
-              paymentNotFound: false,
-              updatedPayment: null,
-              paymentId: null,
-            } satisfies TxResult;
-          }
-        }
-
-        // Step 2: Resolve the payment row this webhook refers to.
+        // Resolve the payment row this webhook refers to.
         //
         // Lookup priority (most specific -> fallback):
         //  1. `gateway_reference` matches `txn.reference`
@@ -200,14 +269,13 @@ export class SubscriptionWebhookService {
             `No subscription_payments row found for invoice ${invoiceId} (sub ${subscriptionId})`,
           );
           return {
-            isDuplicate: false,
             paymentNotFound: true,
             updatedPayment: null,
             paymentId: null,
           } satisfies TxResult;
         }
 
-        // Step 3: Mutate payment state — pass `tx` so all writes stay
+        // Mutate payment state — pass `tx` so all writes stay
         // inside THIS transaction (no nested $transaction opened).
         let updatedPayment: Awaited<
           ReturnType<typeof this.paymentService.markPaymentSucceededFromWebhook>
@@ -258,7 +326,6 @@ export class SubscriptionWebhookService {
         }
 
         return {
-          isDuplicate: false,
           paymentNotFound: false,
           updatedPayment,
           paymentId: payment.id,
@@ -270,8 +337,21 @@ export class SubscriptionWebhookService {
     // ── Post-commit side effects ──────────────────────────────────────────
     // All side effects below run AFTER the transaction commits so they always
     // observe the committed state and are not executed on rollback.
-    if (txResult.isDuplicate || txResult.paymentNotFound) {
+    if (txResult.paymentNotFound) {
+      // Deliberadamente SIN sellar. «No encontré a qué pago aplicarlo» no es
+      // un negocio terminado: es un evento que quedó sin aplicar. Dejar el
+      // reclamo abierto permite que una reentrega de Wompi —o el
+      // reconciliador, una vez exista la fila de pago— lo vuelva a intentar,
+      // en vez de enterrarlo como duplicado para siempre.
       return;
+    }
+
+    // ── Paso 3: CONFIRMACIÓN ─────────────────────────────────────────────
+    // La transacción commiteó, así que el evento sí quedó aplicado: recién
+    // ahora el reclamo pasa a significar «procesado». Va aquí y no dentro de
+    // la tx precisamente para que un rollback no se lo lleve.
+    if (dedupTxnId) {
+      await this.sealWebhookEvent(dedupTxnId, invoiceId);
     }
 
     if (
@@ -292,6 +372,100 @@ export class SubscriptionWebhookService {
         subscriptionId,
         source: 'webhook',
       });
+    }
+  }
+
+  /**
+   * Reclama el evento en `webhook_event_dedup` SIN abrir transacción de
+   * negocio, y responde qué hacer con él:
+   *
+   *   · `fresh`     — no existía: primera vez que se ve este evento.
+   *   · `retry`     — existe con `processed_at` NULL: alguien lo reclamó y no
+   *                   llegó a sellarlo. Se reprocesa.
+   *   · `duplicate` — existe con `processed_at` puesto: llegó y terminó.
+   *
+   * El INSERT y la lectura van en un único statement (CTE) para no necesitar
+   * dos viajes ni una transacción: si el INSERT prospera, la rama del UNION se
+   * apaga sola por el `NOT EXISTS (SELECT 1 FROM claim)`; si choca contra el
+   * único (processor, event_id), `claim` queda vacío y se devuelve la fila que
+   * ya estaba.
+   *
+   * Casos límite, ambos resueltos hacia REPROCESAR, que es el lado seguro
+   * dado que `markPayment*FromWebhook` cortan en estado terminal:
+   *   · Cero filas (una entrega concurrente insertó después de nuestro
+   *     snapshot y antes de nuestro SELECT).
+   *   · Fallo de la consulta: no se puede decidir «duplicado» sin dato, y
+   *     tragarse un evento genuino por un error de infraestructura es
+   *     precisamente el fallo que este cambio persigue.
+   */
+  private async claimWebhookEvent(
+    eventId: string,
+    eventType: string,
+  ): Promise<'fresh' | 'retry' | 'duplicate'> {
+    try {
+      const rows = await this.prisma.withoutScope().$queryRaw<
+        Array<{ processed_at: Date | null; claimed: boolean }>
+      >(
+        Prisma.sql`
+          WITH claim AS (
+            INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
+            VALUES ('wompi_platform', ${eventId}, ${eventType}, NOW())
+            ON CONFLICT (processor, event_id) DO NOTHING
+            RETURNING processed_at
+          )
+          SELECT processed_at, TRUE AS claimed FROM claim
+          UNION ALL
+          SELECT d.processed_at, FALSE AS claimed
+            FROM webhook_event_dedup d
+           WHERE d.processor = 'wompi_platform'
+             AND d.event_id = ${eventId}
+             AND NOT EXISTS (SELECT 1 FROM claim)
+        `,
+      );
+
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      if (!row) return 'retry';
+      if (row.claimed) return 'fresh';
+      return row.processed_at ? 'duplicate' : 'retry';
+    } catch (error: any) {
+      this.logger.error(
+        `Fallo al reclamar el evento Wompi ${eventId} en webhook_event_dedup; ` +
+          `se procesa igual para no perderlo: ${error?.message ?? error}`,
+        error?.stack,
+      );
+      return 'retry';
+    }
+  }
+
+  /**
+   * Sella el reclamo: a partir de aquí el evento cuenta como duplicado.
+   *
+   * El `WHERE ... processed_at IS NULL` mantiene el primer sello como el
+   * bueno y hace el UPDATE idempotente. Si el sellado falla no se propaga: el
+   * negocio YA commiteó, así que lo peor que pasa es que una reentrega vuelva
+   * a entrar y se corte contra el estado terminal del pago. Tumbar el turno
+   * aquí sería peor que un reproceso inocuo.
+   */
+  private async sealWebhookEvent(
+    eventId: string,
+    invoiceId: number,
+  ): Promise<void> {
+    try {
+      await this.prisma.withoutScope().$executeRaw(
+        Prisma.sql`
+          UPDATE webhook_event_dedup
+             SET processed_at = NOW()
+           WHERE processor = 'wompi_platform'
+             AND event_id = ${eventId}
+             AND processed_at IS NULL
+        `,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `No se pudo sellar processed_at del evento ${eventId} ` +
+          `(invoice ${invoiceId}); una reentrega se reprocesará y cortará ` +
+          `contra el estado terminal del pago: ${error?.message ?? error}`,
+      );
     }
   }
 
@@ -383,6 +557,28 @@ export class SubscriptionWebhookService {
 
     // Idempotent dedup INSERT inside a transaction so concurrent redeliveries
     // serialize on (processor, event_id).
+    //
+    // DECISIÓN — este camino NO adopta el reclamo+confirmación de
+    // `handleWompiEvent`, y no es un olvido:
+    //
+    //   1. Aquí «existe la fila» sigue significando duplicado. Un
+    //      `processed_at` NULL NO habilita reproceso, porque el trabajo de
+    //      abajo pasa por `fraudService.handleChargeback`, que incrementa
+    //      `organizations.chargeback_count` — un contador no idempotente con
+    //      umbral de bloqueo (RNC-30). Reprocesar inflaría el contador y
+    //      podría bloquear a un cliente por un contracargo que ocurrió una
+    //      sola vez. Aquí perder un reintento es más barato que duplicar un
+    //      castigo.
+    //   2. No hace falta sacar el INSERT de la transacción: esta tx sólo
+    //      contiene el INSERT y commitea ANTES de los pasos de negocio, que
+    //      además van en try/catch que no propagan. El reclamo ya sobrevive a
+    //      cualquier fallo posterior — que es la propiedad que faltaba en
+    //      `handleWompiEvent`.
+    //
+    // Lo que sí se adopta es el sello final, pero como observabilidad: al
+    // cerrar se escribe `processed_at` para poder distinguir en la base un
+    // contracargo que llegó y terminó de uno que llegó y murió a mitad. La
+    // decisión de duplicado de arriba no lo lee.
     const dedupResult = await this.prisma.withoutScope().$transaction(
       async (tx) => {
         if (dedupKey) {
@@ -485,6 +681,14 @@ export class SubscriptionWebhookService {
       this.logger.warn(
         `subscription.chargeback.received emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
       );
+    }
+
+    // Sello de observabilidad, no de semántica (ver la DECISIÓN del bloque de
+    // dedup): permite leer en la base qué contracargos cerraron su turno y
+    // cuáles se quedaron a mitad. El descarte por duplicado de este camino
+    // sigue decidiéndose por la mera existencia de la fila.
+    if (dedupKey) {
+      await this.sealWebhookEvent(dedupKey, invoiceId);
     }
   }
 }

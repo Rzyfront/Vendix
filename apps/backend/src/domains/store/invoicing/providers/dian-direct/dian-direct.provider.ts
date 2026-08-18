@@ -65,6 +65,10 @@ import {
   summarizeUblViolations,
 } from './xml/ubl-structure.validator';
 import {
+  DianTotalsValidator,
+  summarizeDianTotalsViolations,
+} from './xml/dian-totals.validator';
+import {
   DianConfigDecrypted,
   DianIssuerData,
   DianCustomerData,
@@ -2685,6 +2689,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     // que validar antes no deja fuera nada que el esquema gobierne.
     this.assertStructurallyValid(xml);
 
+    // Segunda compuerta, sobre el MISMO XML sin firmar: la estructura puede ser
+    // impecable y la totalización no cerrar. Va después porque un documento mal
+    // formado o con la secuencia rota daría lecturas sin sentido acá, y el
+    // mensaje útil es el estructural.
+    this.assertTotalsCoherent(xml);
+
     // Under HSM custody the container may legitimately hold no private key, so a
     // missing password is NOT a missing certificate. Requiring one would make the
     // stronger custody look unconfigured and silently ship unsigned XML in dev.
@@ -2748,6 +2758,42 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       {
         document_root: result.root,
         violation_count: result.violations.length,
+        violations: summary,
+      },
+    );
+  }
+
+  /**
+   * Aborta si la totalización del XML no cierra contra las reglas de la DIAN.
+   *
+   * Bloquea por la misma asimetría que la compuerta estructural: `FAS01b` y
+   * `FAU04` garantizan el rechazo, y ese rechazo quema el consecutivo. Acá no
+   * hay nada perdido — el borrador conserva su número.
+   *
+   * Un documento sin totales que juzgar (`ApplicationResponse`,
+   * `AttachedDocument`) devuelve `root: null` y pasa: no aplicaba.
+   */
+  private assertTotalsCoherent(xml: string): void {
+    const result = DianTotalsValidator.validate(xml);
+    if (result.valid) return;
+
+    const summary = summarizeDianTotalsViolations(result.violations);
+    this.logger.error(
+      `XML con totalización inválida (${result.root ?? 'raíz desconocida'}): ` +
+        `${result.violations.length} violación(es). ${summary.join(' | ')}`,
+    );
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_XSD_002,
+      'El documento generado declara unos totales que la DIAN rechaza, así que ' +
+        'no se transmitió: la numeración autorizada queda intacta y el documento ' +
+        'se puede reemitir apenas se corrija. Es un defecto del generador de XML, ' +
+        'no de los datos capturados — repórtalo con el detalle que acompaña este ' +
+        'error.',
+      {
+        document_root: result.root,
+        violation_count: result.violations.length,
+        rules: [...new Set(result.violations.map((v) => v.rule))],
         violations: summary,
       },
     );

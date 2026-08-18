@@ -19,21 +19,42 @@ describe('SubscriptionWebhookService', () => {
   let paymentsFindFirst: jest.Mock;
   let subsFindUnique: jest.Mock;
   let executeRaw: jest.Mock;
+  let claimQueryRaw: jest.Mock;
+  let sealExecuteRaw: jest.Mock;
+  let transactionMock: jest.Mock;
+  let callOrder: string[];
   let paymentServiceMock: any;
   let fraudServiceMock: any;
   let stateServiceMock: any;
   let eventEmitterMock: any;
 
+  /** Respuesta del CTE de reclamo (ver claimWebhookEvent). */
+  function claimRow(claimed: boolean, processedAt: Date | null) {
+    return [{ processed_at: processedAt, claimed }];
+  }
+
   beforeEach(() => {
-    // The service reaches Prisma exclusively through `withoutScope()` and does
-    // all writes inside `$transaction`. The transaction client shares the SAME
-    // jest.fn instances as the top-level mock so assertions can be written
-    // against either surface.
+    // The service reaches Prisma exclusively through `withoutScope()`. Payment
+    // writes still live inside `$transaction`; el RECLAMO y el SELLO viven
+    // FUERA a propósito, así que tienen sus propios mocks: si alguien los
+    // devuelve al interior de la transacción, estos tests lo detectan por el
+    // orden de invocación.
     paymentsFindFirst = jest.fn();
     subsFindUnique = jest.fn();
-    // `$executeRaw` returns the affected-row count of the dedup
-    // `INSERT ... ON CONFLICT DO NOTHING`: 1 = first delivery, 0 = duplicate.
+    callOrder = [];
+    // `$executeRaw` dentro de la tx: sólo lo usa el dedup del chargeback.
+    // 1 = primera entrega, 0 = duplicado.
     executeRaw = jest.fn().mockResolvedValue(1);
+    // Reclamo fuera de la tx: por defecto, evento nuevo.
+    claimQueryRaw = jest.fn(async () => {
+      callOrder.push('claim');
+      return claimRow(true, null);
+    });
+    // Sello `processed_at` fuera de la tx.
+    sealExecuteRaw = jest.fn(async () => {
+      callOrder.push('seal');
+      return 1;
+    });
 
     const txMock = {
       $executeRaw: executeRaw,
@@ -41,8 +62,15 @@ describe('SubscriptionWebhookService', () => {
       store_subscriptions: { findUnique: subsFindUnique },
     };
 
+    transactionMock = jest.fn(async (cb: any) => {
+      callOrder.push('transaction');
+      return cb(txMock);
+    });
+
     const unscopedMock = {
-      $transaction: jest.fn(async (cb: any) => cb(txMock)),
+      $transaction: transactionMock,
+      $queryRaw: claimQueryRaw,
+      $executeRaw: sealExecuteRaw,
       subscription_payments: { findFirst: paymentsFindFirst },
       store_subscriptions: { findUnique: subsFindUnique },
     };
@@ -232,6 +260,159 @@ describe('SubscriptionWebhookService', () => {
     ).not.toHaveBeenCalled();
   });
 
+  /**
+   * RECLAMO + CONFIRMACIÓN sobre `webhook_event_dedup`.
+   *
+   * El incidente del 17/08/2026: el INSERT del dedup era el paso 1 DENTRO de
+   * la transacción de negocio, así que cualquier throw posterior hacía
+   * rollback y borraba la única evidencia de que el evento había llegado.
+   * Estos tests fijan las tres propiedades que lo impiden: el reclamo se
+   * escribe antes de abrir la transacción, un reclamo sin sellar significa
+   * REPROCESAR (no descartar), y sólo el sello convierte la fila en duplicado.
+   */
+  describe('dedup: reclamo + confirmación', () => {
+    beforeEach(() => {
+      paymentsFindFirst.mockResolvedValue({
+        id: 7,
+        invoice_id: 99,
+        state: 'pending',
+      });
+      paymentServiceMock.markPaymentSucceededFromWebhook.mockResolvedValue({
+        id: 7,
+        state: 'succeeded',
+      });
+    });
+
+    it('reclama ANTES de abrir la transacción de negocio y sella DESPUÉS del commit', async () => {
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      // El orden es la propiedad, no un detalle: un reclamo dentro de la
+      // transacción es un reclamo que el rollback puede borrar.
+      expect(callOrder).toEqual(['claim', 'transaction', 'seal']);
+      expect(claimQueryRaw).toHaveBeenCalledTimes(1);
+      expect(sealExecuteRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('fila existente con processed_at NULL → REPROCESA (intento previo que no terminó)', async () => {
+      claimQueryRaw.mockImplementation(async () => {
+        callOrder.push('claim');
+        return claimRow(false, null);
+      });
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      // Descartarlo sería repetir el fallo del incidente: dar por procesado un
+      // evento que nadie procesó.
+      expect(
+        paymentServiceMock.markPaymentSucceededFromWebhook,
+      ).toHaveBeenCalledTimes(1);
+      expect(sealExecuteRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('fila existente con processed_at puesto → duplicado, se descarta', async () => {
+      claimQueryRaw.mockImplementation(async () => {
+        callOrder.push('claim');
+        return claimRow(false, new Date('2026-08-17T14:47:48Z'));
+      });
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      expect(transactionMock).not.toHaveBeenCalled();
+      expect(
+        paymentServiceMock.markPaymentSucceededFromWebhook,
+      ).not.toHaveBeenCalled();
+      expect(sealExecuteRaw).not.toHaveBeenCalled();
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('si el negocio lanza, el reclamo queda SIN sellar (reprocesable) y la excepción sube', async () => {
+      paymentServiceMock.markPaymentSucceededFromWebhook.mockRejectedValue(
+        new Error('P2028 transaction timeout'),
+      );
+
+      await expect(
+        service.handleWompiEvent({
+          subscriptionId: 42,
+          invoiceId: 99,
+          body: approvedBody(),
+        }),
+      ).rejects.toThrow('P2028 transaction timeout');
+
+      // El reclamo se escribió (vive en otra conexión, el rollback no lo
+      // alcanza) y NO se selló: la reentrega de Wompi o el reconciliador lo
+      // vuelven a intentar, y además queda constancia de que el evento llegó.
+      expect(claimQueryRaw).toHaveBeenCalledTimes(1);
+      expect(sealExecuteRaw).not.toHaveBeenCalled();
+    });
+
+    it('no sella cuando no hay fila de pago: el evento quedó sin aplicar, no terminado', async () => {
+      paymentsFindFirst.mockResolvedValue(null);
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      expect(claimQueryRaw).toHaveBeenCalledTimes(1);
+      expect(sealExecuteRaw).not.toHaveBeenCalled();
+    });
+
+    it('si el reclamo falla se procesa igual: perder un evento genuino es peor que reprocesarlo', async () => {
+      claimQueryRaw.mockRejectedValue(new Error('connection terminated'));
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      expect(
+        paymentServiceMock.markPaymentSucceededFromWebhook,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('cero filas del CTE (carrera con otra entrega) → reprocesa, que es el lado seguro', async () => {
+      claimQueryRaw.mockResolvedValue([]);
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: approvedBody(),
+      });
+
+      expect(
+        paymentServiceMock.markPaymentSucceededFromWebhook,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('un fallo al sellar no tumba el turno: el negocio ya commiteó', async () => {
+      sealExecuteRaw.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(
+        service.handleWompiEvent({
+          subscriptionId: 42,
+          invoiceId: 99,
+          body: approvedBody(),
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(eventEmitterMock.emit).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('chargeback → lock_reason', () => {
     function chargebackBody(overrides: any = {}) {
       return {
@@ -325,6 +506,36 @@ describe('SubscriptionWebhookService', () => {
 
       expect(stateServiceMock.transition).not.toHaveBeenCalled();
       expect(fraudServiceMock.handleChargeback).not.toHaveBeenCalled();
+    });
+
+    it('conserva la semántica vieja: la fila sola ya descarta, sin consultar processed_at', async () => {
+      executeRaw.mockResolvedValue(0);
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      // Decisión deliberada: `fraudService.handleChargeback` incrementa
+      // `organizations.chargeback_count`, un contador NO idempotente con
+      // umbral de bloqueo (RNC-30). Reprocesar aquí podría bloquear a un
+      // cliente por un contracargo que ocurrió una sola vez, así que este
+      // camino NO usa el reclamo con `processed_at`.
+      expect(claimQueryRaw).not.toHaveBeenCalled();
+    });
+
+    it('sella processed_at al cerrar el turno, como observabilidad', async () => {
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      // El sello no cambia la decisión de duplicado de este camino; sirve para
+      // distinguir en la base un contracargo que terminó de uno que murió a
+      // mitad.
+      expect(sealExecuteRaw).toHaveBeenCalledTimes(1);
     });
   });
 

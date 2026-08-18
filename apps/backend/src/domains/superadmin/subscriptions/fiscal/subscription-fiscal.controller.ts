@@ -324,6 +324,31 @@ export class SubscriptionFiscalController {
     );
   }
 
+  /**
+   * ¿Puede emitirse esta factura, SIN emitirla?
+   *
+   * Es un `GET` y una lectura: no crea transmisión, no asigna consecutivo, no
+   * cambia ningún estado. Existe para que nadie tenga que gastar un número
+   * autorizado para descubrir que faltaba un dato — el 17/08/2026 eso fue
+   * exactamente lo que pasó con la primera factura de suscripción.
+   *
+   * Devuelve `blockers[]` con el `fix` de cada uno, `warnings[]`, los importes
+   * que el XML va a declarar (`computed`) y el consecutivo que se asignaría
+   * (`document_number_preview`). Espejo de `GET /store/invoicing/:id/emit-readiness`.
+   */
+  @Get('invoices/:id/emit-readiness')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary:
+      'Check whether a SaaS invoice can be issued electronically, without issuing it',
+  })
+  async invoiceEmitReadiness(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const result = await this.fiscalService.getEmitReadiness(id);
+    return this.responseService.success(result, 'Fiscal emit readiness computed');
+  }
+
   @Post('invoices/:id/issue')
   @HttpCode(HttpStatus.OK)
   @Permissions('superadmin:subscriptions:fiscal:write')

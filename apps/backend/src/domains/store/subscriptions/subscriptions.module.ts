@@ -16,6 +16,11 @@ import { SubscriptionWebhookService } from './services/subscription-webhook.serv
 import { SubscriptionProrationService } from './services/subscription-proration.service';
 import { PromotionalApplyService } from './services/promotional-apply.service';
 import { SubscriptionBillingProfileService } from './services/subscription-billing-profile.service';
+// Prevalidador de identidad del adquiriente, reutilizado TAL CUAL desde el
+// carril de tiendas. Es `@Injectable()` puro —sin Prisma, sin contexto de
+// tienda— así que se declara como provider local en vez de importar
+// `InvoicingModule`, que cerraría un ciclo de módulos.
+import { CustomerFiscalIdentityValidator } from '../invoicing/validators/customer-fiscal-identity.validator';
 import { PromotionalRulesEvaluator } from './evaluators/promotional-rules.evaluator';
 import { PartnerCommissionsService } from './services/partner-commissions.service';
 import { SubscriptionTrialService } from './services/subscription-trial.service';
@@ -72,6 +77,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionWebhookService,
     SubscriptionProrationService,
     PromotionalApplyService,
+    CustomerFiscalIdentityValidator,
     SubscriptionBillingProfileService,
     PromotionalRulesEvaluator,
     PartnerCommissionsService,

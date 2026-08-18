@@ -1787,6 +1787,38 @@ export const ErrorCodes = {
       'Built XML violates the DIAN UBL content model; transmission aborted before signing',
   },
   /**
+   * El XML construido es estructuralmente válido pero su TOTALIZACIÓN no cierra
+   * contra las reglas que la DIAN evalúa por XPath.
+   *
+   * Hermano de `INVOICING_XSD_001` y separado de él a propósito: aquel habla de
+   * qué elementos hay y en qué orden; este, de si los importes que declaran se
+   * respaldan entre sí. Cubre hoy dos reglas, y las dos se descubrieron con un
+   * rechazo real el 17/08/2026 sobre una operación excluida de IVA:
+   *
+   *  · `FAS01b` — aparece `cac:TaxTotal` sin ningún `cac:TaxSubtotal`. Un ítem
+   *    EXCLUIDO (art. 476 ET) no está sujeto y no informa el grupo; un EXENTO
+   *    (art. 477 ET) sí lo informa, con `cbc:Percent` en 0,00.
+   *  · `FAU04` — `cbc:TaxExclusiveAmount` no iguala la suma de las bases que
+   *    declaran las líneas. Una línea que omite su grupo de tributos no aporta
+   *    base gravable y no puede sumar en la cabecera.
+   *
+   * Por qué necesita compuerta propia: el prevalidador de entrada recomputa los
+   * importes con las MISMAS funciones que los escriben —deliberadamente, para no
+   * aprobar un documento distinto del que viaja—, así que un defecto compartido
+   * con el emisor le resulta invisible por construcción. Esta comprobación LEE
+   * el XML que se va a transmitir, y por eso sí lo ve.
+   *
+   * Se corta antes de firmar: la numeración autorizada queda intacta.
+   *
+   * Es un fallo de coherencia interna del generador, nunca del contribuyente.
+   */
+  INVOICING_XSD_002: {
+    code: 'INVOICING_XSD_002',
+    httpStatus: 422,
+    devMessage:
+      'Built XML fails DIAN totalization rules (FAS01b / FAU04); transmission aborted before signing',
+  },
+  /**
    * Una línea declara importe de impuesto pero no declara NINGUNA tarifa de la
    * que derivarlo.
    *
@@ -3755,6 +3787,34 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'The organization is missing fiscal data required by DIAN for the acquirer party',
+  },
+  /**
+   * La identidad fiscal del adquiriente ESTÁ completa —todos los campos
+   * presentes— pero no es emitible: el DV no corresponde al NIT, el municipio
+   * no pertenece al departamento, el correo no tiene forma de correo, o el tipo
+   * de documento contradice al tipo de persona.
+   *
+   * Es un código distinto de `SUBSCRIPTION_FISCAL_001` a propósito. «Falta un
+   * dato» y «el dato que diste no cuadra» se arreglan en pantallas distintas y
+   * con instrucciones distintas, y colapsarlos en un 412 obligaba a la UI a
+   * adivinar cuál de los dos estaba viendo.
+   *
+   * 422, no 412: la petición llegó bien formada y con todo lo exigido; lo que
+   * no se puede procesar es su CONTENIDO. `details.blockers[]` trae un
+   * `{ code, field, problem, fix }` por defecto, tal como lo devuelve
+   * `CustomerFiscalIdentityValidator`, para que la pantalla nombre el clic
+   * exacto en vez de decir «datos inválidos».
+   *
+   * Se emite ANTES de crear la factura y de abrir el widget de pago. Ese orden
+   * es el punto entero: cobrarle a un cliente y descubrir después que su
+   * documento no emite deja el dinero adentro y la factura afuera, que fue
+   * exactamente lo que pasó el 17/08/2026.
+   */
+  SUBSCRIPTION_FISCAL_002: {
+    code: 'SUBSCRIPTION_FISCAL_002',
+    httpStatus: 422,
+    devMessage:
+      'The acquirer fiscal identity is complete but not emittable — see details.blockers',
   },
   SUBSCRIPTION_INTERNAL_ERROR: {
     code: 'SUBSCRIPTION_INTERNAL_ERROR',

@@ -20,3 +20,4 @@ export { RejectPayoutDto } from './reject-payout.dto';
 export { EventsQueryDto } from './events-query.dto';
 export { PreviewTransitionDto } from './preview-transition.dto';
 export { AssignPromoPlanDto } from './assign-promo-plan.dto';
+export { ManualPaymentDto } from './manual-payment.dto';

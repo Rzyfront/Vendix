@@ -43,6 +43,12 @@ describe('SubscriptionPaymentService', () => {
       subscription_payment_methods: {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
+        // `hasRenewalEligiblePmInTx` (introducido con
+        // `renewal-eligibility.contract.ts`) lo llama dentro de la transacción.
+        // Sin declararlo, 15 casos morían con «findMany is not a function»
+        // ANTES de llegar a su aserción: no eran fallos de negocio, eran una
+        // suite ciega que parecía roja por un doble incompleto.
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(),
         updateMany: jest.fn(),
       },
@@ -61,6 +67,13 @@ describe('SubscriptionPaymentService', () => {
       },
       store_subscriptions: {
         findUnique: jest.fn().mockResolvedValue({ state: 'pending_payment' }),
+        // `pauseAutoRenewForMissingCredentialInTx` lo consulta dentro de la
+        // transacción. Devuelve `null` —«no encontró la suscripción»— porque es
+        // el camino NEUTRO: la pausa no se aplica y el resto del flujo sigue
+        // igual que antes de que esa rama existiera.
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
     };
@@ -1929,6 +1942,282 @@ describe('SubscriptionPaymentService', () => {
       // Pre-create throw — no payment row, no processor call.
       expect(wompiProcessorMock.processPayment).not.toHaveBeenCalled();
       expect(prismaMock.subscription_payments.create).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Incidente Multimarcas Ever (17/08/2026, store 85 / sub 43 / factura 17):
+   * Wompi aprobó $69.900 por Nequi, el webhook no se procesó, y el cron
+   * `reconcile-stuck-pending` anuló la factura. Con el corte antiguo
+   * (`state === 'void' → status:'failed'`) esa anulación era irreversible: la
+   * factura pagada quedaba `void` para siempre.
+   *
+   * Y reabrirla sin más tampoco alcanzaba: el cron había borrado los
+   * `pending_*` de la suscripción, así que `confirmPendingChange` caía en
+   * `CONFIRM_PENDING_MISMATCH` y NO promovía el plan — pago cobrado, tienda
+   * degradada.
+   */
+  describe('syncInvoiceFromGateway — reapertura de factura anulada', () => {
+    const APPROVED_TXN = {
+      id: '1439162-1786996019-19335',
+      status: 'APPROVED',
+    };
+
+    function voidInvoiceFixture(overrides: any = {}) {
+      return {
+        id: 17,
+        store_id: 85,
+        store_subscription_id: 43,
+        state: 'void',
+        to_plan_id: 7,
+        from_plan_id: 5,
+        change_kind: 'upgrade',
+        issued_at: new Date('2026-08-17T14:40:00.000Z'),
+        created_at: new Date('2026-08-17T14:39:00.000Z'),
+        total: new Prisma.Decimal(69900),
+        partner_organization_id: null,
+        split_breakdown: null,
+        ...overrides,
+      };
+    }
+
+    function wireApprovedGateway(txns: any[] = [APPROVED_TXN]) {
+      (service as any).wompiClientFactory.getClient = jest
+        .fn()
+        .mockReturnValue({
+          getTransactionsByReference: jest
+            .fn()
+            .mockResolvedValue({ data: txns }),
+        });
+    }
+
+    function wireTransaction() {
+      const txClient: any = {
+        $executeRaw: jest.fn().mockResolvedValue(1),
+        store_subscriptions: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ id: 43, state: 'grace_soft' }),
+          update: jest.fn().mockResolvedValue({ id: 43 }),
+        },
+      };
+      prismaMock.withoutScope = () => ({
+        $transaction: jest.fn(async (cb: any) => cb(txClient)),
+      });
+      return txClient;
+    }
+
+    beforeEach(() => {
+      prismaMock.subscription_payments.findFirst.mockResolvedValue({
+        id: 900,
+        invoice_id: 17,
+        state: 'pending',
+        metadata: { reference: 'vendix_saas_43_17_1786996019' },
+      });
+      jest
+        .spyOn(service as any, 'enqueueCommissionAccrualPostCommit')
+        .mockResolvedValue(undefined);
+    });
+
+    it('reabre la factura void y restaura los pending_* ANTES de acreditar', async () => {
+      prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+        voidInvoiceFixture(),
+      );
+      wireApprovedGateway();
+      const tx = wireTransaction();
+
+      const markSpy = jest
+        .spyOn(service as any, 'markPaymentSucceededFromWebhook')
+        .mockResolvedValue(null);
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('paid');
+      expect(result.transaction_id).toBe(APPROVED_TXN.id);
+
+      // Los pending_* se reconstruyen desde la propia factura…
+      expect(tx.store_subscriptions.update).toHaveBeenCalledTimes(1);
+      const restore = tx.store_subscriptions.update.mock.calls[0][0];
+      expect(restore.where).toEqual({ id: 43 });
+      expect(restore.data.pending_plan_id).toBe(7);
+      expect(restore.data.pending_change_invoice_id).toBe(17);
+      expect(restore.data.pending_change_kind).toBe('upgrade');
+      expect(restore.data.pending_change_started_at).toEqual(
+        new Date('2026-08-17T14:40:00.000Z'),
+      );
+      // …y `pending_revert_state` toma el estado ACTUAL de la suscripción, para
+      // que un revertido posterior siga siendo un salto legal.
+      expect(restore.data.pending_revert_state).toBe('grace_soft');
+
+      // …y todo eso ocurre ANTES del acredite, que es lo que dispara
+      // confirmPendingChange y su guarda de mismatch.
+      expect(markSpy).toHaveBeenCalledTimes(1);
+      expect(
+        tx.store_subscriptions.update.mock.invocationCallOrder[0],
+      ).toBeLessThan(markSpy.mock.invocationCallOrder[0]);
+    });
+
+    it('registra INVOICE_REOPENED_FROM_GATEWAY al reabrir', async () => {
+      prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+        voidInvoiceFixture(),
+      );
+      wireApprovedGateway();
+      wireTransaction();
+      jest
+        .spyOn(service as any, 'markPaymentSucceededFromWebhook')
+        .mockResolvedValue(null);
+      const warnSpy = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+
+      await service.syncInvoiceFromGateway(17);
+
+      const reopened = warnSpy.mock.calls
+        .map(([arg]: any[]) => {
+          try {
+            return typeof arg === 'string' ? JSON.parse(arg) : null;
+          } catch {
+            return null;
+          }
+        })
+        .find((e: any) => e?.event === 'INVOICE_REOPENED_FROM_GATEWAY');
+
+      expect(reopened).toBeDefined();
+      expect(reopened.invoice_id).toBe(17);
+      expect(reopened.transaction_id).toBe(APPROVED_TXN.id);
+      expect(reopened.previous_state).toBe('void');
+    });
+
+    it('no toca los pending_* en el camino normal (factura issued)', async () => {
+      prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+        voidInvoiceFixture({ state: 'issued' }),
+      );
+      wireApprovedGateway();
+      const tx = wireTransaction();
+      jest
+        .spyOn(service as any, 'markPaymentSucceededFromWebhook')
+        .mockResolvedValue(null);
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('paid');
+      // Estado vivo: el checkout ya los puso, reescribirlos sería pisarlos.
+      expect(tx.store_subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('una factura refunded sigue cortando de inmediato, sin preguntar', async () => {
+      prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+        voidInvoiceFixture({ state: 'refunded' }),
+      );
+      const getClient = jest.fn();
+      (service as any).wompiClientFactory.getClient = getClient;
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result).toEqual({ status: 'failed', already_paid: false });
+      expect(getClient).not.toHaveBeenCalled();
+      expect(prismaMock.subscription_payments.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Tarea 1 — los cuatro `pending` dejan de ser indistinguibles. Cada `reason`
+   * dice si la pasarela CONTESTÓ o no, que es lo que decide si un llamador
+   * puede tratar la factura como no cobrada.
+   */
+  describe('syncInvoiceFromGateway — discriminación del pending', () => {
+    function issuedInvoice() {
+      return {
+        id: 17,
+        store_id: 85,
+        store_subscription_id: 43,
+        state: 'issued',
+        to_plan_id: null,
+        from_plan_id: null,
+        change_kind: null,
+        issued_at: new Date('2026-08-17T14:40:00.000Z'),
+        created_at: new Date('2026-08-17T14:39:00.000Z'),
+        total: new Prisma.Decimal(69900),
+      };
+    }
+
+    beforeEach(() => {
+      prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+        issuedInvoice(),
+      );
+    });
+
+    it('reason=no_reference cuando el pago no trae metadata.reference', async () => {
+      prismaMock.subscription_payments.findFirst.mockResolvedValue({
+        id: 900,
+        state: 'pending',
+        metadata: {},
+      });
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('pending');
+      expect(result.reason).toBe('no_reference');
+    });
+
+    it('reason=gateway_unreachable cuando la consulta a Wompi revienta', async () => {
+      prismaMock.subscription_payments.findFirst.mockResolvedValue({
+        id: 900,
+        state: 'pending',
+        metadata: { reference: 'vendix_saas_43_17_1' },
+      });
+      (service as any).wompiClientFactory.getClient = jest
+        .fn()
+        .mockReturnValue({
+          getTransactionsByReference: jest
+            .fn()
+            .mockRejectedValue(new Error('ETIMEDOUT')),
+        });
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('pending');
+      expect(result.reason).toBe('gateway_unreachable');
+    });
+
+    it('reason=no_transaction_for_reference cuando Wompi responde sin transacciones', async () => {
+      prismaMock.subscription_payments.findFirst.mockResolvedValue({
+        id: 900,
+        state: 'pending',
+        metadata: { reference: 'vendix_saas_43_17_1' },
+      });
+      (service as any).wompiClientFactory.getClient = jest
+        .fn()
+        .mockReturnValue({
+          getTransactionsByReference: jest
+            .fn()
+            .mockResolvedValue({ data: [] }),
+        });
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('pending');
+      expect(result.reason).toBe('no_transaction_for_reference');
+    });
+
+    it('reason=gateway_pending cuando la transacción sigue PENDING en Wompi', async () => {
+      prismaMock.subscription_payments.findFirst.mockResolvedValue({
+        id: 900,
+        state: 'pending',
+        metadata: { reference: 'vendix_saas_43_17_1' },
+      });
+      (service as any).wompiClientFactory.getClient = jest
+        .fn()
+        .mockReturnValue({
+          getTransactionsByReference: jest.fn().mockResolvedValue({
+            data: [{ id: 'txn_1', status: 'PENDING' }],
+          }),
+        });
+
+      const result = await service.syncInvoiceFromGateway(17);
+
+      expect(result.status).toBe('pending');
+      expect(result.reason).toBe('gateway_pending');
     });
   });
 });
