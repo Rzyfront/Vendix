@@ -342,8 +342,11 @@ export async function resolveLooseUnitFallbacks(
       if (chosen) result.set(id, chosen);
     }
   } catch {
-    // Sin fallback legible se conserva la cascada histórica: es el mismo
-    // resultado que antes de esta feature, nunca un cobro inventado.
+    // Sin fallback legible el mapa queda vacío, y con el selector encendido eso
+    // significa UNIDAD SUELTA — no la cascada histórica. Es la degradación
+    // correcta: cobra lo que el comprador vio en el chip, nunca más caro. El
+    // único caso afectado es el producto que apagó su unidad, y ahí un error de
+    // lectura no puede convertirse en un cobro inventado por el bulto.
   }
 
   return result;
