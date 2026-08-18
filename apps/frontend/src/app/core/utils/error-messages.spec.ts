@@ -156,3 +156,51 @@ describe('ERROR_MESSAGES — real unpaid-balance codes stay untouched', () => {
     }
   });
 });
+
+/**
+ * Escáner de facturas del POP. Ningún `INV_SCAN_*` estaba mapeado, así que el
+ * modal enseñaba el devMessage crudo del backend — «AI OCR response parsed but
+ * is missing required fields» —, que ni está en español ni dice qué hacer.
+ */
+describe('ERROR_MESSAGES — INV_SCAN_* (escáner de facturas POP)', () => {
+  const CODES = [
+    'INV_SCAN_NO_FILE',
+    'INV_SCAN_INVALID_FILE',
+    'INV_SCAN_AI_FAIL',
+    'INV_SCAN_PARSE_FAIL',
+    'INV_SCAN_INCOMPLETE',
+  ];
+
+  it('todos tienen copy propia, no el genérico', () => {
+    for (const code of CODES) {
+      const copy = ERROR_MESSAGES[code];
+      expect(copy).toBeDefined();
+      expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+    }
+  });
+
+  it('el devMessage en inglés del 422 nunca llega al usuario', () => {
+    const parsed = parseApiError(
+      new HttpErrorResponse({
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        error: {
+          statusCode: 422,
+          error_code: 'INV_SCAN_INCOMPLETE',
+          message: 'AI OCR response parsed but is missing required fields',
+        },
+      }),
+    );
+
+    expect(parsed.errorCode).toBe('INV_SCAN_INCOMPLETE');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['INV_SCAN_INCOMPLETE']);
+    expect(parsed.userMessage).not.toContain('AI OCR');
+  });
+
+  it('INV_SCAN_INCOMPLETE ya no culpa al total: pide proveedor y productos', () => {
+    const copy = (ERROR_MESSAGES['INV_SCAN_INCOMPLETE'] ?? '').toLowerCase();
+
+    expect(copy).toContain('proveedor');
+    expect(copy).toContain('productos');
+  });
+});

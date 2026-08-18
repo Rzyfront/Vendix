@@ -15,7 +15,10 @@ import { StockValidatorService } from '../../store/inventory/shared/services/sto
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { resolveDefaultSaleUnits } from '../../store/products/services/default-sale-unit.util';
 import type { DefaultSaleUnit } from '../../store/products/services/default-sale-unit.util';
-import { resolvePublicSaleUnitSelections } from '../../store/products/services/public-sale-unit.util';
+import {
+  resolveLooseUnitFallbacks,
+  resolvePublicSaleUnitSelections,
+} from '../../store/products/services/public-sale-unit.util';
 import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
@@ -724,25 +727,26 @@ export class CheckoutService {
 
     let selected: Array<DefaultSaleUnit | null> = items.map(() => null);
 
+    // El flag gatea lectura Y escritura. Si solo gateara el display, un `curl`
+    // con `price_tier_id` vendería en una presentación que el comercio nunca
+    // publicó. Se lee SIEMPRE porque también decide qué significa una línea
+    // SIN tarifa (ver más abajo): una lectura de settings, ya cacheada.
+    let selectionEnabled = false;
+    try {
+      const settings = await this.settingsService.getSettings();
+      selectionEnabled =
+        (settings as any)?.ecommerce?.catalog?.enable_sale_unit_selector ===
+        true;
+    } catch {
+      selectionEnabled = false;
+    }
+
     if (hasExplicitTier) {
       const store_id = RequestContextService.getStoreId();
       if (!store_id) {
         // Sin contexto de tienda no hay forma de aislar el tenant de la tarifa:
         // se rechaza en vez de resolverla contra cualquier tienda.
         throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
-      }
-
-      // El flag gatea lectura Y escritura. Si solo gateara el display, un
-      // `curl` con `price_tier_id` vendería en una presentación que el comercio
-      // nunca publicó.
-      let selectionEnabled = false;
-      try {
-        const settings = await this.settingsService.getSettings();
-        selectionEnabled =
-          (settings as any)?.ecommerce?.catalog?.enable_sale_unit_selector ===
-          true;
-      } catch {
-        selectionEnabled = false;
       }
 
       selected = await resolvePublicSaleUnitSelections(
@@ -752,13 +756,25 @@ export class CheckoutService {
       );
     }
 
-    // El default sigue siendo el fallback de toda línea sin elección explícita.
-    // Aquí el mapa por producto SÍ es correcto: es una lectura de catálogo
-    // (un producto, una presentación por defecto), no estado de línea.
-    const defaults = await resolveDefaultSaleUnits(
-      this.prisma,
-      items.map((item) => item.product_id),
-    );
+    // Qué significa una línea SIN tarifa depende de si la tienda publicó el
+    // selector, y el carrito ya resolvió esto mismo al agregar la línea. Las
+    // dos superficies tienen que coincidir o el checkout cobra una cifra
+    // distinta de la que el comprador vio en su carrito.
+    //
+    //  - Selector APAGADO ⇒ la presentación marcada por defecto (histórico).
+    //  - Selector ENCENDIDO ⇒ la UNIDAD SUELTA, porque la vitrina la ofrece
+    //    como un chip más y no elegir tarifa ES elegirla. Único relleno: el
+    //    producto que apagó su unidad suelta, que cae a su presentación.
+    const productIds = items.map((item) => item.product_id);
+    const storeIdForFallback = RequestContextService.getStoreId();
+    const defaults =
+      selectionEnabled && storeIdForFallback
+        ? await resolveLooseUnitFallbacks(
+            this.prisma as any,
+            productIds,
+            storeIdForFallback,
+          )
+        : await resolveDefaultSaleUnits(this.prisma, productIds);
 
     return items.map(
       (item, index) => selected[index] ?? defaults.get(item.product_id) ?? null,

@@ -797,13 +797,21 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
 
     const detail: any = await service.getProductBySlug('cable');
 
-    expect(detail.available_sale_units).toHaveLength(2);
-    // Orden = el de `listPublicSaleUnitsForProducts` (sort_order), no reordenado.
+    // La UNIDAD SUELTA va primero (`price_tier_id: null`), igual que el POS
+    // abre su menú con "Default (sin tarifa)"; luego las presentaciones en el
+    // orden de `listPublicSaleUnitsForProducts` (sort_order), no reordenado.
+    expect(detail.available_sale_units).toHaveLength(3);
     expect(detail.available_sale_units.map((u: any) => u.price_tier_id)).toEqual(
-      [71, 72],
+      [null, 71, 72],
     );
 
-    const [metro, rollo] = detail.available_sale_units;
+    const [suelta, metro, rollo] = detail.available_sale_units;
+    // La unidad suelta cotiza el precio base y no empaqueta nada.
+    expect(suelta.price).toBe(5);
+    expect(suelta.units_per_package).toBeNull();
+    expect(suelta.available_packages).toBe(88500);
+    // No es la default: el comercio marcó "Metro", y esa marca manda.
+    expect(suelta.is_default).toBe(false);
     // `price` es el precio del PAQUETE ENTERO: nunca `precio * units_per_package`.
     expect(metro.price).toBe(5000);
     expect(rollo.price).toBe(95000);
@@ -821,7 +829,29 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
     expect(detail.price_from).toBe(
       Math.min(...detail.available_sale_units.map((u: any) => u.price)),
     );
+    expect(detail.sale_unit_count).toBe(3);
+  });
+
+  it('deja de ofrecer la unidad suelta cuando el producto la apaga', async () => {
+    await buildModule(true);
+    prisma.products.findFirst.mockResolvedValue({
+      ...SALE_UNIT_PRODUCT,
+      offer_loose_unit: false,
+    });
+
+    const detail: any = await service.getProductBySlug('cable');
+
+    expect(detail.available_sale_units.map((u: any) => u.price_tier_id)).toEqual(
+      [71, 72],
+    );
     expect(detail.sale_unit_count).toBe(2);
+    // Y el "desde" vuelve a ser el de la presentación más barata: publicar el
+    // precio de la unidad que se acaba de retirar sería anunciar algo que el
+    // carrito ya no vende.
+    expect(detail.price_from).toBe(5000);
+    // Sin unidad suelta no hay precio de unidad suelta: `null` devuelve al
+    // consumidor a `final_price`, que es la presentación forzada por defecto.
+    expect(detail.loose_unit_price).toBeNull();
   });
 
   it('deja la respuesta idéntica a la histórica cuando el flag está apagado', async () => {
@@ -835,6 +865,7 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
     expect(off.available_sale_units).toEqual([]);
     expect(off.sale_unit_count).toBe(0);
     expect(off.price_from).toBeNull();
+    expect(off.loose_unit_price).toBeNull();
 
     // ...y lo VIEJO no se mueve ni un centavo. Ésta es la garantía de cero
     // regresión para el cliente que no se actualice.
@@ -870,9 +901,16 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
     const listing: any = await service.getProducts({ page: 1, limit: 10 } as any);
     const card = listing.data[0];
 
-    expect(card.sale_unit_count).toBe(2);
-    expect(card.price_from).toBe(5000);
+    // 3 = unidad suelta + Metro + Rollo. `price_from` es el mínimo REAL que el
+    // comprador puede pagar, que ahora es el de la unidad.
+    expect(card.sale_unit_count).toBe(3);
+    expect(card.price_from).toBe(5);
     expect(card.final_price).toBe(5000);
+    // El listado NO publica `available_sale_units`, así que el carrito invitado
+    // no tiene de dónde sacar el precio de una línea SIN tarifa: `final_price`
+    // es el de la presentación por defecto (5000) y cobraría el rollo por el
+    // metro. `loose_unit_price` es ese precio, y sólo ese.
+    expect(card.loose_unit_price).toBe(5);
     expect(card.available_stock).toBe(88);
     expect(card.available_stock_units).toBe(88500);
     // El listado hidrata en LOTE: una sola lectura de asignaciones por página,

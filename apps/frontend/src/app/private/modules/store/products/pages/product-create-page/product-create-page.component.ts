@@ -1874,6 +1874,9 @@ export class ProductCreatePageComponent {
         kds_id: [null as number | null],
         // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
+        // Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
+        // presentaciones. Encendido por defecto: es como se comporta el POS.
+        offer_loose_unit: [true],
         // ===== Restaurant Suite toggles (Fase B) =====
         is_sellable: [true],
         is_ingredient: [false],
@@ -2121,6 +2124,8 @@ export class ProductCreatePageComponent {
       kds_id: (product as any).kds_id ?? null,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
+      // `undefined` en un producto anterior a la columna ⇒ true (se ofrece).
+      offer_loose_unit: product.offer_loose_unit !== false,
       // Restaurant Suite toggles (Fase B)
       is_sellable: product.is_sellable !== false,
       is_ingredient: !!product.is_ingredient,
@@ -3935,6 +3940,12 @@ export class ProductCreatePageComponent {
             ? this.enabledPriceTierIdsFromRows()
             : (this.product?.enabled_price_tier_ids ?? [])
           : [],
+      // Sin multi-tarifa el flag no tiene sujeto: el producto solo puede
+      // venderse en su unidad, así que se persiste encendido para que apagar
+      // multi-tarifa no deje un producto invendible en la tienda en línea.
+      offer_loose_unit: !!formValue.has_multiple_price_tiers
+        ? formValue.offer_loose_unit !== false
+        : true,
       // Restaurant Suite toggles (Fase B)
       is_sellable: formValue.is_sellable !== false,
       is_ingredient: !!formValue.is_ingredient,

@@ -414,6 +414,16 @@
           }
 
           @if (isMultiTierEnabled) {
+            <!-- Unidad suelta en la vitrina. El POS siempre ofrece la unidad
+                 además de las tarifas; la tienda en línea hace lo mismo salvo
+                 que el comerciante lo apague acá. Apagado, la presentación por
+                 defecto es la que rige el precio publicado. -->
+            <app-setting-toggle
+              formControlName="offer_loose_unit"
+              label="Ofrecer también la unidad suelta en la tienda en línea"
+              description="Muestra la unidad del producto como una opción más junto a sus presentaciones (bulto, caja, six-pack), igual que el Punto de Venta. Apágalo si este producto solo se vende por presentación."
+            ></app-setting-toggle>
+
             <!-- Create-mode warning: product must be saved first -->
             @if (!productId) {
               <div

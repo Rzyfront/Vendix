@@ -3428,10 +3428,15 @@ export const ErrorCodes = {
   },
   /**
    * The model returned syntactically valid JSON but omitted a field the
-   * scanner requires (supplier, line_items or total). Kept distinct from
+   * scanner requires (supplier or a non-empty line_items). Kept distinct from
    * INV_SCAN_PARSE_FAIL: both used to surface as "no se pudo parsear el
    * JSON", which sent debugging down the wrong path — a POS receipt with no
    * printed invoice number or subtotal is an EXTRACTION gap, not a parser bug.
+   *
+   * `total` NO entra en esta lista: una factura multipágina devuelve todas sus
+   * líneas con `total: null` porque el pie quedó fuera de la vista del modelo,
+   * y exigirlo tiraba un escaneo íntegro. Se deriva sumando las líneas y se
+   * avisa en `scan_warnings` (ver normalizeOcrResponse).
    */
   INV_SCAN_INCOMPLETE: {
     code: 'INV_SCAN_INCOMPLETE',

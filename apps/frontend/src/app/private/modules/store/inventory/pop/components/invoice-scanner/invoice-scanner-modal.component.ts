@@ -19,6 +19,7 @@ import { ToggleComponent } from '../../../../../../../shared/components/toggle/t
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
@@ -1132,9 +1133,11 @@ export class InvoiceScannerModalComponent {
           return this.invoiceScannerService.matchProducts(scanResponse.data);
         }),
         catchError((err) => {
-          this.toastService.error(
-            err?.error?.message || err?.message || 'Error al procesar la factura',
-          );
+          // El `message` del backend es el devMessage en inglés
+          // («AI OCR response parsed but is missing required fields»), que
+          // llegaba tal cual al toast. parseApiError aplica la aduana de
+          // idioma y cae al copy curado por `error_code`.
+          this.toastService.error(parseApiError(err).userMessage);
           this.currentStep.set(1);
           this.isScanning.set(false);
           return of(null);

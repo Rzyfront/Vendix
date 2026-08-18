@@ -159,13 +159,25 @@ export class PopWarehouseQuickCreateComponent {
 
     this.inventoryService.createLocation(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        if (response.success && response.data) {
-          this.warehouseCreated.emit(response.data);
+        // Tolera tanto `ApiResponse<T>` (sobre) como el objeto crudo que
+        // entrega el HttpClient cuando un interceptor ya desenvuelve.
+        const created =
+          (response as any)?.data?.id != null
+            ? (response as any).data
+            : (response as any)?.id != null
+              ? response
+              : null;
+
+        if (created && (response as any)?.success !== false) {
+          this.warehouseCreated.emit(created as InventoryLocation);
           this.resetForm();
           this.isOpen.set(false);
           this.close.emit();
+          this.isLoading.set(false);
+        } else {
+          console.error('Warehouse create non-success response:', response);
+          this.isLoading.set(false);
         }
-        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error creating warehouse:', error);

@@ -18,6 +18,7 @@ import {
 } from '../../store/products/services/default-sale-unit.util';
 import {
   listPublicSaleUnitsForProducts,
+  resolveLooseUnitFallbacks,
   resolvePublicSaleUnitSelections,
 } from '../../store/products/services/public-sale-unit.util';
 import { resolveStockUnitsConsumed } from '../../store/products/services/packaging.util';
@@ -595,6 +596,24 @@ export class CartService {
   private async resolveSaleUnit(
     productId: number,
   ): Promise<DefaultSaleUnit | null> {
+    // Con el SELECTOR ENCENDIDO, una línea sin `price_tier_id` es la UNIDAD
+    // SUELTA, no "no eligió". La vitrina ofrece la unidad como un chip más y
+    // la card no deja agregar a ciegas cuando hay varias opciones, así que la
+    // ausencia de tarifa ya es una elección. Rellenarla con la presentación
+    // marcada era el bug visible: el chip decía $1.000 y el carrito cobraba
+    // $2.000, el precio del "Kilo" que el comprador no eligió.
+    //
+    // Con el selector APAGADO no cambia nada: la presentación por defecto
+    // sigue rigiendo, que es la cascada histórica de toda tienda que no
+    // estrenó la feature.
+    if (await this.isSaleUnitSelectorEnabled()) {
+      const fallbacks = await this.resolveLooseUnitFallbacks([
+        Number(productId),
+      ]);
+      // El fallback SOLO devuelve algo si el producto apagó su unidad suelta.
+      return fallbacks.get(Number(productId)) ?? null;
+    }
+
     return resolveDefaultSaleUnit(this.prisma as any, Number(productId));
   }
 
@@ -602,9 +621,31 @@ export class CartService {
   private async resolveSaleUnitsForProducts(
     productIds: number[],
   ): Promise<Map<number, DefaultSaleUnit>> {
-    return resolveDefaultSaleUnits(
+    const ids = (productIds ?? []).map((id) => Number(id));
+    // Misma regla que `resolveSaleUnit`, en lote.
+    if (await this.isSaleUnitSelectorEnabled()) {
+      return this.resolveLooseUnitFallbacks(ids);
+    }
+    return resolveDefaultSaleUnits(this.prisma as any, ids);
+  }
+
+  /**
+   * Productos que apagaron su unidad suelta: la presentación que debe aplicarse
+   * a una línea que no eligió ninguna.
+   *
+   * Sin esto, apagar "ofrecer la unidad suelta" solo escondía el chip: el
+   * `POST /cart/items` sin `price_tier_id` seguía vendiendo la botella. Nunca
+   * lanza — el peor caso es la cascada de precio de siempre.
+   */
+  private async resolveLooseUnitFallbacks(
+    productIds: number[],
+  ): Promise<Map<number, DefaultSaleUnit>> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return new Map();
+    return resolveLooseUnitFallbacks(
       this.prisma as any,
-      (productIds ?? []).map((id) => Number(id)),
+      productIds,
+      storeId,
     );
   }
 

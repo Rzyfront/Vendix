@@ -60,6 +60,7 @@ import {
   PopProductModalResult,
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
@@ -219,6 +220,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [supplierOptions]="shellSupplierOptions()"
       [locationOptions]="shellLocationOptions()"
       [shippingMethodOptions]="shellShippingMethodOptions"
+      [minExpectedDate]="shellMinExpectedDate()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
@@ -231,6 +233,8 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (configOrderDateChange)="onShellOrderDateChange($event)"
       (configExpectedDateChange)="onShellExpectedDateChange($event)"
       (configShippingMethodChange)="onShellShippingMethodChange($event)"
+      (configOpenSupplierModal)="supplierModalOpen.set(true)"
+      (configOpenWarehouseModal)="warehouseModalOpen.set(true)"
     ></app-pop-checkout-shell>
 
     <app-pop-product-config-modal
@@ -397,12 +401,30 @@ export class PopComponent implements OnInit, OnDestroy {
   readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
 
   /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
-  readonly shellOrderDate = computed<string>(() =>
-    this.toISODate(this.cartState()?.orderDate),
-  );
-  readonly shellExpectedDate = computed<string>(() =>
-    this.toISODate(this.cartState()?.expectedDate),
-  );
+  readonly shellOrderDate = computed<string>(() => {
+    const fromCart = this.toISODate(this.cartState()?.orderDate);
+    if (fromCart) return fromCart;
+    // Fallback al abrir el wizard antes de que la suscripción del carrito
+    // haya propagado estado (cartState() todavía es null). Garantiza que el
+    // input date no quede vacío en el primer render del paso Configuración.
+    return toLocalDateString(new Date());
+  });
+  readonly shellExpectedDate = computed<string>(() => {
+    const fromCart = this.toISODate(this.cartState()?.expectedDate);
+    if (fromCart) return fromCart;
+    // Fecha de entrega por defecto: misma fecha que la orden (el operador puede
+    // moverla libremente; el shell la bloquea con `minExpectedDate`).
+    return toLocalDateString(new Date());
+  });
+  /**
+   * Floor para el input de fecha esperada: si llega vacía cae al día actual
+   * (Zoneless ya exige que el `<input type="date" [min]>` sea siempre un
+   * YYYY-MM-DD válido, nunca '' que el navegador interpreta como "sin mínimo").
+   */
+  readonly shellMinExpectedDate = computed<string>(() => {
+    const order = this.toISODate(this.cartState()?.orderDate);
+    return order || toLocalDateString(new Date());
+  });
 
   /**
    * OC ya creada por un intento cuya RECEPCIÓN falló. Mientras esté seteada, el

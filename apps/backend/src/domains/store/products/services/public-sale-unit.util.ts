@@ -55,6 +55,11 @@ type PublicSaleUnitClient = {
   product_price_tier_overrides: { findMany: (args: any) => Promise<any[]> };
 };
 
+/** Cliente del fallback de unidad suelta: además necesita leer el producto. */
+type LooseUnitFallbackClient = PublicSaleUnitClient & {
+  products: { findMany: (args: any) => Promise<any[]> };
+};
+
 export type PublicSaleUnitItem = {
   product_id?: number | null;
   price_tier_id?: number | null;
@@ -281,4 +286,68 @@ export async function listPublicSaleUnitsForProducts(
   }
 
   return { byProduct, defaultTierByProduct };
+}
+
+/**
+ * Presentación que rige cuando el producto NO ofrece su unidad suelta.
+ *
+ * `products.offer_loose_unit = false` es el comercio diciendo "esto no se vende
+ * por unidad". La vitrina deja de ofrecer el chip, pero eso solo cierra la
+ * puerta que se ve: una línea sin `price_tier_id` —un cliente viejo, un `curl`,
+ * un carrito guardado antes del cambio— seguía cayendo a la cascada de precio
+ * base y vendiendo justo lo que el comercio retiró.
+ *
+ * Esta función es la que cierra la otra puerta. Devuelve, para cada producto
+ * con la unidad suelta apagada, la presentación que debe aplicarse: la marcada
+ * `is_default`, o la primera publicable en el orden que definió el comercio.
+ * Un producto que sí ofrece la unidad suelta no aparece en el mapa, de modo que
+ * el caller conserva su cascada intacta y el cambio es no-regresivo.
+ *
+ * No lanza: el peor caso es el comportamiento de antes de la feature.
+ */
+export async function resolveLooseUnitFallbacks(
+  client: LooseUnitFallbackClient,
+  productIds: number[],
+  storeId: number,
+): Promise<Map<number, DefaultSaleUnit>> {
+  const result = new Map<number, DefaultSaleUnit>();
+  const ids = Array.from(
+    new Set(
+      (productIds ?? [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+  if (ids.length === 0) return result;
+
+  try {
+    const closed = await client.products.findMany({
+      where: { id: { in: ids }, offer_loose_unit: false },
+      select: { id: true },
+    });
+    if (closed.length === 0) return result;
+
+    const closedIds = closed.map((p: { id: number }) => Number(p.id));
+    const { byProduct, defaultTierByProduct } =
+      await listPublicSaleUnitsForProducts(client, closedIds, storeId);
+
+    for (const id of closedIds) {
+      const options = byProduct.get(id) ?? [];
+      if (options.length === 0) continue;
+      const markedId = defaultTierByProduct.get(id);
+      const chosen =
+        (markedId != null
+          ? options.find((option) => option.tier.id === markedId)
+          : null) ?? options[0];
+      if (chosen) result.set(id, chosen);
+    }
+  } catch {
+    // Sin fallback legible el mapa queda vacío, y con el selector encendido eso
+    // significa UNIDAD SUELTA — no la cascada histórica. Es la degradación
+    // correcta: cobra lo que el comprador vio en el chip, nunca más caro. El
+    // único caso afectado es el producto que apagó su unidad, y ahí un error de
+    // lectura no puede convertirse en un cobro inventado por el bulto.
+  }
+
+  return result;
 }
