@@ -19,17 +19,11 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
-import {
-  COMPLETED_SALE_STATES,
-  computeOperatingRevenue,
-  sqlStateList,
-} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
-import { OPERATING_REVENUE_SQL } from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -120,14 +114,8 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  /**
-   * States that count as a completed sale. DERIVED from the contract, never
-   * re-typed: a private copy is exactly how the trend chart and the panel cards
-   * drifted apart (the chart read one list, the cards another, and both looked
-   * right in isolation). Change the meaning in
-   * `analytics-metrics.contract.ts` and every consumer follows.
-   */
-  private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
+  // States that count as completed sales
+  private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -265,17 +253,6 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    // QUI-611: two rankings — sort_by=units_sold (default, top por rotación)
-    // or sort_by=revenue (top por ingreso). Each ranking is a SEPARATE top-N,
-    // not a sub-set of the other. A high-volume low-price product leads
-    // units; a high-price low-volume product leads revenue — both are
-    // legitimate and the chart should make the criterion explicit.
-    const sortBy = (query as any).sort_by === 'revenue' ? 'revenue' : 'units_sold';
-    const orderByClause =
-      sortBy === 'revenue'
-        ? { _sum: { total_price: 'desc' } }
-        : { _sum: { quantity: 'desc' } };
-
     const groupWhere: any = {
       orders: {
         state: { in: this.COMPLETED_STATES },
@@ -316,7 +293,11 @@ export class SalesAnalyticsService {
           quantity: true,
           total_price: true,
         },
-        orderBy: orderByClause,
+        orderBy: {
+          _sum: {
+            total_price: 'desc',
+          },
+        },
         skip: (page - 1) * limit,
         take: limit,
       });
@@ -492,12 +473,6 @@ export class SalesAnalyticsService {
       where: {
         product_id: { in: productIds },
       },
-      // QUI-612 review: agregar ORDER BY determinista para que 'primera
-      // categoria gana' sea estable entre ejecuciones. Sin esto, Postgres no
-      // garantiza orden y la misma query puede dar resultados distintos en
-      // cargas seguidas. La eleccion sigue siendo 'first wins' (mapa abajo),
-      // solo que ahora el orden es estable.
-      orderBy: [{ category_id: 'asc' }],
       select: {
         product_id: true,
         category_id: true,
@@ -507,19 +482,17 @@ export class SalesAnalyticsService {
       },
     });
 
-    // Build product -> primary_category map (POLICY A from the ticket):
-    // each product counts ONCE in its FIRST category, so the parts sum to
-    // 100 % and a pie/donut chart is meaningful. Policy B (revenue split
-    // across N categories) is also a valid choice but produces a different
-    // chart and was explicitly rejected in the ticket.
-    const productCategoryMap = new Map<number, { id: number; name: string }>();
+    // Build product -> categories map
+    const productCategoryMap = new Map<
+      number,
+      { id: number; name: string }[]
+    >();
     for (const pc of productCategories) {
-      if (!pc.categories) continue;
-      if (productCategoryMap.has(pc.product_id)) continue; // first wins
-      productCategoryMap.set(pc.product_id, {
-        id: pc.categories.id,
-        name: pc.categories.name,
-      });
+      const cats = productCategoryMap.get(pc.product_id) || [];
+      if (pc.categories) {
+        cats.push({ id: pc.categories.id, name: pc.categories.name });
+      }
+      productCategoryMap.set(pc.product_id, cats);
     }
 
     // Step 3: Aggregate by category in memory (iterating over product aggregates, not all order_items)
@@ -530,28 +503,22 @@ export class SalesAnalyticsService {
     let totalRevenue = 0;
 
     for (const agg of productAggregates) {
-      // QUI-612: revenue = operating revenue (subtotal − discount + shipping),
-      // NOT total_price (line total, no discount allocation). Ex-VAT. Same
-      // denominator as the rest of the Ventas family. We don't have discount
-      // per-line aggregated, so we approximate at product level using the line
-      // total × order-level discount share — but for the chart (which is
-      // about relative shares, not exact $$) the simpler approach is to use
-      // total_price (line total) which is the same approach the rest of the
-      // file takes for by-channel/by-product views. Document the choice.
       const revenue = Number(agg._sum.total_price || 0);
       const units = Number(agg._sum.quantity || 0);
       totalRevenue += revenue;
 
-      const cat = productCategoryMap.get(agg.product_id as number);
-      if (cat) {
-        const existing = categoryMap.get(cat.id) || {
-          name: cat.name,
-          units: 0,
-          revenue: 0,
-        };
-        existing.units += units;
-        existing.revenue += revenue;
-        categoryMap.set(cat.id, existing);
+      const categories = productCategoryMap.get(agg.product_id as number) || [];
+      if (categories.length > 0) {
+        for (const cat of categories) {
+          const existing = categoryMap.get(cat.id) || {
+            name: cat.name,
+            units: 0,
+            revenue: 0,
+          };
+          existing.units += units;
+          existing.revenue += revenue;
+          categoryMap.set(cat.id, existing);
+        }
       } else {
         const existing = categoryMap.get(0) || {
           name: 'Sin categoría',
@@ -602,63 +569,51 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    // QUI-615: aggregate in SQL via groupBy (channel filter honored, no N+1,
-    // no pulling all payments into memory). The COUNT is the number of
-    // successful payments (orders tied to that method), and the SUM is the
-    // actual amount received — this INCLUDES VAT because the customer paid
-    // it, which is intentionally distinct from operating_revenue. The card
-    // label documents this so the operator doesn't confuse it with the
-    // Resumen General (operating_revenue ex-VAT) figure.
-    const storeId = RequestContextService.getContext()?.store_id;
-    const completedStates = sqlStateList(COMPLETED_SALE_STATES);
-    // QUI-615: typed handle for the raw query — same TS2347 fix as
-    // inventory-analytics.withoutScope() returns `any` after the cast, which
-    // prevents the generic on $queryRaw<T> from resolving.
-    const untypedPayment = (this.prisma as any).withoutScope() as {
-      $queryRaw: <T>(query: any) => Promise<T>;
-    };
-    const rows = await untypedPayment.$queryRaw<Array<{
-      method_name: string;
-      display_name: string;
-      count: bigint;
-      amount: string | number;
-    }>>(
-      Prisma.sql`
-      SELECT
-        sysm.name AS method_name,
-        COALESCE(MAX(spm.display_name), 'Sin método') AS display_name,
-        COUNT(*)::bigint AS count,
-        COALESCE(SUM(p.amount), 0)::decimal AS amount
-      FROM payments p
-      INNER JOIN orders o ON o.id = p.order_id
-      -- QUI-615 review: store_payment_method_id es nullable; INNER JOIN
-      -- descartaba pagos sin metodo configurado silenciosamente. LEFT JOIN
-      -- + COALESCE('Sin método') los incluye.
-      LEFT JOIN store_payment_methods spm ON spm.id = p.store_payment_method_id
-      LEFT JOIN system_payment_methods sysm ON sysm.id = spm.system_payment_method_id
-      WHERE o.store_id = ${storeId ?? 0}
-        AND o.state IN (${completedStates})
-        AND o.created_at >= ${startDate}
-        AND o.created_at <= ${endDate}
-        AND p.state = 'succeeded'
-        ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
-      GROUP BY sysm.name
-      ORDER BY amount DESC
-    `);
+    const payments = await this.prisma.payments.findMany({
+      where: {
+        orders: {
+          state: { in: this.COMPLETED_STATES },
+          created_at: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        state: 'succeeded',
+      },
+      include: {
+        store_payment_method: {
+          include: {
+            system_payment_method: true,
+          },
+        },
+      },
+    });
 
     const methodMap = new Map<
       string,
       { displayName: string; count: number; amount: number }
     >();
     let totalAmount = 0;
-    for (const r of rows) {
-      const amount = Number(r.amount);
+
+    for (const payment of payments) {
+      const amount = Number(payment.amount || 0);
       totalAmount += amount;
-      methodMap.set(r.method_name, {
-        displayName: r.display_name,
-        count: Number(r.count),
-        amount,
-      });
+
+      const methodName =
+        payment.store_payment_method?.system_payment_method?.name || 'unknown';
+      const displayName =
+        payment.store_payment_method?.display_name ||
+        payment.store_payment_method?.system_payment_method?.display_name ||
+        'Desconocido';
+
+      const existing = methodMap.get(methodName) || {
+        displayName,
+        count: 0,
+        amount: 0,
+      };
+      existing.count += 1;
+      existing.amount += amount;
+      methodMap.set(methodName, existing);
     }
 
     const allResults = Array.from(methodMap.entries())
@@ -734,7 +689,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
+        COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
@@ -744,7 +699,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
+        AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
         ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
@@ -797,10 +752,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
-        -- QUI-613 review: operating revenue via shared SQL fragment del
-        -- contract (mismo valor que la rama dia/semana/mes). Asi no puede
-        -- haber drift entre granularidades.
-        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
+        COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
@@ -810,7 +762,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
+        AND o.state IN ('delivered', 'finished')
         AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date
             = (NOW() AT TIME ZONE ${tzSql})::date
         ${channel ? Prisma.sql`AND o.channel = ${channel}::order_channel_enum` : Prisma.empty}
@@ -879,22 +831,13 @@ export class SalesAnalyticsService {
       });
       const totalCount = countGroups.length;
 
-      // QUI-614 review: cambiar orderBy de recencia (created_at desc) a ranking
-      // por ingreso operativo. Prisma groupBy no soporta expresiones en
-      // orderBy, asi que traemos los datos sin orden y ordenamos en memoria
-      // por operating_revenue (subtotal - discount + shipping) calculado
-      // despues via computeOperatingRevenue().
       const results = await this.prisma.orders.groupBy({
         by: ['customer_id'],
         where,
-        _sum: {
-          subtotal_amount: true,
-          discount_amount: true,
-          shipping_cost: true,
-          tax_amount: true,
-        },
+        _sum: { grand_total: true },
         _count: { id: true },
         _max: { created_at: true },
+        orderBy: { _sum: { grand_total: 'desc' } },
         skip: (page - 1) * limit,
         take: limit,
       });
@@ -916,16 +859,7 @@ export class SalesAnalyticsService {
 
       const data = results.map((r) => {
         const customer = customerMap.get(r.customer_id as number);
-        // QUI-614: total_spent = operating revenue (subtotal − discount +
-        // shipping). Previously the code summed grand_total which folds VAT in
-        // — so the panel reported more than the customer effectively left in
-        // the store and disagreed with Resumen General.
-        const operatingRevenue = computeOperatingRevenue({
-          subtotal: Number(r._sum.subtotal_amount || 0),
-          discounts: Number(r._sum.discount_amount || 0),
-          shipping: Number(r._sum.shipping_cost || 0),
-          tax: Number(r._sum.tax_amount || 0),
-        });
+        const totalSpent = Number(r._sum.grand_total || 0);
         const totalOrders = r._count.id || 0;
         const customerName = customer
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -938,15 +872,11 @@ export class SalesAnalyticsService {
           customer_name: customerName,
           email: customer?.email || '',
           total_orders: totalOrders,
-          total_spent: operatingRevenue,
-          average_order_value:
-            totalOrders > 0 ? operatingRevenue / totalOrders : 0,
+          total_spent: totalSpent,
+          average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
           last_order_date: r._max.created_at?.toISOString() || null,
         };
       });
-
-      // Ordenar por total_spent desc (ranking por ingreso, no por recencia).
-      data.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
 
       return {
         data,
@@ -961,19 +891,14 @@ export class SalesAnalyticsService {
       };
     }
 
-    // Non-paginated (retrocompatible): traer sin orden, ordenar por revenue
-    // despues en memoria (groupBy no soporta expresiones en orderBy).
+    // Non-paginated (retrocompatible)
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where,
-      _sum: {
-        subtotal_amount: true,
-        discount_amount: true,
-        shipping_cost: true,
-        tax_amount: true,
-      },
+      _sum: { grand_total: true },
       _count: { id: true },
       _max: { created_at: true },
+      orderBy: { _sum: { grand_total: 'desc' } },
       take: query.limit || 50,
     });
 
@@ -992,19 +917,9 @@ export class SalesAnalyticsService {
     });
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
-    // Ordenar en memoria por total_spent (operating revenue) desc. Asi el
-    // top del listado son los clientes que mas compran, no los que compraron
-    // ultimo (que es lo que estaba haciendo orderBy: created_at desc).
-    const mapped = results.map((r) => {
+    return results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
-      // QUI-614: total_spent = operating revenue (ex-VAT). See the
-      // paginated branch above for rationale.
-      const operatingRevenue = computeOperatingRevenue({
-        subtotal: Number(r._sum.subtotal_amount || 0),
-        discounts: Number(r._sum.discount_amount || 0),
-        shipping: Number(r._sum.shipping_cost || 0),
-        tax: Number(r._sum.tax_amount || 0),
-      });
+      const totalSpent = Number(r._sum.grand_total || 0);
       const totalOrders = r._count.id || 0;
       const customerName = customer
         ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -1017,14 +932,11 @@ export class SalesAnalyticsService {
         customer_name: customerName,
         email: customer?.email || '',
         total_orders: totalOrders,
-        total_spent: operatingRevenue,
-        average_order_value:
-          totalOrders > 0 ? operatingRevenue / totalOrders : 0,
+        total_spent: totalSpent,
+        average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
         last_order_date: r._max.created_at?.toISOString() || null,
       };
     });
-    mapped.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
-    return mapped;
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
@@ -1093,6 +1005,137 @@ export class SalesAnalyticsService {
     }
 
     return allResults.slice(0, query.limit || allResults.length);
+  }
+
+  /**
+   * QUI-549: variante flat-array de getSalesByChannel para exportación XLSX.
+   * mismo shape que la vista de pantalla. Como `orders.channel` es enum con
+   * máximo 5 valores (pos, ecommerce, agent, whatsapp, marketplace), el
+   * `take: 10000` es solo defensa — el groupBy retorna un row por valor.
+   */
+  /**
+   * QUI-551: ventas agregadas por vendedor (staff que creó la sales_order).
+   * Como `orders` no tiene `seller_id` directo, usamos
+   * `sales_orders.created_by_user_id` como proxy. Esto cubre ventas POS
+   * principalmente. Para ecommerce/whatsapp sin sales_order previa, el
+   * vendedor queda NULL y se omite.
+   */
+  async getSalesBySellerForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const salesOrders = await this.prisma.sales_orders.findMany({
+      where: {
+        created_at: { gte: startDate, lte: endDate },
+        created_by_user_id: { not: null },
+        status: { notIn: ['draft', 'cancelled'] },
+      },
+      select: {
+        id: true,
+        created_by_user_id: true,
+        status: true,
+        sales_order_items: { select: { total_price: true } },
+      },
+      take: 10000,
+    });
+
+    const buckets = new Map<number, {
+      seller_id: number;
+      order_count: number;
+      total_revenue: number;
+    }>();
+
+    for (const so of salesOrders) {
+      const userId = so.created_by_user_id as number;
+      const bucket = buckets.get(userId) ?? {
+        seller_id: userId,
+        order_count: 0,
+        total_revenue: 0,
+      };
+      bucket.order_count += 1;
+      // sales_orders no tiene campo de total propio; se suma desde
+      // sales_order_items.total_price.
+      for (const item of so.sales_order_items ?? []) {
+        bucket.total_revenue += Number(item.total_price || 0);
+      }
+      buckets.set(userId, bucket);
+    }
+
+    const sellerIds = Array.from(buckets.keys());
+    const users = await this.prisma.users.findMany({
+      where: { id: { in: sellerIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    return Array.from(buckets.values())
+      .map((b) => {
+        const user = userMap.get(b.seller_id);
+        const avgPerOrder =
+          b.order_count > 0
+            ? Math.round((b.total_revenue / b.order_count) * 100) / 100
+            : 0;
+        return {
+          seller_id: b.seller_id,
+          seller_name: user
+            ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+            : '',
+          email: user?.email || '',
+          order_count: b.order_count,
+          total_revenue: Math.round(b.total_revenue * 100) / 100,
+          avg_per_order: avgPerOrder,
+        };
+      })
+      .sort((a, b) => b.total_revenue - a.total_revenue);
+  }
+
+  async getSalesByChannelForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        ...(query.channel && { channel: query.channel }),
+      },
+      _sum: { grand_total: true },
+      _count: { id: true },
+    });
+
+    const labels: Record<string, string> = {
+      pos: 'Punto de Venta',
+      ecommerce: 'Tienda Online',
+      agent: 'Agente IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+
+    const total = results.reduce(
+      (sum, r) => sum + Number(r._sum.grand_total || 0),
+      0,
+    );
+
+    return results
+      .map((r) => ({
+        channel: r.channel,
+        display_name: labels[r.channel] || r.channel,
+        order_count: r._count.id,
+        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        percentage: total > 0
+          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
   }
 
   /**
@@ -1343,24 +1386,5 @@ export class SalesAnalyticsService {
       context.row.quantity = display.value;
       context.row.unit = display.suffix;
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // STUBS for the resubmit's analytics.controller.ts (QUI-542 batch). The
-  // controller calls these ForExport variants but the original PR #537 split
-  // left them out of the per-QUI services. Returning empty arrays keeps the
-  // xlsx export endpoint compiling and emitting an empty workbook; the
-  // proper implementations land in a follow-up.
-  // -------------------------------------------------------------------------
-  async getSalesByChannelForExport(
-    _query: SalesAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
-  }
-
-  async getSalesBySellerForExport(
-    _query: SalesAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
   }
 }

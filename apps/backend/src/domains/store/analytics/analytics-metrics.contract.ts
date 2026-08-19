@@ -80,6 +80,21 @@ export const PURCHASE_COMMITTED_STATES = [
 ] as const;
 
 /**
+ * Sales-order states that count as a CONSUMMATED sale of the period.
+ *
+ * A `sales_order` is a PoS / pre-invoice entity that progresses from draft to
+ * confirmed to shipped to invoiced. The economic sale is realized at `shipped`
+ * (goods left) and remains at `invoiced` (fiscal document emitted); the two
+ * states are interchangeable for revenue/totals reporting. `draft` is a
+ * shopping list, `confirmed` is an in-flight order, `cancelled` is undone.
+ *
+ * Mirrors the sames naming convention as `COMPLETED_SALE_STATES` (which
+ * concerns `orders`) — kept separate so the contract makes the universe
+ * explicit at the call site.
+ */
+export const SALES_ORDER_COMPLETED_STATES = ['shipped', 'invoiced'] as const;
+
+/**
  * Tipos de movimiento que SUMAN existencias.
  *
  * `production` entra: producir una receta crea unidades del producto terminado,
