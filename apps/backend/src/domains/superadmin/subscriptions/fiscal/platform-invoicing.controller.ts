@@ -315,4 +315,67 @@ export class PlatformInvoicingController {
       'Cotizacion TRM resuelta',
     );
   }
+
+  /**
+   * Preview del PDF del documento platform. Reusa
+   * \`InvoicePdfService.previewPdf\` del riel tienda (builder
+   * ExcelJS-style). Devuelve un stream `application/pdf` directamente.
+   *
+   * Razon para no persistir en S3: el preview es pesado
+   * (regenera cada vez). En el riel tienda, regenerate es el
+   * endpoint que persiste si la version actual no existe.
+   */
+  @Post('invoices/:id/preview-pdf')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Preview del PDF del documento platform' })
+  async previewPdf(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    // Phase B.5: invocar invoicePdfService.previewPdf(transmissionId)
+    // Por ahora respondemos 404 con un shape consistente hasta que
+    // B.5 conecte el provider PDF del riel tienda.
+    throw new VendixHttpException(
+      {
+        code: 'PDF_NOT_READY',
+        httpStatus: 503,
+      } as any,
+      `PDF preview para transmision #${id} no disponible todavia — pendiente B.5`,
+    );
+  }
+
+  /**
+   * Descarga del PDF persistido en S3 (cuando ya se genero y se subio
+   * en la emission). El detail endpoint ya renderiza el boton que
+   * pega a esta ruta.
+   */
+  @Get('invoices/:id/pdf')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Descarga PDF persistido en S3' })
+  async getPdf(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    throw new VendixHttpException(
+      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
+      `PDF persistido para transmision #${id} no disponible todavia — pendiente B.5`,
+    );
+  }
+
+  /**
+   * Fuerza regeneracion del PDF: borra el actual en S3 y reconstruye
+   * desde el snapshot del invoice. Util cuando un cambio normativo (ej.
+   * Annex 1.10) requiere un reissue visual sin reemitir a la DIAN.
+   */
+  @Post('invoices/:id/pdf/regenerate')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Regenera el PDF sin reemitir a la DIAN' })
+  async regeneratePdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    throw new VendixHttpException(
+      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
+      `Regeneracion PDF para transmision #${id} no disponible — pendiente B.5`,
+    );
+  }
 }
