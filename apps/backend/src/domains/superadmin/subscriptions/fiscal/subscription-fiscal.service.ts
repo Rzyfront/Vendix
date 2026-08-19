@@ -2056,7 +2056,7 @@ export class SubscriptionFiscalService {
           `Factura de servicios generada desde super-admin el ${firstAttemptDate}`,
           'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
           `(retry) ${localDateString(new Date(), PLATFORM_TIMEZONE)} ${localTimeString(new Date(), PLATFORM_TIMEZONE)}`,
-        ],
+        ].join('\n'),
         order_reference: null,
         resolution_number: resolution.resolution_number,
         technical_key: this.technicalKeyVault.reveal(resolution),
@@ -2268,7 +2268,7 @@ export class SubscriptionFiscalService {
           notes: [
             `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
             'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-          ],
+          ].join('\n'),
           order_reference: null,
           resolution_number: resolution.resolution_number,
           technical_key: this.technicalKeyVault.reveal(resolution),
@@ -3993,7 +3993,18 @@ export class SubscriptionFiscalService {
     if (!settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
-    const lockKey = `subscription_fiscal_resolution:${settings.accounting_entity_id}:${settings.invoice_resolution_id}`;
+    // Llave unificada con el riel de tienda. Antes la plataforma usaba un
+    // namespace propio (`subscription_fiscal_resolution:...`) sobre la misma
+    // entidad contable y el mismo `document_type`. Las dos transacciones
+    // (rail SaaS y rail tienda) no se serializaban entre sí: ambas leían
+    // `current_number` antes del UPDATE row-lock de Postgres, calculaban el
+    // mismo `next = current_number + 1` y emitían documentos con números
+    // consecutivos idénticos — irrecuperables ante la DIAN. A.4
+    // (habilitar facturación en tienda 1) prendía exactamente este semáforo.
+    // Adoptamos la misma llave del `invoice-number-generator.ts:110` para
+    // que `pg_advisory_xact_lock` serialice TODO el espacio
+    // (entidad, document_type) en una sola asignación concurrente.
+    const lockKey = `invoice_resolution:${settings.accounting_entity_id}:sales_invoice`;
     // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
     // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
     // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
