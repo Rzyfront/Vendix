@@ -399,6 +399,23 @@ export class SubscriptionFiscalController {
     return this.responseService.success(data, 'Subscription invoice detail retrieved');
   }
 
+  /**
+   * Detalle de platform-invoice en ruta separada. Aquí se monta el id de
+   * la `fiscal_transmissions` fila, no el de `subscription_invoices`:
+   * las dos tablas son secuencias independientes y compartir `/invoices/:id`
+   * daba id colisión (dos facturas con mismo número, una de cada riel).
+   */
+  @Get('platform-invoices/:id')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'Get platform invoice detail by transmission id' })
+  async getPlatformInvoiceDetail(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const data = await this.fiscalService.getPlatformInvoiceDetail(id);
+    if (!data) {
+      throw new NotFoundException('Platform invoice not found');
+    }
+    return this.responseService.success(data, 'Platform invoice detail retrieved');
+  }
+
   @Post('invoices')
   @HttpCode(HttpStatus.CREATED)
   @Permissions('superadmin:subscriptions:fiscal:write')
