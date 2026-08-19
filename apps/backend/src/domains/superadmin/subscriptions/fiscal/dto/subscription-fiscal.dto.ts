@@ -348,6 +348,21 @@ export class PlatformInvoiceCustomerDto {
   @IsString()
   @MaxLength(200)
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  address_line?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  department_code?: string;
 }
 
 export class CreatePlatformInvoiceDto {

@@ -102,6 +102,36 @@ interface CreatePlatformInvoiceResponse {
               class="mt-1 w-full border rounded px-3 py-2"
             />
           </label>
+          <label class="block mt-2 text-sm">
+            <span class="text-gray-700">Dirección (opcional)</span>
+            <input
+              type="text"
+              [(ngModel)]="customer.address_line"
+              name="address_line"
+              class="mt-1 w-full border rounded px-3 py-2"
+            />
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block mt-2 text-sm">
+              <span class="text-gray-700">Ciudad</span>
+              <input
+                type="text"
+                [(ngModel)]="customer.city"
+                name="city"
+                class="mt-1 w-full border rounded px-3 py-2"
+              />
+            </label>
+            <label class="block mt-2 text-sm">
+              <span class="text-gray-700">Departamento (código)</span>
+              <input
+                type="text"
+                [(ngModel)]="customer.department_code"
+                name="department_code"
+                maxlength="2"
+                class="mt-1 w-full border rounded px-3 py-2"
+              />
+            </label>
+          </div>
         </fieldset>
 
         <fieldset class="bg-white rounded-lg shadow p-4">
@@ -189,6 +219,9 @@ export class PlatformInvoiceCreateComponent {
     tax_id: '',
     tax_id_dv: '',
     email: '',
+    address_line: '',
+    city: '',
+    department_code: '',
   };
 
   readonly items = signal<Array<{ description: string; quantity: number; unit_price: number }>>([
@@ -223,6 +256,9 @@ export class PlatformInvoiceCreateComponent {
           tax_id: this.customer.tax_id,
           tax_id_dv: this.customer.tax_id_dv || undefined,
           email: this.customer.email || undefined,
+          address_line: this.customer.address_line || undefined,
+          city: this.customer.city || undefined,
+          department_code: this.customer.department_code || undefined,
         },
         items: this.items(),
         currency: 'COP',

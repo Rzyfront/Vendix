@@ -1978,7 +1978,14 @@ export class SubscriptionFiscalService {
         customer_name: dto.customer.legal_name,
         customer_tax_id: dto.customer.tax_id,
         customer_email: dto.customer.email ?? null,
-        customer_address: null, // TODO: dirección del destinatario
+        customer_address: dto.customer.address_line
+          ? {
+              line: dto.customer.address_line,
+              city: dto.customer.city ?? null,
+              department_code: dto.customer.department_code ?? null,
+              country_code: 'CO',
+            }
+          : null,
         customer_document_type: '31',
         customer_verification_digit: dto.customer.tax_id_dv ?? null,
         customer_person_type: '2',
