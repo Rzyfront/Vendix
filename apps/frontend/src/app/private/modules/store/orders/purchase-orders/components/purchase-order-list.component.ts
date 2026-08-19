@@ -154,9 +154,9 @@ export class PurchaseOrderListComponent {
       transform: (value: string) =>
         value ? new Date(value).toLocaleDateString() : '-',
     },
-    // Bug 4 frontend: columna "Próximo pago" derivada del backend
-    // (`next_payment_date` + `next_payment_due_in_days`). Badge de color
-    // según urgencia: verde >7d, amarillo ≤7d, rojo vencido, gris sin plan.
+    // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximidad.
+    // Verde > 7d, amarillo 1-7d, naranja 0d (vence hoy), rojo < 0 (vencida),
+    // gris null (sin plan). Color via `colorFn` que toma el row directo.
     {
       key: 'next_payment',
       label: 'Próximo pago',
@@ -166,13 +166,18 @@ export class PurchaseOrderListComponent {
         type: 'custom',
         size: 'sm',
         colorMap: {
-          // computed en runtime vía transform: el color va en el label HTML,
-          // no en colorMap, porque el badge component soporta 1 color estático
-          // por celda. Aquí dejamos fallback neutro.
           ok: '#10b981',
           soon: '#f59e0b',
           overdue: '#ef4444',
           none: '#9ca3af',
+        },
+        colorFn: (_value: any, item?: any) => {
+          const days = item?.next_payment_due_in_days;
+          if (days === null || days === undefined) return '#9ca3af'; // gris
+          if (days < 0) return '#ef4444'; // rojo vencido
+          if (days === 0) return '#f97316'; // naranja vence hoy
+          if (days <= 7) return '#f59e0b'; // amarillo 1-7d
+          return '#10b981'; // verde > 7d
         },
       },
       transform: (value: any, row?: any) =>
