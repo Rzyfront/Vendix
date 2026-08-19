@@ -1642,6 +1642,16 @@ export const ErrorCodes = {
     httpStatus: 503,
     devMessage: 'PDF generation pipeline not yet wired (phase B.5)',
   },
+  INVOICING_PLATFORM_READINESS_001: {
+    code: 'INVOICING_PLATFORM_READINESS_001',
+    httpStatus: 409,
+    devMessage: 'Platform invoice transmission has no fiscal number assigned',
+  },
+  INVOICING_PLATFORM_READINESS_002: {
+    code: 'INVOICING_PLATFORM_READINESS_002',
+    httpStatus: 409,
+    devMessage: 'Platform invoice not yet emitted to DIAN (no CUFE)',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,

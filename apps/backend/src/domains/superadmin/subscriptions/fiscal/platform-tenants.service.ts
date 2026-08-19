@@ -100,7 +100,21 @@ export class PlatformTenantsService {
       return row ? this.storeToTenantResult(row, row.addresses[0] ?? null) : null;
     }
     const row = await prisma.organizations.findFirst({
-      where: { id: args.id, state: 'active' },
+      where: {
+        id: args.id,
+        state: 'active',
+        // Cross-platform guard: una VENDIX_ADMIN solo puede ver
+        // orgs de su propia plataforma. Si el caller tiene un
+        // `organization_id` (orgId del riel super-admin), excluye
+        // las plataformas ajenas (cada Vendix platform tiene su
+        // propio org_id distinto).
+        // AR2-03: el rail plataforma NO factura a si mismo. Excluir
+        // la orgId del caller (Vendix Corp) — las otras orgs son
+        // tenants facturables.
+        NOT: args.organizationId
+          ? { id: { equals: args.organizationId } }
+          : undefined,
+      },
       include: {
         addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
       },
@@ -123,7 +137,7 @@ export class PlatformTenantsService {
               { legal_name: { contains: args.q, mode: 'insensitive' } },
               { name: { contains: args.q, mode: 'insensitive' } },
               { slug: { contains: args.q, mode: 'insensitive' } },
-              ...(/^\d+$/.test(args.q) ? [{ tax_id: { contains: args.q } }] : []),
+              ...(/^\d+$/.test(args.q) ? [{ tax_id: { equals: args.q } }] : []),
             ],
           }
         : {}),
@@ -151,7 +165,7 @@ export class PlatformTenantsService {
               { legal_name: { contains: args.q, mode: 'insensitive' } },
               { name: { contains: args.q, mode: 'insensitive' } },
               { slug: { contains: args.q, mode: 'insensitive' } },
-              ...(/^\d+$/.test(args.q) ? [{ tax_id: { contains: args.q } }] : []),
+              ...(/^\d+$/.test(args.q) ? [{ tax_id: { equals: args.q } }] : []),
             ],
           }
         : {}),

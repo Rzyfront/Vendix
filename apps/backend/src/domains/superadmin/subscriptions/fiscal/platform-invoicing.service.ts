@@ -122,6 +122,24 @@ export class PlatformInvoicingService {
         validationError,
       );
     }
+    // AR2-R Validation: USD sin exchange_rate > 0 produce 201 con
+    // subtotal en COP sin conversion (legacy ignora exchange_rate).
+    // Forzar 422 INVOICING_TRM_001 con remediacion concreta.
+    if (args.dto.currency?.iso_4217 === 'USD') {
+      const rate = Number(args.dto.currency?.exchange_rate);
+      if (!args.dto.currency?.exchange_rate || rate <= 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_TRM_001,
+          'Factura en USD requiere exchange_rate > 0 (TRM oficial o tasa manual).',
+        );
+      }
+      if (rate === 1) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_TRM_001,
+          'exchange_rate = 1 no es una tasa valida (1 = identity, no conversion).',
+        );
+      }
+    }
 
     // BYPASS Fase B.1: el facade original reusaba `invoicingService.create()`
     // del riel tienda, pero esa API rechaza el wrapper con metadata platform
