@@ -1,13 +1,9 @@
-import { Component, input, output, signal, inject, effect } from '@angular/core';
+import { Component, input, output, signal, computed } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import {
-  SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
+import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
 type DatePreset =
   | 'today'
@@ -17,12 +13,16 @@ type DatePreset =
   | 'thisMonth'
   | 'lastMonth'
   | 'thisYear'
-  | 'lastYear';
+  | 'lastYear'
+  | 'custom';
 
 @Component({
   selector: 'vendix-date-range-filter',
   standalone: true,
-  imports: [FormsModule, InputComponent, SelectorComponent],
+imports: [
+    FormsModule,
+    SelectorComponent,
+  ],
   template: `
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
       <!-- Preset Selector -->
@@ -32,66 +32,45 @@ type DatePreset =
           [ngModel]="selectedPreset()"
           (ngModelChange)="onPresetChange($event)"
           size="sm"
-          label="Período"
-          placeholder="Selecciona un período"
+          placeholder="Período"
         ></app-selector>
       </div>
 
-      <!-- Start date -->
-      <div class="w-full sm:w-40 flex-shrink-0">
-        <app-input
-          type="date"
-          size="sm"
-          [label]="'Desde'"
-          [ngModel]="startDate()"
-          (ngModelChange)="onStartDateChange($event)"
-          [max]="endDate() || undefined"
-        ></app-input>
-      </div>
-
-      <!-- End date -->
-      <div class="w-full sm:w-40 flex-shrink-0">
-        <app-input
-          type="date"
-          size="sm"
-          [label]="'Hasta'"
-          [ngModel]="endDate()"
-          (ngModelChange)="onEndDateChange($event)"
-          [min]="startDate() || undefined"
-        ></app-input>
-      </div>
-
-      <!--
-        QUI-609 chip — when a preset is active and the local dates are empty
-        (meaning the backend resolves the range against stores.timezone),
-        surface that fact so the user knows why the inputs look blank and what
-        the analytics screen will compute against. The fully resolved range
-        (e.g. "1–4 ago 2026 · hora de la tienda") would require every analytics
-        response to carry period: { start_date, end_date, label } — a follow-up
-        change. For now the chip shows the preset name as the visible anchor of
-        "what range is active".
-      -->
-      @if (selectedPreset() && !startDate() && !endDate()) {
-        <span
-          class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200"
-          data-testid="date-range-resolved-chip"
-          aria-live="polite"
-        >
-          {{ activePresetLabel() }} · hora de la tienda
-        </span>
+      <!-- Date Range Inputs (only when custom is selected) -->
+      @if (selectedPreset() === 'custom') {
+        <div class="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="date"
+            [ngModel]="customStartDate()"
+            (ngModelChange)="onStartDateChange($event)"
+            class="flex-1 sm:flex-none px-3 py-2 text-sm border-[3px] border-black rounded-2xl bg-background text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors w-full sm:w-32"
+          />
+          <span class="text-text-secondary text-sm">-</span>
+          <input
+            type="date"
+            [ngModel]="customEndDate()"
+            (ngModelChange)="onEndDateChange($event)"
+            class="flex-1 sm:flex-none px-3 py-2 text-sm border-[3px] border-black rounded-2xl bg-background text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors w-full sm:w-32"
+          />
+        </div>
+      } @else {
+        <!-- Compact date range display pill -->
+        <div class="hidden sm:flex items-center gap-2 text-sm">
+          <span class="px-3 py-1.5 bg-background text-text-primary rounded-2xl border-[3px] border-black font-medium">
+            {{ dateRangeLabel() }}
+          </span>
+        </div>
       }
     </div>
   `,
 })
 export class DateRangeFilterComponent {
-  private readonly dateRangeSync = inject(DateRangeSyncService);
-
   value = input<DateRangeFilter | undefined>();
   valueChange = output<DateRangeFilter>();
 
   selectedPreset = signal<DatePreset>('thisMonth');
-  startDate = signal<string>('');
-  endDate = signal<string>('');
+  customStartDate = signal<string>('');
+  customEndDate = signal<string>('');
 
   presetOptions: SelectorOption[] = [
     { value: 'today', label: 'Hoy' },
@@ -102,67 +81,133 @@ export class DateRangeFilterComponent {
     { value: 'lastMonth', label: 'Mes Pasado' },
     { value: 'thisYear', label: 'Este Año' },
     { value: 'lastYear', label: 'Año Pasado' },
+    { value: 'custom', label: 'Personalizado' },
   ];
 
-  constructor() {
-    // React to external value changes (e.g., navigation from analytics to reports)
-    effect(() => {
-      const v = this.value();
-      if (v?.preset && v.preset !== 'custom') {
-        this.selectedPreset.set(v.preset as DatePreset);
-      }
-      if (v?.start_date) {
-        this.startDate.set(v.start_date);
-      }
-      if (v?.end_date) {
-        this.endDate.set(v.end_date);
-      }
+  dateRangeLabel = computed(() => {
+    const range = this.getDateRange(this.selectedPreset());
+    if (!range) return '';
+    const start = new Date(range.start_date).toLocaleDateString('es-CO', {
+      day: '2-digit',
+      month: 'short',
+      timeZone: 'UTC',
     });
+    const end = new Date(range.end_date).toLocaleDateString('es-CO', {
+      day: '2-digit',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    return `${start} - ${end}`;
+  });
+
+  constructor() {
+    const initialValue = this.value();
+    if (initialValue?.preset) {
+      this.selectedPreset.set(initialValue.preset);
+    }
+    if (initialValue?.start_date) {
+      this.customStartDate.set(initialValue.start_date);
+    }
+    if (initialValue?.end_date) {
+      this.customEndDate.set(initialValue.end_date);
+    }
+
+    if (!this.customStartDate() || !this.customEndDate()) {
+      const defaultRange = this.getDateRange(this.selectedPreset());
+      if (defaultRange) {
+        this.customStartDate.set(defaultRange.start_date);
+        this.customEndDate.set(defaultRange.end_date);
+      }
+    }
   }
 
   onPresetChange(preset: string): void {
     this.selectedPreset.set(preset as DatePreset);
-    // QUIs-609: the device clock does NOT define "today" — the store's timezone
-    // does. We let the backend resolve the preset against `stores.timezone`
-    // (via `localCalendarRange` in `store-timezone.util`), so we no longer
-    // derive `start_date` / `end_date` locally. Empty strings are sent so the
-    // service knows to drop them and forward `date_preset` instead. The
-    // resolved range comes back via `value()` from the parent and the effect
-    // above repopulates the inputs.
-    this.startDate.set('');
-    this.endDate.set('');
-    this.emitRange(preset as DatePreset);
+    if (preset !== 'custom') {
+      const range = this.getDateRange(preset as DatePreset);
+      if (range) {
+        this.customStartDate.set(range.start_date);
+        this.customEndDate.set(range.end_date);
+        this.valueChange.emit(range);
+      }
+    }
   }
 
   onStartDateChange(date: string): void {
-    this.startDate.set(date);
-    // Clamp end_date if it is now before start_date.
-    const end = this.endDate();
-    const clampedEnd = end && end < date ? date : end;
-    if (clampedEnd !== end) {
-      this.endDate.set(clampedEnd!);
-    }
-    this.emitRange('custom');
+    this.customStartDate.set(date);
+    this.selectedPreset.set('custom');
+    this.emitCustomRange();
   }
 
   onEndDateChange(date: string): void {
-    this.endDate.set(date);
-    this.emitRange('custom');
+    this.customEndDate.set(date);
+    this.selectedPreset.set('custom');
+    this.emitCustomRange();
   }
 
-  private emitRange(preset: DateRangeFilter['preset']): void {
-    const range: DateRangeFilter = {
-      start_date: this.startDate(),
-      end_date: this.endDate(),
+  private emitCustomRange(): void {
+    const start = this.customStartDate();
+    const end = this.customEndDate();
+    if (start && end) {
+      this.valueChange.emit({
+        start_date: start,
+        end_date: end,
+        preset: 'custom',
+      });
+    }
+  }
+
+  private getDateRange(preset: DatePreset): DateRangeFilter | null {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start: Date;
+    let end: Date;
+
+    switch (preset) {
+      case 'today':
+        start = today;
+        end = today;
+        break;
+      case 'yesterday':
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        end = start;
+        break;
+      case 'thisWeek':
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        end = today;
+        break;
+      case 'lastWeek':
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay() - 7);
+        end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        break;
+      case 'thisMonth':
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        end = today;
+        break;
+      case 'lastMonth':
+        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        end = new Date(today.getFullYear(), today.getMonth(), 0);
+        break;
+      case 'thisYear':
+        start = new Date(today.getFullYear(), 0, 1);
+        end = today;
+        break;
+      case 'lastYear':
+        start = new Date(today.getFullYear() - 1, 0, 1);
+        end = new Date(today.getFullYear() - 1, 11, 31);
+        break;
+      default:
+        return null;
+    }
+
+    return {
+      start_date: toLocalDateString(start),
+      end_date: toLocalDateString(end),
       preset,
     };
-    this.dateRangeSync.setDateRange(range);
-    this.valueChange.emit(range);
-  }
-
-  /** Human label for the chip, derived from the active preset. */
-  activePresetLabel(): string {
-    const opt = this.presetOptions.find((o) => o.value === this.selectedPreset());
-    return opt?.label ?? String(this.selectedPreset());
   }
 }

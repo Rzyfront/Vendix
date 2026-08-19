@@ -4,38 +4,24 @@ export interface AbandonedCartsSummary {
   total_abandoned_carts: number;
   total_abandoned_value: number;
   abandonment_rate: number;
-  /**
-   * QUI-628: growth badge. The OLD code hardcoded 0; the contract requires
-   * `null` when the previous period had no base (vs 0%, which asserts
-   * "no change" about an empty period).
-   */
-  abandonment_rate_growth: number | null;
+  abandonment_rate_growth?: number;
   recovered_carts: number;
   recovered_value: number;
   recovery_rate: number;
-  /**
-   * QUI-628: `null` until both periods are computed against the new schema.
-   * The OLD code hardcoded 0 here.
-   */
-  recovery_rate_growth: number | null;
+  recovery_rate_growth?: number;
   average_cart_value: number;
+  potential_recovery_value: number;
 }
 
 export interface AbandonedCartTrend {
   period: string;
   abandoned_carts: number;
   recovered_carts: number;
-  cart_value: number;
   abandonment_rate: number;
   recovery_rate: number;
 }
 
 export interface AbandonedCartByReason {
-  /**
-   * QUI-628: the label is intentionally "hora del día" (when the cart was
-   * last active), NOT a cause of abandonment. Frontends must render it as
-   * "Abandono por hora del día — <bucket>" until a real cause signal exists.
-   */
   reason: string;
   count: number;
   percentage: number;

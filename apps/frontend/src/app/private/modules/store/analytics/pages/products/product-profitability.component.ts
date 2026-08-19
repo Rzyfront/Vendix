@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -25,8 +25,6 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
-import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-product-profitability',
@@ -49,7 +47,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private readonly route = inject(ActivatedRoute);
 
   summary$: Observable<ProfitabilitySummary | null> = this.store.select(
     ProfitabilitySelectors.selectProfitabilitySummary,
@@ -103,12 +100,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-
-    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
-    if (urlRange) {
-      this.dateRange.set(urlRange);
-      this.store.dispatch(ProfitabilityActions.setProfitabilityDateRange({ dateRange: urlRange }));
-    }
 
     this.store.dispatch(ProfitabilityActions.loadProfitability());
 
@@ -199,7 +190,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
+        axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [{
@@ -226,7 +217,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       .slice(0, 5)
       .reverse();
 
-    const names = top5.map((p) => p.product_name);
+    const names = top5.map((p) =>
+      p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name,
+    );
     const profits = top5.map((p) => p.profit);
 
     this.topProfitChartOptions.set({
@@ -281,14 +274,14 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [{
@@ -309,7 +302,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const top5 = [...products].sort((a, b) => b.profit - a.profit).slice(0, 5);
-    const productNames = top5.map((p) => p.product_name);
+    const productNames = top5.map((p) =>
+      p.product_name.length > 15 ? p.product_name.substring(0, 15) + '...' : p.product_name,
+    );
     const revenues = top5.map((p) => p.revenue);
     const costs = top5.map((p) => p.total_cost);
     const profits = top5.map((p) => p.profit);
@@ -361,14 +356,14 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: productNames,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10, formatter: (val: string) => truncateLabel(val, 14) },
+        axisLabel: { color: textSecondary, fontSize: 10 },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [

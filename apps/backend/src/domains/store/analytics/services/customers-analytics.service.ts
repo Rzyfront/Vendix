@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -7,17 +8,7 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import {
-  formatPeriodFromDate,
-  parseDateRange,
-  getPreviousPeriod,
-} from '../utils/date.util';
-import {
-  DEFAULT_STORE_TIMEZONE,
-  resolveStoreTimezone,
-  localPeriodSql,
-  localBucketSql,
-} from '@common/utils/store-timezone.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -26,21 +17,8 @@ export class CustomersAnalyticsService {
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
-  /**
-   * Resolves the current request's store timezone (single source of truth).
-   * Falls back to the default when there is no store context.
-   */
-  private async getStoreTimezone(): Promise<string> {
-    const context = RequestContextService.getContext();
-    if (!context?.store_id) {
-      return DEFAULT_STORE_TIMEZONE;
-    }
-    return resolveStoreTimezone(this.prisma, context.store_id);
-  }
-
   async getCustomersSummary(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
@@ -150,6 +128,7 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersTrends(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -158,23 +137,17 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Resolve the store timezone ONCE and drive both the date range and the
-    // bucketing with it (single source of truth).
-    const tz = await resolveStoreTimezone(this.prisma, storeId);
-    const { startDate, endDate } = parseDateRange(query, tz);
-
-    // Bucket by the store's LOCAL calendar via the authoritative TEXT label.
-    const periodSql = localPeriodSql('u.created_at', tz, granularity);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     // New customers by period (using users.created_at with customer role)
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: string;
+        period: Date;
         new_customers: bigint;
       }>
     >`
       SELECT
-        ${periodSql} AS period,
+        DATE_TRUNC(${truncSql}, u.created_at) AS period,
         COUNT(DISTINCT u.id) AS new_customers
       FROM users u
       WHERE EXISTS (
@@ -188,8 +161,8 @@ export class CustomersAnalyticsService {
       )
       AND u.created_at >= ${startDate}
       AND u.created_at <= ${endDate}
-      GROUP BY 1
-      ORDER BY 1 ASC
+      GROUP BY DATE_TRUNC(${truncSql}, u.created_at)
+      ORDER BY period ASC
     `;
 
     // Get cumulative total before start date
@@ -209,46 +182,30 @@ export class CustomersAnalyticsService {
       AND u.created_at < ${startDate}
     `;
 
-    // Cumulative running total at the END of the window (used below as the
-    // seed for fillTimeSeries). The fill is responsible for the per-bucket
-    // running total — see the post-fill pass below.
-    const cumulativeAfterWindow = Number(cumulativeBefore[0]?.count || 0);
+    let cumulative = Number(cumulativeBefore[0]?.count || 0);
 
-    const mapped = results.map((r) => ({
-      // period is already the authoritative local label from SQL.
-      period: r.period,
-      new_customers: Number(r.new_customers),
-    }));
+    const mapped = results.map((r) => {
+      const newCustomers = Number(r.new_customers);
+      cumulative += newCustomers;
+      return {
+        period: formatPeriodFromDate(new Date(r.period), granularity),
+        new_customers: newCustomers,
+        cumulative_customers: cumulative,
+      };
+    });
 
-    // fillTimeSeries generates missing periods (gaps) with `cumulative_customers`
-    // unset. We re-derive the running total in time order so the cumulative
-    // stays FLAT across gaps and grows by `new_customers` only on real buckets.
-    // Pre-fix this used `cumulative_customers: cumulative` (the END value) as the
-    // fill template, which made every gap look like the window closed early.
-    const filled = fillTimeSeries(
+    return fillTimeSeries(
       mapped,
       startDate,
       endDate,
       granularity,
-      { new_customers: 0 },
+      { new_customers: 0, cumulative_customers: cumulative },
       formatPeriodFromDate,
-      tz,
     );
-
-    let running = cumulativeAfterWindow;
-    const withCumulative = filled.map((b) => {
-      running += (b as any).new_customers;
-      return {
-        ...(b as any),
-        cumulative_customers: running,
-      };
-    });
-    return withCumulative as any;
   }
 
   async getTopCustomers(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
     const isPaginated = query.page !== undefined && query.limit !== undefined;
 
     const where = {
@@ -296,8 +253,7 @@ export class CustomersAnalyticsService {
         const customer = customerMap.get(r.customer_id as number);
         return {
           id: r.customer_id,
-          customer_name:
-            `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
+          customer_name: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
           first_name: customer?.first_name || '',
           last_name: customer?.last_name || '',
           email: customer?.email || '',
@@ -349,8 +305,7 @@ export class CustomersAnalyticsService {
       const customer = customerMap.get(r.customer_id as number);
       return {
         id: r.customer_id,
-        customer_name:
-          `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
+        customer_name: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
         first_name: customer?.first_name || '',
         last_name: customer?.last_name || '',
         email: customer?.email || '',
@@ -361,121 +316,8 @@ export class CustomersAnalyticsService {
     });
   }
 
-  /**
-   * QUI-541: variante flat-array de getTopCustomers para XLSX. Devuelve
-   * TODOS los clientes ordenados por gasto (no solo top 10) con la
-   * misma forma de fila pero con `last_order_date` como `Date` cruda
-   * (no string) para que el emitter XLSX la formatee con la TZ de
-   * la tienda.
-   */
-  async getTopCustomersForExport(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
-
-    const results = await this.prisma.orders.groupBy({
-      by: ['customer_id'],
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      _sum: { grand_total: true },
-      _count: { id: true },
-      _max: { created_at: true },
-      orderBy: { _sum: { grand_total: 'desc' } },
-      take: 10000,
-    });
-
-    const customerIds = results
-      .map((r) => r.customer_id)
-      .filter(Boolean) as number[];
-    const customers = await this.prisma.users.findMany({
-      where: { id: { in: customerIds } },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        email: true,
-      },
-    });
-    const customerMap = new Map(customers.map((c) => [c.id, c]));
-
-    return results.map((r) => {
-      const customer = customerMap.get(r.customer_id as number);
-      return {
-        id: r.customer_id,
-        customer_name:
-          `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
-        first_name: customer?.first_name || '',
-        last_name: customer?.last_name || '',
-        email: customer?.email || '',
-        total_orders: r._count.id || 0,
-        total_spent: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
-        // RAW Date — el emitter la formatea con TZ. NULL si nunca ha
-        // comprado (no debería pasar porque la query filtra customer_id NOT NULL).
-        last_order_date: r._max.created_at ?? null,
-      };
-    });
-  }
-
-  async getCustomersChannels(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
-    const context = RequestContextService.getContext();
-
-    if (!context?.store_id) {
-      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
-    }
-    const storeId = context.store_id;
-
-    const customerRoleFilter = {
-      store_users: { some: { store_id: storeId } },
-      user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
-    };
-
-    const totalCustomers = await this.prisma.users.count({
-      where: customerRoleFilter,
-    });
-
-    const newCustomers = await this.prisma.users.count({
-      where: {
-        ...customerRoleFilter,
-        created_at: { gte: startDate, lte: endDate },
-      },
-    });
-
-    const channelStats = await this.prisma.orders.groupBy({
-      by: ['channel'],
-      where: {
-        store_id: storeId,
-        state: { in: this.COMPLETED_STATES },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      _count: { id: true },
-      _sum: { grand_total: true },
-    });
-
-    const channels = channelStats.map((ch) => ({
-      channel: ch.channel,
-      orders: ch._count.id,
-      revenue: Number(ch._sum.grand_total || 0),
-      percentage: ch._count.id > 0 ? (ch._count.id / (channelStats.reduce((a, b) => a + b._count.id, 0))) * 100 : 0,
-    }));
-
-    return {
-      summary: {
-        total_customers: totalCustomers,
-        total_new_customers: newCustomers,
-        total_orders: channelStats.reduce((a, b) => a + b._count.id, 0),
-        total_revenue: channelStats.reduce((a, b) => a + Number(b._sum.grand_total || 0), 0),
-      },
-      channels,
-    };
-  }
-
   async getCustomersForExport(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
@@ -528,8 +370,9 @@ export class CustomersAnalyticsService {
         phone: user.phone || '',
         total_orders: agg?._count?.id || 0,
         total_spent: Number(agg?._sum?.grand_total || 0),
-        last_order_date: agg?._max?.created_at ?? null,
-        registration_date: user.created_at ?? null,
+        last_order_date:
+          agg?._max?.created_at?.toISOString().split('T')[0] || 'N/A',
+        registration_date: user.created_at?.toISOString().split('T')[0] || '',
         state: user.state,
       };
     });
@@ -538,8 +381,7 @@ export class CustomersAnalyticsService {
   // ==================== ABANDONED CARTS ANALYTICS ====================
 
   async getAbandonedCartsSummary(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(startDate, endDate);
 
     const context = RequestContextService.getContext();
@@ -584,27 +426,12 @@ export class CustomersAnalyticsService {
 
     const previousAbandonedCount = Number(previousAbandoned[0]?.count || 0);
 
-    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(o.id) as count
-      FROM orders o
-      WHERE o.store_id = ${storeId}
-        AND o.placed_at >= ${startDate}
-        AND o.placed_at <= ${endDate}
-        AND o.state IN ('delivered', 'finished')
-    `;
-    const orderCount = Number(completedOrders[0]?.count || 0);
+    // Assuming a baseline recovery rate (can be refined when cart-order linking is added)
+    const assumedRecoveryRate = 15; // 15% baseline recovery rate
+    const recoveryRate = assumedRecoveryRate;
 
-    let recoveryRate: number;
-    if (abandonedCount > 0 && orderCount > 0) {
-      const calculatedRate = (orderCount / abandonedCount) * 100;
-      recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-    } else if (abandonedCount === 0) {
-      recoveryRate = 0;
-    } else {
-      recoveryRate = 0;
-    }
-
-    const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
+    const abandonmentRate =
+      abandonedCount > 0 ? (abandonedCount > 0 ? 100 - recoveryRate : 0) : 0;
 
     const abandonmentRateGrowth =
       previousAbandonedCount > 0
@@ -627,6 +454,7 @@ export class CustomersAnalyticsService {
   }
 
   async getAbandonedCartsTrends(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
 
     const context = RequestContextService.getContext();
@@ -635,100 +463,53 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Resolve the store timezone ONCE and drive both the date range and the
-    // bucketing with it (single source of truth).
-    const tz = await resolveStoreTimezone(this.prisma, storeId);
-    const { startDate, endDate } = parseDateRange(query, tz);
-
-    // Bucket by the store's LOCAL calendar via the authoritative TEXT label.
-    const cartsPeriodSql = localPeriodSql('c.created_at', tz, granularity);
-    const ordersPeriodSql = localPeriodSql('o.placed_at', tz, granularity);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: string;
+        period: Date;
         abandoned_carts: bigint;
         cart_value: number;
       }>
     >`
       SELECT
-        ${cartsPeriodSql} AS period,
+        DATE_TRUNC(${truncSql}, c.created_at) AS period,
         COUNT(c.id) AS abandoned_carts,
         COALESCE(SUM(c.subtotal), 0) as cart_value
       FROM carts c
       WHERE c.store_id = ${storeId}
         AND c.created_at >= ${startDate}
         AND c.created_at <= ${endDate}
-      GROUP BY 1
-      ORDER BY 1 ASC
+      GROUP BY DATE_TRUNC(${truncSql}, c.created_at)
+      ORDER BY period ASC
     `;
 
-    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{
-        period: string;
-        order_count: bigint;
-      }>
-    >`
-      SELECT
-        ${ordersPeriodSql} AS period,
-        COUNT(o.id) AS order_count
-      FROM orders o
-      WHERE o.store_id = ${storeId}
-        AND o.placed_at >= ${startDate}
-        AND o.placed_at <= ${endDate}
-        AND o.state IN ('delivered', 'finished')
-      GROUP BY 1
-      ORDER BY 1 ASC
-    `;
-
-    const ordersMap = new Map<string, number>();
-    completedOrders.forEach(o => {
-      // period is already the authoritative local label from SQL.
-      ordersMap.set(o.period, Number(o.order_count));
-    });
-
-    let defaultRecoveryRate = 0;
-    let defaultAbandonmentRate = 0;
+    // Use baseline recovery rate for all periods
+    const recoveryRate = 15;
 
     return fillTimeSeries(
-      results.map((r) => {
-        const periodKey = r.period;
-        const orderCount = ordersMap.get(periodKey) || 0;
-        const cartCount = Number(r.abandoned_carts);
-        
-        let recoveryRate: number;
-        if (cartCount > 0 && orderCount > 0) {
-          const calculatedRate = (orderCount / cartCount) * 100;
-          recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-        } else {
-          recoveryRate = 0;
-        }
-
-        return {
-          period: periodKey,
-          abandoned_carts: cartCount,
-          recovered_carts: Math.floor(cartCount * (recoveryRate / 100)),
-          abandonment_rate: cartCount > 0 ? 100 - recoveryRate : 0,
-          recovery_rate: recoveryRate,
-        };
-      }),
+      results.map((r) => ({
+        period: formatPeriodFromDate(new Date(r.period), granularity),
+        abandoned_carts: Number(r.abandoned_carts),
+        recovered_carts: Math.floor(Number(r.abandoned_carts) * (recoveryRate / 100)),
+        abandonment_rate: 100 - recoveryRate,
+        recovery_rate: recoveryRate,
+      })),
       startDate,
       endDate,
       granularity,
       {
         abandoned_carts: 0,
         recovered_carts: 0,
-        abandonment_rate: defaultAbandonmentRate,
-        recovery_rate: defaultRecoveryRate,
+        abandonment_rate: 100 - recoveryRate,
+        recovery_rate: recoveryRate,
       },
       formatPeriodFromDate,
-      tz,
     );
   }
 
   async getAbandonedCartsByReason(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -745,14 +526,14 @@ export class CustomersAnalyticsService {
       }>
     >`
       SELECT
-        EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)}) as hour,
+        EXTRACT(HOUR FROM c.created_at) as hour,
         COUNT(c.id) as count,
         COALESCE(SUM(c.subtotal), 0) as total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
         AND c.created_at >= ${startDate}
         AND c.created_at <= ${endDate}
-      GROUP BY EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)})
+      GROUP BY EXTRACT(HOUR FROM c.created_at)
       ORDER BY count DESC
     `;
 
@@ -797,8 +578,7 @@ export class CustomersAnalyticsService {
   }
 
   async getAbandonedCartsForExport(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
+    const { startDate, endDate } = parseDateRange(query);
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -841,9 +621,10 @@ export class CustomersAnalyticsService {
         email: customer?.email || '',
         abandonment_reason: 'No especificada',
         value: Number(cart.subtotal || 0),
-        created_at: cart.created_at ?? null,
-        abandoned_at: cart.created_at ?? null,
+        created_at: cart.created_at?.toISOString().split('T')[0] || '',
+        abandoned_at: cart.created_at?.toISOString().split('T')[0] || '',
       };
     });
   }
+
 }
