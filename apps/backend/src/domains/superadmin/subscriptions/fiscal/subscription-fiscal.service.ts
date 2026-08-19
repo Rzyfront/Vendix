@@ -2802,6 +2802,20 @@ export class SubscriptionFiscalService {
       amount_paid: '0',
       currency,
       line_items: items,
+      // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
+      // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
+      // (kind ya validado en la lectura) para que el detail page del rail
+      // plataforma renderice con la misma forma que el rail tienda.
+      customer: customer ?? null,
+      payment_form: snapshot?.metadata?.payment_form ?? null,
+      payment_means_code: snapshot?.metadata?.payment_means_code ?? null,
+      due_date: dueIso,
+      operation_type: snapshot?.metadata?.operation_type ?? null,
+      aiu_contract_object: snapshot?.metadata?.aiur_contract_object ?? null,
+      global_discount_amount: snapshot?.metadata?.global_discount_amount ?? null,
+      withholding_amount: snapshot?.metadata?.withholding_amount ?? null,
+      exchange_rate: snapshot?.metadata?.exchange_rate ?? null,
+      exchange_rate_date: snapshot?.metadata?.exchange_rate_date ?? null,
     };
 
     return {

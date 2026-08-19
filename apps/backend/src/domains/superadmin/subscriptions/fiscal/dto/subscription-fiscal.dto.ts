@@ -488,6 +488,7 @@ export class MvpV1InvoiceLineTaxDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
+  @Max(1, { message: 'rate debe ser fracción entre 0 y 1 (0.19 = 19%)' })
   rate!: number;
 
   @IsOptional()
@@ -584,10 +585,14 @@ export class MvpV1InvoiceWithholdingInputDto {
 // ── Moneda + TRM ──────────────────────────────────────────────────────────
 
 export class MvpV1CurrencyDto {
-  // ISO 4217 alpha-3. La regla completa (no USD en una tienda en COP-only,
-  // etc.) se valida con `vendix-currency-formatting` en el servicio.
+  // ISO 4217 alpha-3. V1 solo soporta COP y USD — la regla completa (no USD
+  // en tienda COP-only, etc.) se valida con `vendix-currency-formatting` en
+  // el servicio. Restringir en DTO bloquea bypass por JSON manual.
   @IsString()
   @Length(3, 3)
+  @IsIn(['COP', 'USD'], {
+    message: 'V1 solo soporta COP y USD (multi-moneda es V2)',
+  })
   iso_4217!: string;
 
   @IsOptional()

@@ -1632,6 +1632,16 @@ export const ErrorCodes = {
     httpStatus: 501,
     devMessage: 'Document type not supported in V1 of the platform invoicing MVP',
   },
+  INVOICING_TRANSITION_001: {
+    code: 'INVOICING_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'Cannot cancel a transmission in its current state',
+  },
+  PDF_NOT_READY: {
+    code: 'PDF_NOT_READY',
+    httpStatus: 503,
+    devMessage: 'PDF generation pipeline not yet wired (phase B.5)',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,

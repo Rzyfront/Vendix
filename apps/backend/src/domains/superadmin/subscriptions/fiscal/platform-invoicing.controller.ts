@@ -16,9 +16,11 @@ import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -88,6 +90,41 @@ class ExchangeRateQueryDto {
   usd_cross_rate?: number;
 }
 
+class ListPlatformInvoicesQueryDto {
+  @IsOptional()
+  @IsIn(['draft', 'queued', 'submitted', 'accepted', 'rejected', 'error', 'cancelled'])
+  status?:
+    | 'draft'
+    | 'queued'
+    | 'submitted'
+    | 'accepted'
+    | 'rejected'
+    | 'error'
+    | 'cancelled';
+
+  @IsOptional()
+  @IsIn(['sales_invoice', 'support_document'])
+  document_type?: 'sales_invoice' | 'support_document';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
 @ApiBearerAuth()
 @ApiTags('super-admin · platform-invoicing · MVP')
 @Controller('superadmin/subscriptions/fiscal')
@@ -116,6 +153,39 @@ export class PlatformInvoicingController {
       accountingEntityId: settings.accounting_entity_id,
       dianConfigurationId: settings.dian_configuration_id,
     };
+  }
+
+  /**
+   * Lista platform invoices (sales_invoice + support_document). FB-12:
+   * el rail tienda ya tiene `/transmissions` pero filtra por source_type
+   * `subscription_invoice`; este endpoint expone los platform_*
+   * (mismo ledger, diferente source_type).
+   */
+  @Get('invoices')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Listar platform invoices (sales_invoice + support_document)',
+  })
+  async listInvoices(
+    @Query() query: ListPlatformInvoicesQueryDto,
+  ): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
+    const data = await this.platformInvoicing.listInvoices({
+      organizationId: identity.organizationId,
+      accountingEntityId: identity.accountingEntityId,
+      status: query.status ?? null,
+      documentType: query.document_type ?? null,
+      q: query.q ?? null,
+      page: query.page ?? 1,
+      limit: query.limit ?? 25,
+    });
+    return this.responseService.paginated(
+      data.rows,
+      data.total,
+      data.page,
+      data.limit,
+      'Platform invoices retrieved',
+    );
   }
 
   /**

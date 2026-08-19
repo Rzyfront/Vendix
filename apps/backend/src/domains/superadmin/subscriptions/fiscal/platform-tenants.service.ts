@@ -100,7 +100,7 @@ export class PlatformTenantsService {
       return row ? this.storeToTenantResult(row, row.addresses[0] ?? null) : null;
     }
     const row = await prisma.organizations.findFirst({
-      where: { id: args.id, id: args.organizationId, state: 'active' },
+      where: { id: args.id, state: 'active' },
       include: {
         addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
       },
@@ -144,7 +144,6 @@ export class PlatformTenantsService {
     args: { organizationId: number; q: string; limit: number },
   ): Promise<TenantSearchResult[]> {
     const where: Prisma.organizationsWhereInput = {
-      id: args.organizationId,
       state: 'active',
       ...(args.q
         ? {
@@ -244,9 +243,16 @@ export class PlatformTenantsService {
 
   private addressToTenant(addr: any): TenantAddress {
     return {
-      line: addr.line1 ?? addr.line ?? addr.address_line ?? null,
+      // addresses columns son: address_line1, address_line2, city, state_province, country_code.
+      // Concatenamos line1+line2 para formar el campo `line` que consume el form.
+      line:
+        [addr.address_line1, addr.address_line2].filter(Boolean).join(' ').trim() ||
+        null,
       city: addr.city ?? null,
-      department_code: addr.department_code ?? null,
+      // state_province guarda el nombre del depto (no codigo DANE). El mapeo
+      // DANE->nombre vive en `country-divisions`. Para MVP enviamos el
+      // nombre tal cual — el frontend puede pedir lookup si lo necesita.
+      department_code: addr.state_province ?? null,
     };
   }
 

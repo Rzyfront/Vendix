@@ -395,14 +395,14 @@ export class PlatformInvoicingService {
     const warnings: Array<{ code: string; problem: string }> = [];
     if (!transmission.document_number) {
       blockers.push({
-        code: 'INVOICING_PREVALIDATION_001',
+        code: 'INVOICING_PLATFORM_READINESS_001',
         problem: 'Transmision sin numero fiscal asignado',
         fix: 'Reintenta la creacion del documento',
       });
     }
     if (!transmission.cufe) {
       warnings.push({
-        code: 'INVOICING_PREVALIDATION_002',
+        code: 'INVOICING_PLATFORM_READINESS_002',
         problem: 'Documento aun no emitido a DIAN (sin CUFE)',
       });
     }
@@ -433,7 +433,7 @@ export class PlatformInvoicingService {
     const acc = args.accountingEntityId;
     if (!org || !acc) {
       throw new VendixHttpException(
-        ErrorCodes.INVOICING_PROVIDER_002,
+        ErrorCodes.INVOICING_RESOLUTION_006,
         'listResolutionsForEmission requiere organizationId y accountingEntityId resueltos',
       );
     }
@@ -449,6 +449,81 @@ export class PlatformInvoicingService {
       accountingEntityId: acc,
       documentType: args.documentType,
     });
+  }
+
+  /**
+   * Lista platform invoices (FB-12). Paginado, con filtros status,
+   * document_type, q (busca por document_number o cufe).
+   *
+   * Usa GlobalPrismaService directamente (no scoped): el rail plataforma
+   * ya filtra por `accounting_entity_id` explicitamente.
+   */
+  async listInvoices(args: {
+    organizationId: number;
+    accountingEntityId: number;
+    status:
+      | 'draft'
+      | 'queued'
+      | 'submitted'
+      | 'accepted'
+      | 'rejected'
+      | 'error'
+      | 'cancelled'
+      | null;
+    documentType: 'sales_invoice' | 'support_document' | null;
+    q: string | null;
+    page: number;
+    limit: number;
+  }): Promise<{
+    rows: any[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const page = Math.max(1, args.page);
+    const limit = Math.min(Math.max(1, args.limit), 100);
+    const where: any = {
+      source_type: { in: ['platform_invoice', 'platform_support_document'] },
+      accounting_entity_id: args.accountingEntityId,
+    };
+    if (args.status) where.transmission_status = args.status;
+    if (args.documentType) where.document_type = args.documentType;
+    if (args.q?.trim()) {
+      const q = args.q.trim();
+      where.OR = [
+        { document_number: { contains: q, mode: 'insensitive' } },
+        { cufe: { contains: q, mode: 'insensitive' } },
+        { error_message: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    const [rows, total] = await Promise.all([
+      this.prismaClient.fiscal_transmissions.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          document_type: true,
+          source_type: true,
+          document_number: true,
+          transmission_status: true,
+          dian_status: true,
+          accounting_status: true,
+          retry_count: true,
+          cufe: true,
+          sent_at: true,
+          accepted_at: true,
+          rejected_at: true,
+          error_message: true,
+          created_at: true,
+          organization_id: true,
+          accounting_entity_id: true,
+        },
+      }),
+      this.prismaClient.fiscal_transmissions.count({ where }),
+    ]);
+    return { rows, total, page, limit };
   }
 
   /**
@@ -476,7 +551,7 @@ export class PlatformInvoicingService {
     // Delegamos al reuso del riel tienda `resendPlatformTransmission`
     // ya operational (PR #636). El envia el invoice desde el snapshot
     // persistido; no necesita re-asignar numero.
-    return this.invoiceFlowService.resendPlatformTransmission(
+    return this.subscriptionFiscalService.resendPlatformTransmission(
       args.transmissionId,
     );
   }
