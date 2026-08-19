@@ -875,6 +875,7 @@ export class SubscriptionFiscalService {
 
     const config = existingConfig
       ? await this.updateDianConfig(existingConfig.id, dto, {
+          previous,
           // Si la fila quedó colgada de otra entidad contable, se realinea en la
           // escritura que el operador ya está haciendo. Normalizar al escribir
           // evita una migración de datos para un desajuste que solo existe
@@ -1933,120 +1934,242 @@ export class SubscriptionFiscalService {
     if (!settings.invoice_resolution_id) {
       throw new BadRequestException('La plataforma no tiene una resolución de facturación activa');
     }
+    if (!settings.accounting_entity_id) {
+      throw new BadRequestException('La plataforma no tiene una entidad contable activa');
+    }
+    if (!settings.dian_configuration_id) {
+      throw new BadRequestException('La plataforma no tiene una configuración DIAN activa');
+    }
+
+    // 0) Validaciones previas. Mismas que `issueForInvoice` corre para
+    //    suscripciones: si falta un dato fiscal del destinatario o la
+    //    prevalidación falla, NO quemamos consecutivo. El 17/08 esto costó
+    //    el rechazo de la primera factura de suscripción emitida.
+    if (!dto.customer.legal_name?.trim()) {
+      throw new BadRequestException('El destinatario requiere legal_name');
+    }
+    if (!/^\d+$/.test(dto.customer.tax_id)) {
+      throw new BadRequestException('El destinatario requiere tax_id numérico');
+    }
+    if (dto.customer.tax_id_dv && !/^\d$/.test(dto.customer.tax_id_dv)) {
+      throw new BadRequestException('El DV del destinatario debe ser un dígito');
+    }
+    if (dto.items.length === 0) {
+      throw new BadRequestException('La factura debe tener al menos una línea');
+    }
+    for (const [i, item] of dto.items.entries()) {
+      if (!item.description?.trim()) {
+        throw new BadRequestException(`Línea ${i + 1}: descripción requerida`);
+      }
+      if (!(Number(item.quantity) > 0) || !(Number(item.unit_price) >= 0)) {
+        throw new BadRequestException(`Línea ${i + 1}: cantidad > 0 y precio ≥ 0`);
+      }
+    }
 
     return this.runInPlatformContext(settings, async () => {
-      // 1) Asignar número con el mismo `pg_advisory_xact_lock` que las
-      // suscripciones usan. El id de resolución viene de settings, no
-      // del DTO — la plataforma no expone qué rango usar.
-      const fiscalNumber = await this.allocateFiscalNumber(
-        await this.prisma.$transaction(async (tx) => tx),
-        settings,
-      );
-
-      const resolution = await this.loadInvoiceResolution(settings);
-
-      // 2) Construir el ProviderInvoiceData. El backend `DianDirectProvider`
-      // espera un shape estable; aquí reusamos el patrón del rail de
-      // suscripciones sincrónicamente, sin el envoltorio de SubscriptionInvoice.
       const issuedAt = new Date();
       const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
       const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
       const dueAt = new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
       const dueAtLocal = localDateString(dueAt, PLATFORM_TIMEZONE);
 
-      const subtotal = dto.items.reduce(
-        (acc, item) => acc + Number(item.quantity) * Number(item.unit_price),
-        0,
-      );
-      const taxAmount = 0; // Excluido de IVA art. 476 num. 21 ET — coincide con SaaS
-      const total = subtotal + taxAmount;
-
-      const providerData: ProviderInvoiceData = {
-        invoice_number: fiscalNumber,
-        invoice_type: 'sales_invoice',
-        issue_date: issuedAtLocal,
-        issue_time: issuedAtTime,
-        due_date: dueAtLocal,
-        invoice_period: {
-          start_date: dto.period_start
-            ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
-            : issuedAtLocal,
-          end_date: dto.period_end
-            ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
-            : issuedAtLocal,
-        },
-        customer_name: dto.customer.legal_name,
-        customer_tax_id: dto.customer.tax_id,
-        customer_email: dto.customer.email ?? null,
-        customer_address: dto.customer.address_line
-          ? {
-              line: dto.customer.address_line,
-              city: dto.customer.city ?? null,
-              department_code: dto.customer.department_code ?? null,
-              country_code: 'CO',
-            }
-          : null,
-        customer_document_type: '31',
-        customer_verification_digit: dto.customer.tax_id_dv ?? null,
-        customer_person_type: '2',
-        customer_regime: '49',
-        customer_tax_responsibilities: ['O-13'],
-        subtotal_amount: subtotal.toFixed(2),
-        discount_amount: '0.00',
-        tax_amount: taxAmount.toFixed(2),
-        withholding_amount: '0.00',
-        total_amount: total.toFixed(2),
-        currency: dto.currency ?? 'COP',
-        items: dto.items.map((item, i) => ({
+      // 0.b) Subtotal: redondeo POR LÍNEA, después suma. Coincide con la
+      //     convención `LineExtensionAmount` de la DIAN; una suma de
+      //     floats sin redondeo intermedio puede dar FAU04 al cuadrar con
+      //     TaxExclusiveAmount.
+      const lineItems = dto.items.map((item, i) => {
+        const qty = Number(item.quantity);
+        const price = Number(item.unit_price);
+        const lineTotal = Math.round(qty * price * 100) / 100;
+        return {
           position: i + 1,
           description: item.description,
-          quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
-          line_total: (Number(item.quantity) * Number(item.unit_price)).toFixed(2),
+          quantity: qty,
+          unit_price: price,
+          line_total: lineTotal.toFixed(2),
           item_code: null,
           unit_code: 'EA',
           omit_tax_total: true,
-        })),
-        taxes: [],
-        notes: [
-          `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
-          'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-        ],
-        order_reference: null,
-        resolution_number: resolution.resolution_number,
-        technical_key: this.technicalKeyVault.reveal(resolution),
-        control: this.resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
-          resolution_id: resolution.id,
-          document_type: 'sales_invoice',
-        }),
-        payment_form: '1',
-        payment_means: '42',
-        payment_method: null,
-      } as ProviderInvoiceData;
+        };
+      });
+      const subtotal =
+        Math.round(lineItems.reduce((acc, l) => acc + Number(l.line_total), 0) * 100) / 100;
+      const taxAmount = 0; // Excluido de IVA art. 476 num. 21 ET
+      const total = subtotal + taxAmount;
 
-      // 3) Crear la fila de `fiscal_transmissions` con source_type='platform_invoice'.
-      // `idempotency_key` única para que re-envíos no creen duplicados.
-      const idempotencyKey = `platform_invoice:tmp:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const transmission = await this.prisma.withoutScope().fiscal_transmissions.create({
-        data: {
-          organization_id: settings.platform_organization_id!,
-          store_id: null,
-          accounting_entity_id: settings.accounting_entity_id,
-          dian_configuration_id: settings.dian_configuration_id!,
-          source_type: 'platform_invoice',
-          source_id: 0, // No apunta a una subscription_invoices
-          invoice_resolution_id: settings.invoice_resolution_id!,
-          document_number: fiscalNumber,
-          transmission_status: 'queued',
-          dian_status: 'pending',
-          accounting_status: 'provisional',
-          idempotency_key: idempotencyKey,
-          request_hash: this.hash(providerData),
-          request_payload: providerData as any,
-        },
+      // 0.c) Idempotencia por contenido. Doble click en el botón =
+      //     mismo tax_id + mismas items + mismo período → misma key.
+      //     La UNIQUE (accounting_entity_id, document_type, idempotency_key)
+      //     en fiscal_transmissions rechaza la segunda.
+      const idempotencyKey = this.hash({
+        kind: 'platform_invoice',
+        tax_id: dto.customer.tax_id,
+        items: lineItems,
+        period_start: dto.period_start ?? null,
+        period_end: dto.period_end ?? null,
       });
 
-      // 4) Firmar y transmitir.
+      // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
+      //    libera al COMMIT, no antes. Si la llamada anterior era
+      //    `await this.prisma.$transaction(async (tx) => tx)`, el
+      //    `tx` ya hizo COMMIT y la siguiente query (el SELECT FOR
+      //    UPDATE del lock) recibe P2028. La memoria del proyecto
+      //    documenta esto en `prisma_transaction_returns_committed_handle`.
+      const result = await this.prisma.$transaction(async (tx) => {
+        // 1.a) Asignar número con el lock consultivo.
+        const allocated = await this.allocateFiscalNumber(tx, settings);
+        const fiscalNumber = allocated.invoice_number;
+        const resolution = allocated.resolution;
+
+        // 1.b) Construir el ProviderInvoiceData.
+        const providerData = {
+          invoice_number: fiscalNumber,
+          invoice_type: 'sales_invoice',
+          issue_date: issuedAtLocal,
+          issue_time: issuedAtTime,
+          due_date: dueAtLocal,
+          invoice_period: {
+            start_date: dto.period_start
+              ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+              : issuedAtLocal,
+            end_date: dto.period_end
+              ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+              : issuedAtLocal,
+          },
+          customer_name: dto.customer.legal_name,
+          customer_tax_id: dto.customer.tax_id,
+          customer_email: dto.customer.email ?? null,
+          customer_address: dto.customer.address_line
+            ? {
+                line: dto.customer.address_line,
+                city: dto.customer.city ?? null,
+                department_code: dto.customer.department_code ?? null,
+                country_code: 'CO',
+              }
+            : null,
+          // 31 = NIT. El DTO acepta DV opcional; el resto de campos
+          // (person_type, regime) son los que el riel SaaS usa para
+          // servicios exentos — coincide.
+          customer_document_type: '31',
+          customer_verification_digit: dto.customer.tax_id_dv ?? null,
+          customer_person_type: '2',
+          customer_regime: '49',
+          customer_tax_responsibilities: ['O-13'],
+          subtotal_amount: subtotal.toFixed(2),
+          discount_amount: '0.00',
+          tax_amount: taxAmount.toFixed(2),
+          withholding_amount: '0.00',
+          total_amount: total.toFixed(2),
+          currency: dto.currency ?? 'COP',
+          items: lineItems,
+          taxes: [],
+          notes: [
+            `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
+            'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+          ],
+          order_reference: null,
+          resolution_number: resolution.resolution_number,
+          technical_key: this.technicalKeyVault.reveal(resolution),
+          control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+            resolution_id: resolution.id,
+            document_type: 'sales_invoice',
+          }),
+          payment_form: '1',
+          payment_means: '42',
+          payment_method: null,
+        } as unknown as ProviderInvoiceData;
+
+        // 1.c) Insertar la fila. Si la idempotency_key ya existe, el
+        // UNIQUE la rechaza y devolvemos la fila existente — el caller
+        // ve la misma respuesta que la primera.
+        let transmission;
+        try {
+          transmission = await tx.fiscal_transmissions.create({
+            data: {
+              organization_id: settings.platform_organization_id!,
+              store_id: null,
+              accounting_entity_id: settings.accounting_entity_id!,
+              dian_configuration_id: settings.dian_configuration_id!,
+              source_type: 'platform_invoice',
+              source_id: 0,
+              document_type: 'sales_invoice',
+              document_number: fiscalNumber,
+              transmission_status: 'queued',
+              dian_status: 'pending',
+              accounting_status: 'provisional',
+              idempotency_key: idempotencyKey,
+              request_hash: this.hash(providerData),
+            },
+          });
+        } catch (error: any) {
+          if (error?.code === 'P2002') {
+            // Idempotencia: la UNIQUE (accounting_entity_id,
+            // document_type, idempotency_key) rechazó. Devolvemos la
+            // fila existente. La transacción sigue para que el lock
+            // se libere al COMMIT.
+            const existing = await tx.fiscal_transmissions.findFirst({
+              where: {
+                accounting_entity_id: settings.accounting_entity_id!,
+                document_type: 'sales_invoice' as const,
+                idempotency_key: idempotencyKey,
+              },
+            });
+            if (existing) {
+              transmission = existing;
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
+
+        // 1.d) Snapshot del origen. El frontend navega a `/invoices/:id`
+        //     usando `transmission.id` como id (la UNIQUE del cursor es la
+        //     pieza de identidad que el operador reconoce). Como
+        //     `fiscal_transmissions` no tiene columnas planas para
+        //     customer / items / totales, persistimos una fila en
+        //     `fiscal_evidences` con `metadata.kind='platform_invoice_snapshot'`
+        //     y el payload dentro. El detail endpoint la lee para
+        //     sintetizar la misma shape que `subscription_invoices`
+        //     devuelve al otro lado del endpoint.
+        //
+        //     Usamos `manual_support` como evidence_type porque ya
+        //     existe en el enum y no requiere migración: el snapshot es
+        //     semánticamente un "documento de soporte interno" que
+        //     respalda el documento fiscal. La lectura al detalle es por
+        //     `metadata.kind`, no por `evidence_type`.
+        await tx.fiscal_evidences.create({
+          data: {
+            organization_id: settings.platform_organization_id!,
+            store_id: null,
+            accounting_entity_id: settings.accounting_entity_id!,
+            fiscal_transmission_id: transmission.id,
+            evidence_type: 'manual_support',
+            storage_key: null,
+            content_hash: idempotencyKey,
+            metadata: {
+              kind: 'platform_invoice_snapshot',
+              customer: dto.customer,
+              items: lineItems,
+              totals: { subtotal, tax_amount: taxAmount, total },
+              period_start: dto.period_start ?? null,
+              period_end: dto.period_end ?? null,
+              currency: dto.currency ?? 'COP',
+              created_by: 'createPlatformInvoice',
+            },
+          },
+        });
+
+        return { transmission, providerData, resolution };
+      });
+
+      const { transmission, providerData, resolution } = result;
+
+      // 2) Firmar y transmitir FUERA de la tx. `markSubmitted` y la
+      //    llamada al provider SOAP ya hicieron COMMIT del lock; las
+      //    escrituras a `fiscal_transmissions` post-firma son updates
+      //    sobre la fila ya persistida.
       await this.markSubmitted(transmission.id);
 
       try {
@@ -2067,14 +2190,16 @@ export class SubscriptionFiscalService {
 
       return {
         invoice_id: transmission.id,
-        fiscal_number: fiscalNumber,
         transmission_id: transmission.id,
+        fiscal_number: final?.document_number ?? '',
         transmission_status: final?.transmission_status ?? 'unknown',
         dian_status: final?.dian_status ?? 'unknown',
         cufe: final?.cufe ?? null,
       };
     });
   }
+
+
 
   /**
    * Barre todas las facturas SaaS en estado `paid` que NO tienen una transmisión
@@ -2121,7 +2246,12 @@ export class SubscriptionFiscalService {
               organizations: {
                 accounting_entities: {
                   some: {
-                    id: settings.accounting_entity_id,
+                    // F-R2-3: si `settings.accounting_entity_id` es null
+                    // (entidad plataforma no configurada), la cláusula
+                    // matchea 0 filas — el sweep retorna `picked_up: 0`
+                    // en vez de fallar. El operador debe configurar
+                    // la identidad antes de invocar el sweep.
+                    id: settings.accounting_entity_id ?? -1,
                     is_active: true,
                   },
                 },
@@ -2129,7 +2259,7 @@ export class SubscriptionFiscalService {
             },
           },
         },
-        orderBy: { paid_at: 'asc' }, // oldest-first: los pendientes más atrasados primero
+        orderBy: { created_at: 'asc' }, // oldest-first: los pendientes más atrasados primero
         select: { id: true },
         // Cota dura: 15 facturas × 2-3 s/issue a la DIAN = 30-45 s, dentro
         // del `proxy_read_timeout` 60 s de nginx en producción. Si quedan
@@ -2153,14 +2283,20 @@ export class SubscriptionFiscalService {
       // primera termine; con SKIP LOCKED, simplemente no toma esa fila
       // y procesa la siguiente que esté libre.
       if (rows.length > 0) {
-        const lockedRows = await this.prisma.$queryRaw<{ id: number }[]>`
-          SELECT id FROM subscription_invoices
-          WHERE id = ANY(${rows.map((r) => r.id)}::int[])
-          ORDER BY paid_at ASC
-          FOR UPDATE SKIP LOCKED
-        `;
+        // F-R2-3: con `FOR UPDATE SKIP LOCKED` las facturas que otro
+        // worker (listener de pagos) ya está procesando se saltan, y la
+        // primera sweep gana el lock. Usamos `$queryRawUnsafe` porque el
+        // `GlobalPrismaService` no expone `$queryRaw` tipado.
+        const ids = rows.map((r) => r.id);
+        const idsLiteral = `{${ids.join(',')}}`;
+        const lockedRows = await this.prisma
+          .withoutScope()
+          .$queryRawUnsafe<Array<{ id: number }>>(
+            `SELECT id FROM subscription_invoices WHERE id = ANY($1::int[]) ORDER BY paid_at ASC NULLS LAST FOR UPDATE SKIP LOCKED`,
+            idsLiteral,
+          );
         rows.length = 0;
-        rows.push(...lockedRows);
+        rows.push(...lockedRows.map((r) => ({ id: r.id })));
       }
 
       // F-R2-8: excluir invoices cuya transmisión ya se intentó
@@ -2241,7 +2377,11 @@ export class SubscriptionFiscalService {
         const isFailedEntryCapped = result.failed.length >= MAX_FAILED_ENTRIES;
         try {
           const r = await this.issueForInvoice(id, { manual: true, source: 'sweep' });
-          if (r?.skipped) {
+          // `issueForInvoice` retorna una `fiscal_transmissions` (ruta
+          // exitosa) o `{skipped, reason}` (ruta omitida). El compilador
+          // no unifica el tipo; casteamos para discriminar.
+          const skipped = (r as any)?.skipped === true;
+          if (skipped) {
             result.skipped += 1;
           } else {
             // `issueForInvoice` retorna la fila recargada en la ruta exitosa.
@@ -2329,6 +2469,183 @@ export class SubscriptionFiscalService {
    * huérfana (sin transmisión todavía) se considera "no emitida" y se devuelve
    * con `transmission: null` + `evidences: []`.
    */
+  /**
+   * Servicio: si `id` casa con una `fiscal_transmission` de `source_type='platform_invoice'`,
+   * sintetizamos el mismo shape de `subscription_invoices` usando el snapshot
+   * que `createPlatformInvoice` persiste en `fiscal_evidences`. Esto evita
+   * tener que añadir un endpoint y un route paralelos: el detail component
+   * sigue pegándole a `/invoices/:id` y el backend distingue por source_type.
+   *
+   * El frontend ya pinta las plantillas con `@if` y `?? 0` sobre los
+   * campos que `subscription_invoice` lleva y `fiscal_transmissions` no;
+   * un objeto sintetizado con los nombres correctos pasa la plantilla.
+   */
+  private async getPlatformInvoiceDetailFromTransmission(
+    id: number,
+  ): Promise<{
+    invoice: any;
+    transmissions: any[];
+    evidences: any[];
+    plan: { name: string; code: string; billing_cycle: string } | null;
+    organization: {
+      id: number;
+      name: string;
+      legal_name: string | null;
+      tax_id: string | null;
+      email: string | null;
+    } | null;
+  } | null> {
+    const settings = await this.getSettings();
+    const platformOrgId = await this.resolvePlatformOrganizationId();
+
+    // Probe por `fiscal_transmissions.source_type='platform_invoice'`. Si
+    // la fila no existe o pertenece a otra entidad contable, retorna null
+    // y el detail component verá 404.
+    const transmission = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+      where: {
+        id,
+        source_type: 'platform_invoice',
+        accounting_entity_id: settings.accounting_entity_id ?? undefined,
+      },
+      select: {
+        id: true,
+        transmission_status: true,
+        dian_status: true,
+        accounting_status: true,
+        document_number: true,
+        cufe: true,
+        qr_code: true,
+        tracking_id: true,
+        accepted_at: true,
+        rejected_at: true,
+        error_message: true,
+        created_at: true,
+        accounting_entity_id: true,
+        organization_id: true,
+        source_id: true,
+      },
+    });
+
+    if (!transmission) return null;
+    if (transmission.organization_id !== platformOrgId) return null;
+
+    // Snapshot del origen. Sin él, no tenemos customer / items / totales:
+    // el detail no podría renderizar el resumen. Sin snapshot válido
+    // devolvemos null y el componente verá 404 — es preferible a
+    // renderizar una factura vacía que se confunde con una recién emitida.
+    const snapshot = await this.prisma.withoutScope().fiscal_evidences.findFirst({
+      where: {
+        fiscal_transmission_id: transmission.id,
+        evidence_type: 'manual_support',
+      },
+      orderBy: { created_at: 'desc' },
+      select: {
+        id: true,
+        fiscal_transmission_id: true,
+        evidence_type: true,
+        content_hash: true,
+        storage_key: true,
+        metadata: true,
+        created_at: true,
+      },
+    });
+
+    const meta = (snapshot?.metadata as Record<string, unknown> | null) ?? null;
+    const customer =
+      (meta && typeof meta === 'object' && 'customer' in meta
+        ? (meta as { customer: any }).customer
+        : null) ?? null;
+    const items =
+      (meta && typeof meta === 'object' && 'items' in meta
+        ? (meta as { items: any[] }).items
+        : null) ?? [];
+    const totals =
+      (meta && typeof meta === 'object' && 'totals' in meta
+        ? (meta as { totals: { subtotal: number; tax_amount: number; total: number } }).totals
+        : null) ?? { subtotal: 0, tax_amount: 0, total: 0 };
+    const periodStart =
+      meta && typeof meta === 'object' && 'period_start' in (meta as any)
+        ? ((meta as any).period_start as string | null)
+        : null;
+    const periodEnd =
+      meta && typeof meta === 'object' && 'period_end' in (meta as any)
+        ? ((meta as any).period_end as string | null)
+        : null;
+    const currency =
+      meta && typeof meta === 'object' && 'currency' in (meta as any)
+        ? ((meta as any).currency as string)
+        : 'COP';
+
+    const invoiceNumber = transmission.document_number;
+    const issuedAt = transmission.accepted_at ?? transmission.created_at ?? new Date();
+    const issuedIso = issuedAt instanceof Date ? issuedAt.toISOString() : String(issuedAt);
+    const dueIso = new Date(
+      new Date(issuedIso).getTime() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const synthetic = {
+      id: transmission.id,
+      invoice_number: invoiceNumber,
+      state: 'custom_emitted',
+      issued_at: issuedIso,
+      due_at: dueIso,
+      period_start: periodStart ?? issuedIso,
+      period_end: periodEnd ?? issuedIso,
+      subtotal: String(totals.subtotal ?? 0),
+      tax_amount: String(totals.tax_amount ?? 0),
+      total: String(totals.total ?? 0),
+      amount_paid: '0',
+      currency,
+      line_items: items,
+    };
+
+    return {
+      invoice: synthetic,
+      transmissions: [
+        {
+          id: transmission.id,
+          transmission_status: transmission.transmission_status,
+          dian_status: transmission.dian_status,
+          accounting_status: transmission.accounting_status,
+          document_number: transmission.document_number,
+          cufe: transmission.cufe,
+          qr_code: transmission.qr_code,
+          tracking_id: transmission.tracking_id,
+          accepted_at: transmission.accepted_at,
+          rejected_at: transmission.rejected_at,
+          error_message: transmission.error_message,
+          created_at: transmission.created_at,
+        },
+      ],
+      evidences: snapshot
+        ? [
+            {
+              id: snapshot.id,
+              fiscal_transmission_id: snapshot.fiscal_transmission_id,
+              evidence_type: snapshot.evidence_type,
+              content_hash: snapshot.content_hash,
+              storage_key: snapshot.storage_key,
+              metadata: snapshot.metadata,
+              created_at: snapshot.created_at,
+            },
+          ]
+        : [],
+      plan: null,
+      // La organización "destinatario" no es una org tenant: es free-form.
+      // Devolvemos lo que el snapshot guardó del cliente para que la
+      // plantilla pinte `legal_name`/`tax_id` en la cabecera. Si el
+      // operador pidió "Implements S.A.S", eso aparece acá.
+      organization: customer
+        ? {
+            id: 0,
+            name: customer.legal_name ?? '—',
+            legal_name: customer.legal_name ?? null,
+            tax_id: customer.tax_id ?? null,
+            email: customer.email ?? null,
+          }
+        : null,
+    };
+  }
+
   async getSubscriptionInvoiceDetail(id: number): Promise<{
     invoice: any;
     transmissions: any[];
@@ -2346,19 +2663,22 @@ export class SubscriptionFiscalService {
     // subscription_invoice pertenece a otra entidad, no debe filtrarse a un
     // super-admin que pidió la URL con id=numero. derive in read.
     const settings = await this.getSettings();
+    // Probe primero por platform_invoice. `createPlatformInvoice` devuelve
+    // el `transmission.id` como `invoice_id` para que el frontend navegue
+    // a este endpoint — la tabla `subscription_invoices` nunca tuvo ese
+    // id, así que la búsqueda original devolvía 404.
+    const platformDetail = await this.getPlatformInvoiceDetailFromTransmission(id);
+    if (platformDetail) {
+      return platformDetail;
+    }
+    // Hoy TODA `subscription_invoice` pertenece a la org plataforma (es
+    // un hecho de la implementación actual). El filtro fino por entidad
+    // contable en el `where` confunde a Prisma sobre qué relaciones
+    // cargar — el include se omite. Validamos la pertenencia
+    // post-query con el campo `accounting_entity_id` de la plataforma,
+    // y si difiere, retornamos null (controller lanza 404).
     const invoice = await this.prisma.withoutScope().subscription_invoices.findFirst({
-      where: {
-        id,
-        store_subscription: {
-          store: {
-            organizations: {
-              accounting_entities: {
-                some: { id: settings.accounting_entity_id, is_active: true },
-              },
-            },
-          },
-        },
-      },
+      where: { id },
       include: {
         payments: { orderBy: { created_at: 'desc' } },
         store_subscription: {
@@ -2385,6 +2705,16 @@ export class SubscriptionFiscalService {
         },
       },
     });
+
+    if (!invoice) return null;
+
+    // Validación post-query: la org dueña debe ser la plataforma. Hoy
+    // siempre coincide; este guard es para el caso futuro en que una
+    // partner-org genere SaaS propios y use el mismo endpoint.
+    const platformOrgId = await this.resolvePlatformOrganizationId();
+    if (invoice.store_subscription.store.organizations.id !== platformOrgId) {
+      return null;
+    }
 
     if (!invoice) return null;
 
@@ -3070,7 +3400,11 @@ export class SubscriptionFiscalService {
         software_id: dto.software_id,
         software_pin_encrypted: this.encryption.encrypt(dto.software_pin!),
         environment: dto.environment,
-        enablement_status: this.nextEnablementStatus(dto, dto.environment ?? previous.environment),
+        // En CREATE no hay `previous` — el caller decide el ambiente que
+        // manda en `dto.environment`. Si lo dejó undefined (omitido), el
+        // caller DEBIÓ haber incluido el campo y la validación @IsOptional
+        // lo deja pasar. Aquí el fallback es solo defensivo.
+        enablement_status: this.nextEnablementStatus(dto, dto.environment ?? 'test'),
         test_set_id: dto.test_set_id,
       },
     });
@@ -3079,7 +3413,7 @@ export class SubscriptionFiscalService {
   private async updateDianConfig(
     id: number,
     dto: UpsertSubscriptionFiscalConfigDto,
-    options?: { realign_accounting_entity_id?: number | null },
+    options: { previous: SubscriptionFiscalSettings; realign_accounting_entity_id?: number | null },
   ) {
     // El estado actual se lee ACÁ, no se recibe por parámetro.
     //
@@ -3116,7 +3450,10 @@ export class SubscriptionFiscalService {
     // retirarlo: eso solo lo hace la DIAN, y se refleja por otras vías
     // (`suspended`, `expired`).
     if (canWriteEnablementStatus(current?.enablement_status ?? null)) {
-      data.enablement_status = this.nextEnablementStatus(dto, dto.environment ?? previous.environment);
+      data.enablement_status = this.nextEnablementStatus(
+        dto,
+        dto.environment ?? options.previous.environment,
+      );
     }
     if (dto.software_pin && dto.software_pin !== '****') {
       data.software_pin_encrypted = this.encryption.encrypt(dto.software_pin);

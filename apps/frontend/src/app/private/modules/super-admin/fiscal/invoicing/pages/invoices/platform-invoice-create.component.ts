@@ -12,6 +12,9 @@ interface CreatePlatformInvoicePayload {
     tax_id: string;
     tax_id_dv?: string;
     email?: string;
+    address_line?: string;
+    city?: string;
+    department_code?: string;
   };
   items: Array<{ description: string; quantity: number; unit_price: number }>;
   period_start?: string;

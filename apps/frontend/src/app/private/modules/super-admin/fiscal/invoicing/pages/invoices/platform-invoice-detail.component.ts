@@ -270,7 +270,7 @@ export class PlatformInvoiceDetailComponent {
    * "Diagnosticar y emitir" para que el operador sepa por qué no salió
    * antes de reintentar.
    */
-  private async loadReadiness(invoiceId: number): Promise<void> {
+  async loadReadiness(invoiceId: number): Promise<void> {
     try {
       const res = await firstValueFrom(
         this.http.get<{
