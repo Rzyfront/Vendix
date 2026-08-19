@@ -376,7 +376,11 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        // Prisma 7 rechaza `{ not: null }`. Se usa `NOT` para conservar la
+        // intención: excluir las ventas sin cliente del ranking. Poner
+        // `customer_id: undefined` quitaría el filtro y metería las ventas
+        // anónimas como un cliente más.
+        NOT: { customer_id: null },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: { grand_total: true },
