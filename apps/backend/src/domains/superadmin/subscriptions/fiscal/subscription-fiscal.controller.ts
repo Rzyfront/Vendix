@@ -384,6 +384,17 @@ export class SubscriptionFiscalController {
     return this.responseService.success(result, 'Fiscal sweep completed');
   }
 
+  @Get('invoices/:id')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'Get SaaS invoice detail with transmissions and evidences' })
+  async getSubscriptionInvoiceDetail(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const data = await this.fiscalService.getSubscriptionInvoiceDetail(id);
+    if (!data) {
+      throw new BadRequestException('Subscription invoice not found');
+    }
+    return this.responseService.success(data, 'Subscription invoice detail retrieved');
+  }
+
   @Get('resolutions')
   @Permissions('superadmin:subscriptions:fiscal:read')
   @ApiOperation({ summary: 'List platform DIAN invoice resolutions' })

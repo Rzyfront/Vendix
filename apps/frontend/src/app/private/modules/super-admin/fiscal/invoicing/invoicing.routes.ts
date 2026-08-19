@@ -76,6 +76,13 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
           ),
       },
       {
+        path: 'invoices/:id',
+        loadComponent: () =>
+          import(
+            './pages/invoices/platform-invoice-detail.component'
+          ).then((c) => c.PlatformInvoiceDetailComponent),
+      },
+      {
         path: 'resolutions',
         loadComponent: () =>
           import('./pages/resolutions/platform-resolutions.component').then(

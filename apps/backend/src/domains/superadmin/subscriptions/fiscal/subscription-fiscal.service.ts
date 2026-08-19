@@ -1956,6 +1956,86 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Detalle de UNA factura SaaS para mostrar en super-admin. Reune la factura
+   * SaaS, su(s) transmisión(es) DIAN y las evidencias (XML firmado, PDF, QR,
+   * respuesta DIAN) en un payload que la vista de plataforma consume sin tener
+   * que volver a preguntar al backend.
+   *
+   * Retorna `null` si la factura no existe. NO verifica que pertenezca a la
+   * organización plataforma: con `accounting_entity_id` derivado en build, una
+   * factura SaaS siempre va a tener la entidad correcta — pero la factura
+   * huérfana (sin transmisión todavía) se considera "no emitida" y se devuelve
+   * con `transmission: null` + `evidences: []`.
+   */
+  async getSubscriptionInvoiceDetail(id: number): Promise<{
+    invoice: any;
+    transmissions: any[];
+    evidences: any[];
+    plan: { name: string; code: string; billing_cycle: string } | null;
+    organization: {
+      id: number;
+      name: string;
+      legal_name: string | null;
+      tax_id: string | null;
+      email: string | null;
+    } | null;
+  } | null> {
+    const invoice = await this.prisma.withoutScope().subscription_invoices.findUnique({
+      where: { id },
+      include: {
+        payments: { orderBy: { created_at: 'desc' } },
+        store_subscription: {
+          include: {
+            plan: { select: { name: true, code: true, billing_cycle: true } },
+            store: {
+              include: {
+                organizations: {
+                  select: {
+                    id: true,
+                    name: true,
+                    legal_name: true,
+                    tax_id: true,
+                    email: true,
+                    document_type: true,
+                    verification_digit: true,
+                    person_type: true,
+                    tax_regime: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!invoice) return null;
+
+    const transmissions = await this.prisma.withoutScope().fiscal_transmissions.findMany({
+      where: { source_type: 'subscription_invoice', source_id: id },
+      orderBy: { created_at: 'desc' },
+    });
+
+    const transmissionIds = transmissions.map((t) => t.id);
+    const evidences = transmissionIds.length
+      ? await this.prisma.withoutScope().fiscal_evidences.findMany({
+          where: { fiscal_transmission_id: { in: transmissionIds } },
+          orderBy: { created_at: 'desc' },
+        })
+      : [];
+
+    const org = invoice.store_subscription.store.organizations;
+
+    return {
+      invoice,
+      transmissions,
+      evidences,
+      plan: invoice.store_subscription.plan,
+      organization: org,
+    };
+  }
+
+  /**
    * List DIAN resolutions registered for the Vendix platform organization.
    *
    * Platform resolutions are scoped to the derived platform `organization_id`
