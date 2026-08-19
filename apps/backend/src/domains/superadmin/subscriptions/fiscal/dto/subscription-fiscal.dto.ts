@@ -339,10 +339,10 @@ export class PlatformInvoiceCustomerDto {
   @MaxLength(20)
   tax_id!: string;
 
-  @IsOptional()
   @IsString()
+  @Matches(/^\d$/, { message: 'El DV del destinatario es obligatorio (NIT, tipo 31): un solo dígito numérico.' })
   @MaxLength(3)
-  tax_id_dv?: string;
+  tax_id_dv!: string;
 
   @IsOptional()
   @IsString()

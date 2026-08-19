@@ -77,6 +77,20 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
       },
       {
         path: 'invoices/:id',
+        data: { kind: 'subscription' },
+        loadComponent: () =>
+          import(
+            './pages/invoices/platform-invoice-detail.component'
+          ).then((c) => c.PlatformInvoiceDetailComponent),
+      },
+      {
+        // Ruta discriminada: las platform-invoices reciben su id de
+        // `fiscal_transmissions.id` (no de `subscription_invoices.id`).
+        // Sin esta ruta separada, las dos secuencias compartían
+        // `/invoices/:id` y un id colisionado (SaaS #42 = platform #42)
+        // mostraba el documento equivocado al abrir la URL.
+        path: 'platform-invoices/:id',
+        data: { kind: 'platform' },
         loadComponent: () =>
           import(
             './pages/invoices/platform-invoice-detail.component'

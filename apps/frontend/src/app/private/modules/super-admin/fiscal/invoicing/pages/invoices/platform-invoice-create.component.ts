@@ -10,7 +10,12 @@ interface CreatePlatformInvoicePayload {
   customer: {
     legal_name: string;
     tax_id: string;
-    tax_id_dv?: string;
+    /**
+     * DV del NIT (un dígito). El riel de plataforma emite siempre con
+     * customer_document_type='31' (NIT), y la DIAN rechaza Anexo 19 sin
+     * DV después de quemar el consecutivo. Por eso es requerido acá.
+     */
+    tax_id_dv: string;
     email?: string;
     address_line?: string;
     city?: string;
@@ -87,12 +92,14 @@ interface CreatePlatformInvoiceResponse {
             />
           </label>
           <label class="block mt-2 text-sm">
-            <span class="text-gray-700">DV</span>
+            <span class="text-gray-700">DV <span class="text-red-600">*</span></span>
             <input
               type="text"
               [(ngModel)]="customer.tax_id_dv"
               name="tax_id_dv"
               maxlength="1"
+              required
+              pattern="[0-9]"
               class="mt-1 w-full border rounded px-3 py-2"
             />
           </label>
@@ -257,7 +264,7 @@ export class PlatformInvoiceCreateComponent {
         customer: {
           legal_name: this.customer.legal_name,
           tax_id: this.customer.tax_id,
-          tax_id_dv: this.customer.tax_id_dv || undefined,
+          tax_id_dv: this.customer.tax_id_dv,
           email: this.customer.email || undefined,
           address_line: this.customer.address_line || undefined,
           city: this.customer.city || undefined,
@@ -274,7 +281,10 @@ export class PlatformInvoiceCreateComponent {
       );
       if (res?.success && res.data) {
         this.toast.success(`Factura ${res.data.fiscal_number} creada (${res.data.dian_status})`);
-        this.router.navigate(['/super-admin/fiscal/invoicing/invoices', res.data.invoice_id]);
+        // Ruta discriminada `/platform-invoices/:id`: las platform-invoices
+        // reciben su id de `fiscal_transmissions`, no de `subscription_invoices`.
+        // La ruta `/invoices/:id` queda reservada a SaaS subscription invoices.
+        this.router.navigate(['/super-admin/fiscal/invoicing/platform-invoices', res.data.invoice_id]);
       } else {
         this.errorMessage.set('La API no devolvió el resultado.');
       }

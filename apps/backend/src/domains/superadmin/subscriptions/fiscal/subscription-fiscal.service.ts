@@ -1897,13 +1897,207 @@ export class SubscriptionFiscalService {
     const transmission = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
       where: { id: transmissionId },
     });
-    if (!transmission || transmission.source_type !== 'subscription_invoice') {
+    if (!transmission) {
       throw new BadRequestException('Fiscal transmission not found');
     }
     if (transmission.transmission_status === 'accepted') {
       throw new BadRequestException('Accepted fiscal transmissions cannot be retried');
     }
-    return this.issueForInvoice(transmission.source_id, { manual: true, source: 'retry' });
+    if (transmission.source_type === 'subscription_invoice') {
+      return this.issueForInvoice(transmission.source_id, { manual: true, source: 'retry' });
+    }
+    if (transmission.source_type === 'platform_invoice') {
+      return this.resendPlatformTransmission(transmissionId);
+    }
+    throw new BadRequestException(
+      `Retransmisión no soportada para source_type='${transmission.source_type}'`,
+    );
+  }
+
+  /**
+   * Re-firma y re-envía una platform-invoice YA existente. Sin reasignar
+   * número: la DIAN quemó el consecutivo en el intento original y no se
+   * recupera, así que el `document_number` y `issue_date` del primer intento
+   * se preservan (de otra forma el CUFE volvería a calcularse con datos
+   * diferentes y la DIAN rechazaría). El snapshot en `fiscal_evidences` con
+   * `metadata.kind='platform_invoice_snapshot'` provee el payload original.
+   *
+   * Si la DIAN rechaza otra vez, `dian_status` queda `'rejected'` y la
+   * factura nunca entra al XML firmado — el siguiente paso es la
+   * corrección administrativa (anular + nueva factura en otra resolución),
+   * NO un tercer retry que tampoco va a pasar.
+   */
+  async resendPlatformTransmission(transmissionId: number) {
+    const settings = await this.getSettings();
+    if (!settings.is_enabled) {
+      throw new BadRequestException('La facturación de plataforma está desactivada');
+    }
+    if (!settings.invoice_resolution_id) {
+      throw new BadRequestException('La plataforma no tiene una resolución de facturación activa');
+    }
+    if (!settings.accounting_entity_id) {
+      throw new BadRequestException('La plataforma no tiene una entidad contable activa');
+    }
+    if (!settings.dian_configuration_id) {
+      throw new BadRequestException('La plataforma no tiene una configuración DIAN activa');
+    }
+
+    return this.runInPlatformContext(settings, async () => {
+      const transmission = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+        where: {
+          id: transmissionId,
+          source_type: 'platform_invoice',
+          accounting_entity_id: settings.accounting_entity_id!,
+        },
+      });
+      if (!transmission) {
+        throw new BadRequestException('Platform invoice transmission not found');
+      }
+
+      // Snapshot persistido en `createPlatformInvoice`. Sin él no
+      // podemos reconstruir `ProviderInvoiceData` con el mismo payload
+      // del primer intento (el `fiscal_transmissions` no tiene columnas
+      // planas para customer / items / totales).
+      const snapshot = await this.prisma.withoutScope().fiscal_evidences.findFirst({
+        where: {
+          fiscal_transmission_id: transmission.id,
+          evidence_type: 'manual_support',
+        },
+        orderBy: { created_at: 'desc' },
+      });
+      const meta = (snapshot?.metadata as Record<string, unknown> | null) ?? null;
+      if (!meta || (meta as any).kind !== 'platform_invoice_snapshot') {
+        throw new BadRequestException(
+          'No hay snapshot del origen — la factura original no se emitió por createPlatformInvoice.',
+        );
+      }
+      const m: any = meta;
+      const customer = m.customer as {
+        legal_name: string;
+        tax_id: string;
+        tax_id_dv: string;
+        email?: string;
+        address_line?: string;
+        city?: string;
+        department_code?: string;
+      };
+      const items = m.items as Array<{
+        position: number;
+        description: string;
+        quantity: number;
+        unit_price: number;
+        line_total: string;
+      }>;
+      const totals = m.totals as { subtotal: number; tax_amount: number; total: number };
+      const periodStart = (m.period_start as string | null) ?? null;
+      const periodEnd = (m.period_end as string | null) ?? null;
+      const currency = (m.currency as string) ?? 'COP';
+
+      // Fechas del primer intento: si cambian, el CUFE recalculado ya
+      // no matchea el burnt y la DIAN rechaza. La fila trae `created_at`
+      // que es el instante del primer CREATE.
+      const firstAttemptAt = transmission.created_at ?? new Date();
+      const firstAttemptDate = localDateString(firstAttemptAt, PLATFORM_TIMEZONE);
+      const firstAttemptTime = localTimeString(firstAttemptAt, PLATFORM_TIMEZONE);
+      const firstAttemptDueDate = localDateString(
+        new Date(firstAttemptAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+        PLATFORM_TIMEZONE,
+      );
+
+      // Resolución: la misma que se usó en el primer intento (settings
+      // no debería cambiarla entre tanto, pero leemos de la fila por
+      // defensa).
+      const resolution = await this.prisma.withoutScope().invoice_resolutions.findFirst({
+        where: {
+          id: settings.invoice_resolution_id!,
+          accounting_entity_id: settings.accounting_entity_id!,
+          document_type: 'sales_invoice',
+        },
+      });
+      if (!resolution) {
+        throw new BadRequestException('No se encontró la resolución original de la factura de plataforma');
+      }
+
+      const providerData = {
+        invoice_number: transmission.document_number,
+        invoice_type: 'sales_invoice',
+        issue_date: firstAttemptDate,
+        issue_time: firstAttemptTime,
+        due_date: firstAttemptDueDate,
+        invoice_period: {
+          start_date: periodStart ? localDateString(new Date(periodStart), PLATFORM_TIMEZONE) : firstAttemptDate,
+          end_date: periodEnd ? localDateString(new Date(periodEnd), PLATFORM_TIMEZONE) : firstAttemptDate,
+        },
+        customer_name: customer.legal_name,
+        customer_tax_id: customer.tax_id,
+        customer_email: customer.email ?? null,
+        customer_address: customer.address_line
+          ? {
+              line: customer.address_line,
+              city: customer.city ?? null,
+              department_code: customer.department_code ?? null,
+              country_code: 'CO',
+            }
+          : null,
+        customer_document_type: '31',
+        customer_verification_digit: customer.tax_id_dv ?? null,
+        customer_person_type: '2',
+        customer_regime: '49',
+        customer_tax_responsibilities: ['O-13'],
+        subtotal_amount: Number(totals.subtotal ?? 0).toFixed(2),
+        discount_amount: '0.00',
+        tax_amount: Number(totals.tax_amount ?? 0).toFixed(2),
+        withholding_amount: '0.00',
+        total_amount: Number(totals.total ?? 0).toFixed(2),
+        currency,
+        items,
+        taxes: [],
+        notes: [
+          `Factura de servicios generada desde super-admin el ${firstAttemptDate}`,
+          'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+          `(retry) ${localDateString(new Date(), PLATFORM_TIMEZONE)} ${localTimeString(new Date(), PLATFORM_TIMEZONE)}`,
+        ],
+        order_reference: null,
+        resolution_number: resolution.resolution_number,
+        technical_key: this.technicalKeyVault.reveal(resolution),
+        control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, firstAttemptAt, {
+          resolution_id: resolution.id,
+          document_type: 'sales_invoice',
+        }),
+        payment_form: '1',
+        payment_means: '42',
+        payment_method: null,
+      } as unknown as ProviderInvoiceData;
+
+      // No se reescribe `request_hash`: el primer intento ya lo dejó
+      // firmado. Bump de `retry_count` ocurre implícitamente al
+      // `markSubmitted` (que también pone sent_at al NOW real del retry).
+      await this.markSubmitted(transmission.id);
+
+      try {
+        const response = await this.dianProvider.sendInvoice(providerData);
+        if (response.success) {
+          await this.markAccepted(transmission.id, response);
+        } else {
+          await this.markRejected(transmission.id, response);
+        }
+      } catch (error) {
+        await this.markError(transmission.id, error);
+        throw error;
+      }
+
+      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
+        where: { id: transmission.id },
+      });
+
+      return {
+        transmission_id: transmission.id,
+        fiscal_number: final?.document_number ?? transmission.document_number,
+        transmission_status: final?.transmission_status ?? 'unknown',
+        dian_status: final?.dian_status ?? 'unknown',
+        cufe: final?.cufe ?? null,
+      };
+    });
   }
 
   /**
@@ -1951,8 +2145,16 @@ export class SubscriptionFiscalService {
     if (!/^\d+$/.test(dto.customer.tax_id)) {
       throw new BadRequestException('El destinatario requiere tax_id numérico');
     }
-    if (dto.customer.tax_id_dv && !/^\d$/.test(dto.customer.tax_id_dv)) {
-      throw new BadRequestException('El DV del destinatario debe ser un dígito');
+    // customer_document_type va fijo en '31' (NIT) en este riel y la DIAN
+    // exige DV para NIT. El DTO ya lo declara requerido y regex, pero un
+    // cliente que mande el campo `undefined` (por ejemplo un retry de una
+    // plataforma vieja) lo colaría: re-validamos aquí también. Sin DV la
+    // DIAN rechaza por Anexo 19 después de quemar el consecutivo, y ese
+    // número no vuelve.
+    if (!/^\d$/.test(dto.customer.tax_id_dv ?? '')) {
+      throw new BadRequestException(
+        'El destinatario requiere DV (NIT, tipo 31): un solo dígito numérico.',
+      );
     }
     if (dto.items.length === 0) {
       throw new BadRequestException('La factura debe tener al menos una línea');
@@ -2470,17 +2672,21 @@ export class SubscriptionFiscalService {
    * con `transmission: null` + `evidences: []`.
    */
   /**
-   * Servicio: si `id` casa con una `fiscal_transmission` de `source_type='platform_invoice'`,
-   * sintetizamos el mismo shape de `subscription_invoices` usando el snapshot
-   * que `createPlatformInvoice` persiste en `fiscal_evidences`. Esto evita
-   * tener que añadir un endpoint y un route paralelos: el detail component
-   * sigue pegándole a `/invoices/:id` y el backend distingue por source_type.
+   * Detalle de una plataforma invoice. Se expone en ruta separada
+   * (`GET /platform-invoices/:id`, no `/invoices/:id`) para que el id
+   * numérico apunte sin ambigüedad: `subscription_invoices.id` y
+   * `fiscal_transmissions.id` son secuencias independientes y, en caso
+   * de colisión numérica, una sola ruta desambigua por source_type sin
+   * tener que inferir. Sin discriminar, abrir `/invoices/42` cuando
+   * existe un SaaS invoice #42 devolvería la platform-invoice si el
+   * probe de transmisión casaba primero — sin fuga de datos (filtra por
+   * entidad contable) pero mostrando el documento equivocado.
    *
-   * El frontend ya pinta las plantillas con `@if` y `?? 0` sobre los
-   * campos que `subscription_invoice` lleva y `fiscal_transmissions` no;
-   * un objeto sintetizado con los nombres correctos pasa la plantilla.
+   * Lee el snapshot persistido en `fiscal_evidences` por
+   * `createPlatformInvoice` y sintetiza la misma shape que el rail SaaS,
+   * para no romper la plantilla del detail component.
    */
-  private async getPlatformInvoiceDetailFromTransmission(
+  async getPlatformInvoiceDetail(
     id: number,
   ): Promise<{
     invoice: any;
@@ -2663,14 +2869,6 @@ export class SubscriptionFiscalService {
     // subscription_invoice pertenece a otra entidad, no debe filtrarse a un
     // super-admin que pidió la URL con id=numero. derive in read.
     const settings = await this.getSettings();
-    // Probe primero por platform_invoice. `createPlatformInvoice` devuelve
-    // el `transmission.id` como `invoice_id` para que el frontend navegue
-    // a este endpoint — la tabla `subscription_invoices` nunca tuvo ese
-    // id, así que la búsqueda original devolvía 404.
-    const platformDetail = await this.getPlatformInvoiceDetailFromTransmission(id);
-    if (platformDetail) {
-      return platformDetail;
-    }
     // Hoy TODA `subscription_invoice` pertenece a la org plataforma (es
     // un hecho de la implementación actual). El filtro fino por entidad
     // contable en el `where` confunde a Prisma sobre qué relaciones

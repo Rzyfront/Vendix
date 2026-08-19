@@ -229,7 +229,30 @@ export class PlatformInvoiceDetailComponent {
 
   private base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
 
+  /**
+   * Endpoint del detalle. Se deriva del route data `kind`:
+   *  - `subscription` (default): `GET /invoices/:id` (SaaS invoice).
+   *  - `platform`: `GET /platform-invoices/:id` (transmisión de platform).
+   *
+   * Las dos rutas son necesarias porque las dos tablas tienen secuencias
+   * independientes: compartir `/invoices/:id` permite que un id colisionado
+   * (SaaS #42 = platform #42) muestre el documento equivocado. La plantilla
+   * no cambia: ambas rutas devuelven la misma shape (sintetizada en el
+   * backend para el caso platform a partir del snapshot de `fiscal_evidences`).
+   */
+  private detailPathPrefix = '/invoices';
+  private readinessPathPrefix = '/invoices';
+
   constructor() {
+    // La ruta `/platform-invoices/:id` lleva `data.kind = 'platform'` y la
+    // ruta `/invoices/:id` lleva (o deja) `kind = 'subscription'`. La pieza
+    // cambia el prefijo del endpoint del backend.
+    const kind =
+      this.route.snapshot.data['kind'] === 'platform' ? 'platform' : 'subscription';
+    if (kind === 'platform') {
+      this.detailPathPrefix = '/platform-invoices';
+      this.readinessPathPrefix = '/platform-invoices';
+    }
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!Number.isInteger(id) || id <= 0) {
       this.errorMessage.set('Identificador de factura inválido.');
@@ -276,7 +299,7 @@ export class PlatformInvoiceDetailComponent {
         this.http.get<{
           success: boolean;
           data: { blockers?: Array<{ code: string; problem: string; fix?: string }> };
-        }>(`${this.base}/invoices/${invoiceId}/emit-readiness`),
+        }>(`${this.base}${this.readinessPathPrefix}/${invoiceId}/emit-readiness`),
       );
       const blockers = res?.data?.blockers ?? [];
       this.readinessBlockers.set(blockers);
@@ -315,7 +338,7 @@ export class PlatformInvoiceDetailComponent {
     try {
       const res = await firstValueFrom(
         this.http.get<{ success: boolean; data: SubscriptionInvoiceDetail }>(
-          `${this.base}/invoices/${id}`,
+          `${this.base}${this.detailPathPrefix}/${id}`,
         ),
       );
       if (res?.success && res.data) {
