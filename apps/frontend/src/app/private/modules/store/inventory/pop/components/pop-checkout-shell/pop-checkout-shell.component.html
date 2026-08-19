@@ -49,7 +49,8 @@
           </button>
         </div>
       </div>
-    } @else if (orderError() !== null) {
+    }
+    @if (orderResult() === null && orderError() !== null) {
       <div class="px-6 py-10 flex flex-col items-center gap-4 text-center">
         <div class="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
           <app-icon name="x-circle" [size]="40" />
@@ -73,7 +74,8 @@
           </button>
         </div>
       </div>
-    } @else {
+    }
+    @if (orderResult() === null && orderError() === null) {
     <!-- Stepper -->
     <div class="pop-checkout-stepper">
       <app-steps-line
@@ -152,8 +154,8 @@
         </div>
       }
     </div>
+    }
   </div>
-  } <!-- cierre @else del bloque orderResult/orderError -->
   }
 
   <!-- Footer -->
