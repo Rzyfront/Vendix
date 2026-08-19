@@ -32,6 +32,7 @@ import { UserRole } from '../../../auth/enums/user-role.enum';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import {
+  CreatePlatformInvoiceDto,
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
   RetrySubscriptionFiscalDto,
@@ -396,6 +397,17 @@ export class SubscriptionFiscalController {
       throw new NotFoundException('Subscription invoice not found');
     }
     return this.responseService.success(data, 'Subscription invoice detail retrieved');
+  }
+
+  @Post('invoices')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Create a platform invoice (services not tied to subscription)',
+  })
+  async createPlatformInvoice(@Body() dto: CreatePlatformInvoiceDto): Promise<any> {
+    const result = await this.fiscalService.createPlatformInvoice(dto);
+    return this.responseService.created(result, 'Platform invoice created');
   }
 
   @Get('resolutions')

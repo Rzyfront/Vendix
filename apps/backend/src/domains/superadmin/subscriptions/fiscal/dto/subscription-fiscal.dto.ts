@@ -1,9 +1,12 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -11,6 +14,7 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import {
   TrimString,
@@ -297,4 +301,76 @@ export class ListPlatformResolutionsQueryDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+}
+
+/**
+ * C.11: DTO de creación de una factura personalizada de plataforma (no
+ * generada por el motor de suscripciones). El destinatario es una
+ * organización tenant existente, no un customer suelto. El backend
+ * arma la `fiscal_transmission` con `source_type='platform_invoice'`
+ * y reutiliza la `platform_settings.invoice_resolution_id` activa.
+ *
+ * Cubre los casos típicos: implementación, consultoría, capacitación,
+ * servicios de plataforma facturados a nombre de la org 1.
+ */
+export class PlatformInvoiceLineDto {
+  @IsString()
+  @MaxLength(500)
+  description!: string;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  quantity!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  unit_price!: number;
+}
+
+export class PlatformInvoiceCustomerDto {
+  @IsString()
+  @MaxLength(500)
+  legal_name!: string;
+
+  @IsString()
+  @Matches(/^\d+$/, { message: 'NIT debe ser numérico' })
+  @MaxLength(20)
+  tax_id!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  tax_id_dv?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  email?: string;
+}
+
+export class CreatePlatformInvoiceDto {
+  @ValidateNested()
+  @Type(() => PlatformInvoiceCustomerDto)
+  customer!: PlatformInvoiceCustomerDto;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PlatformInvoiceLineDto)
+  items!: PlatformInvoiceLineDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  period_start?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  period_end?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  currency?: string;
 }

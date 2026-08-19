@@ -54,6 +54,7 @@ import {
   ProviderInvoiceTax,
   ProviderResponse,
 } from '../../../store/invoicing/providers/invoice-provider.interface';
+import { CreatePlatformInvoiceDto } from './dto/subscription-fiscal.dto';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
@@ -1902,6 +1903,170 @@ export class SubscriptionFiscalService {
       throw new BadRequestException('Accepted fiscal transmissions cannot be retried');
     }
     return this.issueForInvoice(transmission.source_id, { manual: true, source: 'retry' });
+  }
+
+  /**
+   * C.11: crea una factura personalizada de plataforma. A diferencia de
+   * `issueForInvoice` (que firma una `subscription_invoice` ya existente),
+   * este método arma la `fiscal_transmission` con `source_type='platform_invoice'`
+   * sin crear una `subscription_invoices` auxiliar. Cubre los servicios
+   * que Vendix cobra a sus tenants sin pasar por el motor de
+   * suscripciones: implementación, consultoría, capacitación.
+   *
+   * El número se asigna con la misma `allocateFiscalNumber` que las
+   * suscripciones usan. La idempotency_key se deriva del `idempotency_hint`
+   * que el cliente pasa (si lo da) o de un uuid generado server-side:
+   * dos requests con la misma key no emiten dos facturas.
+   */
+  async createPlatformInvoice(dto: CreatePlatformInvoiceDto): Promise<{
+    invoice_id: number;
+    fiscal_number: string;
+    transmission_id: number;
+    transmission_status: string;
+    dian_status: string;
+    cufe: string | null;
+  }> {
+    const settings = await this.getSettings();
+    if (!settings.is_enabled) {
+      throw new BadRequestException('La facturación de plataforma está desactivada');
+    }
+    if (!settings.invoice_resolution_id) {
+      throw new BadRequestException('La plataforma no tiene una resolución de facturación activa');
+    }
+
+    return this.runInPlatformContext(settings, async () => {
+      // 1) Asignar número con el mismo `pg_advisory_xact_lock` que las
+      // suscripciones usan. El id de resolución viene de settings, no
+      // del DTO — la plataforma no expone qué rango usar.
+      const fiscalNumber = await this.allocateFiscalNumber(
+        await this.prisma.$transaction(async (tx) => tx),
+        settings,
+      );
+
+      const resolution = await this.loadInvoiceResolution(settings);
+
+      // 2) Construir el ProviderInvoiceData. El backend `DianDirectProvider`
+      // espera un shape estable; aquí reusamos el patrón del rail de
+      // suscripciones sincrónicamente, sin el envoltorio de SubscriptionInvoice.
+      const issuedAt = new Date();
+      const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
+      const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
+      const dueAt = new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const dueAtLocal = localDateString(dueAt, PLATFORM_TIMEZONE);
+
+      const subtotal = dto.items.reduce(
+        (acc, item) => acc + Number(item.quantity) * Number(item.unit_price),
+        0,
+      );
+      const taxAmount = 0; // Excluido de IVA art. 476 num. 21 ET — coincide con SaaS
+      const total = subtotal + taxAmount;
+
+      const providerData: ProviderInvoiceData = {
+        invoice_number: fiscalNumber,
+        invoice_type: 'sales_invoice',
+        issue_date: issuedAtLocal,
+        issue_time: issuedAtTime,
+        due_date: dueAtLocal,
+        invoice_period: {
+          start_date: dto.period_start
+            ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+            : issuedAtLocal,
+          end_date: dto.period_end
+            ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+            : issuedAtLocal,
+        },
+        customer_name: dto.customer.legal_name,
+        customer_tax_id: dto.customer.tax_id,
+        customer_email: dto.customer.email ?? null,
+        customer_address: null, // TODO: dirección del destinatario
+        customer_document_type: '31',
+        customer_verification_digit: dto.customer.tax_id_dv ?? null,
+        customer_person_type: '2',
+        customer_regime: '49',
+        customer_tax_responsibilities: ['O-13'],
+        subtotal_amount: subtotal.toFixed(2),
+        discount_amount: '0.00',
+        tax_amount: taxAmount.toFixed(2),
+        withholding_amount: '0.00',
+        total_amount: total.toFixed(2),
+        currency: dto.currency ?? 'COP',
+        items: dto.items.map((item, i) => ({
+          position: i + 1,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+          line_total: (Number(item.quantity) * Number(item.unit_price)).toFixed(2),
+          item_code: null,
+          unit_code: 'EA',
+          omit_tax_total: true,
+        })),
+        taxes: [],
+        notes: [
+          `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
+          'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+        ],
+        order_reference: null,
+        resolution_number: resolution.resolution_number,
+        technical_key: this.technicalKeyVault.reveal(resolution),
+        control: this.resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+          resolution_id: resolution.id,
+          document_type: 'sales_invoice',
+        }),
+        payment_form: '1',
+        payment_means: '42',
+        payment_method: null,
+      } as ProviderInvoiceData;
+
+      // 3) Crear la fila de `fiscal_transmissions` con source_type='platform_invoice'.
+      // `idempotency_key` única para que re-envíos no creen duplicados.
+      const idempotencyKey = `platform_invoice:tmp:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const transmission = await this.prisma.withoutScope().fiscal_transmissions.create({
+        data: {
+          organization_id: settings.platform_organization_id!,
+          store_id: null,
+          accounting_entity_id: settings.accounting_entity_id,
+          dian_configuration_id: settings.dian_configuration_id!,
+          source_type: 'platform_invoice',
+          source_id: 0, // No apunta a una subscription_invoices
+          invoice_resolution_id: settings.invoice_resolution_id!,
+          document_number: fiscalNumber,
+          transmission_status: 'queued',
+          dian_status: 'pending',
+          accounting_status: 'provisional',
+          idempotency_key: idempotencyKey,
+          request_hash: this.hash(providerData),
+          request_payload: providerData as any,
+        },
+      });
+
+      // 4) Firmar y transmitir.
+      await this.markSubmitted(transmission.id);
+
+      try {
+        const response = await this.dianProvider.sendInvoice(providerData);
+        if (response.success) {
+          await this.markAccepted(transmission.id, response);
+        } else {
+          await this.markRejected(transmission.id, response);
+        }
+      } catch (error) {
+        await this.markError(transmission.id, error);
+        throw error;
+      }
+
+      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
+        where: { id: transmission.id },
+      });
+
+      return {
+        invoice_id: transmission.id,
+        fiscal_number: fiscalNumber,
+        transmission_id: transmission.id,
+        transmission_status: final?.transmission_status ?? 'unknown',
+        dian_status: final?.dian_status ?? 'unknown',
+        cufe: final?.cufe ?? null,
+      };
+    });
   }
 
   /**

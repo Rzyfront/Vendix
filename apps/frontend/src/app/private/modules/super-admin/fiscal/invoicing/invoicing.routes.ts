@@ -83,6 +83,13 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
           ).then((c) => c.PlatformInvoiceDetailComponent),
       },
       {
+        path: 'invoices/new',
+        loadComponent: () =>
+          import(
+            './pages/invoices/platform-invoice-create.component'
+          ).then((c) => c.PlatformInvoiceCreateComponent),
+      },
+      {
         path: 'resolutions',
         loadComponent: () =>
           import('./pages/resolutions/platform-resolutions.component').then(

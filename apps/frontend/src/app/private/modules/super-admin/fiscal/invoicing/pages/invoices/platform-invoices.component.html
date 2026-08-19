@@ -83,6 +83,10 @@
         <app-icon slot="icon" name="send" [size]="16"></app-icon>
         Emitir
       </app-button>
+      <a
+        routerLink="/super-admin/fiscal/invoicing/invoices/new"
+        class="px-3 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700"
+      >Nueva factura</a>
     </div>
 
     @if (!store.configured()) {
