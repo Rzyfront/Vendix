@@ -19,6 +19,7 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
+import { computeOperatingRevenue } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   formatQuantityInSaleUnit,
@@ -841,13 +842,22 @@ export class SalesAnalyticsService {
       });
       const totalCount = countGroups.length;
 
+      // QUI-614 review: cambiar orderBy de recencia (created_at desc) a ranking
+      // por ingreso operativo. Prisma groupBy no soporta expresiones en
+      // orderBy, asi que traemos los datos sin orden y ordenamos en memoria
+      // por operating_revenue (subtotal - discount + shipping) calculado
+      // despues via computeOperatingRevenue().
       const results = await this.prisma.orders.groupBy({
         by: ['customer_id'],
         where,
-        _sum: { grand_total: true },
+        _sum: {
+          subtotal_amount: true,
+          discount_amount: true,
+          shipping_cost: true,
+          tax_amount: true,
+        },
         _count: { id: true },
         _max: { created_at: true },
-        orderBy: { _sum: { grand_total: 'desc' } },
         skip: (page - 1) * limit,
         take: limit,
       });
@@ -869,7 +879,16 @@ export class SalesAnalyticsService {
 
       const data = results.map((r) => {
         const customer = customerMap.get(r.customer_id as number);
-        const totalSpent = Number(r._sum.grand_total || 0);
+        // QUI-614: total_spent = operating revenue (subtotal − discount +
+        // shipping). Previously the code summed grand_total which folds VAT in
+        // — so the panel reported more than the customer effectively left in
+        // the store and disagreed with Resumen General.
+        const operatingRevenue = computeOperatingRevenue({
+          subtotal: Number(r._sum.subtotal_amount || 0),
+          discounts: Number(r._sum.discount_amount || 0),
+          shipping: Number(r._sum.shipping_cost || 0),
+          tax: Number(r._sum.tax_amount || 0),
+        });
         const totalOrders = r._count.id || 0;
         const customerName = customer
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -882,11 +901,15 @@ export class SalesAnalyticsService {
           customer_name: customerName,
           email: customer?.email || '',
           total_orders: totalOrders,
-          total_spent: totalSpent,
-          average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
+          total_spent: operatingRevenue,
+          average_order_value:
+            totalOrders > 0 ? operatingRevenue / totalOrders : 0,
           last_order_date: r._max.created_at?.toISOString() || null,
         };
       });
+
+      // Ordenar por total_spent desc (ranking por ingreso, no por recencia).
+      data.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
 
       return {
         data,
@@ -901,14 +924,19 @@ export class SalesAnalyticsService {
       };
     }
 
-    // Non-paginated (retrocompatible)
+    // Non-paginated (retrocompatible): traer sin orden, ordenar por revenue
+    // despues en memoria (groupBy no soporta expresiones en orderBy).
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where,
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
+      },
       _count: { id: true },
       _max: { created_at: true },
-      orderBy: { _sum: { grand_total: 'desc' } },
       take: query.limit || 50,
     });
 
@@ -927,9 +955,19 @@ export class SalesAnalyticsService {
     });
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
-    return results.map((r) => {
+    // Ordenar en memoria por total_spent (operating revenue) desc. Asi el
+    // top del listado son los clientes que mas compran, no los que compraron
+    // ultimo (que es lo que estaba haciendo orderBy: created_at desc).
+    const mapped = results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
-      const totalSpent = Number(r._sum.grand_total || 0);
+      // QUI-614: total_spent = operating revenue (ex-VAT). See the
+      // paginated branch above for rationale.
+      const operatingRevenue = computeOperatingRevenue({
+        subtotal: Number(r._sum.subtotal_amount || 0),
+        discounts: Number(r._sum.discount_amount || 0),
+        shipping: Number(r._sum.shipping_cost || 0),
+        tax: Number(r._sum.tax_amount || 0),
+      });
       const totalOrders = r._count.id || 0;
       const customerName = customer
         ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
@@ -942,11 +980,14 @@ export class SalesAnalyticsService {
         customer_name: customerName,
         email: customer?.email || '',
         total_orders: totalOrders,
-        total_spent: totalSpent,
-        average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
+        total_spent: operatingRevenue,
+        average_order_value:
+          totalOrders > 0 ? operatingRevenue / totalOrders : 0,
         last_order_date: r._max.created_at?.toISOString() || null,
       };
     });
+    mapped.sort((a, b) => (b.total_spent ?? 0) - (a.total_spent ?? 0));
+    return mapped;
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
