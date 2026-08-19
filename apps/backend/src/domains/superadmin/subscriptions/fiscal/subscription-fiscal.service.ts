@@ -1945,7 +1945,12 @@ export class SubscriptionFiscalService {
         },
         orderBy: { paid_at: 'asc' }, // oldest-first: los pendientes más atrasados primero
         select: { id: true },
-        take: 200, // cota dura: el barrido no debe agotar memoria si hay miles
+        // Cota dura: 15 facturas × 2-3 s/issue a la DIAN = 30-45 s, dentro
+        // del `proxy_read_timeout` 60 s de nginx en producción. Si quedan
+        // pendientes, el operador vuelve a invocar el endpoint. La idempotency
+        // key de `fiscal_transmissions` hace la segunda corrida no-op para
+        // las ya procesadas.
+        take: 15,
       });
 
       const accepted = await this.prisma.withoutScope().fiscal_transmissions.findMany({

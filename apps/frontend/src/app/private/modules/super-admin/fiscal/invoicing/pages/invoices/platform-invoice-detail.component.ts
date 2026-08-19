@@ -103,15 +103,27 @@ interface SubscriptionInvoiceDetail {
               <dt class="text-gray-500">Estado</dt>
               <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
               <dt class="text-gray-500">Periodo</dt>
-              <dd>{{ d.invoice.period_start | date: 'longDate':'': 'es-CO' }} → {{ d.invoice.period_end | date: 'longDate':'': 'es-CO' }}</dd>
+              <dd>{{ d.invoice.period_start | date: 'longDate' }} → {{ d.invoice.period_end | date: 'longDate' }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
-              <dd>{{ d.invoice.subtotal | currency: d.invoice.currency }}</dd>
+              <dd>
+                {{ d.invoice.subtotal | currency }}
+                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
+              </dd>
               <dt class="text-gray-500">Impuestos</dt>
-              <dd>{{ d.invoice.tax_amount | currency: d.invoice.currency }}</dd>
+              <dd>
+                {{ d.invoice.tax_amount | currency }}
+                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
+              </dd>
               <dt class="text-gray-500">Total</dt>
-              <dd class="font-semibold">{{ d.invoice.total | currency: d.invoice.currency }}</dd>
+              <dd class="font-semibold">
+                {{ d.invoice.total | currency }}
+                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
+              </dd>
               <dt class="text-gray-500">Saldo a pagar</dt>
-              <dd>{{ saldo(d) | currency: d.invoice.currency }}</dd>
+              <dd>
+                {{ saldo(d) | currency }}
+                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
+              </dd>
             </dl>
           </div>
 
@@ -128,7 +140,20 @@ interface SubscriptionInvoiceDetail {
         <section class="mt-6 bg-white rounded-lg shadow p-4">
           <h2 class="font-semibold text-gray-900 mb-3">Transmisiones DIAN</h2>
           @if (d.transmissions.length === 0) {
-            <p class="text-sm text-gray-500">Sin transmisiones. La factura aún no fue emitida.</p>
+            <div class="text-sm">
+              <p class="text-gray-500 mb-3">Esta factura aún no fue emitida. Puede dispararla ahora mismo desde aquí.</p>
+              <button
+                type="button"
+                (click)="issueNow()"
+                [disabled]="issuing()"
+                class="px-3 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700 disabled:opacity-50"
+              >
+                {{ issuing() ? 'Emitiendo…' : 'Emitir ahora' }}
+              </button>
+              @if (issueError(); as ie) {
+                <p class="text-xs text-red-600 mt-2">{{ ie }}</p>
+              }
+            </div>
           } @else {
             <div class="space-y-4">
               @for (t of d.transmissions; track t.id) {
@@ -182,6 +207,8 @@ export class PlatformInvoiceDetailComponent {
   readonly data = signal<SubscriptionInvoiceDetail | null>(null);
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
+  readonly issuing = signal(false);
+  readonly issueError = signal<string | null>(null);
 
   // Helpers expuestos al template
   readonly invoiceStateLabel = invoiceStateLabel;
@@ -210,6 +237,31 @@ export class PlatformInvoiceDetailComponent {
     const total = Number(d.invoice.total);
     const paid = Number(d.invoice.amount_paid);
     return (total - paid).toFixed(2);
+  }
+
+  /**
+   * Emite la factura SaaS vía `POST /invoices/:id/issue` y recarga el detalle
+   * para reflejar el resultado en la UI. El backend ya marca `transmission_status`
+   * y devuelve la fila; el componente solo navega el resultado.
+   */
+  async issueNow(): Promise<void> {
+    const d = this.data();
+    if (!d) return;
+    this.issuing.set(true);
+    this.issueError.set(null);
+    try {
+      await firstValueFrom(this.http.post(`${this.base}/invoices/${d.invoice.id}/issue`, {}));
+      await this.load(d.invoice.id);
+    } catch (error) {
+      const msg =
+        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
+        (error instanceof Error ? error.message : null) ||
+        'Error desconocido al emitir la factura.';
+      this.issueError.set(msg);
+      this.toast.error(msg);
+    } finally {
+      this.issuing.set(false);
+    }
   }
 
   private async load(id: number): Promise<void> {
