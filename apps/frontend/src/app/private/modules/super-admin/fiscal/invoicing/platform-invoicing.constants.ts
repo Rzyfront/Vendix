@@ -130,6 +130,10 @@ export function skippedReasonLabel(reason: string): string {
     subscription_fiscal_auto_issue_disabled:
       'La emisión automática está desactivada',
     subscription_invoice_not_paid: 'La factura SaaS aún no está pagada',
+    subscription_customer_fiscal_data_incomplete:
+      'Faltan datos fiscales del destinatario obligatorio por la DIAN',
+    prevalidation_failed:
+      'La prevalidación de la DIAN reportó bloqueadores (revisar el detalle)',
     vendor_support_fiscal_disabled:
       'El documento soporte electrónico está desactivado',
     vendor_support_fiscal_auto_transmit_disabled:

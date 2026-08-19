@@ -1464,12 +1464,18 @@ export class SubscriptionFiscalService {
   ) {
     const settings = await this.getSettings();
     if (!settings.is_enabled) {
+      this.logger.warn(
+        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_fiscal_billing_disabled`,
+      );
       return {
         skipped: true,
         reason: 'subscription_fiscal_billing_disabled',
       };
     }
     if (!settings.auto_issue && !opts.manual) {
+      this.logger.warn(
+        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_fiscal_auto_issue_disabled`,
+      );
       return {
         skipped: true,
         reason: 'subscription_fiscal_auto_issue_disabled',
@@ -1481,6 +1487,9 @@ export class SubscriptionFiscalService {
       if (opts.manual) {
         throw new BadRequestException('Only paid subscription invoices can be issued electronically');
       }
+      this.logger.warn(
+        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_invoice_not_paid`,
+      );
       return { skipped: true, reason: 'subscription_invoice_not_paid' };
     }
 
@@ -1502,7 +1511,7 @@ export class SubscriptionFiscalService {
         );
       }
       this.logger.warn(
-        `Subscription fiscal issue skipped invoice=${invoiceId}: incomplete acquirer data (${missing.join(', ')})`,
+        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_customer_fiscal_data_incomplete (missing=${missing.join(', ')})`,
       );
       return {
         skipped: true,
@@ -1561,7 +1570,7 @@ export class SubscriptionFiscalService {
         );
       }
       this.logger.warn(
-        `Subscription fiscal issue skipped invoice=${invoiceId}: prevalidation failed (${readiness.blockers
+        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: prevalidation_failed (blockers=${readiness.blockers
           .map((b) => b.code)
           .join(', ')})`,
       );
