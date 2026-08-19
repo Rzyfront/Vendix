@@ -129,8 +129,15 @@ export class UpsertSubscriptionFiscalConfigDto {
   @IsUUID(undefined, { message: 'test_set_id must be the UUID issued by DIAN' })
   test_set_id?: string;
 
+  /**
+   * Ambiente. Opcional en edición: si el caller NO envía `environment`,
+   * `upsertConfig` lo trata como «el ambiente vigente» y rechaza la
+   * transición test→production o la degradación production→test. Sólo
+   * se exige si el caller quiere CAMBIAR el ambiente.
+   */
+  @IsOptional()
   @IsIn(['test', 'production'])
-  environment!: SubscriptionFiscalEnvironment;
+  environment?: SubscriptionFiscalEnvironment;
 
   @IsBoolean()
   is_enabled!: boolean;

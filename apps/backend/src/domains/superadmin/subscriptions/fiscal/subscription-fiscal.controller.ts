@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Patch,
@@ -390,7 +391,9 @@ export class SubscriptionFiscalController {
   async getSubscriptionInvoiceDetail(@Param('id', ParseIntPipe) id: number): Promise<any> {
     const data = await this.fiscalService.getSubscriptionInvoiceDetail(id);
     if (!data) {
-      throw new BadRequestException('Subscription invoice not found');
+      // Un id inexistente no es un error de validación del cliente: la URL
+      // señala un documento que no está. 404, no 400.
+      throw new NotFoundException('Subscription invoice not found');
     }
     return this.responseService.success(data, 'Subscription invoice detail retrieved');
   }

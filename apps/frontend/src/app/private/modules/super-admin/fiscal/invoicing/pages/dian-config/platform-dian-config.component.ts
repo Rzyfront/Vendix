@@ -950,9 +950,6 @@ export class PlatformDianConfigComponent {
     if (value.nit_dv?.trim()) dto.nit_dv = value.nit_dv.trim();
     if (value.software_pin?.trim()) dto.software_pin = value.software_pin.trim();
     if (value.test_set_id?.trim()) dto.test_set_id = value.test_set_id.trim();
-    if (value.environment === 'production') {
-      dto.confirm_production = value.confirm_production;
-    }
     return dto;
   }
 }

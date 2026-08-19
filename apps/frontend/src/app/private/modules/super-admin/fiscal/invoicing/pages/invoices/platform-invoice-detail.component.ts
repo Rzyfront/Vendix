@@ -1,10 +1,17 @@
 import { CurrencyPipe, DatePipe } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { environment } from '../../../../../../../environments/environment';
-import { ToastService } from '../../../../../../../shared/services/toast.service';
+import { environment } from '../../../../../../../../environments/environment';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import {
+  billingCycleLabel,
+  evidenceTypeLabel,
+  invoiceStateLabel,
+  transmissionStatusBadgeClasses,
+  transmissionStatusLabel,
+} from '../../platform-invoicing.constants';
 
 interface SubscriptionInvoiceDetail {
   invoice: {
@@ -39,8 +46,10 @@ interface SubscriptionInvoiceDetail {
   evidences: Array<{
     id: number;
     fiscal_transmission_id: number;
-    kind: string;
-    data: string;
+    evidence_type: string;
+    content_hash?: string | null;
+    storage_key?: string | null;
+    metadata?: { value: string } | Record<string, unknown> | null;
     created_at: string;
   }>;
   plan: { name: string; code: string; billing_cycle: string } | null;
@@ -75,12 +84,12 @@ interface SubscriptionInvoiceDetail {
 
       @if (loading()) {
         <p class="mt-4 text-sm text-gray-500">Cargando factura…</p>
-      } @else if (errorMessage()) {
-        <p class="mt-4 text-sm text-red-600">{{ errorMessage() }}</p>
+      } @else if (errorMessage(); as msg) {
+        <p class="mt-4 text-sm text-red-600">{{ msg }}</p>
       } @else if (data(); as d) {
-        <h1 class="mt-4 text-2xl font-semibold text-gray-900">
+        <h2 class="mt-4 text-2xl font-semibold text-gray-900">
           Factura {{ d.invoice.invoice_number }}
-        </h1>
+        </h2>
         <p class="text-sm text-gray-500">
           {{ d.organization?.legal_name ?? d.organization?.name ?? '—' }}
           ({{ d.organization?.tax_id ?? 'sin NIT' }})
@@ -91,7 +100,7 @@ interface SubscriptionInvoiceDetail {
             <h2 class="font-semibold text-gray-900 mb-2">Resumen</h2>
             <dl class="grid grid-cols-2 gap-y-1">
               <dt class="text-gray-500">Estado</dt>
-              <dd>{{ d.invoice.state }}</dd>
+              <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
               <dt class="text-gray-500">Periodo</dt>
               <dd>{{ d.invoice.period_start | date: 'longDate' }} → {{ d.invoice.period_end | date: 'longDate' }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
@@ -100,15 +109,15 @@ interface SubscriptionInvoiceDetail {
               <dd>{{ d.invoice.tax_amount | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Total</dt>
               <dd class="font-semibold">{{ d.invoice.total | currency: d.invoice.currency }}</dd>
-              <dt class="text-gray-500">Pagado</dt>
-              <dd>{{ d.invoice.amount_paid | currency: d.invoice.currency }}</dd>
+              <dt class="text-gray-500">Saldo a pagar</dt>
+              <dd>{{ saldo(d) | currency: d.invoice.currency }}</dd>
             </dl>
           </div>
 
           <div class="bg-white rounded-lg shadow p-4">
             <h2 class="font-semibold text-gray-900 mb-2">Plan</h2>
             @if (d.plan) {
-              <p>{{ d.plan.name }} ({{ d.plan.billing_cycle }})</p>
+              <p>{{ d.plan.name }} ({{ billingCycleLabel(d.plan.billing_cycle) }})</p>
             } @else {
               <p class="text-gray-500">—</p>
             }
@@ -125,8 +134,14 @@ interface SubscriptionInvoiceDetail {
                 <div class="border rounded p-3">
                   <p class="text-sm">
                     <span class="font-mono">{{ t.document_number }}</span>
-                    · <span class="text-gray-500">{{ t.transmission_status }}</span>
-                    · <span class="text-gray-500">{{ t.dian_status }}</span>
+                    ·
+                    <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + transmissionStatusBadgeClasses(t.transmission_status)">
+                      {{ transmissionStatusLabel(t.transmission_status) }}
+                    </span>
+                    ·
+                    <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + transmissionStatusBadgeClasses(t.dian_status)">
+                      {{ transmissionStatusLabel(t.dian_status) }}
+                    </span>
                   </p>
                   @if (t.cufe) {
                     <p class="text-xs text-gray-500 mt-1 break-all">CUFE: {{ t.cufe }}</p>
@@ -147,7 +162,7 @@ interface SubscriptionInvoiceDetail {
               @for (e of d.evidences; track e.id) {
                 <li>
                   <span class="font-mono text-xs text-gray-500">#{{ e.fiscal_transmission_id }}</span>
-                  · {{ e.kind }}
+                  · {{ evidenceTypeLabel(e.evidence_type) }}
                   · <span class="text-gray-500">{{ e.created_at | date: 'short' }}</span>
                 </li>
               }
@@ -161,12 +176,18 @@ interface SubscriptionInvoiceDetail {
 export class PlatformInvoiceDetailComponent {
   private readonly http = inject(HttpClient);
   private readonly route = inject(ActivatedRoute);
-  private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
 
   readonly data = signal<SubscriptionInvoiceDetail | null>(null);
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
+
+  // Helpers expuestos al template
+  readonly invoiceStateLabel = invoiceStateLabel;
+  readonly billingCycleLabel = billingCycleLabel;
+  readonly evidenceTypeLabel = evidenceTypeLabel;
+  readonly transmissionStatusLabel = transmissionStatusLabel;
+  readonly transmissionStatusBadgeClasses = transmissionStatusBadgeClasses;
 
   private base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
 
@@ -178,6 +199,16 @@ export class PlatformInvoiceDetailComponent {
       return;
     }
     this.load(id);
+  }
+
+  /**
+   * Saldo a pagar = total - amount_paid. Si la factura está `paid`, saldo = 0
+   * y la métrica es informativa. Si está `draft`/`overdue`, saldo = total.
+   */
+  saldo(d: SubscriptionInvoiceDetail): string {
+    const total = Number(d.invoice.total);
+    const paid = Number(d.invoice.amount_paid);
+    return (total - paid).toFixed(2);
   }
 
   private async load(id: number): Promise<void> {
@@ -193,10 +224,15 @@ export class PlatformInvoiceDetailComponent {
         this.errorMessage.set('La API no devolvió la factura.');
       }
     } catch (error) {
-      this.errorMessage.set(
-        error instanceof Error ? error.message : 'Error desconocido al cargar la factura.',
-      );
-      this.toast.error(this.errorMessage() ?? 'Error');
+      // El backend usa el envoltorio `success:false, message:'...'`. Para
+      // 4xx/5xx Angular lanza `HttpErrorResponse` cuyo `.message` es la
+      // descripción del fallo HTTP (no lo que la API quiso decir).
+      const msg =
+        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
+        (error instanceof Error ? error.message : null) ||
+        'Error desconocido al cargar la factura.';
+      this.errorMessage.set(msg);
+      this.toast.error(msg);
     } finally {
       this.loading.set(false);
     }

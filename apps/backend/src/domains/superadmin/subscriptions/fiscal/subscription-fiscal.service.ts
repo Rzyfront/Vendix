@@ -893,7 +893,11 @@ export class SubscriptionFiscalService {
       ...previous,
       is_enabled: dto.is_enabled,
       auto_issue: dto.auto_issue,
-      environment: dto.environment,
+      // `environment` se omite en edición normal; cuando no viene, conservamos
+      // el ambiente vigente. La guarda de transición de más abajo se evalúa
+      // contra `previous.environment` y rechaza la transición test→production
+      // y la degradación production→test.
+      environment: dto.environment ?? previous.environment,
       platform_organization_id,
       accounting_entity_id,
       dian_configuration_id: config.id,
@@ -1902,57 +1906,122 @@ export class SubscriptionFiscalService {
   async sweepPendingInvoices(): Promise<{
     picked_up: number;
     succeeded: number;
+    rejected: number;
+    errored: number;
     skipped: number;
     failed: { invoice_id: number; reason: string }[];
   }> {
-    const rows = await this.prisma.withoutScope().subscription_invoices.findMany({
-      where: {
-        state: 'paid',
-        // NO EXISTS transmission accepted
-        // - filtramos a nivel de la relación hacia fiscal_transmissions
-      },
-      select: { id: true },
-      take: 200, // cota dura: el barrido no debe agotar memoria si hay miles
-    });
+    // El barrido DEBE correr dentro del contexto de plataforma. Si lo dispara
+    // un cron sin un JWT que setee `RequestContextService`, las queries
+    // previas a `issueForInvoice` aquí y el `sendInvoice` interno de la DIAN
+    // fallarían por NPE en `getSettings()`/`platform_organization_id`.
+    //
+    // Capturamos `environment` al inicio: si la plataforma cambia de test a
+    // production a mitad del barrido, abortamos. Mezclar facturas emitidas
+    // a sandbox y a producción en el mismo run rompe paridad.
+    const settings = await this.getSettings();
+    const environmentAtStart = settings.environment;
+    return this.runInPlatformContext(settings, async () => {
+      const rows = await this.prisma.withoutScope().subscription_invoices.findMany({
+        where: {
+          state: 'paid',
+          // El barrido SOLO recorre facturas de la entidad contable de la
+          // plataforma. Si una `subscription_invoice` pertenece a otra entidad
+          // fiscal, debe barrerse desde el servicio de ESA entidad, no
+          // desde este carrusel — caso contrario, `issueForInvoice` la
+          // firmaría con la resolución incorrecta.
+          store_subscription: {
+            store: {
+              organizations: {
+                accounting_entities: {
+                  some: {
+                    id: settings.accounting_entity_id,
+                    is_active: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { paid_at: 'asc' }, // oldest-first: los pendientes más atrasados primero
+        select: { id: true },
+        take: 200, // cota dura: el barrido no debe agotar memoria si hay miles
+      });
 
-    const accepted = await this.prisma.withoutScope().fiscal_transmissions.findMany({
-      where: {
-        source_type: 'subscription_invoice',
-        dian_status: 'accepted',
-        source_id: { in: rows.map((r) => r.id) },
-      },
-      select: { source_id: true },
-    });
-    const acceptedSet = new Set(accepted.map((t) => t.source_id));
-    const pending = rows.filter((r) => !acceptedSet.has(r.id));
+      const accepted = await this.prisma.withoutScope().fiscal_transmissions.findMany({
+        where: {
+          source_type: 'subscription_invoice',
+          dian_status: 'accepted',
+          source_id: { in: rows.map((r) => r.id) },
+        },
+        select: { source_id: true },
+      });
+      const acceptedSet = new Set(accepted.map((t) => t.source_id));
+      const pending = rows.filter((r) => !acceptedSet.has(r.id));
 
-    const result = {
-      picked_up: pending.length,
-      succeeded: 0,
-      skipped: 0,
-      failed: [] as { invoice_id: number; reason: string }[],
-    };
+      const result = {
+        picked_up: pending.length,
+        succeeded: 0,
+        rejected: 0,
+        errored: 0,
+        skipped: 0,
+        failed: [] as { invoice_id: number; reason: string }[],
+      };
 
-    for (const { id } of pending) {
-      try {
-        const r = await this.issueForInvoice(id, { manual: true, source: 'sweep' });
-        if (r?.skipped) {
-          result.skipped += 1;
-        } else {
-          result.succeeded += 1;
+      for (const { id } of pending) {
+        // Congelar ambiente: si cambió durante el barrido, abortamos.
+        const current = await this.getSettings();
+        if (current.environment !== environmentAtStart) {
+          this.logger.warn(
+            `Subscription fiscal sweep aborted: environment changed from ${environmentAtStart} to ${current.environment} mid-run`,
+          );
+          result.failed.push({
+            invoice_id: id,
+            reason: `environment changed mid-sweep from ${environmentAtStart} to ${current.environment}`,
+          });
+          break;
         }
-      } catch (error) {
-        result.failed.push({
-          invoice_id: id,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        try {
+          const r = await this.issueForInvoice(id, { manual: true, source: 'sweep' });
+          if (r?.skipped) {
+            result.skipped += 1;
+          } else {
+            // `issueForInvoice` retorna la fila recargada en la ruta exitosa.
+            // Distinguimos entre el éxito real (accepted) y los fallos que
+            // captura internamente (rejected/error) para que el operador no
+            // confunda "se procesó" con "quedó emitida".
+            const status = (r as any)?.transmission_status;
+            const dian = (r as any)?.dian_status;
+            if (status === 'accepted' || dian === 'accepted') {
+              result.succeeded += 1;
+            } else if (status === 'rejected') {
+              result.rejected += 1;
+            } else if (status === 'error') {
+              result.errored += 1;
+            } else {
+              // Estado terminal no aceptado: lo contamos como fallo para no
+              // inflar `succeeded`. El `failed[]` lleva el detalle.
+              result.failed.push({
+                invoice_id: id,
+                reason:
+                  (r as any)?.error_message ??
+                  `unexpected terminal status: ${status ?? 'unknown'}`,
+              });
+            }
+          }
+        } catch (error) {
+          result.failed.push({
+            invoice_id: id,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
-    }
 
-    this.logger.log(
-      `Subscription fiscal sweep: picked_up=${result.picked_up} succeeded=${result.succeeded} skipped=${result.skipped} failed=${result.failed.length}`,
-    );
-    return result;
+      this.logger.log(
+        `Subscription fiscal sweep: picked_up=${result.picked_up} succeeded=${result.succeeded} rejected=${result.rejected} errored=${result.errored} skipped=${result.skipped} failed=${result.failed.length}`,
+      );
+      return result;
+    });
   }
 
   /**
@@ -1980,8 +2049,23 @@ export class SubscriptionFiscalService {
       email: string | null;
     } | null;
   } | null> {
-    const invoice = await this.prisma.withoutScope().subscription_invoices.findUnique({
-      where: { id },
+    // El detalle debe limitarse a la entidad fiscal de la plataforma: si una
+    // subscription_invoice pertenece a otra entidad, no debe filtrarse a un
+    // super-admin que pidió la URL con id=numero. derive in read.
+    const settings = await this.getSettings();
+    const invoice = await this.prisma.withoutScope().subscription_invoices.findFirst({
+      where: {
+        id,
+        store_subscription: {
+          store: {
+            organizations: {
+              accounting_entities: {
+                some: { id: settings.accounting_entity_id, is_active: true },
+              },
+            },
+          },
+        },
+      },
       include: {
         payments: { orderBy: { created_at: 'desc' } },
         store_subscription: {
@@ -2014,6 +2098,24 @@ export class SubscriptionFiscalService {
     const transmissions = await this.prisma.withoutScope().fiscal_transmissions.findMany({
       where: { source_type: 'subscription_invoice', source_id: id },
       orderBy: { created_at: 'desc' },
+      // Evita cargar xml_document, pdf_url, provider_response: cada uno pesa
+      // 100–500 KB por transmisión y el detalle no los muestra. Si la
+      // factura ha sido reintentada 5 veces, son ~5 MB de payload sin uso.
+      select: {
+        id: true,
+        transmission_status: true,
+        dian_status: true,
+        accounting_status: true,
+        document_number: true,
+        cufe: true,
+        qr_code: true,
+        tracking_id: true,
+        accepted_at: true,
+        rejected_at: true,
+        error_message: true,
+        created_at: true,
+      },
+      take: 10,
     });
 
     const transmissionIds = transmissions.map((t) => t.id);
@@ -2021,6 +2123,16 @@ export class SubscriptionFiscalService {
       ? await this.prisma.withoutScope().fiscal_evidences.findMany({
           where: { fiscal_transmission_id: { in: transmissionIds } },
           orderBy: { created_at: 'desc' },
+          select: {
+            id: true,
+            fiscal_transmission_id: true,
+            evidence_type: true,
+            content_hash: true,
+            metadata: true,
+            storage_key: true,
+            created_at: true,
+          },
+          take: 50,
         })
       : [];
 
