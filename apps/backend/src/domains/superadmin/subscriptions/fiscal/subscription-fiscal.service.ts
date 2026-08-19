@@ -3131,7 +3131,12 @@ export class SubscriptionFiscalService {
     fiscalNumber: string,
     resolution: PlatformInvoiceResolution,
   ): ProviderInvoiceData {
-    const issuedAt = invoice.issued_at ?? invoice.payments[0]?.paid_at ?? new Date();
+    // Fecha de firma. La DIAN exige que la fecha del documento sea igual a la
+    // fecha de firma, no a la fecha de creación de la factura SaaS. Una factura
+    // creada en mayo y pagada en agosto se firma hoy, con `issue_date` de hoy.
+    // El periodo del servicio facturado viaja en `invoice_period` (más abajo)
+    // y se conserva en la línea, no en el header.
+    const issuedAt = new Date();
     const org = invoice.store_subscription.store.organizations;
 
     // Las dos fechas se resuelven UNA vez y en la zona del obligado a facturar
