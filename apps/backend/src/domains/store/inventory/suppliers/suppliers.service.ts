@@ -555,10 +555,12 @@ export class SuppliersService {
     const poIds = Array.from(
       new Set(
         data
-          .filter((ap) => ap.source_type === 'purchase_order' && ap.source_id)
-          .map((ap) => Number(ap.source_id)),
+          .filter(
+            (ap: any) => ap.source_type === 'purchase_order' && ap.source_id,
+          )
+          .map((ap: any) => Number(ap.source_id)),
       ),
-    ).filter((id) => Number.isFinite(id) && id > 0);
+    ).filter((id: unknown): id is number => Number.isFinite(id) && (id as number) > 0);
 
     let installmentMap = new Map<
       number,
