@@ -2782,7 +2782,7 @@ export class SubscriptionFiscalService {
         software_id: dto.software_id,
         software_pin_encrypted: this.encryption.encrypt(dto.software_pin!),
         environment: dto.environment,
-        enablement_status: this.nextEnablementStatus(dto),
+        enablement_status: this.nextEnablementStatus(dto, dto.environment ?? previous.environment),
         test_set_id: dto.test_set_id,
       },
     });
@@ -2828,7 +2828,7 @@ export class SubscriptionFiscalService {
     // retirarlo: eso solo lo hace la DIAN, y se refleja por otras vías
     // (`suspended`, `expired`).
     if (canWriteEnablementStatus(current?.enablement_status ?? null)) {
-      data.enablement_status = this.nextEnablementStatus(dto);
+      data.enablement_status = this.nextEnablementStatus(dto, dto.environment ?? previous.environment);
     }
     if (dto.software_pin && dto.software_pin !== '****') {
       data.software_pin_encrypted = this.encryption.encrypt(dto.software_pin);
@@ -2848,8 +2848,14 @@ export class SubscriptionFiscalService {
 
   private nextEnablementStatus(
     dto: UpsertSubscriptionFiscalConfigDto,
+    effectiveEnvironment: SubscriptionFiscalEnvironment,
   ): 'testing' | 'not_started' {
-    if (dto.is_enabled && dto.environment === 'test') return 'testing';
+    // `dto.environment` puede ser undefined cuando el caller NO cambió el
+    // ambiente (la edición normal lo omite). Usamos el ambiente efectivo
+    // (DTO o previous) para que la decisión refleje el estado real, no un
+    // `undefined` que retornaría `'not_started'` para un CREATE con
+    // is_enabled=true en sandbox.
+    if (dto.is_enabled && effectiveEnvironment === 'test') return 'testing';
     return 'not_started';
   }
 
