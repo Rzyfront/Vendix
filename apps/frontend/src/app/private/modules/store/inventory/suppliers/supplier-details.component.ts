@@ -119,18 +119,8 @@ import type {
               iconColor="text-purple-600"
             ></app-stats>
 
-            <app-stats
-              title="Ticket promedio"
-              [value]="summary()?.average_order_value | currency"
-              [smallText]="lastOrderLabel()"
-              iconName="calculator"
-              iconBgColor="bg-emerald-100"
-              iconColor="text-emerald-600"
-            ></app-stats>
-
             <!--
               CP-ID-VNDX-2026-08-18-PO-PROD — F2.S3: 5ta card "YTD" (año a la fecha).
-              Suma subtotal_amount de las OCs reconocidas desde el 1-ene del año.
             -->
             <app-stats
               title="Compras YTD"
