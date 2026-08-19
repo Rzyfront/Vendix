@@ -142,6 +142,31 @@ jobs:
           # columnas que la base no tiene, y eso sale como ColumnNotFound (HTTP
           # 500) en la primera escritura, con el deploy ya marcado success.
           # Ver apps/backend/prisma/assert-schema-columns.js.
+          #
+          # Self-heal: cuando un deploy anterior dejó una migration en estado
+          # 'failed' en _prisma_migrations, `migrate deploy` se rehúsa a
+          # continuar (P3009) porque considera la base "rota". Marcamos cada
+          # migration fallida como 'rolled-back' para que `migrate deploy`
+          # pueda re-aplicarla con el SQL corregido. Idempotente: si no hay
+          # fallidas, el bucle no hace nada.
+          echo "🔧 Resolving any failed migrations before deploy..."
+          FAILED_MIGRATIONS=$(sudo docker run --rm \
+            --memory=512m \
+            --network=host \
+            --env-file /opt/vendix/.env \
+            -e DATABASE_URL="\$DATABASE_URL" \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            sh -c "npx --yes prisma migrate status 2>&1 | grep -E '^[[:space:]]+20[0-9]{12}_[a-z0-9_]+' | awk '{print \$1}' | sort -u" || true)
+          for MIGRATION in $FAILED_MIGRATIONS; do
+            echo "   ⚠️  Marking failed migration as rolled-back: $MIGRATION"
+            sudo docker run --rm \
+              --memory=512m \
+              --network=host \
+              --env-file /opt/vendix/.env \
+              -e DATABASE_URL="\$DATABASE_URL" \
+              $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+              sh -c "npx --yes prisma migrate resolve --rolled-back $MIGRATION" || true
+          done
           sudo docker run --rm \
             --memory=768m \
             --network=host \
