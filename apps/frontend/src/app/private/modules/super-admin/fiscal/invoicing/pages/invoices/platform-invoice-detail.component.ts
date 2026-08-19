@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, formatDate } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -13,6 +13,14 @@ import {
   transmissionStatusBadgeClasses,
   transmissionStatusLabel,
 } from '../../platform-invoicing.constants';
+
+// F-R2-14: el backend persiste `period_start`/`period_end` como
+// `DateTime @db.Timestamp(6)` (UTC en PG). El DatePipe de Angular los
+// interpretaría en la timezone del navegador — un super-admin en UTC+1
+// vería "31 de julio" en vez de "1 de agosto". El plan crítico define
+// `PLATFORM_TIMEZONE = 'America/Bogota'` en el backend; el frontend
+// formatea con esa misma zona para evitar el off-by-one.
+const PLATFORM_TIMEZONE = 'America/Bogota';
 
 interface SubscriptionInvoiceDetail {
   invoice: {
@@ -79,10 +87,6 @@ interface SubscriptionInvoiceDetail {
   imports: [RouterLink, CurrencyPipe, DatePipe],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
-      <a routerLink="/super-admin/fiscal/invoicing/invoices" class="text-sm text-primary-600 hover:underline">
-        ← Volver al listado
-      </a>
-
       @if (loading()) {
         <p class="mt-4 text-sm text-gray-500">Cargando factura…</p>
       } @else if (errorMessage(); as msg) {
@@ -103,7 +107,7 @@ interface SubscriptionInvoiceDetail {
               <dt class="text-gray-500">Estado</dt>
               <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
               <dt class="text-gray-500">Periodo</dt>
-              <dd>{{ d.invoice.period_start | date: 'longDate' }} → {{ d.invoice.period_end | date: 'longDate' }}</dd>
+              <dd>{{ formatPeriodDate(d.invoice.period_start) }} → {{ formatPeriodDate(d.invoice.period_end) }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
               <dd>
                 {{ d.invoice.subtotal | currency }}
@@ -237,6 +241,17 @@ export class PlatformInvoiceDetailComponent {
     const total = Number(d.invoice.total);
     const paid = Number(d.invoice.amount_paid);
     return (total - paid).toFixed(2);
+  }
+
+  /**
+   * F-R2-14: formatea una fecha en la zona de la plataforma. Sin esto, un
+   * super-admin fuera de `America/Bogota` ve la fecha de periodo en la
+   * timezone del navegador y la factura de un día de Agosto se renderiza
+   * como "31 de julio".
+   */
+  formatPeriodDate(value: string | null | undefined): string {
+    if (!value) return '—';
+    return formatDate(value, 'longDate', 'es-CO', PLATFORM_TIMEZONE);
   }
 
   /**

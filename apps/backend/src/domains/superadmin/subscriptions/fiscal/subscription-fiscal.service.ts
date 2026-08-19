@@ -1473,18 +1473,28 @@ export class SubscriptionFiscalService {
   ) {
     const settings = await this.getSettings();
     if (!settings.is_enabled) {
-      this.logger.warn(
-        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_fiscal_billing_disabled`,
-      );
+      // F-R2-9: el log es JSON estructurado para que Loki/Datadog pueda
+      // filtrar por `event`, `reason` o `subscription_invoice_id` sin regex.
+      this.logger.warn({
+        event: 'fiscal.issue.skipped',
+        reason: 'subscription_fiscal_billing_disabled',
+        subscription_invoice_id: invoiceId,
+        source: opts.source ?? 'auto',
+        manual: opts.manual ?? false,
+      });
       return {
         skipped: true,
         reason: 'subscription_fiscal_billing_disabled',
       };
     }
     if (!settings.auto_issue && !opts.manual) {
-      this.logger.warn(
-        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_fiscal_auto_issue_disabled`,
-      );
+      this.logger.warn({
+        event: 'fiscal.issue.skipped',
+        reason: 'subscription_fiscal_auto_issue_disabled',
+        subscription_invoice_id: invoiceId,
+        source: opts.source ?? 'auto',
+        manual: opts.manual ?? false,
+      });
       return {
         skipped: true,
         reason: 'subscription_fiscal_auto_issue_disabled',
@@ -1496,9 +1506,13 @@ export class SubscriptionFiscalService {
       if (opts.manual) {
         throw new BadRequestException('Only paid subscription invoices can be issued electronically');
       }
-      this.logger.warn(
-        `Subscription fiscal issue skipped invoice=${invoiceId} source=${opts.source ?? 'auto'}: subscription_invoice_not_paid`,
-      );
+      this.logger.warn({
+        event: 'fiscal.issue.skipped',
+        reason: 'subscription_invoice_not_paid',
+        subscription_invoice_id: invoiceId,
+        source: opts.source ?? 'auto',
+        state: invoice.state,
+      });
       return { skipped: true, reason: 'subscription_invoice_not_paid' };
     }
 
@@ -1909,7 +1923,7 @@ export class SubscriptionFiscalService {
     rejected: number;
     errored: number;
     skipped: number;
-    failed: { invoice_id: number; reason: string }[];
+    failed: { invoice_id: number; code: string; summary: string }[];
   }> {
     // El barrido DEBE correr dentro del contexto de plataforma. Si lo dispara
     // un cron sin un JWT que setee `RequestContextService`, las queries
@@ -1953,6 +1967,57 @@ export class SubscriptionFiscalService {
         take: 15,
       });
 
+      // F-R2-3: si el listener de pagos corre en paralelo con el sweep, los
+      // dos pueden leer la misma `subscription_invoices` con `state='paid'`
+      // y entrar ambos a `issueForInvoice`. El `idempotency_key` los
+      // distingue en `fiscal_transmissions` pero el segundo todavía
+      // emitiría un SOAP request inútil. Con `FOR UPDATE SKIP LOCKED`
+      // PostgreSQL deja cada invoice en manos de un solo worker — el resto
+      // se salta y los procesa la siguiente corrida.
+      //
+      // Sólo aplicamos el lock a las ids que ya pasaron el filtro de
+      // `accounting_entity_id` (el `findMany` anterior). Sin SKIP LOCKED,
+      // la segunda sweep que corre en paralelo BLOQUEARÍA hasta que la
+      // primera termine; con SKIP LOCKED, simplemente no toma esa fila
+      // y procesa la siguiente que esté libre.
+      if (rows.length > 0) {
+        const lockedRows = await this.prisma.$queryRaw<{ id: number }[]>`
+          SELECT id FROM subscription_invoices
+          WHERE id = ANY(${rows.map((r) => r.id)}::int[])
+          ORDER BY paid_at ASC
+          FOR UPDATE SKIP LOCKED
+        `;
+        rows.length = 0;
+        rows.push(...lockedRows);
+      }
+
+      // F-R2-8: excluir invoices cuya transmisión ya se intentó
+      // `MAX_RETRIES` veces. Sin este guard, el sweep re-envía la misma
+      // factura rechazada indefinidamente. La DIAN suele responder
+      // `Regla: 90 — Documento repetido` por 24h si el CUFE ya existe,
+      // así que insistir empeora el rate-limit.
+      const MAX_RETRIES = 5;
+      if (rows.length > 0) {
+        const exhausted = await this.prisma.withoutScope().fiscal_transmissions.findMany({
+          where: {
+            source_type: 'subscription_invoice',
+            source_id: { in: rows.map((r) => r.id) },
+            retry_count: { gte: MAX_RETRIES },
+            transmission_status: { notIn: ['accepted', 'cancelled'] },
+          },
+          select: { source_id: true },
+        });
+        const exhaustedSet = new Set(exhausted.map((t) => t.source_id));
+        const filtered = rows.filter((r) => !exhaustedSet.has(r.id));
+        rows.length = 0;
+        rows.push(...filtered);
+        if (exhaustedSet.size > 0) {
+          this.logger.warn(
+            `Subscription fiscal sweep: ${exhaustedSet.size} invoice(s) excluidas por retry_count >= ${MAX_RETRIES}`,
+          );
+        }
+      }
+
       const accepted = await this.prisma.withoutScope().fiscal_transmissions.findMany({
         where: {
           source_type: 'subscription_invoice',
@@ -1970,7 +2035,14 @@ export class SubscriptionFiscalService {
         rejected: 0,
         errored: 0,
         skipped: 0,
-        failed: [] as { invoice_id: number; reason: string }[],
+        // F-R2-7: el `reason` original era `error.message` raw. Ese string
+        // puede incluir paths internos, IDs de transmisión, NITs del
+        // destinatario y la respuesta cruda de la DIAN. Lo categorizamos
+        // en un `code` estable y un `summary` redactado para que el
+        // operador sepa qué pasó sin filtrar PII accidentalmente. El
+        // detalle real vive en `fiscal_transmissions.error_message`
+        // (server-side) y en el log.
+        failed: [] as { invoice_id: number; code: string; summary: string }[],
       };
 
       for (const { id } of pending) {
@@ -1982,7 +2054,8 @@ export class SubscriptionFiscalService {
           );
           result.failed.push({
             invoice_id: id,
-            reason: `environment changed mid-sweep from ${environmentAtStart} to ${current.environment}`,
+            code: 'ENVIRONMENT_CHANGED',
+            summary: `ambiente cambió a mitad del barrido (de ${environmentAtStart} a ${current.environment})`,
           });
           break;
         }
@@ -2005,19 +2078,28 @@ export class SubscriptionFiscalService {
               result.errored += 1;
             } else {
               // Estado terminal no aceptado: lo contamos como fallo para no
-              // inflar `succeeded`. El `failed[]` lleva el detalle.
+              // inflar `succeeded`. El `failed[]` lleva el código y un
+              // summary sin el `error_message` cruda.
               result.failed.push({
                 invoice_id: id,
-                reason:
-                  (r as any)?.error_message ??
-                  `unexpected terminal status: ${status ?? 'unknown'}`,
+                code: 'UNEXPECTED_TERMINAL_STATUS',
+                summary: `estado terminal inesperado: ${status ?? 'unknown'}`,
               });
             }
           }
         } catch (error) {
+          // Categorizamos el error en códigos estables. El mensaje crudo va
+          // al log (server-side), no a la respuesta.
+          this.logger.warn(
+            `Subscription fiscal sweep failed invoice=${id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          const isVendixEx = error && typeof error === 'object' && 'code' in error;
           result.failed.push({
             invoice_id: id,
-            reason: error instanceof Error ? error.message : String(error),
+            code: isVendixEx ? 'PREVALIDATION_FAILED' : 'INTERNAL_ERROR',
+            summary: 'la DIAN rechazó la transmisión o el sistema falló; ver log server-side',
           });
         }
       }
