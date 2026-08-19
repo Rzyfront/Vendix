@@ -154,12 +154,12 @@ export class PurchaseOrderListComponent {
       transform: (value: string) =>
         value ? new Date(value).toLocaleDateString() : '-',
     },
-    // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximidad.
+    // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximity.
     // Verde > 7d, amarillo 1-7d, naranja 0d (vence hoy), rojo < 0 (vencida),
-    // gris null (sin plan). El table component pasa sólo `value` al colorFn,
-    // así que derivamos el color del texto ya transformado.
+    // gris null (sin plan). La clave apunta al campo numérico crudo para
+    // que table.component.ts:583 pase `value` (número) al colorFn.
     {
-      key: 'next_payment',
+      key: 'next_payment_due_in_days',
       label: 'Próximo pago',
       priority: 2,
       badge: true,
@@ -167,20 +167,17 @@ export class PurchaseOrderListComponent {
         type: 'custom',
         size: 'sm',
         colorFn: (value: any) => {
-          const text = String(value ?? '');
-          if (text === 'Sin plan') return '#9ca3af'; // gris
-          if (text.startsWith('Vencida')) return '#ef4444'; // rojo
-          if (text === 'Vence hoy') return '#f97316'; // naranja
-          if (text.startsWith('Vence en')) {
-            const d = parseInt(text.replace(/\D/g, ''), 10);
-            if (Number.isFinite(d) && d <= 7) return '#f59e0b'; // amarillo
-            return '#10b981'; // verde
-          }
-          return '#9ca3af';
+          if (value === null || value === undefined || value === '') return '#9ca3af';
+          const num = Number(value);
+          if (!Number.isFinite(num)) return '#9ca3af';
+          if (num < 0) return '#ef4444';   // vencida: rojo
+          if (num === 0) return '#f97316';  // vence hoy: naranja
+          if (num <= 7) return '#f59e0b';   // 1-7d: amarillo
+          return '#10b981';                 // > 7d: verde
         },
       },
       transform: (value: any, row?: any) =>
-        this.formatNextPaymentBadge(row?.next_payment_due_in_days),
+        this.formatNextPaymentBadge(row?.next_payment_due_in_days ?? value),
       sortable: true,
     },
     {
