@@ -777,3 +777,17 @@ export interface RefundItemRecord {
     code: string;
   };
 }
+
+/**
+ * Body for `PATCH /store/orders/:orderId/flow/refunds/:refundId/resolve`.
+ * Mirrors the backend `ResolveRefundDto` exactly (FB-03 contract):
+ *  - `target_state` is restricted server-side to `completed` | `failed`
+ *    (other refund states are terminal and not resettable).
+ *  - `resolution_notes` is non-empty after trim — kept as required here so
+ *    the form's `Validators.required` matches the DTO without needing a
+ *    second source of truth.
+ */
+export interface ResolveRefundPayload {
+  target_state: 'completed' | 'failed';
+  resolution_notes: string;
+}

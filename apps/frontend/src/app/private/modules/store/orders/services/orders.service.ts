@@ -8,6 +8,8 @@ import {
   OrderQuery,
   PaginatedOrdersResponse,
   OrderStats,
+  RefundRecord,
+  ResolveRefundPayload,
 } from '../interfaces/order.interface';
 
 /**
@@ -166,5 +168,37 @@ export class OrdersService {
           throw error;
         }),
       );
+  }
+
+  /**
+   * Manually resolve a non-terminal refund (`requested` / `pending_approval` /
+   * `processing`) as `completed` or `failed` — escape hatch for the gateway
+   * refund that never auto-resolved (e.g. Wompi never returned a void, or the
+   * sync dispatch was retried into a stuck state).
+   *
+   * Endpoint: `PATCH /store/orders/:orderId/flow/refunds/:refundId/resolve`
+   * (FB-03 contract). Backend enforces:
+   *  - ownership: `refund.order_id === :orderId` AND same store (scoped lookup)
+   *  - state: refund must not be terminal (ERR-01 / 409 otherwise)
+   *  - payload: `resolution_notes` non-empty after trim (ERR-03 / 422)
+   *  - permission: `store:orders:order_flow:create` + `owner|admin` role
+   *
+   * Backend response is `{success, data: RefundRecord}` — unwrapped here so
+   * the order-details modal can refresh the local refund state from the
+   * returned row (which carries `resolved_by_user_id` / `resolution_notes`).
+   */
+  resolveRefund(
+    orderId: string,
+    refundId: string,
+    payload: ResolveRefundPayload,
+  ): Observable<RefundRecord> {
+    const url = `${this.api_url}/store/orders/${orderId}/flow/refunds/${refundId}/resolve`;
+    return this.http.patch<RefundRecord>(url, payload).pipe(
+      map((res) => unwrap<RefundRecord>(res)),
+      catchError((error) => {
+        console.error('Error resolving refund:', error);
+        throw error;
+      }),
+    );
   }
 }
