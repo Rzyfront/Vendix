@@ -156,7 +156,8 @@ export class PurchaseOrderListComponent {
     },
     // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximidad.
     // Verde > 7d, amarillo 1-7d, naranja 0d (vence hoy), rojo < 0 (vencida),
-    // gris null (sin plan). Color via `colorFn` que toma el row directo.
+    // gris null (sin plan). El table component pasa sólo `value` al colorFn,
+    // así que derivamos el color del texto ya transformado.
     {
       key: 'next_payment',
       label: 'Próximo pago',
@@ -165,19 +166,17 @@ export class PurchaseOrderListComponent {
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: {
-          ok: '#10b981',
-          soon: '#f59e0b',
-          overdue: '#ef4444',
-          none: '#9ca3af',
-        },
-        colorFn: (_value: any, item?: any) => {
-          const days = item?.next_payment_due_in_days;
-          if (days === null || days === undefined) return '#9ca3af'; // gris
-          if (days < 0) return '#ef4444'; // rojo vencido
-          if (days === 0) return '#f97316'; // naranja vence hoy
-          if (days <= 7) return '#f59e0b'; // amarillo 1-7d
-          return '#10b981'; // verde > 7d
+        colorFn: (value: any) => {
+          const text = String(value ?? '');
+          if (text === 'Sin plan') return '#9ca3af'; // gris
+          if (text.startsWith('Vencida')) return '#ef4444'; // rojo
+          if (text === 'Vence hoy') return '#f97316'; // naranja
+          if (text.startsWith('Vence en')) {
+            const d = parseInt(text.replace(/\D/g, ''), 10);
+            if (Number.isFinite(d) && d <= 7) return '#f59e0b'; // amarillo
+            return '#10b981'; // verde
+          }
+          return '#9ca3af';
         },
       },
       transform: (value: any, row?: any) =>
