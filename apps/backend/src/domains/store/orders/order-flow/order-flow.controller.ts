@@ -4,6 +4,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Param,
   Body,
   ParseIntPipe,
@@ -11,6 +12,7 @@ import {
   HttpStatus,
   UseGuards,
   Req,
+  BadRequestException,
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { RefundFlowService } from './services/refund-flow.service';
@@ -26,6 +28,7 @@ import {
   FastTrackOrderDto,
   ReactivateOrderDto,
 } from './dto';
+import { ResolveRefundDto } from './dto/resolve-refund.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
@@ -218,6 +221,49 @@ export class OrderFlowController {
   ) {
     const refund = await this.refundFlowService.createRefund(orderId, dto);
     return this.responseService.success(refund, 'Order refunded successfully');
+  }
+
+  /**
+   * refund-gateway-fix (W2-B) — cierre manual de un refund que no terminó
+   * vía processor.
+   *
+   * Caso de uso: un refund creado por el flujo automático queda en
+   * `pending_approval` o `processing` y el processor no contesta (o el
+   * tenant no tiene processor reversible configurado). El operador lo
+   * cierra a mano como `completed` (la plata ya se movió por otro canal,
+   * p.ej. transferencia bancaria) o `failed` (el processor devolvió
+   * algo que no levantó error pero la operación no se completó).
+   *
+   * Permisos: misma política que `cancel-payment` y `forgive-installment`
+   * (reuso `store:orders:order_flow:create` + `@Roles('owner', 'admin')`).
+   * ADR-4 del plan explica por qué no se crea un permiso nuevo.
+   */
+  @Patch('refunds/:refundId/resolve')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
+  async resolveRefund(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('refundId', ParseIntPipe) refundId: number,
+    @Body() dto: ResolveRefundDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Authenticated user id missing');
+    }
+    const refund = await this.refundFlowService.manuallyResolveRefund(
+      orderId,
+      refundId,
+      dto.target_state,
+      dto.resolution_notes,
+      userId,
+    );
+    return this.responseService.success(
+      refund,
+      'Refund resolved successfully',
+    );
   }
 
   @Post('refund/preview')

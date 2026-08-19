@@ -36,10 +36,17 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     orders: { findFirst: jest.fn(), update: jest.fn() },
     stores: { findUnique: jest.fn() },
     inventory_locations: { findFirst: jest.fn() },
-    refunds: { create: jest.fn(), update: jest.fn() },
+    refunds: {
+      create: jest.fn(),
+      update: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
     refund_items: { create: jest.fn() },
     order_items: { findMany: jest.fn() },
-    payments: { update: jest.fn() },
+    payments: {
+      update: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
@@ -864,6 +871,255 @@ describe('RefundFlowService — refund overhaul invariants', () => {
           effective_channel: 'cash',
         }),
       );
+    });
+  });
+
+  /**
+   * refund-gateway-fix (W2-B) — regresión del cierre manual. Cubre los
+   * cinco casos críticos del plan B.2 / ERR-01..ERR-03:
+   *
+   *   A. happy path 'completed' → refund pasa a 'completed',
+   *      `resolved_by_user_id`/`resolution_notes` se persisten,
+   *      `refund.completed` se emite con payload canónico.
+   *   B. happy path 'failed'    → refund pasa a 'failed',
+   *      NO se emite `refund.completed` (la contabilidad no debe
+   *      registrar una reversión que no movió dinero).
+   *   C. estado terminal (state='completed') → lanza BadRequestException
+   *      con mensaje que nombra el estado (ERR-01).
+   *   D. refundId que no pertenece al orderId → lanza NotFoundException
+   *      (ERR-02 — IDOR: una tienda no puede resolver refunds de otra).
+   *   E. `resolution_notes` vacío tras bypass de DTO → lanza BadRequestException
+   *      (ERR-03 — auditoría no es opcional aunque el DTO se haya saltado).
+   *
+   * Cada caso es la regresión mínima que demostraría que el cableado del
+   * endpoint manual está vivo. Cualquier regresión aquí dejaría al
+   * operador sin escape para refunds atorados en `pending_approval`.
+   */
+  describe('manuallyResolveRefund (W2-B — cierre manual por operador)', () => {
+    // Helper para setup del refund row pre-existente. Centraliza el
+    // mock shape para que cada test se enfoque en lo que le importa.
+    function setupPendingRefund(overrides: any = {}) {
+      const refund = {
+        id: 999,
+        order_id: 3830,
+        state: 'pending_approval',
+        processed_at: null,
+        amount: 20000,
+        subtotal_refund: 17000,
+        tax_refund: 3000,
+        shipping_refund: 0,
+        refund_method: 'original_payment',
+        stores: { organization_id: 1 },
+        ...overrides,
+      };
+      // El primer findFirst (validación) devuelve la fila base.
+      // Un segundo findFirst (lookup de pago para emit) sólo ocurre en
+      // camino 'completed'; ese test lo configura explícitamente.
+      mockPrisma.refunds.findFirst.mockResolvedValueOnce(refund);
+      mockPrisma.refunds.update.mockResolvedValue({
+        ...refund,
+        state: overrides.expectedFinalState ?? refund.state,
+        resolved_by_user_id: 1,
+        resolution_notes: overrides.notes ?? 'Confirmado por el dueño',
+      });
+      return refund;
+    }
+
+    it('CAMINO A: target_state=completed → refund a "completed", resolved_by_user_id y notes persistidos, refund.completed emitido con payload canónico', async () => {
+      const refund = setupPendingRefund({ expectedFinalState: 'completed' });
+      // Segundo lookup (refund+payment) usado por el emit: devuelve un
+      // pago gateway para que `resolveEffectiveRefundChannel` resuelva
+      // `effective_channel='gateway'`.
+      mockPrisma.refunds.findFirst.mockResolvedValueOnce({
+        ...refund,
+        payments: {
+          store_payment_method: {
+            system_payment_method: { type: 'wompi' },
+          },
+        },
+      });
+
+      eventEmitter.emit.mockClear();
+
+      const result = await service.manuallyResolveRefund(
+        3830,
+        999,
+        'completed',
+        'Reembolso confirmado por transferencia bancaria',
+        1,
+      );
+
+      // 1. La fila se actualiza con state='completed', resolved_by_user_id,
+      // resolution_notes, processed_at (Date), y updated_at.
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 999 },
+          data: expect.objectContaining({
+            state: 'completed',
+            resolved_by_user_id: 1,
+            resolution_notes:
+              'Reembolso confirmado por transferencia bancaria',
+            processed_at: expect.any(Date),
+            updated_at: expect.any(Date),
+          }),
+        }),
+      );
+
+      // 2. El servicio retorna la fila actualizada.
+      expect(result).toBeDefined();
+      expect(result.state).toBe('completed');
+
+      // 3. refund.completed se emite con el payload canónico completo —
+      //    los listeners de accounting y cache-invalidation consumen
+      //    este shape, así que cualquier drift silenciaría los asientos.
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeDefined();
+      expect(refundCompleted![1]).toEqual(
+        expect.objectContaining({
+          refund_id: 999,
+          order_id: 3830,
+          organization_id: 1,
+          amount: 20000,
+          refund_method: 'original_payment',
+          effective_channel: 'gateway',
+          resolution_notes:
+            'Reembolso confirmado por transferencia bancaria',
+          user_id: 1,
+        }),
+      );
+    });
+
+    it('CAMINO B: target_state=failed → refund a "failed", NO emite refund.completed', async () => {
+      const refund = setupPendingRefund({ expectedFinalState: 'failed' });
+
+      eventEmitter.emit.mockClear();
+
+      const result = await service.manuallyResolveRefund(
+        3830,
+        999,
+        'failed',
+        'Wompi rechazó la reversión, se cierra como fallido',
+        1,
+      );
+
+      // 1. La fila se actualiza con state='failed', resolved_by_user_id,
+      // resolution_notes, processed_at=null (un failed no "completó" nada).
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 999 },
+          data: expect.objectContaining({
+            state: 'failed',
+            resolved_by_user_id: 1,
+            resolution_notes:
+              'Wompi rechazó la reversión, se cierra como fallido',
+            processed_at: null,
+            updated_at: expect.any(Date),
+          }),
+        }),
+      );
+
+      // 2. Retorna la fila actualizada.
+      expect(result.state).toBe('failed');
+
+      // 3. NO emite refund.completed. La contabilidad NO debe registrar
+      //    una reversión para un refund que terminó en 'failed' — la
+      //    signalización correcta es un asiento de cancelación que vive
+      //    en otro flujo. Emitir refund.completed generaría un asiento
+      //    de reversión fantasma.
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeUndefined();
+    });
+
+    it('CAMINO C: refund en estado terminal (state=completed) lanza BadRequestException', async () => {
+      // ARRANGE: un refund que ya estaba 'completed' desde antes.
+      mockPrisma.refunds.findFirst.mockResolvedValueOnce({
+        id: 999,
+        order_id: 3830,
+        state: 'completed',
+        processed_at: new Date(),
+        amount: 20000,
+        subtotal_refund: 17000,
+        tax_refund: 3000,
+        shipping_refund: 0,
+        refund_method: 'original_payment',
+        stores: { organization_id: 1 },
+      });
+
+      // ACT + ASSERT: ERR-01 — BadRequestException con mensaje que nombra
+      // el estado terminal del refund. La fila NO se actualiza.
+      await expect(
+        service.manuallyResolveRefund(
+          3830,
+          999,
+          'completed',
+          'Reapertura inválida',
+          1,
+        ),
+      ).rejects.toThrow(/already in terminal state 'completed'/);
+
+      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+    });
+
+    it('CAMINO D: refundId que no pertenece al orderId lanza NotFoundException (anti-IDOR)', async () => {
+      // ARRANGE: el refund existe PERO pertenece a OTRA orden (no a
+      // 3830). El scope del StorePrismaService ya filtraría tiendas
+      // distintas — aquí probamos el segundo nivel: misma tienda,
+      // otro orderId.
+      mockPrisma.refunds.findFirst.mockResolvedValueOnce({
+        id: 999,
+        order_id: 5000, // ← OTRA orden, mismo store
+        state: 'pending_approval',
+        processed_at: null,
+        amount: 20000,
+        subtotal_refund: 17000,
+        tax_refund: 3000,
+        shipping_refund: 0,
+        refund_method: 'original_payment',
+        stores: { organization_id: 1 },
+      });
+
+      // ACT + ASSERT: ERR-02 — NotFoundException. La respuesta NO
+      // distingue "no existe" de "no pertenece a este order" para
+      // no leakear la existencia de refunds de otros orders / tiendas.
+      await expect(
+        service.manuallyResolveRefund(
+          3830, // ← el operator pidió este orderId
+          999, // ← pero el refund vive bajo 5000
+          'completed',
+          'Intento cruzado',
+          1,
+        ),
+      ).rejects.toThrow(/Refund #999 not found/);
+
+      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+    });
+
+    it('CAMINO E: resolution_notes vacío tras bypass de DTO lanza BadRequestException', async () => {
+      // ARRANGE: el DTO debería haber rechazado esto con @IsNotEmpty(),
+      // pero la verificación defensiva del servicio cubre cualquier
+      // call-site futuro que invoque el método sin pasar por el DTO
+      // (cron jobs, scripts internos, otros controllers).
+      //
+      // No mockeamos refund.findFirst porque la guarda de notas corre
+      // ANTES de la lookup — si la implementación cambiara ese orden,
+      // este test lo detectaría inmediatamente.
+      await expect(
+        service.manuallyResolveRefund(
+          3830,
+          999,
+          'completed',
+          '   ', // solo espacios — DTO lo rechazaría; el servicio también
+          1,
+        ),
+      ).rejects.toThrow(/resolution_notes is required/);
+
+      // La lookup NO ocurrió porque la guarda de notas es lo primero.
+      expect(mockPrisma.refunds.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
     });
   });
 });

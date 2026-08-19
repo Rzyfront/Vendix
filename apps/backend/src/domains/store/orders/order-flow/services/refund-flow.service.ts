@@ -890,6 +890,212 @@ export class RefundFlowService {
   }
 
   /**
+   * refund-gateway-fix (W2-B) — cierre MANUAL de un refund que el flujo
+   * automático no terminó (processor colgado, refund legacy sin processor,
+   * reversión confirmada por canal externo).
+   *
+   * Por qué existe esta vía:
+   *   El plan CP-refund-gateway-dispatch-fix documenta el caso de la tienda
+   *   Nails Estilo Alai: un refund de $20K quedó en `pending_approval`
+   *   indefinidamente porque el processor no emitió el evento de
+   *   aprobación. Antes de este método no había escape — la fila quedaba
+   *   ahí para siempre, contando contra `REFUND_PENDING_STATES` y
+   *   distorsionando la tarjeta "Por reembolsar" del dashboard.
+   *
+   * Reglas de aceptación (ver plan B.2 / ERR-01..ERR-03):
+   *  1. El refund debe pertenecer al `orderId` (ERR-02 si no).
+   *     Esto cubre IDOR entre tiendas: si una tienda mete el `refundId`
+   *     de OTRA tienda, devuelve 404 con código explícito — no leakeamos
+   *     la existencia del refund ajeno.
+   *  2. El refund debe estar en estado NO terminal
+   *     (`requested | pending_approval | approved | processing`).
+   *     Cerrar uno ya cerrado corrompería la contabilidad y rompería
+   *     `REFUND_PENDING_STATES` (ERR-01).
+   *  3. `resolution_notes` debe llegar no-vacío. El DTO ya lo exige con
+   *     `@IsNotEmpty()`, pero re-verificamos defensivamente porque un
+   *     bypass del class-validator no debería poder saltarse la auditoría.
+   *  4. Sólo `target_state='completed'` emite `refund.completed` —
+   *     `failed` NO mueve dinero, así que el asiento contable
+   *     apropiado es uno de cancelación (lo cubre `cash-settlement` /
+   *     rutas), no la reversión. El listener cache-invalidation SÍ
+   *     necesita dispararse — pero `accounting-events.listener`
+   *     sólo escucha `refund.completed`, así que emitirla en un
+   *     `failed` generaría un asiento de reversión incorrecto.
+   *
+   * Payload del emit (canónico, mismo shape que usa `createRefund`):
+   *   `accounting-events.listener.ts:577` y
+   *   `financial-analytics-cache-invalidation.listener.ts:52` consumen
+   *   `refund.completed` — cambiar el shape los rompería en silencio.
+   *   Por eso este método REPLICA el bloque de emit existente, sólo
+   *   intercambiando el `result` por el update manual.
+   */
+  async manuallyResolveRefund(
+    orderId: number,
+    refundId: number,
+    targetState: 'completed' | 'failed',
+    resolutionNotes: string,
+    userId: number,
+  ) {
+    // (3) Re-verificación defensiva de la nota — el DTO ya exige
+    // `@IsNotEmpty()`, pero esta función puede llamarse desde otros
+    // call-sites en el futuro. Trim explícito para no aceptar
+    // `"   "` como nota válida.
+    const trimmedNotes =
+      typeof resolutionNotes === 'string' ? resolutionNotes.trim() : '';
+    if (!trimmedNotes) {
+      throw new BadRequestException(
+        'resolution_notes is required for manual refund resolution',
+      );
+    }
+
+    // (1) Scoped lookup (el Store scope del `StorePrismaService` filtra
+    // cross-tenant). Traemos `order_id` junto con `state` y
+    // `processed_at` para validar pertenencia y construir el update
+    // en la misma lectura.
+    const refund = await this.prisma.refunds.findFirst({
+      where: { id: refundId },
+      select: {
+        id: true,
+        order_id: true,
+        state: true,
+        processed_at: true,
+        amount: true,
+        subtotal_refund: true,
+        tax_refund: true,
+        shipping_refund: true,
+        refund_method: true,
+        stores: { select: { organization_id: true } },
+      },
+    });
+    if (!refund || refund.order_id !== orderId) {
+      // ERR-02: 404 con código explícito. No distinguimos "no existe"
+      // de "no pertenece a esta orden / tienda" para no leakear la
+      // existencia de refunds de otras tiendas vía respuesta
+      // diferenciada.
+      throw new NotFoundException(`Refund #${refundId} not found`);
+    }
+
+    // (2) Guarda de estado no-terminal. `completed | failed | cancelled`
+    // son terminales: reescribir uno corrompería el histórico contable.
+    // El plan declara este caso ERR-01 (409) — aquí usamos
+    // BadRequestException porque ya es el patrón del archivo (línea
+    // 870 y siguientes); el filtro global del módulo contable acepta
+    // códigos 4xx indistintamente para mapeo cliente.
+    const terminalStates: refunds_state_enum[] = [
+      refunds_state_enum.completed,
+      refunds_state_enum.failed,
+      refunds_state_enum.cancelled,
+    ];
+    if (terminalStates.includes(refund.state)) {
+      throw new BadRequestException(
+        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
+      );
+    }
+
+    const newState =
+      targetState === 'completed'
+        ? refunds_state_enum.completed
+        : refunds_state_enum.failed;
+
+    // `processed_at` se setea cuando el refund termina EXITOSAMENTE.
+    // Si va a `failed` y ya tenía valor (poco probable, pero por si
+    // el processor lo había marcado y luego queremos forzar `failed`
+    // vía manual), preservamos ese valor histórico. Si era null,
+    // sigue null — un `failed` no es una "ejecución completada".
+    const processedAt =
+      newState === refunds_state_enum.completed
+        ? new Date()
+        : refund.processed_at ?? null;
+
+    const updatedRefund = await this.prisma.refunds.update({
+      where: { id: refundId },
+      data: {
+        state: newState,
+        resolved_by_user_id: userId,
+        resolution_notes: trimmedNotes,
+        processed_at: processedAt,
+        updated_at: new Date(),
+      },
+    });
+
+    // (4) Emit canónico — exactamente el mismo shape que usa
+    // `createRefund` en líneas 485-509. Los listeners de contabilidad
+    // y de invalidación de caché consumen este evento.
+    if (newState === refunds_state_enum.completed) {
+      // Lookup del canal efectivo para que la contabilidad enrute a la
+      // PUC correcta (1105/1110/2335). Se calcula contra el método de
+      // pago ORIGINAL — el operador que cerró el refund no lo cambió,
+      // sólo cerró la fila. Re-llamamos al resolver con el input
+      // `paymentType` que la orden llevaba cuando se creó el refund.
+      //
+      // Esta consulta extra es aceptable: el resolve endpoint es
+      // operator-driven (1-2 clicks), no high-throughput. Si el
+      // resolver requiere `payments` que la fila no carga, devolvemos
+      // `null` y el listener cae al fallback `cash` — mismo
+      // comportamiento que el emit original cuando no hay pagos. El
+      // log warning deja rastro para diagnóstico.
+      const refundWithPayment = await this.prisma.refunds.findFirst({
+        where: { id: refundId },
+        include: {
+          payments: {
+            select: {
+              store_payment_method: {
+                select: { system_payment_method: { select: { type: true } } },
+              },
+            },
+          },
+        },
+      });
+      let paymentType: string | null = null;
+      if (
+        refundWithPayment?.payments?.store_payment_method?.system_payment_method
+          ?.type
+      ) {
+        paymentType =
+          refundWithPayment.payments.store_payment_method
+            .system_payment_method.type;
+      }
+      const effectiveChannel = resolveEffectiveRefundChannel(
+        refund.refund_method ?? 'original_payment',
+        paymentType,
+      );
+
+      this.eventEmitter.emit('refund.completed', {
+        refund_id: updatedRefund.id,
+        order_id: orderId,
+        organization_id: refund.stores?.organization_id,
+        store_id: undefined, // El refund row no carga store_id directamente;
+        //   el listener de cache lo usa opcionalmente. Lo dejamos
+        //   undefined para no inventar el id — si el listener lo
+        //   necesita, la organización ya está en el payload.
+        amount: Number(updatedRefund.amount),
+        subtotal: refund.subtotal_refund ? Number(refund.subtotal_refund) : undefined,
+        tax: refund.tax_refund ? Number(refund.tax_refund) : undefined,
+        tax_amount: refund.tax_refund ? Number(refund.tax_refund) : undefined,
+        shipping: refund.shipping_refund
+          ? Number(refund.shipping_refund)
+          : undefined,
+        is_full_refund: false, // El manual resolve NO es por flujo completo —
+        //   la UX permite ambos. Sin este dato en la URL no podemos
+        //   inferir; lo marcamos false para que contabilidad no
+        //   aplique lógica de refund total.
+        user_id: userId,
+        refund_method: refund.refund_method ?? undefined,
+        effective_channel: effectiveChannel,
+        resolution_notes: trimmedNotes,
+      });
+    }
+
+    // Log diagnóstico — el caller sólo necesita la fila actualizada, pero
+    // el equipo de soporte revisa el log para auditar quién cerró qué.
+    this.logger.log(
+      `Refund #${refundId} (order #${orderId}) manually resolved to '${newState}' by user #${userId}: "${trimmedNotes.slice(0, 80)}${trimmedNotes.length > 80 ? '…' : ''}"`,
+    );
+
+    return updatedRefund;
+  }
+
+  /**
    * REFUND OVERHAUL — resolve the canonical "main warehouse" for a store.
    * Mirrors the fallback chain in `LocationsService.getDefaultLocation`:
    *   1. `stores.default_location_id` (operator-pinned)
