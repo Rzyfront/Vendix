@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
@@ -136,21 +137,39 @@ export class PlatformInvoicingService {
 
         // Delegar al riel tienda. La shadow-write a `invoices` +
         // `fiscal_transmissions` ocurre dentro del Tx que inyectamos.
-        const storeResult = await this.invoicingService.create(
-          {
-            organization_id: args.organizationId,
-            store_id: null,
-            accounting_entity_id: args.accountingEntityId,
-            dian_configuration_id: args.dianConfigurationId,
-            actor_user_id: args.actorUserId,
-            source_type: 'platform_invoice',
-            // resolution_id queda para la emission (allocateFiscalNumber
-            // lo asigna bajo lock); en la V1 la facade acepta `resolution_id`
-            // opcional y el motor asigna automáticamente si falta.
-            resolution_id: storeCreateDto.resolution_id,
-            payload: storeCreateDto,
-          },
-          tx,
+        // El riel tienda espera un `RequestContext` con `organization_id` +
+        // `store_id` populated (su `resolveAccountingEntityIdForContext` falla
+        // con AUTH_CONTEXT_001 si falta store_id). Para el rail plataforma
+        // pasamos la tienda ancla de la org Vendix (id=1) como `store_id`
+        // y forzamos el contexto via `RequestContextService.runIsolated`
+        // para que el riel tienda vea un store_id valido durante el call.
+        const platformContext = {
+          user_id: args.actorUserId || 1,
+          organization_id: args.organizationId,
+          store_id: 1, // tienda ancla de la org Vendix
+          app_type: 'VENDIX_ADMIN' as any,
+          is_super_admin: true,
+          is_owner: false,
+        };
+        const storeResult = await RequestContextService.runIsolated(
+          platformContext,
+          () =>
+            this.invoicingService.create(
+              {
+                organization_id: args.organizationId,
+                store_id: 1, // ancla Vendix — se ignora para el customer mapping
+                accounting_entity_id: args.accountingEntityId,
+                dian_configuration_id: args.dianConfigurationId,
+                actor_user_id: args.actorUserId,
+                source_type: 'platform_invoice',
+                // resolution_id queda para la emission (allocateFiscalNumber
+                // lo asigna bajo lock); en la V1 la facade acepta `resolution_id`
+                // opcional y el motor asigna automáticamente si falta.
+                resolution_id: storeCreateDto.resolution_id,
+                payload: storeCreateDto,
+              },
+              tx,
+            ),
         );
 
         if (!storeResult || !storeResult.invoice) {
