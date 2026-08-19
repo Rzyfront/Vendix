@@ -220,6 +220,34 @@ interface ReceiveLine {
                       <p class="text-base font-semibold text-text-primary truncate">
                         {{ p.location?.name || '—' }}
                       </p>
+                      <!--
+                        CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 1+: el peso
+                        visual del card "Recibir en" debe simetrizar con el
+                        card del proveedor. Mostramos: código, tipo de bodega,
+                        dirección, fecha de recepción esperada/recibida.
+                      -->
+                      <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-text-secondary">
+                        <div class="truncate">
+                          <span class="font-medium">Código:</span>
+                          {{ p.location?.code || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Tipo:</span>
+                          {{ p.location?.type || '—' }}
+                        </div>
+                        <div class="truncate col-span-2">
+                          <span class="font-medium">Dirección:</span>
+                          {{ getLocationAddress(p.location) || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Esperada:</span>
+                          {{ p.expected_date ? (p.expected_date | date: 'dd/MM/yyyy') : '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Recibida:</span>
+                          {{ p.received_date ? (p.received_date | date: 'dd/MM/yyyy') : '—' }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </app-card>
@@ -1356,6 +1384,16 @@ export class StorePurchaseOrderDetailComponent {
   }
   dateOnly(v?: string | null): string {
     return v ? formatDateOnlyUTC(v) : '—';
+  }
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 1+: dirección legible de la
+   * bodega. Devuelve `address_line_1 + city + state` o null si no hay.
+   */
+  getLocationAddress(loc?: any): string | null {
+    if (!loc?.address) return null;
+    const a = loc.address;
+    const parts = [a.address_line_1, a.city?.name || a.city, a.state?.name || a.state].filter(Boolean);
+    return parts.length ? parts.join(', ') : null;
   }
   dateTime(v?: string | null): string {
     if (!v) return '—';
