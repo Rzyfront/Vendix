@@ -484,10 +484,12 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         location: { store_id: storeId },
+        status: { in: PURCHASE_COMMITTED_STATES },
         order_date: { gte: startDate, lte: endDate },
       },
       select: {
         status: true,
+        subtotal_amount: true,
         total_amount: true,
         order_date: true,
       },
@@ -517,7 +519,7 @@ export class PurchasesAnalyticsService {
         completed_count: 0,
       };
       bucket.order_count += 1;
-      bucket.total_spent += Number(po.total_amount || 0);
+      bucket.total_spent += Number(po.subtotal_amount || po.total_amount || 0);
       if (this.PENDING_STATES.includes(po.status as any)) {
         bucket.pending_count += 1;
       } else if (this.COMPLETED_STATES.includes(po.status as any)) {
@@ -628,19 +630,22 @@ function truncateToGranularity(date: Date, granularity: Granularity): Date {
   d.setUTCMilliseconds(0);
   d.setUTCSeconds(0);
   d.setUTCMinutes(0);
-  d.setUTCHours(0);
   switch (granularity) {
     case Granularity.HOUR:
+      // Keep the hour-of-day — DO NOT reset to 0 (that would collapse HOUR into DAY).
       return d;
     case Granularity.YEAR:
+      d.setUTCHours(0);
       d.setUTCMonth(0);
       d.setUTCDate(1);
       return d;
     case Granularity.MONTH:
+      d.setUTCHours(0);
       d.setUTCDate(1);
       return d;
     case Granularity.WEEK: {
       // Semana inicia en lunes (ISO 8601). setUTCDate(1 - dayOfWeek) ajusta.
+      d.setUTCHours(0);
       const day = d.getUTCDay(); // 0=domingo..6=sábado
       const isoDay = day === 0 ? 7 : day; // 1=lunes..7=domingo
       d.setUTCDate(d.getUTCDate() - (isoDay - 1));
@@ -648,6 +653,7 @@ function truncateToGranularity(date: Date, granularity: Granularity): Date {
     }
     case Granularity.DAY:
     default:
+      d.setUTCHours(0);
       return d;
   }
 }
