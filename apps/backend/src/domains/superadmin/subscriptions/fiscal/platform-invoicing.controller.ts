@@ -24,6 +24,24 @@ import {
   ListPlatformResolutionsQueryDto,
 } from './dto/subscription-fiscal.dto';
 import { PlatformInvoicingService } from './platform-invoicing.service';
+import { PlatformTenantsService } from './platform-tenants.service';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+
+/**
+ * DTO de query para /customers/search. Acepta `kind` discriminador y
+ * `q` libre. La respuesta usa la shape `TenantSearchResult` del helper.
+ */
+class SearchTenantsQueryDto {
+  @IsOptional()
+  @IsIn(['store', 'organization'])
+  kind?: 'store' | 'organization';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+}
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.2a
@@ -53,6 +71,7 @@ export class PlatformInvoicingController {
   constructor(
     private readonly responseService: ResponseService,
     private readonly platformInvoicing: PlatformInvoicingService,
+    private readonly tenants: PlatformTenantsService,
   ) {}
 
   /**
@@ -169,5 +188,61 @@ export class PlatformInvoicingController {
       documentType: query.document_type,
     });
     return this.responseService.success(data, 'Resoluciones listadas');
+  }
+
+  /**
+   * Busqueda de tenants para el TenantPicker. ADR-7: el cliente del
+   * rail super-admin son stores u organizations, NO users. La respuesta
+   * trae `id` compuesto (`store:<n>` u `org:<n>`) que el form envia al
+   * backend como `{kind, tenant_id}`.
+   *
+   * Sin DI todavia — B.5. Cuando la facade tenga la org_id
+   * resuelta via getSettings(), la pasamos por argumento.
+   */
+  @Get('customers/search')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Buscar tenants (stores/orgs) para el picker del rail plataforma',
+  })
+  async searchTenants(@Query() query: SearchTenantsQueryDto): Promise<any> {
+    const data = await this.tenants.searchTenants(this.platformInvoicing['deps']?.prisma ?? null, {
+      organizationId: 0,
+      kind: query.kind ?? null,
+      q: query.q ?? null,
+    });
+    return this.responseService.success(
+      { data, meta: { q: query.q ?? null, kind: query.kind ?? null } },
+      'Tenants listados',
+    );
+  }
+
+  /**
+   * Lookup directo de un tenant por id + kind. Retorna null si no
+   * pertenece a la plataforma. Usado por el picker para la preview.
+   */
+  @Get('customers/:kind/:id')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Detalle fiscal de un tenant del rail plataforma',
+  })
+  async getTenantByKindAndId(
+    @Param('kind') kind: 'store' | 'organization',
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const data = await this.tenants.getTenantByKindAndId(
+      this.platformInvoicing['deps']?.prisma ?? null,
+      { organizationId: 0, kind, id },
+    );
+    if (!data) {
+      throw new VendixHttpException(
+        // Reusar error code generico: el picker renderiza 'no encontrado'.
+        // Para 404 se usa un codigo nuevo en Phase B.5.
+        // Por ahora generamos un 404 limpio.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { code: 'TENANT_NOT_FOUND', httpStatus: 404 } as any,
+        `Tenant ${kind}:${id} no encontrado en esta plataforma`,
+      );
+    }
+    return this.responseService.success(data, 'Tenant retornado');
   }
 }
