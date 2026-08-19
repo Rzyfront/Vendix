@@ -155,39 +155,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
-  {
-    // QUI-542: Cuentas por pagar a proveedores con bucketing de
-    // antigüedad. purchase_orders con payment_status unpaid|partial.
-    id: 'purchase-aging',
-    category: 'purchases',
-    title: 'Cuentas por Pagar (Aging)',
-    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
-    detailedDescription:
-      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
-    icon: 'clock-alert',
-    route: '/admin/reports/purchases/purchase-aging',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'order_number', header: 'OC', type: 'text' },
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
-      { key: 'payment_status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'cuentas_por_pagar',
-    stats: [
-      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/purchases/aging',
-    exportEndpoint: 'store/analytics/purchases/aging/export',
-  },
-
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
 
   {
@@ -224,6 +191,45 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/reviews/summary',
     exportEndpoint: 'store/analytics/reviews/export',
+  },
+
+  {
+    // QUI-548: Reseñas por producto. Una fila por producto con total,
+    // promedio, distribución de estrellas y conteo de verificadas.
+    id: 'reviews-by-product',
+    category: 'reviews',
+    title: 'Reseñas por Producto',
+    description: 'Calificación promedio y distribución de estrellas por producto',
+    detailedDescription:
+      'Detalle de reseñas agrupadas por producto: total, promedio (1 decimal), distribución 1-5 estrellas, cuántas son de compra verificada y cuántas siguen pendientes de moderación.',
+    icon: 'star',
+    route: '/admin/reports/reviews/reviews-by-product',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'total_reviews', header: 'Reseñas', type: 'number', footer: 'sum' },
+      { key: 'average_rating', header: 'Promedio', type: 'number' },
+      { key: 'stars_5', header: '5★', type: 'number', footer: 'sum' },
+      { key: 'stars_4', header: '4★', type: 'number', footer: 'sum' },
+      { key: 'stars_3', header: '3★', type: 'number', footer: 'sum' },
+      { key: 'stars_2', header: '2★', type: 'number', footer: 'sum' },
+      { key: 'stars_1', header: '1★', type: 'number', footer: 'sum' },
+      { key: 'verified_count', header: 'Verificadas', type: 'number', footer: 'sum' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
+      { key: 'last_review_date', header: 'Última Reseña', type: 'date' },
+    ],
+    exportFilename: 'resenas_por_producto',
+    stats: [
+      { key: 'total_reviews', label: 'Total Reseñas', type: 'number', icon: 'message-square' },
+      { key: 'average_rating', label: 'Promedio General', type: 'number', icon: 'star' },
+      { key: 'verified_count', label: 'Verificadas', type: 'number', icon: 'check-circle' },
+    ],
+    dataEndpoint: 'store/analytics/reviews/by-product',
+    exportEndpoint: 'store/analytics/reviews/by-product/export',
   },
 
   // ─── VENTAS (6) ───────────────────────────────────────────────────────────────
@@ -485,77 +491,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/inventory/stock-levels',
     exportEndpoint: 'store/analytics/inventory/export',
-  },
-
-  {
-    // QUI-545: Stock bajo / puntos de reorden. Reusa getLowStockAlerts del
-    // service (que ya filtra qty <= reorder_point con el helper compartido)
-    // y le agrega `stock_value_at_risk` (qty * cost_price) para mostrar el
-    // impacto monetario de reponer.
-    id: 'inventory-low-stock',
-    category: 'inventory',
-    title: 'Stock Bajo',
-    description: 'Productos en o por debajo del punto de reorden',
-    detailedDescription:
-      'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
-    icon: 'alert-triangle',
-    route: '/admin/reports/inventory/inventory-low-stock',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'product_id',
-    columns: [
-      { key: 'product_name', header: 'Producto', type: 'text' },
-      { key: 'sku', header: 'SKU', type: 'text' },
-      { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
-      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
-      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
-      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
-    ],
-    exportFilename: 'stock_bajo',
-    stats: [
-      { key: 'stock_quantity', label: 'Unidades en Riesgo', type: 'number', icon: 'layers' },
-      { key: 'stock_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/inventory/low-stock',
-    exportEndpoint: 'store/analytics/inventory/low-stock/export',
-  },
-
-  {
-    // QUI-550: Inventario por proveedor via supplier_products.
-    // Una fila por proveedor con: productos vinculados, stock total,
-    // costo promedio pactado, valorización total y cuántos de sus
-    // productos son preferred.
-    id: 'inventory-by-supplier',
-    category: 'inventory',
-    title: 'Inventario por Proveedor',
-    description: 'Stock y valorización agrupados por proveedor',
-    detailedDescription:
-      'Para cada proveedor con productos vinculados, muestra cuántos productos tienes con él, el stock total de esos productos, el costo promedio pactado y el valor total en bodega. Útil para negociar volúmenes y diversificar proveedores.',
-    icon: 'building',
-    route: '/admin/reports/inventory/inventory-by-supplier',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'supplier_id',
-    columns: [
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'supplier_code', header: 'Código', type: 'text' },
-      { key: 'product_count', header: 'Productos', type: 'number', footer: 'sum' },
-      { key: 'total_stock_quantity', header: 'Stock Total', type: 'number', footer: 'sum' },
-      { key: 'avg_cost_per_unit', header: 'Costo Promedio', type: 'currency' },
-      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency', footer: 'sum' },
-      { key: 'preferred_count', header: 'Preferidos', type: 'number', footer: 'sum' },
-    ],
-    exportFilename: 'inventario_por_proveedor',
-    stats: [
-      { key: 'total_stock_value', label: 'Valor Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'total_stock_quantity', label: 'Stock Total', type: 'number', icon: 'layers' },
-      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building' },
-    ],
-    dataEndpoint: 'store/analytics/inventory/by-supplier',
-    exportEndpoint: 'store/analytics/inventory/by-supplier/export',
   },
 
   {
@@ -849,77 +784,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/customers/abandoned-carts/export',
   },
 
-  {
-    // QUI-541: Top clientes por ventas. Reutiliza getTopCustomers (que ya
-    // tiene groupBy sobre orders con COMPLETED_STATES) y exporta TODOS
-    // los clientes con al menos una orden, no solo el top-10 que muestra
-    // la pantalla. Diferencia con sales-by-customer: este vive en la
-    // categoría 'customers' (análisis por cliente) y no incluye
-    // ticket_promedio (eso lo calcula la vista de sales-by-customer).
-    id: 'customers-top',
-    category: 'customers',
-    title: 'Top Clientes',
-    description: 'Clientes con mayor gasto total en el período',
-    detailedDescription:
-      'Lista completa de clientes con al menos una orden completada en el período, ordenados por gasto total descendente. Útil para identificar clientes VIP y segmentar campañas.',
-    icon: 'crown',
-    route: '/admin/reports/customers/customers-top',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'id', header: 'ID', type: 'number' },
-      { key: 'customer_name', header: 'Cliente', type: 'text' },
-      { key: 'email', header: 'Correo', type: 'text' },
-      { key: 'total_orders', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
-      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
-    ],
-    exportFilename: 'top_clientes',
-    stats: [
-      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'total_orders', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
-      { key: '_count', label: 'Clientes', type: 'number', icon: 'users' },
-    ],
-    dataEndpoint: 'store/analytics/customers/top',
-    exportEndpoint: 'store/analytics/customers/top/export',
-  },
-
-  {
-    // QUI-540: Cuentas por cobrar de clientes (open + partial) con
-    // bucketing de antigüedad 0-30 / 31-60 / 61-90 / 90+.
-    id: 'customers-receivable',
-    category: 'customers',
-    title: 'Cuentas por Cobrar',
-    description: 'Cartera abierta con bucketing de antigüedad',
-    detailedDescription:
-      'Listado de cuentas por cobrar abiertas o parciales con su bucketing de antigüedad (corriente, 31-60, 61-90, 90+ días). Útil para priorizar gestión de cobro.',
-    icon: 'hand-coins',
-    route: '/admin/reports/customers/customers-receivable',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'document_number', header: 'Documento', type: 'text' },
-      { key: 'customer_name', header: 'Cliente', type: 'text' },
-      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
-      { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'balance', header: 'Saldo', type: 'currency', footer: 'sum' },
-      { key: 'status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'cuentas_por_cobrar',
-    stats: [
-      { key: 'balance', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/customers/receivable',
-    exportEndpoint: 'store/analytics/customers/receivable/export',
-  },
-
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────
 
   {
@@ -1116,147 +980,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'shipping_refunds', label: 'Envios', type: 'currency', icon: 'truck' },
     ],
     dataEndpoint: 'store/analytics/financial/refunds',
-  },
-
-  {
-    // QUI-543: Arqueo de caja. Listado de sesiones de caja con apertura,
-    // cierre esperado vs real, y diferencia. El backend (FinancialAnalyticsService.
-    // getCashSessionsForExport) ya devuelve los 12 campos en el shape canónico;
-    // aquí solo se cablea el registry + ruta.
-    id: 'cash-sessions',
-    category: 'financial',
-    title: 'Arqueo de Caja',
-    description: 'Sesiones de caja con apertura, cierre esperado, real y diferencia',
-    detailedDescription:
-      'Detalle de cada sesión de caja: quién la abrió y cerró, monto de apertura, total de ventas y gastos, cierre esperado vs real, y la diferencia (descuadre). Útil para auditar cuadres diarios y detectar fugas.',
-    icon: 'cash',
-    route: '/admin/reports/financial/cash-sessions',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'opened_at',
-    columns: [
-      { key: 'opened_at', header: 'Apertura', type: 'date' },
-      { key: 'closed_at', header: 'Cierre', type: 'date' },
-      { key: 'register_name', header: 'Caja', type: 'text' },
-      { key: 'opened_by_name', header: 'Abrió', type: 'text' },
-      { key: 'closed_by_name', header: 'Cerró', type: 'text' },
-      { key: 'opening_amount', header: 'Monto Apertura', type: 'currency' },
-      { key: 'total_sales', header: 'Ventas', type: 'currency', footer: 'sum' },
-      { key: 'total_expenses', header: 'Gastos', type: 'currency', footer: 'sum' },
-      { key: 'expected_closing_amount', header: 'Cierre Esperado', type: 'currency' },
-      { key: 'actual_closing_amount', header: 'Cierre Real', type: 'currency' },
-      { key: 'difference', header: 'Diferencia', type: 'currency', footer: 'sum' },
-      { key: 'status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'arqueo_caja',
-    stats: [
-      { key: 'total_sales', label: 'Total Ventas', type: 'currency', icon: 'dollar-sign' },
-      { key: 'total_expenses', label: 'Total Gastos', type: 'currency', icon: 'trending-down' },
-      { key: 'difference', label: 'Descuadre Total', type: 'currency', icon: 'alert-triangle' },
-    ],
-    dataEndpoint: 'store/analytics/financial/cash-sessions',
-    exportEndpoint: 'store/analytics/financial/cash-sessions/export',
-  },
-
-  {
-    // QUI-544: Resumen de gastos. Submódulo nuevo expenses/analytics/ con
-    // 3 endpoints: summary, by-category, detail. Filtra por
-    // RECOGNIZED_EXPENSE_STATES (approved|paid) por defecto.
-    id: 'expenses-summary',
-    category: 'financial',
-    title: 'Resumen de Gastos',
-    description: 'Totales de gastos aprobados y pagados del período',
-    detailedDescription:
-      'Resumen agregado de gastos del período: total reconocido, pendientes, count y promedio. Filtra por RECOGNIZED_EXPENSE_STATES (approved, paid); el estado pending NO cuenta como gasto del período.',
-    icon: 'trending-down',
-    route: '/admin/reports/financial/expenses-summary',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'summary' as ReportType,
-    summaryLayout: {
-      fields: [
-        { key: 'total_recognized', label: 'Reconocidos', type: 'currency' },
-        { key: 'total_pending', label: 'Pendientes', type: 'currency' },
-        { key: 'average_expense', label: 'Promedio', type: 'currency' },
-        { key: 'recognized_count', label: '# Reconocidos', type: 'number' },
-      ],
-    },
-    columns: [
-      { key: 'total_recognized', header: 'Reconocidos', type: 'currency' },
-      { key: 'total_pending', header: 'Pendientes', type: 'currency' },
-      { key: 'recognized_count', header: '# Reconocidos', type: 'number' },
-      { key: 'pending_count', header: '# Pendientes', type: 'number' },
-      { key: 'average_expense', header: 'Promedio', type: 'currency' },
-    ],
-    exportFilename: 'resumen_gastos',
-    stats: [
-      { key: 'total_recognized', label: 'Reconocidos', type: 'currency', icon: 'dollar-sign' },
-      { key: 'total_pending', label: 'Pendientes', type: 'currency', icon: 'clock' },
-      { key: 'average_expense', label: 'Promedio', type: 'currency', icon: 'calculator' },
-      { key: 'recognized_count', label: '# Reconocidos', type: 'number', icon: 'check-circle' },
-    ],
-    dataEndpoint: 'store/analytics/expenses/summary',
-    exportEndpoint: 'store/analytics/expenses/summary',
-  },
-  {
-    id: 'expenses-by-category',
-    category: 'financial',
-    title: 'Gastos por Categoría',
-    description: 'Desglose de gastos por categoría con % de participación',
-    detailedDescription:
-      'Para cada categoría de gasto, muestra el total, count, promedio y % de participación en el total del período. Útil para identificar dónde se va el dinero.',
-    icon: 'pie-chart',
-    route: '/admin/reports/financial/expenses-by-category',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'category_id',
-    columns: [
-      { key: 'category_name', header: 'Categoría', type: 'text' },
-      { key: 'expense_count', header: 'Gastos', type: 'number', footer: 'sum' },
-      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
-      { key: 'average_expense', header: 'Promedio', type: 'currency' },
-      { key: 'percentage', header: '% Participación', type: 'percentage' },
-    ],
-    exportFilename: 'gastos_por_categoria',
-    stats: [
-      { key: 'total_amount', label: 'Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'expense_count', label: 'Gastos', type: 'number', icon: 'list' },
-      { key: '_count', label: 'Categorías', type: 'number', icon: 'tag' },
-    ],
-    dataEndpoint: 'store/analytics/expenses/by-category',
-    exportEndpoint: 'store/analytics/expenses/by-category',
-  },
-  {
-    id: 'expenses-detail',
-    category: 'financial',
-    title: 'Detalle de Gastos',
-    description: 'Listado crudo de gastos con categoría, aprobador y recibo',
-    detailedDescription:
-      'Cada gasto individual del período con su categoría, descripción, monto, estado, aprobador y link al recibo. Útil para auditoría.',
-    icon: 'receipt',
-    route: '/admin/reports/financial/expenses-detail',
-    requiresDateRange: true,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'expense_date', header: 'Fecha', type: 'date' },
-      { key: 'category_name', header: 'Categoría', type: 'text' },
-      { key: 'description', header: 'Descripción', type: 'text' },
-      { key: 'amount', header: 'Monto', type: 'currency', footer: 'sum' },
-      { key: 'state', header: 'Estado', type: 'text' },
-      { key: 'is_recognized', header: 'Reconocido', type: 'text' },
-      { key: 'created_by', header: 'Creado por', type: 'text' },
-      { key: 'approved_by', header: 'Aprobado por', type: 'text' },
-    ],
-    exportFilename: 'detalle_gastos',
-    stats: [
-      { key: 'amount', label: 'Total', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/expenses/detail',
-    exportEndpoint: 'store/analytics/expenses/detail',
   },
 
   {
