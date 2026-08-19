@@ -61,6 +61,7 @@ const STATUS_BADGE_COLORS: Record<string, StickyHeaderBadgeColor> = {
   standalone: true,
   imports: [
     RouterModule,
+    CurrencyPipe,
     DatePipe,
     AlertBannerComponent,
     CardComponent,

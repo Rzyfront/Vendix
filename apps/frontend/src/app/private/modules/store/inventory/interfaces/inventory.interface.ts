@@ -64,6 +64,11 @@ export interface Supplier {
   bank_name?: string;
   bank_account_number?: string;
   bank_account_type?: string;
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S1: dirección comercial del proveedor.
+   * Antes no estaba en la interface; el PO detail ahora la pinta en grid.
+   */
+  address?: Address;
   created_at?: string;
   updated_at?: string;
 }
