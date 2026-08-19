@@ -2210,6 +2210,13 @@ export class SubscriptionFiscalService {
         failed: [] as { invoice_id: number; code: string; summary: string }[],
       };
 
+      // F-R2-18: cap defensivo del array `failed[]` para que un sweep
+      // con 200 fallos no devuelva 200 entradas al caller (cada una con
+      // invoice_id, code, summary). Con MAX_FAILED_ENTRIES=50, un sweep
+      // con `total_failed > 50` requiere re-invocar el endpoint; el
+      // `total_failed` exterior sigue contando todos.
+      const MAX_FAILED_ENTRIES = 50;
+
       for (const { id } of pending) {
         // Congelar ambiente: si cambió durante el barrido, abortamos.
         const current = await this.getSettings();
@@ -2224,6 +2231,7 @@ export class SubscriptionFiscalService {
           });
           break;
         }
+        const isFailedEntryCapped = result.failed.length >= MAX_FAILED_ENTRIES;
         try {
           const r = await this.issueForInvoice(id, { manual: true, source: 'sweep' });
           if (r?.skipped) {
@@ -2241,10 +2249,7 @@ export class SubscriptionFiscalService {
               result.rejected += 1;
             } else if (status === 'error') {
               result.errored += 1;
-            } else {
-              // Estado terminal no aceptado: lo contamos como fallo para no
-              // inflar `succeeded`. El `failed[]` lleva el código y un
-              // summary sin el `error_message` cruda.
+            } else if (!isFailedEntryCapped) {
               result.failed.push({
                 invoice_id: id,
                 code: 'UNEXPECTED_TERMINAL_STATUS',
@@ -2261,17 +2266,46 @@ export class SubscriptionFiscalService {
             }`,
           );
           const isVendixEx = error && typeof error === 'object' && 'code' in error;
-          result.failed.push({
-            invoice_id: id,
-            code: isVendixEx ? 'PREVALIDATION_FAILED' : 'INTERNAL_ERROR',
-            summary: 'la DIAN rechazó la transmisión o el sistema falló; ver log server-side',
-          });
+          if (!isFailedEntryCapped) {
+            result.failed.push({
+              invoice_id: id,
+              code: isVendixEx ? 'PREVALIDATION_FAILED' : 'INTERNAL_ERROR',
+              summary: 'la DIAN rechazó la transmisión o el sistema falló; ver log server-side',
+            });
+          }
         }
       }
 
       this.logger.log(
         `Subscription fiscal sweep: picked_up=${result.picked_up} succeeded=${result.succeeded} rejected=${result.rejected} errored=${result.errored} skipped=${result.skipped} failed=${result.failed.length}`,
       );
+
+      // F-R2-10: persistimos un `audit_logs` row para que la operación
+      // quede registrada en el log inmutable. La acción `fiscal.sweep`
+      // permite buscar sweeps por usuario; el `new_values` lleva el
+      // resumen. `actor_user_id` lo extraemos del RequestContextService
+      // (puede ser null si el sweep lo dispara un cron sin JWT).
+      const actorUserId = RequestContextService.getUserId() ?? null;
+      await this.prisma.withoutScope().audit_logs.create({
+        data: {
+          user_id: actorUserId,
+          action: 'fiscal.sweep',
+          resource: 'subscription_fiscal',
+          resource_id: null,
+          organization_id: settings.platform_organization_id ?? null,
+          new_values: {
+            picked_up: result.picked_up,
+            succeeded: result.succeeded,
+            rejected: result.rejected,
+            errored: result.errored,
+            skipped: result.skipped,
+            failed: result.failed.length,
+            failed_capped: result.failed.length >= MAX_FAILED_ENTRIES,
+            environment: environmentAtStart,
+          } as any,
+        },
+      });
+
       return result;
     });
   }

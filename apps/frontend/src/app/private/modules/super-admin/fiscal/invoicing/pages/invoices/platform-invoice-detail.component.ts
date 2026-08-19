@@ -148,14 +148,30 @@ interface SubscriptionInvoiceDetail {
               <p class="text-gray-500 mb-3">Esta factura aún no fue emitida. Puede dispararla ahora mismo desde aquí.</p>
               <button
                 type="button"
-                (click)="issueNow()"
+                (click)="loadReadiness(d.invoice.id); issueNow()"
                 [disabled]="issuing()"
                 class="px-3 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700 disabled:opacity-50"
               >
-                {{ issuing() ? 'Emitiendo…' : 'Emitir ahora' }}
+                {{ issuing() ? 'Emitiendo…' : 'Diagnosticar y emitir' }}
               </button>
               @if (issueError(); as ie) {
                 <p class="text-xs text-red-600 mt-2">{{ ie }}</p>
+              }
+              @if (readinessBlockers().length > 0) {
+                <div class="mt-4 border-l-4 border-warning bg-warning-light/30 p-3 rounded">
+                  <p class="font-semibold text-sm text-gray-900 mb-2">Bloqueadores de prevalidación</p>
+                  <ul class="text-xs space-y-2">
+                    @for (b of readinessBlockers(); track b.code) {
+                      <li>
+                        <p class="font-mono text-gray-500">{{ b.code }}</p>
+                        <p>{{ b.problem }}</p>
+                        @if (b.fix) {
+                          <p class="text-gray-700"><span class="font-medium">Cómo resolver:</span> {{ b.fix }}</p>
+                        }
+                      </li>
+                    }
+                  </ul>
+                </div>
               }
             </div>
           } @else {
@@ -213,6 +229,9 @@ export class PlatformInvoiceDetailComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly issuing = signal(false);
   readonly issueError = signal<string | null>(null);
+  readonly readinessBlockers = signal<
+    Array<{ code: string; problem: string; fix?: string }>
+  >([]);
 
   // Helpers expuestos al template
   readonly invoiceStateLabel = invoiceStateLabel;
@@ -252,6 +271,31 @@ export class PlatformInvoiceDetailComponent {
   formatPeriodDate(value: string | null | undefined): string {
     if (!value) return '—';
     return formatDate(value, 'longDate', 'es-CO', PLATFORM_TIMEZONE);
+  }
+
+  /**
+   * F-R2-16: cuando el operador pide "Diagnosticar y emitir" sobre una
+   * factura sin transmisiones, primero consultamos
+   * `GET /invoices/:id/emit-readiness` para mostrar los bloqueadores de
+   * prevalidación con su `fix`. El backend ya devuelve `blockers[]` con
+   * `{code, problem, fix}`; el componente los pinta abajo del botón
+   * "Diagnosticar y emitir" para que el operador sepa por qué no salió
+   * antes de reintentar.
+   */
+  private async loadReadiness(invoiceId: number): Promise<void> {
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{
+          success: boolean;
+          data: { blockers?: Array<{ code: string; problem: string; fix?: string }> };
+        }>(`${this.base}/invoices/${invoiceId}/emit-readiness`),
+      );
+      const blockers = res?.data?.blockers ?? [];
+      this.readinessBlockers.set(blockers);
+    } catch {
+      // Si la readiness falla, dejamos el array vacío — la emisión
+      // siguiente reportará el error.
+    }
   }
 
   /**
