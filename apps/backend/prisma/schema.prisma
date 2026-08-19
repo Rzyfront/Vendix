@@ -66,6 +66,7 @@ model users {
   purchase_orders            purchase_orders[]            @relation("purchase_orders_created_by")
   refresh_tokens             refresh_tokens[]
   refunds                    refunds[]
+  refundsResolvedBy          refunds[]                    @relation("refunds_resolved_by")
   reviews                    reviews[]
   // Review system
   review_responses_created   review_responses[]           @relation("review_responses_user")
@@ -2042,10 +2043,17 @@ model refunds {
   // Respuesta cruda de la pasarela, igual que `payments.gateway_response`.
   // `payment-gateway.service.ts` ya la escribía sin que la columna existiera.
   gateway_response      Json?
+  // Auditoría de cierre manual (CP-refund-gateway-dispatch-fix · ADR-3).
+  // Nullable: solo poblado cuando un operador cierra un refund vía
+  // `PATCH /store/orders/:orderId/flow/refunds/:refundId/resolve`. No aplica
+  // a refunds cerrados por el flujo automático del gateway.
+  resolved_by_user_id   Int?
+  resolution_notes      String?            @db.Text
   refund_items          refund_items[]
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  resolvedByUser        users?             @relation("refunds_resolved_by", fields: [resolved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([order_id])
 }
@@ -3968,24 +3976,24 @@ model membership_plans {
 }
 
 model memberships {
-  id                Int                    @id @default(autoincrement())
-  store_id          Int
-  customer_id       Int
-  plan_id           Int
-  kind              membership_kind_enum   @default(generic)
-  status            membership_status_enum @default(pending_payment)
-  period_start      DateTime?
-  period_end        DateTime?
-  auto_renew        Boolean                @default(false)
-  source_order_id   Int?
-  notes             String?
+  id                 Int                    @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int
+  plan_id            Int
+  kind               membership_kind_enum   @default(generic)
+  status             membership_status_enum @default(pending_payment)
+  period_start       DateTime?
+  period_end         DateTime?
+  auto_renew         Boolean                @default(false)
+  source_order_id    Int?
+  notes              String?
   // Bug 10: soft-delete audit. Solo terminales ({expired, suspended, cancelled})
   // se pueden eliminar. El listado filtra deleted_at IS NULL por default.
-  deleted_at        DateTime?
+  deleted_at         DateTime?
   deleted_by_user_id Int?
-  deletion_reason   String?
-  created_at        DateTime               @default(now())
-  updated_at        DateTime               @updatedAt
+  deletion_reason    String?
+  created_at         DateTime               @default(now())
+  updated_at         DateTime               @updatedAt
 
   @@index([store_id, customer_id])
   @@index([store_id, status])
@@ -5281,17 +5289,17 @@ model help_articles {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
-  id                      Int                             @id @default(autoincrement())
-  organization_id         Int
-  store_id                Int
-  accounting_entity_id    Int
-  fiscal_document_type    fiscal_document_type_enum?
-  invoice_number          String                          @db.VarChar(50)
-  invoice_type            invoice_type_enum
-  status                  invoice_status_enum             @default(draft)
-  transmission_status     fiscal_transmission_status_enum @default(draft)
-  dian_status             dian_document_status_enum       @default(not_applicable)
-  accounting_status       fiscal_accounting_status_enum   @default(blocked)
+  id                               Int                             @id @default(autoincrement())
+  organization_id                  Int
+  store_id                         Int
+  accounting_entity_id             Int
+  fiscal_document_type             fiscal_document_type_enum?
+  invoice_number                   String                          @db.VarChar(50)
+  invoice_type                     invoice_type_enum
+  status                           invoice_status_enum             @default(draft)
+  transmission_status              fiscal_transmission_status_enum @default(draft)
+  dian_status                      dian_document_status_enum       @default(not_applicable)
+  accounting_status                fiscal_accounting_status_enum   @default(blocked)
   /// `cbc:CustomizationID` — tipo de operación DIAN: '10' estándar, '09' AIU,
   /// '11' mandatos, '12' transporte (Anexo Técnico 1.9).
   ///
@@ -5299,7 +5307,7 @@ model invoices {
   /// representaciones del mismo valor conviviendo —las facturas históricas en
   /// NULL y las nuevas en '10'— y el lector tendría que manejar ambas igual.
   /// Con NULL ⇒ '10' hay una sola regla y cero filas tocadas por la migración.
-  operation_type          String?                         @db.VarChar(2)
+  operation_type                   String?                         @db.VarChar(2)
   /// Concepto de corrección de una NOTA CRÉDITO o DÉBITO —
   /// `cac:DiscrepancyResponse/cbc:ResponseCode`. Sólo aplica a
   /// `invoice_type` `credit_note` / `debit_note`.
@@ -5320,7 +5328,7 @@ model invoices {
   /// NULL ⇒ se emite '2', el literal histórico. Sin DEFAULT por la misma razón
   /// que `operation_type`: dos representaciones del mismo valor conviviendo
   /// obligan al lector a manejar ambas.
-  note_concept_code       String?                         @db.VarChar(2)
+  note_concept_code                String?                         @db.VarChar(2)
   /// Objeto del contrato AIU de ESTE documento (regla CAV03, Anexo Técnico 1.9).
   ///
   /// La `cbc:Note` de la línea de Administración debe empezar por el literal
@@ -5340,20 +5348,20 @@ model invoices {
   ///
   /// 4900 y no 5000: el prefijo obligatorio ya ocupa parte de la cota de CAV03.
   /// Misma longitud que `contract_object` en `settings-schemas.dto.ts`.
-  aiu_contract_object     String?                         @db.VarChar(4900)
-  customer_id             Int?
-  supplier_id             Int?
-  customer_name           String?                         @db.VarChar(255)
-  customer_tax_id         String?                         @db.VarChar(50)
-  customer_address        Json?
+  aiu_contract_object              String?                         @db.VarChar(4900)
+  customer_id                      Int?
+  supplier_id                      Int?
+  customer_name                    String?                         @db.VarChar(255)
+  customer_tax_id                  String?                         @db.VarChar(50)
+  customer_address                 Json?
   /// Correo del adquiriente al momento de facturar. Es SNAPSHOT, igual que
   /// `customer_address`: la DIAN exige `cac:Contact/cbc:ElectronicMail` y el
   /// acuse de recibo se manda a esta dirección, así que el correo que valió es
   /// el de la emisión, no el que el cliente tenga hoy en su ficha.
-  customer_email          String?                         @db.VarChar(255)
+  customer_email                   String?                         @db.VarChar(255)
   /// Teléfono del adquiriente al momento de facturar (`cac:Contact/cbc:Telephone`).
   /// Snapshot por la misma razón que `customer_email`.
-  customer_phone          String?                         @db.VarChar(50)
+  customer_phone                   String?                         @db.VarChar(50)
   /// Código DIAN del tipo de identificación del adquiriente: '11','12','13',
   /// '21','22','31','41','42','47','48','50','91' (Anexo Técnico 1.9, tabla de
   /// tipos de documento).
@@ -5368,10 +5376,10 @@ model invoices {
   ///
   /// VarChar(5) y no (2) porque el provider todavía acepta el alias interno
   /// ('CC', 'NIT', 'NUIP') además del código numérico.
-  customer_document_type  String?                         @db.VarChar(5)
+  customer_document_type           String?                         @db.VarChar(5)
   /// Dígito de verificación del NIT del adquiriente. Se emite como `<NIT>-<DV>`
   /// en el XML pero NUNCA dentro del número que entra al hash del CUFE.
-  customer_verification_digit String?                     @db.VarChar(1)
+  customer_verification_digit      String?                         @db.VarChar(1)
   /// CÓDIGO DIAN de régimen fiscal del adquiriente (`cbc:TaxLevelCode`):
   /// '48' responsable de IVA, '49' no responsable.
   ///
@@ -5379,27 +5387,27 @@ model invoices {
   /// cabe en 10 caracteres, y eso es deliberado: el XML necesita el código, así
   /// que un intento de guardar la etiqueta debe fallar ruidosamente en vez de
   /// persistir un valor que el builder no sabe emitir.
-  customer_tax_regime     String?                         @db.VarChar(10)
+  customer_tax_regime              String?                         @db.VarChar(10)
   /// Responsabilidades fiscales DIAN del adquiriente (O-13, O-15, O-23, O-47…),
   /// como lista. Ausente ⇒ el builder cae a 'R-99-PN'. Json y no String[] para
   /// alinearse con `customer_address`, el otro snapshot del adquiriente en esta
   /// misma tabla; la fuente viva `users.fiscal_responsibilities` sí es String[].
   customer_fiscal_responsibilities Json?
-  order_id                Int?
-  sales_order_id          Int?
-  related_invoice_id      Int?
-  subtotal_amount         Decimal                         @default(0) @db.Decimal(12, 2)
-  discount_amount         Decimal                         @default(0) @db.Decimal(12, 2)
-  tax_amount              Decimal                         @default(0) @db.Decimal(12, 2)
+  order_id                         Int?
+  sales_order_id                   Int?
+  related_invoice_id               Int?
+  subtotal_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
+  discount_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
+  tax_amount                       Decimal                         @default(0) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado en
   // cuenta 414505 "Transporte Terrestre". Persistido desde order.shipping_cost
   // en invoicing.service.ts:590. Excluido de IVA (tax_amount sólo cubre
   // producto). shipping_amount = 0 ⇒ comportamiento legacy (sin línea extra).
-  shipping_amount         Decimal                         @default(0) @db.Decimal(12, 2)
-  withholding_amount      Decimal                         @default(0) @db.Decimal(12, 2)
-  total_amount            Decimal                         @default(0) @db.Decimal(12, 2)
-  currency                String?                         @db.VarChar(10)
-  exchange_rate           Decimal?                        @db.Decimal(12, 6)
+  shipping_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
+  withholding_amount               Decimal                         @default(0) @db.Decimal(12, 2)
+  total_amount                     Decimal                         @default(0) @db.Decimal(12, 2)
+  currency                         String?                         @db.VarChar(10)
+  exchange_rate                    Decimal?                        @db.Decimal(12, 6)
   /// Divisa ISO 4217 en que se PACTÓ la operación (USD, EUR…).
   ///
   /// LEER ANTES DE ASUMIR LO CONTRARIO: esta columna NO cambia la moneda del
@@ -5408,46 +5416,46 @@ model invoices {
   /// hacen `foreign_currency`, `foreign_total_amount` y `exchange_rate_date` es
   /// DECLARAR la conversión en el bloque `cac:PaymentExchangeRate`. El importe
   /// legal sigue siendo `total_amount` en COP.
-  foreign_currency        String?                         @db.VarChar(3)
+  foreign_currency                 String?                         @db.VarChar(3)
   /// Total equivalente expresado en `foreign_currency`. Informativo/declarativo:
   /// no sustituye a `total_amount` (ver la nota de `foreign_currency`).
   /// Decimal(14,2) — más holgura que los 12,2 vecinos porque una divisa débil
   /// multiplica la cantidad de dígitos del mismo importe.
-  foreign_total_amount    Decimal?                        @db.Decimal(14, 2)
+  foreign_total_amount             Decimal?                        @db.Decimal(14, 2)
   /// Fecha en que se fijó la tasa de cambio (`cac:PaymentExchangeRate/cbc:Date`).
   /// Es fecha-sólo, no instante: la TRM es del día, no de una hora.
-  exchange_rate_date      DateTime?                       @db.Date
+  exchange_rate_date               DateTime?                       @db.Date
   /// `cbc:PaymentMeansCode` grupo forma de pago: '1' contado, '2' crédito.
   /// Mismo dominio y mismo ancho que `orders.payment_form`, del que se propaga.
-  payment_form            String?                         @db.VarChar(2)
+  payment_form                     String?                         @db.VarChar(2)
   /// Medio de pago DIAN (`cac:PaymentMeans/cbc:PaymentMeansCode`): '10' efectivo,
   /// '42' consignación, '48' tarjeta crédito, '49' tarjeta débito…
   /// Hoy el builder emite '10' fijo; persistirlo permite declarar el real.
-  payment_means_code      String?                         @db.VarChar(3)
-  resolution_id           Int?
-  cufe                    String?                         @db.VarChar(255)
-  qr_code                 String?
-  xml_document            String?
-  pdf_url                 String?
-  send_status             document_send_status_enum       @default(not_applicable)
+  payment_means_code               String?                         @db.VarChar(3)
+  resolution_id                    Int?
+  cufe                             String?                         @db.VarChar(255)
+  qr_code                          String?
+  xml_document                     String?
+  pdf_url                          String?
+  send_status                      document_send_status_enum       @default(not_applicable)
   /// '03' = contingencia del facturador, '04' = indisponibilidad DIAN.
-  contingency_type        String?                         @db.VarChar(2)
-  contingency_declared_at DateTime?                       @db.Timestamp(6)
+  contingency_type                 String?                         @db.VarChar(2)
+  contingency_declared_at          DateTime?                       @db.Timestamp(6)
   /// Vencimiento del plazo de 48 h para transmitir el documento a la DIAN.
-  contingency_deadline    DateTime?                       @db.Timestamp(6)
-  contingency_reason      String?
-  provider_response       Json?
-  sent_at                 DateTime?                       @db.Timestamp(6)
-  accepted_at             DateTime?                       @db.Timestamp(6)
-  email_sent_at           DateTime?                       @db.Timestamp(6)
-  issue_date              DateTime                        @db.Timestamp(6)
-  due_date                DateTime?                       @db.Timestamp(6)
-  payment_date            DateTime?                       @db.Timestamp(6)
-  accounting_entry_id     Int?
-  created_by_user_id      Int?
-  notes                   String?
-  created_at              DateTime?                       @default(now()) @db.Timestamp(6)
-  updated_at              DateTime?                       @default(now()) @db.Timestamp(6)
+  contingency_deadline             DateTime?                       @db.Timestamp(6)
+  contingency_reason               String?
+  provider_response                Json?
+  sent_at                          DateTime?                       @db.Timestamp(6)
+  accepted_at                      DateTime?                       @db.Timestamp(6)
+  email_sent_at                    DateTime?                       @db.Timestamp(6)
+  issue_date                       DateTime                        @db.Timestamp(6)
+  due_date                         DateTime?                       @db.Timestamp(6)
+  payment_date                     DateTime?                       @db.Timestamp(6)
+  accounting_entry_id              Int?
+  created_by_user_id               Int?
+  notes                            String?
+  created_at                       DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at                       DateTime?                       @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                    stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
@@ -5478,26 +5486,26 @@ model invoices {
 }
 
 model invoice_items {
-  id                      Int       @id @default(autoincrement())
+  id                      Int                 @id @default(autoincrement())
   invoice_id              Int
   product_id              Int?
   product_variant_id      Int?
-  description             String    @db.VarChar(500)
-  quantity                Decimal   @db.Decimal(12, 4)
-  unit_price              Decimal   @db.Decimal(12, 2)
-  discount_amount         Decimal   @default(0) @db.Decimal(12, 2)
-  tax_amount              Decimal   @default(0) @db.Decimal(12, 2)
+  description             String              @db.VarChar(500)
+  quantity                Decimal             @db.Decimal(12, 4)
+  unit_price              Decimal             @db.Decimal(12, 2)
+  discount_amount         Decimal             @default(0) @db.Decimal(12, 2)
+  tax_amount              Decimal             @default(0) @db.Decimal(12, 2)
   // Snapshot of whether the line's taxes are INCLUDED in `unit_price` or
   // ADDITIONAL on top. Drives `calculateAmounts()` desglose: if true,
   // base gravable = total / (1 + rate); if false, base gravable =
   // unit_price * qty - discount. Defaults to ADDITIONAL for backward
   // compatibility with historical invoices.
-  is_inclusive            Boolean?  @default(false)
-  total_amount            Decimal   @db.Decimal(12, 2)
+  is_inclusive            Boolean?            @default(false)
+  total_amount            Decimal             @db.Decimal(12, 2)
   // Snapshot of the price tier applied on the source order line (human label),
   // and the real stock units consumed when packaging ("empaque por tarifa")
   // expands the sold quantity. Propagated from order_items at invoice build.
-  applied_price_tier_name String?   @db.VarChar(255)
+  applied_price_tier_name String?             @db.VarChar(255)
   stock_units_consumed    Int?
   /// Snapshot de `products.price_unit_quantity` al momento de la venta: a
   /// cuántas unidades de stock corresponde `unit_price`. El total de la línea es
@@ -5516,7 +5524,7 @@ model invoice_items {
   /// y unidad, así que 3 metros declarados como 'EA' dicen "3 unidades" y el
   /// documento queda mintiendo. Snapshot ⇒ un reenvío años después emite la
   /// misma unidad que se emitió la primera vez. NULL = 'EA' (histórico).
-  unit_code               String?   @db.VarChar(10)
+  unit_code               String?             @db.VarChar(10)
   /// SNAPSHOT de la cuenta PUC de ingreso de esta línea al momento de facturar.
   ///
   /// Que el producto se remapee a otra cuenta mañana NO debe reescribir un
@@ -5524,7 +5532,7 @@ model invoice_items {
   /// documento, no desde el catálogo vivo. Mismo patrón y mismo ancho que
   /// `withholding_concepts.account_code`. NULL ⇒ resolver por el mapping vigente
   /// (comportamiento histórico).
-  account_code            String?   @db.VarChar(20)
+  account_code            String?             @db.VarChar(20)
   /// Componente AIU al que pertenece la línea: Administración, Imprevistos o
   /// Utilidad. Marca qué parte del contrato entra a la base gravable del IVA
   /// (`CustomizationID` = '09', ver `invoices.operation_type`).
@@ -5540,7 +5548,7 @@ model invoice_items {
   ///
   /// NULL = línea normal, no AIU — que es el 100% del histórico.
   aiu_component           aiu_component_enum?
-  created_at              DateTime? @default(now()) @db.Timestamp(6)
+  created_at              DateTime?           @default(now()) @db.Timestamp(6)
 
   invoice         invoices          @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   product         products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -5555,8 +5563,8 @@ model invoice_items {
 }
 
 model invoice_taxes {
-  id             Int            @id @default(autoincrement())
-  invoice_id     Int
+  id              Int            @id @default(autoincrement())
+  invoice_id      Int
   /// Línea del documento que este tributo grava. NULL = fila de CABECERA, que
   /// es el 100 % del histórico y sigue siendo la forma canónica de un documento
   /// con un solo tributo.
@@ -5586,16 +5594,16 @@ model invoice_taxes {
   /// correcto. Es además lo que permite que `InvoicingService.update()` borre
   /// las líneas antes que los tributos sin chocar contra la FK.
   invoice_item_id Int?
-  tax_rate_id    Int?
-  tax_name       String         @db.VarChar(100)
-  tax_rate       Decimal        @db.Decimal(5, 2)
-  taxable_amount Decimal        @db.Decimal(12, 2)
-  tax_amount     Decimal        @db.Decimal(12, 2)
-  tax_type       tax_type_enum?
+  tax_rate_id     Int?
+  tax_name        String         @db.VarChar(100)
+  tax_rate        Decimal        @db.Decimal(5, 2)
+  taxable_amount  Decimal        @db.Decimal(12, 2)
+  tax_amount      Decimal        @db.Decimal(12, 2)
+  tax_type        tax_type_enum?
   // Per-line flag: INCLUDED in `unit_price` or ADDITIONAL on top. Drives
   // UBL DIAN builder (`ubl-common.builder.ts`) to emit the corresponding
   // `TaxInclusiveIndicator` XML attribute. Defaults to ADDITIONAL.
-  is_inclusive   Boolean?       @default(false)
+  is_inclusive    Boolean?       @default(false)
 
   invoice      invoices       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   invoice_item invoice_items? @relation(fields: [invoice_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
@@ -5626,21 +5634,21 @@ model invoice_taxes {
 /// the check MORE PERMISSIVE than the DB, and the duplicate then surfaces as a
 /// raw P2002 — an opaque 500 instead of a 409 naming the offending row.
 model invoice_resolutions {
-  id                   Int                       @id @default(autoincrement())
-  organization_id      Int
-  store_id             Int?
-  accounting_entity_id Int
-  document_type        fiscal_document_type_enum @default(sales_invoice)
-  resolution_number    String                    @db.VarChar(100)
-  resolution_date      DateTime                  @db.Timestamp(6)
-  prefix               String                    @db.VarChar(10)
-  range_from           Int
-  range_to             Int
-  current_number       Int                       @default(0)
-  valid_from           DateTime                  @db.Timestamp(6)
-  valid_to             DateTime                  @db.Timestamp(6)
-  is_active            Boolean                   @default(true)
-  technical_key        String?                   @db.VarChar(255)
+  id                        Int                       @id @default(autoincrement())
+  organization_id           Int
+  store_id                  Int?
+  accounting_entity_id      Int
+  document_type             fiscal_document_type_enum @default(sales_invoice)
+  resolution_number         String                    @db.VarChar(100)
+  resolution_date           DateTime                  @db.Timestamp(6)
+  prefix                    String                    @db.VarChar(10)
+  range_from                Int
+  range_to                  Int
+  current_number            Int                       @default(0)
+  valid_from                DateTime                  @db.Timestamp(6)
+  valid_to                  DateTime                  @db.Timestamp(6)
+  is_active                 Boolean                   @default(true)
+  technical_key             String?                   @db.VarChar(255)
   /// Clave técnica DIAN cifrada (AES-256-GCM, `TechnicalKeyVaultService`).
   ///
   /// Es la fuente de verdad PREFERIDA: `reveal()` la descifra y sólo cae a
@@ -5649,7 +5657,7 @@ model invoice_resolutions {
   /// migraciones—, así que las filas viejas se cifran solas la primera vez que
   /// alguien las lee, una a una y sin mutación masiva. Mismo patrón ya probado
   /// en `DianSecretEnvelopeService` para el Software-PIN.
-  technical_key_encrypted String?                @db.Text
+  technical_key_encrypted   String?                   @db.Text
   /// SHA-256 de la ClTec normalizada. Sin llave, a propósito.
   ///
   /// Existe porque el cifrado usa salt e IV frescos por registro: dos filas con
@@ -5658,9 +5666,9 @@ model invoice_resolutions {
   /// (`findResolutionsSharingTechnicalKey`), que corre sin scope sobre toda la
   /// plataforma. Contra la columna cifrada esa igualdad nunca coincide y su
   /// vacío se lee como «no hay contaminación».
-  technical_key_fingerprint String?              @db.VarChar(64)
-  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
+  technical_key_fingerprint String?                   @db.VarChar(64)
+  created_at                DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                 @default(now()) @db.Timestamp(6)
 
   organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?             @relation(fields: [store_id], references: [id], onDelete: Cascade)
