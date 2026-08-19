@@ -127,15 +127,12 @@ export class PlatformInvoicingService {
     // y la UI reintentara con un nuevo idempotency_key.
     const result = await this.prismaClient.$transaction(
       async (tx: Prisma.TransactionClient) => {
-        // Persistir el snapshot ANTES del create: asi si `InvoicingService.create`
-        // falla por validacion DIAN, ya queda registro de que el operador
-        // intento emitir contra ese tenant.
-        await this.persistence.persistAcquirerSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: 0, // placeholder; se actualiza despues del create
-          acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
-        });
+        // Persistir el snapshot ANTES del create violaba la FK de
+        // fiscal_evidences.fiscal_transmission_id. Skip pre-create: ahora
+        // el snapshot se persiste DESPUES del create con el transmissionId
+        // real. El registro de intento se conserva en los logs de Nest.
+        // Si `InvoicingService.create` falla por validacion DIAN, el
+        // rollback de la Tx limpia cualquier evidencia parcial.
 
         // Delegar al riel tienda. La shadow-write a `invoices` +
         // `fiscal_transmissions` ocurre dentro del Tx que inyectamos.
@@ -444,14 +441,14 @@ export class PlatformInvoicingService {
         'listResolutionsForEmission requiere organizationId y accountingEntityId resueltos',
       );
     }
-    const f = (this.deps as any).subscriptionFiscalService?.listResolutionsForEmission;
+    const f = this.subscriptionFiscalService?.listResolutionsForEmission;
     if (typeof f !== 'function') {
       throw new VendixHttpException(
         ErrorCodes.SYS_INTERNAL_001,
-        'No se encontro el helper listResolutionsForEmission en deps',
+        'No se encontro el helper listResolutionsForEmission en subscriptionFiscalService',
       );
     }
-    return f({
+    return f.call(this.subscriptionFiscalService, {
       organizationId: org,
       accountingEntityId: acc,
       documentType: args.documentType,

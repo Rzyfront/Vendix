@@ -34,6 +34,7 @@ import {
 } from './dto/subscription-fiscal.dto';
 import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformTenantsService } from './platform-tenants.service';
+import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.2 + B.3
@@ -96,7 +97,26 @@ export class PlatformInvoicingController {
     private readonly responseService: ResponseService,
     private readonly platformInvoicing: PlatformInvoicingService,
     private readonly tenants: PlatformTenantsService,
+    private readonly subscriptionFiscalService: SubscriptionFiscalService,
   ) {}
+
+  /**
+   * Resuelve la identidad de la plataforma (organizationId + accountingEntityId
+   * + dianConfigurationId) desde `platform_settings`. Cachea por request para
+   * evitar N+1 round-trips a la DB.
+   */
+  private async resolvePlatformIdentity(): Promise<{
+    organizationId: number;
+    accountingEntityId: number;
+    dianConfigurationId: number;
+  }> {
+    const settings = await this.subscriptionFiscalService.getSettingsForController();
+    return {
+      organizationId: settings.platform_organization_id,
+      accountingEntityId: settings.accounting_entity_id,
+      dianConfigurationId: settings.dian_configuration_id,
+    };
+  }
 
   /**
    * Crea una `sales_invoice` del rail plataforma. El `customer` del
@@ -110,10 +130,11 @@ export class PlatformInvoicingController {
     summary: 'Crear y emitir sales_invoice del rail super-admin contra un tenant',
   })
   async createSalesInvoice(@Body() dto: CreatePlatformSalesInvoiceDto): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
     const data = await this.platformInvoicing.createSalesInvoice({
-      organizationId: 0, // resuelto por getSettings() en la facade (Phase B.5)
-      accountingEntityId: 0,
-      dianConfigurationId: 0,
+      organizationId: identity.organizationId,
+      accountingEntityId: identity.accountingEntityId,
+      dianConfigurationId: identity.dianConfigurationId,
       actorUserId: 0,
       dto,
     });
@@ -130,10 +151,11 @@ export class PlatformInvoicingController {
     summary: 'Crear y emitir support_document del rail super-admin contra un tenant',
   })
   async createSupportDocument(@Body() dto: CreatePlatformSupportDocumentDto): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
     const data = await this.platformInvoicing.createSupportDocument({
-      organizationId: 0,
-      accountingEntityId: 0,
-      dianConfigurationId: 0,
+      organizationId: identity.organizationId,
+      accountingEntityId: identity.accountingEntityId,
+      dianConfigurationId: identity.dianConfigurationId,
       actorUserId: 0,
       dto,
     });
@@ -185,8 +207,9 @@ export class PlatformInvoicingController {
     summary: 'Prevalidar el documento platform antes de emitir',
   })
   async emitReadiness(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
     const data = await this.platformInvoicing.evaluateReadiness({
-      organizationId: 0,
+      organizationId: identity.organizationId,
       invoiceId: id,
     });
     return this.responseService.success(data, 'Prevalidacion platform ejecutada');
@@ -204,9 +227,13 @@ export class PlatformInvoicingController {
   async listResolutionsForEmission(
     @Query() query: { document_type: 'sales_invoice' | 'support_document' },
   ): Promise<any> {
+    // Resolucion de identidad desde platform_settings (no se hardcodea 0).
+    // El facade requiere org/accountingEntityId resueltos para poder armar
+    // la query Prisma (organization_id + accounting_entity_id + store_id=NULL).
+    const identity = await this.subscriptionFiscalService.getPlatformIdentity();
     const data = await this.platformInvoicing.listResolutionsForEmission({
-      organizationId: 0,
-      accountingEntityId: 0,
+      organizationId: identity.organizationId,
+      accountingEntityId: identity.accountingEntityId,
       documentType: query.document_type,
     });
     return this.responseService.success(data, 'Resoluciones listadas');
@@ -222,8 +249,9 @@ export class PlatformInvoicingController {
   })
   async searchTenants(@Query() query: SearchTenantsQueryDto): Promise<any> {
     const prisma = this.platformInvoicing['prisma'];
+    const identity = await this.resolvePlatformIdentity();
     const data = await this.tenants.searchTenants(prisma, {
-      organizationId: 0,
+      organizationId: identity.organizationId,
       kind: query.kind ?? null,
       q: query.q ?? null,
     });
@@ -246,8 +274,9 @@ export class PlatformInvoicingController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<any> {
     const prisma = this.platformInvoicing['prisma'];
+    const identity = await this.resolvePlatformIdentity();
     const data = await this.tenants.getTenantByKindAndId(prisma, {
-      organizationId: 0,
+      organizationId: identity.organizationId,
       kind,
       id,
     });

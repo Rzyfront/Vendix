@@ -3562,6 +3562,46 @@ export class SubscriptionFiscalService {
     };
   }
 
+  /**
+   * Wrapper publico que retorna la identidad resuelta (organization_id +
+   * accounting_entity_id) para que el facade V1 pueda pasarle esos
+   * parametros sin tener que duplicar la logica de derivacion.
+   *
+   * Por diseño: este metodo es lo unico del legacy que el facade V1
+   * consume en runtime (Phase B.1). El controller lo llama antes de
+   * `listResolutionsForEmission` y `evaluateReadiness` para evitar
+   * hardcodear org=0/accountingEntityId=0.
+   */
+  async getPlatformIdentity(): Promise<{
+    organizationId: number;
+    accountingEntityId: number;
+  }> {
+    const settings = await this.getSettings();
+    return {
+      organizationId: settings.platform_organization_id ?? 0,
+      accountingEntityId: settings.accounting_entity_id ?? 0,
+    };
+  }
+
+  /**
+   * Version extendida para el controller V1: retorna los 3 IDs
+   * (organization + accounting_entity + dian_configuration) que el
+   * controller necesita para resolver el cliente (organizationId)
+   * + el dian_configuration_id al crear transmisiones platform.
+   */
+  async getSettingsForController(): Promise<{
+    platform_organization_id: number;
+    accounting_entity_id: number;
+    dian_configuration_id: number;
+  }> {
+    const settings = await this.getSettings();
+    return {
+      platform_organization_id: settings.platform_organization_id ?? 0,
+      accounting_entity_id: settings.accounting_entity_id ?? 0,
+      dian_configuration_id: settings.dian_configuration_id ?? 0,
+    };
+  }
+
   private async saveSettings(settings: SubscriptionFiscalSettings): Promise<void> {
     await this.prisma.withoutScope().platform_settings.upsert({
       where: { key: SETTINGS_KEY },
