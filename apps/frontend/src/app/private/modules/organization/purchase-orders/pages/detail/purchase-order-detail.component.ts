@@ -200,7 +200,7 @@ const STATUS_BADGE_COLORS: Record<string, StickyHeaderBadgeColor> = {
                       <tr class="border-t border-border">
                         <td class="py-2 px-2">{{ $index + 1 }} de {{ (plan.payment_schedules ?? []).length }}</td>
                         <td class="py-2 px-2">{{ s.scheduled_date | date: 'yyyy-MM-dd' }}</td>
-                        <td class="py-2 px-2 text-right">{{ Number(s.amount) | currency }}</td>
+                        <td class="py-2 px-2 text-right">{{ asNumber(s.amount) | currency }}</td>
                         <td class="py-2 px-2">
                           <span class="text-xs px-2 py-0.5 rounded-full"
                             [class.bg-emerald-100]="s.status === 'paid'"
