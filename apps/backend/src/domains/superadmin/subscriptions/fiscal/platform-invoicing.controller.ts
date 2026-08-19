@@ -253,9 +253,7 @@ export class PlatformInvoicingController {
     });
     if (!data) {
       throw new VendixHttpException(
-        // Codigo provisional — el codigo registrado del catalogo se
-        // agrega en B.5 cuando se confirme el scope del registro.
-        { code: 'TENANT_NOT_FOUND', httpStatus: 404 } as any,
+        ErrorCodes.INVOICING_TENANT_NOT_FOUND,
         `Tenant ${kind}:${id} no encontrado en esta plataforma`,
       );
     }
