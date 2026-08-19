@@ -2,14 +2,15 @@ import {
   IsOptional,
   IsString,
   IsInt,
-  Min,
   IsEnum,
   IsDateString,
+  IsIn,
+  Min,
 } from 'class-validator';
-import { order_state_enum, payments_state_enum } from '@prisma/client';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { booking_status_enum, order_channel_enum } from '@prisma/client';
 
-export class OrderQueryDto {
+export class BookingQueryDto {
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsInt()
@@ -27,28 +28,22 @@ export class OrderQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum(order_state_enum)
-  status?: order_state_enum;
-
-  @IsOptional()
-  @IsEnum(payments_state_enum)
-  payment_status?: payments_state_enum;
+  @IsEnum(booking_status_enum)
+  status?: booking_status_enum;
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsInt()
-  @Min(1)
   customer_id?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsInt()
-  @Min(1)
-  store_id?: number;
+  product_id?: number;
 
   @IsOptional()
-  @IsString()
-  sort?: string;
+  @IsEnum(order_channel_enum)
+  channel?: order_channel_enum;
 
   @IsOptional()
   @IsDateString()
@@ -57,4 +52,12 @@ export class OrderQueryDto {
   @IsOptional()
   @IsDateString()
   date_to?: string;
+
+  @IsOptional()
+  @IsString()
+  sort_by?: string = 'date';
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sort_order?: 'asc' | 'desc' = 'asc';
 }

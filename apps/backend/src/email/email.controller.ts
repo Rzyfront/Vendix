@@ -1,17 +1,16 @@
-import { Controller, Get, Post, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { EmailService } from './email.service';
-import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 
 @Controller('email')
 export class EmailController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get('config')
-  @UseGuards(JwtAuthGuard)
-  async getEmailConfig(@CurrentUser() user: any) {
+  async getEmailConfig(@Req() req: AuthenticatedRequest) {
     // Solo admins pueden ver la configuración
-    if (!user.roles?.includes('admin')) {
+    if (!req.user.user_roles?.some((ur) => ur.roles?.name === 'admin')) {
       return { message: 'Access denied' };
     }
 
@@ -26,10 +25,9 @@ export class EmailController {
   }
 
   @Post('test')
-  @UseGuards(JwtAuthGuard)
-  async testEmailService(@CurrentUser() user: any) {
+  async testEmailService(@Req() req: AuthenticatedRequest) {
     // Solo admins pueden testear el servicio
-    if (!user.roles?.includes('admin')) {
+    if (!req.user.user_roles?.some((ur) => ur.roles?.name === 'admin')) {
       return { message: 'Access denied' };
     }
 
@@ -42,24 +40,24 @@ export class EmailController {
   }
 
   @Post('test-template')
-  @UseGuards(JwtAuthGuard)
   async testEmailTemplate(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Body()
     body: {
       type: 'verification' | 'password-reset' | 'welcome' | 'onboarding';
       email?: string;
       username?: string;
       step?: string;
+      organizationSlug?: string; // Optional organization slug for testing
     },
   ) {
     // Solo admins pueden testear templates
-    if (!user.roles?.includes('admin')) {
+    if (!req.user.user_roles?.some((ur) => ur.roles?.name === 'admin')) {
       return { message: 'Access denied' };
     }
 
-    const email = body.email || user.email;
-    const username = body.username || user.first_name || 'Test User';
+    const email = body.email || req.user.email;
+    const username = body.username || req.user.first_name || 'Test User';
     const token = 'test-token-' + Date.now();
 
     let result;
@@ -70,6 +68,7 @@ export class EmailController {
           email,
           token,
           username,
+          body.organizationSlug, // Optional organization slug for testing
         );
         break;
       case 'password-reset':
@@ -100,9 +99,8 @@ export class EmailController {
   }
 
   @Post('switch-provider')
-  @UseGuards(JwtAuthGuard)
   async switchProvider(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Body()
     body: {
       provider: 'resend' | 'sendgrid' | 'console';
@@ -110,7 +108,7 @@ export class EmailController {
     },
   ) {
     // Solo admins pueden cambiar proveedores
-    if (!user.roles?.includes('admin')) {
+    if (!req.user.user_roles?.some((ur) => ur.roles?.name === 'admin')) {
       return { message: 'Access denied' };
     }
 
