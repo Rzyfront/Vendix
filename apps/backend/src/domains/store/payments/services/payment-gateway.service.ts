@@ -173,7 +173,7 @@ export class PaymentGatewayService {
    * - Raw exceptions from the processor call propagate unchanged; callers that
    *   want a uniform contract should wrap the call in their own try/catch.
    */
-  private async reversePaymentWithProcessor(
+  public async reversePaymentWithProcessor(
     transactionId: string,
     amount?: number,
   ): Promise<RefundResult> {
