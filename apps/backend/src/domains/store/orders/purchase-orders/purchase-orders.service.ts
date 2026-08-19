@@ -1551,8 +1551,8 @@ export class PurchaseOrdersService {
     const {
       page = 1,
       limit = 10,
-      sort_by = 'order_date',
-      sort_order = 'desc',
+      sort_by = 'next_payment_date',
+      sort_order = 'asc',
     } = query;
     const skip = (page - 1) * limit;
 
@@ -1605,24 +1605,57 @@ export class PurchaseOrdersService {
       },
     };
 
-    const [data, total] = await Promise.all([
-      this.prisma.purchase_orders.findMany({
+    // CP-ID-VNDX-2026-08-18-PO-PROD — ADR-001 / F1.S5 / F1.S6.
+    // Antes el DTO aceptaba cualquier string y el cliente inyectaba columnas
+    // Prisma inexistentes. Hoy sort_by es un enum cerrado de 5 valores.
+    // Para `next_payment_date` (campo calculado por el decorador) no hay
+    // columna SQL nativa: ordenamos en memoria tras decorar. Trade-off ADR-002
+    // (≤500 POs por tienda, latencia subsegundo).
+    const orderBy = this.resolveOrderBy(sort_by, sort_order);
+
+    // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S6: cuando el orden es por
+    // `next_payment_date`, no podemos paginar en SQL (el campo no existe).
+    // Traemos TODAS las filas match, decoramos, ordenamos en memoria, paginamos.
+    const needsInMemorySort = sort_by === 'next_payment_date';
+
+    let data: any[];
+    let total: number;
+
+    if (needsInMemorySort) {
+      const allMatched = await this.prisma.purchase_orders.findMany({
         where,
         include,
-        skip,
-        take: limit,
-        orderBy: { [sort_by]: sort_order },
-      }),
-      this.prisma.purchase_orders.count({ where }),
-    ]);
-
-    // Bug 4: derivar `next_payment_date` y `next_payment_due_in_days` para el listado.
-    // Sin migración: lectura batched de `purchase_order_payment_schedules` (status=planned, ASC)
-    // con fallback a `purchase_orders.payment_due_date`.
-    const enriched = await this.decorateWithNextPaymentDate(data);
+      });
+      const enriched = await this.decorateWithNextPaymentDate(allMatched);
+      // nulls al final (sin plan de pago), resto asc.
+      enriched.sort((a, b) => {
+        const av = a.next_payment_date;
+        const bv = b.next_payment_date;
+        if (av === bv) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return sort_order === 'asc'
+          ? av.localeCompare(bv)
+          : bv.localeCompare(av);
+      });
+      total = enriched.length;
+      data = enriched.slice(skip, skip + limit);
+    } else {
+      [data, total] = await Promise.all([
+        this.prisma.purchase_orders.findMany({
+          where,
+          include,
+          skip,
+          take: limit,
+          orderBy,
+        }),
+        this.prisma.purchase_orders.count({ where }),
+      ]);
+      data = await this.decorateWithNextPaymentDate(data);
+    }
 
     return {
-      data: enriched,
+      data,
       meta: {
         total,
         page,
@@ -1630,6 +1663,35 @@ export class PurchaseOrdersService {
         total_pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S5 / ADR-001.
+   * Mapea el sort_by cerrado al orderBy soportado por Prisma. Rechaza valores
+   * no listados (el DTO ya bloquea por `@IsEnum`, esto es la red final).
+   */
+  private resolveOrderBy(
+    sort_by: 'order_date' | 'next_payment_date' | 'supplier_name' | 'total' | 'status',
+    sort_order: 'asc' | 'desc',
+  ): any {
+    switch (sort_by) {
+      case 'order_date':
+        return { order_date: sort_order };
+      case 'total':
+        return { total_amount: sort_order };
+      case 'status':
+        return { status: sort_order };
+      case 'supplier_name':
+        return { suppliers: { name: sort_order } };
+      case 'next_payment_date':
+        // Manejado en findAll() con orden en memoria.
+        return { order_date: 'desc' };
+      default:
+        throw new VendixHttpException(
+          ErrorCodes.PO_INVALID_SORT_BY,
+          'sort_by no soportado.',
+        );
+    }
   }
 
   /**

@@ -74,14 +74,35 @@ export class PurchaseOrderQueryDto {
   @IsNumber()
   limit?: number = 10;
 
+  // CP-ID-VNDX-2026-08-18-PO-PROD — ADR-001 / F1.S5: sort_by cerrado (enum).
+  // Antes el cliente podía inyectar un nombre de columna Prisma y reventar la
+  // query como 500 silencioso. Ahora solo se aceptan 5 valores declarados.
   @ApiProperty({
     description: 'Sort field',
+    enum: [
+      'order_date',
+      'next_payment_date',
+      'supplier_name',
+      'total',
+      'status',
+    ],
     required: false,
-    default: 'order_date',
+    default: 'next_payment_date',
   })
   @IsOptional()
-  @IsString()
-  sort_by?: string = 'order_date';
+  @IsEnum([
+    'order_date',
+    'next_payment_date',
+    'supplier_name',
+    'total',
+    'status',
+  ])
+  sort_by?:
+    | 'order_date'
+    | 'next_payment_date'
+    | 'supplier_name'
+    | 'total'
+    | 'status' = 'next_payment_date';
 
   @ApiProperty({
     description: 'Sort direction',

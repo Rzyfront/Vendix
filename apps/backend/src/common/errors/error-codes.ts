@@ -990,6 +990,16 @@ export const ErrorCodes = {
     devMessage:
       'El calendario de cuotas requiere al menos una cuota con monto mayor que cero',
   },
+  // CP-ID-VNDX-2026-08-18-PO-PROD — ADR-001: sort_by cerrado en PO List.
+  // Antes el DTO aceptaba cualquier string y el cliente podía inyectar columnas
+  // Prisma inexistentes (`?sort_by=next_payment_date`) que reventaban la query
+  // como 500 silencioso. El enum cerrado lo bloquea en validación.
+  PO_INVALID_SORT_BY: {
+    code: 'PO_INVALID_SORT_BY',
+    httpStatus: 400,
+    devMessage:
+      'El parámetro sort_by no es válido. Usa: order_date, next_payment_date, supplier_name, total o status',
+  },
 
   // Inventory
   INV_FIND_001: {
