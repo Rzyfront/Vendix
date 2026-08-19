@@ -1,6 +1,7 @@
+
 services:
   db:
-    image: pgvector/pgvector:0.8.2-pg15
+    image: postgres:15-alpine
     container_name: vendix_postgres
     restart: unless-stopped
     environment:
@@ -8,33 +9,11 @@ services:
       POSTGRES_USER: username
       POSTGRES_PASSWORD: password
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - vendix_pgdata:/var/lib/postgresql/data
     networks:
       - vendix_net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  redis:
-    image: redis:7-alpine
-    container_name: vendix_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - vendix_redis_data:/data
-    networks:
-      - vendix_net
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   backend:
     build:
@@ -42,98 +21,22 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_backend
     restart: unless-stopped
-    # Sin límite, el backend crecía libre (~2.3 GB observados) y empujaba a la
-    # VM al OOM global, cuya víctima siempre acababa siendo `ng serve` por RSS.
-    mem_limit: 2560m
-    memswap_limit: 3g
     env_file:
       - ./apps/backend/.env
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
-      # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
-      # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
-      # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
-      NODE_OPTIONS: "--max-old-space-size=2048"
-      CHOKIDAR_USEPOLLING: "true"
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      # QUI-489: en dev el límite de 10 intentos de login estorba al probar
-      # flujos de auth. Este compose es sólo de desarrollo (NODE_ENV arriba lo
-      # fija), así que el 30 vive acá y prod queda con el default seguro de 10.
-      LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-30}
+      CHOKIDAR_USEPOLLING: 'true'
     depends_on:
       - db
-      - redis
     ports:
-      - "3000:3000"
+      - '3000:3000'
     volumes:
       - ./apps/backend:/app
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npx prisma generate && npm run start:dev"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Proceso worker: MISMA imagen, MISMO comando, distinto VENDIX_PROCESS_ROLE.
-  #
-  # QUI-674: los 11 workers de BullMQ y todos los @Cron compartían el event loop
-  # de la API, así que un job CPU-bound (firmar el set de pruebas DIAN) congelaba
-  # el backend entero. Con el rol separado, un worker bloqueado ya no puede
-  # tumbar la API porque no comparte su event loop.
-  #
-  # NO arranca por defecto: pertenece al perfil `split`, así que
-  # `docker compose up -d` sigue levantando el stack de siempre —un solo backend
-  # con todo dentro— y el desarrollo cotidiano no cambia. Para reproducir la
-  # topología de producción:
-  #
-  #   docker compose --profile split up -d backend-worker
-  #   # y en el contenedor `backend`, VENDIX_PROCESS_ROLE=api
-  #
-  # La cola vive en el contenedor `redis`, que ya es compartido, así que el
-  # productor (API) y el consumidor (worker) se encuentran sin más cableado.
-  backend-worker:
-    profiles: ["split"]
-    build:
-      context: ./apps/backend
-      dockerfile: Dockerfile.dev
-    container_name: vendix_backend_worker
-    restart: unless-stopped
-    # Presupuesto menor que el de la API: no sirve HTTP ni sostiene SSE, pero
-    # carga el MISMO grafo de módulos (cliente Prisma incluido), que es el grueso
-    # del heap en reposo.
-    mem_limit: 1536m
-    memswap_limit: 2g
-    env_file:
-      - ./apps/backend/.env
-    environment:
-      DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
-      NODE_ENV: development
-      NODE_OPTIONS: "--max-old-space-size=1024"
-      CHOKIDAR_USEPOLLING: "true"
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      VENDIX_PROCESS_ROLE: worker
-    depends_on:
-      - db
-      - redis
-    # Sin `ports`: no hay servidor HTTP que exponer. Es la comprobación más
-    # barata de que el modo worker no abrió un puerto por accidente.
-    volumes:
-      - ./apps/backend:/app
-      - /app/node_modules
-    networks:
-      - vendix_net
-    command: sh -c "npx prisma generate && npm run start:dev"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    command: sh -c "npx prisma migrate deploy && npm run start:dev"
 
   frontend:
     build:
@@ -141,92 +44,22 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
-    # Presupuesto del contenedor en build en frío, medido en dmesg:
-    #   ng serve (heap V8)  ~2.5 GB
-    #   esbuild (binario Go) ~1.5 GB   <-- NO lo gobierna NODE_OPTIONS
-    #   overhead de Node     ~0.3 GB
-    # Total ~4.3 GB, por eso 4g moría con CONSTRAINT_MEMCG. Requiere VM de
-    # colima con 10 GB (5.5g frontend + 2.5g backend + resto).
-    mem_limit: 5632m
-    memswap_limit: 6656m
     environment:
       - NODE_ENV=development
-      - BACKEND_URL=http://api.vendix.com
-      # Ojo: este límite lo hereda también el *worker* de compilación de
-      # Angular, no sólo el proceso de ng serve. Con 2048 el worker moría con
-      # "Worker terminated due to reaching memory limit: JS heap out of memory"
-      # y el compiler-plugin quedaba con compilation=null, lo que se manifiesta
-      # como un críptico assert(compilation) en el ciclo siguiente.
-      # 3072 le alcanza y sigue por debajo del 4096 original que dejaba al GC
-      # crecer hasta reventar la VM.
-      - NODE_OPTIONS=--max-old-space-size=3072
-      - CHOKIDAR_USEPOLLING="true"
+      - BACKEND_URL=http://vendix_backend:3000
     depends_on:
       - backend
     ports:
-      - "4200:4200"
+      - '4200:4200'
     volumes:
       - ./apps/frontend:/app
       - /app/node_modules
     networks:
       - vendix_net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  nginx:
-    image: nginx:alpine
-    container_name: vendix_nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl/certs:/etc/ssl/certs:ro
-      - ./ssl/private:/etc/ssl/private:ro
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - vendix_net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Docker cleanup - limpieza automática cada 24h
-  docker-cleanup:
-    image: docker:cli
-    container_name: vendix_cleanup
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        echo "Cleanup service started"
-        while true; do
-          sleep 86400
-          echo "Running cleanup at $$(date)"
-          docker image prune -af --filter "until=168h"
-          docker container prune -f --filter "until=24h"
-          docker volume prune -f --filter "label!=keep"
-          echo "Cleanup done"
-        done
-    networks:
-      - vendix_net
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "1"
+    command: npm run start
 
 volumes:
   vendix_pgdata:
-  vendix_redis_data:
 
 networks:
   vendix_net:

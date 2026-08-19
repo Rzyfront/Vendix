@@ -3,10 +3,7 @@ import { Injectable } from '@nestjs/common';
 @Injectable()
 export class AppService {
   getHello(): string {
-    // Dashboard HTML en /api/ (legacy). Se conserva como estaba antes del
-    // cambio de JSON en /, porque la raíz `/` se atiende por adapter Express
-    // (ver main.ts) y este método queda disponible si alguien lo quiere
-    // reexponer en otra ruta NestJS.
+    // Hora local de Colombia (UTC-5, sin horario de verano)
     const now = new Date();
     const utc = now.getTime() + now.getTimezoneOffset() * 60000;
     const colombiaDate = new Date(utc - 5 * 60 * 60000);
@@ -23,20 +20,5 @@ export class AppService {
         </div>
       </div>
     `;
-  }
-
-  getStatus(): Record<string, unknown> {
-    // Status JSON consumido por `/` (raíz). Diferencia con /api/health: este
-    // endpoint es estático, no toca memoria ni heap, y es el que sirven
-    // uptime-checks externos que solo quieren "ok/vivo".
-    const version = process.env.npm_package_version || '1.0.0';
-    return {
-      status: 'ok',
-      service: 'Vendix API',
-      version,
-      node: process.version,
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-    };
   }
 }
