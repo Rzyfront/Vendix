@@ -1739,6 +1739,18 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Duplicate invoice number',
   },
+  INVOICING_TENANT_NOT_FOUND: {
+    code: 'INVOICING_TENANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage:
+      'Tenant (store or organization) referenced in the platform invoice request does not exist or does not belong to the platform org',
+  },
+  INVOICING_TENANT_FISCAL_DATA_INCOMPLETE: {
+    code: 'INVOICING_TENANT_FISCAL_DATA_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'Tenant lacks required fiscal data (legal_name, tax_id, dv, address, regimen, responsabilidades)',
+  },
   INVOICING_PROVIDER_001: {
     code: 'INVOICING_PROVIDER_001',
     httpStatus: 502,
