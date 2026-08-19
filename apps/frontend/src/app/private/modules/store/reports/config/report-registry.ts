@@ -778,6 +778,77 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/customers/abandoned-carts/export',
   },
 
+  {
+    // QUI-541: Top clientes por ventas. Reutiliza getTopCustomers (que ya
+    // tiene groupBy sobre orders con COMPLETED_STATES) y exporta TODOS
+    // los clientes con al menos una orden, no solo el top-10 que muestra
+    // la pantalla. Diferencia con sales-by-customer: este vive en la
+    // categoría 'customers' (análisis por cliente) y no incluye
+    // ticket_promedio (eso lo calcula la vista de sales-by-customer).
+    id: 'customers-top',
+    category: 'customers',
+    title: 'Top Clientes',
+    description: 'Clientes con mayor gasto total en el período',
+    detailedDescription:
+      'Lista completa de clientes con al menos una orden completada en el período, ordenados por gasto total descendente. Útil para identificar clientes VIP y segmentar campañas.',
+    icon: 'crown',
+    route: '/admin/reports/customers/customers-top',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'id', header: 'ID', type: 'number' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+    ],
+    exportFilename: 'top_clientes',
+    stats: [
+      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_orders', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: '_count', label: 'Clientes', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/analytics/customers/top',
+    exportEndpoint: 'store/analytics/customers/top/export',
+  },
+
+  {
+    // QUI-540: Cuentas por cobrar de clientes (open + partial) con
+    // bucketing de antigüedad 0-30 / 31-60 / 61-90 / 90+.
+    id: 'customers-receivable',
+    category: 'customers',
+    title: 'Cuentas por Cobrar',
+    description: 'Cartera abierta con bucketing de antigüedad',
+    detailedDescription:
+      'Listado de cuentas por cobrar abiertas o parciales con su bucketing de antigüedad (corriente, 31-60, 61-90, 90+ días). Útil para priorizar gestión de cobro.',
+    icon: 'hand-coins',
+    route: '/admin/reports/customers/customers-receivable',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'document_number', header: 'Documento', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
+      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
+      { key: 'balance', header: 'Saldo', type: 'currency', footer: 'sum' },
+      { key: 'status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'cuentas_por_cobrar',
+    stats: [
+      { key: 'balance', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/customers/receivable',
+    exportEndpoint: 'store/analytics/customers/receivable/export',
+  },
+
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────
 
   {
