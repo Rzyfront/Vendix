@@ -924,22 +924,27 @@ export class SubscriptionFiscalService {
     // tengan la misma guarda, en vez de que la de plataforma dependa de que la
     // DIAN rechace por su cuenta una conexión de software no habilitado —un
     // control real, pero externo y que no controlamos.
-    // Se bloquea el AMBIENTE, no la combinación ambiente+`is_enabled`.
     //
-    // La guarda anterior solo miraba `environment === 'production' && is_enabled`,
-    // y eso dejaba abierta la puerta grande: `updateDianConfig` escribe
-    // `environment: dto.environment` sin condición, así que un PATCH con
-    // `is_enabled: false` volteaba `dian_configurations.environment` a producción
-    // —el ambiente con el que el proveedor firma y transmite— sin pasar por
-    // ninguna comprobación. La activación era un baile de dos pasos donde el
-    // primero ya había hecho el daño.
-    if (dto.environment === 'production') {
+    // Se bloquea la *TRANSICIÓN* (test→production), no la edición de una config
+    // ya en producción. La guarda anterior rechazaba `environment:'production'`
+    // de manera incondicional, y como `environment` es obligatorio en el DTO,
+    // eso dejó al panel sin poder editar `name`, `auto_issue`, etc. estando
+    // ya en producción. También rechaza la degradación producción→test: por
+    // simetría, la única vía entre ambientes es `promote-to-production`.
+    if (dto.environment === 'production' && previous.environment !== 'production') {
       throw new BadRequestException(
         'El paso a producción no se hace por este endpoint: usa POST ' +
           'superadmin/subscriptions/fiscal/promote-to-production, que exige el ' +
           'reporte de readiness completo (incluida la aprobación del set de ' +
           'pruebas por la DIAN). Consúltalo en GET ' +
           'superadmin/subscriptions/fiscal/production-readiness.',
+      );
+    }
+    if (dto.environment === 'test' && previous.environment === 'production') {
+      throw new BadRequestException(
+        'No se puede degradar producción desde este endpoint: la única vía ' +
+          'entre ambientes es promote-to-production, en sentido contrario. ' +
+          'Si necesitas sacar la plataforma de producción, abre una incidencia.',
       );
     }
 
