@@ -2802,28 +2802,34 @@ export class SubscriptionFiscalService {
       amount_paid: '0',
       currency,
       line_items: items,
-      // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
-      // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
-      // (kind ya validado en la lectura) para que el detail page del rail
-      // plataforma renderice con la misma forma que el rail tienda.
-      // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
-      // casteamos via unknown para leer campos arbitrarios sin revalidation por
-      // linea.
-      const meta = (snapshot?.metadata ?? null) as unknown as Record<string, unknown> | null;
+    };
+
+    // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
+    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
+    // (kind ya validado en la lectura) para que el detail page del rail
+    // plataforma renderice con la misma forma que el rail tienda.
+    // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
+    // casteamos via unknown para leer campos arbitrarios sin revalidation por
+    // linea.
+    const metaExtras = (snapshot?.metadata ?? null) as unknown as
+      | Record<string, unknown>
+      | null;
+    const syntheticWithExtras = {
+      ...synthetic,
       customer: customer ?? null,
-      payment_form: (meta?.['payment_form'] as string | null) ?? null,
-      payment_means_code: (meta?.['payment_means_code'] as string | null) ?? null,
+      payment_form: (metaExtras?.['payment_form'] as string | null) ?? null,
+      payment_means_code: (metaExtras?.['payment_means_code'] as string | null) ?? null,
       due_date: dueIso,
-      operation_type: (meta?.['operation_type'] as string | null) ?? null,
-      aiu_contract_object: (meta?.['aiur_contract_object'] as string | null) ?? null,
-      global_discount_amount: (meta?.['global_discount_amount'] as number | null) ?? null,
-      withholding_amount: (meta?.['withholding_amount'] as number | null) ?? null,
-      exchange_rate: (meta?.['exchange_rate'] as number | null) ?? null,
-      exchange_rate_date: (meta?.['exchange_rate_date'] as string | null) ?? null,
+      operation_type: (metaExtras?.['operation_type'] as string | null) ?? null,
+      aiu_contract_object: (metaExtras?.['aiur_contract_object'] as string | null) ?? null,
+      global_discount_amount: (metaExtras?.['global_discount_amount'] as number | null) ?? null,
+      withholding_amount: (metaExtras?.['withholding_amount'] as number | null) ?? null,
+      exchange_rate: (metaExtras?.['exchange_rate'] as number | null) ?? null,
+      exchange_rate_date: (metaExtras?.['exchange_rate_date'] as string | null) ?? null,
     };
 
     return {
-      invoice: synthetic,
+      invoice: syntheticWithExtras,
       transmissions: [
         {
           id: transmission.id,

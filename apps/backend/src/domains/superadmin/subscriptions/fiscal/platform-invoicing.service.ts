@@ -162,17 +162,20 @@ export class PlatformInvoicingService {
   }
 
   /**
-   * Crea una `support_document` (DSA) del rail super-admin. Diferencias
-   * con sales: sin AIU, sin withholding, `supplier_id` en lugar de
-   * `customer_id`, y la ClTec no es necesaria (CUDS en lugar de CUFE).
+   * Crea un `support_document` (DSA) del rail super-admin.
    *
-   * El riel tienda ya tiene un flujo de vendor support document; esta
-   * facade lo invoca via el mismo `InvoicingService.create` pero
-   * pasando `document_type='support_document'`. La persona natural/Juridica
-   * laxa del DSA NO exige `tax_regime_code` tan estricto como una
-   * venta — el snapshot captura lo que el operador indico en el form.
+   * MVP: el legacy `subscriptionFiscalService` no tiene un
+   * `createPlatformSupportDocument` paralelo (solo existe para
+   * `sales_invoice`). Hasta que se cree ese camino, devolvemos 501
+   * con `INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1` para que el operador
+   * sepa que es una omision del MVP, no un bug de validacion.
+   *
+   * FB-02 queda marcado deferred hasta que la facade V1 tenga su
+   * propio camino de emision DSA — lo cual requiere extender el
+   * legacy service para aceptar `source_type='platform_support_document'`
+   * (mismo patron que el sales_invoice BYPASS que esta facade usa).
    */
-  async createSupportDocument(args: {
+  async createSupportDocument(_args: {
     organizationId: number;
     accountingEntityId: number;
     dianConfigurationId: number;
@@ -193,111 +196,9 @@ export class PlatformInvoicingService {
     // dedicado para que el operador sepa que es una omisión del MVP, no
     // un bug de validación. FB-02 queda marcado deferred.
     throw new VendixHttpException(
-      {
-        code: 'INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1',
-        httpStatus: 501,
-      } as any,
+      ErrorCodes.INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1,
       `Soporte para documentos soporte (DSA) en el rail plataforma no esta implementado en MVP. Usa /sales-invoices (FB-01) o espera una iteracion posterior que agregue createPlatformSupportDocument.`,
     );
-    /* c8 ignore next */
-    const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
-      organizationId: args.organizationId,
-      kind: args.dto.supplier.kind,
-      id: args.dto.supplier.tenant_id,
-    });
-    if (!tenant) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_TENANT_NOT_FOUND,
-        `No se encontro el supplier ${args.dto.supplier.kind}:${args.dto.supplier.tenant_id} en la plataforma.`,
-      );
-    }
-    const storeCreateDto = this.mapToStoreSupportDocDto(args.dto, tenant);
-    // Misma transaccion, mismo patron de snapshots.
-    const result = await this.prismaClient.$transaction(
-      async (tx: Prisma.TransactionClient) => {
-        await this.persistence.persistAcquirerSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: 0,
-          acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
-        });
-        const storeResult = await RequestContextService.runIsolated(
-          {
-            organization_id: args.organizationId,
-            store_id: 1, // ancla Vendix — InvoicingService.create exige store scope
-            user_id: args.actorUserId || 1,
-            is_super_admin: true,
-            is_owner: false,
-            roles: ['super_admin'],
-            permissions: [],
-            app_type: 'VENDIX_ADMIN',
-          },
-          () =>
-            this.invoicingService.create({
-              organization_id: args.organizationId,
-              store_id: null,
-              accounting_entity_id: args.accountingEntityId,
-              dian_configuration_id: args.dianConfigurationId,
-              actor_user_id: args.actorUserId,
-              source_type: 'platform_support_document',
-              resolution_id: storeCreateDto.resolution_id,
-              payload: storeCreateDto,
-            }),
-        );
-        if (!storeResult || !storeResult.invoice) {
-          throw new VendixHttpException(
-            ErrorCodes.INVOICING_STATUS_001,
-            'InvoicingService.create devolvio sin invoice',
-          );
-        }
-        const transmission = await tx.fiscal_transmissions.findFirst({
-          where: {
-            source_type: 'platform_support_document',
-            source_id: storeResult.invoice.id,
-          },
-          orderBy: { created_at: 'desc' },
-          select: { id: true },
-        });
-        if (!transmission) {
-          throw new VendixHttpException(
-            ErrorCodes.INVOICING_FIND_001,
-            'No se encontro la fiscal_transmission del support_document',
-          );
-        }
-        await this.persistence.persistAcquirerSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: transmission.id,
-          acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
-        });
-        await this.persistence.persistInvoiceSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: transmission.id,
-          idempotencyKey: storeResult.idempotency_key ?? `platform_support_doc:${transmission.id}`,
-          payload: {
-            customer: storeCreateDto.customer,
-            items: storeCreateDto.items,
-            totals: storeResult.totals ?? { subtotal: 0, tax_amount: 0, total: 0 },
-            period_start: args.dto.period_start ?? null,
-            period_end: args.dto.period_end ?? null,
-            currency: storeCreateDto.currency ?? 'COP',
-            withholdings: [],
-            global_discount_amount: storeCreateDto.global_discount_amount ?? 0,
-            operation_type: args.dto.operation_type,
-          },
-        });
-        return {
-          invoice_id: transmission.id,
-          transmission_id: transmission.id,
-          fiscal_number: storeResult.invoice.invoice_number,
-          transmission_status: 'queued',
-          dian_status: 'pending',
-          cufe: null,
-        };
-      },
-    );
-    return result;
   }
 
   /**
