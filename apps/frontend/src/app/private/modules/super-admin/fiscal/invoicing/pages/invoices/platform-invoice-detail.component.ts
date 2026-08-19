@@ -1,9 +1,10 @@
-import { CurrencyPipe, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   billingCycleLabel,
@@ -102,7 +103,7 @@ interface SubscriptionInvoiceDetail {
               <dt class="text-gray-500">Estado</dt>
               <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
               <dt class="text-gray-500">Periodo</dt>
-              <dd>{{ d.invoice.period_start | date: 'longDate' }} → {{ d.invoice.period_end | date: 'longDate' }}</dd>
+              <dd>{{ d.invoice.period_start | date: 'longDate':'': 'es-CO' }} → {{ d.invoice.period_end | date: 'longDate':'': 'es-CO' }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
               <dd>{{ d.invoice.subtotal | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Impuestos</dt>

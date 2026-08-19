@@ -177,12 +177,17 @@
                   }
                 </td>
                 <td class="py-3 pr-4">
-                  <div class="text-text-primary">
-                    {{ row.subscription_invoice?.invoice_number ?? row.source_id }}
-                  </div>
-                  <div class="text-xs text-text-secondary">
-                    ID {{ row.source_id }}
-                  </div>
+                  <a
+                    [routerLink]="['/super-admin/fiscal/invoicing/invoices', row.source_id]"
+                    class="block hover:bg-surface-muted -m-2 p-2 rounded"
+                  >
+                    <div class="text-text-primary">
+                      {{ row.subscription_invoice?.invoice_number ?? row.source_id }}
+                    </div>
+                    <div class="text-xs text-text-secondary">
+                      ID {{ row.source_id }}
+                    </div>
+                  </a>
                 </td>
                 <td class="py-3 pr-4">
                   <span
