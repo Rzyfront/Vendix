@@ -967,7 +967,7 @@ export class FinancialAnalyticsService {
         state: { in: [...EXPENSE_CASH_OUT_STATES] },
         paid_at: startDate
           ? { gte: startDate, lte: endDate }
-          : { lte: endDate, not: null },
+          : { lte: endDate, not: undefined },
       },
       _sum: { amount: true },
     });
@@ -1438,7 +1438,7 @@ export class FinancialAnalyticsService {
           where: {
             state: { in: [...REFUND_RECOGNIZED_STATES] },
             created_at: { gte: startDate, lte: endDate },
-            reason: { not: null },
+            reason: undefined,
           },
           _count: { id: true },
           _sum: { amount: true },

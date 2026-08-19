@@ -663,7 +663,7 @@ export class ProductsAnalyticsService {
           state: { in: this.COMPLETED_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
-        product_id: { not: null },
+        product_id: undefined,
       },
       _sum: {
         quantity: true,
@@ -804,7 +804,7 @@ export class ProductsAnalyticsService {
           state: { in: this.COMPLETED_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
-        product_id: { not: null },
+        product_id: undefined,
       },
       _sum: {
         quantity: true,

@@ -46,7 +46,7 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: startDate, lte: endDate },
       },
     });
@@ -71,7 +71,7 @@ export class CustomersAnalyticsService {
     const revenueAgg = await this.prisma.orders.aggregate({
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: { grand_total: true },
@@ -81,7 +81,7 @@ export class CustomersAnalyticsService {
     const previousRevenueAgg = await this.prisma.orders.aggregate({
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
       _sum: { grand_total: true },
@@ -92,7 +92,7 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
     });
@@ -210,7 +210,7 @@ export class CustomersAnalyticsService {
 
     const where = {
       state: { in: this.COMPLETED_STATES },
-      customer_id: { not: null },
+      customer_id: undefined,
       created_at: { gte: startDate, lte: endDate },
     };
 

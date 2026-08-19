@@ -218,7 +218,7 @@ export class SalesAnalyticsService {
               lte: endDate,
             },
             customer_id: {
-              not: null,
+              not: undefined,
             },
           },
         }),
@@ -815,7 +815,7 @@ export class SalesAnalyticsService {
 
     const where = {
       state: { in: this.COMPLETED_STATES },
-      customer_id: { not: null },
+      customer_id: undefined,
       created_at: { gte: startDate, lte: endDate },
     };
 

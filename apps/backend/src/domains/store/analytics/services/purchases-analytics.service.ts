@@ -566,7 +566,7 @@ export class PurchasesAnalyticsService {
         organization_id: organizationId,
         suppliers: { store_id: storeId },
         payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: { not: null },
+        payment_due_date: undefined,
       },
       select: {
         id: true,

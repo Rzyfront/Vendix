@@ -1099,7 +1099,7 @@ export class InventoryAnalyticsService {
       where: {
         quantity: { gt: 0 },
         expiration_date: { // tz-audit:ignore — umbral de vencimiento futuro, no ventana de período
-          not: null,
+          not: undefined,
           lte: thresholdDate,
         },
         ...(query.location_id && { location_id: query.location_id }),
