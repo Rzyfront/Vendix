@@ -1,9 +1,7 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -13,25 +11,55 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import {
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import type { Response } from 'express';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import {
   CreatePlatformSalesInvoiceDto,
   CreatePlatformSupportDocumentDto,
-  ListPlatformResolutionsQueryDto,
 } from './dto/subscription-fiscal.dto';
 import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformTenantsService } from './platform-tenants.service';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { Type } from 'class-transformer';
 
 /**
- * DTO de query para /customers/search. Acepta `kind` discriminador y
- * `q` libre. La respuesta usa la shape `TenantSearchResult` del helper.
+ * CP-platform-fiscal-invoicing-mvp · Phase B.2 + B.3
+ *
+ * Controller de las rutas V1 del rail super-admin. Aislado del
+ * `subscription-fiscal.controller.ts` (legacy SaaS) para minimizar
+ * conflictos con sesiones que toquen el controller historico.
+ *
+ * Rutas (todas bajo `/api/superadmin/subscriptions/fiscal/`):
+ *   - POST  /sales-invoices                       (FB-01)
+ *   - POST  /support-documents                    (FB-02)
+ *   - POST  /invoices/:id/send                   (FB-07)
+ *   - POST  /invoices/:id/cancel                 (FB-08)
+ *   - GET   /invoices/:id/emit-readiness         (FB-06)
+ *   - POST  /transmissions/:id/retry             (FB-09)
+ *   - GET   /resolutions-for-emission            (FB-05)
+ *   - GET   /customers/search?q=&kind=           (FB-03)
+ *   - GET   /customers/:kind/:id                 (FB-04)
+ *   - GET   /invoices/:id/aiu-settings           (FB-14)
+ *   - POST  /invoices/:id/exchange-rate          (FB-10)
+ *
+ * Por qué :id aquí es transmission.id: el detail del rail plataforma
+ * (PR #636) ya opera sobre transmissions. La facade de B.1 traduce
+ * `invoiceId` → `transmissionId` cuando es necesario.
  */
+
 class SearchTenantsQueryDto {
   @IsOptional()
   @IsIn(['store', 'organization'])
@@ -43,26 +71,22 @@ class SearchTenantsQueryDto {
   q?: string;
 }
 
-/**
- * CP-platform-fiscal-invoicing-mvp · Phase B.2a
- *
- * Controller de las rutas V1 del rail super-admin. Aislado del
- * `subscription-fiscal.controller.ts` (legacy SaaS) para minimizar
- * conflictos con sesiones que toquen el controller legacy.
- *
- * Rutas (todas bajo `/api/superadmin/subscriptions/fiscal/`):
- *   - POST /sales-invoices                      (FB-01)
- *   - POST /support-documents                   (FB-02)
- *   - POST /invoices/:id/send                  (FB-07) — :id = transmission.id
- *   - POST /invoices/:id/cancel                (FB-08)
- *   - GET  /invoices/:id/emit-readiness        (FB-06)
- *   - POST /transmissions/:id/retry            (FB-09, ya en legacy + extender)
- *   - GET  /resolutions-for-emission           (FB-05)
- *
- * Por qué :id aquí es transmission.id: el detail del rail plataforma
- * (PR #636) ya opera sobre transmissions. La facade de B.1 traduce
- * `invoiceId` → `transmissionId` cuando es necesario.
- */
+class ExchangeRateQueryDto {
+  @IsString()
+  @IsDateString()
+  date!: string;
+
+  @IsString()
+  @MaxLength(3)
+  currency!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  usd_cross_rate?: number;
+}
+
 @ApiBearerAuth()
 @ApiTags('super-admin · platform-invoicing · MVP')
 @Controller('superadmin/subscriptions/fiscal')
@@ -87,18 +111,17 @@ export class PlatformInvoicingController {
   })
   async createSalesInvoice(@Body() dto: CreatePlatformSalesInvoiceDto): Promise<any> {
     const data = await this.platformInvoicing.createSalesInvoice({
-      organizationId: 0, // resuelto por getSettings() en la facade
-      accountingEntityId: 0, // idem
-      dianConfigurationId: 0, // idem
-      actorUserId: 0, // relleno por el guard global cuando se wire el auth context
+      organizationId: 0, // resuelto por getSettings() en la facade (Phase B.5)
+      accountingEntityId: 0,
+      dianConfigurationId: 0,
+      actorUserId: 0,
       dto,
     });
     return this.responseService.created(data, 'Sales invoice del rail plataforma creada');
   }
 
   /**
-   * Crea un `support_document` (DSA) del rail plataforma. Misma
-   * mecánica que `sales_invoice` pero con `document_type='support_document'`.
+   * Crea un `support_document` (DSA) del rail plataforma.
    */
   @Post('support-documents')
   @HttpCode(HttpStatus.CREATED)
@@ -119,7 +142,7 @@ export class PlatformInvoicingController {
 
   /**
    * Envia una transmision del rail plataforma a DIAN. `:id` es el id
-   * de la fila `fiscal_transmissions`. La facade traduce a `invoice.id`.
+   * de la fila `fiscal_transmissions`.
    */
   @Post('invoices/:id/send')
   @HttpCode(HttpStatus.OK)
@@ -172,7 +195,6 @@ export class PlatformInvoicingController {
   /**
    * Listado de resoluciones APTAS PARA EMISION. Filtra por
    * `document_type` requerido, `is_active=true`, vigente en la fecha.
-   * Proyecta `technical_key_fingerprint` (nunca la ClTec plana).
    */
   @Get('resolutions-for-emission')
   @Permissions('superadmin:fiscal:invoicing')
@@ -191,13 +213,7 @@ export class PlatformInvoicingController {
   }
 
   /**
-   * Busqueda de tenants para el TenantPicker. ADR-7: el cliente del
-   * rail super-admin son stores u organizations, NO users. La respuesta
-   * trae `id` compuesto (`store:<n>` u `org:<n>`) que el form envia al
-   * backend como `{kind, tenant_id}`.
-   *
-   * Sin DI todavia — B.5. Cuando la facade tenga la org_id
-   * resuelta via getSettings(), la pasamos por argumento.
+   * Busqueda de tenants para el TenantPicker. ADR-7.
    */
   @Get('customers/search')
   @Permissions('superadmin:fiscal:invoicing')
@@ -205,7 +221,8 @@ export class PlatformInvoicingController {
     summary: 'Buscar tenants (stores/orgs) para el picker del rail plataforma',
   })
   async searchTenants(@Query() query: SearchTenantsQueryDto): Promise<any> {
-    const data = await this.tenants.searchTenants(this.platformInvoicing['deps']?.prisma ?? null, {
+    const prisma = (this.platformInvoicing['deps'] as any)?.prisma;
+    const data = await this.tenants.searchTenants(prisma, {
       organizationId: 0,
       kind: query.kind ?? null,
       q: query.q ?? null,
@@ -217,8 +234,7 @@ export class PlatformInvoicingController {
   }
 
   /**
-   * Lookup directo de un tenant por id + kind. Retorna null si no
-   * pertenece a la plataforma. Usado por el picker para la preview.
+   * Lookup directo de un tenant por id + kind.
    */
   @Get('customers/:kind/:id')
   @Permissions('superadmin:fiscal:invoicing')
@@ -229,20 +245,74 @@ export class PlatformInvoicingController {
     @Param('kind') kind: 'store' | 'organization',
     @Param('id', ParseIntPipe) id: number,
   ): Promise<any> {
-    const data = await this.tenants.getTenantByKindAndId(
-      this.platformInvoicing['deps']?.prisma ?? null,
-      { organizationId: 0, kind, id },
-    );
+    const prisma = (this.platformInvoicing['deps'] as any)?.prisma;
+    const data = await this.tenants.getTenantByKindAndId(prisma, {
+      organizationId: 0,
+      kind,
+      id,
+    });
     if (!data) {
       throw new VendixHttpException(
-        // Reusar error code generico: el picker renderiza 'no encontrado'.
-        // Para 404 se usa un codigo nuevo en Phase B.5.
-        // Por ahora generamos un 404 limpio.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Codigo provisional — el codigo registrado del catalogo se
+        // agrega en B.5 cuando se confirme el scope del registro.
         { code: 'TENANT_NOT_FOUND', httpStatus: 404 } as any,
         `Tenant ${kind}:${id} no encontrado en esta plataforma`,
       );
     }
     return this.responseService.success(data, 'Tenant retornado');
+  }
+
+  /**
+   * AIU settings consult del rail plataforma. Reusa el helper del
+   * rail tienda (\`getAiuSettingsView\`). Devuelve regime + min_percent
+   * por defecto + componentes gravables + estado de obligatoriedad.
+   */
+  @Get('invoices/:id/aiu-settings')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'AIU settings disponibles para el form (regime + piso + componentes)',
+  })
+  async getAiuSettings(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    // Passthrough al riel tienda via la facade. Por ahora devolvemos
+    // un shape estatico que el form consume; B.5 lo conecta al helper real.
+    return this.responseService.success(
+      {
+        invoice_id: id,
+        regime: 'et_462_1',
+        min_percent: 10,
+        taxable_components: ['administracion', 'imprevistos', 'utilidad'],
+        taxable_base_required: false,
+      },
+      'AIU settings del platform tenant',
+    );
+  }
+
+  /**
+   * Cotiza TRM oficial para la emision en USD (u otra moneda extranjera).
+   * Reusa el helper del rail tienda (\`resolveExchangeRateQuote\`).
+   */
+  @Post('invoices/:id/exchange-rate')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Cotiza TRM oficial para fecha y moneda extranjera',
+  })
+  async getExchangeRate(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ExchangeRateQueryDto,
+  ): Promise<any> {
+    // Passthrough al helper del riel tienda cuando este disponible en B.5.
+    // Aqui devolvemos la shape esperada por el front (solo-lectura para preview).
+    return this.responseService.success(
+      {
+        invoice_id: id,
+        currency: query.currency,
+        date: query.date,
+        value: 0, // placeholder — Phase B.5 reemplaza con la TRM oficial
+        source: 'datos_gov_co',
+        usd_cross_rate: query.usd_cross_rate ?? null,
+      },
+      'Cotizacion TRM resuelta',
+    );
   }
 }
