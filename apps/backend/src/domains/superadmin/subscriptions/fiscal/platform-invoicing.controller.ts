@@ -221,7 +221,7 @@ export class PlatformInvoicingController {
     summary: 'Buscar tenants (stores/orgs) para el picker del rail plataforma',
   })
   async searchTenants(@Query() query: SearchTenantsQueryDto): Promise<any> {
-    const prisma = (this.platformInvoicing['deps'] as any)?.prisma;
+    const prisma = this.platformInvoicing['prisma'];
     const data = await this.tenants.searchTenants(prisma, {
       organizationId: 0,
       kind: query.kind ?? null,
@@ -245,7 +245,7 @@ export class PlatformInvoicingController {
     @Param('kind') kind: 'store' | 'organization',
     @Param('id', ParseIntPipe) id: number,
   ): Promise<any> {
-    const prisma = (this.platformInvoicing['deps'] as any)?.prisma;
+    const prisma = this.platformInvoicing['prisma'];
     const data = await this.tenants.getTenantByKindAndId(prisma, {
       organizationId: 0,
       kind,

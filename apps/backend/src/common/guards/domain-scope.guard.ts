@@ -77,6 +77,14 @@ export class DomainScopeGuard implements CanActivate {
 
     const path: string = (req.path || req.originalUrl || '').toLowerCase();
 
+    // 4b. VENDIX_ADMIN (superadmin del rail plataforma) tiene acceso a los
+    // endpoints `/api/superadmin/*` (facturacion plataforma, control fiscal,
+    // configuracion global). El resto de la matriz de aislamiento sigue
+    // activa para STORE_ADMIN / ORG_ADMIN.
+    if (user.app_type === 'VENDIX_ADMIN' && path.includes('/api/superadmin/')) {
+      return true;
+    }
+
     const isStorePath = path.includes(this.STORE_PATH_MARKER);
     const isOrgPath = path.includes(this.ORG_PATH_MARKER);
 

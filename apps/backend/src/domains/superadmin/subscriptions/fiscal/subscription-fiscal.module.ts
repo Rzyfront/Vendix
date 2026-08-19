@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { PrismaModule } from '../../../../prisma/prisma.module';
+import { PrismaModule, GlobalPrismaService } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { S3Module } from '../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
@@ -90,33 +90,10 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
     PlatformInvoicingPersistenceService,
     // Facade con `useFactory` que arma el `Deps` con las dependencias
     // inyectadas del riel tienda + legacy + MvpV1.
-    {
-      provide: PlatformInvoicingService,
-      useFactory: (
-        invoicingService: InvoicingService,
-        invoiceFlowService: InvoiceFlowService,
-        persistence: PlatformInvoicingPersistenceService,
-        tenants: PlatformTenantsService,
-        subscriptionFiscalService: SubscriptionFiscalService,
-      ) =>
-        new PlatformInvoicingService({
-          invoicingService,
-          invoiceFlowService,
-          // prisma se obtiene de `invoicingService['prisma']` en runtime.
-          // No inyectamos GlobalPrismaService directo para evitar el ciclo
-          // DI: subscription-fiscal module NO declara el provider de prisma.
-          persistence,
-          tenants,
-          subscriptionFiscalService,
-        } as any),
-      inject: [
-        InvoicingService,
-        InvoiceFlowService,
-        PlatformInvoicingPersistenceService,
-        PlatformTenantsService,
-        SubscriptionFiscalService,
-      ],
-    },
+    // PlatformInvoicingService inyecta sus deps via @Injectable standard.
+    // Se declara como provider normal (no useFactory) para que Nest resuelva
+    // via constructor y no requiera el truco del deps object.
+    PlatformInvoicingService,
   ],
   exports: [SubscriptionFiscalService],
 })

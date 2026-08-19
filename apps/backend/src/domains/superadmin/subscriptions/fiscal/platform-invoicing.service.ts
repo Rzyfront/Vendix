@@ -1,6 +1,12 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { InvoicingService } from '../../../store/invoicing/invoicing.service';
+import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
+import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
+import { PlatformTenantsService } from './platform-tenants.service';
+import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.1
@@ -33,23 +39,38 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
  */
 
 interface Deps {
-  prisma: PrismaClient | Prisma.TransactionClient;
-  invoicingService: any; // apps/backend/src/domains/store/invoicing/invoicing.service.ts (vía DI)
-  invoiceFlowService: any; // apps/backend/src/domains/store/invoicing/invoice-flow/invoice-flow.service.ts (vía DI)
-  persistence: any; // ./platform-invoicing-persistence.service.ts
-  tenants: any; // ./platform-tenants.service.ts
+  invoicingService: any;
+  invoiceFlowService: any;
+  persistence: any;
+  tenants: any;
+  subscriptionFiscalService: any;
 }
 
+@Injectable()
 export class PlatformInvoicingService {
   private readonly logger = new Logger(PlatformInvoicingService.name);
 
   constructor(
-    // Las dependencias se inyectan via factory en `subscription-fiscal.module.ts`.
-    // La firma tipada esta en `Deps` arriba. Aqui definimos el parametro
-    // del constructor — permitir tests inyectar versiones mock sin tocar
-    // el DI real.
-    private readonly deps: Deps,
+    private readonly prismaService: GlobalPrismaService,
+    private readonly invoicingService: InvoicingService,
+    private readonly invoiceFlowService: InvoiceFlowService,
+    private readonly persistence: PlatformInvoicingPersistenceService,
+    private readonly tenants: PlatformTenantsService,
+    private readonly subscriptionFiscalService: SubscriptionFiscalService,
   ) {}
+
+  private get prismaClient(): PrismaClient | Prisma.TransactionClient {
+    return this.prismaService as unknown as PrismaClient;
+  }
+
+  /**
+   * Expose prisma a sub-services que lo reciben como parametro.
+   * Por ejemplo `PlatformTenantsService.searchTenants(prisma, ...)`.
+   * Solo lectura — el caller NO debe mutar.
+   */
+  get prisma(): any {
+    return this.prismaService as unknown as PrismaClient;
+  }
 
   /**
    * Crea y emite una `sales_invoice` del rail super-admin contra un
@@ -80,7 +101,7 @@ export class PlatformInvoicingService {
     dian_status: string;
     cufe: string | null;
   }> {
-    const tenant = await this.deps.tenants.getTenantByKindAndId(this.deps.prisma, {
+    const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
       organizationId: args.organizationId,
       kind: args.dto.customer.kind,
       id: args.dto.customer.tenant_id,
@@ -104,12 +125,12 @@ export class PlatformInvoicingService {
     // Atomico: la creacion de `invoices` + `fiscal_transmissions` + snapshot
     // viven en una sola transaccion. Si algo falla, hacemos rollback
     // y la UI reintentara con un nuevo idempotency_key.
-    const result = await this.deps.prisma.$transaction(
+    const result = await this.prismaClient.$transaction(
       async (tx: Prisma.TransactionClient) => {
         // Persistir el snapshot ANTES del create: asi si `InvoicingService.create`
         // falla por validacion DIAN, ya queda registro de que el operador
         // intento emitir contra ese tenant.
-        await this.deps.persistence.persistAcquirerSnapshot(tx, {
+        await this.persistence.persistAcquirerSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: 0, // placeholder; se actualiza despues del create
@@ -118,7 +139,7 @@ export class PlatformInvoicingService {
 
         // Delegar al riel tienda. La shadow-write a `invoices` +
         // `fiscal_transmissions` ocurre dentro del Tx que inyectamos.
-        const storeResult = await this.deps.invoicingService.create(
+        const storeResult = await this.invoicingService.create(
           {
             organization_id: args.organizationId,
             store_id: null,
@@ -163,14 +184,14 @@ export class PlatformInvoicingService {
 
         // Re-persistir el snapshot del destinatario con el transmissionId real.
         // La fase 1 (overwrite in-place) del helper hace idempotente el doble insert.
-        await this.deps.persistence.persistAcquirerSnapshot(tx, {
+        await this.persistence.persistAcquirerSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: transmission.id,
           acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
         });
 
-        await this.deps.persistence.persistInvoiceSnapshot(tx, {
+        await this.persistence.persistInvoiceSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: transmission.id,
@@ -227,7 +248,7 @@ export class PlatformInvoicingService {
     dian_status: string;
     cufe: string | null;
   }> {
-    const tenant = await this.deps.tenants.getTenantByKindAndId(this.deps.prisma, {
+    const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
       organizationId: args.organizationId,
       kind: args.dto.supplier.kind,
       id: args.dto.supplier.tenant_id,
@@ -240,15 +261,15 @@ export class PlatformInvoicingService {
     }
     const storeCreateDto = this.mapToStoreSupportDocDto(args.dto, tenant);
     // Misma transaccion, mismo patron de snapshots.
-    const result = await this.deps.prisma.$transaction(
+    const result = await this.prismaClient.$transaction(
       async (tx: Prisma.TransactionClient) => {
-        await this.deps.persistence.persistAcquirerSnapshot(tx, {
+        await this.persistence.persistAcquirerSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: 0,
           acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
         });
-        const storeResult = await this.deps.invoicingService.create(
+        const storeResult = await this.invoicingService.create(
           {
             organization_id: args.organizationId,
             store_id: null,
@@ -281,13 +302,13 @@ export class PlatformInvoicingService {
             'No se encontro la fiscal_transmission del support_document',
           );
         }
-        await this.deps.persistence.persistAcquirerSnapshot(tx, {
+        await this.persistence.persistAcquirerSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: transmission.id,
           acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
         });
-        await this.deps.persistence.persistInvoiceSnapshot(tx, {
+        await this.persistence.persistInvoiceSnapshot(tx, {
           organizationId: args.organizationId,
           accountingEntityId: args.accountingEntityId,
           transmissionId: transmission.id,
@@ -332,7 +353,7 @@ export class PlatformInvoicingService {
     // el id de transmision en `source_id` para source_type='platform_invoice'|'platform_support_document').
     // Si pasamos el invoice_id directo, `InvoiceFlowService.send`
     // buscaria un subscription_invoice — no lo que queremos.
-    const transmission = await this.deps.prisma.fiscal_transmissions.findFirst({
+    const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
@@ -345,7 +366,7 @@ export class PlatformInvoicingService {
         `No se encontro transmision platform_invoice/platform_support_document con id=${args.invoiceId}`,
       );
     }
-    return this.deps.invoiceFlowService.send({
+    return this.invoiceFlowService.send({
       invoice_id: transmission.source_id,
       manual: true,
       source: 'platform',
@@ -360,7 +381,7 @@ export class PlatformInvoicingService {
    */
   async cancelInvoice(args: { invoiceId: number; actorUserId: number; reason?: string }) {
     // mismo resolve que sendInvoice
-    const transmission = await this.deps.prisma.fiscal_transmissions.findFirst({
+    const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
@@ -373,7 +394,7 @@ export class PlatformInvoicingService {
         `No se encontro transmision con id=${args.invoiceId}`,
       );
     }
-    return this.deps.invoiceFlowService.cancel({
+    return this.invoiceFlowService.cancel({
       invoice_id: transmission.source_id,
       reason: args.reason,
     });
@@ -388,7 +409,7 @@ export class PlatformInvoicingService {
     organizationId: number;
     invoiceId: number;
   }) {
-    const transmission = await this.deps.prisma.fiscal_transmissions.findFirst({
+    const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
@@ -401,7 +422,7 @@ export class PlatformInvoicingService {
         `No se encontro transmision con id=${args.invoiceId}`,
       );
     }
-    return this.deps.invoiceFlowService.getEmitReadiness(transmission.source_id);
+    return this.invoiceFlowService.getEmitReadiness(transmission.source_id);
   }
 
   /**
@@ -446,7 +467,7 @@ export class PlatformInvoicingService {
     transmissionId: number;
     actorUserId: number;
   }) {
-    const transmission = await this.deps.prisma.fiscal_transmissions.findFirst({
+    const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.transmissionId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
@@ -462,7 +483,7 @@ export class PlatformInvoicingService {
     // Delegamos al reuso del riel tienda `resendPlatformTransmission`
     // ya operational (PR #636). El envia el invoice desde el snapshot
     // persistido; no necesita re-asignar numero.
-    return this.deps.invoiceFlowService.resendPlatformTransmission(
+    return this.invoiceFlowService.resendPlatformTransmission(
       args.transmissionId,
     );
   }
