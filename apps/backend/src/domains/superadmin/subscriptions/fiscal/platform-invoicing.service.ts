@@ -405,6 +405,39 @@ export class PlatformInvoicingService {
   }
 
   /**
+   * Lista resoluciones aptas para emision. Reusa el helper que esta
+   * en `SubscriptionFiscalService.listResolutionsForEmission` (Phase A.4)
+   * — el caller pasa el filtro document_type, vigencia y active.
+   * Reenviar al facade evita que el controller dependa del legacy.
+   */
+  async listResolutionsForEmission(args: {
+    organizationId: number;
+    accountingEntityId: number;
+    documentType: 'sales_invoice' | 'support_document';
+  }) {
+    const org = args.organizationId;
+    const acc = args.accountingEntityId;
+    if (!org || !acc) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_002,
+        'listResolutionsForEmission requiere organizationId y accountingEntityId resueltos',
+      );
+    }
+    const f = (this.deps as any).subscriptionFiscalService?.listResolutionsForEmission;
+    if (typeof f !== 'function') {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_INTERNAL_001,
+        'No se encontro el helper listResolutionsForEmission en deps',
+      );
+    }
+    return f({
+      organizationId: org,
+      accountingEntityId: acc,
+      documentType: args.documentType,
+    });
+  }
+
+  /**
    * Retry sobre transmision platform. Ademas del caso platform_invoice
    * ya implemented (PR #636), cubre platform_support_document.
    */
