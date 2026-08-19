@@ -20,6 +20,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `agent-teams` |
 | -- | `buildcheck-dev` |
 | -- | `git-workflow` |
+| -- | `how-to-critical-plan` |
 | -- | `how-to-dev` |
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
@@ -379,7 +380,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Updating skill guidance or documenting repeatable AI patterns | `skill-creator` |
 | Updating the status of a Vendix Linear issue | `linear-issues` |
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
+| User explicitly asks for a critical plan (plan crítico, critical plan) | `how-to-critical-plan` |
+| User explicitly asks for a full contract sweep (frontend to backend, and database) as part of a plan | `how-to-critical-plan` |
+| User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande) | `how-to-critical-plan` |
+| User explicitly asks for a plan with checklists that tracks execution progress for handoff | `how-to-critical-plan` |
+| User explicitly asks for parallel multi-perspective auditing of a plan or its implementation | `how-to-critical-plan` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
+| User explicitly says the work cannot fail (esto no puede fallar, cero margen de error) | `how-to-critical-plan` |
+| User names or links the how-to-critical-plan skill | `how-to-critical-plan` |
 | User requests agent teams, subordinate agents, parallel agents, or background agents | `agent-teams` |
 | Using AWS CLI to inspect or administer Vendix cloud resources | `vendix-cloud-operations` |
 | Using SSH to inspect Vendix production infrastructure | `vendix-cloud-operations` |

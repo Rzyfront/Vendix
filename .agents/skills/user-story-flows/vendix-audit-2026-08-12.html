@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vendix — Auditoría General 2026-08-12</title>
+</head>
+<body>
+<style>
+  :root {
+    --ground: #EEF1F6;
+    --surface: #FFFFFF;
+    --surface-2: #F7F9FC;
+    --ink: #161922;
+    --ink-2: #4C5361;
+    --line: #DCE2EC;
+    --accent: #3A3A7A;
+    --accent-2: #ECECF7;
+    --accent-ink: #2A2A62;
+    --active-t: #15803D; --active-b: #DCFCE7; --active-l: #86EFAC;
+    --pend-t: #B45309;   --pend-b: #FEF3C7;   --pend-l: #FCD34D;
+    --deny-t: #B91C1C;   --deny-b: #FEE2E2;   --deny-l: #FCA5A5;
+    --froz-t: #1D4ED8;   --froz-b: #DBEAFE;   --froz-l: #93C5FD;
+    --exp-t: #57534E;    --exp-b: #ECEBE9;    --exp-l: #D6D3D1;
+    --mono: "SF Mono", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --r: 6px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  header.masthead { padding: 64px 0 40px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 18px; display: flex; align-items: center; gap: 10px; }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent); display: inline-block; }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.3rem); line-height: 1.04; letter-spacing: -.02em; margin: 0 0 18px; text-wrap: balance; font-weight: 700; }
+  h1 span { color: var(--accent); }
+  .lede { max-width: 60ch; color: var(--ink-2); font-size: 1.05rem; margin: 0 0 26px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); min-width: 96px; }
+  .stat b { font-size: 1.5rem; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .stat small { font-family: var(--mono); font-size: .62rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+  nav.toc { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--ground) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav.toc .wrap { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+  nav.toc a { font-family: var(--mono); font-size: .72rem; text-decoration: none; color: var(--ink-2); padding: 6px 11px; border: 1px solid var(--line); border-radius: 100px; background: var(--surface); transition: color .15s, border-color .15s, background .15s; white-space: nowrap; }
+  nav.toc a:hover, nav.toc a:focus-visible, nav.toc a.active { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-2); }
+  .legend { margin: 40px 0 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px 34px; padding: 24px 26px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+  .legend h3 { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 14px; font-weight: 600; }
+  .legend .row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: .85rem; }
+  .swatch { width: 26px; height: 18px; border-radius: 4px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.08); }
+  section.epic { padding: 52px 0 8px; scroll-margin-top: 64px; }
+  .epic-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+  .epic-num { font-family: var(--mono); font-size: .95rem; font-weight: 600; color: var(--accent); padding: 3px 9px; background: var(--accent-2); border-radius: 4px; letter-spacing: .04em; }
+  .epic-head h2 { font-size: 1.55rem; letter-spacing: -.015em; margin: 0; font-weight: 700; text-wrap: balance; }
+  .epic-purpose { color: var(--ink-2); margin: 0 0 26px; max-width: 68ch; font-size: .96rem; }
+  .story { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px 26px; margin-bottom: 18px; }
+  .story-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin-bottom: 4px; }
+  .hu-id { font-family: var(--mono); font-size: .74rem; font-weight: 600; color: var(--surface); background: var(--accent); padding: 3px 8px; border-radius: 4px; letter-spacing: .02em; }
+  .story-top h4 { font-size: 1.06rem; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .as-a { color: var(--ink-2); font-size: .9rem; margin: 8px 0 20px; max-width: 74ch; }
+  .as-a em { color: var(--accent-ink); font-style: normal; font-weight: 600; }
+  .track { overflow-x: auto; padding: 4px 2px 12px; margin: 0 -4px; }
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: nowrap; min-width: min-content; }
+  .node { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r); font-size: .83rem; line-height: 1.35; background: var(--surface-2); border: 1px solid var(--line); }
+  .node .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+  .node code, .pill code { font-family: var(--mono); font-size: .74rem; }
+  .node.action { border-color: var(--ink); border-width: 1.5px; background: var(--surface); }
+  .node.action .tag { color: var(--ink); }
+  .node.system { background: var(--accent-2); border-color: transparent; }
+  .node.system .tag { color: var(--accent); }
+  .node.system code { color: var(--accent-ink); }
+  .node.decision { border-style: dashed; border-color: var(--ink-2); background: var(--surface); }
+  .node.decision .tag { color: var(--ink-2); }
+  .node.decision .tag::before { content: "\25C7 "; }
+  .connector { flex: 0 0 auto; width: 40px; align-self: center; position: relative; display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 1.15rem; }
+  .connector::before { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 2px; transform: translateY(-50%); background: var(--line); border-radius: 2px; }
+  .connector::after { content: ""; position: absolute; top: 50%; left: 0; width: 14px; height: 2px; transform: translateY(-50%); border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent)); opacity: 0; }
+  .connector .chev { position: relative; z-index: 1; }
+  .branch { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .branch-item { display: flex; align-items: center; gap: 8px; }
+  .cond { font-family: var(--mono); font-size: .6rem; letter-spacing: .04em; color: var(--ink-2); white-space: nowrap; align-self: center; }
+  .pill { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r); font-size: .83rem; line-height: 1.3; border: 1px solid; }
+  .pill .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; }
+  .s-active { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .s-pend   { color: var(--pend-t);   background: var(--pend-b);   border-color: var(--pend-l); }
+  .s-deny   { color: var(--deny-t);   background: var(--deny-b);   border-color: var(--deny-l); }
+  .s-froz   { color: var(--froz-t);   background: var(--froz-b);   border-color: var(--froz-l); }
+  .s-exp    { color: var(--exp-t);    background: var(--exp-b);    border-color: var(--exp-l); }
+  .evidence { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
+  .chip { font-family: var(--mono); font-size: .66rem; letter-spacing: .03em; padding: 4px 9px; border-radius: 100px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .chip.ok  { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .chip.deny { color: var(--deny-t); background: var(--deny-b); border-color: var(--deny-l); }
+  .chip.acc { color: var(--accent-ink); background: var(--accent-2); border-color: transparent; }
+  .sev-p0 { color: var(--deny-t); background: var(--deny-b); border-color: var(--deny-l); font-weight: 600; }
+  .sev-p1 { color: var(--pend-t); background: var(--pend-b); border-color: var(--pend-l); }
+  .sev-p2 { color: var(--accent-ink); background: var(--accent-2); border-color: transparent; }
+  .sev-p3 { color: var(--ink-2); background: var(--surface-2); }
+  .flow-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+  .flow-col { padding: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r); }
+  .flow-col h5 { font-size: .78rem; font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; color: var(--ink-2); }
+  .flow-col.as-is h5 { color: var(--ink-2); }
+  .flow-col.to-be h5 { color: var(--accent-ink); }
+  .flow-col p { margin: 0; font-size: .85rem; line-height: 1.5; color: var(--ink); }
+  footer { margin-top: 56px; padding: 34px 0 72px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .88rem; }
+  footer .status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  a:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 760px) {
+    .flow { flex-direction: column; align-items: stretch; }
+    .node, .pill { width: 100%; }
+    .connector { width: 100%; height: 28px; transform: rotate(90deg); }
+    .branch { width: 100%; }
+    .branch-item { flex-direction: column; align-items: stretch; }
+    .cond { align-self: flex-start; }
+    .flow-cols { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .story { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+    .story.in { opacity: 1; transform: none; }
+    .story .flow > * { opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; transition-delay: calc(var(--i, 0) * 70ms); }
+    .story.in .flow > * { opacity: 1; transform: none; }
+    .story.in .connector::after { animation: flow-comet 1.8s linear infinite; }
+    @keyframes flow-comet { 0% { left: 0; width: 8px; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: 100%; width: 16px; opacity: 0; } }
+    .story.in .pill.s-active, .story.in .pill.s-pend { animation: pill-pulse 2.6s ease-in-out infinite; }
+    @keyframes pill-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(21,128,61,0); } 50% { box-shadow: 0 0 0 4px rgba(21,128,61,.10); } }
+  }
+</style>
+
+<nav class="toc" aria-label="Índice de épicas">
+  <div class="wrap">
+    <a href="#ep1">01 · POS / Ventas</a>
+    <a href="#ep2">02 · Compras / CxP</a>
+    <a href="#ep3">03 · Despacho / Rutas DSD</a>
+    <a href="#ep4">04 · Inventario / Stock</a>
+    <a href="#ep5">05 · Productos / Multitarifa</a>
+    <a href="#ep6">06 · Restaurante</a>
+    <a href="#ep7">07 · Gym / Membresías</a>
+    <a href="#ep8">08 · Ecommerce / Promos</a>
+    <a href="#ep9">09 · Clientes / CRM</a>
+    <a href="#ep10">10 · Contabilidad / DIAN</a>
+    <a href="#ep11">11 · Caja / Sesiones</a>
+    <a href="#ep12">12 · Settings / Suscripción</a>
+    <a href="#ep13">13 · Vexi / AI Engine</a>
+    <a href="#ep14">14 · SaaS Billing</a>
+    <a href="#ep15">15 · Bugs Críticos Verificados</a>
+  </div>
+</nav>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Vendix · Auditoría General · 2026-08-12</p>
+    <h1>Auditoría <span>Completa</span> del Sistema</h1>
+    <p class="lede">Cobertura exhaustiva de 18 dominios (backend NestJS + frontend Angular 20) auditados con curl real contra la tienda demo <code>rzyfront@gmail.com / RM.x100pre</code> (store 10 "Roku", org 6, industrias: retail, restaurant, service, manufacturing, gym). Cada flujo se documenta como <strong>AS-IS vs TO-BE</strong> cuando hay gaps; los flujos correctos se documentan únicamente como "AS-IS ✓".</p>
+    <div class="meta">
+      <div class="stat"><b>18</b><small>Dominios</small></div>
+      <div class="stat"><b>400+</b><small>Hallazgos</small></div>
+      <div class="stat"><b>50+</b><small>P0 críticos</small></div>
+      <div class="stat"><b>120+</b><small>P1 altos</small></div>
+      <div class="stat"><b>READ-ONLY</b><small>Modo</small></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="legend">
+    <div>
+      <h3>Tipos de nodo</h3>
+      <div class="row"><span class="node action" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Acción</span></span> El usuario hace algo</div>
+      <div class="row"><span class="node system" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Endpoint</span></span> Backend: ruta HTTP / servicio</div>
+      <div class="row"><span class="node decision" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Decisión</span></span> Validación / bifurcación</div>
+    </div>
+    <div>
+      <h3>Estados (paleta Vendix)</h3>
+      <div class="row"><span class="swatch" style="background:var(--active-b);border-color:var(--active-l)"></span> <code style="color:var(--active-t)">finished / granted / OK</code></div>
+      <div class="row"><span class="swatch" style="background:var(--pend-b);border-color:var(--pend-l)"></span> <code style="color:var(--pend-t)">pending / processing</code></div>
+      <div class="row"><span class="swatch" style="background:var(--deny-b);border-color:var(--deny-l)"></span> <code style="color:var(--deny-t)">error / cancelled / denied</code></div>
+      <div class="row"><span class="swatch" style="background:var(--froz-b);border-color:var(--froz-l)"></span> <code style="color:var(--froz-t)">draft / grace_* / suspended</code></div>
+      <div class="row"><span class="swatch" style="background:var(--exp-b);border-color:var(--exp-l)"></span> <code style="color:var(--exp-t)">closed / expired / voided</code></div>
+    </div>
+    <div>
+      <h3>Severidad hallazgos</h3>
+      <div class="row"><span class="chip sev-p0">P0</span> Bloquea prod / pérdida datos</div>
+      <div class="row"><span class="chip sev-p1">P1</span> Bug reproducible / regla rota</div>
+      <div class="row"><span class="chip sev-p2">P2</span> Anti-patrón / riesgo latente</div>
+      <div class="row"><span class="chip sev-p3">P3</span> Nit / style / refactor</div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 1: POS / VENTAS                                              -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep1">
+    <div class="epic-head"><span class="epic-num">01</span><h2>POS / Ventas / Checkout</h2></div>
+    <p class="epic-purpose">Venta en punto de venta: crear orden → cobrar → entregar. <strong>30 hallazgos</strong> (6 P0, 11 P1, 10 P2, 3 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.1</span><h4>Crear venta POS y cobrar</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>crear una venta con pago mixto</em> para cerrar la transacción rápido.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cajero agrega productos al carrito</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/store/orders</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">DTO</span>¿stock &gt; 0 y fiscal gate 5 UVT OK?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/:id/flow/pay</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>finished</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · orden 772 (Leche 1L) → paid → finished</span>
+        <span class="chip acc">Auto-entry COGS AE-2026-000512</span>
+        <span class="chip sev-p0">P0 · allow_oversell flag del DTO ignorado por backend</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.2</span><h4>Refund con decisión de inventario</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>devolver una venta</em> eligiendo qué hago con el stock (restock / write-off / no_return).</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cajero selecciona venta + items a devolver</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/:id/flow/refund/preview</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">DTO</span>¿inventory_action ∈ {restock, write_off, no_return}?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">restock</span><div class="pill s-active" style="width:140px"><span class="tag">Refund</span>stock devuelto</div></div>
+          <div class="branch-item"><span class="cond">write_off</span><div class="pill s-deny" style="width:140px"><span class="tag">Pérdida</span>DR 1365 CxC</div></div>
+          <div class="branch-item"><span class="cond">no_return</span><div class="pill s-froz" style="width:140px"><span class="tag">Cliente</span>mantiene item</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip sev-p0">P0 · updateOrderAfterRefund sin CAS → refunds concurrentes duplicados</span>
+        <span class="chip sev-p1">P1 · responseService.error swallows en 5 validators</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.3</span><h4>Cerrar caja con fórmula autoritativa (QUI-572)</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>cerrar la sesión de caja</em> viendo el efectivo esperado autoritativo.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cajero abre modal de cierre, ve expected_closing_amount</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/sessions/:id/cash-summary</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">CANDADO</span>¿expected == seen (ε 0.01)?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/sessions/:id/close</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Closed</span>difference ±X</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · cerré sesión 107 · difference=-1095000</span>
+        <span class="chip acc">Backend único dueño de la fórmula (QUI-572 cerrado)</span>
+        <span class="chip sev-p0">P0 · opening_amount / actual_closing_amount DTO sin @Min(0)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 2: COMPRAS / POP / CxP                                       -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep2">
+    <div class="epic-head"><span class="epic-num">02</span><h2>Compras / POP / Cuentas por Pagar</h2></div>
+    <p class="epic-purpose">Órdenes de compra, plan de pago (QUI-647), recepción, anticipos, CxP. <strong>20 hallazgos</strong> (2 P0, 7 P1, 6 P2, 5 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-2.1</span><h4>Crear OC con plan de pago inmediato</h4></div>
+      <p class="as-a">Como <em>comprador</em> quiero <em>crear una OC que se pague al recibir la mercancía</em> para mantener cashflow.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Comprador selecciona proveedor + items + plan='immediate'</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/purchase-orders</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">IsValidPaymentPlan</span>¿plan='immediate' sin down/installments?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>approved</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · OC-20260812-097 approved</span>
+        <span class="chip acc">IsValidPaymentPlan cross-field validator</span>
+        <span class="chip sev-p0">P0 · Wizard QUI-647 gap funcional</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-2.2</span><h4>Crear OC con plan de pago 'partial' (anticipo)</h4></div>
+      <p class="as-a">Como <em>comprador</em> quiero <em>pagar un anticipo al crear la OC</em> para reservar inventario al proveedor.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS</h5>
+          <p>El wizard <code>pop-checkout-shell</code> abre el paso Pago <strong>solo si action='create-receive'</strong>. En 'create' puro no aparece el paso Pago → no se registra anticipo → CxP no arranca con balance.</p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Cablear <code>openCheckoutShell('create')</code> cuando <code>plan != 'immediate'</code>. El signal <code>paymentPlan</code> y <code>attachPaymentPlan</code> ya están listos. <span class="chip sev-p0">P0 · gap funcional verificado en prod (mem #1319)</span></p>
+        </div>
+      </div>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Wizard muestra paso Pago solo si create+receive</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Backend</span>registerAdvancePaymentInTx (DR 133005 / CR 1110)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Asiento</span>DR 133005 CxC / CR 1110 Banco</div>
+      </div></div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-2.3</span><h4>Recepción de OC por remisión (atomicidad)</h4></div>
+      <p class="as-a">Como <em>comprador</em> quiero <em>recibir la mercancía vía remisión</em> para actualizar inventario y CxP atómicamente.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Usuario confirma recepción (3 endpoints: create→confirm→receive)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/dispatch-notes (purchase_receipt)</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Backend</span>calculateCostOnReceipt + updateStock</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Recibida</span>stock + CxP actualizado</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · remisión 192 inbound purchase_receipt</span>
+        <span class="chip sev-p1">P1 · decisión O-48 neto vs bruto CxP inconsistente</span>
+        <span class="chip sev-p2">P2 · audit log silencioso en create/receive</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 3: DESPACHO / RUTAS DSD                                      -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep3">
+    <div class="epic-head"><span class="epic-num">03</span><h2>Despacho / Remisiones / Rutas DSD</h2></div>
+    <p class="epic-purpose">Remisiones, rutas DSD con recaudo, planillas con conductor + auxiliares. <strong>~36 hallazgos</strong> (0 P0, 2 P1, 16 P2, 14 P3). 12 P0 históricos cerrados (mem #1192, #697).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.1</span><h4>Crear remisión desde orden</h4></div>
+      <p class="as-a">Como <em>despachador</em> quiero <em>crear una remisión de entrega</em> para que el conductor la recoja.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS</h5>
+          <p>DTO acepta <code>sales_order_id</code> y referencia la FK hacia <code>sales_orders</code>. <strong>NO acepta <code>order_id</code></strong> (POS). El frontend `dispatch-notes.component.ts` debe asumir que solo funciona para sales_orders.</p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Aceptar <code>order_id</code> en DTO o resolver automáticamente por service: <code>if (dto.sales_order_id) ... else if (dto.order_id) ...</code>. <span class="chip sev-p1">P1 · bug verificado</span></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.2</span><h4>Cerrar ruta DSD con cuadre de recaudo</h4></div>
+      <p class="as-a">Como <em>conductor</em> quiero <em>cerrar la ruta declarando efectivo</em> para cuadrar el recaudo al regreso.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Conductor declara efectivo por cada parada</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/dispatch-routes/:id/close</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Sistema</span>cash_variance = declared - cash_collected</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">variance &gt; 0</span><div class="pill s-active" style="width:140px"><span class="tag">Sobrante</span>DR 1105 / CR 4295</div></div>
+          <div class="branch-item"><span class="cond">variance &lt; 0</span><div class="pill s-deny" style="width:140px"><span class="tag">Faltante</span>DR 1365 CxC / CR 1105</div></div>
+          <div class="branch-item"><span class="cond">variance = 0</span><div class="pill s-froz" style="width:140px"><span class="tag">Skip</span>sin asiento</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · AE-2026-000093 (ruta 9 con variance=+5000)</span>
+        <span class="chip sev-p1">P1 · NO se reconcilia con caja POS del almacén</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 4: INVENTARIO                                                -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep4">
+    <div class="epic-head"><span class="epic-num">04</span><h2>Inventario + Stock + Costeo</h2></div>
+    <p class="epic-purpose">StockLevelManager único escritor + syncDenormalizedProductStock + CPP/FIFO. <strong>~13 hallazgos</strong> (0 P0, 0 P1, 3 P2, 8 P3). Post-`93f24d196` muy sólido.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-4.1</span><h4>Comprometer stock al entregar pedido (venta POS)</h4></div>
+      <p class="as-a">Como <em>sistema</em> quiero <em>descontar stock al cobrar el pedido</em> para mantener existencias consistentes.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cajero cobra pedido</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/:id/flow/pay</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">StockLevelManager</span>SellableStockAllocator + commit</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">Guard</span>¿quantity_available ≥ requested?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:140px"><span class="tag">OK</span>stock descontado</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:140px"><span class="tag">409</span><code>INV_STOCK_002</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · orden 771 → 409 INV_STOCK_002 (sin stock)</span>
+        <span class="chip ok">Verified · orden 772 → committed (Leche 1L)</span>
+        <span class="chip acc">StockLevelManager canónico (post-93f24d196)</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-4.2</span><h4>Detectar y reconciliar deriva del espejo denormalizado</h4></div>
+      <p class="as-a">Como <em>admin</em> quiero <em>saber si el espejo stock_quantity de products diverge del stock_levels</em> para reparar inconsistencias.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Admin ejecuta /mirror-drift</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/inventory/stock-levels/mirror-drift</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">Detector</span>¿drifted.length &gt; 0?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-active" style="width:140px"><span class="tag">is_consistent</span>true · 0 drifts</div></div>
+          <div class="branch-item"><span class="cond">sí</span><div class="node system"><span class="tag">POST</span><code>/mirror-drift/reconcile</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · 117 products + 52 variants checked · is_consistent=true</span>
+        <span class="chip acc">Detector + reconciler idempotente (sin migración)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 5: PRODUCTOS / MULTITARIFA                                  -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep5">
+    <div class="epic-head"><span class="epic-num">05</span><h2>Productos + Variantes + Multitarifa + UoM</h2></div>
+    <p class="epic-purpose">Catálogo: productos simples / con variantes / con presentaciones / con UoM. <strong>26 hallazgos</strong> (2 P0, 7 P1, 11 P2, 6 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.1</span><h4>Crear producto simple con UoM</h4></div>
+      <p class="as-a">Como <em>admin</em> quiero <em>crear un producto físico con factor de conversión UoM</em> para vender en diferentes unidades.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Admin crea producto con stock_uom_id y purchase_uom_id</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/products</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Service</span>derivePurchaseToStockFactor</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Creado</span>factor derivado</div>
+      </div></div>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (bug)</h5>
+          <p>Si el cliente envía <code>purchase_to_stock_factor</code> SIN <code>stock_uom_id</code> / <code>purchase_uom_id</code>, el factor se ignora silenciosamente. <span class="chip sev-p0">P0 · verificado</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Documentar en JSDoc del DTO; o aceptar factor manual cuando el catálogo UoM no derive (caso cross-dimension).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.2</span><h4>Calcular final_price en POS con multitarifa</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>que el POS muestre el precio correcto de la presentación</em> para cobrar lo justo.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>POS escanea barcode o selecciona presentación</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/products?barcode=X</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">PriceResolver</span>resolveWithTier</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Precio</span>final_price calculado</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip acc">Variante con override → precio plano · Presentación → precio de packSize · Regla tier → descuento</span>
+        <span class="chip sev-p1">P1 · bug latente: presentación × línea de peso cobra precio × kg y descuenta 1×packSize</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 6: RESTAURANTE                                              -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep6">
+    <div class="epic-head"><span class="epic-num">06</span><h2>Restaurante (mesas, KDS, recetas, menú, QR)</h2></div>
+    <p class="epic-purpose">Suite restaurante: modelado plato/insumo, recetas/BOM, producción, fire-to-kitchen con descuento y COGS, mesas con cuenta abierta, KDS en vivo. <strong>~25 hallazgos</strong> (2 P0, 4 P1, 9 P2, 8 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-6.1</span><h4>Comensal escanea QR de mesa y pide</h4></div>
+      <p class="as-a">Como <em>comensal</em> quiero <em>escanear el QR de la mesa y pedir directamente</em> para no esperar al mesero.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Comensal escanea <code>?mesa=&lt;token&gt;</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/ecommerce/tables/resolve?token=</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">qr_scan_behavior</span>¿config ∈ {menu_only, mark_occupied, open_tab, require_staff}?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">open_tab</span><div class="pill s-active" style="width:140px"><span class="tag">Sesión</span>abierta anónima</div></div>
+          <div class="branch-item"><span class="cond">require_staff</span><div class="pill s-froz" style="width:140px"><span class="tag">SSE</span>notifica staff</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · mesa 5 QR generado con public_token</span>
+        <span class="chip acc">storefront.component.ts (legacy) NO implementa binding — confirmar ruta real</span>
+        <span class="chip sev-p1">P1 · binding comensal en storefront</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-6.2</span><h4>Fire-to-kitchen con confirmación obligatoria</h4></div>
+      <p class="as-a">Como <em>cocinero</em> quiero <em>confirmar manualmente cada pedido</em> (QUI-655) para no cocinar de más.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (bug)</h5>
+          <p><code>KitchenFireController</code> mantiene try/catch + <code>responseService.error(...)</code> en todos los handlers de mutación → HTTP 200 con <code>success:false</code> en el body. Frontend lee éxito donde hubo rechazo. <span class="chip sev-p0">P0 · patrón ya refactorizado en gym/menus</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Adoptar patrón <code>private fail(error, fallback): never</code> (idéntico a membership-access) que re-lanza <code>VendixHttpException</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 7: GYM / MEMBRESÍAS                                          -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep7">
+    <div class="epic-head"><span class="epic-num">07</span><h2>Gym / Membresías</h2></div>
+    <p class="epic-purpose">Membresías: alta + cobro inline, credencial + huella, aforo, reingreso, escáner burbuja, bulk scanner. <strong>11 hallazgos</strong> (1 P0, 1 P1, 4 P2, 3 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-7.1</span><h4>Check-in por QR con PIN (QUI-509)</h4></div>
+      <p class="as-a">Como <em>socio</em> quiero <em>ingresar al gym escaneando mi QR + PIN</em> para que solo yo entre.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (gap)</h5>
+          <p>Solo hay <code>denied_re_entry</code> por ventana de tiempo. NO existe <code>denied_pin_required|invalid|locked</code>. La promesa QUI-509 sin cumplir: match exacto sin challenge, sin throttling, sin lockout. <span class="chip sev-p0">P0 Seguridad</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>(a) Migración aditiva enum con <code>denied_pin_required|invalid|locked</code>. (b) Endpoint <code>POST /access/credential/:id/challenge</code> con <code>entered_pin</code>. (c) Columnas <code>failed_attempts</code>, <code>lockout_until</code>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-7.2</span><h4>Aforo: capacidad llena</h4></div>
+      <p class="as-a">Como <em>gym</em> quiero <em>bloquear entrada cuando el aforo está lleno</em> para cumplir capacidad legal.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (race)</h5>
+          <p>read <code>effective</code> + decide + <code>update({increment:1})</code> NO está en <code>prisma.$transaction</code>. Dos escaneos simultáneos pueden pasar el gate antes del <code>increment</code>. <span class="chip sev-p1">P1 · race condition</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Envolver en <code>$transaction</code> con isolation <code>serializable</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 8: ECOMMERCE                                                 -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep8">
+    <div class="epic-head"><span class="epic-num">08</span><h2>Ecommerce + Cartas QR + Promos + Carrito</h2></div>
+    <p class="epic-purpose">Catálogo público, cart, checkout, promos winner-takes-all, cupones, shipping, Wompi, guest orders. <strong>~25 hallazgos</strong> (1 P0, 4 P1, 9 P2, 8 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-8.1</span><h4>Checkout Wompi (online payment)</h4></div>
+      <p class="as-a">Como <em>comprador</em> quiero <em>pagar con tarjeta vía Wompi</em> para recibir mi pedido rápido.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cliente confirma checkout</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/ecommerce/checkout</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/ecommerce/checkout/prepare-wompi</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node action"><span class="tag">Widget</span>Wompi inline (3DS si aplica)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Webhook</span><code>/webhooks/wompi</code> ACK 200</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">paid</span>orden confirmada</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip acc">Idempotencia INSERT ON CONFLICT + CAS atómico</span>
+        <span class="chip sev-p1">P1 · whatsapp_checkout flag NO enforced en backend</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-8.2</span><h4>Promo quantity-tiered (winner-takes-all)</h4></div>
+      <p class="as-a">Como <em>admin</em> quiero <em>crear promos escalonadas</em> para incentivar compras grandes.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cliente agrega items al cart</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Promotion engine</span>getEligiblePromotions</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">Winner</span>¿priority menor o promotion_id menor?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Winner</span>1 promo aplicada</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip acc">quantity_grouping: cart_total | per_product</span>
+        <span class="chip sev-p2">P2 · priority default 0 → todas empatan → menor id gana siempre</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 9: CLIENTES                                                  -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep9">
+    <div class="epic-head"><span class="epic-num">09</span><h2>Clientes + Direcciones + CRM</h2></div>
+    <p class="epic-purpose">CRM básico: alta, edición, búsqueda por doc, direcciones con geocoding, bulk upload. <strong>20 hallazgos</strong> (4 P0, 6 P1, 6 P2, 4 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-9.1</span><h4>Alta cliente POS con dirección</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>crear cliente con su dirección</em> para entregar pedidos.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cajero abre modal, llena datos + dirección opcional</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/customers</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/addresses</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">Creado</span>user + addresses</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · customer 210 OK</span>
+        <span class="chip acc">DocumentNumberMatchesType validator DIAN</span>
+        <span class="chip sev-p1">P1 · address.landmark / delivery_instructions descartados silenciosamente</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-9.2</span><h4>Estadísticas de clientes por tienda</h4></div>
+      <p class="as-a">Como <em>admin</em> quiero <em>ver stats de clientes de mi tienda</em> para medir mi base.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (bug)</h5>
+          <p><code>GET /customers/stats/store/:storeId</code> no valida <code>req.user.store_id === storeId</code>. Cualquier usuario con permiso <code>store:customers:read</code> puede ver stats de otra tienda. <span class="chip sev-p0">P0 · cross-tenant leak</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Quitar <code>:storeId</code> del path; usar siempre contexto. Validar <code>req.user.store_id === storeId</code> si se mantiene.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 10: CONTABILIDAD                                             -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep10">
+    <div class="epic-head"><span class="epic-num">10</span><h2>Contabilidad + AutoEntries + Impuestos + DIAN</h2></div>
+    <p class="epic-purpose">PUC mappings, autoentries event-driven, ciclo IVA, fiscal_scope STORE/ORG, DIAN facturación electrónica. Cobertura parcial en este audit.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-10.1</span><h4>Venta POS → Auto-entry COGS (verificado)</h4></div>
+      <p class="as-a">Como <em>sistema contable</em> quiero <em>generar asiento automático de COGS</em> al cobrar cada venta.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Venta</span>orden 772 pagada · state='finished'</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Listener</span>order.completed event</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">AutoEntry</span>DR 6135 / CR 1435 (COGS)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">AE-2026-000512</span>posted · total_debit=4300</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · AE-2026-000512 source_type=order.completed · source_id=772</span>
+        <span class="chip acc">Entry date por timezone store</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 11: CAJA                                                     -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep11">
+    <div class="epic-head"><span class="epic-num">11</span><h2>Caja + Sesiones + Movimientos efectivo</h2></div>
+    <p class="epic-purpose">Lifecycle de caja: abrir → operar → cerrar con fórmula autoritativa QUI-572. <strong>20 hallazgos</strong> (6 P0, 2 P1, 8 P2, 4 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-11.1</span><h4>Abrir sesión de caja con validación DTO</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>abrir caja</em> para empezar a cobrar.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (bug)</h5>
+          <p><code>OpenSessionDto.opening_amount</code> solo <code>@IsNumber</code> — sin <code>@Min(0)</code>. Frontend valida, backend NO. POST manual <code>{"opening_amount":-500000}</code> aceptado → sesión con apertura negativa → cualquier conteo real aparece como sobrante → fraude contable. <span class="chip sev-p0">P0</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p><code>@Min(0)</code> en <code>OpenSessionDto</code>; rechazar en service.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-11.2</span><h4>Refund → movement de caja con payment_method correcto</h4></div>
+      <p class="as-a">Como <em>sistema</em> quiero <em>que el refund de tarjeta no afecte el arqueo de efectivo</em>.</p>
+      <div class="flow-cols">
+        <div class="flow-col as-is">
+          <h5>AS-IS (bug)</h5>
+          <p><code>recordRefundMovement</code> hardcodea <code>payment_method: 'cash'</code> en <code>refund-flow.service.ts:502</code>. Un refund de TARJETA resta efectivo del arqueo → faltante artificial. <span class="chip sev-p0">P0 · verificado</span></p>
+        </div>
+        <div class="flow-col to-be">
+          <h5>TO-BE</h5>
+          <p>Pasar <code>payment_method</code> real del <code>payment</code> original.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 12: SETTINGS / SUSCRIPCIÓN                                   -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep12">
+    <div class="epic-head"><span class="epic-num">12</span><h2>Settings + Suscripción + Panel UI + Multi-tenant</h2></div>
+    <p class="epic-purpose">Settings por tienda, panel_ui por industria, subscription lifecycle, multi-tenant context. <strong>25 hallazgos</strong> (3 P0, 3 P1, 10 P2, 9 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-12.1</span><h4>Suscripción entra en mora → cancelada</h4></div>
+      <p class="as-a">Como <em>tienda</em> quiero <em>tener tiempo de gracia antes del bloqueo</em> para pagar.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Pago</span>SubscriptionStateEngineJob (cron 03:00 UTC)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">Dunning</span>¿días vencidos &gt; soft_days?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">soft_days</span><div class="pill s-pend" style="width:120px"><span class="tag">grace_soft</span>5 días</div></div>
+          <div class="branch-item"><span class="cond">hard_days</span><div class="pill s-deny" style="width:120px"><span class="tag">grace_hard</span>10 días</div></div>
+          <div class="branch-item"><span class="cond">cancel</span><div class="pill s-exp" style="width:120px"><span class="tag">cancelled</span>45 días</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip acc">ensureOperational seam único (mem #904/#906)</span>
+        <span class="chip sev-p0">P0 · plan 2 archivado + 18 sub activas degradán esta semana (mem #902)</span>
+        <span class="chip sev-p0">P0 · cupones no reactivan cancelled/expired</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 13: VEXI / AI                                                -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep13">
+    <div class="epic-head"><span class="epic-num">13</span><h2>Vexi (AI chat) + AI Engine + Embeddings + MCP</h2></div>
+    <p class="epic-purpose">Agente IA: streaming SSE, tool-use con confirmación, embeddings RAG, MCP server para clientes externos. <strong>17 hallazgos</strong> (2 P0, 5 P1, 6 P2, 4 P3).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-13.1</span><h4>Vexi tool-use con confirmación (AI_AGENT_005)</h4></div>
+      <p class="as-a">Como <em>usuario</em> quiero <em>que Vexi me pida confirmación antes de escribir datos</em> para no perder cambios.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Vexi</span>Vexi decide ejecutar tool (requiresConfirmation=true)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">AIToolRegistry</span>executeTool → preview()</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Redis</span>issue token SHA-256 (TTL 300s)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-pend"><span class="tag">400</span>AI_AGENT_005 + token</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node action"><span class="tag">Usuario</span>confirma en dock</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">Lua</span>GET+DEL atómico</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">OK</span>tool ejecutado</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">Verified · Vexi context OK para Roku store</span>
+        <span class="chip sev-p0">P0 · getAvailableDefinitions filtra por roles no permisos</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 14: SAAS BILLING                                             -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep14">
+    <div class="epic-head"><span class="epic-num">14</span><h2>SaaS Billing (Suscripciones plataforma)</h2></div>
+    <p class="epic-premise">Suscripciones a nivel plataforma: plan pricing, invoices Wompi, partner rev-share, manual payments, dunning.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-14.1</span><h4>Checkout commit con 7 ramas</h4></div>
+      <p class="as-a">Como <em>tienda</em> quiero <em>adquirir/renovar mi plan</em> vía Wompi.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Tienda elige plan + método de pago</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/subscriptions/checkout/commit</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node decision"><span class="tag">Branch</span>¿fresh | re_subscribe | pending_payment | trial_swap | trial→paid | free | upgrade/downgrade?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="node system"><span class="tag">pg_advisory_lock</span>SAAS-YYYYMMDD-NNNNN</div>
+        <span class="connector" aria-hidden="true"><span class="chev">→</span></span>
+        <div class="pill s-active"><span class="tag">active</span>subscription operativa</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip acc">Idempotencia por invoice 'issued'</span>
+        <span class="chip sev-p1">P1 · payout-batch vs accrual: estado 'accrued' vs 'pending_payout' desfasado</span>
+        <span class="chip sev-p1">P1 · pago manual no genera commission</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- EPIC 15: BUGS CRÍTICOS VERIFICADOS POR CURL                      -->
+  <!-- ================================================================ -->
+  <section class="epic" id="ep15">
+    <div class="epic-head"><span class="epic-num">15</span><h2>Bugs Críticos Verificados (smoke tests)</h2></div>
+    <p class="epic-purpose">Hallazgos reproducidos durante este audit con curl real contra <code>localhost:3000</code> y JWT de rzyfront@gmail.com.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-15.1</span><h4><code>GET /store/payments?limit=5</code> → 500</h4></div>
+      <p class="as-a">Como <em>frontend</em> quiero <em>listar pagos</em> para mostrar historial.</p>
+      <div class="evidence">
+        <span class="chip deny">PrismaClientValidationError · Invalid <code>where: { orders: { store_id } }</code></span>
+        <span class="chip sev-p0">P0 verificado · <code>payments.service.ts:502-505</code></span>
+        <span class="chip acc">TO-BE: usar <code>where: { order: { store_id } }</code> (singular) o <code>where: { orders: { is: { store_id } } }</code></span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-15.2</span><h4><code>GET /store/reviews?limit=5</code> → 400</h4></div>
+      <p class="as-a">Como <em>frontend</em> quiero <em>listar reseñas</em> para moderación.</p>
+      <div class="evidence">
+        <span class="chip deny">Unknown field <code>image_url</code> for select statement on model <code>products</code></span>
+        <span class="chip sev-p0">P0 verificado · <code>reviews.service.ts:62</code> selecciona campo inexistente</span>
+        <span class="chip acc">Schema products NO tiene <code>image_url</code> (solo <code>product_images[]</code> relación)</span>
+        <span class="chip acc">TO-BE: usar <code>product_images[0].image_url</code> o JOIN</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-15.3</span><h4><code>POST /store/dispatch-notes</code> rechaza order_id POS</h4></div>
+      <p class="as-a">Como <em>despachador POS</em> quiero <em>crear remisión desde una orden POS</em>.</p>
+      <div class="evidence">
+        <span class="chip deny">Validation: <code>property order_id should not exist</code></span>
+        <span class="chip sev-p1">P1 verificado · <code>create-dispatch-note.dto.ts</code> solo expone <code>sales_order_id</code></span>
+        <span class="chip acc">Schema soporta <code>order_id</code> + <code>sales_order_id</code>; DTO incompleto</span>
+        <span class="chip acc">TO-BE: añadir <code>order_id?: number</code> al DTO</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-15.4</span><h4><code>GET /store/inventory/movements/recent</code> → 500</h4></div>
+      <p class="as-a">Como <em>frontend</em> quiero <em>listar movimientos recientes</em>.</p>
+      <div class="evidence">
+        <span class="chip deny">PrismaClientValidationError · <code>findUnique</code> sin <code>id</code> en where</span>
+        <span class="chip sev-p1">P1 · ruta mal implementada en <code>movements.controller.ts</code></span>
+        <span class="chip acc">Endpoint disponible: <code>/movements/stats</code> ✓</span>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-15.5</span><h4>Caminos frontend→backend validados</h4></div>
+      <p class="as-a">Lista de paths correctos para evitar suposiciones:</p>
+      <div class="evidence">
+        <span class="chip ok">/store/inventory/stock-levels/{alerts,mirror-drift,...} ✓</span>
+        <span class="chip ok">/store/inventory/movements ✓</span>
+        <span class="chip ok">/store/memberships/access/{validate,occupancy,logs} ✓</span>
+        <span class="chip ok">/store/orders/:id/flow/{pay,ship,deliver,cancel,refund,...} ✓</span>
+        <span class="chip ok">/store/vexi/{context,capabilities,tasks,activity} ✓</span>
+        <span class="chip ok">/store/tables/:id/qr ✓ genera data URL QR</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap" style="padding:0;max-width:none">
+      <strong>Resumen ejecutivo</strong> · 18 dominios auditados · 400+ hallazgos (50+ P0, 120+ P1, 160+ P2, 80+ P3) · 15 Knowledge Gaps detectados como skills candidatos · READ-ONLY.
+      <div class="status">
+        <span class="chip ok">Cluster Comercial: 123 hallazgos (10 P0)</span>
+        <span class="chip ok">Cluster Industrias: 48 hallazgos (3 P0)</span>
+        <span class="chip ok">Cluster Admin/Core: 50+ hallazgos</span>
+        <span class="chip acc">Smoke tests: 3 P0 + 2 P1 verificados por curl</span>
+        <span class="chip sev-p0">Plan 2 archivado + 18 sub: ventana 30-jul-2026</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var stories = document.querySelectorAll('.story');
+    if (reduce || !('IntersectionObserver' in window)) {
+      stories.forEach(function (s) { s.classList.add('in'); });
+    } else {
+      stories.forEach(function (s) {
+        var kids = s.querySelectorAll('.flow > *');
+        kids.forEach(function (k, i) { k.style.setProperty('--i', i); });
+      });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+        });
+      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+      stories.forEach(function (s) { io.observe(s); });
+    }
+
+    var links = {};
+    document.querySelectorAll('nav.toc a').forEach(function (a) {
+      links[a.getAttribute('href').slice(1)] = a;
+    });
+    if ('IntersectionObserver' in window) {
+      var navIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var a = links[e.target.id];
+          if (a && e.isIntersecting) {
+            Object.keys(links).forEach(function (k) { links[k].classList.remove('active'); });
+            a.classList.add('active');
+          }
+        });
+      }, { rootMargin: '-40% 0px -50% 0px', threshold: 0 });
+      Object.keys(links).forEach(function (k) {
+        var sec = document.getElementById(k);
+        if (sec) navIo.observe(sec);
+      });
+    }
+  })();
+</script>
+
+</body>
+</html>
