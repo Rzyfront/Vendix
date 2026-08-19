@@ -120,6 +120,71 @@ export function resolutionDocTypeLabel(type: string): string {
 }
 
 /**
+ * Traduce el estado de la factura SaaS (enum `subscription_invoice_state_enum`)
+ * al español que ve el operador. El backend manda el enum en inglés; el listado
+ * ya usaba `transmissionStatusLabel` para `transmission_status`, pero el
+ * detalle renderizaba el enum de la factura en crudo.
+ */
+export function invoiceStateLabel(state?: string | null): string {
+  switch (state) {
+    case 'draft':
+      return 'Borrador';
+    case 'issued':
+      return 'Emitida';
+    case 'paid':
+      return 'Pagada';
+    case 'overdue':
+      return 'Vencida';
+    case 'void':
+      return 'Anulada';
+    case 'refunded':
+      return 'Reembolsada';
+    case 'refunded_chargeback':
+      return 'Reembolsada (contracargo)';
+    default:
+      return state ?? '—';
+  }
+}
+
+/**
+ * Traduce el ciclo de facturación del plan (`monthly`, `quarterly`, `annual`,
+ * `biannual`) al español. El backend lo expone en inglés.
+ */
+export function billingCycleLabel(cycle?: string | null): string {
+  switch (cycle) {
+    case 'monthly':
+      return 'Mensual';
+    case 'quarterly':
+      return 'Trimestral';
+    case 'biannual':
+      return 'Semestral';
+    case 'annual':
+      return 'Anual';
+    default:
+      return cycle ?? '—';
+  }
+}
+
+/**
+ * Traduce el `evidence_type` de `fiscal_evidences` a una descripción humana.
+ * Los valores del enum vienen del backend sin traducir.
+ */
+export function evidenceTypeLabel(type?: string | null): string {
+  switch (type) {
+    case 'xml_signed':
+      return 'XML firmado';
+    case 'pdf':
+      return 'PDF';
+    case 'qr':
+      return 'Código QR';
+    case 'dian_response':
+      return 'Respuesta DIAN';
+    default:
+      return type ?? '—';
+  }
+}
+
+/**
  * Traduce el `reason` con que el backend rechaza una emisión. Sin esto el
  * usuario ve la constante cruda y no sabe qué interruptor tocar.
  */
@@ -130,6 +195,10 @@ export function skippedReasonLabel(reason: string): string {
     subscription_fiscal_auto_issue_disabled:
       'La emisión automática está desactivada',
     subscription_invoice_not_paid: 'La factura SaaS aún no está pagada',
+    subscription_customer_fiscal_data_incomplete:
+      'Faltan datos fiscales del destinatario obligatorio por la DIAN',
+    prevalidation_failed:
+      'La prevalidación de la DIAN reportó bloqueadores (revisar el detalle)',
     vendor_support_fiscal_disabled:
       'El documento soporte electrónico está desactivado',
     vendor_support_fiscal_auto_transmit_disabled:

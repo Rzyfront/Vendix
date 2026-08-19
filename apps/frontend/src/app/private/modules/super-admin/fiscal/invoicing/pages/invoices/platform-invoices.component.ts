@@ -2,6 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import {
   ButtonComponent,
@@ -43,6 +44,7 @@ import {
     ReactiveFormsModule,
     DatePipe,
     CurrencyPipe,
+    RouterLink,
     ButtonComponent,
     EmptyStateComponent,
     IconComponent,

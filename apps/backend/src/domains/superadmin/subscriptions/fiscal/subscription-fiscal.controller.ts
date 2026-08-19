@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Patch,
@@ -31,6 +32,7 @@ import { UserRole } from '../../../auth/enums/user-role.enum';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import {
+  CreatePlatformInvoiceDto,
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
   RetrySubscriptionFiscalDto,
@@ -371,6 +373,41 @@ export class SubscriptionFiscalController {
   ): Promise<any> {
     const result = await this.fiscalService.retryTransmission(id);
     return this.responseService.success(result, 'Fiscal transmission retry requested');
+  }
+
+  @Post('sweep')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Sweep paid SaaS invoices without an accepted fiscal transmission',
+  })
+  async sweepPendingInvoices(): Promise<any> {
+    const result = await this.fiscalService.sweepPendingInvoices();
+    return this.responseService.success(result, 'Fiscal sweep completed');
+  }
+
+  @Get('invoices/:id')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'Get SaaS invoice detail with transmissions and evidences' })
+  async getSubscriptionInvoiceDetail(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const data = await this.fiscalService.getSubscriptionInvoiceDetail(id);
+    if (!data) {
+      // Un id inexistente no es un error de validación del cliente: la URL
+      // señala un documento que no está. 404, no 400.
+      throw new NotFoundException('Subscription invoice not found');
+    }
+    return this.responseService.success(data, 'Subscription invoice detail retrieved');
+  }
+
+  @Post('invoices')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Create a platform invoice (services not tied to subscription)',
+  })
+  async createPlatformInvoice(@Body() dto: CreatePlatformInvoiceDto): Promise<any> {
+    const result = await this.fiscalService.createPlatformInvoice(dto);
+    return this.responseService.created(result, 'Platform invoice created');
   }
 
   @Get('resolutions')

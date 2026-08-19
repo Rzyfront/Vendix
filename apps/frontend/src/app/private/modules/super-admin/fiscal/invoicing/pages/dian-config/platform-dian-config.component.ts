@@ -140,6 +140,12 @@ export class PlatformDianConfigComponent {
   readonly testing = signal(false);
   /** Un solo candado para las 4 acciones del set de pruebas: son excluyentes. */
   readonly testSetBusy = signal(false);
+  /**
+   * Snapshot del `environment` con que se cargó el form. `buildConfigDto` solo
+   * adjunta `environment` al payload cuando el usuario lo cambió explícito
+   * (cambio de ambiente = promoción; edición normal no debe enviarlo).
+   */
+  private initialEnvironment: SubscriptionFiscalEnvironment = 'test';
   readonly testSetResult = signal<unknown>(null);
   readonly uploadingCertificate = signal(false);
   readonly selectedCertificate = signal<File | null>(null);
@@ -905,6 +911,7 @@ export class PlatformDianConfigComponent {
       },
       { emitEvent: false },
     );
+    this.initialEnvironment = settings.environment;
     this.refreshFormSignals();
   }
 
@@ -922,19 +929,27 @@ export class PlatformDianConfigComponent {
       name: value.name?.trim() ?? '',
       nit: value.nit?.trim() ?? '',
       software_id: value.software_id?.trim() ?? '',
-      environment: value.environment,
       is_enabled: value.is_enabled,
       auto_issue: value.auto_issue,
     };
+
+    // `environment` solo viaja cuando el usuario lo cambió explícitamente. Si
+    // lo mandamos siempre el backend tiene que aceptar la edición en
+    // producción y la transición a producción es indistinguible de un edit;
+    // omitirlo es lo que deja al usuario editar `name`, `auto_issue`, etc. sin
+    // pasar por la promoción.
+    if (value.environment !== this.initialEnvironment) {
+      dto.environment = value.environment;
+      if (value.environment === 'production') {
+        dto.confirm_production = value.confirm_production;
+      }
+    }
 
     const resolutionId = parseOptionalId(value.invoice_resolution_id);
     if (resolutionId) dto.invoice_resolution_id = resolutionId;
     if (value.nit_dv?.trim()) dto.nit_dv = value.nit_dv.trim();
     if (value.software_pin?.trim()) dto.software_pin = value.software_pin.trim();
     if (value.test_set_id?.trim()) dto.test_set_id = value.test_set_id.trim();
-    if (value.environment === 'production') {
-      dto.confirm_production = value.confirm_production;
-    }
     return dto;
   }
 }

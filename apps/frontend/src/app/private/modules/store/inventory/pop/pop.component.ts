@@ -188,16 +188,6 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       ></app-pop-prebulk-modal>
     }
 
-    <app-pop-supplier-quick-create
-      [(isOpen)]="supplierModalOpen"
-      (supplierCreated)="onSupplierCreated($event)"
-    ></app-pop-supplier-quick-create>
-
-    <app-pop-warehouse-quick-create
-      [(isOpen)]="warehouseModalOpen"
-      (warehouseCreated)="onWarehouseCreated($event)"
-    ></app-pop-warehouse-quick-create>
-
     <app-pop-lot-modal
       [(isOpen)]="lotModalOpen"
       [initialLotInfo]="currentLotInfo"
@@ -205,6 +195,12 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
 
+    <!-- El checkout shell va ANTES de los quick-create para que el orden del
+         DOM no los tape: app-modal monta fixed inset-0 z-[9999], todos los
+         modales comparten z-index, y gana quien aparece MÁS TARDE en el
+         template. El shell abre primero en flujo y debe quedar por debajo de
+         los quick-create de proveedor/bodega cuando se disparan desde el
+         paso Configuración. -->
     <app-pop-checkout-shell
       [isOpen]="showOrderConfirmModal()"
       (isOpenChange)="showOrderConfirmModal.set($event)"
@@ -236,6 +232,20 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (configOpenSupplierModal)="supplierModalOpen.set(true)"
       (configOpenWarehouseModal)="warehouseModalOpen.set(true)"
     ></app-pop-checkout-shell>
+
+    <!-- Quick-create de proveedor/bodega: AFTER el shell para que el orden
+         del DOM los deje ARRIBA del wizard (z-index 9999 compartido, gana
+         quien aparece después). El handler refresca las listas del shell
+         tras crear: ver onSupplierCreated y onWarehouseCreated. -->
+    <app-pop-supplier-quick-create
+      [(isOpen)]="supplierModalOpen"
+      (supplierCreated)="onSupplierCreated($event)"
+    ></app-pop-supplier-quick-create>
+
+    <app-pop-warehouse-quick-create
+      [(isOpen)]="warehouseModalOpen"
+      (warehouseCreated)="onWarehouseCreated($event)"
+    ></app-pop-warehouse-quick-create>
 
     <app-pop-product-config-modal
       [isOpen]="showConfigModal()"
@@ -1415,7 +1425,13 @@ export class PopComponent implements OnInit, OnDestroy {
 
   onSupplierCreated(supplier: { id: number; name: string; code?: string }): void {
     if (this.header) {
+      // Append en memoria: selector lo ve al instante, sin esperar el server.
       this.header.addSupplier(supplier);
+      // Forzar reload contra el backend para reconciliar (puede traer registros
+      // concurrentes que el header no vio) y propagar al `shellSupplierOptions`
+      // del wizard, que re-evalúa porque ya registramos ese signal como dep
+      // del computed (ver `headerRef = viewChild(...)`).
+      this.header.refreshSuppliers().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.popCartService.setSupplier(supplier.id);
   }
@@ -1423,6 +1439,7 @@ export class PopComponent implements OnInit, OnDestroy {
   onWarehouseCreated(warehouse: { id: number; name: string; code?: string }): void {
     if (this.header) {
       this.header.addLocation(warehouse);
+      this.header.refreshLocations().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.popCartService.setLocation(warehouse.id);
   }

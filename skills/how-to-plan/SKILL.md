@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.4"
+  version: "2.5"
   scope: [root]
   auto_invoke:
     - "Creating implementation plans or decomposing non-trivial work"
@@ -32,6 +32,7 @@ This skill specifies both the **format** of the plan and the **operational workf
 ## Core Rules
 
 - Always plan before non-trivial development. Trivial = single-line fix, typo, or isolated config change under 10 lines (see global rule 2.3).
+- This skill covers the whole normal range, trivial through genuinely complex and multi-domain. **Never escalate to `how-to-critical-plan` on your own judgment** — it is invoked only when the human asks for a critical/massive plan or names the skill. If you find critical risk, say so in one or two sentences, offer the upgrade, and keep planning under this skill.
 - **Every Step block must contain ALL SIX mandatory fields**, in this order: `Skills`, `Resources`, `Business decision`, `Why`, `Output`, `Verification`. Missing **any** field invalidates the entire plan — it is not approvable until fixed.
 - Every plan step must reference the skills that govern it, or be explicitly marked `Knowledge gap` when no skill exists. Never list `how-to-plan` as a step skill — it governs planning, not execution.
 - Every plan step must declare the `Business decision` it enforces (rule, product behavior, or technical policy). This field is **non-negotiable**.
@@ -310,6 +311,7 @@ The following are prohibited. Each row lists the wrong move and its correct alte
 | Missing `vendix-multi-tenant-context` on any step that resolves org/store from JWT | Always include it where AsyncLocalStorage tenant resolution matters. |
 | Asking "¿está bien el plan?" / "¿procedo?" mid-text | Use the formal `## Approval Request` block at the end of the plan |
 | Using `AskUserQuestion` to validate a finished plan | `AskUserQuestion` is for Phase 3 only (choose approach / clarify requirement). Approval uses the formal block. |
+| Switching to `how-to-critical-plan` because the work looks dangerous | Explicit invocation only. Name the risk, offer the upgrade, continue the plan you were asked for. |
 | Replanning during execution because a step "seems suboptimal" | Stop, ask the human explicitly. Global rule 1.3 forbids silent replan. |
 | Proposing new code without running the Reuse Discovery checklist | Run the checklist first. Document the result. |
 | Writing a plan without `Business decision` per step | Every step has it. If unknown, mark `Knowledge gap`. |
@@ -387,6 +389,7 @@ If any of these gates is not met, the work is **not done** — return to the gat
 ## Related Skills
 
 - `how-to-dev` — Development execution after planning.
+- `how-to-critical-plan` — The heavyweight protocol for mission-critical work that cannot fail (contract registries, checklists, living document, multi-perspective convergence loop). **Explicit invocation only** — never escalate into it on your own judgment.
 - `git-workflow` — **Required** for branches, commits, pushes, PR review, and the Engram memory lifecycle (RULES 5-8 are post-plan gates).
 - `vendix-engram` — Persistent shared memory used to satisfy RULES 6-7 of `git-workflow`.
 - `pr-code-review` — The 80% pass gate that closes the loop on RULE 8.
@@ -399,6 +402,7 @@ If any of these gates is not met, the work is **not done** — return to the gat
 
 ## Changelog
 
+- **v2.5** — Declared the boundary with the new `how-to-critical-plan` skill: this skill owns the whole normal range (trivial through complex and multi-domain), and escalation to the critical protocol is **explicit-invocation only**. Added the no-self-escalation Core Rule, the matching anti-pattern row, and the Related Skills entry.
 - **v2.4** — Switched the frontend E2E verification mechanism from `agent-browser` to **Playwright MCP** (`@playwright/mcp`) as primary, with `agent-browser` demoted to a documented fallback. Updated the Verification Mechanisms Catalog (Playwright MCP row + agent-browser fallback row), the frontend verification note (single `--ignore-https-errors` context-level flag for the local self-signed vhost), and the `auto_invoke` trigger. Full methodology remains in `how-to-test`.
 
 - **v2.3** — Added `agent-browser` to the Verification Mechanisms Catalog as the frontend E2E mechanism (drive the real vhost, not `localhost:4200`). Linked the new `how-to-test` skill (full curl + agent-browser methodology) from the verification note and Related Skills. Synced frontmatter version (was stale at 2.1 while the changelog already listed 2.2).

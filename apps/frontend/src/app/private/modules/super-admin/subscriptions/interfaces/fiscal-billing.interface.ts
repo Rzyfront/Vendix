@@ -206,7 +206,9 @@ export interface UpsertSubscriptionFiscalConfigDto {
   software_id: string;
   software_pin?: string;
   test_set_id?: string;
-  environment: SubscriptionFiscalEnvironment;
+  // Opcional: el frontend lo omite cuando el ambiente no cambió (la edición
+  // normal no debe promover). El backend ahora lo trata como opcional.
+  environment?: SubscriptionFiscalEnvironment;
   is_enabled: boolean;
   auto_issue: boolean;
   confirm_production?: boolean;
