@@ -86,6 +86,22 @@ interface PaymentReceiptPreview {
   uploadedAt?: string | null;
 }
 
+/**
+ * Local alias for the refund state enum (`refunds_state_enum`). Mirrors the 7
+ * values defined in `apps/backend/prisma/schema.prisma`. Kept local to this
+ * component — if a second surface needs the same labels, extract to a shared
+ * pipe/util (see plan Knowledge Gap "Centralized `refunds_state_enum`
+ * translation").
+ */
+type RefundState =
+  | 'requested'
+  | 'pending_approval'
+  | 'approved'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
@@ -2832,6 +2848,37 @@ export class OrderDetailsPageComponent {
       default:
         return 'bg-gray-100 text-gray-700 border border-gray-200';
     }
+  }
+
+  /**
+   * Plan refund-gateway-dispatch-fix (Step A.4): exhaustive Spanish
+   * translation map for the 7 `refunds_state_enum` values. Replaces the
+   * old inline ternary (only `completed` and `processing` were
+   * translated; every other state leaked the raw enum key). Pure
+   * presentation; the template consumes it via `refundStateLabel()`.
+   */
+  readonly REFUND_STATE_LABELS: Record<RefundState, string> = {
+    requested: 'Solicitado',
+    pending_approval: 'Pendiente de aprobación',
+    approved: 'Aprobado',
+    processing: 'En proceso',
+    completed: 'Completado',
+    failed: 'Fallido',
+    cancelled: 'Cancelado',
+  };
+
+  /**
+   * Template adapter over `REFUND_STATE_LABELS`. Falls back to the
+   * raw enum key for any value not present in the enum (defensive —
+   * today the contract is exhaustive, but if a future migration adds
+   * a new state before the map is updated, the badge still shows
+   * something inspectable instead of an empty string).
+   */
+  refundStateLabel(state: string | undefined | null): string {
+    if (state && (this.REFUND_STATE_LABELS as Record<string, string>)[state]) {
+      return this.REFUND_STATE_LABELS[state as RefundState];
+    }
+    return state ?? '';
   }
 
   getAuditActionLabel(action: string): string {
