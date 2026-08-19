@@ -1,10 +1,15 @@
 import { CurrencyPipe, DatePipe, formatDate } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import {
+  ButtonComponent,
+  CurrencyFormatService,
+} from '../../../../../../../shared/components';
+import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import {
   billingCycleLabel,
   evidenceTypeLabel,
@@ -21,6 +26,51 @@ import {
 // formatea con esa misma zona para evitar el off-by-one.
 const PLATFORM_TIMEZONE = 'America/Bogota';
 
+interface PlatformLineSnapshot {
+  description: string;
+  quantity: number;
+  unit_price: number | string;
+  discount_amount?: number | string;
+  taxes?: Array<{
+    tax_type: string;
+    rate: number | string;
+    tax_amount?: number | string;
+    is_inclusive?: boolean;
+  }>;
+  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  is_inclusive?: boolean;
+}
+
+interface PlatformAcquirerSnapshot {
+  kind: 'store' | 'organization';
+  id: number;
+  legal_name: string;
+  tax_id: string;
+  tax_id_dv?: string;
+  tax_regime_code?: string;
+  fiscal_responsibilities?: string[];
+  email?: string;
+  address?: { line?: string; city?: string; department_code?: string };
+}
+
+interface PlatformInvoiceSnapshotPayload {
+  customer?: PlatformAcquirerSnapshot;
+  items?: PlatformLineSnapshot[];
+  withholdings?: Array<{
+    role: string;
+    concept_id: number;
+    base_amount: number | string;
+    rate: number | string;
+    amount?: number | string;
+  }>;
+  operation_type?: '10' | '09' | '11' | '12';
+  aiu_contract_object?: string;
+  payment_form?: '1' | '2';
+  due_date?: string;
+  currency?: { iso_4217: string; exchange_rate?: number; exchange_rate_date?: string };
+  global_discount_amount?: number | string;
+}
+
 interface SubscriptionInvoiceDetail {
   invoice: {
     id: number;
@@ -36,6 +86,16 @@ interface SubscriptionInvoiceDetail {
     amount_paid: string;
     currency: string;
     line_items: unknown[];
+    payment_form?: '1' | '2';
+    payment_means_code?: string;
+    due_date?: string;
+    operation_type?: string;
+    aiu_contract_object?: string;
+    global_discount_amount?: string;
+    withholding_amount?: string;
+    exchange_rate?: string;
+    exchange_rate_date?: string;
+    customer?: PlatformAcquirerSnapshot;
   };
   transmissions: Array<{
     id: number;
@@ -50,6 +110,7 @@ interface SubscriptionInvoiceDetail {
     rejected_at: string | null;
     error_message: string | null;
     created_at: string;
+    retry_count?: number;
   }>;
   evidences: Array<{
     id: number;
@@ -57,7 +118,7 @@ interface SubscriptionInvoiceDetail {
     evidence_type: string;
     content_hash?: string | null;
     storage_key?: string | null;
-    metadata?: { value: string } | Record<string, unknown> | null;
+    metadata?: Record<string, unknown> | null;
     created_at: string;
   }>;
   plan: { name: string; code: string; billing_cycle: string } | null;
@@ -71,21 +132,36 @@ interface SubscriptionInvoiceDetail {
 }
 
 /**
- * Detalle de una factura SaaS en super-admin. Muestra la factura, sus
- * transmisiones DIAN y las evidencias (XML firmado, PDF, QR, respuesta DIAN).
+ * Detalle de una factura en super-admin. Soporta dos sub-flujos:
+ *   - SaaS (legacy): `GET /invoices/:id` -> subscription invoice shape
+ *   - Platform: `GET /platform-invoices/:id` -> synthesized transmission + evidences
  *
- * Trade-off documentado: el plan proponía reusar `invoice-detail.component.ts`
- * del carril de tienda con un adapter. Ese adapter rompe los 200 líneas y
- * comparte la mitad de la shape por similitud semántica con la de tienda.
- * Este componente nuevo muestra la SaaS directamente — la fase siguiente
- * factorizará un componente compartido si el adapter crece.
+ * V1 enriquesido:
+ *   - Tenant snapshot (acquirer evidence) rendereado como bloque del destinatario
+ *   - Lines table con tax breakdown por línea (snapshot del invoice evidence)
+ *   - Withholdings breakdown (snapshot)
+ *   - AIU regime display (cuando operation_type='09')
+ *   - TRM block (cuando currency != 'COP')
+ *   - CTAs: Diagnosticar+emitir, Cancelar, Retry
+ *   - Readiness panel con blockers[] + warnings[]
  */
 @Component({
   selector: 'app-platform-invoice-detail',
   standalone: true,
-  imports: [RouterLink, CurrencyPipe, DatePipe],
+  imports: [
+    RouterLink,
+    CurrencyPipe,
+    VendixCurrencyPipe,
+    DatePipe,
+    ButtonComponent,
+  ],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
+      <a
+        routerLink="/super-admin/fiscal/invoicing/invoices"
+        class="text-sm text-primary-600 hover:underline"
+      >← Volver al listado</a>
+
       @if (loading()) {
         <p class="mt-4 text-sm text-gray-500">Cargando factura…</p>
       } @else if (errorMessage(); as msg) {
@@ -99,6 +175,7 @@ interface SubscriptionInvoiceDetail {
           ({{ d.organization?.tax_id ?? 'sin NIT' }})
         </p>
 
+        <!-- Resumen + Plan -->
         <section class="mt-6 grid grid-cols-2 gap-4 text-sm">
           <div class="bg-white rounded-lg shadow p-4">
             <h2 class="font-semibold text-gray-900 mb-2">Resumen</h2>
@@ -115,52 +192,182 @@ interface SubscriptionInvoiceDetail {
               <dd class="font-semibold">{{ d.invoice.total | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Saldo a pagar</dt>
               <dd>{{ saldo() | currency: d.invoice.currency }}</dd>
+              @if (d.invoice.global_discount_amount && +d.invoice.global_discount_amount > 0) {
+                <dt class="text-gray-500">Descuento global</dt>
+                <dd>- {{ d.invoice.global_discount_amount | currency: d.invoice.currency }}</dd>
+              }
+              @if (d.invoice.withholding_amount && +d.invoice.withholding_amount > 0) {
+                <dt class="text-gray-500">Retenciones</dt>
+                <dd>{{ d.invoice.withholding_amount | currency: d.invoice.currency }}</dd>
+              }
             </dl>
           </div>
 
           <div class="bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Plan</h2>
+            <h2 class="font-semibold text-gray-900 mb-2">Pago</h2>
+            <dl class="grid grid-cols-2 gap-y-1">
+              <dt class="text-gray-500">Forma</dt>
+              <dd>{{ d.invoice.payment_form === '2' ? 'Crédito' : 'Contado' }}</dd>
+              @if (d.invoice.due_date) {
+                <dt class="text-gray-500">Vencimiento</dt>
+                <dd>{{ formatPeriodDate(d.invoice.due_date) }}</dd>
+              }
+              @if (d.invoice.exchange_rate) {
+                <dt class="text-gray-500">TRM</dt>
+                <dd>{{ d.invoice.exchange_rate }} ({{ d.invoice.exchange_rate_date ?? '—' }})</dd>
+              }
+              @if (d.invoice.operation_type && d.invoice.operation_type !== '10') {
+                <dt class="text-gray-500">Tipo de operación</dt>
+                <dd>{{ operationTypeLabel(d.invoice.operation_type) }}</dd>
+              }
+            </dl>
             @if (d.plan) {
-              <p>{{ d.plan.name }} ({{ billingCycleLabel(d.plan.billing_cycle) }})</p>
-            } @else {
-              <p class="text-gray-500">—</p>
+              <p class="mt-3 text-sm text-gray-700">
+                Plan: <span class="font-medium">{{ d.plan.name }}</span> ({{ billingCycleLabel(d.plan.billing_cycle) }})
+              </p>
             }
           </div>
         </section>
 
+        <!-- Tenant (destinatario) snapshot -->
+        @if (acquirerSnapshot(); as acq) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-3">Destinatario (snapshot al emitir)</h2>
+            <dl class="grid grid-cols-2 gap-y-1 text-sm">
+              <dt class="text-gray-500">Tipo</dt>
+              <dd class="font-mono">{{ acq.kind }} :{{ acq.id }}</dd>
+              <dt class="text-gray-500">Razón social</dt>
+              <dd>{{ acq.legal_name }}</dd>
+              <dt class="text-gray-500">NIT</dt>
+              <dd>{{ acq.tax_id }}{{ acq.tax_id_dv ? '-' + acq.tax_id_dv : '' }}</dd>
+              @if (acq.tax_regime_code) {
+                <dt class="text-gray-500">Régimen</dt>
+                <dd>{{ acq.tax_regime_code }}</dd>
+              }
+              @if (acq.fiscal_responsibilities && acq.fiscal_responsibilities.length > 0) {
+                <dt class="text-gray-500">Responsabilidades</dt>
+                <dd>{{ acq.fiscal_responsibilities.join(', ') }}</dd>
+              }
+              @if (acq.email) {
+                <dt class="text-gray-500">Email</dt>
+                <dd>{{ acq.email }}</dd>
+              }
+              @if (acq.address && acq.address.line) {
+                <dt class="text-gray-500">Dirección</dt>
+                <dd>
+                  {{ acq.address.line }} ·
+                  {{ acq.address.city ?? '' }} ·
+                  {{ acq.address.department_code ?? '' }}
+                </dd>
+              }
+            </dl>
+          </section>
+        }
+
+        <!-- Líneas con impuestos por línea -->
+        @if (invoiceSnapshot()?.items && invoiceSnapshot()!.items!.length > 0) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-3">Líneas</h2>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 border-b">
+                  <th>Descripción</th>
+                  <th class="text-right">Cant</th>
+                  <th class="text-right">Precio</th>
+                  <th class="text-right">Desc</th>
+                  <th>Impuestos</th>
+                  <th>AIU</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (line of invoiceSnapshot()!.items!; track $index) {
+                  <tr class="border-b">
+                    <td class="py-2">{{ line.description }}</td>
+                    <td class="text-right">{{ line.quantity }}</td>
+                    <td class="text-right">{{ line.unit_price }}</td>
+                    <td class="text-right">
+                      @if (line.discount_amount) { {{ line.discount_amount }} }
+                    </td>
+                    <td class="text-xs">
+                      @if (line.taxes && line.taxes.length > 0) {
+                        @for (t of line.taxes; track $index) {
+                          <div>
+                            {{ t.tax_type }} {{ (+t.rate * 100).toFixed(2) }}%
+                            @if (t.is_inclusive) { (i) }
+                            @if (t.tax_amount !== undefined) { = {{ t.tax_amount }} }
+                          </div>
+                        }
+                      } @else { — }
+                    </td>
+                    <td class="text-xs">{{ line.aiu_component ?? '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
+
+        <!-- AIU note -->
+        @if (invoiceSnapshot()?.aiu_contract_object) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-2">Nota AIU (regimen 09)</h2>
+            <p class="text-sm text-gray-700 whitespace-pre-wrap">
+              {{ invoiceSnapshot()!.aiu_contract_object }}
+            </p>
+            <p class="text-xs text-gray-500 mt-2">
+              {{ invoiceSnapshot()!.aiu_contract_object!.length }} / 4900 caracteres
+            </p>
+          </section>
+        }
+
+        <!-- Retenciones breakdown -->
+        @if (invoiceSnapshot()?.withholdings && invoiceSnapshot()!.withholdings!.length > 0) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-3">Retenciones</h2>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 border-b">
+                  <th>Rol</th>
+                  <th>Concepto</th>
+                  <th class="text-right">Base</th>
+                  <th class="text-right">Tasa</th>
+                  <th class="text-right">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (wh of invoiceSnapshot()!.withholdings!; track $index) {
+                  <tr class="border-b">
+                    <td>{{ wh.role }}</td>
+                    <td>{{ wh.concept_id }}</td>
+                    <td class="text-right">{{ wh.base_amount }}</td>
+                    <td class="text-right">{{ (+wh.rate * 100).toFixed(4) }}%</td>
+                    <td class="text-right">{{ wh.amount ?? (wh.base_amount * +wh.rate) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
+
+        <!-- Transmisiones DIAN -->
         <section class="mt-6 bg-white rounded-lg shadow p-4">
-          <h2 class="font-semibold text-gray-900 mb-3">Transmisiones DIAN</h2>
-          @if (d.transmissions.length === 0) {
-            <div class="text-sm">
-              <p class="text-gray-500 mb-3">Esta factura aún no fue emitida. Puede dispararla ahora mismo desde aquí.</p>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold text-gray-900">Transmisiones DIAN</h2>
+            @if (d.transmissions.length === 0) {
               <button
+                app-button
                 type="button"
-                (click)="loadReadiness(d.invoice.id); issueNow()"
+                variant="primary"
+                (click)="onDiagnoseEmit(d.invoice.id)"
                 [disabled]="issuing()"
-                class="px-3 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700 disabled:opacity-50"
               >
                 {{ issuing() ? 'Emitiendo…' : 'Diagnosticar y emitir' }}
               </button>
-              @if (issueError(); as ie) {
-                <p class="text-xs text-red-600 mt-2">{{ ie }}</p>
-              }
-              @if (readinessBlockers().length > 0) {
-                <div class="mt-4 border-l-4 border-warning bg-warning-light/30 p-3 rounded">
-                  <p class="font-semibold text-sm text-gray-900 mb-2">Bloqueadores de prevalidación</p>
-                  <ul class="text-xs space-y-2">
-                    @for (b of readinessBlockers(); track b.code) {
-                      <li>
-                        <p class="font-mono text-gray-500">{{ b.code }}</p>
-                        <p>{{ b.problem }}</p>
-                        @if (b.fix) {
-                          <p class="text-gray-700"><span class="font-medium">Cómo resolver:</span> {{ b.fix }}</p>
-                        }
-                      </li>
-                    }
-                  </ul>
-                </div>
-              }
-            </div>
+            }
+          </div>
+
+          @if (d.transmissions.length === 0) {
+            <p class="text-sm text-gray-500">Esta factura aún no fue emitida.</p>
           } @else {
             <div class="space-y-4">
               @for (t of d.transmissions; track t.id) {
@@ -175,12 +382,30 @@ interface SubscriptionInvoiceDetail {
                     <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + transmissionStatusBadgeClasses(t.dian_status)">
                       {{ transmissionStatusLabel(t.dian_status) }}
                     </span>
+                    @if (t.retry_count && t.retry_count > 0) {
+                      <span class="ml-2 text-xs text-gray-500">reintentos: {{ t.retry_count }}</span>
+                    }
                   </p>
                   @if (t.cufe) {
                     <p class="text-xs text-gray-500 mt-1 break-all">CUFE: {{ t.cufe }}</p>
                   }
+                  @if (t.qr_code) {
+                    <p class="text-xs text-gray-500 mt-1 break-all">QR: {{ t.qr_code }}</p>
+                  }
                   @if (t.error_message) {
                     <p class="text-xs text-red-600 mt-1">{{ t.error_message }}</p>
+                  }
+                  @if (t.transmission_status === 'rejected' || t.transmission_status === 'error') {
+                    <button
+                      app-button
+                      type="button"
+                      variant="secondary"
+                      class="mt-2"
+                      (click)="retryTransmission(t.id)"
+                      [disabled]="retrying() === t.id"
+                    >
+                      {{ retrying() === t.id ? 'Reintentando…' : 'Reintentar' }}
+                    </button>
                   }
                 </div>
               }
@@ -188,6 +413,63 @@ interface SubscriptionInvoiceDetail {
           }
         </section>
 
+        <!-- Readiness (blockers + warnings) -->
+        @if (readinessBlockers().length > 0 || readinessWarnings().length > 0) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-2">Pre-validación</h2>
+
+            @if (readinessBlockers().length > 0) {
+              <div class="border-l-4 border-warning bg-warning-light/30 p-3 rounded mb-3">
+                <p class="font-semibold text-sm text-gray-900 mb-2">Bloqueadores</p>
+                <ul class="text-xs space-y-2">
+                  @for (b of readinessBlockers(); track b.code) {
+                    <li>
+                      <p class="font-mono text-gray-500">{{ b.code }}</p>
+                      <p>{{ b.problem }}</p>
+                      @if (b.fix) {
+                        <p class="text-gray-700"><span class="font-medium">Cómo resolver:</span> {{ b.fix }}</p>
+                      }
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+
+            @if (readinessWarnings().length > 0) {
+              <div class="border-l-4 border-info bg-info-light/30 p-3 rounded">
+                <p class="font-semibold text-sm text-gray-900 mb-2">Advertencias</p>
+                <ul class="text-xs space-y-2">
+                  @for (w of readinessWarnings(); track w.code) {
+                    <li>
+                      <p class="font-mono text-gray-500">{{ w.code }}</p>
+                      <p>{{ w.problem }}</p>
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+          </section>
+        }
+
+        <!-- Acciones de documento -->
+        @if (canCancel()) {
+          <section class="mt-6 bg-white rounded-lg shadow p-4">
+            <h2 class="font-semibold text-gray-900 mb-2">Acciones</h2>
+            <div class="flex gap-2">
+              <button
+                app-button
+                type="button"
+                variant="secondary"
+                (click)="cancelInvoice(d.invoice.id)"
+                [disabled]="cancelling()"
+              >
+                {{ cancelling() ? 'Cancelando…' : 'Cancelar documento' }}
+              </button>
+            </div>
+          </section>
+        }
+
+        <!-- Evidencias -->
         @if (d.evidences.length > 0) {
           <section class="mt-6 bg-white rounded-lg shadow p-4">
             <h2 class="font-semibold text-gray-900 mb-3">Evidencias</h2>
@@ -197,6 +479,9 @@ interface SubscriptionInvoiceDetail {
                   <span class="font-mono text-xs text-gray-500">#{{ e.fiscal_transmission_id }}</span>
                   · {{ evidenceTypeLabel(e.evidence_type) }}
                   · <span class="text-gray-500">{{ e.created_at | date: 'short' }}</span>
+                  @if (evidenceKind(e.metadata) && evidenceKind(e.metadata) !== 'platform_invoice_snapshot') {
+                    <span class="text-xs text-gray-400">({{ evidenceKind(e.metadata) }})</span>
+                  }
                 </li>
               }
             </ul>
@@ -215,9 +500,14 @@ export class PlatformInvoiceDetailComponent {
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
   readonly issuing = signal(false);
+  readonly retrying = signal<number | null>(null);
+  readonly cancelling = signal(false);
   readonly issueError = signal<string | null>(null);
   readonly readinessBlockers = signal<
     Array<{ code: string; problem: string; fix?: string }>
+  >([]);
+  readonly readinessWarnings = signal<
+    Array<{ code: string; problem: string }>
   >([]);
 
   // Helpers expuestos al template
@@ -228,30 +518,67 @@ export class PlatformInvoiceDetailComponent {
   readonly transmissionStatusBadgeClasses = transmissionStatusBadgeClasses;
 
   private base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
-
-  /**
-   * Endpoint del detalle. Se deriva del route data `kind`:
-   *  - `subscription` (default): `GET /invoices/:id` (SaaS invoice).
-   *  - `platform`: `GET /platform-invoices/:id` (transmisión de platform).
-   *
-   * Las dos rutas son necesarias porque las dos tablas tienen secuencias
-   * independientes: compartir `/invoices/:id` permite que un id colisionado
-   * (SaaS #42 = platform #42) muestre el documento equivocado. La plantilla
-   * no cambia: ambas rutas devuelven la misma shape (sintetizada en el
-   * backend para el caso platform a partir del snapshot de `fiscal_evidences`).
-   */
   private detailPathPrefix = '/invoices';
   private readinessPathPrefix = '/invoices';
+  private sendPathPrefix = '/invoices';
+  private cancelPathPrefix = '/invoices';
+
+  /**
+   * Snapshot derivado de `fiscal_evidences.metadata` para el detalle platform.
+   * Filtra por `kind='platform_invoice_snapshot'` y `'platform_acquirer_snapshot'`.
+   */
+  readonly invoiceSnapshot = computed<PlatformInvoiceSnapshotPayload | null>(() => {
+    const d = this.data();
+    if (!d) return null;
+    // El backend puede haber sintetizado `customer`, `items`, `withholdings`,
+    // `aiu_contract_object` en la fila `invoice`. Si están ahí los usamos.
+    const inv = d.invoice as any;
+    if (inv.customer || inv.items || inv.withholdings || inv.aiu_contract_object) {
+      return {
+        customer: inv.customer,
+        items: inv.items,
+        withholdings: inv.withholdings,
+        operation_type: inv.operation_type,
+        aiu_contract_object: inv.aiu_contract_object,
+        payment_form: inv.payment_form,
+        due_date: inv.due_date,
+        currency: inv.currency,
+        global_discount_amount: inv.global_discount_amount,
+      };
+    }
+    // Si no, leemos del evidence con kind='platform_invoice_snapshot'.
+    const snap = d.evidences.find(
+      (e) =>
+        (e.metadata as any)?.kind === 'platform_invoice_snapshot',
+    );
+    if (snap && snap.metadata) {
+      return snap.metadata as PlatformInvoiceSnapshotPayload;
+    }
+    return null;
+  });
+
+  readonly acquirerSnapshot = computed<PlatformAcquirerSnapshot | null>(() => {
+    // Preferir la fila `invoice.customer` si el backend la sintetizó.
+    const inv = this.data()?.invoice as any;
+    if (inv?.customer) return inv.customer as PlatformAcquirerSnapshot;
+    const acq = this.data()?.evidences.find(
+      (e) =>
+        (e.metadata as any)?.kind === 'platform_acquirer_snapshot',
+    );
+    if (acq && acq.metadata) {
+      return (acq.metadata as any).acquirer as PlatformAcquirerSnapshot;
+    }
+    return null;
+  });
 
   constructor() {
-    // La ruta `/platform-invoices/:id` lleva `data.kind = 'platform'` y la
-    // ruta `/invoices/:id` lleva (o deja) `kind = 'subscription'`. La pieza
-    // cambia el prefijo del endpoint del backend.
     const kind =
       this.route.snapshot.data['kind'] === 'platform' ? 'platform' : 'subscription';
     if (kind === 'platform') {
       this.detailPathPrefix = '/platform-invoices';
       this.readinessPathPrefix = '/platform-invoices';
+      this.sendPathPrefix = '/invoices';
+      this.cancelPathPrefix = '/invoices';
     }
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!Number.isInteger(id) || id <= 0) {
@@ -262,65 +589,70 @@ export class PlatformInvoiceDetailComponent {
     this.load(id);
   }
 
-  /**
-   * Saldo a pagar = total - amount_paid. Si la factura está `paid`, saldo = 0
-   * y la métrica es informativa. Si está `draft`/`overdue`, saldo = total.
-   * Como `data` es un signal, este signal se recomputa automáticamente.
-   */
   readonly saldo = computed<number>(() => {
     const d = this.data();
     if (!d) return 0;
     return Number(d.invoice.total) - Number(d.invoice.amount_paid);
   });
 
-  /**
-   * F-R2-14: formatea una fecha en la zona de la plataforma. Sin esto, un
-   * super-admin fuera de `America/Bogota` ve la fecha de periodo en la
-   * timezone del navegador y la factura de un día de Agosto se renderiza
-   * como "31 de julio".
-   */
+  readonly canCancel = computed<boolean>(() => {
+    const d = this.data();
+    if (!d) return false;
+    const s = d.invoice.state;
+    return s === 'draft' || s === 'validated';
+  });
+
   formatPeriodDate(value: string | null | undefined): string {
     if (!value) return '—';
     return formatDate(value, 'longDate', 'es-CO', PLATFORM_TIMEZONE);
   }
 
-  /**
-   * F-R2-16: cuando el operador pide "Diagnosticar y emitir" sobre una
-   * factura sin transmisiones, primero consultamos
-   * `GET /invoices/:id/emit-readiness` para mostrar los bloqueadores de
-   * prevalidación con su `fix`. El backend ya devuelve `blockers[]` con
-   * `{code, problem, fix}`; el componente los pinta abajo del botón
-   * "Diagnosticar y emitir" para que el operador sepa por qué no salió
-   * antes de reintentar.
-   */
+  operationTypeLabel(value: string | undefined): string {
+    switch (value) {
+      case '09': return 'AIU (09)';
+      case '11': return 'Mandato (11)';
+      case '12': return 'Consorcio (12)';
+      default: return 'Estándar (10)';
+    }
+  }
+
+  evidenceKind(metadata: unknown): string | null {
+    return (metadata as any)?.kind ?? null;
+  }
+
   async loadReadiness(invoiceId: number): Promise<void> {
     try {
       const res = await firstValueFrom(
         this.http.get<{
           success: boolean;
-          data: { blockers?: Array<{ code: string; problem: string; fix?: string }> };
+          data: {
+            blockers?: Array<{ code: string; problem: string; fix?: string }>;
+            warnings?: Array<{ code: string; problem: string }>;
+          };
         }>(`${this.base}${this.readinessPathPrefix}/${invoiceId}/emit-readiness`),
       );
-      const blockers = res?.data?.blockers ?? [];
-      this.readinessBlockers.set(blockers);
+      this.readinessBlockers.set(res?.data?.blockers ?? []);
+      this.readinessWarnings.set(res?.data?.warnings ?? []);
     } catch {
-      // Si la readiness falla, dejamos el array vacío — la emisión
-      // siguiente reportará el error.
+      // fallback silencioso
     }
   }
 
-  /**
-   * Emite la factura SaaS vía `POST /invoices/:id/issue` y recarga el detalle
-   * para reflejar el resultado en la UI. El backend ya marca `transmission_status`
-   * y devuelve la fila; el componente solo navega el resultado.
-   */
+  async onDiagnoseEmit(invoiceId: number): Promise<void> {
+    await this.loadReadiness(invoiceId);
+    await this.issueNow();
+  }
+
   async issueNow(): Promise<void> {
     const d = this.data();
     if (!d) return;
     this.issuing.set(true);
     this.issueError.set(null);
     try {
-      await firstValueFrom(this.http.post(`${this.base}/invoices/${d.invoice.id}/issue`, {}));
+      await firstValueFrom(
+        this.http.post(`${this.base}${this.sendPathPrefix}/${d.invoice.id}/send`, {}),
+      );
+      this.toast.success('Documento enviado a DIAN');
       await this.load(d.invoice.id);
     } catch (error) {
       const msg =
@@ -331,6 +663,48 @@ export class PlatformInvoiceDetailComponent {
       this.toast.error(msg);
     } finally {
       this.issuing.set(false);
+    }
+  }
+
+  async retryTransmission(transmissionId: number): Promise<void> {
+    this.retrying.set(transmissionId);
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.base}/transmissions/${transmissionId}/retry`, {}),
+      );
+      this.toast.success('Reintento encolado');
+      const id = this.data()?.invoice.id;
+      if (id) await this.load(id);
+    } catch (error) {
+      const msg =
+        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
+        (error instanceof Error ? error.message : null) ||
+        'Error al reintentar la transmisión.';
+      this.toast.error(msg);
+    } finally {
+      this.retrying.set(null);
+    }
+  }
+
+  async cancelInvoice(invoiceId: number): Promise<void> {
+    if (!confirm('Cancelar este documento? La acción no se puede deshacer.')) return;
+    this.cancelling.set(true);
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.base}${this.cancelPathPrefix}/${invoiceId}/cancel`, {
+          reason: 'cancelado desde UI super-admin',
+        }),
+      );
+      this.toast.success('Documento cancelado');
+      await this.load(invoiceId);
+    } catch (error) {
+      const msg =
+        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
+        (error instanceof Error ? error.message : null) ||
+        'Error al cancelar.';
+      this.toast.error(msg);
+    } finally {
+      this.cancelling.set(false);
     }
   }
 
@@ -347,9 +721,6 @@ export class PlatformInvoiceDetailComponent {
         this.errorMessage.set('La API no devolvió la factura.');
       }
     } catch (error) {
-      // El backend usa el envoltorio `success:false, message:'...'`. Para
-      // 4xx/5xx Angular lanza `HttpErrorResponse` cuyo `.message` es la
-      // descripción del fallo HTTP (no lo que la API quiso decir).
       const msg =
         (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
         (error instanceof Error ? error.message : null) ||
