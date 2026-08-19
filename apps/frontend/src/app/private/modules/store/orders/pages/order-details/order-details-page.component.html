@@ -1474,15 +1474,22 @@
                             refund.state !== 'processing',
                         }"
                       >
-                        {{
-                          refund.state === "completed"
-                            ? "Completado"
-                            : refund.state === "processing"
-                              ? "Procesando"
-                              : refund.state
-                        }}
+                        {{ refundStateLabel(refund.state) }}
                       </span>
                     </div>
+                    @if (
+                      refund.state === "requested" ||
+                      refund.state === "pending_approval" ||
+                      refund.state === "processing"
+                    ) {
+                      <button
+                        type="button"
+                        class="mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+                        (click)="openResolveRefundModal(refund)"
+                      >
+                        Resolver manualmente
+                      </button>
+                    }
                     @if (refund.reason) {
                       <p class="text-xs text-gray-500 mb-1">
                         {{ refund.reason }}
