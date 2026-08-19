@@ -1627,6 +1627,11 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'DIAN enablement is not live (production + enabled) yet',
   },
+  INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1: {
+    code: 'INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1',
+    httpStatus: 501,
+    devMessage: 'Document type not supported in V1 of the platform invoicing MVP',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,

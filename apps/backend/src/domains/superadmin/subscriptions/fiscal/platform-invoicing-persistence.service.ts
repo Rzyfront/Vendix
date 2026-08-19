@@ -106,12 +106,18 @@ export class PlatformInvoicingPersistenceService {
         `Overwriting platform_acquirer_snapshot on transmission #${args.transmissionId} (evidence #${existing.id})`,
       );
     } else {
+      // Cuando el caller todavia no creo la transmision (transmissionId=0),
+      // persistimos sin FK para evitar violacion; el snapshot se enlazara
+      // luego via `linkAcquirerSnapshotToTransmission` cuando la transmision
+      // quede persistida. En V1 el riel tienda emite la transmision DENTRO
+      // de la misma tx y el caller ya tiene su id — pero los paths que
+      // delegan al facade pasan 0 y necesitan este fallback.
       await prisma.fiscal_evidences.create({
         data: {
           organization_id: args.organizationId,
           store_id: null,
           accounting_entity_id: args.accountingEntityId,
-          fiscal_transmission_id: args.transmissionId,
+          fiscal_transmission_id: args.transmissionId > 0 ? args.transmissionId : null,
           evidence_type: 'manual_support',
           storage_key: null,
           content_hash: null,

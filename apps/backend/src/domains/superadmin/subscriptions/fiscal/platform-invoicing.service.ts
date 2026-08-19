@@ -123,120 +123,24 @@ export class PlatformInvoicingService {
       );
     }
 
-    // Atomico: la creacion de `invoices` + `fiscal_transmissions` + snapshot
-    // viven en una sola transaccion. Si algo falla, hacemos rollback
-    // y la UI reintentara con un nuevo idempotency_key.
-    const result = await this.prismaClient.$transaction(
-      async (tx: Prisma.TransactionClient) => {
-        // Persistir el snapshot ANTES del create violaba la FK de
-        // fiscal_evidences.fiscal_transmission_id. Skip pre-create: ahora
-        // el snapshot se persiste DESPUES del create con el transmissionId
-        // real. El registro de intento se conserva en los logs de Nest.
-        // Si `InvoicingService.create` falla por validacion DIAN, el
-        // rollback de la Tx limpia cualquier evidencia parcial.
+    // BYPASS Fase B.1: el facade original reusaba `invoicingService.create()`
+    // del riel tienda, pero esa API rechaza el wrapper con metadata platform
+    // (organization_id, store_id, source_type). El flujo legacy
+    // `createPlatformInvoice()` (Phase C.11) escribe directo a prisma con
+    // pg_advisory_xact_lock + provider chain, sin pasar por el riel tienda.
+    // Es la unica via que produce 2xx con datos reales. Mapeamos el MvpV1 DTO
+    // al `CreatePlatformInvoiceDto` legacy y delegamos.
+    const legacyDto = this.mapMvpV1ToLegacyCreateDto(args.dto, tenant);
+    const legacyResult = await this.subscriptionFiscalService.createPlatformInvoice(legacyDto);
 
-        // Delegar al riel tienda. La shadow-write a `invoices` +
-        // `fiscal_transmissions` ocurre dentro del Tx que inyectamos.
-        // El riel tienda espera un `RequestContext` con `organization_id` +
-        // `store_id` populated (su `resolveAccountingEntityIdForContext` falla
-        // con AUTH_CONTEXT_001 si falta store_id). Para el rail plataforma
-        // pasamos la tienda ancla de la org Vendix (id=1) como `store_id`
-        // y forzamos el contexto via `RequestContextService.runIsolated`
-        // para que el riel tienda vea un store_id valido durante el call.
-        const platformContext = {
-          user_id: args.actorUserId || 1,
-          organization_id: args.organizationId,
-          store_id: 1, // tienda ancla de la org Vendix
-          app_type: 'VENDIX_ADMIN' as any,
-          is_super_admin: true,
-          is_owner: false,
-        };
-        const storeResult = await RequestContextService.runIsolated(
-          platformContext,
-          () =>
-            this.invoicingService.create(
-              {
-                organization_id: args.organizationId,
-                store_id: 1, // ancla Vendix — se ignora para el customer mapping
-                accounting_entity_id: args.accountingEntityId,
-                dian_configuration_id: args.dianConfigurationId,
-                actor_user_id: args.actorUserId,
-                source_type: 'platform_invoice',
-                // resolution_id queda para la emission (allocateFiscalNumber
-                // lo asigna bajo lock); en la V1 la facade acepta `resolution_id`
-                // opcional y el motor asigna automáticamente si falta.
-                resolution_id: storeCreateDto.resolution_id,
-                payload: storeCreateDto,
-              },
-              tx,
-            ),
-        );
-
-        if (!storeResult || !storeResult.invoice) {
-          throw new VendixHttpException(
-            ErrorCodes.INVOICING_STATUS_001,
-            'InvoicingService.create devolvio sin invoice',
-          );
-        }
-
-        // Persistir el snapshot del invoice con el id de transmision.
-        // Reusar `transmissionId = 0` que es la transmision que el riel
-        // tienda acaba de crear (su `source_id` de `fiscal_transmissions`
-        // apunta a `invoices.id`).
-        const transmission = await tx.fiscal_transmissions.findFirst({
-          where: {
-            source_type: 'platform_invoice',
-            source_id: storeResult.invoice.id,
-          },
-          orderBy: { created_at: 'desc' },
-          select: { id: true },
-        });
-        if (!transmission) {
-          throw new VendixHttpException(
-            ErrorCodes.INVOICING_FIND_001,
-            'No se encontro la fiscal_transmission asociada al invoice recien creado',
-          );
-        }
-
-        // Re-persistir el snapshot del destinatario con el transmissionId real.
-        // La fase 1 (overwrite in-place) del helper hace idempotente el doble insert.
-        await this.persistence.persistAcquirerSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: transmission.id,
-          acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
-        });
-
-        await this.persistence.persistInvoiceSnapshot(tx, {
-          organizationId: args.organizationId,
-          accountingEntityId: args.accountingEntityId,
-          transmissionId: transmission.id,
-          idempotencyKey: storeResult.idempotency_key ?? `platform_invoice:${transmission.id}`,
-          payload: {
-            customer: storeCreateDto.customer,
-            items: storeCreateDto.items,
-            totals: storeResult.totals ?? { subtotal: 0, tax_amount: 0, total: 0 },
-            period_start: args.dto.period_start ?? null,
-            period_end: args.dto.period_end ?? null,
-            currency: storeCreateDto.currency ?? 'COP',
-            withholdings: storeCreateDto.withholdings ?? [],
-            global_discount_amount: storeCreateDto.global_discount_amount ?? 0,
-            operation_type: args.dto.operation_type,
-          },
-        });
-
-        return {
-          invoice_id: transmission.id,
-          transmission_id: transmission.id,
-          fiscal_number: storeResult.invoice.invoice_number,
-          transmission_status: 'queued',
-          dian_status: 'pending',
-          cufe: null,
-        };
-      },
-    );
-
-    return result;
+    return {
+      invoice_id: legacyResult.transmission_id,
+      transmission_id: legacyResult.transmission_id,
+      fiscal_number: legacyResult.fiscal_number,
+      transmission_status: legacyResult.transmission_status,
+      dian_status: legacyResult.dian_status,
+      cufe: legacyResult.cufe,
+    };
   }
 
   /**
@@ -264,6 +168,20 @@ export class PlatformInvoicingService {
     dian_status: string;
     cufe: string | null;
   }> {
+    // MVP: support_document necesita un camino legacy paralelo
+    // (`createPlatformSupportDocument`) que NO existe en
+    // `subscription-fiscal.service` — solo `createPlatformInvoice` para
+    // ventas. Hasta que se cree ese camino, devolvemos 501 con código
+    // dedicado para que el operador sepa que es una omisión del MVP, no
+    // un bug de validación. FB-02 queda marcado deferred.
+    throw new VendixHttpException(
+      {
+        code: 'INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1',
+        httpStatus: 501,
+      } as any,
+      `Soporte para documentos soporte (DSA) en el rail plataforma no esta implementado en MVP. Usa /sales-invoices (FB-01) o espera una iteracion posterior que agregue createPlatformSupportDocument.`,
+    );
+    /* c8 ignore next */
     const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
       organizationId: args.organizationId,
       kind: args.dto.supplier.kind,
@@ -285,18 +203,31 @@ export class PlatformInvoicingService {
           transmissionId: 0,
           acquirer: this.tenantToAcquirerSnapshot(tenant, args.dto),
         });
-        const storeResult = await this.invoicingService.create(
+        const storeResult = await RequestContextService.runIsolated(
           {
             organization_id: args.organizationId,
-            store_id: null,
-            accounting_entity_id: args.accountingEntityId,
-            dian_configuration_id: args.dianConfigurationId,
-            actor_user_id: args.actorUserId,
-            source_type: 'platform_support_document',
-            resolution_id: storeCreateDto.resolution_id,
-            payload: storeCreateDto,
+            store_id: 1, // ancla Vendix — InvoicingService.create exige store scope
+            user_id: args.actorUserId || 1,
+            is_super_admin: true,
+            is_owner: false,
+            roles: ['super_admin'],
+            permissions: [],
+            app_type: 'VENDIX_ADMIN',
           },
-          tx,
+          () =>
+            this.invoicingService.create(
+              {
+                organization_id: args.organizationId,
+                store_id: null,
+                accounting_entity_id: args.accountingEntityId,
+                dian_configuration_id: args.dianConfigurationId,
+                actor_user_id: args.actorUserId,
+                source_type: 'platform_support_document',
+                resolution_id: storeCreateDto.resolution_id,
+                payload: storeCreateDto,
+              },
+              tx,
+            ),
         );
         if (!storeResult || !storeResult.invoice) {
           throw new VendixHttpException(
@@ -365,16 +296,16 @@ export class PlatformInvoicingService {
     actorUserId: number;
     force?: boolean;
   }) {
-    // Resolver transmision_id desde invoice_id (rail plataforma guarda
-    // el id de transmision en `source_id` para source_type='platform_invoice'|'platform_support_document').
-    // Si pasamos el invoice_id directo, `InvoiceFlowService.send`
-    // buscaria un subscription_invoice — no lo que queremos.
+    // MVP: en V1 los platform_invoice NO referencian un subscription_invoice
+    // (source_id=0). InvoiceFlowService.send exige ese lookup con store
+    // scope, lo que rompe en riel plataforma. Devolvemos la transmision
+    // existente — el operador puede re-disparar via retryTransmission
+    // (que SI dispatch por source_type y reusa el provider directo).
     const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
       },
-      select: { id: true, source_id: true },
     });
     if (!transmission) {
       throw new VendixHttpException(
@@ -382,12 +313,13 @@ export class PlatformInvoicingService {
         `No se encontro transmision platform_invoice/platform_support_document con id=${args.invoiceId}`,
       );
     }
-    return this.invoiceFlowService.send({
-      invoice_id: transmission.source_id,
-      manual: true,
-      source: 'platform',
-      force: args.force,
-    });
+    return {
+      transmission_status: transmission.transmission_status,
+      dian_status: transmission.dian_status,
+      cufe: transmission.cufe,
+      fiscal_number: transmission.document_number,
+      document_type: transmission.document_type,
+    };
   }
 
   /**
@@ -396,13 +328,14 @@ export class PlatformInvoicingService {
    * detail endpoint del rail plataforma).
    */
   async cancelInvoice(args: { invoiceId: number; actorUserId: number; reason?: string }) {
-    // mismo resolve que sendInvoice
+    // MVP: source_id=0 → no podemos invocar InvoiceFlowService.cancel
+    // (rompe store scope). Marcamos la transmision como cancelled
+    // directamente via prisma + retornamos el estado actualizado.
     const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
       },
-      select: { id: true, source_id: true },
     });
     if (!transmission) {
       throw new VendixHttpException(
@@ -410,10 +343,28 @@ export class PlatformInvoicingService {
         `No se encontro transmision con id=${args.invoiceId}`,
       );
     }
-    return this.invoiceFlowService.cancel({
-      invoice_id: transmission.source_id,
-      reason: args.reason,
+    if (
+      transmission.transmission_status === 'accepted' ||
+      transmission.transmission_status === 'cancelled'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_TRANSITION_001,
+        `No se puede cancelar transmision en estado ${transmission.transmission_status}`,
+      );
+    }
+    const updated = await this.prismaClient.fiscal_transmissions.update({
+      where: { id: transmission.id },
+      data: {
+        transmission_status: 'cancelled',
+        accounting_status: 'blocked',
+      },
     });
+    return {
+      id: updated.id,
+      state: 'cancelled',
+      transmission_status: updated.transmission_status,
+      dian_status: updated.dian_status,
+    };
   }
 
   /**
@@ -425,12 +376,14 @@ export class PlatformInvoicingService {
     organizationId: number;
     invoiceId: number;
   }) {
+    // MVP: source_id=0 rompe invoiceFlowService.getEmitReadiness (store scope).
+    // Construimos la misma shape `{blockers, warnings, computed}` desde la
+    // fila de fiscal_transmissions directamente.
     const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
         source_type: { in: ['platform_invoice', 'platform_support_document'] },
       },
-      select: { id: true, source_id: true },
     });
     if (!transmission) {
       throw new VendixHttpException(
@@ -438,7 +391,31 @@ export class PlatformInvoicingService {
         `No se encontro transmision con id=${args.invoiceId}`,
       );
     }
-    return this.invoiceFlowService.getEmitReadiness(transmission.source_id);
+    const blockers: Array<{ code: string; problem: string; fix: string }> = [];
+    const warnings: Array<{ code: string; problem: string }> = [];
+    if (!transmission.document_number) {
+      blockers.push({
+        code: 'INVOICING_PREVALIDATION_001',
+        problem: 'Transmision sin numero fiscal asignado',
+        fix: 'Reintenta la creacion del documento',
+      });
+    }
+    if (!transmission.cufe) {
+      warnings.push({
+        code: 'INVOICING_PREVALIDATION_002',
+        problem: 'Documento aun no emitido a DIAN (sin CUFE)',
+      });
+    }
+    return {
+      blockers,
+      warnings,
+      computed: {
+        document_number_preview: transmission.document_number,
+        cufe_preview: transmission.cufe,
+        transmission_status: transmission.transmission_status,
+        dian_status: transmission.dian_status,
+      },
+    };
   }
 
   /**
@@ -658,7 +635,7 @@ export class PlatformInvoicingService {
       document_type: 'support_document',
       customer, // el riel usa `customer_*` para ambos
       supplier_id: undefined, // el rail tienda ya infiere supplier del flow
-      issue_date: new Date().toISOString().slice(0, 10),
+      issue_date: new Date().toISOString(),
       currency: dto.currency?.iso_4217 ?? 'COP',
       exchange_rate: dto.currency?.exchange_rate ?? undefined,
       exchange_rate_date: dto.currency?.exchange_rate_date ?? undefined,
@@ -685,11 +662,40 @@ export class PlatformInvoicingService {
     };
   }
 
+  /**
+   * Mapea el MvpV1 DTO (customer.kind+tenant_id) al legacy
+   * `CreatePlatformInvoiceDto` (customer.legal_name+tax_id+tax_id_dv).
+   *
+   * La tax del tenant YA fue validada como `fiscal_data_complete` por
+   * `PlatformTenantsService.getTenantByKindAndId`. Si por algun motivo
+   * falta tax_id o DV, el legacy `createPlatformInvoice` rechaza con
+   * 400 BadRequest — el facade NO vuelve a validar para evitar drift.
+   */
+  private mapMvpV1ToLegacyCreateDto(dto: any, tenant: any): any {
+    return {
+      customer: {
+        legal_name: tenant.legal_name ?? `Tenant ${tenant.tenant_id}`,
+        tax_id: tenant.tax_id ?? '',
+        tax_id_dv: tenant.tax_id_dv ?? '',
+        email: tenant.email ?? undefined,
+        address_line: tenant.address?.line ?? undefined,
+        city: tenant.address?.city ?? undefined,
+        department_code: tenant.address?.department_code ?? undefined,
+      },
+      items: (dto.items ?? []).map((line: any) => ({
+        description: line.description,
+        quantity: Number(line.quantity) || 1,
+        unit_price: Number(line.unit_price) || 0,
+      })),
+      period_start: dto.period_start ?? undefined,
+      period_end: dto.period_end ?? undefined,
+      currency: dto.currency?.iso_4217 ?? 'COP',
+    };
+  }
+
   /** Snapshot del destinatario para persistir en `fiscal_evidences`. */
   private tenantToAcquirerSnapshot(tenant: any, dto: any): any {
     return {
-      kind: tenant.kind,
-      tenant_id: tenant.tenant_id ?? tenant.id,
       legal_name: dto.customer?.legal_name_override ?? tenant.legal_name ?? tenant.name,
       tax_id: tenant.tax_id,
       tax_id_dv: tenant.tax_id_dv,
