@@ -122,19 +122,10 @@ export class FinancialAnalyticsService {
   private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
 
   /**
-   * Order states that count as REVENUE for the period. This is the CONTRACT's
-   * {@link COMPLETED_SALE_STATES} plus `refunded`, and the addition is deliberate:
-   * an order created and refunded inside the same period must net to zero instead
-   * of producing a phantom negative on net_profit (the refund subtotal is still
-   * subtracted below). Cross-period refunds are recognized in the period they
-   * occur (standard returns accounting).
+   * `REVENUE_STATES` is now imported from the contract (line 17) — same
+   * definition, single owner. The previous private field at this location
+   * duplicated the contract and was removed by the Anchor PR rebase.
    *
-   * Derived from the contract rather than re-typed, so a change to the canonical
-   * sale states propagates here instead of silently diverging.
-   */
-  private readonly REVENUE_STATES = [...COMPLETED_SALE_STATES, 'refunded'];
-
-  /**
    * Resolves the current request's store timezone (single source of truth).
    * Falls back to the default when there is no store context (e.g. the scoped
    * client would already reject such a call before reaching real data).
@@ -661,7 +652,7 @@ export class FinancialAnalyticsService {
   private async aggregateRevenueOrders(startDate: Date, endDate: Date) {
     return this.prisma.orders.aggregate({
       where: {
-        state: { in: this.REVENUE_STATES },
+        state: { in: REVENUE_STATES },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: {
@@ -692,7 +683,7 @@ export class FinancialAnalyticsService {
     startDate: Date,
     endDate: Date,
   ): Promise<{ cogs: number; coverage: CostCoverage }> {
-    const states = sqlStateList(this.REVENUE_STATES);
+    const states = sqlStateList(REVENUE_STATES);
     // QUI-631: typed handle for the raw query — same TS2347 fix as
     // inventory-analytics and sales-analytics. The scoped client's
     // withoutScope() returns `any` after the cast, which prevents the
@@ -1493,7 +1484,7 @@ export class FinancialAnalyticsService {
     // route hits this and only this).
     const currentPeriodRevenue = await this.prisma.orders.aggregate({
       where: {
-        state: { in: this.REVENUE_STATES },
+        state: { in: REVENUE_STATES },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: {
@@ -1505,7 +1496,7 @@ export class FinancialAnalyticsService {
     });
     const previousPeriodRevenue = await this.prisma.orders.aggregate({
       where: {
-        state: { in: this.REVENUE_STATES },
+        state: { in: REVENUE_STATES },
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
       _sum: {
@@ -1612,7 +1603,7 @@ export class FinancialAnalyticsService {
       // from the most recent revenue order (single-currency stores are the norm).
       this.prisma.orders.findFirst({
         where: {
-          state: { in: this.REVENUE_STATES },
+          state: { in: REVENUE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
         select: { currency: true },
