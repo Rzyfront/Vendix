@@ -233,19 +233,16 @@ export class PlatformInvoicingService {
             app_type: 'VENDIX_ADMIN',
           },
           () =>
-            this.invoicingService.create(
-              {
-                organization_id: args.organizationId,
-                store_id: null,
-                accounting_entity_id: args.accountingEntityId,
-                dian_configuration_id: args.dianConfigurationId,
-                actor_user_id: args.actorUserId,
-                source_type: 'platform_support_document',
-                resolution_id: storeCreateDto.resolution_id,
-                payload: storeCreateDto,
-              },
-              tx,
-            ),
+            this.invoicingService.create({
+              organization_id: args.organizationId,
+              store_id: null,
+              accounting_entity_id: args.accountingEntityId,
+              dian_configuration_id: args.dianConfigurationId,
+              actor_user_id: args.actorUserId,
+              source_type: 'platform_support_document',
+              resolution_id: storeCreateDto.resolution_id,
+              payload: storeCreateDto,
+            }),
         );
         if (!storeResult || !storeResult.invoice) {
           throw new VendixHttpException(

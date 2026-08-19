@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { PrismaModule, GlobalPrismaService } from '../../../../prisma/prisma.module';
+import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { S3Module } from '../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';

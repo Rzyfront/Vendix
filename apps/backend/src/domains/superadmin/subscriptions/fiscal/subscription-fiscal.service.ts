@@ -2806,16 +2806,20 @@ export class SubscriptionFiscalService {
       // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
       // (kind ya validado en la lectura) para que el detail page del rail
       // plataforma renderice con la misma forma que el rail tienda.
+      // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
+      // casteamos via unknown para leer campos arbitrarios sin revalidation por
+      // linea.
+      const meta = (snapshot?.metadata ?? null) as unknown as Record<string, unknown> | null;
       customer: customer ?? null,
-      payment_form: snapshot?.metadata?.payment_form ?? null,
-      payment_means_code: snapshot?.metadata?.payment_means_code ?? null,
+      payment_form: (meta?.['payment_form'] as string | null) ?? null,
+      payment_means_code: (meta?.['payment_means_code'] as string | null) ?? null,
       due_date: dueIso,
-      operation_type: snapshot?.metadata?.operation_type ?? null,
-      aiu_contract_object: snapshot?.metadata?.aiur_contract_object ?? null,
-      global_discount_amount: snapshot?.metadata?.global_discount_amount ?? null,
-      withholding_amount: snapshot?.metadata?.withholding_amount ?? null,
-      exchange_rate: snapshot?.metadata?.exchange_rate ?? null,
-      exchange_rate_date: snapshot?.metadata?.exchange_rate_date ?? null,
+      operation_type: (meta?.['operation_type'] as string | null) ?? null,
+      aiu_contract_object: (meta?.['aiur_contract_object'] as string | null) ?? null,
+      global_discount_amount: (meta?.['global_discount_amount'] as number | null) ?? null,
+      withholding_amount: (meta?.['withholding_amount'] as number | null) ?? null,
+      exchange_rate: (meta?.['exchange_rate'] as number | null) ?? null,
+      exchange_rate_date: (meta?.['exchange_rate_date'] as string | null) ?? null,
     };
 
     return {

@@ -207,7 +207,7 @@ export class PlatformInvoicingPersistenceService {
       legal_name: (meta['legal_name'] as string) ?? '',
       tax_id: (meta['tax_id'] as string) ?? '',
       tax_id_dv: (meta['tax_id_dv'] as string | null) ?? null,
-      person_type: (meta['person_type'] as string) ?? '2',
+      person_type: ((meta['person_type'] as '1' | '2') ?? '2') as '1' | '2',
       tax_regime_code: (meta['tax_regime_code'] as string | null) ?? null,
       fiscal_responsibilities: (meta['fiscal_responsibilities'] as string[]) ?? [],
       address: {
@@ -285,4 +285,6 @@ export interface PlatformInvoiceSnapshotPayload {
   withholdings: Array<Record<string, unknown>>;
   global_discount_amount: number;
   operation_type: string;
+  /** Texto libre AIU (AIU contract object, max 4900 chars DIAN). */
+  aiur_observation?: string | null;
 }
