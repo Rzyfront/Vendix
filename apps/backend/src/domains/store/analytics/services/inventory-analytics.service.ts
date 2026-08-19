@@ -1068,11 +1068,19 @@ export class InventoryAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(INBOUND_MOVEMENT_TYPES)}) THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_in,
-        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(OUTBOUND_MOVEMENT_TYPES)}) THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_out,
-        COALESCE(SUM(CASE WHEN im.movement_type = 'adjustment' THEN ABS(im.quantity) ELSE 0 END), 0) AS adjustments,
+        -- QUI-620: stock_in (positive inflow) and stock_out (negative outflow)
+        -- carry their SIGN so net = stock_in + stock_out + adjustments reconciles
+        -- with the actual stock_levels change. ABS removed because it erased
+        -- the direction of the flow — the dashboard summed "all magnitudes"
+        -- and the net was always 0 or positive even when the store bled stock.
+        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(INBOUND_MOVEMENT_TYPES)}) THEN im.quantity ELSE 0 END), 0) AS stock_in,
+        COALESCE(SUM(CASE WHEN im.movement_type IN (${sqlStateList(OUTBOUND_MOVEMENT_TYPES)}) THEN im.quantity ELSE 0 END), 0) AS stock_out,
+        COALESCE(SUM(CASE WHEN im.movement_type = 'adjustment' THEN im.quantity ELSE 0 END), 0) AS adjustments,
+        -- Transfers move stock between locations but don't change total
+        -- stock at the store level — keep ABS here so the net (which the
+        -- summary endpoint exposes) doesn't double-count.
         COALESCE(SUM(CASE WHEN im.movement_type = ${TRANSFER_MOVEMENT_TYPE} THEN ABS(im.quantity) ELSE 0 END), 0) AS transfers,
-        COALESCE(SUM(ABS(im.quantity)), 0) AS total
+        COALESCE(SUM(im.quantity), 0) AS total
       FROM inventory_movements im
       INNER JOIN products p ON p.id = im.product_id
       WHERE p.store_id = ${storeId}
