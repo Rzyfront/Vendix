@@ -3024,6 +3024,102 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * CP-platform-fiscal-invoicing-mvp · Phase A.4
+   *
+   * Lista de resoluciones aptas para EMISION en el rail super-admin.
+   * Diferencias con `listResolutions` (legacy management):
+   *   - excluye resoluciones expiradas (valid_to < now) o futuras (valid_from > now)
+   *   - excluye resoluciones inactivas
+   *   - incluye `technical_key_fingerprint` (nunca la cifrada plana)
+   *   - filtra explicitamente por `document_type` requerido
+   *
+   * Razon: el TenantPicker emite directamente sobre el form. No debe
+   * poder elegir una resolucion que no le sirve. La regla del piso
+   * no la hace este endpoint — la aplica `allocateFiscalNumber`
+   * (cursor exhaustado).
+   *
+   * Para sales_invoice exige ClTec utilizable — la DIAN rechaza sin
+   * ClTec y quema consecutivo. Para support_document no la requiere.
+   */
+  async listResolutionsForEmission(args: {
+    organizationId: number;
+    accountingEntityId: number;
+    documentType: 'sales_invoice' | 'support_document';
+    now?: Date;
+  }) {
+    const now = args.now ?? new Date();
+    const rows = await this.prisma.withoutScope().invoice_resolutions.findMany({
+      where: {
+        organization_id: args.organizationId,
+        store_id: null,
+        accounting_entity_id: args.accountingEntityId,
+        document_type: args.documentType,
+        is_active: true,
+        valid_from: { lte: now },
+        valid_to: { gte: now },
+      },
+      orderBy: [{ created_at: 'desc' }],
+      select: {
+        id: true,
+        prefix: true,
+        resolution_number: true,
+        range_from: true,
+        range_to: true,
+        current_number: true,
+        valid_from: true,
+        valid_to: true,
+        document_type: true,
+        technical_key_fingerprint: true,
+        created_at: true,
+      },
+    });
+
+    // Reglas adicionales del lado aplicacion (no Postgres):
+    // - sales_invoice: requiere `technical_key_fingerprint` no nulo
+    //   (ClTec utilizable, validada por `isWellFormedTechnicalKey`).
+    // - support_document: NO requiere ClTec; siempre es emitible.
+    // Devolvemos el flag `emittable` para que el form muestre advertencia.
+    const techKeyShape: Record<string, unknown> = {};
+    for (const row of rows) {
+      let emittable = true;
+      let cltecStatus: 'present' | 'absent' | 'invalid' = 'absent';
+
+      if (args.documentType === 'sales_invoice') {
+        const fingerprint = row.technical_key_fingerprint;
+        if (!fingerprint) {
+          emittable = false;
+          cltecStatus = 'absent';
+        } else {
+          // El fingerprint es SHA-256 del ClTec. La verificacion final
+          // de la forma (long 40 o 64 hex) corre en `allocateFiscalNumber`
+          // bajo el candado; aca marcamos 'present' y dejamos la
+          // verificacion dura para el submit.
+          cltecStatus = 'present';
+        }
+      } else {
+        cltecStatus = 'absent'; // support_document: irrelevante
+      }
+
+      techKeyShape[row.id] = { emittable, cltecStatus, fingerprint: row.technical_key_fingerprint ?? null };
+      // Adjuntamos `emittable` y `cltec_status` al row sin mutar la select.
+      (row as any).emittable = emittable;
+      (row as any).cltec_status = cltecStatus;
+    }
+
+    return {
+      data: rows,
+      meta: {
+        document_type: args.documentType,
+        total: rows.length,
+        // El caller puede ordenar/filtrar en cliente.
+        rejected_for_missing_cltec: rows.filter(
+          (r) => (r as any).cltec_status === 'absent' && args.documentType === 'sales_invoice',
+        ).length,
+      },
+    };
+  }
+
+  /**
    * Create a DIAN resolution for the Vendix platform organization
    * (derived platform `organization_id`, `store_id = NULL`).
    *
