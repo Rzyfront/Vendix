@@ -136,23 +136,20 @@
         class="lg:w-56"
         label="Origen"
         [options]="sourceTypeOptions"
-        [value]="sourceTypeFilter()"
-        (valueChange)="sourceTypeFilter.set($event ?? '')"
+        (valueChange)="sourceTypeFilter.set(($event ?? '').toString())"
       ></app-selector>
 
       <app-selector
         class="lg:w-56"
         label="Tipo de documento"
         [options]="documentTypeOptions"
-        [value]="documentTypeFilter()"
-        (valueChange)="documentTypeFilter.set($event ?? '')"
+        (valueChange)="documentTypeFilter.set(($event ?? '').toString())"
       ></app-selector>
 
       <app-input
         class="lg:w-40"
         label="Desde"
         type="date"
-        [value]="dateFromFilter()"
         (inputChange)="dateFromFilter.set($event ?? '')"
       ></app-input>
 
@@ -160,7 +157,6 @@
         class="lg:w-40"
         label="Hasta"
         type="date"
-        [value]="dateToFilter()"
         (inputChange)="dateToFilter.set($event ?? '')"
       ></app-input>
     </div>

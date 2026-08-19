@@ -131,8 +131,7 @@ interface ResolutionListItem {
               <span class="text-gray-700">Tipo de documento</span>
               <app-selector
                 [options]="documentTypeOptions"
-                [value]="documentType()"
-                (valueChange)="onDocumentTypeChange($event)"
+                (valueChange)="onDocumentTypeChange(($event ?? '').toString())"
               ></app-selector>
             </label>
 
@@ -140,8 +139,7 @@ interface ResolutionListItem {
               <span class="text-gray-700">Resolución</span>
               <app-selector
                 [options]="resolutionOptions()"
-                [value]="resolutionId()?.toString() ?? ''"
-                (valueChange)="onResolutionChange($event)"
+                (valueChange)="onResolutionChange(($event ?? '').toString())"
                 [placeholder]="resolutionOptions().length === 0 ? 'Cargando resoluciones...' : 'Seleccionar'"
               ></app-selector>
               @if (selectedResolution() && !selectedResolution()!.emittable) {
@@ -156,8 +154,7 @@ interface ResolutionListItem {
             <span class="text-gray-700">Operación</span>
             <app-selector
               [options]="operationTypeOptions"
-              [value]="operationType()"
-              (valueChange)="operationType.set($event)"
+              (valueChange)="onOperationTypeChange($event)"
             ></app-selector>
           </label>
 
@@ -250,7 +247,7 @@ interface ResolutionListItem {
                     <span class="text-gray-700">Descripción <span class="text-red-600">*</span></span>
                     <input
                       [ngModel]="newLine().description"
-                      (ngModelChange)="newLine.update(($any) => ({...$any(), description: $event}))"
+                      (ngModelChange)="onNewLineDescription($event)"
                       name="line_desc"
                       maxlength="500"
                       required
@@ -263,7 +260,7 @@ interface ResolutionListItem {
                       type="number"
                       step="0.0001"
                       [ngModel]="newLine().quantity"
-                      (ngModelChange)="newLine.update(($any) => ({...$any(), quantity: +$event || 0}))"
+                      (ngModelChange)="onNewLineQuantity($event)"
                       name="line_qty"
                       required
                       class="mt-1 w-full border rounded px-3 py-2 text-right"
@@ -275,7 +272,7 @@ interface ResolutionListItem {
                       type="number"
                       step="0.0001"
                       [ngModel]="newLine().unit_price"
-                      (ngModelChange)="newLine.update(($any) => ({...$any(), unit_price: +$event || 0}))"
+                      (ngModelChange)="onNewLinePrice($event)"
                       name="line_price"
                       required
                       class="mt-1 w-full border rounded px-3 py-2 text-right"
@@ -287,7 +284,7 @@ interface ResolutionListItem {
                       type="number"
                       step="0.01"
                       [ngModel]="newLine().discount_amount"
-                      (ngModelChange)="newLine.update(($any) => ({...$any(), discount_amount: +$event || 0}))"
+                      (ngModelChange)="onNewLineDiscount($event)"
                       name="line_disc"
                       class="mt-1 w-full border rounded px-3 py-2 text-right"
                     />
@@ -341,8 +338,7 @@ interface ResolutionListItem {
                       <legend class="text-xs text-gray-700 px-1">Componente AIU</legend>
                       <app-selector
                         [options]="aiuComponentOptions"
-                        [value]="newLine().aiu_component ?? ''"
-                        (valueChange)="newLine.update(($any) => ({...$any(), aiu_component: $event || undefined}))"
+                        (valueChange)="onNewLineAiuComponent($event)"
                       ></app-selector>
                     </fieldset>
                   }
@@ -351,7 +347,7 @@ interface ResolutionListItem {
                     <span class="text-gray-700">Unidad (UN/ECE)</span>
                     <input
                       [ngModel]="newLine().unit_code"
-                      (ngModelChange)="newLine.update(($any) => ({...$any(), unit_code: $event || 'EA'}))"
+                      (ngModelChange)="onNewLineUnitCode($event)"
                       name="line_unit_code"
                       maxlength="10"
                       class="mt-1 w-full border rounded px-3 py-2"
@@ -383,8 +379,7 @@ interface ResolutionListItem {
             <div class="grid grid-cols-12 gap-2 items-end">
               <app-selector
                 [options]="withholdingRoleOptions"
-                [value]="wh.role"
-                (valueChange)="updateWithholding(i, 'role', $event)"
+                (valueChange)="updateWithholding(i, 'role', ($event ?? 'practiced').toString())"
                 class="col-span-3"
               ></app-selector>
               <label class="col-span-2 text-sm">
@@ -451,8 +446,7 @@ interface ResolutionListItem {
               <span class="text-gray-700">Currency</span>
               <app-selector
                 [options]="currencyOptions"
-                [value]="currencyIso()"
-                (valueChange)="currencyIso.set($event)"
+                (valueChange)="currencyIso.set(($event ?? 'COP').toString())"
               ></app-selector>
             </label>
           </div>
@@ -489,8 +483,7 @@ interface ResolutionListItem {
               <span class="text-gray-700">Forma de pago</span>
               <app-selector
                 [options]="paymentFormOptions"
-                [value]="paymentForm()"
-                (valueChange)="paymentForm.set($event)"
+                (valueChange)="onPaymentFormChange($event)"
               ></app-selector>
             </label>
             @if (paymentForm() === '2') {
@@ -679,6 +672,49 @@ export class PlatformInvoiceCreateComponent {
     this.documentType.set(next);
     this.resolutionId.set(null);
     this.loadResolutions();
+  }
+
+  onOperationTypeChange(value: string | number | null): void {
+    const v = (value ?? '10').toString();
+    if (v === '09' || v === '11' || v === '12') {
+      this.operationType.set(v);
+    } else {
+      this.operationType.set('10');
+    }
+  }
+
+  onPaymentFormChange(value: string | number | null): void {
+    const v = (value ?? '1').toString();
+    this.paymentForm.set(v === '2' ? '2' : '1');
+  }
+
+  onNewLineDescription(value: string): void {
+    this.newLine.update((l) => ({ ...l, description: value }));
+  }
+
+  onNewLineQuantity(value: string | number): void {
+    this.newLine.update((l) => ({ ...l, quantity: Number(value) || 0 }));
+  }
+
+  onNewLinePrice(value: string | number): void {
+    this.newLine.update((l) => ({ ...l, unit_price: Number(value) || 0 }));
+  }
+
+  onNewLineDiscount(value: string | number): void {
+    this.newLine.update((l) => ({ ...l, discount_amount: Number(value) || 0 }));
+  }
+
+  onNewLineUnitCode(value: string): void {
+    this.newLine.update((l) => ({ ...l, unit_code: value || 'EA' }));
+  }
+
+  onNewLineAiuComponent(value: string | number | null): void {
+    const v = (value ?? '').toString();
+    const valid = v === 'administracion' || v === 'imprevistos' || v === 'utilidad';
+    this.newLine.update((l) => ({
+      ...l,
+      aiu_component: valid ? (v as 'administracion' | 'imprevistos' | 'utilidad') : undefined,
+    }));
   }
 
   onResolutionChange(value: string): void {

@@ -155,7 +155,7 @@ export const PlatformFiscalInvoicingActions = createActionGroup({
     // DETAIL
     'Load Detail': props<{ id: number }>(),
     'Load Detail Success': props<{ data: PlatformInvoiceSummary }>(),
-    'Load Detail Failure': props<{ error: string }>(),
+    'Load Detail Failure': props<{ id: number; error: string }>(),
 
     // READINESS
     'Evaluate Readiness': props<{ id: number }>(),
@@ -185,30 +185,30 @@ export const PlatformFiscalInvoicingActions = createActionGroup({
   },
 });
 
+// Tipos de cada action creator individual (exported para consumers)
+export type PlatformLoadInvoicesAction = ReturnType<typeof PlatformFiscalInvoicingActions.loadInvoices>;
+export type PlatformLoadInvoicesSuccessAction = ReturnType<typeof PlatformFiscalInvoicingActions.loadInvoicesSuccess>;
+export type PlatformLoadDetailSuccessAction = ReturnType<typeof PlatformFiscalInvoicingActions.loadDetailSuccess>;
+export type PlatformEvaluateReadinessAction = ReturnType<typeof PlatformFiscalInvoicingActions.evaluateReadiness>;
+export type PlatformSendInvoiceAction = ReturnType<typeof PlatformFiscalInvoicingActions.sendInvoice>;
+export type PlatformCancelInvoiceAction = ReturnType<typeof PlatformFiscalInvoicingActions.cancelInvoice>;
+export type PlatformRetryTransmissionAction = ReturnType<typeof PlatformFiscalInvoicingActions.retryTransmission>;
+export type PlatformSearchAcquirersAction = ReturnType<typeof PlatformFiscalInvoicingActions.searchAcquirers>;
+export type PlatformSearchAcquirersSuccessAction = ReturnType<typeof PlatformFiscalInvoicingActions.searchAcquirersSuccess>;
+export type PlatformLockAcquirerAction = ReturnType<typeof PlatformFiscalInvoicingActions.lockAcquirer>;
+
+// Union tipado via ReturnType (reemplaza el Action<X> que no compila con ActionCreator)
 export type PlatformFiscalInvoicingAction =
-  | Action<typeof PlatformFiscalInvoicingActions.loadInvoices>
-  | Action<typeof PlatformFiscalInvoicingActions.loadInvoicesSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.loadInvoicesFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.setFilters>
-  | Action<typeof PlatformFiscalInvoicingActions.loadDetail>
-  | Action<typeof PlatformFiscalInvoicingActions.loadDetailSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.loadDetailFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.evaluateReadiness>
-  | Action<typeof PlatformFiscalInvoicingActions.evaluateReadinessSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.evaluateReadinessFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.sendInvoice>
-  | Action<typeof PlatformFiscalInvoicingActions.sendInvoiceSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.sendInvoiceFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.cancelInvoice>
-  | Action<typeof PlatformFiscalInvoicingActions.cancelInvoiceSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.cancelInvoiceFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.retryTransmission>
-  | Action<typeof PlatformFiscalInvoicingActions.retryTransmissionSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.retryTransmissionFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.searchAcquirers>
-  | Action<typeof PlatformFiscalInvoicingActions.searchAcquirersSuccess>
-  | Action<typeof PlatformFiscalInvoicingActions.searchAcquirersFailure>
-  | Action<typeof PlatformFiscalInvoicingActions.lockAcquirer>;
+  | PlatformLoadInvoicesAction
+  | PlatformLoadInvoicesSuccessAction
+  | PlatformLoadDetailSuccessAction
+  | PlatformEvaluateReadinessAction
+  | PlatformSendInvoiceAction
+  | PlatformCancelInvoiceAction
+  | PlatformRetryTransmissionAction
+  | PlatformSearchAcquirersAction
+  | PlatformSearchAcquirersSuccessAction
+  | PlatformLockAcquirerAction;
 
 // ── State ────────────────────────────────────────────────────────────────
 
@@ -529,7 +529,7 @@ export class PlatformFiscalInvoicingEffects {
               ),
             ),
           ),
-      }),
+      ),
     ),
   );
 
@@ -555,7 +555,7 @@ export class PlatformFiscalInvoicingEffects {
               ),
             ),
           ),
-      }),
+      ),
     ),
   );
 
@@ -575,8 +575,8 @@ export class PlatformFiscalInvoicingEffects {
                 }),
               ),
             ),
-          );
-      }),
+          )
+      ),
     ),
   );
 
@@ -596,8 +596,8 @@ export class PlatformFiscalInvoicingEffects {
                 }),
               ),
             ),
-          );
-      }),
+          )
+      ),
     ),
   );
 
@@ -617,8 +617,8 @@ export class PlatformFiscalInvoicingEffects {
                 }),
               ),
             ),
-          );
-      }),
+          )
+      ),
     ),
   );
 
@@ -636,7 +636,7 @@ export class PlatformFiscalInvoicingEffects {
               PlatformFiscalInvoicingActions.searchAcquirersSuccess({
                 q,
                 kind: kind ?? null,
-                results: res.data.data ?? [],
+                results: (res as any).data?.data ?? [],
               }),
             ),
             catchError((err: HttpErrorResponse) =>

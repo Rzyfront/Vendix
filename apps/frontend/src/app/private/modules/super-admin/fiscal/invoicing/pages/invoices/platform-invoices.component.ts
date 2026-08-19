@@ -94,8 +94,8 @@ export class PlatformInvoicesComponent {
     return this.transmissions().filter((row) => {
       if (sourceType && row.source_type !== sourceType) return false;
       if (docType && row.document_type !== docType) return false;
-      if (from && row.created_at < from) return false;
-      if (to && row.created_at > to + 'T23:59:59') return false;
+      if (from && (row.created_at ?? '') < from) return false;
+      if (to && (row.created_at ?? '') > to + 'T23:59:59') return false;
       return true;
     });
   });

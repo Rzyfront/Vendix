@@ -66,14 +66,12 @@ import {
       <div class="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
         <app-input
           placeholder="Buscar por NIT, razón social, slug..."
-          [value]="q()"
-          (valueChange)="onQueryChange($event)"
+          (inputChange)="onQueryChange($event)"
           aria-label="Buscar destinatario"
         ></app-input>
         <app-selector
           [options]="kindOptions"
-          [value]="kind() ?? ''"
-          (valueChange)="onKindChange($event)"
+          (valueChange)="onKindChange($event ?? null)"
         ></app-selector>
       </div>
 
@@ -168,8 +166,9 @@ export class TenantPickerComponent implements OnInit {
     );
   }
 
-  onKindChange(value: string): void {
-    const next = !value ? null : ((value as 'store' | 'organization') ?? null);
+  onKindChange(value: string | number | null): void {
+    const v = (value ?? '').toString();
+    const next = !v ? null : ((v as 'store' | 'organization') ?? null);
     this.kind.set(next);
     this.store.dispatch(
       PlatformFiscalInvoicingActions.searchAcquirers({

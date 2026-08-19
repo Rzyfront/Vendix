@@ -7,7 +7,6 @@ import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   ButtonComponent,
-  CurrencyFormatService,
 } from '../../../../../../../shared/components';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import {
@@ -150,7 +149,6 @@ interface SubscriptionInvoiceDetail {
   standalone: true,
   imports: [
     RouterLink,
-    CurrencyPipe,
     VendixCurrencyPipe,
     DatePipe,
     ButtonComponent,
@@ -185,20 +183,20 @@ interface SubscriptionInvoiceDetail {
               <dt class="text-gray-500">Periodo</dt>
               <dd>{{ formatPeriodDate(d.invoice.period_start) }} → {{ formatPeriodDate(d.invoice.period_end) }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
-              <dd>{{ d.invoice.subtotal | currency: d.invoice.currency }}</dd>
+              <dd>{{ subtotalNumber() | currency }}</dd>
               <dt class="text-gray-500">Impuestos</dt>
-              <dd>{{ d.invoice.tax_amount | currency: d.invoice.currency }}</dd>
+              <dd>{{ taxAmountNumber() | currency }}</dd>
               <dt class="text-gray-500">Total</dt>
-              <dd class="font-semibold">{{ d.invoice.total | currency: d.invoice.currency }}</dd>
+              <dd class="font-semibold">{{ totalNumber() | currency }}</dd>
               <dt class="text-gray-500">Saldo a pagar</dt>
-              <dd>{{ saldo() | currency: d.invoice.currency }}</dd>
-              @if (d.invoice.global_discount_amount && +d.invoice.global_discount_amount > 0) {
+              <dd>{{ saldo() | currency }}</dd>
+              @if (globalDiscountAmountNumber() > 0) {
                 <dt class="text-gray-500">Descuento global</dt>
-                <dd>- {{ d.invoice.global_discount_amount | currency: d.invoice.currency }}</dd>
+                <dd>- {{ globalDiscountAmountNumber() | currency }}</dd>
               }
-              @if (d.invoice.withholding_amount && +d.invoice.withholding_amount > 0) {
+              @if (withholdingAmountNumber() > 0) {
                 <dt class="text-gray-500">Retenciones</dt>
-                <dd>{{ d.invoice.withholding_amount | currency: d.invoice.currency }}</dd>
+                <dd>{{ withholdingAmountNumber() | currency }}</dd>
               }
             </dl>
           </div>
@@ -340,8 +338,8 @@ interface SubscriptionInvoiceDetail {
                     <td>{{ wh.role }}</td>
                     <td>{{ wh.concept_id }}</td>
                     <td class="text-right">{{ wh.base_amount }}</td>
-                    <td class="text-right">{{ (+wh.rate * 100).toFixed(4) }}%</td>
-                    <td class="text-right">{{ wh.amount ?? (wh.base_amount * +wh.rate) }}</td>
+                    <td class="text-right">{{ whWithholdingRatePct(wh) }}</td>
+                    <td class="text-right">{{ whWithholdingAmount(wh) }}</td>
                   </tr>
                 }
               </tbody>
@@ -594,6 +592,43 @@ export class PlatformInvoiceDetailComponent {
     if (!d) return 0;
     return Number(d.invoice.total) - Number(d.invoice.amount_paid);
   });
+
+  readonly subtotalNumber = computed<number>(() => {
+    const d = this.data();
+    return d ? Number(d.invoice.subtotal) : 0;
+  });
+
+  readonly taxAmountNumber = computed<number>(() => {
+    const d = this.data();
+    return d ? Number(d.invoice.tax_amount) : 0;
+  });
+
+  readonly totalNumber = computed<number>(() => {
+    const d = this.data();
+    return d ? Number(d.invoice.total) : 0;
+  });
+
+  readonly globalDiscountAmountNumber = computed<number>(() => {
+    const d = this.data();
+    if (!d || !d.invoice.global_discount_amount) return 0;
+    return Number(d.invoice.global_discount_amount);
+  });
+
+  readonly withholdingAmountNumber = computed<number>(() => {
+    const d = this.data();
+    if (!d || !d.invoice.withholding_amount) return 0;
+    return Number(d.invoice.withholding_amount);
+  });
+
+  whWithholdingRatePct(wh: { rate: number | string }): string {
+    const r = Number(wh.rate);
+    return (r * 100).toFixed(4) + '%';
+  }
+
+  whWithholdingAmount(wh: { amount?: number | string; base_amount: number | string; rate: number | string }): number | string {
+    if (wh.amount !== undefined && wh.amount !== null) return wh.amount;
+    return Number(wh.base_amount) * Number(wh.rate);
+  }
 
   readonly canCancel = computed<boolean>(() => {
     const d = this.data();
