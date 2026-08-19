@@ -1,10 +1,9 @@
-import { DatePipe, formatDate } from '@angular/common';
+import { CurrencyPipe, DatePipe, formatDate } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   billingCycleLabel,
@@ -109,25 +108,13 @@ interface SubscriptionInvoiceDetail {
               <dt class="text-gray-500">Periodo</dt>
               <dd>{{ formatPeriodDate(d.invoice.period_start) }} → {{ formatPeriodDate(d.invoice.period_end) }}</dd>
               <dt class="text-gray-500">Subtotal</dt>
-              <dd>
-                {{ d.invoice.subtotal | currency }}
-                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
-              </dd>
+              <dd>{{ d.invoice.subtotal | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Impuestos</dt>
-              <dd>
-                {{ d.invoice.tax_amount | currency }}
-                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
-              </dd>
+              <dd>{{ d.invoice.tax_amount | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Total</dt>
-              <dd class="font-semibold">
-                {{ d.invoice.total | currency }}
-                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
-              </dd>
+              <dd class="font-semibold">{{ d.invoice.total | currency: d.invoice.currency }}</dd>
               <dt class="text-gray-500">Saldo a pagar</dt>
-              <dd>
-                {{ saldo(d) | currency }}
-                <span class="text-xs text-gray-500">{{ d.invoice.currency }}</span>
-              </dd>
+              <dd>{{ saldo() | currency: d.invoice.currency }}</dd>
             </dl>
           </div>
 
@@ -255,12 +242,13 @@ export class PlatformInvoiceDetailComponent {
   /**
    * Saldo a pagar = total - amount_paid. Si la factura está `paid`, saldo = 0
    * y la métrica es informativa. Si está `draft`/`overdue`, saldo = total.
+   * Como `data` es un signal, este signal se recomputa automáticamente.
    */
-  saldo(d: SubscriptionInvoiceDetail): string {
-    const total = Number(d.invoice.total);
-    const paid = Number(d.invoice.amount_paid);
-    return (total - paid).toFixed(2);
-  }
+  readonly saldo = computed<number>(() => {
+    const d = this.data();
+    if (!d) return 0;
+    return Number(d.invoice.total) - Number(d.invoice.amount_paid);
+  });
 
   /**
    * F-R2-14: formatea una fecha en la zona de la plataforma. Sin esto, un
