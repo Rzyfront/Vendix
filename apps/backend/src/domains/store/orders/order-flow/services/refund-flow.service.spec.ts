@@ -12,6 +12,7 @@ import { SerialNumberEnforcementService } from '../../../inventory/serial-number
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
+import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
 
 /**
  * REFUND OVERHAUL — focused regression tests for the invariants this
@@ -29,6 +30,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
   let service: RefundFlowService;
   let eventEmitter: { emit: jest.Mock };
   let movementsService: { recordRefundMovement: jest.Mock };
+  let paymentGatewayService: { reversePaymentWithProcessor: jest.Mock };
 
   const mockPrisma = {
     orders: { findFirst: jest.fn(), update: jest.fn() },
@@ -58,6 +60,13 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     jest.clearAllMocks();
     eventEmitter = { emit: jest.fn() };
     movementsService = mockMovementsService;
+    // refund-gateway-fix (W2-A): dispatchRefundProcessor now calls
+    // PaymentGatewayService.reversePaymentWithProcessor() in-process. The
+    // mock starts unset (no behavior) and each test configures the
+    // gateway response it wants to exercise.
+    paymentGatewayService = {
+      reversePaymentWithProcessor: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -82,6 +91,10 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         {
           provide: WalletBalanceService,
           useValue: { credit: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: PaymentGatewayService,
+          useValue: paymentGatewayService,
         },
       ],
     }).compile();
@@ -438,12 +451,12 @@ describe('RefundFlowService — refund overhaul invariants', () => {
    *
    * Caso A — operador pidió `original_payment` sobre un pago en `cash`:
    *   el canal efectivo es `cash` → `finalState='completed'` y se registra
-   *   salida de caja. No se emite `payment.refund.requested`.
+   *   salida de caja. No se emite el evento async del processor.
    *
    * Caso B — operador pidió `original_payment` sobre un pago `wompi`:
-   *   el canal efectivo es `gateway` → `finalState='pending_approval'` y se
-   *   emite `payment.refund.requested` para que el processor intente la
-   *   reversión. No hay movimiento de caja.
+   *   el canal efectivo es `gateway` → la rama invoca el processor real
+   *   en proceso (W2-A) y le devuelve control al usuario con estado
+   *   terminal. No hay movimiento de caja.
    */
   describe('effective refund channel resolution', () => {
     it("original_payment sobre pago cash → state='completed' y registra salida de caja", async () => {
@@ -545,74 +558,312 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       // podemos verificar indirectamente: el refund no quedó en
       // 'pending_approval' (eso ya lo cubrimos arriba).
 
-      // 4. payment.refund.requested NO se emite para canal cash.
-      const refundRequestedEmit = eventEmitter.emit.mock.calls.filter(
-        ([name]) => name === 'payment.refund.requested',
-      );
-      expect(refundRequestedEmit).toHaveLength(0);
+      // 4. El evento async del processor NO se emite para canal cash
+      // (regression guard: el processor real sólo se llama para canales
+      // reversibles como wompi/stripe/paypal — para cash el refund ya
+      // terminó en la tx).
+      expect(paymentGatewayService.reversePaymentWithProcessor).not.toHaveBeenCalled();
     });
 
-    it("original_payment sobre wompi → state='pending_approval' y emite payment.refund.requested", async () => {
-      // ARRANGE: orden con un pago wompi (pasarela reversible). Usamos
-      // el helper existente, que ya arma el mock con `type='wompi'`.
+    it("original_payment sobre wompi → processor responded 'succeeded' → state='completed' y refund.completed con payload canónico", async () => {
+      // refund-gateway-fix (W2-A): la rama llama al processor en proceso
+      // y persiste el resultado. El round-trip async anterior dejaba
+      // refunds atorados en `pending_approval` cuando el listener del
+      // processor no estaba registrado (la mayoría de las tiendas).
+      //
+      // Este caso verifica el camino feliz para wompi: el processor
+      // responde `succeeded` → el refund row se actualiza a
+      // `completed` con `refund_transaction_id` y `processed_at`, y
+      // `refund.completed` se emite con el payload canónico completo
+      // para que la contabilidad (accounting-events.listener) registre
+      // el asiento contra la PUC correcta (1105/1110/2335 según canal).
       setupFinishedOrderWithSucceededPayment();
-
-      const dto = {
-        items: [],
-        include_shipping: false,
-        refund_method: 'original_payment',
-        reason: 'test',
-      };
+      paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
+        success: true,
+        status: 'succeeded',
+        refundId: 'wo-refund-abc-123',
+        amount: 3800,
+        gatewayResponse: {
+          id: 'wo-refund-abc-123',
+          status: 'REFUNDED',
+          raw: 'stub',
+        },
+      });
 
       movementsService.recordRefundMovement.mockClear();
       eventEmitter.emit.mockClear();
 
-      await service.createRefund(3830, dto as any);
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      } as any);
 
-      // 1. State del refund debe ser 'pending_approval' (no 'completed').
-      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 999 },
-          data: expect.objectContaining({ state: 'pending_approval' }),
-        }),
+      // 1. Processor llamado en proceso con transaction_id y amount.
+      expect(
+        paymentGatewayService.reversePaymentWithProcessor,
+      ).toHaveBeenCalledWith('tx-123', 3800);
+
+      // 2. Refund row actualizado al estado terminal correcto (segundo
+      // update, fuera de la tx). El primer update (dentro de la tx) lo
+      // dejó en `pending_approval`; el segundo lo promovió a
+      // `completed` con `refund_transaction_id` y `processed_at`.
+      const updates = mockPrisma.refunds.update.mock.calls.filter(
+        ([args]) => args?.where?.id === 999,
       );
-
-      // 2. processed_at debe ser null cuando el state es 'pending_approval'.
-      const updateCall = mockPrisma.refunds.update.mock.calls[0][0];
-      expect(updateCall.data.processed_at).toBeNull();
-
-      // 3. payment.refund.requested SÍ se emite para canal gateway.
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        'payment.refund.requested',
-        expect.objectContaining({
-          refund_id: 999,
-          payment_id: 100,
-          transaction_id: 'tx-123',
-          processor_type: 'wompi',
-          store_id: 10,
-          amount: 3800,
-        }),
+      const terminalUpdate = updates.find(
+        ([args]) => args?.data?.state === 'completed',
       );
+      expect(terminalUpdate).toBeDefined();
+      expect(terminalUpdate![0].data.refund_transaction_id).toBe(
+        'wo-refund-abc-123',
+      );
+      expect(terminalUpdate![0].data.processed_at).toBeInstanceOf(Date);
 
-      // 4. El evento refund.completed también se emite (incluye effective_channel).
+      // 3. refund.completed emitido con payload canónico completo.
       const refundCompleted = eventEmitter.emit.mock.calls.find(
         ([name]) => name === 'refund.completed',
       );
       expect(refundCompleted).toBeDefined();
       expect(refundCompleted![1]).toEqual(
         expect.objectContaining({
+          refund_id: 999,
+          order_id: 3830,
+          organization_id: 1,
+          store_id: 10,
+          amount: 3800,
           refund_method: 'original_payment',
           effective_channel: 'gateway',
         }),
       );
 
-      // 5. No debe registrarse movimiento de caja (movesCash=false para gateway).
-      // La verificación real del no-llamado se hace contra el mock
-      // movementsService.recordRefundMovement, pero como el mock está
-      // global al describe y no podemos afirmar fácilmente que no se
-      // llamó (settingsService devuelve undefined → corta antes), el
-      // assert observable es que la rama de código para `movesCash` no
-      // se invocó: eso ya está implícito porque movesCash=false.
+      // 4. No debe registrarse movimiento de caja (movesCash=false para
+      // gateway — implícito por canal efectivo).
+    });
+  });
+
+  /**
+   * refund-gateway-fix (W2-A) — regresión exhaustiva del nuevo
+   * `dispatchRefundProcessor`. Cubre los cuatro caminos críticos del
+   * contrato:
+   *
+   *   A. processor responde `succeeded` → refund row `completed`,
+   *      refund.completed emitido con payload canónico.
+   *   B. processor responde `failed`   → refund row `failed`,
+   *      refund.completed emitido (la contabilidad registra la falla).
+   *   C. processor responde `pending`  → refund row `processing`,
+   *      refund.completed NO emitido (la pasarela sigue trabajando).
+   *   D. canal no-gateway (cash)       → processor NO se llama,
+   *      refund.completed emitido (la tx ya cerró el refund).
+   *
+   * Estos test cases son los que evidencia el criterion B.1 de la
+   * critical plan; cualquier regresión aquí volvería al limbo pre-W2-A.
+   */
+  describe('dispatchRefundProcessor (W2-A — sync reversa por gateway)', () => {
+    it('CAMINO A: processor responde succeeded → state=completed y refund.completed emitido', async () => {
+      setupFinishedOrderWithSucceededPayment();
+      paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
+        success: true,
+        status: 'succeeded',
+        refundId: 'wo-refund-A',
+        amount: 3800,
+        gatewayResponse: { id: 'wo-refund-A', status: 'REFUNDED' },
+      });
+
+      eventEmitter.emit.mockClear();
+
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      } as any);
+
+      expect(
+        paymentGatewayService.reversePaymentWithProcessor,
+      ).toHaveBeenCalledWith('tx-123', 3800);
+
+      const updates = mockPrisma.refunds.update.mock.calls.filter(
+        ([args]) => args?.where?.id === 999,
+      );
+      const terminalUpdate = updates.find(
+        ([args]) => args?.data?.state === 'completed',
+      );
+      expect(terminalUpdate).toBeDefined();
+      expect(terminalUpdate![0].data.refund_transaction_id).toBe(
+        'wo-refund-A',
+      );
+      expect(terminalUpdate![0].data.processed_at).toBeInstanceOf(Date);
+
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeDefined();
+      expect(refundCompleted![1]).toEqual(
+        expect.objectContaining({
+          refund_id: 999,
+          organization_id: 1,
+          store_id: 10,
+          amount: 3800,
+          refund_method: 'original_payment',
+          effective_channel: 'gateway',
+        }),
+      );
+    });
+
+    it('CAMINO B: processor responde failed → state=failed y refund.completed emitido', async () => {
+      setupFinishedOrderWithSucceededPayment();
+      paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
+        success: false,
+        status: 'failed',
+        message: 'card declined',
+        amount: 3800,
+        gatewayResponse: { error: 'CARD_DECLINED', raw: 'stub' },
+      });
+
+      eventEmitter.emit.mockClear();
+
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      } as any);
+
+      // 1. state actualizado a 'failed'.
+      const updates = mockPrisma.refunds.update.mock.calls.filter(
+        ([args]) => args?.where?.id === 999,
+      );
+      const failedUpdate = updates.find(
+        ([args]) => args?.data?.state === 'failed',
+      );
+      expect(failedUpdate).toBeDefined();
+      // processed_at NO se setea cuando state='failed'.
+      expect(failedUpdate![0].data.processed_at).toBeNull();
+
+      // 2. refund.completed SÍ se emite (la contabilidad debe registrar
+      // la falla para que cuadren los saldos).
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeDefined();
+    });
+
+    it('CAMINO C: processor responde pending → state=processing y NO emite refund.completed', async () => {
+      setupFinishedOrderWithSucceededPayment();
+      paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
+        success: true,
+        status: 'pending',
+        amount: 3800,
+      });
+
+      eventEmitter.emit.mockClear();
+
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      } as any);
+
+      // 1. state actualizado a 'processing' (la pasarela sigue
+      // trabajando; el processor ya movió la plata pero todavía no
+      // confirma).
+      const updates = mockPrisma.refunds.update.mock.calls.filter(
+        ([args]) => args?.where?.id === 999,
+      );
+      const processingUpdate = updates.find(
+        ([args]) => args?.data?.state === 'processing',
+      );
+      expect(processingUpdate).toBeDefined();
+      expect(processingUpdate![0].data.processed_at).toBeNull();
+
+      // 2. refund.completed NO se emite — emitir ahora generaría un
+      // asiento contable para una reversión que todavía no terminó en
+      // la pasarela (defecto B.3).
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeUndefined();
+    });
+
+    it('CAMINO D: canal no-gateway (cash) → processor NO se llama, refund.completed emitido', async () => {
+      // ARRANGE: orden con pago en efectivo. El canal efectivo se
+      // resuelve a 'cash' → `awaitsReversal=false` → el dispatch
+      // completo se salta y el refund sigue en `completed` desde la tx.
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 5001,
+        store_id: 10,
+        state: 'finished',
+        payments: [
+          {
+            id: 100,
+            state: 'succeeded',
+            store_payment_method: {
+              state: 'enabled',
+              system_payment_method: { type: 'cash', is_active: true },
+            },
+          },
+        ],
+        stores: { id: 10, organization_id: 1 },
+        order_items: [],
+      });
+      mockCalculationService.calculate.mockResolvedValue({
+        items: [],
+        subtotal_refund: 1500,
+        tax_refund: 0,
+        shipping_refund: 0,
+        total_refund: 1500,
+        is_full_refund: false,
+        already_refunded: 0,
+        max_refundable: 5000,
+      });
+      mockPrisma.stores.findUnique.mockResolvedValue({
+        default_location_id: null,
+        organization_id: 1,
+      });
+      mockPrisma.refunds.create.mockResolvedValue({
+        id: 1500,
+        state: 'processing',
+      });
+      mockPrisma.refunds.update.mockResolvedValue({
+        id: 1500,
+        state: 'completed',
+        refund_items: [],
+      });
+      mockPrisma.order_items.findMany.mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(
+        async (cb: any) => cb(mockPrisma),
+      );
+      mockPrisma.refund_items.create.mockResolvedValue({ id: 1 });
+      mockPrisma.payments.update.mockResolvedValue({});
+
+      eventEmitter.emit.mockClear();
+
+      await service.createRefund(5001, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      } as any);
+
+      // 1. processor NUNCA se llama para canal cash.
+      expect(
+        paymentGatewayService.reversePaymentWithProcessor,
+      ).not.toHaveBeenCalled();
+
+      // 2. refund.completed SÍ se emite (la tx ya cerró el refund;
+      // este evento es el camino normal del refund no-gateway).
+      const refundCompleted = eventEmitter.emit.mock.calls.find(
+        ([name]) => name === 'refund.completed',
+      );
+      expect(refundCompleted).toBeDefined();
+      expect(refundCompleted![1]).toEqual(
+        expect.objectContaining({
+          effective_channel: 'cash',
+        }),
+      );
     });
   });
 });

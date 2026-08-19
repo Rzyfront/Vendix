@@ -1,9 +1,12 @@
 import {
   Injectable,
+  Inject,
+  forwardRef,
   NotFoundException,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { Prisma, refunds_state_enum } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -25,6 +28,7 @@ import { SerialNumberEnforcementService } from '../../../inventory/serial-number
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
+import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
 import {
   resolveEffectiveRefundChannel,
   awaitsExternalReversal,
@@ -52,6 +56,14 @@ export class RefundFlowService {
     // QUI-457 — credit customer wallet on `store_credit` refunds.
     private readonly walletService: WalletService,
     private readonly walletBalance: WalletBalanceService,
+    // refund-gateway-fix (W2-A): the dispatch path now calls
+    // PaymentGatewayService.reversePaymentWithProcessor() in-process. The
+    // previous async round-trip via an event listener left many refunds
+    // stranded in pending_approval when the listener was never
+    // registered. forwardRef resolves the PaymentsModule ↔ OrderFlowModule
+    // cycle (see order-flow.module.ts:39).
+    @Inject(forwardRef(() => PaymentGatewayService))
+    private readonly paymentGatewayService: PaymentGatewayService,
   ) {}
 
   async previewRefund(
@@ -384,32 +396,49 @@ export class RefundFlowService {
       })
       .then(async (completedRefund) => {
         // 7. Dispatch the original_payment reversal to the processor BEFORE
-        // emitting refund.completed. Hotfix post-PR-576: la rama vieja
-        // marcaba `state='completed'` sin reversar el dinero en el processor.
-        // Ahora emitimos `payment.refund.requested` y dejamos el refund en
-        // `pending_approval`. El listener del processor (cuando existe) lo
-        // promueve a `completed` o rechaza con `failed`. Sin listener, el
-        // operador cierra manualmente — comportamiento correcto: nunca
-        // marcamos `completed` un refund que no se reversó en el gateway.
+        // emitting refund.completed.
+        //
+        // refund-gateway-fix (W2-A): la rama vieja emitía un evento async
+        // y dejaba el refund en `pending_approval` para que un listener
+        // del processor lo promoviera a `completed` o rechazara con
+        // `failed`. Ese round-trip dejaba refunds invisibles durante horas
+        // (hasta que el listener reaccionaba) y muchos ni llegaban a
+        // cerrarse cuando el listener no estaba registrado.
+        //
+        // Ahora la rama llama en proceso al processor real
+        // (PaymentGatewayService.reversePaymentWithProcessor) y actualiza
+        // el refund row con el estado terminal (`completed`/`failed`) o
+        // `processing` (cuando la pasarela contestó `pending`). Esto le
+        // devuelve control al usuario sincrónicamente y elimina el estado
+        // limbo para refunds que viajaban por un canal reversible.
         //
         // El gate se hace por CANAL EFECTIVO, no por `refund_method` crudo.
         // Así, `original_payment` sobre `cash` o `bank_transfer` NO entra al
         // processor (su promesa se cumplió en la tx) y el refund ya está
-        // `completed`.
+        // `completed`. Sobre `gateway` (`wompi`/`paypal`/`stripe`) sí.
+        //
+        // Capturamos `dispatchStatus` para que el bloque de emit de abajo
+        // pueda distinguir los refunds que AÚN no son terminales (no deben
+        // generar `refund.completed` para que la contabilidad no registre
+        // una reversión que todavía no terminó).
+        let dispatchStatus: 'completed' | 'failed' | 'processing' | null = null;
         if (awaitsReversal) {
-          // FIX refund 500: el processor emit + downstream listener es
-          // no-bloqueante para el refund row (que ya está committed). Si
-          // falla, NO propagamos el throw al cliente — el refund sigue
-          // válido en `pending_approval` para intervención manual del
-          // operador, y el `SYS_INTERNAL_001` que el filtro global
-          // devolvería solo confundiría al usuario. Loggeamos el error
-          // para diagnóstico.
+          // FIX refund 500: el processor dispatch es no-bloqueante para el
+          // refund row (que ya está committed). Si falla, NO propagamos el
+          // throw al cliente — el refund sigue válido en `pending_approval`
+          // para intervención manual del operador, y el `SYS_INTERNAL_001`
+          // que el filtro global devolvería solo confundiría al usuario.
+          // Loggeamos el error para diagnóstico. `dispatchRefundProcessor`
+          // ya captura internamente los throws del processor y los traduce
+          // a `status: 'failed'`, así que este catch sólo atrapa bugs en el
+          // dispatch mismo (DB update fallido, etc.).
           try {
-            await this.dispatchRefundProcessor(
+            const dispatchResult = await this.dispatchRefundProcessor(
               order,
               completedRefund,
               Number(calculation.total_refund),
             );
+            dispatchStatus = dispatchResult.status;
           } catch (err) {
             this.logger.error(
               `Refund #${completedRefund.id}: processor dispatch threw — refund stays in 'pending_approval' for manual operator intervention. ${err instanceof Error ? err.message : String(err)}`,
@@ -417,6 +446,16 @@ export class RefundFlowService {
             );
           }
         }
+
+        // ¿Llegamos a un estado terminal? Para refunds no-gateway, la promesa
+        // se cumplió en la tx así que siempre emitimos. Para refunds
+        // gateway, sólo emitimos cuando el processor devolvió `completed` o
+        // `failed` (`processing` significa que la pasarela sigue trabajando
+        // y no debe generar asiento todavía).
+        const reachedTerminalState =
+          !awaitsReversal ||
+          dispatchStatus === 'completed' ||
+          dispatchStatus === 'failed';
 
         // 8. Emit events after transaction (and processor dispatch) completes
         try {
@@ -435,35 +474,45 @@ export class RefundFlowService {
             Number(calculation.tax_refund || 0),
           );
 
-          this.eventEmitter.emit('refund.completed', {
-            refund_id: completedRefund.id,
-            order_id: orderId,
-            organization_id: order.stores?.organization_id,
-            store_id: order.store_id,
-            amount: calculation.total_refund,
-            subtotal: calculation.subtotal_refund,
-            tax: calculation.tax_refund,
-            tax_amount: calculation.tax_refund,
-            tax_breakdown,
-            shipping: calculation.shipping_refund,
-            is_full_refund: calculation.is_full_refund,
-            user_id: userId,
-            // REFUND OVERHAUL — include refund_method so AutoEntryService
-            // can pick the correct credit-side mapping key (1105 / 1110 / 2335).
-            // Previously the event omitted this and the journal always
-            // resolved to refund.completed.cash → 1105 Caja.
-            refund_method: dto.refund_method,
-            // REFUND OVERHAUL — incluir el canal EFECTIVO (cash /
-            // bank_transfer / store_credit / gateway) para auditoría y para
-            // que AutoEntryService pueda enrutar por canal real en lugar de
-            // adivinarlo desde `refund_method` (que es intención del
-            // operador, no el canal final).
-            effective_channel: effectiveChannel,
-          });
+          // Emit `refund.completed` ONLY when we reached a terminal state.
+          // For non-gateway channels the refund was already `completed` in
+          // the tx; for gateway channels we wait for the processor to come
+          // back with `completed` or `failed`. `processing` means the
+          // gateway is still working — emitting now would generate an
+          // accounting entry for a reversal that hasn't actually happened
+          // yet, which is the exact defect audit B.3 flagged.
+          if (reachedTerminalState) {
+            this.eventEmitter.emit('refund.completed', {
+              refund_id: completedRefund.id,
+              order_id: orderId,
+              organization_id: order.stores?.organization_id,
+              store_id: order.store_id,
+              amount: calculation.total_refund,
+              subtotal: calculation.subtotal_refund,
+              tax: calculation.tax_refund,
+              tax_amount: calculation.tax_refund,
+              tax_breakdown,
+              shipping: calculation.shipping_refund,
+              is_full_refund: calculation.is_full_refund,
+              user_id: userId,
+              // REFUND OVERHAUL — include refund_method so AutoEntryService
+              // can pick the correct credit-side mapping key (1105 / 1110 / 2335).
+              // Previously the event omitted this and the journal always
+              // resolved to refund.completed.cash → 1105 Caja.
+              refund_method: dto.refund_method,
+              // REFUND OVERHAUL — incluir el canal EFECTIVO (cash /
+              // bank_transfer / store_credit / gateway) para auditoría y para
+              // que AutoEntryService pueda enrutar por canal real en lugar de
+              // adivinarlo desde `refund_method` (que es intención del
+              // operador, no el canal final).
+              effective_channel: effectiveChannel,
+            });
+          }
 
           if (calculation.is_full_refund) {
             this.eventEmitter.emit('order.status_changed', {
               store_id: order.store_id,
+              organization_id: order.stores?.organization_id,
               order_id: orderId,
               order_number: order.order_number,
               old_state: order.state,
@@ -629,26 +678,40 @@ export class RefundFlowService {
 
   /**
    * Dispatch the `original_payment` reversal to the corresponding payment
-   * processor. Hotfix post-PR-576: el comentario en `:428-431` nombraba
-   * esta función pero nunca existía — los reembolsos `original_payment`
-   * quedaban `completed` en DB sin reversar nada en Wompi/cash_on_delivery.
+   * processor SYNCHRONOUSLY and persist the outcome on the refund row.
    *
-   * Esta implementación sigue el patrón de "marcar pending + emitir evento
-   * de processor dispatch", que es el mínimo cambio coherente con el
-   * resto del módulo de pagos. Los listeners de cada processor (Wompi,
-   * Stripe, PayPal) escuchan `payment.refund.requested` y llaman a su
-   * `refundPayment` API. Si la integración no existe (la mayoría de las
-   * tiendas hoy), el refund queda `pending` para intervención manual del
-   * operador — exactamente la semántica que el comentario original
-   * describía pero nunca implementó.
+   * Historia:
+   *   - Pre-PR-576: esta función no existía. Los refunds `original_payment`
+   *     sobre pago por gateway se marcaban `completed` en la tx sin reversar
+   *     nada en Wompi/cash_on_delivery/etc. (bug crítico).
+   *   - PR-576: introdujo esta función con el patrón "emit +
+   *     listener round-trip". El listener del processor promovía a
+   *     `completed` o rechazaba con `failed`. Sin listener, el refund
+   *     quedaba `pending_approval` para intervención manual — muchos
+   *     refunds se atascaron ahí indefinidamente.
+   *   - W2-A (refund-gateway-fix): la rama emite-en-proceso. Llamamos
+   *     `PaymentGatewayService.reversePaymentWithProcessor` directamente,
+   *     mapeamos `RefundResult.status` → `refunds_state_enum`, y
+   *     actualizamos el refund row con el estado terminal (o
+   *     `processing` cuando la pasarela sigue trabajando). Esto le
+   *     devuelve control al usuario sincrónicamente y elimina el limbo.
    *
-   * Devuelve `{ status: 'succeeded' | 'pending' | 'failed', message? }`.
+   * Devuelve `{ status: 'completed' | 'failed' | 'processing', message? }`.
+   *
+   *   - `completed` / `failed` → el processor respondió terminalmente;
+   *     el caller emite `refund.completed` para que la contabilidad
+   *     registre la reversión (éxito o falla).
+   *   - `processing` → el processor reportó `pending` o no había
+   *     processor reversible que llamar; el caller NO emite y el
+   *     refund queda en `processing`/`pending_approval` para
+   *     reconciliación posterior (webhook del gateway, intervención
+   *     manual del operador, o el próximo reintento).
    */
   private async dispatchRefundProcessor(
     order: any,
     completedRefund: any,
     amount: number,
-  ): Promise<{ status: 'succeeded' | 'pending' | 'failed'; message?: string }> {
+  ): Promise<{ status: 'completed' | 'failed' | 'processing'; message?: string }> {
     const activePayment = order.payments?.find(
       (p: any) => p.state === 'succeeded' || p.state === 'pending',
     );
@@ -657,7 +720,7 @@ export class RefundFlowService {
       this.logger.warn(
         `Refund #${completedRefund.id}: no active payment found, leaving pending for manual operator intervention.`,
       );
-      return { status: 'pending', message: 'No active payment on the order' };
+      return { status: 'processing', message: 'No active payment on the order' };
     }
 
     const systemMethodType =
@@ -668,54 +731,101 @@ export class RefundFlowService {
       this.logger.warn(
         `Refund #${completedRefund.id}: payment has no transaction_id (method=${systemMethodType ?? 'unknown'}), leaving pending.`,
       );
-      return { status: 'pending', message: 'Payment has no gateway transaction_id' };
+      return { status: 'processing', message: 'Payment has no gateway transaction_id' };
     }
 
-    // El processor real se invoca desde el listener del módulo de pagos
-    // (`payment.refund.requested`). Aquí decidimos el state destino del
-    // refund basándonos en si la integración existe:
-    //
-    // - `wompi` / `paypal` / `stripe` con integración configurada → el
-    //   listener revierte; nosotros dejamos `pending` y leemos el resultado
-    //   vía callback en una corrida posterior.
-    //
-    // Para mantener el scope acotado al hotfix y no acoplar este módulo a
-    // `PaymentGatewayService` (cambio de firma del constructor), marcamos
-    // `pending` para todos los métodos reversibles y emitimos el evento.
-    // El listener del processor (cuando existe) lo marca `completed` o
-    // rechaza con `failed`. Sin listener (la mayoría de las tiendas hoy),
-    // el refund permanece `pending` y el operador lo cierra manualmente.
-
+    // Sólo llamamos al processor real para gateways reversibles por API.
+    // Para cualquier otro canal (cash, bank_transfer, store_credit, voucher,
+    // wallet, etc.) la promesa se cumplió en la tx y no corresponde tocar
+    // aquí. Devolverse con `processing` y dejar el refund row intacto
+    // (seguirá en `pending_approval` para intervención manual si el
+    // operador eligió un canal no-gateway, o en `completed` si la tx ya
+    // lo cerró).
     const reversible = (API_REVERSIBLE_REFUND_PROCESSORS as readonly string[]).includes(
       systemMethodType,
     );
-    if (reversible) {
-      try {
-        this.eventEmitter.emit('payment.refund.requested', {
-          refund_id: completedRefund.id,
-          payment_id: activePayment.id,
-          transaction_id: transactionId,
-          processor_type: systemMethodType,
-          store_id: order.store_id,
-          amount,
-          // Listener puede llamar `refunds.update({state: 'completed'|'failed'})`
-          // con su propia concurrencia.
-        });
-        this.logger.log(
-          `Refund #${completedRefund.id}: payment.refund.requested emitted for ${systemMethodType}`,
-        );
-      } catch (e: any) {
-        this.logger.error(
-          `Refund #${completedRefund.id}: emit failed ${e?.message ?? e}`,
-        );
-      }
+    if (!reversible) {
+      return {
+        status: 'processing',
+        message: `${systemMethodType ?? 'unknown'} requires manual operator intervention`,
+      };
     }
 
+    // Llamada síncrona al processor. Wompi / PayPal / Stripe reversan la
+    // transacción en la pasarela y devuelven `RefundResult` con
+    // `status ∈ {'succeeded', 'failed', 'pending'}`. Si la pasarela
+    // lanzó una excepción (red caída, credenciales inválidas, etc.), la
+    // capturamos y marcamos el refund como `failed` — preferimos
+    // honrar la verdad ("no pudimos reversar") antes que fingir éxito.
+    let result;
+    try {
+      result = await this.paymentGatewayService.reversePaymentWithProcessor(
+        transactionId,
+        amount,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Refund #${completedRefund.id}: reversePaymentWithProcessor threw — ${message}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      await this.prisma.refunds.update({
+        where: { id: completedRefund.id },
+        data: {
+          state: refunds_state_enum.failed,
+          gateway_response: JSON.stringify({ error: message }),
+          processed_at: null,
+          updated_at: new Date(),
+        },
+      });
+      return { status: 'failed', message };
+    }
+
+    // REFUND_STATE: RefundResult.status (proveniente del processor) →
+    // refunds_state_enum (columna Prisma). Mismo mapa que el
+    // `createRefundRecord` interno del gateway usa (convención de
+    // dominio: succeeded→completed, failed→failed, pending→processing).
+    const REFUND_STATE: Record<typeof result.status, refunds_state_enum> = {
+      succeeded: refunds_state_enum.completed,
+      failed: refunds_state_enum.failed,
+      pending: refunds_state_enum.processing,
+    };
+    const newState = REFUND_STATE[result.status] ?? refunds_state_enum.processing;
+
+    // Persistimos el resultado en el refund row ya committed.
+    // `refund_transaction_id` lleva el id que la pasarela devolvió
+    // (ej. `wo-refund-abc-123`) para reconciliación con el webhook.
+    // `gateway_response` lleva la respuesta cruda para auditorías
+    // (Prisma.JsonNull si el processor no devolvió nada — sin esto,
+    // escribir `undefined` fallaría la validación de tipo).
+    await this.prisma.refunds.update({
+      where: { id: completedRefund.id },
+      data: {
+        state: newState,
+        refund_transaction_id: result.refundId ?? null,
+        gateway_response:
+          result.gatewayResponse !== undefined
+            ? (result.gatewayResponse as any)
+            : Prisma.JsonNull,
+        processed_at: result.status === 'succeeded' ? new Date() : null,
+        updated_at: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `Refund #${completedRefund.id}: processor returned status=${result.status}, persisted state=${newState}`,
+    );
+
+    // Traducimos al vocabulario del refund-flow (completed / failed /
+    // processing) para que el caller decida si emite `refund.completed`.
+    const terminal: Record<typeof result.status, 'completed' | 'failed' | 'processing'> = {
+      succeeded: 'completed',
+      failed: 'failed',
+      pending: 'processing',
+    };
     return {
-      status: 'pending',
-      message: reversible
-        ? `${systemMethodType} dispatch emitted; awaiting processor callback`
-        : `${systemMethodType ?? 'unknown'} requires manual operator intervention`,
+      status: terminal[result.status],
+      message: result.message,
     };
   }
 
