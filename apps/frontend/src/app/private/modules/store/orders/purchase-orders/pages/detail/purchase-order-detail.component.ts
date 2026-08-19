@@ -26,6 +26,7 @@ import {
 import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { DatePipe } from '@angular/common';
 
 import { PurchaseOrdersService } from '../../../../inventory/services/purchase-orders.service';
 import { DispatchNotesService } from '../../../../dispatch-notes/services/dispatch-notes.service';
@@ -114,6 +115,7 @@ interface ReceiveLine {
   standalone: true,
   imports: [
     FormsModule,
+    DatePipe,
     AlertBannerComponent,
     ButtonComponent,
     CardComponent,
