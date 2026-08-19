@@ -1447,20 +1447,4 @@ export class InventoryAnalyticsService {
       };
     });
   }
-
-  // -------------------------------------------------------------------------
-  // STUBS for the resubmit's analytics.controller.ts (QUI-542 batch). See
-  // the comment on the matching sales stubs for context.
-  // -------------------------------------------------------------------------
-  async getLowStockForExport(
-    _query: InventoryAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
-  }
-
-  async getInventoryBySupplierForExport(
-    _query: InventoryAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
-  }
 }

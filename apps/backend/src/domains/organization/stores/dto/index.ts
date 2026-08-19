@@ -3,7 +3,6 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
-  IsUrl,
   MaxLength,
   MinLength,
   IsInt,
@@ -12,9 +11,10 @@ import {
   IsIn,
   IsDecimal,
   IsArray,
-  IsJSON,
+  ArrayMinSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { StoreIndustry } from '../../../store/stores/dto';
 
 export enum StoreType {
   PHYSICAL = 'physical',
@@ -32,8 +32,9 @@ export enum StoreState {
 }
 
 export class CreateStoreDto {
+  @IsOptional()
   @IsInt()
-  organization_id: number;
+  organization_id?: number;
 
   @IsString()
   @MinLength(2)
@@ -52,18 +53,8 @@ export class CreateStoreDto {
   store_code?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   logo_url?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_primary?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_secondary?: string;
 
   @IsOptional()
   @IsString()
@@ -76,12 +67,7 @@ export class CreateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency_code?: string;
-
-  @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()
@@ -93,8 +79,38 @@ export class CreateStoreDto {
   is_active?: boolean = true;
 
   @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
+
+  @IsOptional()
   @IsInt()
   manager_user_id?: number;
+
+  @IsOptional()
+  @IsObject()
+  settings?: {
+    currency_code?: string;
+    color_primary?: string;
+    color_secondary?: string;
+    tax_included?: boolean;
+    fiscal_regime?: string;
+    tax_id?: string;
+    [key: string]: any;
+  };
+
+  @IsOptional()
+  @IsObject()
+  address?: {
+    address_line1: string;
+    address_line2?: string | null;
+    city: string;
+    state_province?: string | null;
+    postal_code?: string | null;
+    country_code: string;
+    phone_number?: string | null;
+  };
 }
 
 export class UpdateStoreDto {
@@ -116,18 +132,8 @@ export class UpdateStoreDto {
   store_code?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   logo_url?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_primary?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_secondary?: string;
 
   @IsOptional()
   @IsString()
@@ -140,12 +146,7 @@ export class UpdateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency_code?: string;
-
-  @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()
@@ -157,11 +158,101 @@ export class UpdateStoreDto {
   is_active?: boolean;
 
   @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
+
+  @IsOptional()
   @IsInt()
   manager_user_id?: number;
+
+  @IsOptional()
+  @IsObject()
+  settings?: {
+    currency_code?: string;
+    color_primary?: string;
+    color_secondary?: string;
+    tax_included?: boolean;
+    fiscal_regime?: string;
+    tax_id?: string;
+    [key: string]: any;
+  };
+
+  @IsOptional()
+  @IsObject()
+  address?: {
+    address_line1: string;
+    address_line2?: string | null;
+    city: string;
+    state_province?: string | null;
+    postal_code?: string | null;
+    country_code: string;
+    phone_number?: string | null;
+  };
 }
 
 export class StoreQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(StoreType)
+  store_type?: StoreType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_active?: boolean;
+}
+
+export class AddStaffToStoreDto {
+  @IsInt()
+  user_id: number;
+
+  @IsInt()
+  role_id: number;
+
+  @IsOptional()
+  @IsObject()
+  permissions?: any;
+
+  @IsOptional()
+  @IsString()
+  hire_date?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean = true;
+}
+
+export class UpdateStoreSettingsDto {
+  @IsObject()
+  settings: any;
+}
+
+export class StoreDashboardDto {
+  @IsOptional()
+  @Type(() => Date)
+  start_date?: Date;
+
+  @IsOptional()
+  @Type(() => Date)
+  end_date?: Date;
+}
+
+export class AdminStoreQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -189,29 +280,4 @@ export class StoreQueryDto {
   @Type(() => Number)
   @IsInt()
   organization_id?: number;
-}
-
-export class AddStaffToStoreDto {
-  @IsInt()
-  user_id: number;
-
-  @IsInt()
-  role_id: number;
-
-  @IsOptional()
-  @IsObject()
-  permissions?: any;
-
-  @IsOptional()
-  @IsString()
-  hire_date?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  is_active?: boolean = true;
-}
-
-export class UpdateStoreSettingsDto {
-  @IsObject()
-  settings: any;
 }

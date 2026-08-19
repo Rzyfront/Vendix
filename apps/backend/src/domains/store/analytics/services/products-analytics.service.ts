@@ -182,13 +182,10 @@ export class ProductsAnalyticsService {
       take: query.limit || 10,
     });
 
-<<<<<<< HEAD
-=======
     // QUI-622 review: units_without_cost via SUM(quantity) filtrado por
     // cost_price IS NULL — mismo patron que products/profitability (QUI-623).
     // El calculo anterior usaba COUNT(*) (filas) que no es units.
     const coverageMap = new Map<number, { units_without_cost: number }>();
->>>>>>> 3dcd84c99 (fix(analytics): QUI-622 getStoreId -> RequestContext + dedup productIds)
     const productIds = results
       .map((r) => r.product_id)
       .filter(Boolean) as number[];
@@ -289,15 +286,14 @@ export class ProductsAnalyticsService {
           return null;
         }
 
-// PR #545 (QUI-622): use cost snapshot per units_sold (not current
+        // PR #545 (QUI-622): use cost snapshot per units_sold (not current
         // product.cost_price), per vendix-inventory-valuation rule 6.
         const costSnap = costByProduct.get(r.product_id as number);
         const cogs = costSnap?.cogs ?? 0;
-        const unitsInCost = costSnap?.units_total ?? units;
-        const unitsWithoutCost = Math.max(0, units - unitsInCost);
-        // HEAD had a `costPrice` from current product.cost_price; kept for
-        // backward compatibility but unused after #545 alignment.
-        const costPrice = product ? Number(product.cost_price || 0) : 0;
+        // QUI-622 review: las unidades sin costo vienen del SUM(quantity)
+        // filtrado por cost_price IS NULL, no de restar un COUNT(*) de filas.
+        const unitsWithoutCost =
+          coverageMap.get(r.product_id as number)?.units_without_cost ?? 0;
         const avgPrice = units > 0 ? revenue / units : 0;
         // Margin over OPERATING revenue (subtotal − discount + shipping),
         // mirroring the contract — not over grand_total (which folds VAT in).

@@ -1,107 +1,290 @@
-import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
+import { getPrismaClient, disconnectPrisma } from './seeds/shared/client';
+import { seedDefaultTemplates } from './seeds/default-templates.seed';
+import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
+import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
+import { seedVendixPlatformOrg } from './seeds/vendix-platform-org.seed';
+import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
+import { seedSystemShippingMethods } from './seeds/system-shipping-methods.seed';
+import { seedLegalDocuments } from './seeds/legal-documents.seed';
+import { seedUsers } from './seeds/users.seed';
+import { seedProductsAndCategories } from './seeds/products-categories.seed';
+import { seedDefaultPucForAllOrgs } from './seeds/default-puc.seed';
+import { seedDefaultAccountMappings } from './seeds/default-account-mappings.seed';
+import { seedDomains } from './seeds/domains.seed';
+import { seedAddresses } from './seeds/addresses.seed';
+import { seedInventoryLocations } from './seeds/inventory-locations.seed';
+import { seedTestOrders } from './seeds/test-orders.seed';
+import { seedHelpArticles } from './seeds/help-articles.seed';
+import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
+import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
+import { seedWithholdingTax } from './seeds/withholding-tax.seed';
+import { seedFiscalRuleSets } from './seeds/fiscal-rule-sets.seed';
+import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
+import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
+import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
+import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
+import { seedPqrAnonUser } from './seeds/pqr-anon-user.seed';
 
-const prisma = new PrismaClient();
+/**
+ * Seed modules registry
+ * Modules are executed in order - dependencies must be satisfied by previous modules
+ *
+ * Execution order and dependencies:
+ * 1. defaultTemplates - No dependencies
+ * 2. permissionsAndRoles - No dependencies
+ * 3. systemPaymentMethods - No dependencies
+ * 4. organizationsAndStores - No dependencies
+ * 5. legalDocuments - No dependencies (system documents)
+ * 6. users - Depends on: organizationsAndStores, permissionsAndRoles
+ * 7. productsAndCategories - Depends on: organizationsAndStores
+ * 8. domains - Depends on: organizationsAndStores
+ * 9. addresses - Depends on: organizationsAndStores, users
+ * 10. inventoryLocations - Depends on: organizationsAndStores
+ * 11. testOrders - Depends on: organizationsAndStores, users, productsAndCategories
+ *
+ * Cada módulo debe:
+ * - Exportar una función async que acepta PrismaClient opcional
+ * - Manejar sus propios errores y logs
+ * - Ser idempotente (puede ejecutarse múltiples veces)
+ */
+const seedModules = [
+  {
+    name: 'Default Templates',
+    fn: seedDefaultTemplates,
+    description: 'System configuration templates',
+  },
+  {
+    name: 'Permissions & Roles',
+    fn: seedPermissionsAndRoles,
+    description: 'System permissions and role definitions',
+  },
+  {
+    name: 'System Payment Methods',
+    fn: seedSystemPaymentMethods,
+    description: 'System-wide payment methods',
+  },
+  {
+    name: 'System Shipping Methods',
+    fn: seedSystemShippingMethods,
+    description:
+      'System-wide shipping methods (own_fleet, carrier, pickup) that stores can activate',
+  },
+  {
+    name: 'Organizations & Stores',
+    fn: seedOrganizationsAndStores,
+    description: 'Organizations and store instances',
+  },
+  {
+    name: 'Vendix Platform Org Bootstrap',
+    fn: seedVendixPlatformOrg,
+    description:
+      'Claim Vendix Corp as is_platform=true org with consolidated accounting entity, PUC, fiscal period, and DIAN placeholder',
+  },
+  {
+    name: 'Legal Documents',
+    fn: seedLegalDocuments,
+    description: 'System legal documents and terms',
+  },
+  {
+    name: 'Users',
+    fn: seedUsers,
+    description: 'User accounts with role assignments',
+  },
+  {
+    name: 'Products & Categories',
+    fn: seedProductsAndCategories,
+    description: 'Product catalog with categories and variants',
+  },
+  {
+    name: 'Default PUC Chart of Accounts',
+    fn: seedDefaultPucForAllOrgs,
+    description: 'Colombian PUC chart of accounts for all organizations',
+  },
+  {
+    name: 'Default Account Mappings',
+    fn: seedDefaultAccountMappings,
+    description: 'Default PUC account mappings for organizations',
+  },
+  {
+    name: 'Domains',
+    fn: seedDomains,
+    description: 'Domain settings for organizations and stores',
+  },
+  {
+    name: 'Addresses',
+    fn: seedAddresses,
+    description: 'Addresses for organizations, stores, and users',
+  },
+  {
+    name: 'Inventory Locations',
+    fn: seedInventoryLocations,
+    description: 'Inventory locations (warehouses and stores)',
+  },
+  {
+    name: 'Test Orders',
+    fn: seedTestOrders,
+    description: 'Test orders and product reviews',
+  },
+  {
+    name: 'Help Articles',
+    fn: seedHelpArticles,
+    description: 'Help center articles and categories',
+  },
+  {
+    name: 'Default Payroll Rules',
+    fn: seedDefaultPayrollRules,
+    description: 'Colombian payroll rules defaults',
+  },
+  {
+    name: 'ICA Municipal Rates',
+    fn: seedIcaMunicipalRates,
+    description: 'ICA tax rates for Colombian municipalities',
+  },
+  {
+    name: 'Withholding Tax',
+    fn: seedWithholdingTax,
+    description:
+      'UVT values and withholding concepts for Colombian tax compliance',
+  },
+  {
+    name: 'Fiscal Rule Sets',
+    fn: seedFiscalRuleSets,
+    description: 'Global Colombian fiscal operation rule snapshots',
+  },
+  {
+    name: 'AI Engine Applications',
+    fn: seedAIEngineApps,
+    description: 'Default AI application definitions (invoice OCR, etc.)',
+  },
+  {
+    name: 'Payroll System Defaults',
+    fn: seedPayrollSystemDefaults,
+    description: 'Colombian payroll parameters baseline (2026)',
+  },
+  {
+    name: 'Subscription Plans (Default Trial)',
+    fn: seedSubscriptionPlans,
+    description: 'Default trial plan for the auto-trial flow (is_default=true)',
+  },
+  {
+    name: 'Subscription Plans (Canonical Production)',
+    fn: seedSubscriptionPlansProduction,
+    description:
+      'Canonical SaaS plans (starter / pro / enterprise) — idempotent across all environments',
+  },
+  {
+    name: 'PQR Anonymous User',
+    fn: seedPqrAnonUser,
+    description:
+      'Creates the anon-pqr@vendix.online user that acts as the creator of public PQR submissions (idempotent)',
+  },
+];
 
+/**
+ * Main seed entry point
+ * Executes all registered seed modules in sequence
+ */
 async function main() {
-  console.log('🌱 Iniciando seed de la base de datos...');
+  const startTime = Date.now();
+  console.log('🌱 Starting seed process...');
+  console.log(`📋 Registered seed modules: ${seedModules.length}`);
+  console.log('');
 
-  // 0. Crear Organización Principal para los usuarios de prueba
-  console.log('🏢 Creando organización principal para el seed...');
-  const seedOrganization = await prisma.organizations.upsert({
-    where: { slug: 'vendix-corp' },
-    update: {},
-    create: {
-      name: 'Vendix Corp',
-      slug: 'vendix-corp',
-      email: 'admin@vendix.com',
-      state: 'active',
-    },
-  });
+  const prisma = getPrismaClient();
+  const results: Array<{
+    name: string;
+    description: string;
+    result?: any;
+    error?: string;
+  }> = [];
 
-  // 1. Crear permisos
-  console.log('📝 Creando permisos...');
-  const permissions = [
-    // Usuarios
-    { name: 'users.read', description: 'Ver usuarios', path: '/api/users', method: 'GET' },
-    { name: 'users.create', description: 'Crear usuarios', path: '/api/users', method: 'POST' },
-    { name: 'users.update', description: 'Actualizar usuarios', path: '/api/users/:id', method: 'PUT' },
-    { name: 'users.delete', description: 'Eliminar usuarios', path: '/api/users/:id', method: 'DELETE' },
-    // ... (otros permisos)
-  ];
-
-  for (const permission of permissions) {
-    await prisma.permissions.upsert({
-      where: { name: permission.name },
-      update: {},
-      create: {
-        name: permission.name,
-        description: permission.description,
-        path: permission.path,
-        method: permission.method as any,
-      },
-    });
+  for (const module of seedModules) {
+    console.log(`▶️  [${module.name}] ${module.description}`);
+    try {
+      const result = await module.fn(prisma);
+      results.push({
+        name: module.name,
+        description: module.description,
+        result,
+      });
+      console.log(`✅ Completed: ${module.name}\n`);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      results.push({
+        name: module.name,
+        description: module.description,
+        error: errorMessage,
+      });
+      console.error(`❌ Failed: ${module.name}`);
+      console.error(`   Error: ${errorMessage}\n`);
+      // Continue with other seeds even if one fails
+    }
   }
 
-  // 2. Crear roles
-  console.log('👥 Creando roles...');
-  const superAdminRole = await prisma.roles.upsert({
-    where: { name: 'super_admin' },
-    update: {},
-    create: { name: 'super_admin', description: 'Super Administrador', is_system_role: true },
-  });
-  const ownerRole = await prisma.roles.upsert({
-    where: { name: 'owner' },
-    update: {},
-    create: { name: 'owner', description: 'Propietario de la organización', is_system_role: true },
-  });
-  // ... (otros roles)
+  await disconnectPrisma();
 
-  // 3. Asignar permisos a roles (lógica simplificada)
-  console.log('🔗 Asignando permisos a roles...');
-  const allPermissions = await prisma.permissions.findMany();
-  for (const permission of allPermissions) {
-    await prisma.role_permissions.upsert({
-      where: { role_id_permission_id: { role_id: superAdminRole.id, permission_id: permission.id } },
-      update: {},
-      create: { role_id: superAdminRole.id, permission_id: permission.id },
-    });
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`${'═'.repeat(70)}`);
+  console.log(`📊 Seed Summary (completed in ${duration}s)`);
+  console.log(`${'═'.repeat(70)}`);
+
+  const successCount = results.filter((r) => !r.error).length;
+  const failureCount = results.filter((r) => r.error).length;
+
+  results.forEach((result) => {
+    if (result.error) {
+      console.log(`   ❌ ${result.name}: ${result.error}`);
+    } else {
+      const stats = Object.entries(result.result || {})
+        .filter(([_, v]) => typeof v === 'number' && v > 0)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ');
+      console.log(`   ✅ ${result.name}${stats ? ` (${stats})` : ''}`);
+    }
+  });
+
+  console.log(`${'═'.repeat(70)}`);
+  console.log(`Total: ${successCount} succeeded, ${failureCount} failed`);
+  console.log(`${'═'.repeat(70)}`);
+
+  if (failureCount > 0) {
+    process.exit(1);
   }
-
-  // 4. Crear usuarios de prueba
-  console.log('👤 Creando usuarios de prueba...');
-  const hashedPassword = await bcrypt.hash('password123', 10);
-
-  const superAdminUser = await prisma.users.upsert({
-    where: { username: 'superadmin' },
-    update: {},
-    create: {
-      email: 'superadmin@vendix.com',
-      password: hashedPassword,
-      first_name: 'Super',
-      last_name: 'Admin',
-      username: 'superadmin',
-      email_verified: true,
-      state: 'active',
-      organization_id: seedOrganization.id, // Asociar a la organización
-    },
-  });
-
-  // Asignar rol
-  await prisma.user_roles.upsert({
-    where: { user_id_role_id: { user_id: superAdminUser.id, role_id: superAdminRole.id } },
-    update: {},
-    create: { user_id: superAdminUser.id, role_id: superAdminRole.id },
-  });
-
-  console.log('✅ Seed completado exitosamente!');
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Error en el seed:', e);
+// Execute seed if called directly
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('💥 Seed process failed with unhandled error:');
+    console.error(error);
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });
+}
+
+// Export for programmatic usage
+export { main as seedDatabase };
+export * from './seeds/shared/database';
+export * from './seeds/shared/client';
+export * from './seeds/default-templates.seed';
+export * from './seeds/permissions-roles.seed';
+export * from './seeds/system-payment-methods.seed';
+export * from './seeds/organizations-stores.seed';
+export * from './seeds/vendix-platform-org.seed';
+export * from './seeds/legal-documents.seed';
+export * from './seeds/users.seed';
+export * from './seeds/products-categories.seed';
+export * from './seeds/default-puc.seed';
+export * from './seeds/default-account-mappings.seed';
+export * from './seeds/domains.seed';
+export * from './seeds/addresses.seed';
+export * from './seeds/inventory-locations.seed';
+export * from './seeds/test-orders.seed';
+export * from './seeds/help-articles.seed';
+export * from './seeds/default-payroll-rules.seed';
+export * from './seeds/ica-municipal-rates.seed';
+export * from './seeds/withholding-tax.seed';
+export * from './seeds/ai-engine-apps.seed';
+export * from './seeds/payroll-system-defaults.seed';
+export * from './seeds/subscription-plans.seed';
+export * from './seeds/subscription-plans-production.seed';

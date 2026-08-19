@@ -3,9 +3,14 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
+  Granularity,
   PurchasesBySupplierQueryDto,
 } from '../dto/analytics-query.dto';
-import { getPreviousPeriod, parseDateRange } from '../utils/date.util';
+import {
+  getDateTruncInterval,
+  getPreviousPeriod,
+  parseDateRange,
+} from '../utils/date.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
