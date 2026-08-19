@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { PrismaModule, PrismaService } from '../../../../prisma/prisma.module';
+import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { S3Module } from '../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
@@ -95,7 +95,6 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
       useFactory: (
         invoicingService: InvoicingService,
         invoiceFlowService: InvoiceFlowService,
-        prisma: PrismaService,
         persistence: PlatformInvoicingPersistenceService,
         tenants: PlatformTenantsService,
         subscriptionFiscalService: SubscriptionFiscalService,
@@ -103,7 +102,9 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
         new PlatformInvoicingService({
           invoicingService,
           invoiceFlowService,
-          prisma,
+          // prisma se obtiene de `invoicingService['prisma']` en runtime.
+          // No inyectamos GlobalPrismaService directo para evitar el ciclo
+          // DI: subscription-fiscal module NO declara el provider de prisma.
           persistence,
           tenants,
           subscriptionFiscalService,
@@ -111,7 +112,6 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
       inject: [
         InvoicingService,
         InvoiceFlowService,
-        PrismaService,
         PlatformInvoicingPersistenceService,
         PlatformTenantsService,
         SubscriptionFiscalService,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
@@ -40,14 +40,14 @@ interface Deps {
   tenants: any; // ./platform-tenants.service.ts
 }
 
-@Injectable()
 export class PlatformInvoicingService {
   private readonly logger = new Logger(PlatformInvoicingService.name);
 
   constructor(
-    // Las dependencias se inyectan en NestJS runtime. La firma tipada esta
-    // en `Deps` arriba. Aqui definimos los parametros de cada vez —
-    // permitir tests inyectar versiones mock sin tocar el DI real.
+    // Las dependencias se inyectan via factory en `subscription-fiscal.module.ts`.
+    // La firma tipada esta en `Deps` arriba. Aqui definimos el parametro
+    // del constructor — permitir tests inyectar versiones mock sin tocar
+    // el DI real.
     private readonly deps: Deps,
   ) {}
 

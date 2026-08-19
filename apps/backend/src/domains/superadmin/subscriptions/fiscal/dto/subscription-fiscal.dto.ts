@@ -12,6 +12,7 @@ import {
   IsUUID,
   Length,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
