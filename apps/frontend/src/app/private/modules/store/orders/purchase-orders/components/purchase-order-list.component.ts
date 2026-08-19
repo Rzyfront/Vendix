@@ -73,6 +73,22 @@ export class PurchaseOrderListComponent {
   // Pagination
   filters = { page: 1, limit: 10 };
 
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: ordenamiento con enum cerrado.
+   * Backend ahora rechaza cualquier sort_by fuera del enum. Default = 'next_payment_date'.
+   */
+  readonly sortBy = signal<
+    'order_date' | 'next_payment_date' | 'supplier_name' | 'total' | 'status'
+  >('next_payment_date');
+  readonly sortDir = signal<'asc' | 'desc'>('asc');
+  readonly sortOptions = [
+    { value: 'next_payment_date', label: 'Próximo pago (asc)' },
+    { value: 'order_date', label: 'Fecha de orden' },
+    { value: 'supplier_name', label: 'Proveedor' },
+    { value: 'total', label: 'Total' },
+    { value: 'status', label: 'Estado' },
+  ] as const;
+
   // Filter state
   searchTerm = '';
   selectedStatus = '';
@@ -277,6 +293,8 @@ export class PurchaseOrderListComponent {
     const query: any = {
       page: this.filters.page,
       limit: this.filters.limit,
+      sort_by: this.sortBy(),
+      sort_order: this.sortDir(),
     };
     if (this.selectedStatus) {
       query.status = this.selectedStatus;
@@ -423,6 +441,18 @@ export class PurchaseOrderListComponent {
   // Check if there are active filters
   get hasFilters(): boolean {
     return !!(this.searchTerm || this.selectedStatus);
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: handler del sort select.
+   * Resets page=1 al cambiar el criterio.
+   */
+  onSortChange(value: string): void {
+    if (this.sortOptions.some((o) => o.value === value)) {
+      this.sortBy.set(value as any);
+      this.filters.page = 1;
+      this.refresh.emit();
+    }
   }
 
 

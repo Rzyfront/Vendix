@@ -172,6 +172,55 @@ const STATUS_BADGE_COLORS: Record<string, StickyHeaderBadgeColor> = {
             </app-card>
           </div>
 
+          <!--
+            CP-ID-VNDX-2026-08-18-PO-PROD — F2.S2: bloque "Plan de pagos".
+            El backend ahora incluye payment_plan con payment_schedules
+            (anotación 2 del usuario: el org scope no lo exponía).
+          -->
+          @if (p.payment_plan; as plan) {
+            <app-card customClasses="mb-3">
+              <div class="px-4 py-3 border-b border-border bg-surface-secondary">
+                <h2 class="text-sm md:text-base font-semibold text-text-primary">
+                  Plan de pagos ({{ plan.payment_plan }})
+                </h2>
+              </div>
+              <div class="p-4 overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-text-secondary">
+                      <th class="py-2 px-2">Cuota</th>
+                      <th class="py-2 px-2">Vencimiento</th>
+                      <th class="py-2 px-2 text-right">Monto</th>
+                      <th class="py-2 px-2">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (s of plan.payment_schedules; track s.id) {
+                      <tr class="border-t border-border">
+                        <td class="py-2 px-2">{{ $index + 1 }} de {{ plan.payment_schedules.length }}</td>
+                        <td class="py-2 px-2">{{ s.scheduled_date | date: 'yyyy-MM-dd' }}</td>
+                        <td class="py-2 px-2 text-right">{{ s.amount | currency }}</td>
+                        <td class="py-2 px-2">
+                          <span class="text-xs px-2 py-0.5 rounded-full"
+                            [class.bg-emerald-100]="s.status === 'paid'"
+                            [class.text-emerald-700]="s.status === 'paid'"
+                            [class.bg-amber-100]="s.status === 'planned'"
+                            [class.text-amber-700]="s.status === 'planned'"
+                            [class.bg-red-100]="s.status === 'overdue'"
+                            [class.text-red-700]="s.status === 'overdue'"
+                            [class.bg-gray-100]="s.status === 'materialized' || s.status === 'partial'"
+                            [class.text-gray-700]="s.status === 'materialized' || s.status === 'partial'">
+                            {{ s.status }}
+                          </span>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </app-card>
+          }
+
           <!-- Líneas -->
           @if (poLines().length > 0) {
             <app-card [padding]="false">

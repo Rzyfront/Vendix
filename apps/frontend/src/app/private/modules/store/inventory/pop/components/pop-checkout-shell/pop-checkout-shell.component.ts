@@ -94,6 +94,16 @@ export class PopCheckoutShellComponent {
   /** Ref (`#id` / `order_number`) de la OC pendiente de recepción (reintento). */
   readonly retryOrderRef = input<string | null>(null);
 
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: panel post-creación.
+   * `orderResult` aparece cuando el POST OK. El shell pinta un bloque
+   * `app-success` con id + total + botones "Ver detalle" / "Nueva compra".
+   * `orderError` aparece cuando el POST falló — pinta `app-error` con
+   * mensaje y opción de reintentar.
+   */
+  readonly orderResult = input<{ id: number; total: number; orderNumber: string } | null>(null);
+  readonly orderError = input<string | null>(null);
+
   // ── Paso Configuración (solo cuando el POP no tiene proveedor/bodega) ────
   /** Snapshot al abrir: true ⇒ el wizard arranca en Configuración (paso 1). */
   readonly needsConfig = input(false);
@@ -114,6 +124,16 @@ export class PopCheckoutShellComponent {
   readonly confirmed = output<void>();
   readonly cancelled = output<void>();
   readonly navigateToSettings = output<void>();
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: emits desde el panel `app-success`.
+   * `viewCreatedOrder` → el padre navega a /admin/orders/purchase-orders/:id.
+   * `createAnotherOrder` → el padre limpia y abre el wizard de nuevo.
+   * `retryOrder` → el padre re-dispara el POST con el mismo payload.
+   */
+  readonly viewCreatedOrder = output<void>();
+  readonly createAnotherOrder = output<void>();
+  readonly retryOrder = output<void>();
   readonly pricingOverridesChange = output<PopPricingOverridesMap>();
   readonly ackReceiveChange = output<boolean>();
   readonly paymentPlanChange = output<PopPaymentPlan>();
