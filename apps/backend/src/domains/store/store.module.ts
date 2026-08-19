@@ -18,6 +18,7 @@ import { CustomersModule } from './customers/customers.module';
 import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { ExpensesAnalyticsModule } from './expenses/analytics/expenses-analytics.module';
 import { StoreLegalDocumentsModule } from './legal-documents/legal-documents.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -87,6 +88,7 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     StoreDomainsModule,
     ShippingModule,
     ExpensesModule,
+    ExpensesAnalyticsModule,
     StoreLegalDocumentsModule,
     AnalyticsModule,
     NotificationsModule,

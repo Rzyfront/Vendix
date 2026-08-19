@@ -62,10 +62,10 @@ export class ExpensesAnalyticsController {
       { key: 'period_start', header: 'Desde', type: 'date' },
       { key: 'period_end', header: 'Hasta', type: 'date' },
       { key: 'total_expenses', header: 'Total Gastos', type: 'currency' },
-      { key: 'total_recognized', header: 'Monto Reconocido', type: 'currency' },
+      { key: 'total_recognized', header: 'Reconocidos', type: 'currency' },
       { key: 'total_pending', header: 'Pendientes', type: 'currency' },
       { key: 'total_count', header: 'Total Movimientos', type: 'number' },
-      { key: 'recognized_count', header: 'Cantidad Reconocida', type: 'number' },
+      { key: 'recognized_count', header: 'Reconocidos', type: 'number' },
       { key: 'pending_count', header: 'Pendientes', type: 'number' },
       { key: 'average_expense', header: 'Promedio', type: 'currency' },
     ];
@@ -134,7 +134,6 @@ export class ExpensesAnalyticsController {
     tz: string,
     columns: ReportColumn[],
     rows: any[],
-    query?: AnalyticsQueryDto,
   ): Promise<void> {
     const sheet: ReportSheet = {
       name: base,
@@ -142,14 +141,7 @@ export class ExpensesAnalyticsController {
       rows,
     };
     const buffer = await buildReportBuffer({ sheets: [sheet] });
-    const filename = buildReportFilename(base, {
-      tz,
-      date: query?.date_from
-        ? new Date(query.date_from)
-        : query?.date_to
-          ? new Date(query.date_to)
-          : undefined,
-    });
+    const filename = buildReportFilename(base, { tz });
     sendXlsxReport(res, buffer, filename);
   }
 }
