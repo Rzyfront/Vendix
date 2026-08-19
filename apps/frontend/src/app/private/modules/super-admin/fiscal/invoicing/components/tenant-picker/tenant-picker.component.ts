@@ -1,11 +1,9 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  EventEmitter,
-  Input,
   OnInit,
-  Output,
   inject,
+  output,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -136,7 +134,8 @@ export class TenantPickerComponent implements OnInit {
   readonly results = signal<PlatformAcquirer[]>([]);
   readonly loading = signal<boolean>(false);
 
-  @Output() tenantPicked = new EventEmitter<PlatformAcquirer | null>();
+  /** Output del destinatario seleccionado al padre (form de creación). */
+  readonly tenantPicked = output<PlatformAcquirer | null>();
 
   readonly kindOptions = [
     { value: '', label: 'Todos' },
