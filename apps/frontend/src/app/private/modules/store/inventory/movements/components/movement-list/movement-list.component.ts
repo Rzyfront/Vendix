@@ -2,6 +2,8 @@ import { Component, input, output, computed } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+
 // Shared Components
 import {
   InputsearchComponent,
@@ -95,7 +97,13 @@ export class MovementListComponent {
       sortable: true,
       width: '120px',
       priority: 3,
-      transform: (value: string) => new Date(value).toLocaleDateString('es-CO'),
+      // QUI-618: the previous `new Date(v).toLocaleDateString('es-CO')` used
+      // the BROWSER timezone — at 8pm Colombia on day N it could show day N+1
+      // for some users. Use `formatDateOnlyUTC` which formats the date in UTC
+      // (consistent across the admin panel, not depending on the operator's
+      // machine TZ). For the time-of-day see the detail modal where the raw
+      // ISO timestamp is rendered with an explicit `timeZone` option.
+      transform: (value: string) => formatDateOnlyUTC(value),
     },
     {
       key: 'products.name',
@@ -186,7 +194,8 @@ export class MovementListComponent {
         key: 'created_at',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
+        // QUI-618: see the table-column above — same browser-TZ bug.
+        transform: (val: string) => formatDateOnlyUTC(val),
       },
       {
         // Misma razón que en la columna de la tabla: la etiqueta viene ya
