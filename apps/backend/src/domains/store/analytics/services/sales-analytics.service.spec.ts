@@ -245,83 +245,50 @@ describe('SalesAnalyticsService', () => {
     });
   });
 
-  // ==================== QUI-551: REGRESIÓN sales_orders.total_price ====================
+  // ==================== QUI-549: VENTAS POR CANAL ====================
 
-  describe('getSalesByChannel — QUI-551 regression', () => {
-    // El bug original: el método seleccionaba `sales_orders.total_price`,
-    // pero esa columna NO existe en el modelo (`sales_orders` no tiene total
-    // propio — se computa sumando `sales_order_items.total_price`). Provocaba
-    // `PrismaClientValidationError` en navegador ("Internal server error").
-    //
-    // Este test blinda el fix: si alguien "simplifica" el select de vuelta a
-    // `total_price: true`, el spec lo cacha con el error de Prisma.
-
-    it('agrega total_revenue desde sales_order_items.total_price (sales_orders NO tiene total propio)', async () => {
-      prisma.sales_orders.findMany.mockResolvedValue([
-        {
-          id: 100,
-          created_by_user_id: 7,
-          status: 'completed',
-          sales_order_items: [
-            { total_price: 100 },
-            { total_price: 250 },
-            { total_price: 50 },
-          ],
-        },
-        {
-          id: 101,
-          created_by_user_id: 8,
-          status: 'completed',
-          sales_order_items: [{ total_price: 1000 }],
-        },
+  describe('getSalesByChannelForExport (QUI-549)', () => {
+    it('aggregates by channel, sorts by revenue desc, and computes % participation with 2-decimal rounding', async () => {
+      prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      prisma.orders.groupBy.mockResolvedValue([
+        { channel: 'pos', _sum: { grand_total: 600000 }, _count: { id: 12 } },
+        { channel: 'ecommerce', _sum: { grand_total: 300000 }, _count: { id: 8 } },
+        { channel: 'agent', _sum: { grand_total: 100000 }, _count: { id: 2 } },
       ] as any);
 
-      // El método usa `this.prisma.sales_orders.findMany` con el select
-      // que incluye `sales_order_items`. Si alguien revierte el select a
-      // `total_price: true`, findMany arriba con la forma anterior (sin
-      // sales_order_items) devolvería `sales_order_items: undefined` y
-      // el cálculo daría 0 — pero el test ASSERT que la suma SÍ ocurre.
-      const rows = await service.getSalesByChannel({
-        storeId: 1,
-        fromDate: new Date('2026-01-01'),
-        toDate: new Date('2026-01-31'),
-      } as any);
+      const rows = await service.getSalesByChannelForExport({} as any);
 
-      // Verifica que total_revenue se acumuló correctamente (1400 total
-      // esperado: 100+250+50 para user 7 + 1000 para user 8).
-      const sumRevenue = rows.reduce(
-        (acc, r) => acc + Number(r.total_revenue || 0),
-        0,
-      );
-      expect(sumRevenue).toBe(1400);
+      expect(rows).toHaveLength(3);
+      // Total 1,000,000. POS 60%, ecommerce 30%, agent 10%.
+      const pos = rows.find((r) => r.channel === 'pos');
+      expect(pos!.revenue).toBe(600000);
+      expect(pos!.order_count).toBe(12);
+      expect(pos!.percentage).toBe(60);
+      expect(pos!.display_name).toBe('Punto de Venta');
+
+      const ecom = rows.find((r) => r.channel === 'ecommerce');
+      expect(ecom!.revenue).toBe(300000);
+      expect(ecom!.percentage).toBe(30);
+      expect(ecom!.display_name).toBe('Tienda Online');
+
+      const agent = rows.find((r) => r.channel === 'agent');
+      expect(agent!.revenue).toBe(100000);
+      expect(agent!.percentage).toBe(10);
+      expect(agent!.display_name).toBe('Agente IA');
+
+      // Sort: POS (600k) > ecommerce (300k) > agent (100k).
+      expect(rows[0].channel).toBe('pos');
+      expect(rows[1].channel).toBe('ecommerce');
+      expect(rows[2].channel).toBe('agent');
     });
 
-    it('tolera sales_order_items undefined o vacío sin lanzar NaN', async () => {
-      // Edge case: una sales_order sin items (por ejemplo, orden creada y
-      // cancelada antes de tener líneas). El `for...of` sobre `?? []` debe
-      // tolerarlo y reportar 0 para esa orden, no NaN ni throw.
-      prisma.sales_orders.findMany.mockResolvedValue([
-        {
-          id: 200,
-          created_by_user_id: 9,
-          status: 'cancelled',
-          // sales_order_items omitido intencionalmente — Prisma lo devolvería
-          // como undefined si alguien revierte al select antiguo.
-        },
-      ] as any);
-
-      const rows = await service.getSalesByChannel({
-        storeId: 1,
-        fromDate: new Date('2026-01-01'),
-        toDate: new Date('2026-01-31'),
-      } as any);
-
-      const sumRevenue = rows.reduce(
-        (acc, r) => acc + Number(r.total_revenue || 0),
-        0,
-      );
-      expect(Number.isNaN(sumRevenue)).toBe(false);
-      expect(sumRevenue).toBe(0);
+    it('returns empty array (not paginated envelope) when no channels have sales', async () => {
+      prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      prisma.orders.groupBy.mockResolvedValue([] as any);
+      const rows = await service.getSalesByChannelForExport({} as any);
+      expect(Array.isArray(rows)).toBe(true);
+      expect(rows).toHaveLength(0);
+      expect((rows as any).data).toBeUndefined();
     });
   });
 });
