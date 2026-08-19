@@ -378,4 +378,62 @@ describe('InventoryAnalyticsService', () => {
       expect(prisma.withoutScope).not.toHaveBeenCalled();
     });
   });
+
+  // ==================== QUI-550: GET-INVENTORY-BY-SUPPLIER-FOR-EXPORT ====================
+
+  describe('getInventoryBySupplierForExport (QUI-550)', () => {
+    // Cobertura mínima del nuevo método flat-array introducido por QUI-550.
+    // Verifica la forma del retorno y que tolere tiendas sin productos.
+    it('returns a flat array grouped by supplier with product_count, total_stock, total_value', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Coca-Cola 350ml',
+          sku: 'CC350',
+          stock_quantity: 100,
+          cost_price: 1500,
+          primary_supplier_id: 10,
+          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+        },
+        {
+          id: 2,
+          name: 'Galletas Festival',
+          sku: 'GAL-FES',
+          stock_quantity: 50,
+          cost_price: 800,
+          primary_supplier_id: 10,
+          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+        },
+        {
+          id: 3,
+          name: 'Chocorramo',
+          sku: 'CHOCO',
+          stock_quantity: 200,
+          cost_price: 2000,
+          primary_supplier_id: 20,
+          primary_supplier: { id: 20, name: 'Post Colombiano SA' },
+        },
+      ] as any);
+
+      const rows = await service.getInventoryBySupplierForExport({
+        storeId: 1,
+      } as any);
+
+      expect(Array.isArray(rows)).toBe(true);
+      const andina = rows.find((r) => r.supplier_id === 10);
+      expect(andina).toBeDefined();
+      expect(andina!.product_count).toBe(2);
+      expect(andina!.total_stock_quantity).toBe(150);
+      // total_stock_value = 100*1500 + 50*800 = 190000
+      expect(andina!.total_stock_value).toBe(190000);
+    });
+
+    it('returns an empty array when there are no products, without throwing', async () => {
+      prisma.products.findMany.mockResolvedValue([] as any);
+      const rows = await service.getInventoryBySupplierForExport({
+        storeId: 1,
+      } as any);
+      expect(rows).toEqual([]);
+    });
+  });
 });
