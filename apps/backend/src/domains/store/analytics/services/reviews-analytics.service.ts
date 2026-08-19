@@ -147,7 +147,11 @@ export class ReviewsAnalyticsService {
       where: {
         store_id: storeId,
         created_at: { gte: startDate, lte: endDate },
-        product_id: { not: null },
+        // Prisma 7 rejects `{ not: null }` (semantically redundant: nullable fields
+        // are excluded by default). The original Prisma-6 form here triggered
+        // `PrismaClientValidationError: Argument 'not' must not be null` at
+        // runtime — see PR #593 / QUI-548 follow-up.
+        product_id: { not: undefined },
       },
       include: {
         products: { select: { name: true, sku: true } },
