@@ -1,41 +1,17 @@
 import { Module } from '@nestjs/common';
 
-import { PrismaModule } from '../../../../prisma/prisma.module';
+import { PrismaModule, PrismaService } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { S3Module } from '../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { BullModule } from '@nestjs/bullmq';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
-// Reutilizado tal cual, igual que `DianTestService`: la plataforma necesita el
-// MISMO reporte de readiness y la MISMA guarda de promoción que un tenant, y
-// duplicarlos fue justo lo que dejó al riel de plataforma promoviendo a
-// producción sin comprobar que la DIAN aprobó su set de habilitación.
 import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
-// `DianConfigService` la necesita en su constructor. `EncryptionService`, su otra
-// dependencia, ya llega por `EncryptionModule`, que es @Global.
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
-// Reused as-is from the store domain: the scanner is stateless and only needs
-// AIEngineService (a @Global() provider), so the platform gets the same
-// extraction and the same validation rules instead of a second copy.
 import { ResolutionScannerService } from '../../../store/invoicing/resolutions/resolution-scanner.service';
-// Reused for the shared early-alert helpers (certificate expiry tiers, range
-// threshold) so the platform checklist cannot drift from the tenant one.
 import { FiscalProductionReadinessService } from '../../../store/invoicing/providers/fiscal-production-readiness.service';
-// Reutilizado TAL CUAL, sin una línea de cambio: el scope de `invoice_resolutions`
-// es FISCAL, no de tienda (`buildFiscalEntityDirectScope` devuelve sólo
-// `{organization_id, accounting_entity_id}` y nunca filtra por `store_id`), así
-// que el servicio ya funciona bajo el contexto de plataforma —organización 1 sin
-// tienda— igual que `DianTestService`.
-//
-// Se importa por su path y NO vía `InvoicingModule`: ese módulo importa este riel
-// y traerlo aquí cerraría el ciclo.
 import { DianNumberingRangeService } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
-// Los dos prevalidadores del carril de tiendas, reutilizados tal cual. Son
-// `@Injectable()` puros —sin Prisma, sin contexto de tienda— así que no arrastran
-// dependencias: se declaran como providers locales por el mismo motivo que
-// `DianNumberingRangeService`, para no importar `InvoicingModule` y cerrar el
-// ciclo de módulos.
 import { CustomerFiscalIdentityValidator } from '../../../store/invoicing/validators/customer-fiscal-identity.validator';
 import { FiscalDocumentValidator } from '../../../store/invoicing/validators/fiscal-document.validator';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
@@ -43,18 +19,57 @@ import { SubscriptionFiscalController } from './subscription-fiscal.controller';
 import { SubscriptionFiscalListener } from './subscription-fiscal.listener';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
+/**
+ * CP-platform-fiscal-invoicing-mvp · Phase B.5
+ *
+ * V1 providers + factory wiring para la facade `PlatformInvoicingService`.
+ *
+ * Antes: este modulo solo manejaba el rail SaaS. Ahora co-habita
+ * el rail plataforma (MvpV1) — el legacy sigue operativo y la nueva
+ * API (`/sales-invoices`, `/support-documents`, `/customers/search`,
+ * etc.) entra por `PlatformInvoicingController`. Las responsabilidades
+ * legacy NO cambian: `SubscriptionFiscalService` sigue emitiendo
+ * invoices SaaS bajo el camino legacy y se inyecta ademas en la
+ * facade MvpV1 como `subscriptionFiscalService` (usada para
+ * delegar `listResolutionsForEmission`).
+ *
+ * Por que importamos `InvoicingModule` aqui: el facade reusa
+ * `InvoicingService` + `InvoiceFlowService` del rail tienda como
+ * motor de aritmetica, validators y cadena UBL. `InvoicingModule`
+ * NO importa este modulo, asi que no hay ciclo de DI.
+ *
+ * Por que la facade usa un `useFactory` y NO `@Injectable()` puro:
+ * `PlatformInvoicingService` recibe sus dependencias via un objeto
+ * `Deps` plano. Eso permite tests deterministicos sin NestJS runtime
+ * y mantiene la clase aislable. El modulo construye el `Deps` una
+ * sola vez y lo inyecta. Sin el factory la clase estaria atada al
+ * DI de Nest y seria mas dificil de probar.
+ */
+import { InvoicingModule } from '../../../store/invoicing/invoicing.module';
+import { InvoicingService } from '../../../store/invoicing/invoicing.service';
+import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
+import { PlatformTenantsService } from './platform-tenants.service';
+import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
+import { PlatformInvoicingService } from './platform-invoicing.service';
+import { PlatformInvoicingController } from './platform-invoicing.controller';
+
 @Module({
   imports: [
     PrismaModule,
     ResponseModule,
     S3Module,
     DianDirectModule,
-    // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
-    // `DianTestService` en sus providers, porque Nest instancia el servicio una
-    // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
     BullModule.registerQueue({ name: 'dian-test-set' }),
+    // InvoicingModule provee los servicios de aritmetica/validator/UBL
+    // del riel tienda. La facade los consume sin copiarlos.
+    InvoicingModule,
   ],
-  controllers: [SubscriptionFiscalController],
+  controllers: [
+    SubscriptionFiscalController,
+    // PlatformInvoicingController expone los nuevos paths MvpV1.
+    // Aisla las rutas V1 del legacy para minimizar conflictos.
+    PlatformInvoicingController,
+  ],
   providers: [
     ManualCertificateIssuerAdapter,
     DianTestService,
@@ -63,14 +78,45 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
     ResolutionScannerService,
     PlatformOrgService,
     FiscalProductionReadinessService,
-    // Sus tres dependencias ya están resueltas en este módulo: `StorePrismaService`
-    // por `PrismaModule`, `DianTestService` como provider de arriba y
-    // `TechnicalKeyVaultService` por `EncryptionModule`, que es @Global.
     DianNumberingRangeService,
     CustomerFiscalIdentityValidator,
     FiscalDocumentValidator,
     SubscriptionFiscalService,
     SubscriptionFiscalListener,
+    // MvpV1 providers (Phase B.5):
+    // Servicio read-only de busqueda de tenants (ADR-7).
+    PlatformTenantsService,
+    // Servicio de persistencia de snapshots (acquirer + invoice).
+    PlatformInvoicingPersistenceService,
+    // Facade con `useFactory` que arma el `Deps` con las dependencias
+    // inyectadas del riel tienda + legacy + MvpV1.
+    {
+      provide: PlatformInvoicingService,
+      useFactory: (
+        invoicingService: InvoicingService,
+        invoiceFlowService: InvoiceFlowService,
+        prisma: PrismaService,
+        persistence: PlatformInvoicingPersistenceService,
+        tenants: PlatformTenantsService,
+        subscriptionFiscalService: SubscriptionFiscalService,
+      ) =>
+        new PlatformInvoicingService({
+          invoicingService,
+          invoiceFlowService,
+          prisma,
+          persistence,
+          tenants,
+          subscriptionFiscalService,
+        } as any),
+      inject: [
+        InvoicingService,
+        InvoiceFlowService,
+        PrismaService,
+        PlatformInvoicingPersistenceService,
+        PlatformTenantsService,
+        SubscriptionFiscalService,
+      ],
+    },
   ],
   exports: [SubscriptionFiscalService],
 })
