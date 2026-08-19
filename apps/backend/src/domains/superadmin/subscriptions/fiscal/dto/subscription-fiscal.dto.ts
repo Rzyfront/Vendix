@@ -12,6 +12,7 @@ import {
   IsUUID,
   Length,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -389,3 +390,359 @@ export class CreatePlatformInvoiceDto {
   @MaxLength(10)
   currency?: string;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CP-platform-fiscal-invoicing-mvp: DTOs V1 (sales_invoice + support_document)
+ * Etiquetados con `MvpV1` para señalar que son la pieza del plan crítico
+ * ejecutado — el rail legacy `CreatePlatformInvoiceDto` queda activo y NO se
+ * reescribe. Cuando V2 retire el legacy, `CreatePlatformInvoiceDto` se borra
+ * y `MvpV1` prefix cae.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+// Tax codes DIAN — reusado por taxes per-line.
+// Tipos del enum tax_type_enum (IVA/INC/IBUA/ICUI/RETE_FUENTE/RETE_IVA/RETE_ICA/ICA)
+// ver schema.prisma. V1 emite IVA/INC/ICUI/RETENCIONES — IBUA solo si la
+// feature explícita lo pide (caso Shopify/marketplace).
+const MvpV1_TAX_TYPES = [
+  'IVA',
+  'INC',
+  'ICUI',
+  'RETE_FUENTE',
+  'RETE_IVA',
+  'RETE_ICA',
+] as const;
+export type MvpV1TaxType = (typeof MvpV1_TAX_TYPES)[number];
+
+/**
+ * AIU: el regimen colombiano (E.T. art. 462-1) exige un minimo de 10% sobre
+ * la base gravable acumulada (administracion + imprevistos + utilidad). El
+ * backend ya tiene `aiu_base_below_minimum` en `invoice-calculator.service.ts`;
+ * V1 solo expone el campo al frontend. La regla del piso NO se redefine aquí.
+ */
+const MvpV1_AIU_COMPONENTS = [
+  'administracion',
+  'imprevistos',
+  'utilidad',
+] as const;
+export type MvpV1AiuComponent = (typeof MvpV1_AIU_COMPONENTS)[number];
+
+const MvpV1_OPERATION_TYPES = ['10', '09', '11', '12'] as const;
+export type MvpV1OperationType = (typeof MvpV1_OPERATION_TYPES)[number];
+
+/**
+ * Roles de withholding: practiced (VENDIX retiene al cliente), suffered
+ * (VENDIX sufre retención del cliente), self (auto-retención).
+ */
+const MvpV1_WITHHOLDING_ROLES = ['practiced', 'suffered', 'self'] as const;
+export type MvpV1WithholdingRole = (typeof MvpV1_WITHHOLDING_ROLES)[number];
+
+// ── Tenant customer ADR-7 ────────────────────────────────────────────────────
+//
+// El rail super-admin factura a TENANTS (stores u organizations), NO a
+// `users`. ADR-7 lo formaliza con discriminated `kind`. El selector de
+// tenant en el frontend usa estas dos variantes, y el backend persiste
+// snapshot fiscal en `fiscal_evidences.metadata.kind='platform_acquirer_snapshot'`.
+
+export class PlatformInvoiceTenantRefStore {
+  @IsIn(['store'])
+  kind!: 'store';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_id!: number;
+}
+
+export class PlatformInvoiceTenantRefOrganization {
+  @IsIn(['organization'])
+  kind!: 'organization';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  organization_id!: number;
+}
+
+/**
+ * Discriminated union. `class-validator` valida cada rama por separado si
+ * `IsIn(['store'])` o `IsIn(['organization'])` discrimina correctamente; el
+ * backend re-checka con ValidateNested-or-custom en el servicio.
+ */
+export class PlatformInvoiceTenantRefDto {
+  // Campo plano que decide la rama. La union en runtime la construye el frontend.
+  @IsIn(['store', 'organization'])
+  kind!: 'store' | 'organization';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  tenant_id!: number;
+}
+
+// ── Item (line) con taxes + discount + AIU + is_inclusive + unit_code ────────
+
+export class MvpV1InvoiceLineTaxDto {
+  @IsIn(MvpV1_TAX_TYPES as unknown as string[])
+  tax_type!: MvpV1TaxType;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  @Max(1, { message: 'rate debe ser fracción entre 0 y 1 (0.19 = 19%)' })
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  taxable_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  tax_amount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_inclusive?: boolean;
+}
+
+export class MvpV1InvoiceLineDto {
+  @TrimString()
+  @IsString()
+  @MaxLength(500)
+  description!: string;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0.0001, { message: 'quantity debe ser > 0' })
+  quantity!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  unit_price!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  discount_amount?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MvpV1InvoiceLineTaxDto)
+  taxes?: MvpV1InvoiceLineTaxDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  unit_code?: string; // UN/ECE Rec. 20 — default 'EA' en el servicio si falta
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  account_code?: string;
+
+  @IsOptional()
+  @IsIn(MvpV1_AIU_COMPONENTS as unknown as string[])
+  aiu_component?: MvpV1AiuComponent;
+}
+
+// ── Withholdings (input, resolver en backend) ────────────────────────────────
+
+export class MvpV1InvoiceWithholdingInputDto {
+  @IsIn(MvpV1_WITHHOLDING_ROLES as unknown as string[])
+  role!: MvpV1WithholdingRole;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  concept_id!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  base_amount!: number;
+
+  // rate entre 0 y 1 (fracción). Auto-resolución: si viene vacío y el
+  // `concept_id` existe, el backend rellena desde `withholding_concepts.rate`.
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  amount?: number;
+}
+
+// ── Moneda + TRM ──────────────────────────────────────────────────────────
+
+export class MvpV1CurrencyDto {
+  // ISO 4217 alpha-3. V1 solo soporta COP y USD — la regla completa (no USD
+  // en tienda COP-only, etc.) se valida con `vendix-currency-formatting` en
+  // el servicio. Restringir en DTO bloquea bypass por JSON manual.
+  @IsString()
+  @Length(3, 3)
+  @IsIn(['COP', 'USD'], {
+    message: 'V1 solo soporta COP y USD (multi-moneda es V2)',
+  })
+  iso_4217!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  exchange_rate?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  exchange_rate_date?: string;
+}
+
+// ── V1: CreatePlatformSalesInvoiceDto ────────────────────────────────────────
+
+/**
+ * Discriminated variant: para `sales_invoice`, el destinatario es un
+ * `PlatformInvoiceTenantRefDto` y los campos tenant-fiscal se derivan del
+ * snapshot en `fiscal_evidences.metadata` post-emisión.
+ *
+ * El DTO `CreatePlatformInvoiceDto` (legacy MVP) sigue operativo bajo la
+ * ruta `POST /invoices` (sin taxes, sin AIU). V1 entra por la ruta nueva
+ * `POST /sales-invoices` y se queda con esta DTO.
+ */
+export class CreatePlatformSalesInvoiceDto {
+  @ValidateNested()
+  @Type(() => PlatformInvoiceTenantRefDto)
+  customer!: PlatformInvoiceTenantRefDto;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => MvpV1InvoiceLineDto)
+  items!: MvpV1InvoiceLineDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  period_start?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  period_end?: string;
+
+  // '09' = régimen AIU (E.T. art. 462-1). '10' es estándar.
+  @IsIn(MvpV1_OPERATION_TYPES as unknown as string[])
+  operation_type!: MvpV1OperationType;
+
+  // SI operation_type='09' se exige el AIU note de 4900 char DIAN.
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(4900)
+  aiu_contract_object?: string;
+
+  // '1' contado / '2' crédito. Default '1' en el servicio.
+  @IsOptional()
+  @IsIn(['1', '2'])
+  payment_form?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  payment_means_code?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  due_date?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MvpV1CurrencyDto)
+  currency?: MvpV1CurrencyDto;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MvpV1InvoiceWithholdingInputDto)
+  withholdings?: MvpV1InvoiceWithholdingInputDto[];
+
+  // Documento -> cac:AllowanceCharge (descuento global)
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  global_discount_amount?: number;
+
+  // Notas libres para el XML (≤ 5000 char concat)
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notes?: string;
+}
+
+// ── V1: CreatePlatformSupportDocumentDto ────────────────────────────────────
+
+/**
+ * Vendor support document (DSA). Vendor = VENDIX vendiendo servicios a un
+ * tenant; el `supplier_id` es el tenant-receptor (análogo al `customer`).
+ *
+ * Diferencias con sales_invoice:
+ *   - sin AIU (no es contrato AIU)
+ *   - sin payment_means_code (el rail tienda DSA no lo usa)
+ *   - sin withholdings (la DIAN lo modela distinto a ventas)
+ *   - único fiscal doc que NO exige ClTec (CUDS en lugar de CUFE)
+ */
+export class CreatePlatformSupportDocumentDto {
+  @ValidateNested()
+  @Type(() => PlatformInvoiceTenantRefDto)
+  supplier!: PlatformInvoiceTenantRefDto;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => MvpV1InvoiceLineDto)
+  items!: MvpV1InvoiceLineDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  period_start?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  period_end?: string;
+
+  @IsIn(MvpV1_OPERATION_TYPES as unknown as string[])
+  operation_type!: MvpV1OperationType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  payment_means_code?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  due_date?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MvpV1CurrencyDto)
+  currency?: MvpV1CurrencyDto;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  global_discount_amount?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notes?: string;
+}
+

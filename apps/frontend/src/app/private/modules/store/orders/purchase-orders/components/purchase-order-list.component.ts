@@ -73,6 +73,22 @@ export class PurchaseOrderListComponent {
   // Pagination
   filters = { page: 1, limit: 10 };
 
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: ordenamiento con enum cerrado.
+   * Backend ahora rechaza cualquier sort_by fuera del enum. Default = 'next_payment_date'.
+   */
+  readonly sortBy = signal<
+    'order_date' | 'next_payment_date' | 'supplier_name' | 'total' | 'status'
+  >('next_payment_date');
+  readonly sortDir = signal<'asc' | 'desc'>('asc');
+  readonly sortOptions = [
+    { value: 'next_payment_date', label: 'Próximo pago (asc)' },
+    { value: 'order_date', label: 'Fecha de orden' },
+    { value: 'supplier_name', label: 'Proveedor' },
+    { value: 'total', label: 'Total' },
+    { value: 'status', label: 'Estado' },
+  ] as const;
+
   // Filter state
   searchTerm = '';
   selectedStatus = '';
@@ -138,29 +154,30 @@ export class PurchaseOrderListComponent {
       transform: (value: string) =>
         value ? new Date(value).toLocaleDateString() : '-',
     },
-    // Bug 4 frontend: columna "Próximo pago" derivada del backend
-    // (`next_payment_date` + `next_payment_due_in_days`). Badge de color
-    // según urgencia: verde >7d, amarillo ≤7d, rojo vencido, gris sin plan.
+    // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximity.
+    // Verde > 7d, amarillo 1-7d, naranja 0d (vence hoy), rojo < 0 (vencida),
+    // gris null (sin plan). La clave apunta al campo numérico crudo para
+    // que table.component.ts:583 pase `value` (número) al colorFn.
     {
-      key: 'next_payment',
+      key: 'next_payment_due_in_days',
       label: 'Próximo pago',
       priority: 2,
       badge: true,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: {
-          // computed en runtime vía transform: el color va en el label HTML,
-          // no en colorMap, porque el badge component soporta 1 color estático
-          // por celda. Aquí dejamos fallback neutro.
-          ok: '#10b981',
-          soon: '#f59e0b',
-          overdue: '#ef4444',
-          none: '#9ca3af',
+        colorFn: (value: any) => {
+          if (value === null || value === undefined || value === '') return '#9ca3af';
+          const num = Number(value);
+          if (!Number.isFinite(num)) return '#9ca3af';
+          if (num < 0) return '#ef4444';   // vencida: rojo
+          if (num === 0) return '#f97316';  // vence hoy: naranja
+          if (num <= 7) return '#f59e0b';   // 1-7d: amarillo
+          return '#10b981';                 // > 7d: verde
         },
       },
       transform: (value: any, row?: any) =>
-        this.formatNextPaymentBadge(row?.next_payment_due_in_days),
+        this.formatNextPaymentBadge(row?.next_payment_due_in_days ?? value),
       sortable: true,
     },
     {
@@ -277,6 +294,8 @@ export class PurchaseOrderListComponent {
     const query: any = {
       page: this.filters.page,
       limit: this.filters.limit,
+      sort_by: this.sortBy(),
+      sort_order: this.sortDir(),
     };
     if (this.selectedStatus) {
       query.status = this.selectedStatus;
@@ -423,6 +442,18 @@ export class PurchaseOrderListComponent {
   // Check if there are active filters
   get hasFilters(): boolean {
     return !!(this.searchTerm || this.selectedStatus);
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: handler del sort select.
+   * Resets page=1 al cambiar el criterio.
+   */
+  onSortChange(value: string): void {
+    if (this.sortOptions.some((o) => o.value === value)) {
+      this.sortBy.set(value as any);
+      this.filters.page = 1;
+      this.refresh.emit();
+    }
   }
 
 

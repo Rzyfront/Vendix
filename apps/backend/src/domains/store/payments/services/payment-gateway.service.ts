@@ -127,35 +127,21 @@ export class PaymentGatewayService {
     reason?: string,
   ): Promise<RefundResult> {
     try {
-      const payment = await this.prisma.payments.findFirst({
-        where: { transaction_id: paymentId },
-        include: {
-          store_payment_method: { include: { system_payment_method: true } },
-        },
-      });
-
-      if (!payment) {
-        throw new PaymentError(
-          PaymentErrorCodes.INVALID_ORDER,
-          'Payment not found',
-        );
-      }
-
-      if (payment.state !== 'succeeded' && payment.state !== 'captured') {
-        throw new PaymentError(
-          PaymentErrorCodes.VALIDATION_FAILED,
-          'Payment cannot be refunded',
-        );
-      }
-
-      const processor = this.getProcessor(
-        payment.store_payment_method?.system_payment_method?.type || 'card',
+      const result = await this.reversePaymentWithProcessor(
+        paymentId,
+        amount,
       );
-      const result = await processor.refundPayment(paymentId, amount);
 
       if (result.success) {
-        await this.createRefundRecord(payment, result, reason);
-        await this.updateOrderAfterRefund(payment.order_id);
+        const payment = await this.prisma.payments.findFirst({
+          where: { transaction_id: paymentId },
+          select: { id: true, order_id: true },
+        });
+
+        if (payment) {
+          await this.createRefundRecord(payment, result, reason);
+          await this.updateOrderAfterRefund(payment.order_id);
+        }
       }
 
       return result;
@@ -165,6 +151,57 @@ export class PaymentGatewayService {
       }
       throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, error.message);
     }
+  }
+
+  /**
+   * Performs the processor-side reversal against the gateway without touching
+   * the `refunds` or `orders` tables. Resolves the processor by following
+   * `payments → store_payment_method → system_payment_method.type`, validates
+   * that the payment is in a refundable state, and delegates to
+   * `processor.refundPayment(...)`.
+   *
+   * Separated from the public `refundPayment()` flow (ADR-1, CP-refund-gateway-
+   * dispatch-fix) so callers that already own the `refunds` row in their own
+   * transaction (e.g. `RefundFlowService.dispatchRefundProcessor`) can call
+   * the processor without triggering a duplicate `createRefundRecord`.
+   *
+   * Errors thrown:
+   * - `PaymentError(INVALID_ORDER)` — payment not found.
+   * - `PaymentError(VALIDATION_FAILED)` — payment is not in a refundable state.
+   * - `PaymentError(PROCESSOR_ERROR)` — processor lookup failed or processor
+   *   call rejected with a non-PaymentError exception.
+   * - Raw exceptions from the processor call propagate unchanged; callers that
+   *   want a uniform contract should wrap the call in their own try/catch.
+   */
+  public async reversePaymentWithProcessor(
+    transactionId: string,
+    amount?: number,
+  ): Promise<RefundResult> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { transaction_id: transactionId },
+      include: {
+        store_payment_method: { include: { system_payment_method: true } },
+      },
+    });
+
+    if (!payment) {
+      throw new PaymentError(
+        PaymentErrorCodes.INVALID_ORDER,
+        'Payment not found',
+      );
+    }
+
+    if (payment.state !== 'succeeded' && payment.state !== 'captured') {
+      throw new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'Payment cannot be refunded',
+      );
+    }
+
+    const processor = this.getProcessor(
+      payment.store_payment_method?.system_payment_method?.type || 'card',
+    );
+    return await processor.refundPayment(transactionId, amount);
   }
 
   async getPaymentStatus(transactionId: string): Promise<PaymentStatus> {

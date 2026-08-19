@@ -53,6 +53,22 @@ export interface OrgPurchaseOrderRow {
   expected_date?: string | null;
   created_at?: string;
   lines?: OrgPurchaseOrderLine[];
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S11 / F2.S2: payment_plan opcional.
+   * Viene del backend `OrgPurchaseOrdersService.findOne` que ahora incluye
+   * `payment_plan: { include: { payment_schedules: true } }`. Solo presente
+   * cuando la OC tiene plan de pagos configurado.
+   */
+  payment_plan?: {
+    id?: number;
+    payment_plan?: string | null;
+    payment_schedules?: Array<{
+      id: number;
+      scheduled_date: string;
+      amount: string | number;
+      status: string;
+    }>;
+  } | null;
 }
 
 /**

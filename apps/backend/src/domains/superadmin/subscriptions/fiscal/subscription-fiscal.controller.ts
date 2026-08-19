@@ -338,7 +338,12 @@ export class SubscriptionFiscalController {
    * que el XML va a declarar (`computed`) y el consecutivo que se asignaría
    * (`document_number_preview`). Espejo de `GET /store/invoicing/:id/emit-readiness`.
    */
-  @Get('invoices/:id/emit-readiness')
+  // Renombrado a `/saas-invoices/:id/emit-readiness` para no colisionar con
+  // `PlatformInvoicingController.invoices/:id/emit-readiness` (FB-06), que
+  // cubre el rail plataforma. NestJS resuelve por orden de registro y este
+  // controller se registra antes, así que la ruta duplicada le ganaba al
+  // nuevo rail plataforma. LaSaaS sigue funcionando bajo el nuevo path.
+  @Get('saas-invoices/:id/emit-readiness')
   @Permissions('superadmin:subscriptions:fiscal:read')
   @ApiOperation({
     summary:

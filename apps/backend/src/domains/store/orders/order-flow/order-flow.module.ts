@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import {
   OrderFlowController,
@@ -21,6 +21,7 @@ import { PaymentFromDispatchRouteListener } from './listeners/payment-from-dispa
 import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commit.module';
 import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
+import { PaymentsModule } from '../../payments/payments.module'; // refund-gateway-fix: W2-A needs PaymentGatewayService
 
 @Module({
   imports: [
@@ -31,6 +32,11 @@ import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
     InventorySerialNumbersModule,
     OrderStockCommitModule,
     WalletModule,
+    // refund-gateway-fix: PaymentGatewayService.reversePaymentWithProcessor()
+    // is called from RefundFlowService.dispatchRefundProcessor. Reverse the
+    // forwardRef that PaymentsModule already declares against us (line 69 of
+    // payments.module.ts) so DI resolves on both sides of the cycle.
+    forwardRef(() => PaymentsModule),
   ],
   controllers: [OrderFlowController, OrderRefundsController],
   providers: [

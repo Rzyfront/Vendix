@@ -2804,8 +2804,32 @@ export class SubscriptionFiscalService {
       line_items: items,
     };
 
+    // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
+    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
+    // (kind ya validado en la lectura) para que el detail page del rail
+    // plataforma renderice con la misma forma que el rail tienda.
+    // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
+    // casteamos via unknown para leer campos arbitrarios sin revalidation por
+    // linea.
+    const metaExtras = (snapshot?.metadata ?? null) as unknown as
+      | Record<string, unknown>
+      | null;
+    const syntheticWithExtras = {
+      ...synthetic,
+      customer: customer ?? null,
+      payment_form: (metaExtras?.['payment_form'] as string | null) ?? null,
+      payment_means_code: (metaExtras?.['payment_means_code'] as string | null) ?? null,
+      due_date: dueIso,
+      operation_type: (metaExtras?.['operation_type'] as string | null) ?? null,
+      aiu_contract_object: (metaExtras?.['aiur_contract_object'] as string | null) ?? null,
+      global_discount_amount: (metaExtras?.['global_discount_amount'] as number | null) ?? null,
+      withholding_amount: (metaExtras?.['withholding_amount'] as number | null) ?? null,
+      exchange_rate: (metaExtras?.['exchange_rate'] as number | null) ?? null,
+      exchange_rate_date: (metaExtras?.['exchange_rate_date'] as string | null) ?? null,
+    };
+
     return {
-      invoice: synthetic,
+      invoice: syntheticWithExtras,
       transmissions: [
         {
           id: transmission.id,
@@ -3021,6 +3045,102 @@ export class SubscriptionFiscalService {
       : data;
 
     return filtered;
+  }
+
+  /**
+   * CP-platform-fiscal-invoicing-mvp · Phase A.4
+   *
+   * Lista de resoluciones aptas para EMISION en el rail super-admin.
+   * Diferencias con `listResolutions` (legacy management):
+   *   - excluye resoluciones expiradas (valid_to < now) o futuras (valid_from > now)
+   *   - excluye resoluciones inactivas
+   *   - incluye `technical_key_fingerprint` (nunca la cifrada plana)
+   *   - filtra explicitamente por `document_type` requerido
+   *
+   * Razon: el TenantPicker emite directamente sobre el form. No debe
+   * poder elegir una resolucion que no le sirve. La regla del piso
+   * no la hace este endpoint — la aplica `allocateFiscalNumber`
+   * (cursor exhaustado).
+   *
+   * Para sales_invoice exige ClTec utilizable — la DIAN rechaza sin
+   * ClTec y quema consecutivo. Para support_document no la requiere.
+   */
+  async listResolutionsForEmission(args: {
+    organizationId: number;
+    accountingEntityId: number;
+    documentType: 'sales_invoice' | 'support_document';
+    now?: Date;
+  }) {
+    const now = args.now ?? new Date();
+    const rows = await this.prisma.withoutScope().invoice_resolutions.findMany({
+      where: {
+        organization_id: args.organizationId,
+        store_id: null,
+        accounting_entity_id: args.accountingEntityId,
+        document_type: args.documentType,
+        is_active: true,
+        valid_from: { lte: now },
+        valid_to: { gte: now },
+      },
+      orderBy: [{ created_at: 'desc' }],
+      select: {
+        id: true,
+        prefix: true,
+        resolution_number: true,
+        range_from: true,
+        range_to: true,
+        current_number: true,
+        valid_from: true,
+        valid_to: true,
+        document_type: true,
+        technical_key_fingerprint: true,
+        created_at: true,
+      },
+    });
+
+    // Reglas adicionales del lado aplicacion (no Postgres):
+    // - sales_invoice: requiere `technical_key_fingerprint` no nulo
+    //   (ClTec utilizable, validada por `isWellFormedTechnicalKey`).
+    // - support_document: NO requiere ClTec; siempre es emitible.
+    // Devolvemos el flag `emittable` para que el form muestre advertencia.
+    const techKeyShape: Record<string, unknown> = {};
+    for (const row of rows) {
+      let emittable = true;
+      let cltecStatus: 'present' | 'absent' | 'invalid' = 'absent';
+
+      if (args.documentType === 'sales_invoice') {
+        const fingerprint = row.technical_key_fingerprint;
+        if (!fingerprint) {
+          emittable = false;
+          cltecStatus = 'absent';
+        } else {
+          // El fingerprint es SHA-256 del ClTec. La verificacion final
+          // de la forma (long 40 o 64 hex) corre en `allocateFiscalNumber`
+          // bajo el candado; aca marcamos 'present' y dejamos la
+          // verificacion dura para el submit.
+          cltecStatus = 'present';
+        }
+      } else {
+        cltecStatus = 'absent'; // support_document: irrelevante
+      }
+
+      techKeyShape[row.id] = { emittable, cltecStatus, fingerprint: row.technical_key_fingerprint ?? null };
+      // Adjuntamos `emittable` y `cltec_status` al row sin mutar la select.
+      (row as any).emittable = emittable;
+      (row as any).cltec_status = cltecStatus;
+    }
+
+    return {
+      data: rows,
+      meta: {
+        document_type: args.documentType,
+        total: rows.length,
+        // El caller puede ordenar/filtrar en cliente.
+        rejected_for_missing_cltec: rows.filter(
+          (r) => (r as any).cltec_status === 'absent' && args.documentType === 'sales_invoice',
+        ).length,
+      },
+    };
   }
 
   /**
@@ -3463,6 +3583,46 @@ export class SubscriptionFiscalService {
       last_test_result: value.last_test_result ?? null,
       updated_by_user_id: value.updated_by_user_id ?? null,
       updated_at: value.updated_at ?? null,
+    };
+  }
+
+  /**
+   * Wrapper publico que retorna la identidad resuelta (organization_id +
+   * accounting_entity_id) para que el facade V1 pueda pasarle esos
+   * parametros sin tener que duplicar la logica de derivacion.
+   *
+   * Por diseño: este metodo es lo unico del legacy que el facade V1
+   * consume en runtime (Phase B.1). El controller lo llama antes de
+   * `listResolutionsForEmission` y `evaluateReadiness` para evitar
+   * hardcodear org=0/accountingEntityId=0.
+   */
+  async getPlatformIdentity(): Promise<{
+    organizationId: number;
+    accountingEntityId: number;
+  }> {
+    const settings = await this.getSettings();
+    return {
+      organizationId: settings.platform_organization_id ?? 0,
+      accountingEntityId: settings.accounting_entity_id ?? 0,
+    };
+  }
+
+  /**
+   * Version extendida para el controller V1: retorna los 3 IDs
+   * (organization + accounting_entity + dian_configuration) que el
+   * controller necesita para resolver el cliente (organizationId)
+   * + el dian_configuration_id al crear transmisiones platform.
+   */
+  async getSettingsForController(): Promise<{
+    platform_organization_id: number;
+    accounting_entity_id: number;
+    dian_configuration_id: number;
+  }> {
+    const settings = await this.getSettings();
+    return {
+      platform_organization_id: settings.platform_organization_id ?? 0,
+      accounting_entity_id: settings.accounting_entity_id ?? 0,
+      dian_configuration_id: settings.dian_configuration_id ?? 0,
     };
   }
 

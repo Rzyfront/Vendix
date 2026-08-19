@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -67,7 +67,38 @@ export class PlatformInvoicesComponent {
   readonly issuingInvoice = signal(false);
   readonly retryingTransmissionId = signal<number | null>(null);
   readonly search = signal('');
+  readonly sourceTypeFilter = signal<string>('');
+  readonly documentTypeFilter = signal<string>('');
+  readonly dateFromFilter = signal<string>('');
+  readonly dateToFilter = signal<string>('');
   readonly pagination = signal({ page: 1, limit: 20, total: 0, totalPages: 0 });
+
+  readonly sourceTypeOptions = [
+    { value: '', label: 'Todos los origenes' },
+    { value: 'subscription_invoice', label: 'SaaS' },
+    { value: 'platform_invoice', label: 'Platform' },
+    { value: 'platform_support_document', label: 'Platform DSA' },
+  ];
+
+  readonly documentTypeOptions = [
+    { value: '', label: 'Todos los tipos' },
+    { value: 'sales_invoice', label: 'Factura de venta' },
+    { value: 'support_document', label: 'Documento soporte' },
+  ];
+
+  readonly filteredTransmissions = computed(() => {
+    const sourceType = this.sourceTypeFilter();
+    const docType = this.documentTypeFilter();
+    const from = this.dateFromFilter();
+    const to = this.dateToFilter();
+    return this.transmissions().filter((row) => {
+      if (sourceType && row.source_type !== sourceType) return false;
+      if (docType && row.document_type !== docType) return false;
+      if (from && (row.created_at ?? '') < from) return false;
+      if (to && (row.created_at ?? '') > to + 'T23:59:59') return false;
+      return true;
+    });
+  });
 
   readonly manualInvoiceIdControl = this.fb.control<string | null>(null, [
     optionalNumericIdValidator,

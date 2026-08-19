@@ -212,6 +212,8 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [loadingCostPreview]="loadingCostPreview()"
       [isProcessing]="isProcessingOrder()"
       [retryOrderRef]="retryOrderRef()"
+      [orderResult]="orderResult()"
+      [orderError]="orderError()"
       [needsConfig]="shellNeedsConfig()"
       [supplierOptions]="shellSupplierOptions()"
       [locationOptions]="shellLocationOptions()"
@@ -220,6 +222,9 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
+      (viewCreatedOrder)="onViewCreatedOrder()"
+      (createAnotherOrder)="onCreateAnotherOrder()"
+      (retryOrder)="onOrderConfirmed()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
@@ -391,6 +396,16 @@ export class PopComponent implements OnInit, OnDestroy {
 
   showOrderConfirmModal = signal(false);
   confirmOrderAction: 'create' | 'create-receive' = 'create';
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: resultado post-creación.
+   * `orderResult` se popula cuando el POST de la OC termina OK; el shell
+   * renderiza un panel `app-success` con el id y un botón "Ver detalle"
+   * que navega a /admin/orders/purchase-orders/:id (en lugar de
+   * /admin/products como antes).
+   */
+  readonly orderResult = signal<{ id: number; total: number; orderNumber: string } | null>(null);
+  readonly orderError = signal<string | null>(null);
 
   /**
    * QUI-647 — snapshot de "el POP no estaba configurado (sin proveedor/bodega)"
@@ -1773,7 +1788,14 @@ export class PopComponent implements OnInit, OnDestroy {
    *    pago: la OC ya existe y solo falta que entre la mercancía.
    */
   onOrderConfirmed(): void {
-    this.showOrderConfirmModal.set(false);
+    // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: NO cerrar el modal antes del POST.
+    // Antes `showOrderConfirmModal.set(false)` corría como primera línea y el
+    // operador quedaba sin feedback durante el RTT. Ahora el modal se mantiene
+    // abierto durante el POST, muestra spinner, y al terminar pinta un panel
+    // `app-success` con id + total + botón "Ver detalle".
+    this.orderResult.set(null);
+    this.orderError.set(null);
+    this.isProcessingOrder.set(true);
 
     const action = this.confirmOrderAction;
     const doReceive = this.ackReceive();
@@ -1788,6 +1810,28 @@ export class PopComponent implements OnInit, OnDestroy {
     const doPay =
       !this.pendingReceptionOrder() && plan?.payment_plan === 'immediate';
     this._executeCreateReceivePay(doReceive, doPay);
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: navega al detalle de la PO creada
+   * en lugar de /admin/products. Antes el operador perdía de vista la OC.
+   */
+  onViewCreatedOrder(): void {
+    const result = this.orderResult();
+    if (result?.id) {
+      this.showOrderConfirmModal.set(false);
+      this.router.navigate(['/admin/orders/purchase-orders', result.id]);
+    }
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: cierra el panel de éxito y vuelve
+   * al estado limpio para crear otra OC.
+   */
+  onCreateAnotherOrder(): void {
+    this.orderResult.set(null);
+    this.orderError.set(null);
+    this.showOrderConfirmModal.set(false);
   }
 
   onNavigateToSettings(): void {
@@ -1997,16 +2041,23 @@ export class PopComponent implements OnInit, OnDestroy {
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
+          // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: en lugar de navegar a
+          // /admin/products, pintar panel `app-success` con id + total.
           this.toastService.success('Orden creada exitosamente');
           this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-          this.router.navigate(['/admin/products']);
+          this.orderResult.set({
+            id: response.data.id,
+            total: Number(response.data.total_amount ?? 0),
+            orderNumber: response.data.order_number ?? '',
+          });
+          this.isProcessingOrder.set(false);
         }
       },
       error: (error) => {
         console.error('Error submitting order:', error);
-        this.toastService.error(
-          this._errorMessage(error, 'Error al enviar la orden'),
-        );
+        this.orderError.set(this._errorMessage(error, 'Error al enviar la orden'));
+        this.toastService.error(this.orderError() || 'Error al enviar la orden');
+        this.isProcessingOrder.set(false);
       },
     });
   }
@@ -2293,7 +2344,10 @@ export class PopComponent implements OnInit, OnDestroy {
       .clearCart()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe();
-    this.router.navigate(['/admin/products']);
+    // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: ya no navegamos a /products.
+    // El panel `app-success` queda pintado en el shell. El usuario decide
+    // cuándo cerrarlo (botón "Ver detalle" o "Nueva compra").
+    this.isProcessingOrder.set(false);
   }
 
   /** Fecha de hoy en formato YYYY-MM-DD (hora local) para el pago. */

@@ -119,13 +119,16 @@ import type {
               iconColor="text-purple-600"
             ></app-stats>
 
+            <!--
+              CP-ID-VNDX-2026-08-18-PO-PROD — F2.S3: 5ta card "YTD" (año a la fecha).
+            -->
             <app-stats
-              title="Ticket promedio"
-              [value]="summary()?.average_order_value | currency"
-              [smallText]="lastOrderLabel()"
-              iconName="calculator"
-              iconBgColor="bg-emerald-100"
-              iconColor="text-emerald-600"
+              title="Compras YTD"
+              [value]="summary()?.ytd_purchases | currency"
+              [smallText]="(summary()?.open_pos_count || 0) + ' OCs abiertas'"
+              iconName="calendar"
+              iconBgColor="bg-cyan-100"
+              iconColor="text-cyan-600"
             ></app-stats>
           </div>
 
@@ -387,6 +390,25 @@ export class SupplierDetailsComponent implements OnInit {
       label: 'Vence',
       priority: 1,
       transform: (value: any) => this.formatDate(value as string | null),
+    },
+    /**
+     * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S4: columna "Cuota N de M".
+     * Solo aplica cuando la CxP proviene de un PO con plan de pagos.
+     * Si no hay plan: muestra "Única".
+     */
+    {
+      key: 'installment_info',
+      label: 'Cuota',
+      priority: 2,
+      transform: (_value: any, row?: any) => {
+        const info = row?.installment_info;
+        if (!info || !info.total_installments || info.payment_plan === 'immediate') {
+          return 'Única';
+        }
+        const n = info.installment_number ?? '?';
+        const m = info.total_installments;
+        return `${n} de ${m}`;
+      },
     },
     {
       key: 'days_overdue',

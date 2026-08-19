@@ -64,6 +64,11 @@ export interface Supplier {
   bank_name?: string;
   bank_account_number?: string;
   bank_account_type?: string;
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S1: dirección comercial del proveedor.
+   * Antes no estaba en la interface; el PO detail ahora la pinta en grid.
+   */
+  address?: Address;
   created_at?: string;
   updated_at?: string;
 }
@@ -821,6 +826,13 @@ export interface SupplierSummary {
     max_days_overdue: number;
     committed_amount: number;
     committed_orders: number;
+    /**
+     * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S8 / F2.S3: stats cards nuevas.
+     * ytd_purchases: SUM(subtotal) desde el 1-ene del año corriente.
+     * open_pos_count: count de POs en 'approved'|'partial'.
+     */
+    ytd_purchases: number;
+    open_pos_count: number;
     last_order_date: string | null;
     /** Universo agregado: ORGANIZATION suma todas las tiendas. */
     scope: 'ORGANIZATION' | 'STORE';
@@ -831,6 +843,8 @@ export interface SupplierPurchaseOrderRow {
     order_number: string;
     status: string;
     payment_status: string;
+    payment_plan?: string | null;
+    payment_due_date?: string | null;
     subtotal_amount: string | number;
     tax_amount: string | number;
     total_amount: string | number;
@@ -838,6 +852,24 @@ export interface SupplierPurchaseOrderRow {
     order_date: string | null;
     expected_date: string | null;
     received_date: string | null;
+    /**
+     * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S10: enriquecido en backend.
+     * Próxima fecha de pago planeada (scheduled_date planned ASC) o
+     * fallback a payment_due_date. `null` si no hay plan ni due_date.
+     */
+    next_payment_date?: string | null;
+    next_payment_due_in_days?: number | null;
+}
+
+/**
+ * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S9: desglose "Cuota N de M" en CxP.
+ * `null` cuando la CxP no proviene de un PO con plan de pagos.
+ */
+export interface PayableInstallmentInfo {
+    po_id: number;
+    payment_plan: string | null;
+    installment_number: number | null;
+    total_installments: number;
 }
 
 export interface SupplierPayableRow {
@@ -851,4 +883,5 @@ export interface SupplierPayableRow {
     due_date: string;
     status: string;
     days_overdue: number;
+    installment_info?: PayableInstallmentInfo | null;
 }

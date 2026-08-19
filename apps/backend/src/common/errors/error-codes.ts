@@ -990,6 +990,16 @@ export const ErrorCodes = {
     devMessage:
       'El calendario de cuotas requiere al menos una cuota con monto mayor que cero',
   },
+  // CP-ID-VNDX-2026-08-18-PO-PROD — ADR-001: sort_by cerrado en PO List.
+  // Antes el DTO aceptaba cualquier string y el cliente podía inyectar columnas
+  // Prisma inexistentes (`?sort_by=next_payment_date`) que reventaban la query
+  // como 500 silencioso. El enum cerrado lo bloquea en validación.
+  PO_INVALID_SORT_BY: {
+    code: 'PO_INVALID_SORT_BY',
+    httpStatus: 400,
+    devMessage:
+      'El parámetro sort_by no es válido. Usa: order_date, next_payment_date, supplier_name, total o status',
+  },
 
   // Inventory
   INV_FIND_001: {
@@ -1617,6 +1627,31 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'DIAN enablement is not live (production + enabled) yet',
   },
+  INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1: {
+    code: 'INVOICING_DOCUMENT_TYPE_UNSUPPORTED_V1',
+    httpStatus: 501,
+    devMessage: 'Document type not supported in V1 of the platform invoicing MVP',
+  },
+  INVOICING_TRANSITION_001: {
+    code: 'INVOICING_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'Cannot cancel a transmission in its current state',
+  },
+  PDF_NOT_READY: {
+    code: 'PDF_NOT_READY',
+    httpStatus: 503,
+    devMessage: 'PDF generation pipeline not yet wired (phase B.5)',
+  },
+  INVOICING_PLATFORM_READINESS_001: {
+    code: 'INVOICING_PLATFORM_READINESS_001',
+    httpStatus: 409,
+    devMessage: 'Platform invoice transmission has no fiscal number assigned',
+  },
+  INVOICING_PLATFORM_READINESS_002: {
+    code: 'INVOICING_PLATFORM_READINESS_002',
+    httpStatus: 409,
+    devMessage: 'Platform invoice not yet emitted to DIAN (no CUFE)',
+  },
   INVOICING_VALIDATE_001: {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,
@@ -1728,6 +1763,18 @@ export const ErrorCodes = {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
     devMessage: 'Duplicate invoice number',
+  },
+  INVOICING_TENANT_NOT_FOUND: {
+    code: 'INVOICING_TENANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage:
+      'Tenant (store or organization) referenced in the platform invoice request does not exist or does not belong to the platform org',
+  },
+  INVOICING_TENANT_FISCAL_DATA_INCOMPLETE: {
+    code: 'INVOICING_TENANT_FISCAL_DATA_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'Tenant lacks required fiscal data (legal_name, tax_id, dv, address, regimen, responsabilidades)',
   },
   INVOICING_PROVIDER_001: {
     code: 'INVOICING_PROVIDER_001',

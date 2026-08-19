@@ -238,6 +238,55 @@ describe('PaymentGatewayService', () => {
         expect(error).toBeInstanceOf(PaymentError);
       }
     });
+
+    it('should call prisma.refunds.create exactly once on successful refund', async () => {
+      const mockPayment = {
+        id: 1,
+        transaction_id: 'txn_refund_count',
+        order_id: 1,
+        store_payment_methods: {
+          type: 'card',
+        },
+        state: 'succeeded',
+      };
+
+      const mockRefundResult: RefundResult = {
+        success: true,
+        refundId: 'refund_count_1',
+        amount: 50.0,
+        status: 'succeeded',
+        message: 'Refund processed successfully',
+      };
+
+      jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
+
+      const mockProcessor = {
+        refundPayment: jest.fn().mockResolvedValue(mockRefundResult),
+      };
+      service.registerProcessor('card', mockProcessor as any);
+
+      const createSpy = jest
+        .spyOn(prisma.refunds, 'create')
+        .mockResolvedValue({});
+      jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
+        id: 1,
+        payments: [],
+        refunds: [],
+      });
+
+      const result = await service.refundPayment(
+        'txn_refund_count',
+        50.0,
+        'Customer request',
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.refundId).toBe('refund_count_1');
+      // Regression guard for the A.1 refactor: the extracted
+      // reversePaymentWithProcessor() must not introduce a duplicate
+      // createRefundRecord call.
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('getPaymentStatus', () => {

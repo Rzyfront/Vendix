@@ -280,6 +280,17 @@ export class OrgPurchaseOrdersService {
             product_variants: true,
           },
         },
+        // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S11: el detalle de OC en alcance
+        // ORG expone el calendario de pagos (fechas, montos, estados) igual que
+        // el scope store. Antes no estaba en el include y el frontend no podía
+        // pintar el plan; anotación 2 del usuario.
+        payment_plan: {
+          include: {
+            payment_schedules: {
+              orderBy: { scheduled_date: 'asc' },
+            },
+          },
+        },
       },
     });
     if (!po) {

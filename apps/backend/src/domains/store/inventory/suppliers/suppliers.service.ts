@@ -301,7 +301,12 @@ export class SuppliersService {
       supplierId,
     );
 
-    const [committed, lastOrder, payables, pendingReception] =
+    // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S8: 5ta card "YTD" desde el 1-ene.
+    const yearStartIso = new Date(
+      Date.UTC(new Date().getUTCFullYear(), 0, 1),
+    ).toISOString();
+
+    const [committed, lastOrder, payables, pendingReception, ytdPurchases] =
       await Promise.all([
         // Compras reconocidas: mismos estados que el contrato de métrica, para
         // que el perfil no invente un cuarto criterio de "cuánto le compré".
@@ -335,6 +340,15 @@ export class SuppliersService {
           },
           _count: { _all: true },
           _sum: { total_amount: true },
+        }),
+        // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S8: ytd desde 1-ene.
+        this.prisma.purchase_orders.aggregate({
+          where: {
+            ...baseWhere,
+            status: { in: [...PURCHASE_COMMITTED_STATES] },
+            order_date: { gte: yearStartIso },
+          },
+          _sum: { subtotal_amount: true },
         }),
       ]);
 
@@ -377,6 +391,14 @@ export class SuppliersService {
       /** OCs aprobadas/parciales sin CxP todavía: compromiso, no deuda. */
       committed_amount: round2(Number(pendingReception._sum.total_amount ?? 0)),
       committed_orders: pendingReception._count._all ?? 0,
+      /**
+       * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S8: stats cards nuevas.
+       * ytd_purchases: SUM(subtotal_amount) desde el 1-ene del año en curso.
+       * open_pos_count: count de POs en 'approved'|'partial' (alias de committed_orders).
+       *   Se duplica el campo con un nombre más claro para el consumidor.
+       */
+      ytd_purchases: round2(Number(ytdPurchases._sum.subtotal_amount ?? 0)),
+      open_pos_count: pendingReception._count._all ?? 0,
       last_order_date: lastOrder?.order_date ?? null,
       /** El universo agregado, para que la UI pueda declararlo. */
       scope: storeId === null ? 'ORGANIZATION' : 'STORE',
@@ -409,6 +431,8 @@ export class SuppliersService {
           order_number: true,
           status: true,
           payment_status: true,
+          payment_plan: true,
+          payment_due_date: true,
           subtotal_amount: true,
           tax_amount: true,
           total_amount: true,
@@ -420,7 +444,71 @@ export class SuppliersService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    /**
+     * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S10: enriquecemos cada PO con
+     * `next_payment_date` y `next_payment_due_in_days` usando el mismo
+     * patrón batched del helper de PurchaseOrdersService. Aquí se aplica
+     * localmente para no inyectar el otro service.
+     */
+    const enriched = await this.decorateSupplierPOsWithNextPayment(data);
+
+    return { data: enriched, total, page, limit };
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F1.S10: decorador local de POs del
+   * proveedor. Lee `purchase_order_payment_schedules` en una sola query
+   * batched (status='planned' ASC), con fallback a `payment_due_date`.
+   */
+  private async decorateSupplierPOsWithNextPayment<
+    T extends { id: number; payment_due_date?: Date | null }
+  >(
+    rows: T[],
+  ): Promise<
+    Array<
+      T & {
+        next_payment_date: string | null;
+        next_payment_due_in_days: number | null;
+      }
+    >
+  > {
+    if (!rows.length) return [];
+    const poIds = rows.map((r) => r.id);
+    const map = new Map<number, { date: string | null }>();
+    const rowsRaw: Array<{ purchase_order_id: number; scheduled_date: Date }> =
+      await this.prisma.$queryRawUnsafe(
+        `SELECT purchase_order_id, scheduled_date
+         FROM purchase_order_payment_schedules
+         WHERE purchase_order_id IN (${poIds.join(',')})
+           AND status = 'planned'
+         ORDER BY purchase_order_id ASC, scheduled_date ASC`,
+      );
+    for (const r of rowsRaw) {
+      if (!map.has(r.purchase_order_id)) {
+        map.set(r.purchase_order_id, {
+          date: new Date(r.scheduled_date).toISOString().slice(0, 10),
+        });
+      }
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    return rows.map((row) => {
+      let next = map.get(row.id);
+      if (!next || !next.date) {
+        next = {
+          date: row.payment_due_date
+            ? new Date(row.payment_due_date).toISOString().slice(0, 10)
+            : null,
+        };
+      }
+      const days = next.date
+        ? Math.ceil(
+            (new Date(`${next.date}T00:00:00`).getTime() -
+              new Date(`${today}T00:00:00`).getTime()) /
+              86_400_000,
+          )
+        : null;
+      return { ...row, next_payment_date: next.date, next_payment_due_in_days: days };
+    });
   }
 
   /** QUI-656 — documentos de CxP del proveedor con saldo y vencimiento. */
@@ -456,7 +544,102 @@ export class SuppliersService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S9: desglose "Cuota N de M".
+    // Para cada CxP cuyo source_type='purchase_order', enriquecer con:
+    //   - po_id, payment_plan
+    //   - installment_number (posición de la cuota dentro del plan)
+    //   - total_installments (total de cuotas del plan)
+    //   - installment_due_date (fecha de la cuota, distintos a due_date de CxP)
+    // Implementación: batched query a purchase_order_payment_schedules para
+    // todos los PO referenciados en la página, sin N+1.
+    const poIds = Array.from(
+      new Set(
+        data
+          .filter(
+            (ap: any) => ap.source_type === 'purchase_order' && ap.source_id,
+          )
+          .map((ap: any) => Number(ap.source_id)),
+      ),
+    ).filter((id: unknown): id is number => Number.isFinite(id) && (id as number) > 0);
+
+    let installmentMap = new Map<
+      number,
+      { total: number; byDate: Map<string, { installment_number: number }> }
+    >();
+    let poDatesMap = new Map<
+      number,
+      { payment_due_date: Date | null; payment_plan: string | null }
+    >();
+
+    if (poIds.length) {
+      // CP-ID-VNDX-2026-08-18-PO-PROD — F1.S9: batched read.
+      const [schedules, pos] = await Promise.all([
+        this.prisma.$queryRawUnsafe<
+          Array<{
+            purchase_order_id: number;
+            scheduled_date: Date;
+            status: string;
+          }>
+        >(
+          `SELECT purchase_order_id, scheduled_date, status
+           FROM purchase_order_payment_schedules
+           WHERE purchase_order_id IN (${poIds.join(',')})
+           ORDER BY purchase_order_id ASC, scheduled_date ASC`,
+        ),
+        this.prisma.purchase_orders.findMany({
+          where: { id: { in: poIds } },
+          select: {
+            id: true,
+            payment_due_date: true,
+            payment_plan: true,
+          },
+        }),
+      ]);
+
+      for (const s of schedules) {
+        if (!installmentMap.has(s.purchase_order_id)) {
+          installmentMap.set(s.purchase_order_id, {
+            total: 0,
+            byDate: new Map(),
+          });
+        }
+        const entry = installmentMap.get(s.purchase_order_id)!;
+        entry.total += 1;
+        const dateKey = new Date(s.scheduled_date).toISOString().slice(0, 10);
+        entry.byDate.set(dateKey, { installment_number: entry.total });
+      }
+
+      for (const po of pos) {
+        poDatesMap.set(po.id, {
+          payment_due_date: po.payment_due_date,
+          payment_plan: po.payment_plan,
+        });
+      }
+    }
+
+    const enriched = data.map((ap) => {
+      if (ap.source_type !== 'purchase_order' || !ap.source_id) {
+        return { ...ap, installment_info: null };
+      }
+      const poId = Number(ap.source_id);
+      const entry = installmentMap.get(poId);
+      const poMeta = poDatesMap.get(poId);
+      const dxKey = ap.due_date
+        ? new Date(ap.due_date).toISOString().slice(0, 10)
+        : null;
+      const slot = dxKey && entry ? entry.byDate.get(dxKey) : null;
+      return {
+        ...ap,
+        installment_info: {
+          po_id: poId,
+          payment_plan: poMeta?.payment_plan ?? null,
+          installment_number: slot?.installment_number ?? null,
+          total_installments: entry?.total ?? 0,
+        },
+      };
+    });
+
+    return { data: enriched, total, page, limit };
   }
 
   async update(id: number, updateSupplierDto: UpdateSupplierDto) {

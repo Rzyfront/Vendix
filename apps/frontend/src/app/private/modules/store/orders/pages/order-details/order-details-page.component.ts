@@ -11,6 +11,11 @@ import {
   CreateAddressPayload,
   UpdateAddressPayload,
 } from '../../services/store-orders.service';
+// Plan refund-gateway-dispatch-fix (Step C.1): `resolveRefund` lives on
+// `OrdersService` (W1-C), not on `StoreOrdersService`. Aliased to
+// `ordersFlowService` so we don't shadow the existing `ordersService`
+// injection (used everywhere else on the page for store-order CRUD).
+import { OrdersService } from '../../services/orders.service';
 import { AddressPayload } from '../../../../../../shared/components';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
@@ -30,6 +35,7 @@ import {
   OrderActionConfig,
   PayOrderDto,
   RefundRecord,
+  ResolveRefundPayload,
   FastTrackOrderDto,
   AssignShippingMethodDto,
   ReactivateOrderDto,
@@ -85,6 +91,22 @@ interface PaymentReceiptPreview {
   kind: PaymentReceiptPreviewKind;
   uploadedAt?: string | null;
 }
+
+/**
+ * Local alias for the refund state enum (`refunds_state_enum`). Mirrors the 7
+ * values defined in `apps/backend/prisma/schema.prisma`. Kept local to this
+ * component — if a second surface needs the same labels, extract to a shared
+ * pipe/util (see plan Knowledge Gap "Centralized `refunds_state_enum`
+ * translation").
+ */
+type RefundState =
+  | 'requested'
+  | 'pending_approval'
+  | 'approved'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 @Component({
   selector: 'app-order-details-page',
@@ -173,6 +195,13 @@ export class OrderDetailsPageComponent {
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
+  /**
+   * Plan refund-gateway-dispatch-fix (Step C.1): true while the manual
+   * refund-resolution modal is open. The refund being resolved lives in
+   * {@link resolveRefundContext} (non-null only when this modal is open).
+   */
+  showResolveRefundModal = signal(false);
+  resolveRefundContext = signal<RefundRecord | null>(null);
   showReactivateModal = signal(false);
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
@@ -298,6 +327,13 @@ export class OrderDetailsPageComponent {
   shipForm!: FormGroup;
   deliverForm!: FormGroup;
   cancelForm!: FormGroup;
+  /**
+   * Plan refund-gateway-dispatch-fix (Step C.1): form for the manual
+   * refund-resolution modal. `target_state` is restricted to `completed`
+   * or `failed` (matching the backend `ResolveRefundDto`); `resolution_notes`
+   * is required (server enforces non-empty after trim — ERR-03 otherwise).
+   */
+  resolveRefundForm!: FormGroup;
   reactivateForm!: FormGroup;
 
   // Currency
@@ -1050,6 +1086,7 @@ export class OrderDetailsPageComponent {
   private router = inject(Router);
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
+  private ordersFlowService = inject(OrdersService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private paymentMethodsService = inject(PaymentMethodsService);
@@ -1103,6 +1140,17 @@ export class OrderDetailsPageComponent {
 
     this.reactivateForm = this.fb.group({
       reason: ['', [Validators.minLength(3)]],
+    });
+
+    this.resolveRefundForm = this.fb.group({
+      // 'completed' is the common case (operator confirms a stuck refund went
+      // through the gateway). 'failed' closes the refund without a reversal —
+      // both are accepted server-side (ResolveRefundDto enum).
+      target_state: ['completed', Validators.required],
+      // ERR-03 surfaces server-side as 422; the form mirrors it locally so the
+      // submit button stays disabled while the user types nothing (and stops
+      // obsessing about the 2000-char backend cap by warning client-side).
+      resolution_notes: ['', [Validators.required, Validators.maxLength(2000)]],
     });
 
     this.fastTrackForm = this.fb.group({
@@ -2020,6 +2068,123 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ── Plan refund-gateway-dispatch-fix (Step C.1): manual refund resolve ──
+  //
+  // Escape hatch for refunds stuck in non-terminal states (`requested`,
+  // `pending_approval`, `processing`). Backend: `PATCH
+  // /store/orders/:orderId/flow/refunds/:refundId/resolve` (FB-03 contract).
+  // Permission enforced server-side via `store:orders:order_flow:create` +
+  // owner/admin role (mirrors `cancel-payment`/`forgive-installment`).
+
+  /**
+   * User-facing copy for the 5 error codes the manual-resolution endpoint can
+   * surface (Error Code Registry ERR-01..05 in the plan). Stored locally
+   * because these codes do not exist in the shared `ERROR_MESSAGES` catalog
+   * (they are feature-specific), and `parseApiError` falls back to a generic
+   * copy otherwise. Keys are matched on `err.error_code` returned by the
+   * backend's `AllExceptionsFilter`.
+   */
+  private readonly ERROR_COPY: Record<string, string> = {
+    REFUND_RESOLUTION_INVALID_STATE:
+      'Este reembolso ya está cerrado y no se puede modificar.',
+    REFUND_NOT_FOUND: 'No se encontró el reembolso.',
+    REFUND_RESOLUTION_NOTES_REQUIRED: 'Debes ingresar una nota de resolución.',
+    REFUND_GATEWAY_REVERSAL_FAILED:
+      'La reversión contra el procesador de pago falló.',
+    REFUND_FORBIDDEN: 'No tienes permisos para resolver reembolsos.',
+  };
+
+  /**
+   * Open the manual-resolution modal for one non-terminal refund. The
+   * template (W3-B) wires the `<app-modal>` and the form controls; this
+   * method only seeds the context (which refund is being resolved) and
+   * resets the form to its default state.
+   */
+  openResolveRefundModal(refund: RefundRecord): void {
+    if (!refund) return;
+    this.resolveRefundForm.reset({
+      target_state: 'completed',
+      resolution_notes: '',
+    });
+    this.resolveRefundContext.set(refund);
+    this.showResolveRefundModal.set(true);
+  }
+
+  /**
+   * Cancel/close path for the manual-resolution modal. Clear the context
+   * (paranoia — prevents stale `refund.id` from leaking into a future
+   * submit) and hide the modal.
+   */
+  closeResolveRefundModal(): void {
+    this.showResolveRefundModal.set(false);
+    this.resolveRefundContext.set(null);
+  }
+
+  /**
+   * Submit the manual-resolution form. Server enforces ownership
+   * (`refund.order_id === :orderId` + same store — IDOR guard), non-terminal
+   * state, and non-empty notes. Success: close the modal, refresh the local
+   * refund list (badge updates immediately). Error: surface one of the 5
+   * `ERROR_COPY` entries via `parseApiError.error_code`; fall back to the
+   * parser's `userMessage` so any future drift still produces a usable toast.
+   */
+  submitResolveRefund(): void {
+    if (this.resolveRefundForm.invalid) return;
+
+    const orderId = this.orderId;
+    const refund = this.resolveRefundContext();
+    if (!orderId || !refund) return;
+
+    this.isProcessingAction.set(true);
+
+    const formValue = this.resolveRefundForm.value as {
+      target_state?: 'completed' | 'failed' | null;
+      resolution_notes?: string | null;
+    };
+    const payload: ResolveRefundPayload = {
+      target_state: (formValue.target_state ?? 'completed') as 'completed' | 'failed',
+      resolution_notes: (formValue.resolution_notes ?? '').trim(),
+    };
+
+    this.ordersFlowService
+      .resolveRefund(orderId, String(refund.id), payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.isProcessingAction.set(false);
+          this.showResolveRefundModal.set(false);
+          this.resolveRefundContext.set(null);
+          // Mirrors `onRefundSubmitted`'s post-create refresh path:
+          // re-fetch only the refund list (cheaper than full `loadData()`).
+          this.loadRefunds();
+          // Patch the freshly-persisted row into the local cache too, so the
+          // badge + button state update before `loadRefunds()` resolves.
+          if (updated) {
+            const next = this.orderRefunds().map((r) =>
+              r.id === updated.id ? { ...r, ...updated } : r,
+            );
+            this.orderRefunds.set(next);
+          }
+          this.toastService.success(
+            payload.target_state === 'completed'
+              ? 'Reembolso marcado como completado'
+              : 'Reembolso marcado como fallido',
+          );
+        },
+        error: (err: unknown) => {
+          this.isProcessingAction.set(false);
+          const parsed = parseApiError(err);
+          const code = parsed.errorCode || '';
+          const message =
+            (code && this.ERROR_COPY[code]) ||
+            parsed.userMessage ||
+            (err as { message?: string })?.message ||
+            'No se pudo resolver el reembolso';
+          this.toastService.error(message);
+        },
+      });
+  }
+
   openReactivateModal(): void {
     this.reactivateForm.reset();
     this.showReactivateModal.set(true);
@@ -2832,6 +2997,37 @@ export class OrderDetailsPageComponent {
       default:
         return 'bg-gray-100 text-gray-700 border border-gray-200';
     }
+  }
+
+  /**
+   * Plan refund-gateway-dispatch-fix (Step A.4): exhaustive Spanish
+   * translation map for the 7 `refunds_state_enum` values. Replaces the
+   * old inline ternary (only `completed` and `processing` were
+   * translated; every other state leaked the raw enum key). Pure
+   * presentation; the template consumes it via `refundStateLabel()`.
+   */
+  readonly REFUND_STATE_LABELS: Record<RefundState, string> = {
+    requested: 'Solicitado',
+    pending_approval: 'Pendiente de aprobación',
+    approved: 'Aprobado',
+    processing: 'En proceso',
+    completed: 'Completado',
+    failed: 'Fallido',
+    cancelled: 'Cancelado',
+  };
+
+  /**
+   * Template adapter over `REFUND_STATE_LABELS`. Falls back to the
+   * raw enum key for any value not present in the enum (defensive —
+   * today the contract is exhaustive, but if a future migration adds
+   * a new state before the map is updated, the badge still shows
+   * something inspectable instead of an empty string).
+   */
+  refundStateLabel(state: string | undefined | null): string {
+    if (state && (this.REFUND_STATE_LABELS as Record<string, string>)[state]) {
+      return this.REFUND_STATE_LABELS[state as RefundState];
+    }
+    return state ?? '';
   }
 
   getAuditActionLabel(action: string): string {

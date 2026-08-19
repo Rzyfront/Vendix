@@ -26,6 +26,7 @@ import {
 import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { DatePipe } from '@angular/common';
 
 import { PurchaseOrdersService } from '../../../../inventory/services/purchase-orders.service';
 import { DispatchNotesService } from '../../../../dispatch-notes/services/dispatch-notes.service';
@@ -114,6 +115,7 @@ interface ReceiveLine {
   standalone: true,
   imports: [
     FormsModule,
+    DatePipe,
     AlertBannerComponent,
     ButtonComponent,
     CardComponent,
@@ -155,6 +157,12 @@ interface ReceiveLine {
             <div class="flex flex-col gap-3">
               <!-- Supplier + location -->
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <!--
+                  CP-ID-VNDX-2026-08-18-PO-PROD — F2.S1: tarjeta de proveedor
+                  con 8 campos del supplier (no solo el nombre). Backend ya
+                  devuelve el supplier completo via include suppliers: true
+                  en findOne; antes solo pintabamos name.
+                -->
                 <app-card>
                   <div class="flex items-start gap-3">
                     <div class="shrink-0 w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -165,6 +173,42 @@ interface ReceiveLine {
                       <p class="text-base font-semibold text-text-primary truncate">
                         {{ p.supplier?.name || p.suppliers?.name || '—' }}
                       </p>
+                      <!-- 8 fields: NIT, persona de contacto, email, teléfono,
+                           móvil, dirección, banco, cuenta. -->
+                      <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-text-secondary">
+                        <div class="truncate">
+                          <span class="font-medium">NIT:</span>
+                          {{ p.supplier?.tax_id || p.suppliers?.tax_id || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Contacto:</span>
+                          {{ p.supplier?.contact_person || p.suppliers?.contact_person || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Email:</span>
+                          {{ p.supplier?.email || p.suppliers?.email || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Tel:</span>
+                          {{ p.supplier?.phone || p.suppliers?.phone || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Móvil:</span>
+                          {{ p.supplier?.mobile || p.suppliers?.mobile || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Dirección:</span>
+                          {{ (p.supplier?.address?.address_line_1 || p.suppliers?.address?.address_line_1) || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Banco:</span>
+                          {{ p.supplier?.bank_name || p.suppliers?.bank_name || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Cuenta:</span>
+                          {{ p.supplier?.bank_account_number || p.suppliers?.bank_account_number || '—' }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </app-card>
@@ -178,6 +222,34 @@ interface ReceiveLine {
                       <p class="text-base font-semibold text-text-primary truncate">
                         {{ p.location?.name || '—' }}
                       </p>
+                      <!--
+                        CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 1+: el peso
+                        visual del card "Recibir en" debe simetrizar con el
+                        card del proveedor. Mostramos: código, tipo de bodega,
+                        dirección, fecha de recepción esperada/recibida.
+                      -->
+                      <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-text-secondary">
+                        <div class="truncate">
+                          <span class="font-medium">Código:</span>
+                          {{ p.location?.code || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Tipo:</span>
+                          {{ p.location?.type || '—' }}
+                        </div>
+                        <div class="truncate col-span-2">
+                          <span class="font-medium">Dirección:</span>
+                          {{ getLocationAddress(p.location) || '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Esperada:</span>
+                          {{ p.expected_date ? (p.expected_date | date: 'dd/MM/yyyy') : '—' }}
+                        </div>
+                        <div class="truncate">
+                          <span class="font-medium">Recibida:</span>
+                          {{ p.received_date ? (p.received_date | date: 'dd/MM/yyyy') : '—' }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </app-card>
@@ -1314,6 +1386,16 @@ export class StorePurchaseOrderDetailComponent {
   }
   dateOnly(v?: string | null): string {
     return v ? formatDateOnlyUTC(v) : '—';
+  }
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 1+: dirección legible de la
+   * bodega. Devuelve `address_line_1 + city + state` o null si no hay.
+   */
+  getLocationAddress(loc?: any): string | null {
+    if (!loc?.address) return null;
+    const a = loc.address;
+    const parts = [a.address_line_1, a.city?.name || a.city, a.state?.name || a.state].filter(Boolean);
+    return parts.length ? parts.join(', ') : null;
   }
   dateTime(v?: string | null): string {
     if (!v) return '—';
