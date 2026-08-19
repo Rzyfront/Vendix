@@ -1887,6 +1887,75 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Barre todas las facturas SaaS en estado `paid` que NO tienen una transmisión
+   * aceptada, y llama a `issueForInvoice` con `manual: true, source: 'sweep'`.
+   *
+   * Justificación: `auto_issue` solo cubre pagos futuros. Una factura pagada
+   * cuya emisión falló por un motivo transitorio quedaba sin emitir para siempre
+   * (el listener no reintenta). El endpoint permite disparar la recuperación
+   * desde un cron externo o a mano, sin agregar cron jobs al backend.
+   *
+   * Idempotencia: `issueForInvoice` usa `idempotency_key` por transmisión, así
+   * que la segunda corrida del sweep siempre devuelve `picked_up: 0` salvo que
+   * haya un nuevo pago en estado `paid` sin transmisión aceptada.
+   */
+  async sweepPendingInvoices(): Promise<{
+    picked_up: number;
+    succeeded: number;
+    skipped: number;
+    failed: { invoice_id: number; reason: string }[];
+  }> {
+    const rows = await this.prisma.withoutScope().subscription_invoices.findMany({
+      where: {
+        state: 'paid',
+        // NO EXISTS transmission accepted
+        // - filtramos a nivel de la relación hacia fiscal_transmissions
+      },
+      select: { id: true },
+      take: 200, // cota dura: el barrido no debe agotar memoria si hay miles
+    });
+
+    const accepted = await this.prisma.withoutScope().fiscal_transmissions.findMany({
+      where: {
+        source_type: 'subscription_invoice',
+        dian_status: 'accepted',
+        source_id: { in: rows.map((r) => r.id) },
+      },
+      select: { source_id: true },
+    });
+    const acceptedSet = new Set(accepted.map((t) => t.source_id));
+    const pending = rows.filter((r) => !acceptedSet.has(r.id));
+
+    const result = {
+      picked_up: pending.length,
+      succeeded: 0,
+      skipped: 0,
+      failed: [] as { invoice_id: number; reason: string }[],
+    };
+
+    for (const { id } of pending) {
+      try {
+        const r = await this.issueForInvoice(id, { manual: true, source: 'sweep' });
+        if (r?.skipped) {
+          result.skipped += 1;
+        } else {
+          result.succeeded += 1;
+        }
+      } catch (error) {
+        result.failed.push({
+          invoice_id: id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    this.logger.log(
+      `Subscription fiscal sweep: picked_up=${result.picked_up} succeeded=${result.succeeded} skipped=${result.skipped} failed=${result.failed.length}`,
+    );
+    return result;
+  }
+
+  /**
    * List DIAN resolutions registered for the Vendix platform organization.
    *
    * Platform resolutions are scoped to the derived platform `organization_id`

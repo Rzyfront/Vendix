@@ -373,6 +373,17 @@ export class SubscriptionFiscalController {
     return this.responseService.success(result, 'Fiscal transmission retry requested');
   }
 
+  @Post('sweep')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Sweep paid SaaS invoices without an accepted fiscal transmission',
+  })
+  async sweepPendingInvoices(): Promise<any> {
+    const result = await this.fiscalService.sweepPendingInvoices();
+    return this.responseService.success(result, 'Fiscal sweep completed');
+  }
+
   @Get('resolutions')
   @Permissions('superadmin:subscriptions:fiscal:read')
   @ApiOperation({ summary: 'List platform DIAN invoice resolutions' })
