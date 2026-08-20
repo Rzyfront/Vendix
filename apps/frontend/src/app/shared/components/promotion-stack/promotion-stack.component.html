@@ -1,0 +1,176 @@
+<!--
+  `app-promotion-stack` — shared component for CP-ECOM-PROMO-UX-001.
+  Three modes: compact-pills, scroll-batch, expanded-cards.
+  Empty state: renderiza null (no wrapper) cuando items está vacío.
+-->
+@if (hasItems()) {
+  <div
+    class="promotion-stack"
+    [attr.aria-label]="ariaLabel()"
+    [attr.data-testid]="'promotion-stack-' + mode()"
+    [ngSwitch]="mode()"
+  >
+    <!-- ── compact-pills ────────────────────────────────────────────── -->
+    <ul
+      *ngSwitchCase="'compact-pills'"
+      class="promotion-stack__pills"
+      role="list"
+    >
+      @for (item of items(); track item.id; let i = $index) {
+        <li
+          class="promotion-stack__pill-cell"
+          [attr.data-testid]="'promotion-stack-item-' + i"
+        >
+          <app-badge
+            [variant]="pillVariant(item.type)"
+            [badgeStyle]="pillStyle(item.type)"
+            [size]="pillSize()"
+            [attr.aria-label]="pillAriaLabel(item)"
+          >
+            <app-icon
+              [name]="pillIcon(item.type)"
+              [size]="12"
+              class="promotion-stack__pill-icon"
+            ></app-icon>
+            <span class="promotion-stack__pill-text">{{ pillText(item) }}</span>
+          </app-badge>
+        </li>
+      }
+    </ul>
+
+    <!-- ── scroll-batch ────────────────────────────────────────────── -->
+    <div
+      *ngSwitchCase="'scroll-batch'"
+      class="promotion-stack__scroll"
+      role="region"
+      [attr.aria-label]="ariaLabel()"
+      (mouseenter)="pauseAutoplay()"
+      (mouseleave)="resumeAutoplay()"
+      (focusin)="pauseAutoplay()"
+      (focusout)="resumeAutoplay()"
+    >
+      <div class="promotion-stack__scroll-row">
+        <button
+          type="button"
+          class="promotion-stack__scroll-btn"
+          aria-label="Anterior promoción"
+          (click)="scrollTo((activeIndex() - 1 + scrollBatchItems().length) % scrollBatchItems().length)"
+        >
+          <app-icon name="chevron-left" [size]="18"></app-icon>
+        </button>
+
+        <div
+          #scroller
+          class="promotion-stack__scroller"
+          tabindex="0"
+          aria-live="polite"
+        >
+          @for (item of scrollBatchItems(); track item.id; let i = $index) {
+            <article
+              class="promotion-stack__card"
+              [ngClass]="{ 'promotion-stack__card--featured': item.featured }"
+              [attr.data-testid]="'promotion-stack-item-' + i"
+              [attr.aria-current]="i === activeIndex() ? 'true' : null"
+            >
+              <app-icon
+                [name]="pillIcon(item.type)"
+                [size]="24"
+                class="promotion-stack__card-icon"
+              ></app-icon>
+              <div class="promotion-stack__card-body">
+                <strong class="promotion-stack__card-label">{{ pillText(item) }}</strong>
+                <span class="promotion-stack__card-desc">
+                  {{ scrollBatchDescription(item) }}
+                </span>
+              </div>
+            </article>
+          }
+        </div>
+
+        <button
+          type="button"
+          class="promotion-stack__scroll-btn"
+          aria-label="Siguiente promoción"
+          (click)="scrollTo((activeIndex() + 1) % scrollBatchItems().length)"
+        >
+          <app-icon name="chevron-right" [size]="18"></app-icon>
+        </button>
+      </div>
+
+      <div
+        class="promotion-stack__dots"
+        role="tablist"
+        aria-label="Indicadores de promoción"
+      >
+        @for (item of scrollBatchItems(); track item.id; let i = $index) {
+          <button
+            type="button"
+            class="promotion-stack__dot"
+            [ngClass]="{ 'promotion-stack__dot--active': i === activeIndex() }"
+            [attr.aria-label]="'Ir a promoción ' + (i + 1) + ' de ' + scrollBatchItems().length"
+            [attr.aria-current]="i === activeIndex() ? 'true' : null"
+            (click)="scrollTo(i)"
+          ></button>
+        }
+      </div>
+    </div>
+
+    <!-- ── expanded-cards ──────────────────────────────────────────── -->
+    <div
+      *ngSwitchCase="'expanded-cards'"
+      class="promotion-stack__expanded"
+      role="list"
+    >
+      @for (item of expandedTiers(); track item.id; let i = $index; let total = $count) {
+        <article
+          class="promotion-stack__tier"
+          [ngClass]="{
+            'promotion-stack__tier--current': isCurrentTier(item),
+            'promotion-stack__tier--next': isNextTier(item) && !isCurrentTier(item),
+            'promotion-stack__tier--achieved': isAchievedTier(item) && !isCurrentTier(item)
+          }"
+          [attr.data-testid]="'promotion-stack-item-' + i"
+          [attr.aria-label]="tierAriaLabel(item, i, total)"
+        >
+          <div class="promotion-stack__tier-header">
+            <span class="promotion-stack__tier-min">{{ tierHeader(item) }}</span>
+            @if (isAchievedTier(item)) {
+              <app-icon
+                name="check-circle"
+                [size]="18"
+                class="promotion-stack__tier-check"
+              ></app-icon>
+            }
+          </div>
+          <div class="promotion-stack__tier-body">
+            <strong class="promotion-stack__tier-label">{{ item.label }}</strong>
+            @if (tierHint(item)) {
+              <span class="promotion-stack__tier-hint">{{ tierHint(item) }}</span>
+            }
+          </div>
+        </article>
+      }
+
+      <div
+        class="promotion-stack__progress"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        [attr.aria-valuenow]="progressPercent()"
+        aria-label="Progreso hacia la próxima promoción"
+        aria-live="polite"
+      >
+        <div
+          class="promotion-stack__progress-bar"
+          [style.width.%]="progressPercent()"
+        ></div>
+      </div>
+      @if (nextTier() && currentQuantity() !== null) {
+        <p class="promotion-stack__progress-text">
+          Te faltan {{ remainingQty() }} unidades para desbloquear
+          <strong>{{ pillText(nextTier()!) }}</strong>
+        </p>
+      }
+    </div>
+  </div>
+}

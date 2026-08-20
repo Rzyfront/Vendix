@@ -1,0 +1,338 @@
+/*
+ * `app-promotion-stack` styles
+ * CP-ECOM-PROMO-UX-001 — shared component (compact-pills, scroll-batch, expanded-cards).
+ *
+ * Tokens semánticos:
+ *   --color-success, --color-primary, --color-warning,
+ *   --color-success-rgb, --color-primary-rgb, --color-warning-rgb,
+ *   --color-text-primary, --color-text-secondary, --color-border,
+ *   --color-surface, --color-background.
+ *
+ * Mobile-first. prefers-reduced-motion respetado. Touch targets ≥ 44px.
+ * Empty state: host sin contenido (no wrapper div) → display:contents.
+ */
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+/* El host no toma espacio cuando items() es vacío (template no renderiza
+   el wrapper .promotion-stack → :host:empty aplica). */
+:host:empty {
+  display: none;
+}
+
+.promotion-stack {
+  display: flex;
+  width: 100%;
+}
+
+/* ── compact-pills ────────────────────────────────────────────────── */
+.promotion-stack__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+
+.promotion-stack__pill-cell {
+  display: inline-flex;
+  /* Touch target ≥ 44px en pills: el badge es pequeño, pero el cell
+     garantiza área táctil mínima si se hace foco. */
+  min-height: 44px;
+  align-items: center;
+}
+
+.promotion-stack__pill-icon {
+  margin-right: 0.25rem;
+}
+
+.promotion-stack__pill-text {
+  white-space: nowrap;
+}
+
+/* ── scroll-batch ─────────────────────────────────────────────────── */
+.promotion-stack__scroll {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.promotion-stack__scroll-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.promotion-stack__scroller {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  scroll-behavior: smooth;
+}
+
+.promotion-stack__scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.promotion-stack__card {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  min-width: 220px;
+  max-width: 320px;
+  min-height: 64px;
+  border-radius: 0.75rem;
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #111827);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+.promotion-stack__card--featured {
+  border-color: rgba(var(--color-success-rgb, 16, 185, 129), 0.45);
+  background: rgba(var(--color-success-rgb, 16, 185, 129), 0.08);
+}
+
+.promotion-stack__card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.promotion-stack__card-icon {
+  color: var(--color-primary, #2563eb);
+  flex-shrink: 0;
+}
+
+.promotion-stack__card--featured .promotion-stack__card-icon {
+  color: var(--color-success, #059669);
+}
+
+.promotion-stack__card-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.promotion-stack__card-label {
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.promotion-stack__card-desc {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* prev/next buttons — plain <button> con styling ghost. */
+.promotion-stack__scroll-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  background: transparent;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 999px;
+  color: var(--color-text-primary, #111827);
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+  padding: 0;
+}
+
+.promotion-stack__scroll-btn:hover {
+  background: var(--color-background, rgba(0, 0, 0, 0.04));
+  border-color: rgba(var(--color-primary-rgb, 37, 99, 235), 0.4);
+}
+
+.promotion-stack__scroll-btn:focus-visible {
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+/* ── dots ─────────────────────────────────────────────────────────── */
+.promotion-stack__dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.promotion-stack__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: none;
+  background: var(--color-border, rgba(0, 0, 0, 0.18));
+  padding: 0;
+  cursor: pointer;
+  transition: background 200ms ease, transform 200ms ease;
+  /* Touch target mínimo 44px preservado con padding transparente. */
+  padding: 8px;
+  background-clip: content-box;
+  width: 26px;
+  height: 26px;
+}
+
+.promotion-stack__dot--active {
+  background: var(--color-primary, #2563eb);
+  background-clip: content-box;
+  transform: scale(1.15);
+}
+
+.promotion-stack__dot:focus-visible {
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+/* ── expanded-cards ──────────────────────────────────────────────── */
+.promotion-stack__expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.promotion-stack__tier {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  background: var(--color-surface, #ffffff);
+  min-height: 44px;
+  transition: background 200ms ease, border-color 200ms ease, opacity 200ms ease;
+}
+
+.promotion-stack__tier--current {
+  border: 2px solid var(--color-success, #059669);
+  background: rgba(var(--color-success-rgb, 16, 185, 129), 0.10);
+}
+
+.promotion-stack__tier--next {
+  opacity: 0.6;
+}
+
+.promotion-stack__tier--achieved {
+  border-color: rgba(var(--color-success-rgb, 16, 185, 129), 0.3);
+}
+
+.promotion-stack__tier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.promotion-stack__tier-min {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.promotion-stack__tier--current .promotion-stack__tier-min {
+  color: var(--color-success, #059669);
+}
+
+.promotion-stack__tier-check {
+  color: var(--color-success, #059669);
+}
+
+.promotion-stack__tier-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.promotion-stack__tier-label {
+  font-size: 0.9375rem;
+  color: var(--color-text-primary, #111827);
+}
+
+.promotion-stack__tier-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* ── progress bar ────────────────────────────────────────────────── */
+.promotion-stack__progress {
+  margin-top: 0.5rem;
+  width: 100%;
+  height: 8px;
+  background: var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.promotion-stack__progress-bar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary, #2563eb) 0%,
+    var(--color-success, #059669) 100%
+  );
+  border-radius: 999px;
+  transition: width 350ms ease;
+}
+
+.promotion-stack__progress-text {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #6b7280);
+  text-align: center;
+}
+
+.promotion-stack__progress-text strong {
+  color: var(--color-text-primary, #111827);
+  font-weight: 600;
+}
+
+/* ── prefers-reduced-motion ──────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .promotion-stack__card,
+  .promotion-stack__scroll-btn,
+  .promotion-stack__dot,
+  .promotion-stack__tier,
+  .promotion-stack__progress-bar {
+    transition: none;
+  }
+
+  .promotion-stack__card:hover {
+    transform: none;
+  }
+
+  .promotion-stack__scroller {
+    scroll-behavior: auto;
+  }
+}
