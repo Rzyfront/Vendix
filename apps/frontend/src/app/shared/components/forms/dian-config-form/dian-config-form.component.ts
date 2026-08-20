@@ -29,6 +29,7 @@ import { FileUploadDropzoneComponent } from '../../file-upload-dropzone/file-upl
 import { formatDateOnlyUTC } from '../../../utils/date.util';
 // Validadores compartidos por las cuatro puertas de entrada de configuración DIAN.
 import {
+  DIAN_VALIDATION_MESSAGES,
   dianSoftwarePinValidator,
   dianUuidValidator,
   nitFormatValidator,
@@ -175,6 +176,11 @@ interface DianConfigControls {
             placeholder="0"
           ></app-input>
         </div>
+        @if (nitDvMessage()) {
+          <p class="text-xs text-error" role="alert">
+            {{ nitDvMessage() }}
+          </p>
+        }
       </section>
 
       <!-- Software -->
@@ -236,6 +242,11 @@ interface DianConfigControls {
             placeholder="5000000"
           ></app-input>
         </div>
+        @if (rangeOrderMessage()) {
+          <p class="text-xs text-error" role="alert">
+            {{ rangeOrderMessage() }}
+          </p>
+        }
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <app-input
             label="Vigente desde"
@@ -542,12 +553,36 @@ export class DianConfigFormComponent {
       .join(', '),
   );
 
+  /**
+   * Mirror of `form.errors` into the signal graph.
+   *
+   * Same Zoneless rationale as `resolutionMissing`: `FormGroup.errors` is NOT a
+   * signal, so a `computed` that reads it without notifying the graph produces
+   * stale values. We push the snapshot from `statusChanges` so the templates
+   * that depend on `nitDvMessage` / `rangeOrderMessage` re-render when the
+   * group-level validators flip.
+   */
+  private readonly formErrors = signal<ValidationErrors | null>(null);
+
+  /** Mensaje del error de grupo `nitDv`, o `null` si el DV cuadra. */
+  readonly nitDvMessage = computed(() =>
+    this.formErrors()?.['nitDv'] ? DIAN_VALIDATION_MESSAGES['nitDv'] : null,
+  );
+
+  /** Mensaje del error de grupo `rango_final_invalid`, o `null` si el rango es válido. */
+  readonly rangeOrderMessage = computed(() =>
+    this.formErrors()?.['rango_final_invalid']
+      ? DIAN_VALIDATION_MESSAGES['rango_final_invalid']
+      : null,
+  );
+
   constructor() {
     effect(() => {
       const v = this.initialValue();
       if (v) {
         this.form.patchValue(v, { emitEvent: false });
         this.syncResolutionErrors();
+        this.syncGroupErrors();
         this.emitCurrent();
       }
     });
@@ -561,14 +596,24 @@ export class DianConfigFormComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.syncResolutionErrors();
+        this.syncGroupErrors();
         this.emitCurrent();
       });
+
+    this.form.statusChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.syncGroupErrors());
   }
 
   /** Mirrors the group validator's result into the signal graph. */
   private syncResolutionErrors(): void {
     const missing = this.form.errors?.['resolutionIncomplete'];
     this.resolutionMissing.set(Array.isArray(missing) ? missing : []);
+  }
+
+  /** Mirrors `form.errors` into `formErrors` so `computed` consumers react. */
+  private syncGroupErrors(): void {
+    this.formErrors.set(this.form.errors ?? null);
   }
 
   getValue(): DianConfigValue {
@@ -595,6 +640,7 @@ export class DianConfigFormComponent {
     this.form.patchValue(patch, { emitEvent: false });
     this.form.markAsDirty();
     this.syncResolutionErrors();
+    this.syncGroupErrors();
     this.emitCurrent();
   }
 
