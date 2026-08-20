@@ -501,8 +501,11 @@ export class PosCartService {
       // main branch already does it via `buildLoadedCartState`; the empty
       // branch used to drop it, which meant editing an empty/zero-item order
       // silently reset the staff note.
+      // Round 8 — empty-order branch was also missing the cartState.set; the
+      // signal never picked up the linked metadata. Same fix as the embedded
+      // fast-path: push the value to the signal before returning.
       const linkedState = this.getInitialState();
-      return of({
+      const built = {
         ...linkedState,
         linkedOrderId: order?.id ?? null,
         linkedOrderNumber: order?.order_number ?? null,
@@ -513,7 +516,9 @@ export class PosCartService {
         customer: this.mapOrderUsersToCustomer(order),
         summary: this.calculateSummary([], this.mapOrderPromotionsToDiscounts(order)),
         updatedAt: new Date(),
-      });
+      };
+      this.cartState.set(built);
+      return of(built);
     }
 
     // Phase D.1: prefer the embedded product snapshot from the order response.
@@ -535,7 +540,13 @@ export class PosCartService {
     }
 
     if (missingProductIds.length === 0) {
-      return of(this.buildLoadedCartState(order, initialItems));
+      // Round 8 — embedded fast-path used to return the loaded state without
+      // pushing it to the cartState signal, which left it stale and the
+      // editor's cart empty. Mirror the fallback-path tap so the signal picks
+      // up the value before the observable completes.
+      const built = this.buildLoadedCartState(order, initialItems);
+      this.cartState.set(built);
+      return of(built);
     }
 
     // Fallback: fetch only the genuinely missing products. Deduplicate so the
