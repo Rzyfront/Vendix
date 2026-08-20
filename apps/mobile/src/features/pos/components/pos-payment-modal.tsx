@@ -15,7 +15,7 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import { formatSaleQuantity } from '@/features/store/pricing';
 import type { PaymentMethod, PosCustomer } from '@/features/store/types';
-import type { CreatePosPaymentDto } from '@/features/store/types';
+import type { CreatePosPaymentDto, PayOrderDto } from '@/features/store/types';
 import { CheckoutStepIndicator } from './checkout-step-indicator';
 import { PosCustomerModal } from './pos-customer-modal';
 
@@ -52,9 +52,23 @@ interface PosPaymentModalProps {
   visible: boolean;
   onClose: () => void;
   onSuccess: (orderNumber: string) => void;
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — cuando el padre abre el modal con un
+   * `editingDraftId` no-null, el cobro se enruta por
+   * `POST /store/orders/:id/flow/pay` (`OrderService.flowPayOrder`) en
+   * lugar de `POST /store/payments/pos` (`processPosPayment`). El segundo
+   * crea una orden nueva; el primero carga al draft existente. Si se omite,
+   * el modal hace fallback al `draftId` del cart store.
+   */
+  editingDraftId?: number | null;
 }
 
-export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModalProps) {
+export function PosPaymentModal({
+  visible,
+  onClose,
+  onSuccess,
+  editingDraftId: editingDraftIdProp,
+}: PosPaymentModalProps) {
   const insets = useSafeAreaInsets();
 
   const items = useCartStore((s) => s.items);
@@ -391,6 +405,61 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       // la orden como sin cupón.
       const couponId = undefined;
       const couponCode = undefined;
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro tiene DOS rutas:
+      //   1. Edición de draft (`editingDraftId != null`): enruta por
+      //      `POST /store/orders/:id/flow/pay` para cargar al draft
+      //      existente. Usar `processPosPayment` acá crearía una orden
+      //      NUEVA encima del draft.
+      //   2. Venta nueva (`editingDraftId == null`): `processPosPayment`
+      //      con `is_draft=false, requires_payment=true`.
+      // La fuente de verdad es el prop `editingDraftIdProp`, con fallback
+      // al `draftId` del cart store por si el padre lo olvidó.
+      const cartDraftId = state.draftId ? Number(state.draftId) : null;
+      const effectiveDraftId =
+        editingDraftIdProp != null && Number.isFinite(editingDraftIdProp) && editingDraftIdProp > 0
+          ? editingDraftIdProp
+          : cartDraftId != null && Number.isFinite(cartDraftId) && cartDraftId > 0
+            ? cartDraftId
+            : null;
+      const isEditMode = effectiveDraftId != null;
+
+      // `payment_form` es un campo del backend que distingue contado (1) vs
+      // crédito (2) — se manda en AMBAS rutas porque `flow/pay` también lo
+      // acepta en su DTO (`PayOrderDto`).
+      const paymentFormValue: '1' | '2' = paymentForm === 'contado' ? '1' : '2';
+      const paymentReference = needsReference ? reference.trim() || undefined : undefined;
+      const amountReceived = needsCashInput ? parsedCash : undefined;
+
+      if (isEditMode) {
+        // === MODO EDICIÓN: cobrar draft existente ===
+        const flowPayload: PayOrderDto = {
+          store_payment_method_id: Number(selectedMethod.id),
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — `payment_type='direct'` para
+          // POS; el cashier ya cobró en caja. (Flujo online lo resuelve
+          // `confirmPayment` por separado vía Wompi.)
+          payment_type: 'direct',
+          amount: Number(summary.total.toFixed(2)),
+          amount_received: amountReceived,
+          payment_reference: paymentReference,
+        };
+        const updatedOrder = await OrderService.flowPayOrder(
+          effectiveDraftId as number,
+          flowPayload,
+        );
+        const orderNum = updatedOrder?.order_number || '';
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — en modo edición NO vaciamos el
+        // carrito (la próxima venta puede reutilizarlo); solo limpiamos el
+        // vínculo al draft cobrado. `clearCart()` vive en el padre cuando
+        // decide arrancar una venta nueva.
+        state.clearDraft();
+        handleReset();
+        onClose();
+        onSuccess(orderNum);
+        toastSuccess('Pago procesado exitosamente');
+        return;
+      }
+
+      // === MODO NUEVA VENTA ===
       const payload: CreatePosPaymentDto = {
         customer_id: Number(customer.id),
         customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
@@ -422,8 +491,8 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
         store_payment_method_id: selectedMethod.id,
-        amount_received: needsCashInput ? parsedCash : undefined,
-        payment_reference: needsReference ? reference.trim() || undefined : undefined,
+        amount_received: amountReceived,
+        payment_reference: paymentReference,
         // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro es siempre
         // `is_draft=false, requires_payment=true`. El draft pertenece a
         // "Guardar"; el cobro va por `flow/pay`.
@@ -434,7 +503,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora y el
         // rechazo de stock insuficiente viene por `POS_STOCK_INSUFFICIENT_001`.
         // Enviar `true` aquí era solo client-intent misleading.
-        payment_form: paymentForm === 'contado' ? '1' : '2',
+        payment_form: paymentFormValue,
         internal_notes: state.notes || undefined,
         // Coupon attachment — campos aceptados por el DTO backend. Se
         // mantienen como `undefined` porque el cart store mobile aún no
@@ -492,7 +561,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
     } finally {
       setIsProcessing(false);
     }
-  }, [selectedMethod, needsCashInput, needsReference, parsedCash, summary.total, reference, paymentForm, handleReset, onClose, onSuccess]);
+  }, [selectedMethod, needsCashInput, needsReference, parsedCash, summary.total, reference, paymentForm, handleReset, onClose, onSuccess, editingDraftIdProp]);
 
   const customerDisplayName = customer
     ? `${customer.first_name} ${customer.last_name || ''}`.trim()

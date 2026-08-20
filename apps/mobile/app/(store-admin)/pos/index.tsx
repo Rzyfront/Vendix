@@ -2322,6 +2322,12 @@ const PosScreen = () => {
   // take payment without leaving the POS. Cleared when the cart is cleared or
   // when the operator starts a fresh sale.
   const [editAfterSave, setEditAfterSave] = useState(false);
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — ID del draft en edición al que el
+  // modal de cobro debe enrutar (`flowPayOrder`). Se setea cuando el
+  // operador está editando una orden persistida y va a cobrar; el modal
+  // lo lee del prop para armar el payload de `flow/pay`. En venta nueva
+  // queda `null` y el modal cae al path `processPosPayment`.
+  const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
   // Local mirror for the footer's "Ítem" action button. The mobile POS does
   // not gate custom-line creation by mode today; the prop simply needs a
   // boolean. Default `true` keeps parity with the prior behaviour.
@@ -2368,6 +2374,9 @@ const PosScreen = () => {
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
   // presiona X en cualquier paso del flujo y quiere volver limpio a la
   // pantalla de selección de productos sin quedar atrapado en un modal.
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — además limpiamos `editingDraftId`
+  // para que la próxima apertura del modal de cobro no quede pre-armada
+  // con el ID de un draft que ya se cerró / pagó / canceló.
   const closeCheckoutModals = useCallback(() => {
     setShowCartModal(false);
     setShowPaymentModal(false);
@@ -2376,6 +2385,7 @@ const PosScreen = () => {
     setShowCustomerModal(false);
     setShowOrderCreateModal(false);
     setShowLayawayConfigModal(false);
+    setEditingDraftId(null);
   }, []);
   const [activeFilters, setActiveFilters] = useState<{
     category_id: string;
@@ -2812,7 +2822,11 @@ const PosScreen = () => {
         // Leave the cart populated so the footer + payment modal keep working
         // until the cashier either collects payment or cancels. The footer's
         // primary CTA now reads "Cobrar" (driven by `editAfterSave`).
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — pasamos por el helper
+        // centralizado para que el modal quede pre-armado con
+        // `editingDraftId` y enrute por `flowPayOrder` (Round 5 fix).
         setEditAfterSave(true);
+        setEditingDraftId(editingDraftId);
         setShowPaymentModal(true);
         return;
       }
@@ -2939,12 +2953,38 @@ const PosScreen = () => {
     setShowOrderCreateModal(true);
   }, [summary.totalItems]);
 
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — helper centralizado del camino
+  // "después de editar el draft, cobra". Lee `draftId` del cart store y,
+  // si está presente, abre el modal de cobro pre-armado para enrutar el
+  // cobro por `OrderService.flowPayOrder(draftId, ...)`. Si NO hay draft,
+  // abre el modal en modo venta nueva (cae a `processPosPayment`).
+  //
+  // Es la MISMA función invocada por:
+  //   1. El CTA primario del footer ("Cobrar" tras `editAfterSave=true`).
+  //   2. El botón "Cobrar" interno del modal (`PosPaymentModal`) que ya
+  //      enruta por `flowPayOrder` cuando `editingDraftIdProp != null`.
+  //
+  // Antes del Round 5 fix, el modal creaba una orden nueva con
+  // `processPosPayment` en vez de cargar al draft — este helper garantiza
+  // que el prop `editingDraftId` quede seteado ANTES de abrir el modal.
+  const openPaymentModalForCharge = useCallback(() => {
+    const stateDraftId = useCartStore.getState().draftId;
+    const nextDraftId =
+      stateDraftId && Number.isFinite(Number(stateDraftId)) && Number(stateDraftId) > 0
+        ? Number(stateDraftId)
+        : null;
+    setEditingDraftId(nextDraftId);
+    setShowPaymentModal(true);
+  }, []);
+
   // CTA primario del footer — despacha según el modo activo.
-  // - `sale` + draft cargado (edit-mode) → persiste los cambios sobre el
-  //   draft existente (paridad web `updateExistingOrder`). El mobile NO
-  //   tiene `flow/pay`; el cobro directo lo hace `processPosPayment`
-  //   con `is_draft=true` desde el mismo modal de cobro.
-  // - `sale` (sin draft) → abre modal de pago
+  // - `sale` + draft cargado (edit-mode, sin `editAfterSave`) → persiste los
+  //   cambios sobre el draft existente (`handleSaveDraft` → editor atómico
+  //   backend). El cobro va en la siguiente pulsación del CTA una vez
+  //   `editAfterSave=true` dispara `openPaymentModalForCharge`.
+  // - `sale` (sin draft o post-save) → abre el modal de cobro vía
+  //   `openPaymentModalForCharge` (que setea `editingDraftId` para enrutar
+  //   a `flowPayOrder` si hay draft, o `processPosPayment` si no).
   // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
   // - `layaway`  → abre `PosLayawayConfigModal` (paridad con desktop
   //   `LayawayConfigModalComponent`, ver QUI-499). El modal POSTea
@@ -2956,14 +2996,17 @@ const PosScreen = () => {
       return;
     }
     // QUI-audit-round-2: en modo edición del draft, "Cobrar" debe persistir
-    // sobre el draft, NO abrir el flujo de venta nueva.
-    if (mode === 'sale' && draftId != null) {
+    // sobre el draft, NO abrir el flujo de venta nueva. Mientras el editor
+    // no haya guardado, el CTA es "Guardar cambios" (lo decide el footer
+    // vía `isEditMode && !editAfterSave`); tras el guardado, el CTA pasa a
+    // "Cobrar" y entra a `sale` normal usando el helper centralizado.
+    if (mode === 'sale' && draftId != null && !editAfterSave) {
       void handleSaveDraft();
       return;
     }
     switch (mode) {
       case 'sale':
-        setShowPaymentModal(true);
+        openPaymentModalForCharge();
         return;
       case 'quotation':
         toastWarning('Próximamente: Crear cotización');
@@ -2977,7 +3020,7 @@ const PosScreen = () => {
         setShowLayawayConfigModal(true);
         return;
     }
-  }, [mode, customer, summary.totalItems, draftId, handleSaveDraft]);
+  }, [mode, customer, summary.totalItems, draftId, editAfterSave, handleSaveDraft, openPaymentModalForCharge]);
 
   // Cambia el modo del POS (POS / Cotizar / Separé). En paridad con el web
   // `pos.component.ts` (`setQuotationMode` / `setLayawayMode`), los handlers
@@ -3164,7 +3207,11 @@ const PosScreen = () => {
             setShowLayawayConfigModal(true);
             return;
           }
-          setShowPaymentModal(true);
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — checkout desde el cart modal
+          // debe pasar por el helper centralizado para preservar el camino
+          // de edición de draft (si hay `draftId`, el modal cobra con
+          // `flowPayOrder`; si no, con `processPosPayment`).
+          openPaymentModalForCharge();
         }}
         canCreateCustomItems
       />
@@ -3208,14 +3255,19 @@ const PosScreen = () => {
         onClose={() => setShowCart(false)}
         onCharge={() => {
           setShowCart(false);
-          setShowPaymentModal(true);
+          openPaymentModalForCharge();
         }}
       />
 
-      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow. */}
+      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow.
+          CP-POS-CREAR-EDITAR-COBRAR-001 — pasamos `editingDraftId` para que
+          el modal enrute por `flowPayOrder` cuando hay draft en edición
+          (seteado por `openPaymentModalForCharge`). El modal también hace
+          fallback al `draftId` del cart store por si el padre lo omite. */}
       <PosPaymentModal
         visible={showPaymentModal}
         onClose={() => closeCheckoutModals()}
+        editingDraftId={editingDraftId}
         onSuccess={(orderNumber) => {
           closeCheckoutModals();
           setOrderNumber(orderNumber);
