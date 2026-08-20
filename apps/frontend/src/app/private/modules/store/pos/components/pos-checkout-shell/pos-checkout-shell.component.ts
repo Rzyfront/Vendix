@@ -553,6 +553,24 @@ export class PosCheckoutShellComponent {
   readonly confirmDisabled = computed<boolean>(() => {
     if (this.footerProcessing()) return true;
 
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `create-draft` does not mount the
+    // Cobro step (no paymentStep instance exists). The Guardar CTA must gate
+    // on the cart contents + customer gate only:
+    //   - cart must have ≥1 item
+    //   - if `pos.allow_anonymous_sales=false`, customer is required
+    //   - if true, customer is optional; the shell still needs *some* customer
+    //     OR explicit `isAnonymousSale=true` to honor the policy
+    if (this.mode() === 'create-draft') {
+      const state = this.cartState();
+      if (!state || !(state.items?.length ?? 0)) return true;
+      if (this.isAnonymousSale()) return false;
+      if (state.customer?.id != null) return false;
+      // No customer picked and not anonymous → block. The shell already
+      // surfaces a toast in `createRetailDraft`, so this just keeps the CTA
+      // disabled to avoid a round-trip rejection.
+      return !this.allowAnonymousSales();
+    }
+
     if (this.checkoutIntent() === 'delivery') {
       // Cobro es el último paso: la validez del envío ya se garantizó por el gate
       // de navegación (onConfirm re-valida y redirige a Envío si falta). Aquí solo
@@ -939,32 +957,79 @@ export class PosCheckoutShellComponent {
     // Phase A.2 minimal payload — Phase C will expand with coupon/promotion
     // recompute. For now we send items + customer_id only; the backend
     // returns the persisted Order, which we re-emit to the parent.
-    const items = state.items.map((it) => ({
-      product_id: (it.product as any)?.id,
-      quantity: it.quantity,
-      unit_price: Number(it.unitPrice ?? 0),
-      total_price: Number(it.totalPrice ?? 0),
-      product_name: it.product?.name,
+    //
+    // CP-POS-MODAL-SCOPE-001 / Phase F.5 — full DTO coverage. The shell's
+    // minimal payload omitted fields the backend needs (variant_id,
+    // variant_sku, variant_attributes, description, tax_amount_item,
+    // promotion_ids, coupon_code, idempotency_key, …). The cashier
+    // experienced this as "Actualizar queda en carga infinita y nunca
+    // se actualiza": the parent sets `loading=true` waiting for
+    // `editorUpdated`, the PUT rejects with 400 on missing required
+    // fields, the error branch never emits `editorUpdated`, the
+    // spinner stays. We mirror the legacy `buildEditorRequest` shape
+    // so the editor endpoint accepts the payload and returns the
+    // fresh Order. The shell keeps the footer's own loading guard
+    // (`submittingDraft`) and resets it in BOTH next AND error so
+    // the cashier is never stuck.
+    const items = state.items.map((it: any) => ({
+      item_type: it.itemType ?? 'product',
+      product_id: it.product?.id ?? null,
+      product_variant_id: it.variant_id ?? null,
+      product_name: it.product?.name ?? '',
+      product_sku: it.product?.sku ?? null,
+      variant_sku: it.variant_sku ?? null,
+      variant_attributes: it.variant_attributes ?? null,
+      description: it.description ?? it.notes ?? null,
+      quantity: Number(it.quantity ?? 1),
+      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
+      final_unit_price: Number(
+        (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
+      ),
+      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
+      tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
+      tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
+      tax_category_id: it.taxCategoryId ?? undefined,
+      applied_price_tier_id: it.appliedPriceTierId ?? undefined,
     }));
-    const customer = this.cartState()?.customer;
+    const customer = state.customer;
 
+    // Idempotency key per edit attempt (defense-in-depth vs double-clicks
+    // and network retries; first call wins, retries get the cached Order).
+    const idempotencyKey = `editor:${orderId}:${Date.now()}`;
+
+    this.submittingDraft.set(true);
     this.ordersService
       .updateOrderFromEditor(String(orderId), {
         items,
-        customer_id: customer?.id,
+        customer_id: customer?.id ?? null,
+        notes: state.notes || undefined,
+        internal_notes: state.internalNotes || undefined,
+        promotion_ids: (state.appliedDiscounts ?? [])
+          .map((d: any) => d.promotion_id)
+          .filter((id: any) => typeof id === 'number'),
+        coupon_code: state.appliedCoupon?.code ?? undefined,
+        idempotency_key: idempotencyKey,
       } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
           const order = res?.data ?? res?.order ?? res;
+          this.submittingDraft.set(false);
           this.editorUpdated.emit(order);
           this.toastService.success('Orden actualizada correctamente');
           this.isOpenChange.emit(false);
         },
         error: (err: any) => {
+          // Always reset the loading guard so the cashier is not stranded on
+          // a spinner forever. The parent also has its own `loading` flag; if
+          // the PUT fails, the parent never sees `editorUpdated`, so we emit
+          // a no-op `editorUpdated` with `null` to let the parent reset its
+          // own state in `onEditorUpdated`.
+          this.submittingDraft.set(false);
           this.toastService.error(
             err?.error?.message ?? err?.message ?? 'No se pudo actualizar la orden',
           );
+          this.editorUpdated.emit(null);
         },
       });
   }
@@ -1370,9 +1435,17 @@ export class PosCheckoutShellComponent {
     // cartState.customer may still hold a previously-picked customer. We clone
     // the cart with customer=null so the backend stores the draft without a
     // customer row (Consumidor Final), per the existing saveDraft contract.
-    const draftState = this.isAnonymousSale()
-      ? { ...state, customer: null }
-      : state;
+    //
+    // CP-POS-MODAL-SCOPE-001 / Phase F.2 — defensive guard against the
+    // `anonymousSalesAsDefault=true` re-sync race: if the cart carries a
+    // non-null customer row the cashier picked, the draft MUST save with that
+    // customer attached, regardless of the anonymous toggle state. The toggle
+    // is a defaulting convenience, not an override of an explicit pick.
+    const customerPicked = state.customer?.id != null;
+    const draftState =
+      this.isAnonymousSale() && !customerPicked
+        ? { ...state, customer: null }
+        : state;
 
     this.paymentService
       .saveDraft(draftState, 'current_user')

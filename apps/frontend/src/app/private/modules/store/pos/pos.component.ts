@@ -1872,8 +1872,15 @@ export class PosComponent {
    * order from the same shell without leaving the POS. We also surface a
    * confirmation screen so the cashier sees what changed.
    */
-  onEditorUpdated(updatedOrder: Order): void {
-    if (!updatedOrder?.id) return;
+  onEditorUpdated(updatedOrder: Order | null): void {
+    // CP-POS-MODAL-SCOPE-001 / Phase F.5 — the shell emits a no-op
+    // `editorUpdated` with `null` when the PUT /editor request fails,
+    // so the parent can release its own `loading` flag without waiting
+    // for a fresh Order. On success the Order is non-null.
+    if (!updatedOrder?.id) {
+      this.loading.set(false);
+      return;
+    }
     this.readyToPayOrder.set(updatedOrder);
     this.editingOrder.set(updatedOrder);
     this.currentOrderId.set(String(updatedOrder.id));
