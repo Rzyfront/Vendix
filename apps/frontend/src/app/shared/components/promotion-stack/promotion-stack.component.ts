@@ -3,9 +3,12 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  afterNextRender,
   computed,
+  effect,
   inject,
   input,
+  output,
   signal,
   viewChild,
 } from '@angular/core';
@@ -72,8 +75,11 @@ export interface PromotionStackItem {
  *
  * Reglas duras:
  * - Empty state: renderiza `null` cuando `items().length === 0`.
- * - Sin `effect()`, sin `@HostListener`. `setInterval` de `scroll-batch`
- *   se limpia por `DestroyRef.onDestroy()`.
+ * - Sin `@HostListener`. `setInterval` de `scroll-batch` y
+ *   `IntersectionObserver` se limpian por `DestroyRef.onDestroy()`.
+ * - `effect()` se permite SOLO para side-effects (emitir outputs
+ *   `promotionViewed` / `promotionIntent`); la UI re-renderea por
+ *   signals nativos (zoneless CD).
  * - Auto-advance solo arranca si el media-query `prefers-reduced-motion`
  *   no está activo.
  * - Todos los `aria-label` en español.
@@ -100,6 +106,32 @@ export class PromotionStackComponent {
   /** Autoplay en ms para `scroll-batch`. Default 3500. */
   readonly autoplayMs = input<number>(3500);
 
+  // ── Outputs (signal-output API) ──────────────────────────────────────
+  /**
+   * Emite cuando un item entra al viewport del carrusel (`scroll-batch`)
+   * o cuando se monta un tier activo (`expanded-cards`). Útil para
+   * analíticas de exposición de promociones.
+   *
+   * En `compact-pills` no emite (todos los items son visibles a la vez).
+   */
+  readonly promotionViewed = output<{
+    promotion_id: string | number;
+    mode: PromotionStackMode;
+  }>();
+
+  /**
+   * Emite cuando `currentQuantity` cruza la frontera de un tier
+   * (`expanded-cards`). El payload incluye el `tier_index` del nuevo
+   * nivel y la `quantity` que disparó el cruce.
+   *
+   * Solo aplica en `expanded-cards`.
+   */
+  readonly promotionIntent = output<{
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }>();
+
   // ── Refs ──────────────────────────────────────────────────────────────
   private readonly scrollerRef = viewChild<ElementRef<HTMLElement>>('scroller');
 
@@ -107,6 +139,12 @@ export class PromotionStackComponent {
   private readonly activeIndexSignal = signal(0);
   private autoplayInterval: ReturnType<typeof setInterval> | null = null;
   private autoplayPaused = false;
+  /** Última entrada observada en `scroll-batch` (id del item visible). */
+  private readonly lastViewedPromotionId = signal<string | number | null>(null);
+  /** Último tier cuyo cruce se emitió (id o null). */
+  private readonly lastEmittedTierId = signal<string | number | null>(null);
+  /** Bandera para evitar emitir el mismo view antes de que cambie. */
+  private intersectionObserver: IntersectionObserver | null = null;
   private readonly initialReducedMotion =
     typeof window !== 'undefined'
       ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -182,7 +220,37 @@ export class PromotionStackComponent {
     // Autoplay del scroll-batch: arranca vía microtask post-construcción
     // para que el viewChild ya esté disponible.
     this.destroyRef.onDestroy(() => this.stopAutoplay());
+    this.destroyRef.onDestroy(() => this.disconnectIntersectionObserver());
     queueMicrotask(() => this.syncAutoplay());
+
+    // IntersectionObserver para `scroll-batch`: se monta después del
+    // primer render para que el `<div #scroller>` y sus `<article>`
+    // existan en el DOM.
+    afterNextRender(() => this.setupScrollBatchObserver());
+
+    // `effect()` SOLO para side-effects (emitir eventos analytics).
+    // No se usa para re-render ni para sincronizar UI: la UI ya
+    // reacciona al signal `currentTier()` vía zoneless CD. La skill
+    // `vendix-zoneless-signals` permite `effect()` con fines de
+    // side-effects cuando el cambio viene de un input reactivo.
+    effect(() => {
+      const m = this.mode();
+      if (m !== 'expanded-cards') return;
+      const tier = this.currentTier();
+      if (!tier || tier.tier_index === undefined) {
+        this.lastEmittedTierId.set(null);
+        return;
+      }
+      const tierId = tier.id;
+      if (this.lastEmittedTierId() === tierId) return;
+      this.lastEmittedTierId.set(tierId);
+      const qty = this.currentQuantity() ?? 0;
+      this.promotionIntent.emit({
+        promotion_id: tier.id,
+        tier_index: tier.tier_index,
+        quantity: qty,
+      });
+    });
   }
 
   // ── Helpers de variante ──────────────────────────────────────────────
@@ -351,5 +419,69 @@ export class PromotionStackComponent {
     const child = scroller.children[clamped] as HTMLElement | undefined;
     if (!child) return;
     scroller.scrollTo({ left: child.offsetLeft - scroller.offsetLeft, behavior: 'smooth' });
+  }
+
+  // ── Scroll-batch: IntersectionObserver (analytics) ────────────────────
+  /**
+   * Observa cada `<article>` del scroller. Cuando un item cruza el 50%
+   * de visibilidad y es el más visible del momento, emite
+   * `promotionViewed` con su id.
+   *
+   * `IntersectionObserver` (NO `effect()`) — el requisito del plan
+   * `CP-ECOM-PROMO-UX-001` G.1 es detectar entrada al viewport, lo cual
+   * es side-effect puro (no re-render). `effect()` se reserva para
+   * cambios de `currentTier()` en `expanded-cards`.
+   */
+  private setupScrollBatchObserver(): void {
+    const scroller = this.scrollerRef()?.nativeElement;
+    if (!scroller) return;
+    if (this.intersectionObserver) return;
+
+    const articles = Array.from(
+      scroller.querySelectorAll<HTMLElement>('.promotion-stack__card'),
+    );
+    if (articles.length === 0) return;
+
+    const items = this.scrollBatchItems();
+    if (items.length === 0) return;
+
+    this.intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        // Encontrar la entry más visible actualmente.
+        let best: { id: string | number; ratio: number } | null = null;
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const idxAttr = entry.target.getAttribute('data-promo-idx');
+          if (idxAttr === null) continue;
+          const idx = Number(idxAttr);
+          const item = items[idx];
+          if (!item) continue;
+          if (!best || entry.intersectionRatio > best.ratio) {
+            best = { id: item.id, ratio: entry.intersectionRatio };
+          }
+        }
+        if (!best) return;
+        if (best.ratio < 0.5) return;
+        if (this.lastViewedPromotionId() === best.id) return;
+        this.lastViewedPromotionId.set(best.id);
+        this.promotionViewed.emit({
+          promotion_id: best.id,
+          mode: 'scroll-batch',
+        });
+      },
+      {
+        root: scroller,
+        threshold: [0.25, 0.5, 0.75, 1],
+      },
+    );
+
+    articles.forEach((el) => this.intersectionObserver!.observe(el));
+  }
+
+  private disconnectIntersectionObserver(): void {
+    if (this.intersectionObserver) {
+      this.intersectionObserver.disconnect();
+      this.intersectionObserver = null;
+    }
   }
 }

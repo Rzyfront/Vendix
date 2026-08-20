@@ -70,6 +70,7 @@
               class="promotion-stack__card"
               [ngClass]="{ 'promotion-stack__card--featured': item.featured }"
               [attr.data-testid]="'promotion-stack-item-' + i"
+              [attr.data-promo-idx]="i"
               [attr.aria-current]="i === activeIndex() ? 'true' : null"
             >
               <app-icon
