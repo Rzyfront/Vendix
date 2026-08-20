@@ -167,6 +167,25 @@ export interface Cart {
    * Powers the "next tier" nudge shown in cart dropdown / page / checkout.
    */
   tier_progress?: CartTierProgress[];
+  /**
+   * Per-product tier ladder for `quantity_tiered` promotions that target a
+   * specific product (`quantity_grouping='per_product'`). Surfaces the full
+   * tier breakdown so the UI can render progress and next-tier nudges that
+   * name the SKU the customer needs to add. Optional for back-compat with
+   * older backend versions that predate the Phase A.2 ladder payload.
+   */
+  per_product_tier_ladder?: Array<{
+    promotion_id: number;
+    target_product_id: number;
+    tiers: Array<{
+      min_quantity: number;
+      max_quantity: number | null;
+      type: 'percentage' | 'fixed_amount';
+      value: number;
+      sort_order: number;
+    }>;
+    current_tier_index: number | null;
+  }>;
 }
 
 /**

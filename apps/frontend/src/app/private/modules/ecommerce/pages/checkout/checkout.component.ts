@@ -1029,7 +1029,71 @@ export class CheckoutComponent implements OnInit {
   selected_shipping_method_id: number | null = null;
   selected_shipping_option_id: number | null = null;
   selected_shipping_method_type: string | null = null;
-  shipping_cost = 0;
+  // `shipping_cost` se eleva a signal para que el resumen del checkout
+  // re-renderice bajo zoneless cuando se elige/limpia una opción de envío.
+  // Antes era propiedad plana y los cambios no refrescaban el total.
+  readonly shipping_cost = signal(0);
+
+  /**
+   * Costo de envío reactivo. Computed perezoso: lee la signal `shipping_cost`
+   * y nada más — toda la lógica de selección vive en `selectShippingMethod`.
+   */
+  readonly shippingCost = computed(() => this.shipping_cost());
+
+  /** Texto del envío: "Gratis" cuando es 0, formato moneda cuando no. */
+  readonly shippingDisplay = computed(() => {
+    const cost = this.shippingCost();
+    return cost === 0 ? 'Gratis' : cost.toString();
+  });
+
+  /**
+   * Cupón actual del carrito: prioriza el que el cliente tipeó en el input
+   * (signal local). Como el backend lo aplica al confirmar (no en el
+   * summary), aquí sólo reflejamos la INTENCIÓN del cliente.
+   */
+  readonly cartCouponCode = computed<string | null>(() => {
+    const typed = this.coupon_code().trim();
+    return typed.length > 0 ? typed : null;
+  });
+
+  /**
+   * Monto del cupón actual. El backend todavía lo calcula al confirmar la
+   * compra (no en el summary), así que aquí reportamos 0 hasta entonces.
+   * El resumen del checkout sigue mostrando el descuento promocional
+   * automático en `cart.promotion_discount`, que es reactivo y fiable.
+   */
+  readonly couponDiscount = computed(() => 0);
+
+  /** Promociones aplicadas con scope preservado para el breakdown. */
+  readonly appliedPromotionsWithScope = computed(
+    () => this.cart()?.applied_promotions ?? [],
+  );
+
+  /**
+   * Icono por scope de promoción (CP-ECOM-PROMO-UX-001 F.2):
+   * - `order`    → shopping-cart (afecta toda la orden)
+   * - `category` → layers (agrupa por categoría)
+   * - `product`  → tag (etiqueta de producto individual)
+   */
+  scopeIcon(scope: 'order' | 'product' | 'category' | undefined): string {
+    if (scope === 'order') return 'shopping-cart';
+    if (scope === 'category') return 'layers';
+    return 'tag';
+  }
+
+  /** Color del icono según el scope. */
+  scopeColor(scope: 'order' | 'product' | 'category' | undefined): string {
+    if (scope === 'order') return 'text-primary';
+    if (scope === 'category') return 'text-warning';
+    return 'text-success';
+  }
+
+  /** Etiqueta humana en español del scope. */
+  scopeLabel(scope: 'order' | 'product' | 'category' | undefined): string {
+    if (scope === 'order') return 'Orden completa';
+    if (scope === 'category') return 'Por categoría';
+    return 'Por producto';
+  }
 
   /**
    * Qué tipo de cobertura devolvió el calculador para la dirección actual.
@@ -1194,7 +1258,7 @@ export class CheckoutComponent implements OnInit {
             this.selected_shipping_method_id = null;
             this.selected_shipping_option_id = null;
             this.selected_shipping_method_type = null;
-            this.shipping_cost = 0;
+            this.shipping_cost.set(0);
             this.shipping_coverage.set('none');
 
             // Antes esto era silencioso: la lista quedaba vacía, el botón se
@@ -1230,7 +1294,7 @@ export class CheckoutComponent implements OnInit {
     this.selected_shipping_option_id = option.id;
     this.selected_shipping_method_id = option.method_id;
     this.selected_shipping_method_type = option.method_type || null;
-    this.shipping_cost = cost;
+    this.shipping_cost.set(cost);
 
     this.loadPaymentMethods(option.method_type);
     this.loadEtaPreview(option.method_id);
