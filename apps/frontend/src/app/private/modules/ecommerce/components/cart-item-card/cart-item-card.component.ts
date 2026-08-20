@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-import { CartItem } from '../../services/cart.service';
+import { Cart, CartItem } from '../../services/cart.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
@@ -17,6 +17,32 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
+import { CartService } from '../../services/cart.service';
+
+/**
+ * Shape of `cart.per_product_tier_ladder` as emitted by the backend from
+ * Phase A.2 of `CP-ECOM-PROMO-UX-001`. Defined locally because the
+ * `Cart` interface lives in `cart.service.ts` and the SCOPE of Phase E.2
+ * forbids modifying it; when A.2 is wired through the central
+ * enrichment, the cast in `itemTierProgress`/`progressPercent` will start
+ * returning real data without any further change here.
+ */
+type CartTierLadder = {
+  promotion_id: number;
+  target_product_id: number;
+  tiers: Array<{
+    min_quantity: number;
+    max_quantity: number | null;
+    type: 'percentage' | 'fixed_amount';
+    value: number;
+    sort_order: number;
+  }>;
+  current_tier_index: number | null;
+};
+
+type CartWithTierLadder = Cart & {
+  per_product_tier_ladder?: CartTierLadder[];
+};
 
 /**
  * Presentational, horizontal cart-item card for the ecommerce cart.
@@ -144,6 +170,35 @@ import {
               </span>
             }
           </div>
+
+          <!-- Phase E.2 / CP-ECOM-PROMO-UX-001: per-line tier nudge.
+               Shows a slim progress bar ("Faltan N und para -X%") under the
+               price chip whenever this line's product is sitting on a
+               quantity_tiered promotion tier AND there is a next tier
+               reachable. Sourced from cart.per_product_tier_ladder (A.2)
+               so the bar is consistent with the global nudge already shown
+               by app-cart-promotions. -->
+          @if (itemTierProgress(); as progress) {
+            <div class="cart-item-progress" data-testid="cart-item-progress-bar">
+              <div class="cart-item-progress__label">
+                Faltan <strong>{{ progress.remaining }}</strong>
+                und para <strong>{{ progress.benefit }}</strong>
+              </div>
+              <div
+                class="cart-item-progress__track"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                [attr.aria-valuenow]="progressPercent()"
+                aria-label="Progreso hacia el próximo descuento"
+              >
+                <div
+                  class="cart-item-progress__fill"
+                  [style.width.%]="progressPercent()"
+                ></div>
+              </div>
+            </div>
+          }
         </div>
 
         <!-- Actions -->
@@ -355,6 +410,42 @@ import {
         color: var(--color-text-muted) !important;
       }
 
+      /* Phase E.2 / CP-ECOM-PROMO-UX-001 — per-line tier progress bar.
+         Slim track under the price chip; uses the success palette so it
+         visually rhymes with the green discount chips above. The track
+         width is intentionally capped at 120px so the bar never stretches
+         across the full card width on desktop. */
+      .cart-item-progress {
+        margin-top: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary, #6b7280);
+      }
+
+      .cart-item-progress__label {
+        margin-bottom: 0.25rem;
+        line-height: 1.3;
+      }
+
+      .cart-item-progress__track {
+        width: 120px;
+        height: 4px;
+        background: rgba(var(--color-success-rgb, 34 197 94), 0.15);
+        border-radius: 9999px;
+        overflow: hidden;
+      }
+
+      .cart-item-progress__fill {
+        height: 100%;
+        background: var(--color-success, #22c55e);
+        transition: width 200ms ease-out;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .cart-item-progress__fill {
+          transition: none;
+        }
+      }
+
       :host ::ng-deep .ci-remove:hover:not(:disabled) {
         color: var(--color-destructive) !important;
         background: rgba(var(--color-destructive-rgb), 0.1) !important;
@@ -411,6 +502,11 @@ export class CartItemCardComponent {
   readonly remove = output<void>();
 
   private readonly currencyFormat = inject(CurrencyFormatService);
+  // Phase E.2 — read `cart.per_product_tier_ladder` (A.2 backend emission)
+  // to drive the per-line progress bar. Injected here so the bar is wired
+  // to the SAME central signal the rest of the cart consumes — no separate
+  // fetch, no drift from `<app-cart-promotions>`'s global nudge.
+  private readonly cartService = inject(CartService);
 
   /**
    * Tenant currency code, read in the template (via `data-currency`) so this
@@ -452,6 +548,95 @@ export class CartItemCardComponent {
       )
       .map((value) => String(value));
   });
+
+  /**
+   * Phase E.2 / CP-ECOM-PROMO-UX-001 — per-line tier progress.
+   *
+   * Reads `cart.per_product_tier_ladder` (emitted by the backend from
+   * Phase A.2) and returns the units still needed to unlock the NEXT tier
+   * for THIS line's product, plus a formatted benefit label
+   * ("-10%", "-$5.000"). Returns `null` when the line is NOT sitting on a
+   * `quantity_tiered` promotion OR the customer has already crossed the
+   * top tier — both cases are "no nudge to show".
+   *
+   * The cast to `CartWithTierLadder` is necessary because
+   * `Cart.per_product_tier_ladder` is not yet declared on the shared
+   * `Cart` interface (the central enrichment in `CartService` doesn't pass
+   * it through yet). When that wiring lands, the cast becomes a no-op and
+   * the bar will start rendering automatically.
+   */
+  readonly itemTierProgress = computed<{
+    remaining: number;
+    benefit: string;
+  } | null>(() => {
+    const cart = this.cartService.cart() as CartWithTierLadder | null;
+    if (!cart) return null;
+    const ladder = (cart.per_product_tier_ladder ?? []).find(
+      (l) => l.target_product_id === this.item().product_id,
+    );
+    if (!ladder) return null;
+    // Per the E.2 spec, only surface the bar when the customer has already
+    // landed on a tier (`current_tier_index !== null`) AND a next tier
+    // exists. This avoids painting a "Faltan N und" hint on lines that
+    // haven't even reached the first threshold — `<app-cart-promotions>`
+    // owns the global nudge for that case.
+    if (ladder.current_tier_index === null) return null;
+    const nextTier = ladder.tiers[ladder.current_tier_index + 1];
+    if (!nextTier) return null;
+    const currentQty = this.item().quantity;
+    const remaining = nextTier.min_quantity - currentQty;
+    if (remaining <= 0) return null;
+    return {
+      remaining,
+      benefit: this.formatTierBenefit(nextTier.type, nextTier.value),
+    };
+  });
+
+  /**
+   * Width (0–100) of the per-line tier progress bar.
+   *
+   * Anchored at the boundary between the customer's CURRENT tier (lower
+   * bound) and the NEXT tier (upper bound). When the current quantity has
+   * not yet reached the current tier's `min_quantity` we report `0`; once
+   * it crosses the next tier's `min_quantity` we report `100`. The middle
+   * span is linear — same math the POS cart summary uses for the same
+   * ladder.
+   */
+  readonly progressPercent = computed<number>(() => {
+    const cart = this.cartService.cart() as CartWithTierLadder | null;
+    if (!cart) return 0;
+    const ladder = (cart.per_product_tier_ladder ?? []).find(
+      (l) => l.target_product_id === this.item().product_id,
+    );
+    if (!ladder || ladder.current_tier_index === null) return 0;
+    const currentTier = ladder.tiers[ladder.current_tier_index];
+    const nextTier = ladder.tiers[ladder.current_tier_index + 1];
+    const currentQty = this.item().quantity;
+    // No upper bound reached yet — either customer is below the first
+    // tier's threshold, or they already sit on the last one. Both cases
+    // pin to a fixed extreme so the bar never overshoots.
+    if (!currentTier || !nextTier) return currentQty > 0 ? 100 : 0;
+    if (currentQty >= nextTier.min_quantity) return 100;
+    if (currentQty < currentTier.min_quantity) return 0;
+    const span = nextTier.min_quantity - currentTier.min_quantity;
+    if (span <= 0) return 100;
+    const offset = currentQty - currentTier.min_quantity;
+    return Math.min(100, Math.round((offset / span) * 100));
+  });
+
+  /**
+   * Format a tier benefit into the user-facing label shown on the
+   * progress bar ("-10%", "-$5.000"). Mirrors the same labels used by
+   * `<app-cart-promotions>`'s tierProgressItems so the two nudges can
+   * never drift apart.
+   */
+  private formatTierBenefit(
+    type: 'percentage' | 'fixed_amount',
+    value: number,
+  ): string {
+    if (type === 'percentage') return `-${value}%`;
+    return `-${this.currencyFormat.format(value)}`;
+  }
 
   constructor() {
     // Ensure tenant currency is loaded so amounts format correctly.
