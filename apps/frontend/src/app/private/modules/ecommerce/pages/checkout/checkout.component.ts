@@ -1668,19 +1668,6 @@ export class CheckoutComponent implements OnInit {
     this.is_submitting.set(true);
     this.error_message.set('');
 
-    // DEBUG: trace what's happening with booking detection at checkout time
-    console.log('[checkout DEBUG] placeOrder() invoked', {
-      cartHasBookableServices: this.cartHasBookableServices,
-      bookableItemsCount: this.bookableItems.length,
-      bookingSelectionsSize: this.bookingSelections().size,
-      bookingSelectionsKeys: Array.from(this.bookingSelections().keys()),
-      sessionStoragePending: sessionStorage.getItem('pending_booking'),
-      cartItemsCount: this.cart()?.items?.length ?? 0,
-      cartItemProductTypes: (this.cart()?.items ?? []).map(
-        (i: any) => `${i.product?.name}(${i.product?.product_type})`,
-      ),
-    });
-
     // LAST-RESORT FALLBACK: also peek at sessionStorage in case the
     // cart$ subscription + restorePendingBooking() race-condition still
     // hasn't populated bookingSelections by the time the user hits "Pagar".
