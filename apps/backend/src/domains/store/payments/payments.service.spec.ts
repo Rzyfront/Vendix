@@ -130,7 +130,14 @@ describe('PaymentsService', () => {
         {
           provide: SettingsService,
           useValue: {
-            getSettings: jest.fn().mockResolvedValue({}),
+            // CP-POS-CREAR-EDITAR-COBRAR-001 — legacy fiscal-threshold tests
+            // were authored under the anonymous-allowed assumption
+            // (`require_customer_data=false`). Mirror that explicitly so the
+            // new customer gate in `processPosPayment` does not fire and
+            // re-target these tests' STOP_AFTER_GATE assertion.
+            getSettings: jest
+              .fn()
+              .mockResolvedValue({ checkout: { require_customer_data: false } }),
             getStoreCurrency: jest.fn().mockResolvedValue('COP'),
           },
         },

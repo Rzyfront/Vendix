@@ -705,6 +705,86 @@ export class PaymentsService {
         }
       }
 
+      // ----------------------------------------------------------------
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — B.2 draft/payment invariant.
+      //
+      // `is_draft=true` significa "guardar la orden pendiente de cobro". Combinarlo
+      // con `requires_payment=true` es contradictorio: si la intención es cobrar,
+      // NO debe ser draft; si la intención es guardar, NO debe procesar pago.
+      // Se valida ANTES de la `$transaction` para no tomar numeración ni abrir
+      // un cupón/COGS/inventario/pago que luego haya que revertir.
+      // ----------------------------------------------------------------
+      if (
+        createPosPaymentDto.is_draft === true &&
+        createPosPaymentDto.requires_payment === true
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001,
+          'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
+        );
+      }
+
+      // ----------------------------------------------------------------
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — B.1 customer gate.
+      //
+      // Política canónica: `settings.checkout.require_customer_data=true` (default).
+      // Una orden POS sin cliente queda huérfana y no se puede cobrar, facturar ni
+      // atender soporte. La validación corre en backend, ANTES de abrir la
+      // `$transaction`, para no escribir pagos / cupones / eventos / COGS / inventario
+      // / invoice sobre una orden sin identificar.
+      //
+      // El default seguro es TRUE: si la rama `checkout` no existe en settings
+      // (settings legacy, JSON parcial), se trata como `require_customer_data=true`
+      // y se exige cliente. Sólo se omite el gate cuando el flag es EXPLÍCITAMENTE
+      // `false`, política opt-in del comerciante.
+      //
+      // Cuando hay `customer_id`, se valida que el cliente pertenezca a la tienda
+      // del contexto vía `store_users` (manual scope — el getter `users` del
+      // `StorePrismaService` devuelve el `baseClient` sin scope; el join se hace
+      // por la tabla de membresía).
+      // ----------------------------------------------------------------
+      const checkoutSettings = (settings as any)?.checkout as
+        | { require_customer_data?: boolean }
+        | undefined;
+      const requireCustomerData =
+        checkoutSettings?.require_customer_data !== false;
+
+      if (requireCustomerData) {
+        const customerId = createPosPaymentDto.customer_id;
+        const customerIdInvalid =
+          customerId === undefined ||
+          customerId === null ||
+          (typeof customerId === 'number' &&
+            (!Number.isInteger(customerId) || customerId < 1));
+
+        if (customerIdInvalid) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_CUSTOMER_REQUIRED_001,
+            'POS order requires a valid customer_id when checkout.require_customer_data is enabled',
+            { reason: 'missing_or_invalid_customer_id' },
+          );
+        }
+
+        // Scope-safe lookup: `users` no está scopeado por `StorePrismaService`
+        // (su getter devuelve el `baseClient`); validamos la membresía con
+        // `store_users.findFirst({ where: { store_id, user_id } })` antes de
+        // aceptar el cliente en esta tienda.
+        const membership = await this.prisma.store_users.findFirst({
+          where: {
+            store_id: createPosPaymentDto.store_id,
+            user_id: customerId as number,
+          },
+          select: { user_id: true },
+        });
+        if (!membership) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_CUSTOMER_REQUIRED_001,
+            'POS customer does not belong to the current store',
+            { reason: 'customer_store_mismatch' },
+          );
+        }
+      }
+
       const result = await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order. Backend recalculates promotions/coupon
         // server-side and returns the persistence-ready snapshots so this
@@ -1388,7 +1468,18 @@ export class PaymentsService {
         // ignored — only the value returned by `CouponsService.validate`
         // (computed server-side) is persisted in `coupon_uses`, kept
         // separate from the promotional discount stored in `order_promotions`.
-        if (couponInfo.coupon_id && couponInfo.discount_amount > 0) {
+        //
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — B.2 coupon lifecycle: a DRAFT is a
+        // saved business order, NOT a charged sale. We must NOT persist
+        // `coupon_uses` and must NOT increment `coupons.current_uses` here; the
+        // coupon validation/commit belongs to `flow/pay`. Otherwise an
+        // abandoned draft would burn the coupon quota, and a successful draft →
+        // pay → cancel loop would leave a phantom row in `coupon_uses`.
+        if (
+          !createPosPaymentDto.is_draft &&
+          couponInfo.coupon_id &&
+          couponInfo.discount_amount > 0
+        ) {
           await tx.coupon_uses.create({
             data: {
               coupon_id: couponInfo.coupon_id,
