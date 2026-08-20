@@ -577,5 +577,236 @@ describe('OrdersService', () => {
         contextSpy.mockRestore();
       }
     });
+
+    // ----------------------------------------------------------------
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — G.1
+    //
+    // Camino feliz e invariantes restantes del editor: orden terminal,
+    // stock insuficiente y cupón inválido. Cada caso asserta un error
+    // tipado distinto Y que la fila no quedó a medias (`updateMany`, el
+    // claim atómico, nunca corrió).
+    // ----------------------------------------------------------------
+    const draftOrder = {
+      ...editableOrder,
+      state: 'draft',
+      delivery_type: 'home_delivery',
+    };
+
+    /** DTO completo: items + cliente + notas + envío validado por servidor. */
+    const fullDto = {
+      customer_id: 99,
+      notes: 'nota editada',
+      internal_notes: 'interna',
+      delivery_type: 'home_delivery',
+      shipping_method_id: 5,
+      shipping_rate_id: 7,
+      shipping_address_id: 33,
+      shipping_cost: 10,
+      promotion_ids: [],
+      items: [
+        {
+          product_id: 1,
+          product_name: 'Test product',
+          quantity: 1,
+          unit_price: 100,
+          total_price: 100,
+          tax_amount_item: 19,
+          tax_rate: 0.19,
+        },
+      ],
+    } as any;
+
+    /** Fila devuelta por el read final dentro de la transacción. */
+    const persistedOrder = {
+      ...draftOrder,
+      subtotal_amount: 100,
+      tax_amount: 19,
+      discount_amount: 0,
+      shipping_cost: 10,
+      grand_total: 129,
+      order_items: [],
+      users: { id: 99, first_name: 'Juan' },
+      order_promotions: [],
+      coupon_uses: [],
+      order_installments: [],
+    };
+
+    /** Arranque común del camino que llega hasta el commit. */
+    const arrangeEditableDraft = () => {
+      mockPrismaService.orders.findFirst
+        .mockResolvedValueOnce(draftOrder as any)
+        .mockResolvedValue(persistedOrder as any);
+      mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+      mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+      mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+        id: 5,
+        store_id: 1,
+        type: 'delivery',
+        is_active: true,
+      });
+      mockPrismaService.shipping_rates.findFirst.mockResolvedValue({
+        id: 7,
+        shipping_method_id: 5,
+        base_cost: 10,
+        is_active: true,
+      });
+      mockPrismaService.orders.updateMany.mockResolvedValue({ count: 1 } as any);
+      mockPrismaService.orders.update.mockResolvedValue({} as any);
+      mockPrismaService.order_items.deleteMany.mockResolvedValue({ count: 0 });
+      mockPrismaService.order_items.createMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.order_items.findMany.mockResolvedValue([]);
+      mockPrismaService.order_promotions.deleteMany.mockResolvedValue({
+        count: 0,
+      });
+    };
+
+    it('actualiza un draft con items + cliente + envío y devuelve la orden completa', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+
+        const result = await service.updateOrderFromEditor(500, fullDto);
+
+        // La respuesta es la orden persistida completa, no un eco del DTO.
+        expect(result).toBeDefined();
+        expect((result as any).id).toBe(500);
+        expect(Number((result as any).grand_total)).toBe(129);
+        expect((result as any).order_items).toBeDefined();
+        expect((result as any).users).toBeDefined();
+
+        // Claim atómico ejecutado sobre estados editables únicamente.
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 500,
+              store_id: 1,
+              state: { in: ['created', 'draft'] },
+            }),
+          }),
+        );
+
+        // Draft: no se libera ni se crea reserva de stock.
+        expect(
+          mockStockLevelManager.releaseReservationsByReference,
+        ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 sobre una orden terminal (shipped)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          ...editableOrder,
+          state: 'shipped',
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
+        );
+        // Ni siquiera se consulta la membresía del cliente: el gate de estado
+        // corre primero y nada se escribe.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 409 POS_STOCK_INSUFFICIENT_001 sin actualización parcial cuando falta stock', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        // `created` (no draft) es el único estado que valida stock.
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce(editableOrder as any)
+          .mockResolvedValue(persistedOrder as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          track_inventory: true,
+        });
+        mockSellableStockAllocator.allocateForLine.mockResolvedValue({
+          slices: [],
+          allocated: 0,
+          available: 0,
+          shortfall: 1,
+        });
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, fullDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.POS_STOCK_INSUFFICIENT_001.code,
+        );
+        // El stock se valida ANTES de la transacción: sin claim, sin borrado
+        // de líneas, sin totales nuevos. La orden queda intacta.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+
+        mockSellableStockAllocator.allocateForLine.mockResolvedValue({
+          slices: [{ location_id: 1, quantity: 1 }],
+          allocated: 1,
+          available: 1,
+          shortfall: 0,
+        });
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 422 ORD_EDIT_PROMOTION_INVALID_001 cuando el cupón ya no valida', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockCouponsService.validate.mockRejectedValue(
+          new Error('Coupon expired'),
+        );
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            coupon_code: 'EXPIRADO',
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001.code,
+        );
+        // Cupón inválido = ninguna escritura; el contador nunca se toca.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.coupons.update).not.toHaveBeenCalled();
+
+        mockCouponsService.validate.mockResolvedValue({
+          valid: true,
+          coupon_id: 1,
+          code: 'TEST',
+          discount_amount: 0,
+        } as any);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
   });
 });
