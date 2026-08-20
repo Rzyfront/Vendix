@@ -972,6 +972,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No puedes cobrar y guardar borrador al mismo tiempo. Guarda la orden primero y luego cobra.',
   POS_STOCK_INSUFFICIENT_001:
     'No hay stock suficiente para uno o más productos.',
+  // Round 3 MAJOR #5 — added to keep the mobile POS payment modal and the
+  // web fallback copy aligned with the backend codes the cashier is told
+  // to expect (`POS_DIRECT_METHOD_MISSING_001`, `POS_CREDIT_METHOD_MISSING_001`).
+  POS_DIRECT_METHOD_MISSING_001:
+    'No hay métodos de pago configurados para cobro directo.',
+  POS_CREDIT_METHOD_MISSING_001:
+    'No hay métodos de pago configurados para venta a crédito.',
   ORD_EDIT_STATE_CHANGED_001:
     'La orden cambió mientras se editaba. Actualiza la pantalla.',
   ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',

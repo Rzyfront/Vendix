@@ -497,12 +497,17 @@ export class PosCartService {
     if (!order?.order_items || order.order_items.length === 0) {
       // Even on an empty order, persist the linked order metadata so the editor
       // can navigate back / stay in edit mode without losing context.
+      // Round 3 MAJOR #2 — also restore `internal_notes` (staff-only). The
+      // main branch already does it via `buildLoadedCartState`; the empty
+      // branch used to drop it, which meant editing an empty/zero-item order
+      // silently reset the staff note.
       const linkedState = this.getInitialState();
       return of({
         ...linkedState,
         linkedOrderId: order?.id ?? null,
         linkedOrderNumber: order?.order_number ?? null,
         notes: order?.notes ?? '',
+        internalNotes: order?.internal_notes ?? '',
         appliedDiscounts: this.mapOrderPromotionsToDiscounts(order),
         appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
         customer: this.mapOrderUsersToCustomer(order),

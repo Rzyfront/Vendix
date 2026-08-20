@@ -2029,6 +2029,9 @@ const PaymentSheet = ({
           : {}),
       };
       clearCart();
+      // Round 3 MAJOR #12 — the `editAfterSave` flag lives in the
+      // `PosScreen` component; the `PaymentSheet` doesn't have access to
+      // its setter. Reset happens at the next cart mount / sale start.
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pos-products'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -2314,6 +2317,15 @@ const PosScreen = () => {
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  // Round 3 MAJOR #12 — flipped to true after a successful editor save. The
+  // footer CTA changes from "Guardar cambios" to "Cobrar" so the cashier can
+  // take payment without leaving the POS. Cleared when the cart is cleared or
+  // when the operator starts a fresh sale.
+  const [editAfterSave, setEditAfterSave] = useState(false);
+  // Local mirror for the footer's "Ítem" action button. The mobile POS does
+  // not gate custom-line creation by mode today; the prop simply needs a
+  // boolean. Default `true` keeps parity with the prior behaviour.
+  const canCreateCustomItems = true;
   // Cash register modals (paridad web `pos-header-dropdown.component`).
   const [showCashOpenModal, setShowCashOpenModal] = useState(false);
   const [showCashCloseModal, setShowCashCloseModal] = useState(false);
@@ -2758,6 +2770,24 @@ const PosScreen = () => {
           unit_price: Number(i.unitPrice.toFixed(2)),
           total_price: Number(getLineSubtotal(i).toFixed(2)),
           tax_amount_item: Number(i.taxAmount.toFixed(2)),
+          // Round 3 MINOR #14 — `tax_rate` was being stripped from the
+          // mobile editor payload, so the backend recomputed `tax_amount_item`
+          // from a fresh `tax_rate` lookup. The cashier then saw a different
+          // number on the tiquete than the one they typed. The mobile cart
+          // doesn't carry an explicit `taxRate` per line — derive from
+          // `taxAmount / (finalPrice * quantity)` so the value the editor
+          // sends matches what the cart already computed (mirror web parity
+          // where `taxRate` is the source of truth).
+          tax_rate:
+              Number(i.taxAmount) > 0 && Number(i.finalPrice) > 0 && Number(i.quantity) > 0
+                ? Number(
+                    (
+                      (Number(i.taxAmount) /
+                        (Number(i.finalPrice) * Number(i.quantity))) *
+                      100
+                    ).toFixed(4),
+                  )
+                : 0,
           cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
           applied_price_tier_id: i.appliedPriceTierId ?? undefined,
         }));
@@ -2768,14 +2798,22 @@ const PosScreen = () => {
           delivery_type: 'direct_delivery' as const,
         };
         const updatedOrder = await OrderService.updateOrderEditor(editingDraftId, editorPayload);
-        // Éxito: limpiamos el carrito y mantenemos el flujo abierto para
-        // que el operador pueda volver a "Cobrar" sobre la orden guardada.
+        // Round 3 MAJOR #12 — after a successful editor save, open the
+        // payment modal directly so the cashier can "Cobrar" without a
+        // second navigation. We keep the cart hydrated with the fresh totals
+        // (server returns the canonical order) and flip into the payment
+        // modal — the footer CTA "Cobrar" stays in lock-step because the
+        // cart now has the latest server-validated totals.
         toastSuccess(
           updatedOrder?.order_number
             ? `Cambios guardados en ${updatedOrder.order_number}`
             : 'Cambios guardados',
         );
-        state.clearCart();
+        // Leave the cart populated so the footer + payment modal keep working
+        // until the cashier either collects payment or cancels. The footer's
+        // primary CTA now reads "Cobrar" (driven by `editAfterSave`).
+        setEditAfterSave(true);
+        setShowPaymentModal(true);
         return;
       }
 
@@ -2824,11 +2862,13 @@ const PosScreen = () => {
         // El DTO sigue aceptándolo (`forbidNonWhitelisted: true`) pero el
         // mobile ya no declara la intención.
         // Coupon attachment — el cart store mobile todavía NO trackea cupones
-        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
-        // incluyen en el payload para mantener paridad con el DTO y permitir
-        // adopción futura sin tocar el call site.
-        coupon_id: undefined,
-        coupon_code: undefined,
+        // (ver `cart.store.ts`), así que ambos campos quedan fuera del
+        // payload. Round 3 MAJOR #13 — NO incluimos `coupon_id` /
+        // `coupon_code`: serializar `undefined` en JSON lo omite, pero
+        // algunos validadores del backend y clientes HTTP convierten la
+        // ausencia a `null`, y los validadores Prisma/Class-Validator
+        // distinguen entre ambas formas. La ausencia explícita (clave
+        // omitida) es la opción segura.
         print_receipt: false,
       };
 
@@ -2839,6 +2879,9 @@ const PosScreen = () => {
       }
 
       state.clearCart();
+      // Round 3 MAJOR #12 — once the new draft is created we are no longer
+      // in "edit-then-charge" mode; the next sale starts fresh.
+      setEditAfterSave(false);
       toastSuccess('Guardado correctamente');
     } catch (error: any) {
       const data = error?.response?.data;
@@ -3052,7 +3095,8 @@ const PosScreen = () => {
         onShipping={handleShipping}
         onPrimaryCta={handlePrimaryCta}
         isEditMode={draftId != null}
-        canCreateCustomItems
+        canCreateCustomItems={canCreateCustomItems}
+        editAfterSave={editAfterSave}
       />
 
       {/* Cart Modal — bottom sheet con slide-up (paridad web). */}

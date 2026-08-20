@@ -275,11 +275,13 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
         // client-intent misleading — el server es la fuente de verdad.
         // Coupon attachment — el cart store mobile todavía NO trackea cupones
-        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
-        // incluyen en el payload para mantener paridad con el DTO y permitir
-        // adopción futura sin tocar el call site.
-        coupon_id: undefined,
-        coupon_code: undefined,
+        // (ver `cart.store.ts`), así que ambos campos quedan fuera del
+        // payload. Round 3 MAJOR #13 — NO incluimos `coupon_id` /
+        // `coupon_code`: serializar `undefined` en JSON lo omite, pero
+        // algunos validadores del backend y clientes HTTP convierten la
+        // ausencia a `null`, y los validadores Prisma/Class-Validator
+        // distinguen entre ambas formas. La ausencia explícita (clave
+        // omitida) es la opción segura.
         print_receipt: false,
       };
 
@@ -437,8 +439,11 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         // Coupon attachment — campos aceptados por el DTO backend. Se
         // mantienen como `undefined` porque el cart store mobile aún no
         // los captura (paridad con editor backend, ver `cart.store.ts`).
-        coupon_id: couponId,
-        coupon_code: couponCode,
+        // Round 3 MAJOR #13 — same spread pattern as the draft path: omit
+        // the key when the value is undefined rather than sending
+        // `coupon_id: undefined` / `coupon_code: undefined`.
+        ...(couponId != null ? { coupon_id: couponId } : {}),
+        ...(couponCode ? { coupon_code: couponCode } : {}),
         print_receipt: false,
       };
 

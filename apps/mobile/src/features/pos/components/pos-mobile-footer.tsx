@@ -33,6 +33,13 @@ interface PosMobileFooterProps {
    * "Guardar cambios" y dispara `onEdit` en lugar de `onCreate`.
    */
   isEditMode?: boolean;
+  /**
+   * Round 3 MAJOR #12 — `true` después de un `updateOrderEditor` exitoso:
+   * el footer muestra el CTA primario como "Cobrar" (ruteando a
+   * `onPrimaryCta`) en lugar de "Guardar cambios", para que el cajero
+   * cobre sin abandonar la pantalla POS. Lo controla el padre.
+   */
+  editAfterSave?: boolean;
 }
 
 // ── Mode-aware primary CTA metadata (paridad con `pos.component.ts` web) ──
@@ -97,6 +104,13 @@ export function PosMobileFooter({
   onPrimaryCta,
   canCreateCustomItems = false,
   isEditMode = false,
+  // Round 3 MAJOR #12 — after the editor saves an order successfully, the
+  // parent flips `editAfterSave=true` to swap the primary CTA from "Guardar
+  // cambios" to "Cobrar" so the cashier can take payment without leaving the
+  // POS. The handler (`onPrimaryCta`) stays the same shape — the parent
+  // knows the order is already saved and routes the press to the payment
+  // modal.
+  editAfterSave = false,
 }: PosMobileFooterProps) {
   const insets = useSafeAreaInsets();
   if (itemCount === 0) return null;
@@ -104,8 +118,10 @@ export function PosMobileFooter({
   // CP-POS-CREAR-EDITAR-COBRAR-001 — el CTA primario en modo "edit" rutea
   // al handler `onEdit` (que el padre conecta a `handleSaveDraft` →
   // `updateOrderEditor`) y se etiqueta "Guardar cambios". En modo normal,
-  // sigue siendo el cobro del modo activo.
-  const isEditing = isEditMode && typeof onEdit === 'function';
+  // sigue siendo el cobro del modo activo. Round 3 MAJOR #12 — once the
+  // save lands, the CTA flips to "Cobrar" (using `onPrimaryCta`, NOT
+  // `onEdit`) so the operator can collect payment without leaving the POS.
+  const isEditing = isEditMode && typeof onEdit === 'function' && !editAfterSave;
   const cta = isEditing ? EDIT_MODE_PRIMARY_CTA : PRIMARY_CTA_META[mode];
   const handlePrimaryPress = isEditing ? onEdit : onPrimaryCta;
   const createLabel = isEditing ? 'Guardar cambios' : 'Crear';

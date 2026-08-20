@@ -39,6 +39,7 @@ import {
 } from '@common/audit/audit.service';
 import { VendixHttpException } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
+import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 
 @Controller('store/orders/:orderId/flow')
 @UseGuards(PermissionsGuard)
@@ -53,6 +54,12 @@ export class OrderFlowController {
     // canonical pay endpoint. AuditModule is `@Global()` so the import is
     // resolved without touching the OrderFlowModule wiring.
     private readonly auditService: AuditService,
+    // Round 3 MAJOR #8 — needed by the controller to enrich `payment.attempt`
+    // with `amount`, `customer_id`, `is_draft` and `requires_payment`. The
+    // service's `getOrder` is private, so the controller reads the order
+    // directly via the store-scoped prisma. The query is single-row, scoped
+    // to the store already in context.
+    private readonly prisma: StorePrismaService,
   ) {}
 
   @Get('transitions')
@@ -105,20 +112,78 @@ export class OrderFlowController {
       request_id: RequestContextService.getRequestId(),
     });
 
-    await this.auditService.logCustom(
-      ctxUser?.id,
-      'payment.attempt',
-      AuditResource.PAYMENTS,
-      {
-        order_id: orderId,
-        payment_type: dto?.payment_type,
-        store_payment_method_id: dto?.store_payment_method_id,
-        ...auditCtx(),
-      },
-      orderId,
+    // Round 3 MAJOR #9 — gate `payment.attempt` so it does NOT fire when the
+    // order is already past `pay`. Previously a stale POST against a refunded
+    // order still emitted `payment.attempt`, polluting the timeline with a row
+    // for an intent that was structurally rejected by the service. We peek at
+    // the available actions and skip the audit (and the call) when `pay` is
+    // no longer in the action list. The action-set lookup is read-only and
+    // uses the same `getOrder`/`state` resolution as the rest of the flow.
+    const availableActions =
+      await this.orderFlowService.getAvailableActions(orderId);
+    const payAction = (availableActions as any[])?.find?.(
+      (a) => a?.code === 'pay',
     );
+    const payEnabled = !!payAction?.enabled;
+
+    if (!payEnabled) {
+      // Mirror the canonical error shape so the cashier sees the same code
+      // the editor / order-detail pages already handle, AND the timeline is
+      // left clean of `payment.attempt` rows for terminal states.
+      throw new VendixHttpException(
+        'ORD_FLOW_PAYMENT_FAILED_001',
+        undefined,
+        {
+          order_id: orderId,
+          available_actions: (availableActions as any[])?.map?.(
+            (a) => a?.code,
+          ),
+          reason: 'pay is not in the available actions for this order state',
+        },
+      );
+    }
+
+    // Round 3 MAJOR #8 — enrich `payment.attempt` with the financial context
+    // a timeline reader needs: amount, customer_id, is_draft and
+    // requires_payment. Without these the audit row only told you "someone
+    // tried to pay" — support couldn't pivot from a row to the actual
+    // order state or who was being invoiced.
+    const storeCtx = RequestContextService.getContext();
+    const orderForAudit = await this.prisma.orders
+      .findFirst({
+        where: {
+          id: orderId,
+          ...(storeCtx?.store_id ? { store_id: storeCtx.store_id } : {}),
+        },
+        select: {
+          grand_total: true,
+          customer_id: true,
+          state: true,
+        },
+      })
+      .catch(() => null);
+    const orderCtx = {
+      amount: orderForAudit ? Number(orderForAudit.grand_total ?? 0) : null,
+      customer_id: orderForAudit?.customer_id ?? null,
+      is_draft: orderForAudit?.state === 'draft',
+      requires_payment: true,
+    };
 
     try {
+      await this.auditService.logCustom(
+        ctxUser?.id,
+        'payment.attempt',
+        AuditResource.PAYMENTS,
+        {
+          order_id: orderId,
+          payment_type: dto?.payment_type,
+          store_payment_method_id: dto?.store_payment_method_id,
+          ...orderCtx,
+          ...auditCtx(),
+        },
+        orderId,
+      );
+
       const result = await this.orderFlowService.payOrder(orderId, dto);
       await this.auditService.logCustom(
         ctxUser?.id,
@@ -131,6 +196,7 @@ export class OrderFlowController {
           // from a timeline row straight to the provider-side payment.
           transaction_id:
             (result as any)?.payment?.transaction_id ?? null,
+          ...orderCtx,
           ...auditCtx(),
         },
         orderId,

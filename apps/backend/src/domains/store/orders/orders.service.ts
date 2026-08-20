@@ -1416,7 +1416,17 @@ export class OrdersService {
               .map((it) => ({
                 product_id: it.product_id,
                 quantity: Number(it.quantity || 0),
-                price: Number(it.total_price || 0),
+                // Round 3 MAJOR #7 — server-owned price. Trusting the client
+                // `total_price` (or anything the operator typed in the editor)
+                // lets a manipulated row bias the shipping calculator; here we
+                // derive the price the shipping calculator needs from
+                // `final_unit_price × quantity` so the rate the server picks
+                // never depends on a client-supplied total. The original
+                // `total_price` is still accepted by the rest of the editor
+                // (recomputed server-side in step 11).
+                price:
+                  Number(it.final_unit_price ?? it.unit_price ?? 0) *
+                  Number(it.quantity || 0),
                 weight: it.weight ? Number(it.weight) : undefined,
                 product_type: (it as any).product_type,
               }));
@@ -1660,13 +1670,33 @@ export class OrdersService {
     //     verificación temprana de shortfall pero deja la reserva definitiva
     //     al camino `13d` dentro de la transacción.
     if (!isDraft) {
+      // Round 3 MAJOR #10 — pre-flight used to issue one `products.findUnique`
+      // per item (N+1) before the stock allocator even ran. A 30-line cart
+      // became 30 round-trips for the products alone. We collapse the lookup
+      // into a single batched query: pull `id` + `track_inventory` for every
+      // distinct product id, then resolve each item from a Map.
+      const productIds = Array.from(
+        new Set(
+          dto.items
+            .map((it) => (typeof it.product_id === 'number' ? it.product_id : null))
+            .filter((id): id is number => id !== null),
+        ),
+      );
+      const productRows =
+        productIds.length > 0
+          ? await this.prisma.products.findMany({
+              where: { id: { in: productIds }, store_id: storeId },
+              select: { id: true, track_inventory: true },
+            })
+          : [];
+      const trackInventoryByProduct = new Map<number, boolean>();
+      for (const row of productRows) {
+        trackInventoryByProduct.set(row.id, !!row.track_inventory);
+      }
+
       for (const item of dto.items) {
         if (!item.product_id) continue;
-        const product = await this.prisma.products.findUnique({
-          where: { id: item.product_id, store_id: storeId },
-          select: { track_inventory: true },
-        });
-        if (!product?.track_inventory) continue;
+        if (!trackInventoryByProduct.get(item.product_id)) continue;
         const allocation = await this.sellableStockAllocator.allocateForLine(
           storeId,
           item.product_id,
@@ -1987,8 +2017,34 @@ export class OrdersService {
             products: { select: { id: true, track_inventory: true } },
           },
         });
+
+        // Round 3 MAJOR #11 — group reservation work by the (product, variant,
+        // location) tuple so we issue ONE `reserveStock` per group instead of
+        // one per row. The default-location lookup is cached inside
+        // `getDefaultLocationForProduct` already, but batching the calls
+        // themselves cuts DB round-trips from N (one per item) to the
+        // cardinality of the groups. Quantities are summed across rows that
+        // share the tuple (e.g. two lines of the same product+variant collapse
+        // into a single reservation); `stockUnitsConsumed` falls back to the
+        // first row's value when the group is homogeneous, otherwise it is
+        // `undefined` and `reserveStock` re-resolves from quantity.
+        const reservationGroups = new Map<
+          string,
+          {
+            productId: number;
+            variantId: number | null;
+            locationId: number | null;
+            quantity: number;
+            stockUnitsConsumed: number | undefined;
+          }
+        >();
         for (const item of newItems) {
           if (!item.products?.track_inventory) continue;
+          const variantId =
+            item.product_variant_id == null ? null : Number(item.product_variant_id);
+          // `getDefaultLocationForProduct` is awaited inline to keep ordering
+          // deterministic; the call is idempotent and cheap (cached at the
+          // stock level manager level).
           const location_id =
             await this.stockLevelManager.getDefaultLocationForProduct(
               item.product_id,
@@ -1999,6 +2055,27 @@ export class OrdersService {
             item.stock_units_consumed > 0
               ? item.stock_units_consumed
               : undefined;
+          const key = `${item.product_id}::${variantId ?? 'null'}::${location_id ?? 'null'}`;
+          const existing = reservationGroups.get(key);
+          if (existing) {
+            existing.quantity += Number(item.quantity || 0);
+            // Only keep `stockUnitsConsumed` if every row in the group had
+            // the same value (otherwise `reserveStock` falls back to qty).
+            if (existing.stockUnitsConsumed !== stockUnitsConsumed) {
+              existing.stockUnitsConsumed = undefined;
+            }
+          } else {
+            reservationGroups.set(key, {
+              productId: item.product_id,
+              variantId,
+              locationId: location_id,
+              quantity: Number(item.quantity || 0),
+              stockUnitsConsumed,
+            });
+          }
+        }
+
+        for (const group of reservationGroups.values()) {
           try {
             // `validate_availability=true` (defensa) +
             // `allow_negative_available=false` (Round 1 BLOCKER #2): si la
@@ -2008,10 +2085,10 @@ export class OrdersService {
             // reserva debería entrar; si falla acá, hay una race con otro
             // consumidor concurrente que queremos reportar.
             await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
+              group.productId,
+              group.variantId || undefined,
+              group.locationId,
+              group.quantity,
               'order',
               orderId,
               userId,
@@ -2019,7 +2096,7 @@ export class OrdersService {
               tx,
               undefined,
               false,
-              stockUnitsConsumed,
+              group.stockUnitsConsumed,
               false, // allow_negative_available=false (Round 1 #2)
             );
           } catch (err) {
@@ -2036,9 +2113,9 @@ export class OrdersService {
                   store_id: storeId,
                   request_id: requestId,
                   stage: 'commit_reserve',
-                  product_id: item.product_id,
-                  product_variant_id: item.product_variant_id ?? null,
-                  requested_quantity: Number(item.quantity || 0),
+                  product_id: group.productId,
+                  product_variant_id: group.variantId,
+                  requested_quantity: group.quantity,
                   error: message,
                 },
                 orderId,
@@ -2050,13 +2127,25 @@ export class OrdersService {
               ErrorCodes.POS_STOCK_INSUFFICIENT_001,
               message,
               {
-                product_id: item.product_id,
-                variant_id: item.product_variant_id,
-                requested: Number(item.quantity || 0),
+                product_id: group.productId,
+                variant_id: group.variantId,
+                requested: group.quantity,
               },
             );
           }
         }
+
+        // Round 3 MINOR #15 — `orders.currency` is intentionally NOT mutated
+        // by the editor. The currency is fixed at order creation:
+        //   `createOrderDto.currency || (await this.settingsService.getStoreCurrency())`
+        // (see `createOrder` above), and the order_items that carry
+        // monetary values all inherit that scale. Changing it mid-edit
+        // would mean re-scaling every line total, tax, discount and
+        // shipping cost to a different unit — that's a separate decision
+        // (re-create the order, or migrate manually), not a side effect
+        // of editing items. We document the choice rather than to over-write
+        // it: a re-render of an existing order keeps the currency it was
+        // created with.
       }
 
       // 13e) Reconciliar `order_promotions`: borrar existentes, reinsertar

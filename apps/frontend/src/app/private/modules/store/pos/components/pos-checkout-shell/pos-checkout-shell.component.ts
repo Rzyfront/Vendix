@@ -424,9 +424,18 @@ export class PosCheckoutShellComponent {
     () => this.settingsFacade.checkout()?.require_customer_data ?? true,
   );
 
-  /** Anonymous option is hidden when the collector is in credit mode. */
+  /** Anonymous option is hidden when the collector is in credit mode.
+   *  Round 3 MAJOR #4 — also hidden when the policy requires a customer
+   *  (`settings.checkout.require_customer_data=true`): an anonymous sale is
+   *  structurally incompatible with the policy, so the toggle is hidden
+   *  rather than shown-then-rejected. The legacy `pos-order-create-modal`
+   *  used to expose it anyway; the backend then returned 422 with
+   *  `POS_CUSTOMER_REQUIRED_001`. */
   readonly canBeAnonymous = computed<boolean>(
-    () => this.allowAnonymousSales() && this.paymentStep()?.mode() !== 'credito',
+    () =>
+      this.allowAnonymousSales() &&
+      !this.customerRequiredByPolicy() &&
+      this.paymentStep()?.mode() !== 'credito',
   );
 
   /**
@@ -889,9 +898,21 @@ export class PosCheckoutShellComponent {
    *    de paso (p.ej. Cliente → Envío en delivery). Si aún no era anónima, la
    *    fija y se queda en [Tipo] listo (un segundo clic avanza top-level).
    *  - "Con Cliente" → contrae Tipo y avanza al sub-paso Cliente (Buscar).
+   *
+   *  Round 3 MAJOR #4 — refuse anonymous when the policy requires one: a
+   *  silent flip of the flag would just produce a `POS_CUSTOMER_REQUIRED_001`
+   *  on submit. Treat the call as a no-op (the UI also hides the option via
+   *  {@link canBeAnonymous}, but defending here keeps the invariant under any
+   *  caller — including keyboard shortcuts or tests).
    */
   onSelectSaleType(anonymous: boolean): void {
     if (anonymous) {
+      if (this.customerRequiredByPolicy()) {
+        // Policy forbids anonymous — force the customer path.
+        this.toggleAnonymousSale(false);
+        this.goToClienteSubStep(1);
+        return;
+      }
       if (this.isAnonymousSale()) {
         this.nextStep();
         return;

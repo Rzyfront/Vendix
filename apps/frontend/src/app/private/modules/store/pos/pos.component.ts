@@ -1913,9 +1913,19 @@ export class PosComponent {
       this.toastService.error('Selecciona un método de pago válido');
       return;
     }
+    // Round 3 MAJOR #6 — `payment_type` was decided by a binary check on
+    // `methodType === 'wompi'`. That hardcoded 'wompi' as the only online
+    // method, while `epayco`, `mercadopago` (and any future provider) would
+    // silently map to 'direct' — a wrong classification that drives the
+    // backend down the direct-payment code path with an async gateway payload.
+    // The canonical, future-proof rule: a method is online iff its
+    // `PaymentMethod.type` is one of the known online gateways.
+    const ONLINE_PAYMENT_TYPES = new Set(['wompi', 'epayco', 'mercadopago']);
     const dto: PayOrderDto = {
       store_payment_method_id: Number(submit.storePaymentMethodId),
-      payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
+      payment_type: ONLINE_PAYMENT_TYPES.has(String(submit.methodType))
+        ? 'online'
+        : 'direct',
       ...(submit.amountReceived != null
         ? { amount_received: Number(submit.amountReceived) }
         : {}),
@@ -3407,8 +3417,14 @@ export class PosComponent {
       coupon_code: appliedCoupon?.code ?? null,
       promotion_ids: promotionIds,
       items,
-      notes: state.notes ?? '',
-      internal_notes: state.internalNotes ?? '',
+      // Round 3 MAJOR #3 — never send empty strings for `notes` /
+      // `internal_notes`. The backend's `?? ''` default kicks in when the key
+      // is omitted (and `forbidNonWhitelisted` deletes the field on
+      // unexpected keys). Empty string would survive a a round-trip and pin the
+      // order's notes to "" — exactly the silent data loss Round 1 audited
+      // for the cart path.
+      ...(state.notes ? { notes: state.notes } : {}),
+      ...(state.internalNotes ? { internal_notes: state.internalNotes } : {}),
       ...shippingKeys,
     };
   }
