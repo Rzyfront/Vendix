@@ -148,6 +148,18 @@ export interface CartSummaryData {
   promotional_subtotal?: number;
   applied_promotions?: AppliedPromotion[];
   tier_progress?: CartTierProgress[];
+  per_product_tier_ladder?: Array<{
+    promotion_id: number;
+    target_product_id: number;
+    tiers: Array<{
+      min_quantity: number;
+      max_quantity: number | null;
+      type: 'percentage' | 'fixed_amount';
+      value: number;
+      sort_order: number;
+    }>;
+    current_tier_index: number | null;
+  }>;
 }
 
 export interface Cart {
@@ -951,6 +963,7 @@ export class CartService {
                 : now.subtotal,
             applied_promotions: data.applied_promotions ?? [],
             tier_progress: data.tier_progress ?? [],
+            per_product_tier_ladder: data.per_product_tier_ladder,
           });
         },
         // On failure keep the cart as-is (no promo lines shown).
