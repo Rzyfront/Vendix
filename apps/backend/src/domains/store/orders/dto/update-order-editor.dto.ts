@@ -297,4 +297,29 @@ export class UpdateOrderEditorDto {
   @IsString()
   @MaxLength(50)
   coupon_code?: string | null;
+
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · idempotency key for the
+   * editor endpoint.
+   *
+   * Callers (mobile POS, web POS, batch jobs) SHOULD pass a stable, unique
+   * key per user-initiated edit attempt. If a recent `audit_logs` row with
+   * the same `action='order.editor.updated'` and
+   * `metadata->>'idempotency_key' = <key>` already exists, the service
+   * short-circuits and returns the cached full Order, avoiding duplicate
+   * claims / double stock reservations / double coupon counters.
+   *
+   * The key is opaque to the backend (any string ≤ 64 chars is accepted);
+   * uniqueness and stability are the caller's responsibility (typically a
+   * UUID v4 generated when the operator taps "Actualizar").
+   *
+   * Without this key the editor still works, but a double-click or a
+   * network retry can produce two consecutive successful PUTs. With the
+   * key, the second call hits the audit cache and returns the same order
+   * the first call already produced.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotency_key?: string;
 }

@@ -2900,13 +2900,33 @@ export class OrderFlowService {
   private async commitCouponUseForOrder(orderId: number): Promise<void> {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
-      select: { id: true, coupon_id: true, discount_amount: true },
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
+      // `coupon_code` is needed by the audit row so SIEM rules can
+      // answer "which coupon was just consumed?" without joining against
+      // `coupons.code`. `store_id` is also surfaced here because the
+      // audit helper expects a per-tenant trail.
+      select: {
+        id: true,
+        coupon_id: true,
+        coupon_code: true,
+        discount_amount: true,
+        store_id: true,
+      },
     });
     if (!order?.coupon_id) return;
 
     // Idempotencia: si ya hay un `coupon_uses` para esta orden, no
     // hacemos nada. La UNIQUE implícita `(order_id, coupon_id)` no está
     // declarada en el schema, así que la chequeamos explícitamente.
+    //
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.18 · defense-in-depth guard.
+    // Esta guarda es la ÚNICA defensa contra el doble consumo cuando
+    // `flow/pay` (direct) y `confirmPayment` (online) ambos llaman a este
+    // helper sobre la misma orden: la combinación `(order_id, coupon_id)`
+    // debe ser única por construcción. Sin esta guarda, dos `coupon_uses`
+    // podrían coexistir para la misma orden y dos cargos podrían
+    // incrementar el contador dos veces. La guarda aquí es explícita
+    // porque el schema no tiene UNIQUE sobre ese par.
     const existing = await this.prisma.coupon_uses.findFirst({
       where: { order_id: orderId, coupon_id: order.coupon_id },
       select: { id: true },
@@ -2964,6 +2984,16 @@ export class OrderFlowService {
     // aparezca o no aparezca junto con el contador. Si el `updateMany`
     // del contador falla (race con otro cargo), no dejamos una fila
     // huérfana de `coupon_uses`.
+    //
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 1 MAJOR #10 / Round 3.5.
+    // El `updateMany` es la ÚNICA operación de incremento del contador:
+    // usar `update` con `current_uses: { increment: 1 }` directo NO es
+    // idempotente — reintentaría el increment incluso cuando el row ya
+    // no califica. `updateMany` con el WHERE condicional (`state` +
+    // cupo disponible) hace que cualquier retry después de un commit
+    // exitoso devuelva count=0 cuando el cupo ya se agotó, evitando el
+    // sobreconteo silencioso. count=0 ⇒ `ORD_EDIT_COUPON_COMMIT_001`
+    // (abort, la orden NO queda pagada).
     await this.prisma.$transaction(async (tx) => {
       await tx.coupon_uses.create({
         data: {
@@ -2998,6 +3028,36 @@ export class OrderFlowService {
         );
       }
     });
+
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
+    // Audit row AFTER commit (no antes — un fallo del `updateMany` ya
+    // hizo rollback y no debe quedar un audit que afirme lo contrario).
+    // El campo `coupon_code_before` se persiste aquí, no en el editor,
+    // porque es el momento real de consumo: la UI puede ver un cupón
+    // "WELCOME5" en el editor pero el `coupon_id` real se resuelve
+    // recién en `flow/pay`; registrar aquí garantiza que el timeline
+    // muestra el cupón final, no el que el operador había tecleado.
+    try {
+      await this.auditService.logCustom(
+        (RequestContextService.getUserId() ?? 0) as number,
+        'order.coupon_committed',
+        AuditResource.ORDERS,
+        {
+          request_id: RequestContextService.getRequestId() ?? null,
+          store_id: order.store_id ?? null,
+          order_id: orderId,
+          coupon_id: order.coupon_id,
+          coupon_code_before: order.coupon_code ?? null,
+          discount_applied: order.discount_amount ?? 0,
+        },
+        orderId,
+      );
+    } catch (auditErr) {
+      // Audit es observabilidad, nunca bloquea el commit del cupón.
+      this.logger.warn(
+        `[order.coupon_committed audit failed] order=${orderId}: ${(auditErr as Error).message}`,
+      );
+    }
   }
 
   /**

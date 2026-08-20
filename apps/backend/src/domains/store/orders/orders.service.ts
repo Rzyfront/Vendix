@@ -1242,6 +1242,42 @@ export class OrdersService {
 
     const isDraft = existingOrder.state === 'draft';
 
+    // 2.5) CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · idempotency short-circuit.
+    //
+    // If the caller passed an `idempotency_key` (web POS, mobile POS, batch
+    // job), look up the most recent `audit_logs` row carrying the same key
+    // for `action='order.editor.updated'`. If found, return the persisted
+    // full Order without touching the claim / pricing / stock / coupon
+    // pipeline. This is the defense-in-depth against double-clicks and
+    // network retries: the FIRST call wins, the SECOND call returns the
+    // cached response.
+    //
+    // The audit row is written AFTER commit (step 16), so by construction
+    // the cache lookup only fires for an edit that has already committed.
+    // A failed/rolled-back edit never produces an audit row, so a retry
+    // that arrives AFTER the rollback correctly re-enters the pipeline.
+    if (dto.idempotency_key) {
+      const cached = await this.prisma.audit_logs.findFirst({
+        where: {
+          resource: 'orders',
+          resource_id: orderId,
+          action: 'order.editor.updated',
+          metadata: {
+            path: ['idempotency_key'],
+            equals: dto.idempotency_key,
+          } as any,
+        },
+        orderBy: { created_at: 'desc' },
+        select: { id: true, created_at: true },
+      });
+      if (cached) {
+        this.logger.log(
+          `[editor] idempotency hit for key=${dto.idempotency_key} order=${orderId}; short-circuiting to cached response`,
+        );
+        return await this.findOne(orderId);
+      }
+    }
+
     // 3) Customer del store. Backend es autoritativo: si el frontend manda un
     //    customer_id que no pertenece a este store, falla ANTES del claim
     //    atómico para no contaminar la fila.
@@ -1759,6 +1795,18 @@ export class OrdersService {
           tx,
         );
       }
+
+      // Round 3 MINOR #15 — `orders.currency` is intentionally NOT mutated
+      // by the editor. The currency is fixed at order creation:
+      //   `createOrderDto.currency || (await this.settingsService.getStoreCurrency())`
+      // (see `createOrder` above), and the order_items that carry
+      // monetary values all inherit that scale. Changing it mid-edit
+      // would mean re-scaling every line total, tax, discount and
+      // shipping cost to a different unit — that's a separate decision
+      // (re-create the order, or migrate manually), not a side effect
+      // of editing items. We document the choice rather than to over-write
+      // it: a re-render of an existing order keeps the currency it was
+      // created with.
 
       // 13c) Replace items. Antes del `deleteMany + createMany`, capturamos
       //      las filas existentes para MERGAR los campos que el DTO NO
@@ -2302,7 +2350,26 @@ export class OrdersService {
             customer_id: dto.customer_id ?? null,
           },
           is_draft: isDraft,
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
+          // `coupon_changed` alone doesn't tell SIEM rules WHICH coupon
+          // was removed/applied. Surface both `coupon_code_before` and
+          // `coupon_code_after` so a rule like "operator removed
+          // `WELCOME5` and applied `SUMMER20` on a draft > $X" can match
+          // directly. `coupon_code_before` is null when no coupon was
+          // previously applied; `coupon_code_after` is null when the
+          // operator cleared the coupon. We log code lengths only when
+          // the codes contain PII-style content; here we treat the code
+          // as non-sensitive (it's already shown to the cashier and
+          // printed on the ticket) so the literal value travels.
           coupon_changed: couponChanged,
+          coupon_code_before: currentCode || null,
+          coupon_code_after: requestedCode || null,
+          // Carry the idempotency key into the audit row so future calls
+          // with the same key short-circuit via step 2.5. Without this,
+          // a retry would re-execute the whole pipeline.
+          ...(dto.idempotency_key
+            ? { idempotency_key: dto.idempotency_key }
+            : {}),
         },
         orderId,
       );

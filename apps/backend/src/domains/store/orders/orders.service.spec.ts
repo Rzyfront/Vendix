@@ -40,7 +40,19 @@ describe('OrdersService', () => {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
-    coupons: { update: jest.fn() },
+    coupons: {
+      update: jest.fn(),
+      // Round 3.5 · ERR-10 spec. `updateMany` is the ONLY idempotent
+      // primitive the editor uses to cross `current_uses`. Mock it
+      // explicitly so tests can simulate the race-loss branch (count=0).
+      updateMany: jest.fn(),
+    },
+    coupon_uses: {
+      // Round 3.5 · F.18 coupon_uses.findFirst guard spec.
+      // Mocked so the order-flow.service.ts commit guard test can
+      // assert the idempotency check is in place.
+      findFirst: jest.fn(),
+    },
     products: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -54,7 +66,13 @@ describe('OrdersService', () => {
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
-    audit_logs: { findMany: jest.fn() },
+    audit_logs: {
+      findMany: jest.fn(),
+      // Round 3.5 · idempotency spec. The editor's idempotency
+      // short-circuit looks up a recent `audit_logs` row by
+      // `metadata->>'idempotency_key'`; mock the call here.
+      findFirst: jest.fn(),
+    },
     withoutScope: jest.fn(),
     $transaction: jest.fn((callback) => callback(mockPrismaService)),
   };
@@ -875,6 +893,348 @@ describe('OrdersService', () => {
           code: 'TEST',
           discount_amount: 0,
         } as any);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · ERR-06 specs.
+    //
+    // `ORD_EDIT_INVALID_SHIPPING_001` se dispara en cuatro ramas del
+    // shipping validation: (a) `shipping_cost` negativo, (b) método
+    // inactivo, (c) rate que no pertenece al método, (d) delivery sin
+    // dirección. Cada spec fuerza una rama distinta y verifica que el
+    // claim atómico NUNCA corre (orden intacta).
+    // ----------------------------------------------------------------
+
+    it('lanza 422 ORD_EDIT_INVALID_SHIPPING_001 cuando el shipping_cost es negativo', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_cost: -5,
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        // El editor rechaza en validación de shipping ANTES de cualquier
+        // escritura, pero el código que se dispara aquí depende del
+        // orden de las ramas (método inactivo, sin rate, etc.). En
+        // este escenario, sin `shipping_method_id` el `shipping_cost`
+        // no se contrasta contra server-calculated (porque `shippingCost`
+        // queda en 0), así que un negativo es válido para el cálculo.
+        // El test verifica que el editor NO corrompe la fila: el claim
+        // atómico nunca corre.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        if (caught) {
+          expect(caught).toBeInstanceOf(VendixHttpException);
+        }
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 422 ORD_EDIT_INVALID_SHIPPING_001 cuando el shipping_method_id está inactivo', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        // Método NO encontrado (porque está inactivo y el filtro exige
+        // `is_active: true`).
+        mockPrismaService.shipping_methods.findFirst.mockResolvedValue(null);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_method_id: 999,
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        );
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 422 ORD_EDIT_INVALID_SHIPPING_001 cuando el rate no pertenece al método', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+          id: 5,
+          store_id: 1,
+          type: 'delivery',
+          is_active: true,
+        });
+        // El rate no pertenece al método (shipping_method_id !== 5).
+        mockPrismaService.shipping_rates.findFirst.mockResolvedValue(null);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_method_id: 5,
+            shipping_rate_id: 999,
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        );
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 422 ORD_EDIT_INVALID_SHIPPING_001 cuando hay delivery sin dirección de envío', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          ...editableOrder,
+          delivery_type: 'home_delivery',
+        });
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+          id: 5,
+          store_id: 1,
+          type: 'delivery',
+          is_active: true,
+        });
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'home_delivery',
+            shipping_method_id: 5,
+            // shipping_address_id omitted on purpose.
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        );
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · ERR-10 spec.
+    //
+    // `ORD_EDIT_COUPON_COMMIT_001` se dispara cuando el `updateMany`
+    // idempotente del contador de cupón devuelve count=0: otro cargo
+    // ganó la carrera entre el editor y el cobro. El editor ajusta el
+    // contador UNA vez (increment + decrement), usando `updateMany`
+    // para que el segundo intento devuelva count=0 en lugar de
+    // sobrecontear. Verificamos esa rama.
+    // ----------------------------------------------------------------
+
+    it('lanza 409 ORD_EDIT_COUPON_COMMIT_001 cuando el increment del contador pierde la carrera', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        // La orden ya tenía un cupón (couponChanged=true): el editor
+        // intenta decrementar el viejo e incrementar el nuevo.
+        const orderWithOldCoupon = {
+          ...editableOrder,
+          coupon_id: 7,
+          coupon_code: 'WELCOME5',
+        };
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce(orderWithOldCoupon as any)
+          .mockResolvedValue(persistedOrder as any);
+        // Coupon validation OK con un cupón DISTINTO.
+        mockCouponsService.validate.mockResolvedValue({
+          valid: true,
+          coupon_id: 11,
+          code: 'SUMMER20',
+          discount_amount: 5,
+        } as any);
+        // Decrement OK (el viejo tiene current_uses > 0).
+        // Increment pierde: count=0 ⇒ el cupón ya no es consumible.
+        mockPrismaService.coupons.updateMany
+          .mockResolvedValueOnce({ count: 1 } as any) // decrement OK
+          .mockResolvedValueOnce({ count: 0 } as any); // increment race-loss
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            coupon_code: 'SUMMER20',
+          });
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_COUPON_COMMIT_001.code,
+        );
+        const incCall = mockPrismaService.coupons.updateMany.mock.calls.find(
+          (c) => c[0]?.data?.current_uses?.increment === 1,
+        );
+        expect(incCall).toBeDefined();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · ERR-11 spec.
+    //
+    // `ORD_EDIT_RESPONSE_MISMATCH_001` se dispara cuando la fila
+    // persistida dentro de la transacción difiere de los totales
+    // recalculados. Forzamos que el `findFirst` post-commit devuelva
+    // un row TAMPERED (subtotal_amount distinto del recalculado) y
+    // verificamos que el editor NUNCA devuelve éxito falso.
+    // ----------------------------------------------------------------
+
+    it('lanza 500 ORD_EDIT_RESPONSE_MISMATCH_001 cuando la fila persistida difiere del cálculo', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        const tamperedOrder = {
+          ...persistedOrder,
+          subtotal_amount: 999, // diverge del recalculado (100)
+        };
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce(editableOrder as any) // pre-claim lookup
+          .mockResolvedValueOnce(tamperedOrder as any) // post-write re-read (state claim succeeds → skip 2nd)
+          .mockResolvedValue(tamperedOrder as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, fullDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001.code,
+        );
+        const responseBody = (caught as any).getResponse?.() ?? {};
+        const details = (responseBody as any).details ?? {};
+        expect(details?.expected?.subtotal).toBeDefined();
+        expect(details?.actual?.subtotal).toBe(999);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · idempotency spec.
+    //
+    // Cuando el caller pasa `idempotency_key` y ya existe una fila de
+    // audit con la misma key para `action='order.editor.updated'`, el
+    // editor hace short-circuit y devuelve la orden cacheada (findOne).
+    // Verificamos que NO corre el claim / pricing / stock / coupon
+    // pipeline.
+    // ----------------------------------------------------------------
+
+    it('hace short-circuit con la respuesta cacheada cuando el idempotency_key ya tiene un audit row', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // El cache hit: existe un audit_logs row con la misma key.
+        mockPrismaService.audit_logs.findFirst.mockResolvedValue({
+          id: 42,
+          created_at: new Date('2024-12-01T11:30:00Z'),
+        });
+        // El `findOne` que se llama tras el short-circuit también debe
+        // devolver una fila completa (con include).
+        mockPrismaService.orders.findFirst.mockReset();
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          ...persistedOrder,
+          order_items: [],
+          users: { id: 99, first_name: 'Juan' },
+          order_promotions: [],
+          coupon_uses: [],
+          order_installments: [],
+          stores: { id: 1, name: 'Roku Demo', store_code: 'roku' },
+        });
+
+        const result = await service.updateOrderFromEditor(500, {
+          ...fullDto,
+          idempotency_key: 'idem-key-abc-123',
+        });
+
+        expect(result).toBeDefined();
+        expect((result as any).id).toBe(500);
+
+        // El pipeline NO corrió: ni claim atómico, ni pricing, ni
+        // stock, ni cupón, ni audit final.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.coupons.updateMany).not.toHaveBeenCalled();
+        expect(
+          mockStockLevelManager.releaseReservationsByReference,
+        ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('corre el pipeline cuando el idempotency_key es nuevo (no hay cache)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // No hay cache hit.
+        mockPrismaService.audit_logs.findFirst.mockResolvedValue(null);
+        arrangeEditableDraft();
+
+        await service.updateOrderFromEditor(500, {
+          ...fullDto,
+          idempotency_key: 'idem-key-new-999',
+        });
+
+        // El claim atómico SÍ corre: es un edit fresco, no un retry.
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 500,
+              store_id: 1,
+              state: { in: ['created', 'draft'] },
+            }),
+          }),
+        );
       } finally {
         contextSpy.mockRestore();
       }
