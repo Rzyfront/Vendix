@@ -32,6 +32,7 @@ import { NextAvailableNoticeComponent } from '../../components/next-available-no
 import { AddProductOptions, CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
 import { TableContextService } from '../../services/table-context.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -113,13 +114,20 @@ import {
               @if (p.images && p.images.length > 1) {
                 <div class="thumbnail-list">
                   @for (img of p.images; track img.id) {
-                    <div
+                    <button
+                      type="button"
                       class="thumbnail"
                       [class.active]="activeImageUrl() === img.image_url"
                       (click)="setActiveImage(img.image_url)"
+                      (keydown.enter)="
+                        setActiveImage(img.image_url); $event.preventDefault()
+                      "
+                      (keydown.space)="
+                        setActiveImage(img.image_url); $event.preventDefault()
+                      "
                     >
                       <img [src]="img.image_url" [alt]="p.name" />
-                    </div>
+                    </button>
                   }
                 </div>
               }
@@ -230,6 +238,8 @@ import {
                     [currentQuantity]="quantity()"
                     [ariaLabel]="'Niveles de descuento por cantidad'"
                     data-testid="detail-promo-tier-ladder"
+                    (promotionViewed)="onPromotionViewed($event)"
+                    (promotionIntent)="onPromotionIntent($event)"
                   />
                 }
               </div>
@@ -478,6 +488,7 @@ import {
                 <button
                   type="button"
                   class="rv-write-btn"
+                  aria-controls="rv-form-section"
                   (click)="openReviewForm()"
                 >
                   <app-icon name="edit-2" [size]="16"></app-icon>
@@ -651,7 +662,7 @@ import {
 
             <!-- Write Review Form (collapsible: only visible after the
                  user clicks the "Escribir reseña" CTA) -->
-            <div class="rv-form-section">
+            <div class="rv-form-section" id="rv-form-section">
               @if (reviewSubmitted()) {
                 <div class="rv-submitted">
                   <app-icon
@@ -828,6 +839,8 @@ import {
           border-radius: var(--radius-md);
           overflow: hidden;
           border: 1px solid var(--color-border);
+          background: transparent;
+          padding: 0;
           cursor: pointer;
           transition: 0.2s;
           img {
@@ -840,6 +853,17 @@ import {
             border-color: var(--color-primary);
           }
         }
+      }
+
+      /* ─── Focus styles (a11y, CP-ECOM-PROMO-UX-001 R3-M3) ───
+         Visible ring only for keyboard users via :focus-visible;
+         mouse clicks do NOT trigger the outline. The outline
+         color reuses the tenant primary brand token with a
+         hardcoded fallback so the ring is always visible even if
+         the tenant config hasn't defined --color-primary. */
+      :focus-visible {
+        outline: 2px solid var(--color-primary, #2ecc71);
+        outline-offset: 2px;
       }
 
       .product-info-panel {
@@ -2135,13 +2159,20 @@ export class ProductDetailComponent implements OnInit {
     const query: CatalogQuery = { limit: 10, sort_by: 'newest' };
     if (product.categories?.length)
       query.category_id = product.categories[0].id;
-    this.catalogService.getProducts(query).subscribe({
-      next: (response) => {
-        this.recommendedProducts.set(
-          response.data.filter((p) => p.id !== product.id),
-        );
-      },
-    });
+    // CP-ECOM-PROMO-UX-001 R3-m2: pipe the request through
+    // `takeUntilDestroyed(this.destroyRef)` so navigating away mid-fetch
+    // doesn't leak — the response would otherwise arrive after destroy and
+    // write to `recommendedProducts()` against a dead component.
+    this.catalogService
+      .getProducts(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.recommendedProducts.set(
+            response.data.filter((p) => p.id !== product.id),
+          );
+        },
+      });
   }
 
   loadReviews(productId: number): void {
@@ -2404,10 +2435,16 @@ export class ProductDetailComponent implements OnInit {
     this.showReviewForm.set(!this.showReviewForm());
     if (this.showReviewForm()) {
       // Wait for Angular to render the form, then smooth-scroll it
-      // into view.
+      // into view and move focus to the first interactive field for
+      // keyboard / screen-reader users (a11y: the CTA advertised this
+      // section via aria-controls="rv-form-section").
       queueMicrotask(() => {
-        const el = document.querySelector('.rv-form-section');
-        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const form = document.getElementById('rv-form-section');
+        form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const firstInput = form?.querySelector(
+          'input, textarea, select',
+        ) as HTMLElement | null;
+        firstInput?.focus();
       });
     }
   }

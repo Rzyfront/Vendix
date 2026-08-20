@@ -4,6 +4,7 @@ import {
   computed,
   inject,
   input,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -108,6 +109,19 @@ export class CartPromotionsComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
 
   /**
+   * CP-ECOM-PROMO-UX-001 R3-M6: contract-drift breadcrumb.
+   *
+   * Persistent counter incremented every time an applied promo is dropped
+   * because of an invalid `type` (or `scope`). Exposed as a read-only signal
+   * so the operator surface (admin / debug panels) can read it without
+   * granting write access. The component's own template does NOT need to
+   * surface it — the cart telemetry does. We keep `console.warn` for
+   * browser DevTools as a last-resort visibility path in production.
+   */
+  private readonly driftCount = signal(0);
+  readonly cartPromoDriftCount = this.driftCount.asReadonly();
+
+  /**
    * Tenant currency code, read in the template so this OnPush component's
    * change detection is tied to the async currency load. Without it, the
    * impure `| currency` pipe used for applied-promo amounts could stay on the
@@ -134,29 +148,34 @@ export class CartPromotionsComponent {
   readonly tierProgressItems = computed<PromotionStackItem[]>(() => {
     const cart = this.cart();
     if (!cart) return [];
-    return (cart.tier_progress ?? []).map((tier) => {
-      const label =
-        tier.benefit_type === 'percentage'
-          ? `-${tier.benefit_value}%`
-          : `-${this.currencyFormat.format(tier.benefit_value)}`;
-      const targetName = this.resolveProductName(tier.target_product_id);
-      const currentQty = this.resolveProductQuantity(tier.target_product_id);
-      return {
-        id: tier.promotion_id,
-        label,
-        type: tier.benefit_type,
-        value: tier.benefit_value,
-        // Sentinel: anchor at the customer's actual line count so the pill
-        // reads "Desde {currentQty} und: <benefit>". Falls back to
-        // `undefined` when the cart line is missing — `<app-promotion-stack>`
-        // then drops the "Desde N und:" prefix and renders the bare label.
-        min_quantity: currentQty ?? undefined,
-        // Span = current + remaining = next-tier threshold.
-        max_quantity:
-          currentQty != null ? currentQty + tier.remaining_quantity : undefined,
-        target_product_name: targetName,
-      };
-    });
+    return (cart.tier_progress ?? [])
+      .map((tier) => {
+        const currentQty = this.resolveProductQuantity(tier.target_product_id);
+        // CP-ECOM-PROMO-UX-001 R3-M5: skip tiers where the customer has no
+        // current quantity (line is being set up, freshly added before
+        // `cart.items` resolves, etc.). "Desde 0 und: -10%" is meaningless
+        // and would otherwise surface in the cart dropdown.
+        if (currentQty == null || currentQty <= 0) return null;
+        const label =
+          tier.benefit_type === 'percentage'
+            ? `-${tier.benefit_value}%`
+            : `-${this.currencyFormat.format(tier.benefit_value)}`;
+        const targetName = this.resolveProductName(tier.target_product_id);
+        const item: PromotionStackItem = {
+          id: tier.promotion_id,
+          label,
+          type: tier.benefit_type,
+          value: tier.benefit_value,
+          // Sentinel: anchor at the customer's actual line count so the pill
+          // reads "Desde {currentQty} und: <benefit>".
+          min_quantity: currentQty,
+          // Span = current + remaining = next-tier threshold.
+          max_quantity: currentQty + tier.remaining_quantity,
+          target_product_name: targetName,
+        };
+        return item;
+      })
+      .filter((it): it is PromotionStackItem => it !== null);
   });
 
   /**
@@ -198,6 +217,12 @@ export class CartPromotionsComponent {
           : undefined;
 
       if (!safeType) {
+        // CP-ECOM-PROMO-UX-001 R3-M6: increment the contract-drift breadcrumb
+        // BEFORE logging so an operator reading `cartPromoDriftCount()` sees
+        // the same count the browser console will. Keep the warn as a
+        // last-resort visibility path — production swallows the browser
+        // console but the persistent counter survives.
+        this.driftCount.set(this.driftCount() + 1);
         // eslint-disable-next-line no-console
         console.warn(
           `[cart-promotions] Skipping applied promo ${promo.promotion_id} with invalid/missing type:`,
@@ -268,17 +293,5 @@ export class CartPromotionsComponent {
       }
     }
     return matched ? total : null;
-  }
-
-  /**
-   * Format the list of product names that unlocked an applied promotion
-   * under `quantity_grouping='per_product'`.
-   *
-   * @deprecated Replaced by the per-item "en: ..." badge inside
-   * `<app-promotion-stack mode="expanded-cards">` (Phase F). Kept for any
-   * external consumer still reading this through a test harness.
-   */
-  protected formatTargetProductNames(names: string[]): string {
-    return names.join(', ');
   }
 }

@@ -595,12 +595,17 @@ export class CartItemCardComponent {
   /**
    * Width (0–100) of the per-line tier progress bar.
    *
-   * Anchored at the boundary between the customer's CURRENT tier (lower
-   * bound) and the NEXT tier (upper bound). When the current quantity has
-   * not yet reached the current tier's `min_quantity` we report `0`; once
-   * it crosses the next tier's `min_quantity` we report `100`. The middle
-   * span is linear — same math the POS cart summary uses for the same
-   * ladder.
+   * CP-ECOM-PROMO-UX-001 R3-M4: anchor at the LOWER BOUND MINUS ONE of the
+   * customer's current tier (NOT at `min_quantity` exactly). With the exact
+   * threshold, `currentQuantity === min_quantity` reported `0%` — which
+   * looked broken the instant a tier was unlocked. Anchoring one unit below
+   * the threshold means "0% only when BELOW the tier" and the bar starts
+   * showing movement as soon as the customer lands on the tier.
+   *
+   * When the customer is below the first tier's threshold, or they already
+   * sit on the last one, the bar is pinned to a fixed extreme so it never
+   * overshoots. The middle span is linear — same math the POS cart summary
+   * uses for the same ladder.
    */
   readonly progressPercent = computed<number>(() => {
     const cart = this.cartService.cart() as CartWithTierLadder | null;
@@ -617,11 +622,12 @@ export class CartItemCardComponent {
     // pin to a fixed extreme so the bar never overshoots.
     if (!currentTier || !nextTier) return currentQty > 0 ? 100 : 0;
     if (currentQty >= nextTier.min_quantity) return 100;
-    if (currentQty < currentTier.min_quantity) return 0;
-    const span = nextTier.min_quantity - currentTier.min_quantity;
+    // Anchor at min_quantity - 1 so 0% only when BELOW the tier.
+    const lowerBound = currentTier.min_quantity - 1;
+    if (currentQty <= lowerBound) return 0;
+    const span = nextTier.min_quantity - lowerBound;
     if (span <= 0) return 100;
-    const offset = currentQty - currentTier.min_quantity;
-    return Math.min(100, Math.round((offset / span) * 100));
+    return Math.min(100, Math.round(((currentQty - lowerBound) / span) * 100));
   });
 
   /**
