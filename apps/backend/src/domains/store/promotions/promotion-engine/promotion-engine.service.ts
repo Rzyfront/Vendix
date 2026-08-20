@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { resolvePriceUnits } from '../../products/services/price-unit.util';
 import {
@@ -81,6 +81,8 @@ interface PromotionRecord {
 
 @Injectable()
 export class PromotionEngineService {
+  private readonly logger = new Logger(PromotionEngineService.name);
+
   constructor(private prisma: StorePrismaService) {}
 
   /**
@@ -451,6 +453,16 @@ export class PromotionEngineService {
     const scale = scaleByProduct.get(Number(item.product_id));
     if (!scale || scale <= 1) return quantity;
     const converted = resolvePriceUnits(quantity, scale);
+    // CP-ECOM-PROMO-UX-001 M7: trace scale conversions so that "I bought 3
+    // meters of cable and the tier didn't fire" reports can be reconstructed.
+    this.logger.debug(
+      {
+        productId: Number(item.product_id),
+        unitsPerPackage: scale,
+        convertedQty: converted,
+      },
+      'Scale converted',
+    );
     return converted >= 1 ? Math.floor(converted) : converted;
   }
 
@@ -744,6 +756,18 @@ export class PromotionEngineService {
         if (!matchedTier) continue;
         if (tierIndexes.length === 0 || tierTotal <= 0) continue;
 
+        // CP-ECOM-PROMO-UX-001 M7: trace which tier was selected so that
+        // "I added 3 and got the wrong band" reports can be reconstructed.
+        this.logger.debug(
+          {
+            promotionId: promo.id,
+            tierMinQuantity: matchedTier.min_quantity,
+            tierMaxQuantity: matchedTier.max_quantity,
+            quantityInCart: scopedQty,
+          },
+          'Tier selected',
+        );
+
         // Per-line discount computed from the FIXED winning tier (resolved once
         // from scopedQty above), not from each line's individual quantity.
         // percentage tiers apply per line; fixed_amount tiers apply a single
@@ -777,6 +801,19 @@ export class PromotionEngineService {
         discountAmount = Math.min(discountAmount, tierTotal);
         discountAmount = this.roundMoney(discountAmount);
         if (discountAmount <= 0) continue;
+
+        // CP-ECOM-PROMO-UX-001 M7: trace when the cap silently clips the
+        // discount so support can confirm "the engine honored max_discount_amount".
+        if (discountAmount < rawTotal) {
+          this.logger.debug(
+            {
+              promotionId: promo.id,
+              rawDiscount: rawTotal,
+              cappedAt: discountAmount,
+            },
+            'Discount capped',
+          );
+        }
 
         // Rescale the per-line shares so the SUM of shares matches the capped
         // `discountAmount` exactly. The proportional split preserves the
@@ -848,6 +885,21 @@ export class PromotionEngineService {
         };
       }
     }
+
+    // CP-ECOM-PROMO-UX-001 M7: trace which candidate won the tiebreak so that
+    // customer reports ("the wrong promo applied") can be diagnosed without
+    // re-running the cart.
+    if (winner) {
+      this.logger.debug(
+        {
+          promotionId: winner.promo.id,
+          priority: winner.promo.priority,
+          scope: winner.promo.scope,
+        },
+        'Winner resolved',
+      );
+    }
+
 
     // Apply ONLY the winner (if any) to the per-item breakdown. All other
     // candidates were evaluated but discarded by the "highest priority wins"

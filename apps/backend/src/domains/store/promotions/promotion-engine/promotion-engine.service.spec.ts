@@ -1562,4 +1562,168 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.tier_progress[0].remaining_quantity).toBe(1);
     });
   });
+
+  // CP-ECOM-PROMO-UX-001 m8: spec for the cart-view helper that the frontend
+  // calls to render the "Lleva N, llevas X" badge. The contract is:
+  //   - one entry per (promotion, target_product_id) where the promo has
+  //     `promotion_products` rows;
+  //   - `cart_total` promos (no `promotion_products`) produce NO entries;
+  //   - `current_tier_index` is computed against the OVERRIDDEN quantity when
+  //     the caller passes `perProductQuantity` (so the cart view can show
+  //     "what would happen if I added 5").
+  describe('getTierLaddersForQuote', () => {
+    // Local helper: this `describe` is a sibling of the other tier tests, so
+    // the `buildTier` defined in `quantity_tiered - aggregated by scope` is
+    // not in scope. Mirrors its shape.
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 400,
+        min_quantity: 2,
+        max_quantity: null as number | null,
+        value: 10,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    it('per_product + multiple products: emits one entry per (promo, product_id) with current_tier_index', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 401,
+          name: 'Lleva 3: -15%',
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          type: 'percentage',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }, { product_id: 11 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 401,
+              min_quantity: 2,
+              max_quantity: 2,
+              value: 5,
+              type: 'percentage',
+            }),
+            buildTier({
+              id: 2,
+              promotion_id: 401,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 15,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.getTierLaddersForQuote(
+        [401],
+        [
+          { product_id: 10, quantity: 3 },
+          { product_id: 11, quantity: 1 },
+        ],
+      );
+
+      expect(result).toHaveLength(2);
+      const product10 = result.find((r) => r.target_product_id === 10);
+      const product11 = result.find((r) => r.target_product_id === 11);
+      expect(product10).toBeDefined();
+      expect(product11).toBeDefined();
+      // Product 10 has qty=3 → top tier (index 1).
+      expect(product10!.current_tier_index).toBe(1);
+      // Product 11 has qty=1 → below the first threshold (index null).
+      expect(product11!.current_tier_index).toBeNull();
+      // Both entries share the same tier ladder.
+      expect(product10!.tiers).toHaveLength(2);
+      expect(product11!.tiers).toHaveLength(2);
+      expect(product10!.promotion_id).toBe(401);
+    });
+
+    it('cart_total promos (no promotion_products) produce no entries', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 402,
+          name: 'Cart total -10%',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          type: 'percentage',
+          quantity_grouping: 'cart_total',
+          promotion_products: [],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 402,
+              min_quantity: 3,
+              max_quantity: null,
+              value: 10,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      const result = await service.getTierLaddersForQuote(
+        [402],
+        [
+          { product_id: 10, quantity: 5 },
+          { product_id: 11, quantity: 5 },
+        ],
+      );
+
+      // cart_total promos have no `target_product_id` to surface a ladder
+      // against — the badge helper returns nothing for them.
+      expect(result).toEqual([]);
+    });
+
+    it('perProductQuantity override: current_tier_index uses the custom quantity, not the cart qty', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 403,
+          name: 'Lleva 5: -15%',
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          type: 'percentage',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({
+              id: 1,
+              promotion_id: 403,
+              min_quantity: 2,
+              max_quantity: 2,
+              value: 5,
+              type: 'percentage',
+            }),
+            buildTier({
+              id: 2,
+              promotion_id: 403,
+              min_quantity: 5,
+              max_quantity: null,
+              value: 15,
+              type: 'percentage',
+            }),
+          ],
+        }),
+      ]);
+
+      // Cart has only 1 unit of product 10, but the caller wants to preview
+      // "what if I add 5". The override must drive `current_tier_index`.
+      const override = new Map<number, number>([[10, 5]]);
+
+      const result = await service.getTierLaddersForQuote(
+        [403],
+        [{ product_id: 10, quantity: 1 }],
+        override,
+      );
+
+      expect(result).toHaveLength(1);
+      // With qty=5 → top tier (index 1).
+      expect(result[0].current_tier_index).toBe(1);
+      expect(result[0].target_product_id).toBe(10);
+      expect(result[0].promotion_id).toBe(403);
+    });
+  });
 });
