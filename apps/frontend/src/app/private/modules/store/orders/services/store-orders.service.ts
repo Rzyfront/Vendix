@@ -6,6 +6,7 @@ import { throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   Order,
   OrderQuery,
@@ -227,10 +228,7 @@ export class StoreOrdersService {
     return this.http.get<PaginatedOrdersResponse>(url).pipe(
       catchError((error) => {
         console.error('Error fetching orders:', error);
-        const errorMessage = this.extractErrorMessage(error);
-        return throwError(
-          () => new Error(`Failed to fetch orders: ${errorMessage}`),
-        );
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -252,7 +250,7 @@ export class StoreOrdersService {
       }),
       catchError((error) => {
         console.error('Error fetching order stats:', error);
-        return throwError(() => new Error('Failed to fetch order stats'));
+        return throwError(() => this.buildApiError(error));
       }),
     );
 
@@ -270,7 +268,7 @@ export class StoreOrdersService {
     return this.http.get<Order>(url).pipe(
       catchError((error) => {
         console.error('Error fetching order:', error);
-        return throwError(() => new Error('Failed to fetch order'));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -281,7 +279,7 @@ export class StoreOrdersService {
     return this.http.get<any[]>(url).pipe(
       catchError((error) => {
         console.error('Error fetching order timeline:', error);
-        return throwError(() => new Error('Failed to fetch order timeline'));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -292,7 +290,7 @@ export class StoreOrdersService {
     return this.http.patch<Order>(url, { state: status }).pipe(
       catchError((error) => {
         console.error('Error updating order status:', error);
-        return throwError(() => new Error('Failed to update order status'));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -306,10 +304,7 @@ export class StoreOrdersService {
     return this.http.post<Order>(url, order).pipe(
       catchError((error) => {
         console.error('Error creating order:', error);
-        const errorMessage = this.extractErrorMessage(error);
-        return throwError(
-          () => new Error(`Failed to create order: ${errorMessage}`),
-        );
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -326,10 +321,7 @@ export class StoreOrdersService {
     return this.http.patch<Order>(url, { state: update.status }).pipe(
       catchError((error) => {
         console.error('Error updating order status:', error);
-        const errorMessage = this.extractErrorMessage(error);
-        return throwError(
-          () => new Error(`Failed to update order status: ${errorMessage}`),
-        );
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -348,10 +340,7 @@ export class StoreOrdersService {
       .pipe(
         catchError((error) => {
           console.error('Error updating payment status:', error);
-          const errorMessage = this.extractErrorMessage(error);
-          return throwError(
-            () => new Error(`Failed to update payment status: ${errorMessage}`),
-          );
+          return throwError(() => this.buildApiError(error));
         }),
       );
   }
@@ -365,10 +354,7 @@ export class StoreOrdersService {
     return this.http.delete<void>(url).pipe(
       catchError((error) => {
         console.error('Error deleting order:', error);
-        const errorMessage = this.extractErrorMessage(error);
-        return throwError(
-          () => new Error(`Failed to delete order: ${errorMessage}`),
-        );
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -383,28 +369,73 @@ export class StoreOrdersService {
     return this.http.get(url, { responseType: 'blob' }).pipe(
       catchError((error) => {
         console.error('Error exporting orders:', error);
-        const errorMessage = this.extractErrorMessage(error);
-        return throwError(
-          () => new Error(`Failed to export orders: ${errorMessage}`),
-        );
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
 
   /**
-   * Extraer mensaje de error de diferentes tipos de errores HTTP
+   * Normalize an HTTP/RxJS error into a typed shape callers can branch on.
+   *
+   * CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 + vendix-error-handling:
+   * previous implementation returned only a string, dropping `error_code`
+   * and `details` on the floor. POS callers now need to distinguish
+   * `POS_CUSTOMER_REQUIRED_001`, `POS_STOCK_INSUFFICIENT_001`,
+   * `ORD_EDIT_STATE_CHANGED_001`, etc., without parsing free-form messages.
+   *
+   * Delegates to `parseApiError` (shared utility) so the user-facing copy
+   * follows the same `ERROR_MESSAGES` catalog as the rest of the frontend,
+   * including the `details.blockers[]` short-circuit for fiscal validators.
    */
-  private extractErrorMessage(error: any): string {
-    if (error?.error?.message) {
-      return error.error.message;
-    }
-    if (error?.message) {
-      return error.message;
-    }
-    if (typeof error === 'string') {
-      return error;
-    }
-    return 'Unknown error occurred';
+  extractApiError(error: unknown): {
+    message: string;
+    errorCode: string | null;
+    details: unknown;
+    devMessage: string | null;
+  } {
+    const parsed = parseApiError(error);
+    return {
+      message: parsed.userMessage,
+      errorCode: parsed.errorCode,
+      details: parsed.details,
+      devMessage: parsed.devMessage,
+    };
+  }
+
+  /**
+   * Backward-compatible string extractor.
+   *
+   * Existing call sites use `extractErrorMessage(err)` and immediately build
+   * an `Error(message)` in the catch handler. To avoid a wide refactor that
+   * touches callers outside this file, keep this method returning a string
+   * but route it through `parseApiError` so it picks up the same UX copy
+   * (`ERROR_MESSAGES[error_code]`, blockers, presentable backend messages).
+   *
+   * New code that needs `error_code` should call {@link extractApiError}
+   * directly.
+   */
+  private extractErrorMessage(error: unknown): string {
+    return this.extractApiError(error).message;
+  }
+
+  /**
+   * Build an `Error` whose message is the UX-safe copy and whose
+   * `errorCode` / `details` properties are the typed backend code and
+   * payload. Use inside `catchError` so the caller can branch on
+   * `error.errorCode === 'POS_CUSTOMER_REQUIRED_001'` etc.
+   */
+  private buildApiError(error: unknown): Error {
+    const { message, errorCode, details, devMessage } = this.extractApiError(error);
+    const wrapped = new Error(message) as Error & {
+      errorCode: string | null;
+      details: unknown;
+      devMessage: string | null;
+    };
+    wrapped.errorCode = errorCode;
+    wrapped.details = details;
+    wrapped.devMessage = devMessage;
+    (wrapped as any).cause = error;
+    return wrapped;
   }
 
   // ── Order Flow Methods ──────────────────────────────────────
@@ -415,7 +446,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching valid transitions:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -426,7 +457,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error processing payment:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -457,7 +488,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error shipping order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -468,7 +499,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error delivering order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -479,7 +510,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error confirming payment:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -490,7 +521,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error confirming delivery:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -501,7 +532,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error cancelling payment:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -511,7 +542,7 @@ export class StoreOrdersService {
     return this.http.patch<Order>(url, dto).pipe(
       catchError((error) => {
         console.error('Error assigning shipping method:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -526,7 +557,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fast-tracking order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -537,7 +568,7 @@ export class StoreOrdersService {
     return this.http.get<any[]>(url).pipe(
       catchError((error) => {
         console.error('Error fetching available actions:', error);
-        return throwError(() => new Error('Failed to fetch available actions'));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -548,7 +579,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error updating order items:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -559,7 +590,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error cancelling order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -570,7 +601,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error reactivating order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -581,7 +612,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error refunding order:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -594,7 +625,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error previewing refund:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -618,7 +649,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching available refund methods:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -629,7 +660,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error creating refund:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -640,7 +671,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching order refunds:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -662,7 +693,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching payment receipt URL:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -682,7 +713,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error creating customer address:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
@@ -703,7 +734,7 @@ export class StoreOrdersService {
         map((r) => r.data || r),
         catchError((error) => {
           console.error('Error updating order shipping address:', error);
-          return throwError(() => new Error(this.extractErrorMessage(error)));
+          return throwError(() => this.buildApiError(error));
         }),
       );
   }
@@ -724,7 +755,7 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error updating address:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        return throwError(() => this.buildApiError(error));
       }),
     );
   }
