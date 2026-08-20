@@ -112,7 +112,14 @@ export class OrderFlowService {
     private readonly auditService: AuditService,
   ) {}
 
-  private async getOrder(orderId: number) {
+  /**
+   * Read the canonical order shape used by the controller's pre-flight
+   * gate (`payOrder`) and by every flow method below. Made public so the
+   * `OrderFlowController` can re-read the freshest `state` after the row
+   * lock in `promoteDraftToCreated` commits — that's how the FB-10
+   * race-claim rejects concurrent second waves with 409.
+   */
+  async getOrder(orderId: number) {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
       include: {
