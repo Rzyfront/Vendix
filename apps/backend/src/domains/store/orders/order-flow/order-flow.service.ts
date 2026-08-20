@@ -161,6 +161,14 @@ export class OrderFlowService {
     currentState: OrderState,
     targetState: OrderState,
   ): void {
+    // QUI-POS-E2E-R8-LIVE: idempotent no-op when the caller already
+    // pre-claimed the order into the target state (the FB-10 race-claim
+    // in `payOrder` transitions to `processing` BEFORE this validator
+    // runs, so the subsequent `validateTransition(state, 'processing')`
+    // is a no-op transition, not an error).
+    if (currentState === targetState) {
+      return;
+    }
     const validTargets = VALID_TRANSITIONS[currentState];
     if (!validTargets.includes(targetState)) {
       throw new BadRequestException(
@@ -413,103 +421,151 @@ export class OrderFlowService {
    * `skip_reservation = true` so the stock manager records the reservation row
    * without decrementing available stock again.
    */
-  private async promoteDraftToCreated(orderId: number): Promise<void> {
-    // Reload with the item shape the reservation loop needs.
-    const order = await this.prisma.orders.findFirst({
-      where: { id: orderId },
-      include: {
-        order_items: {
+  private async promoteDraftToCreated(orderId: number): Promise<boolean> {
+    // QUI-POS-E2E-R8-LIVE: FB-10 double-click race. 10 concurrent flow/pay
+    // calls previously produced 8 succeeded payments on a $100 order ($800
+    // overcharge) because the original flow read state then mutated state
+    // in two separate statements: (1) reservation loop ran inside a $tx but
+    // the state change ran AFTER commit through `updateOrderState`, so every
+    // concurrent caller saw state='draft' and proceeded. Fix: take a row
+    // lock with `SELECT ... FOR UPDATE` AT THE TOP of the same transaction
+    // that performs the reservation AND the state change. Concurrent
+    // promoteDraftToCreated calls for the same order_id serialize on the
+    // row lock; the second wave sees state != 'draft' and bails. The state
+    // is updated inside the same tx so the lock covers the full claim
+    // window.
+    await this.prisma.$transaction(
+      async (tx) => {
+        // 1) Lock the order row + read its state under the lock.
+        const locked = await tx.$queryRaw<
+          Array<{ id: number; state: OrderState }>
+        >`SELECT id, state FROM orders WHERE id = ${orderId} FOR UPDATE`;
+
+        if (!locked.length) {
+          throw new NotFoundException(`Order #${orderId} not found`);
+        }
+
+        // IDEMPOTENT: if another concurrent caller already promoted this
+        // order, bail without touching reservations. The FOR UPDATE lock
+        // guarantees we observe the latest committed state. We return
+        // `false` so `payOrder` knows WE did not win the claim and must
+        // bail with `state_not_payable` instead of inserting a duplicate
+        // payment.
+        if (locked[0].state !== 'draft') {
+          return false;
+        }
+
+        // 2) Load order items + products for the reservation loop. Use `tx`
+        // so the read is part of the same locked transaction.
+        const order = await tx.orders.findFirst({
+          where: { id: orderId },
           include: {
-            products: {
-              select: {
-                id: true,
-                name: true,
-                track_inventory: true,
-                product_type: true,
+            order_items: {
+              include: {
+                products: {
+                  select: {
+                    id: true,
+                    name: true,
+                    track_inventory: true,
+                    product_type: true,
+                  },
+                },
+                product_variants: { select: { id: true } },
               },
             },
-            product_variants: { select: { id: true } },
           },
-        },
-      },
-    });
+        });
 
-    if (!order) {
-      throw new NotFoundException(`Order #${orderId} not found`);
-    }
-
-    // IDEMPOTENT: nothing to promote if it already left draft.
-    if ((order.state as OrderState) !== 'draft') {
-      return;
-    }
-
-    const userId = RequestContextService.getUserId();
-
-    // Reserve stock atomically. Reservations only — the state change happens
-    // after commit through updateOrderState (which uses this.prisma, not tx).
-    await this.prisma.$transaction(async (tx) => {
-      for (const item of order.order_items) {
-        if (
-          !item.products?.track_inventory ||
-          item.products?.product_type === 'service'
-        ) {
-          continue;
+        if (!order) {
+          throw new NotFoundException(`Order #${orderId} not found`);
         }
 
-        const skip = item.inventory_consumed_at_fire === true;
+        const userId = RequestContextService.getUserId();
 
-        const location_id =
-          await this.stockLevelManager.getDefaultLocationForProduct(
+        // 3) Reserve stock. The lock is held for the entire loop.
+        for (const item of order.order_items) {
+          if (
+            !item.products?.track_inventory ||
+            item.products?.product_type === 'service'
+          ) {
+            continue;
+          }
+
+          const skip = item.inventory_consumed_at_fire === true;
+
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+
+          // Anti-duplicate: skip if an active reservation for this order+item
+          // already exists (e.g. a previous promote attempt that committed the
+          // reservations but failed before the state change).
+          const existing = await tx.stock_reservations.findFirst({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: orderId,
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              status: 'active',
+            },
+            select: { id: true },
+          });
+          if (existing) {
+            continue;
+          }
+
+          await this.stockLevelManager.reserveStock(
             item.product_id,
             item.product_variant_id || undefined,
+            location_id,
+            item.quantity,
+            'order',
+            orderId,
+            userId,
+            false, // validate_availability: NEVER block a payment on stock
+            tx,
+            undefined, // expires_at
+            skip, // skip_reservation: already consumed at fire
+            undefined, // stock_units_consumed
+            // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
+            // autoriza el disponible negativo de forma explícita. El piso duro
+            // de `reserveStock` sigue protegiendo a los demás callers.
+            true,
           );
-
-        // Anti-duplicate: skip if an active reservation for this order+item
-        // already exists (e.g. a previous promote attempt that committed the
-        // reservations but failed before the state change).
-        const existing = await tx.stock_reservations.findFirst({
-          where: {
-            reserved_for_type: 'order',
-            reserved_for_id: orderId,
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id ?? null,
-            status: 'active',
-          },
-          select: { id: true },
-        });
-        if (existing) {
-          continue;
         }
 
-        await this.stockLevelManager.reserveStock(
-          item.product_id,
-          item.product_variant_id || undefined,
-          location_id,
-          item.quantity,
-          'order',
-          orderId,
-          userId,
-          false, // validate_availability: NEVER block a payment on stock
-          tx,
-          undefined, // expires_at
-          skip, // skip_reservation: already consumed at fire
-          undefined, // stock_units_consumed
-          // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
-          // autoriza el disponible negativo de forma explícita. El piso duro
-          // de `reserveStock` sigue protegiendo a los demás callers.
-          true,
-        );
-      }
-    });
+        // 4) Update state inside the same tx — the FOR UPDATE lock holds
+        // until commit, so the next concurrent caller observes state='created'
+        // and bails at step 1. updateOrderState (which writes flow metadata
+        // to internal_notes) runs after this returns; that's safe because
+        // it's idempotent on 'created'.
+        this.validateTransition('draft', 'created');
+        await tx.orders.update({
+          where: { id: orderId },
+          data: { state: 'created', updated_at: new Date() },
+        });
+      },
+      { timeout: 30_000 },
+    );
 
-    // Transition draft -> created after the reservations commit.
-    this.validateTransition('draft', 'created');
-    await this.updateOrderState(orderId, 'created', {
-      promoted_from_draft: true,
-      promoted_at: new Date(),
-    });
+    // 5) Flow metadata (promoted_from_draft / promoted_at) — best effort,
+    // written AFTER the claim commits. If it fails the order is already
+    // 'created' and the payment path can still proceed.
+    try {
+      await this.updateOrderState(orderId, 'created', {
+        promoted_from_draft: true,
+        promoted_at: new Date(),
+      });
+    } catch (metaErr) {
+      this.logger.warn(
+        `[promoteDraftToCreated metadata failed] order=${orderId}: ${(metaErr as Error).message}`,
+      );
+    }
 
     this.logger.log(`Order #${orderId} promoted draft -> created before payment`);
+    return true;
   }
 
   /**
@@ -525,6 +581,44 @@ export class OrderFlowService {
    * y el `cause_code` lo mapea a la causa real para soporte y la UI.
    */
   async payOrder(orderId: number, dto: PayOrderDto) {
+    // QUI-POS-E2E-R8-LIVE: FB-10 double-click race (v2 — atomic state claim).
+    //
+    // The state-claim inside `promoteDraftToCreated` correctly rejects
+    // concurrent promotes, BUT callers who read state='created' AFTER
+    // the winner committed skip the if-block entirely and still reach
+    // the payment-insert path. v1's `updateMany` that only touched
+    // `updated_at` did not actually serialize because the state filter
+    // kept matching for every concurrent caller (state never changed).
+    //
+    // Fix v2: at the TOP of payOrder, atomically transition the order
+    // into `processing` via `updateMany` with the pre-charge state
+    // filter. PostgreSQL serializes UPDATE statements on the same row
+    // (row-level lock) — the second wave blocks until the first
+    // commits, then re-evaluates the WHERE and sees state='processing'
+    // (not in the IN clause), so count=0 and we bail with 409
+    // ORD_FLOW_PAYMENT_FAILED_001. No data is persisted when count=0.
+    //
+    // `processing` is also the legitimate next state for online payments,
+    // so we end every successful charge either in `finished` (direct) or
+    // `pending_payment`/`processing` (online) — the same state machine
+    // already in use. Direct path mutates back via the existing
+    // `updateOrderState` calls below; online stays in processing until
+    // the gateway callback lands.
+    const claim = await this.prisma.orders.updateMany({
+      where: {
+        id: orderId,
+        state: { in: ['draft', 'created', 'shipped', 'pending_payment'] },
+      },
+      data: { state: 'processing', updated_at: new Date() },
+    });
+    if (claim.count === 0) {
+      throw this.wrapPaymentFailure('state_not_payable', {
+        message: `Cannot pay order: another concurrent charge already claimed it.`,
+        state: 'unknown',
+        reason: 'lost_pay_order_claim_race',
+      });
+    }
+
     let order = await this.getOrder(orderId);
 
     // Table orders are born in 'draft' without a stock reservation. Promote
@@ -532,7 +626,22 @@ export class OrderFlowService {
     // Idempotent + non-blocking; fastTrackOrder inherits this via payOrder.
     if (order.state === 'draft') {
       try {
-        await this.promoteDraftToCreated(orderId);
+        // QUI-POS-E2E-R8-LIVE: FB-10 double-click race. promoteDraftToCreated
+        // returns `false` when another concurrent caller already won the
+        // FOR UPDATE claim and changed the state. Without this check, every
+        // concurrent flow/pay would still pass `allowedPayStates` below
+        // (because `order` was reloaded to 'created' by the winner) and
+        // insert duplicate payment rows. Reject the second wave here with
+        // the same `state_not_payable` shape every other terminal-order
+        // attempt produces.
+        const didPromote = await this.promoteDraftToCreated(orderId);
+        if (!didPromote) {
+          throw this.wrapPaymentFailure('state_not_payable', {
+            message: `Cannot pay order: another concurrent charge already claimed the draft promotion.`,
+            state: 'draft',
+            reason: 'lost_promotion_claim_race',
+          });
+        }
         // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B3.
         // Emit `order.promoted_to_created` AFTER the promotion commits.
         // Carries the reservation count so a SIEM rule can flag a
@@ -604,10 +713,26 @@ export class OrderFlowService {
       order = await this.getOrder(orderId); // reload: now 'created'
     }
 
-    const allowedPayStates: OrderState[] = ['created', 'shipped'];
+    const allowedPayStates: OrderState[] = ['created', 'shipped', 'processing'];
     if (!allowedPayStates.includes(order.state as OrderState)) {
+      // QUI-POS-E2E-R8-LIVE: if we just claimed the order into `processing`
+      // for the race-claim above but the rest of payOrder then decides the
+      // order is not pay-able (e.g. an unknown state we never expected),
+      // restore the prior state so the cashier can retry. We do a best-
+      // effort transition back; if it fails, the operator will see the
+      // order stuck in `processing` and can flip it manually.
+      try {
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { state: 'created', updated_at: new Date() },
+        });
+      } catch (rollbackErr) {
+        this.logger.error(
+          `[payOrder claim rollback failed] order=${orderId}: ${(rollbackErr as Error).message}`,
+        );
+      }
       throw this.wrapPaymentFailure('state_not_payable', {
-        message: `Cannot pay order in state '${order.state}'. Order must be in 'created' or 'shipped' state.`,
+        message: `Cannot pay order in state '${order.state}'. Order must be in 'created', 'shipped' or 'processing' state.`,
         state: order.state,
       });
     }
