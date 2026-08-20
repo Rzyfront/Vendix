@@ -953,6 +953,194 @@ export class PromotionEngineService {
   }
 
   /**
+   * Per-product tier ladder for promotions that touched the current cart.
+   *
+   * Returns one entry per `(promotion_id, target_product_id)` for every
+   * `quantity_tiered` promotion in `promotionIds` whose target product is
+   * listed in that promotion's `promotion_products` mapping. `tiers` is the
+   * FULL ladder (ordered by `min_quantity` ASC, secondary by `sort_order`,
+   * final tie-break by tier id), and `current_tier_index` reflects how many
+   * units of THAT product are already in the cart — the last tier whose
+   * `min_quantity <= quantity` wins (`null` when quantity is below the
+   * first threshold).
+   *
+   * Pure READ — no discount math, no DB writes. Powers the per-product
+   * tier-ladder UI (`Lleva 3 → -10% · Lleva 6 → -15% …`) so consumers can
+   * render the full ladder next to each cart line without re-querying
+   * `promotion_quantity_tiers`. Mirrors `ActiveProductPromotion.quantity_tiers`
+   * (same `QuantityTierSummary` rows, same ordering) so the rendering code
+   * stays symmetric with the product card surface.
+   *
+   * `perProductQuantity` is optional: when omitted, the engine aggregates
+   * `quantity` from `cartItems` per `product_id` to build the per-product
+   * map. Callers that already aggregate quantities (e.g. via the engine's
+   * `toSaleUnits`) can pass a precomputed Map to skip the re-aggregation.
+   *
+   * Promotions whose `promotion_products` is empty (scope='order' /
+   * scope='category') produce NO entries — they have no single
+   * `target_product_id`. Callers that want a single ladder for those promos
+   * can query `ActiveProductPromotion.quantity_tiers` directly.
+   *
+   * Resilience: errors from the DB read bubble up; callers are expected to
+   * `try/catch` and degrade silently (the cart view must keep serving 200s
+   * without the ladder field — same policy as `quoteDiscounts`).
+   */
+  async getTierLaddersForQuote(
+    promotionIds: number[],
+    cartItems: Array<{ product_id: number; quantity: number }>,
+    perProductQuantity?: Map<number, number>,
+  ): Promise<
+    Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: QuantityTierSummary[];
+      current_tier_index: number | null;
+    }>
+  > {
+    const ids = Array.from(
+      new Set((promotionIds ?? []).map((id) => Number(id))),
+    ).filter((id) => Number.isFinite(id) && id > 0);
+    if (ids.length === 0) return [];
+
+    // One batched query through `promotions` (the model that owns the store
+    // scope + the relations we need): tiers ordered by `min_quantity` ASC
+    // (the same ordering the engine uses internally for tier resolution),
+    // plus the promotion's `promotion_products` mapping so we know which
+    // `product_id`s each promotion targets. We read via `promotions` rather
+    // than `promotion_quantity_tiers` directly because `StorePrismaService`
+    // doesn't expose a scoped getter for the tier model — its sole
+    // cross-store query surface is the promotions relation here.
+    const promoRows = (await this.prisma.promotions.findMany({
+      where: { id: { in: ids } },
+      include: {
+        promotion_quantity_tiers: {
+          orderBy: [
+            { min_quantity: 'asc' },
+            { sort_order: 'asc' },
+            { id: 'asc' },
+          ],
+        },
+        promotion_products: { select: { product_id: true } },
+      },
+    })) as unknown as Array<{
+      id: number;
+      promotion_quantity_tiers?: Array<{
+        id: number;
+        promotion_id: number;
+        min_quantity: number;
+        max_quantity: number | null;
+        type: PromotionQuoteType;
+        value: unknown;
+        sort_order: number;
+      }>;
+      promotion_products?: Array<{ product_id: number | string }>;
+    }>;
+
+    // Per-product quantity: build from `cartItems` when the caller didn't
+    // pass an aggregated map. Sum across lines of the same product — same
+    // summation the engine does for `per_product` grouping in
+    // `quoteDiscounts`.
+    const quantityByProduct = new Map<number, number>();
+    if (perProductQuantity) {
+      for (const [pid, qty] of perProductQuantity.entries()) {
+        const n = Number(pid);
+        const q = Number(qty);
+        if (Number.isFinite(n) && Number.isFinite(q) && q > 0) {
+          quantityByProduct.set(n, (quantityByProduct.get(n) ?? 0) + q);
+        }
+      }
+    } else {
+      for (const item of cartItems ?? []) {
+        const pid = Number(item?.product_id);
+        const qty = Number(item?.quantity) || 0;
+        if (!Number.isFinite(pid)) continue;
+        if (qty <= 0) continue;
+        quantityByProduct.set(pid, (quantityByProduct.get(pid) ?? 0) + qty);
+      }
+    }
+
+    // Group tier rows per promotion so we emit one ladder per (promo,
+    // target_product_id). `targetProductIds` is de-duplicated so a product
+    // linked to the same promotion by multiple rows still appears once.
+    const ladderByPromo = new Map<
+      number,
+      { tiers: QuantityTierSummary[]; targetProductIds: number[] }
+    >();
+    for (const promo of promoRows) {
+      const promotionId = Number(promo.id);
+      const tiers = promo.promotion_quantity_tiers ?? [];
+      if (tiers.length === 0) continue;
+      const bucket: { tiers: QuantityTierSummary[]; targetProductIds: number[] } =
+        {
+          tiers: tiers.map((t) => ({
+            min_quantity: Number(t.min_quantity),
+            max_quantity:
+              t.max_quantity === null ? null : Number(t.max_quantity),
+            type: t.type,
+            value: Number(t.value),
+            sort_order: Number(t.sort_order),
+          })),
+          targetProductIds: [],
+        };
+      for (const pp of promo.promotion_products ?? []) {
+        const targetProductId = Number(pp.product_id);
+        if (!Number.isFinite(targetProductId)) continue;
+        if (!bucket.targetProductIds.includes(targetProductId)) {
+          bucket.targetProductIds.push(targetProductId);
+        }
+      }
+      ladderByPromo.set(promotionId, bucket);
+    }
+
+    const result: Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: QuantityTierSummary[];
+      current_tier_index: number | null;
+    }> = [];
+    for (const [promotionId, bucket] of ladderByPromo.entries()) {
+      if (bucket.tiers.length === 0) continue;
+      if (bucket.targetProductIds.length === 0) continue;
+      for (const targetProductId of bucket.targetProductIds) {
+        const quantity = quantityByProduct.get(targetProductId) ?? 0;
+        result.push({
+          promotion_id: promotionId,
+          target_product_id: targetProductId,
+          tiers: bucket.tiers,
+          current_tier_index: this.resolveCurrentTierIndex(
+            bucket.tiers,
+            quantity,
+          ),
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Index of the highest tier whose `min_quantity <= quantity`.
+   * `null` when quantity is below the first threshold. Returns
+   * `tiers.length - 1` when quantity crosses the top tier (since tiers are
+   * ordered ASC by `min_quantity`, the top one is still "the last whose
+   * `min_quantity <= quantity`").
+   */
+  private resolveCurrentTierIndex(
+    tiers: QuantityTierSummary[],
+    quantity: number,
+  ): number | null {
+    if (!tiers || tiers.length === 0) return null;
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return tiers[0].min_quantity <= 0 ? 0 : null;
+    }
+    let idx = -1;
+    for (let i = 0; i < tiers.length; i++) {
+      if (tiers[i].min_quantity <= quantity) idx = i;
+      else break;
+    }
+    return idx >= 0 ? idx : null;
+  }
+
+  /**
    * Compute the "next tier" nudge for auto-apply `quantity_tiered` promotions.
    * Pure READ over the candidate promotions + cart items: reuses the SAME scope
    * resolver (`resolveApplicableItemIndexes`) and tier ordering as the discount
