@@ -7,9 +7,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
-import { VendixHttpException } from 'src/common/errors';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { CouponsService } from '../coupons/coupons.service';
+import { AuditService } from '@common/audit/audit.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -21,10 +25,32 @@ describe('OrdersService', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
       aggregate: jest.fn(),
+      deleteMany: jest.fn(),
     },
+    order_items: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+      findMany: jest.fn(),
+    },
+    order_promotions: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    coupons: { update: jest.fn() },
+    products: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    product_variants: { findMany: jest.fn() },
+    store_users: { findFirst: jest.fn() },
+    shipping_methods: { findFirst: jest.fn() },
+    shipping_rates: { findFirst: jest.fn() },
+    addresses: { findFirst: jest.fn() },
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
@@ -46,12 +72,47 @@ describe('OrdersService', () => {
   const mockStockLevelManager = {
     reserveStock: jest.fn(),
     releaseReservation: jest.fn(),
+    releaseReservationsByReference: jest.fn(),
     getDefaultLocationForProduct: jest.fn(async () => 1),
+  };
+  const mockSellableStockAllocator = {
+    allocateForLine: jest.fn(async () => ({
+      slices: [{ location_id: 1, quantity: 1 }],
+      allocated: 1,
+      available: 1,
+      shortfall: 0,
+    })),
   };
   const mockShippingCalculator = { calculateRates: jest.fn() };
   const mockOrderFlowService = {
     cancelOrder: jest.fn(),
     forceOrderState: jest.fn(),
+  };
+  const mockPromotionEngine = {
+    quoteDiscounts: jest.fn(async () => ({
+      subtotal: 100,
+      total_discount: 0,
+      promotional_subtotal: 100,
+      applied_promotions: [],
+      items: [],
+      order_promotions_snapshot: [],
+      tier_progress: [],
+    })),
+  };
+  const mockCouponsService = {
+    validate: jest.fn(async () => ({
+      valid: true,
+      coupon_id: 1,
+      code: 'TEST',
+      discount_amount: 0,
+    })),
+  };
+  const mockAuditService = {
+    logCustom: jest.fn(),
+    logCreate: jest.fn(),
+    logUpdate: jest.fn(),
+    logDelete: jest.fn(),
+    log: jest.fn(),
   };
 
   const mockRequestContextService = {
@@ -72,8 +133,12 @@ describe('OrdersService', () => {
         { provide: SettingsService, useValue: mockSettingsService },
         { provide: ScheduleValidationService, useValue: mockScheduleValidation },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
+        { provide: SellableStockAllocator, useValue: mockSellableStockAllocator },
         { provide: ShippingCalculatorService, useValue: mockShippingCalculator },
         { provide: OrderFlowService, useValue: mockOrderFlowService },
+        { provide: PromotionEngineService, useValue: mockPromotionEngine },
+        { provide: CouponsService, useValue: mockCouponsService },
+        { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
 
@@ -84,6 +149,8 @@ describe('OrdersService', () => {
       store_id: 1,
       organization_id: 1,
       is_super_admin: false,
+      user_id: 99,
+      request_id: 'req-test-001',
     });
 
     jest.clearAllMocks();
@@ -371,6 +438,144 @@ describe('OrdersService', () => {
       );
       const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
       expect(writtenData.state).toBeUndefined();
+    });
+  });
+
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1/C.2/C.3 · updateOrderFromEditor
+   *
+   * Dos invariantes críticas del editor:
+   *  1. Customer gate: si el customer_id no pertenece al store del contexto,
+   *     el servicio lanza 403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001` ANTES
+   *     de tomar el claim atómico del estado (no contamina la fila).
+   *  2. Atomic state claim: si dos llamadas concurrentes editan la misma
+   *     orden, el `updateMany` con filtro de estado sólo actualiza una. La
+   *     segunda recibe 409 `ORD_EDIT_INVALID_STATE_001`.
+   *
+   * El resto del flujo (promociones, cupones, shipping, stock) se cubre con
+   * verificaciones de integración contra el flujo canónico
+   * `flow/pay`/`flow/cancel` y con `npm run buildcheck:test` para no
+   * arrastrar mocks pesados.
+   */
+  describe('updateOrderFromEditor — gates previos al commit', () => {
+    const editableOrder = {
+      id: 500,
+      store_id: 1,
+      state: 'created',
+      customer_id: 99,
+      coupon_id: null,
+      coupon_code: null,
+      subtotal_amount: '100.00',
+      tax_amount: '19.00',
+      shipping_cost: '0.00',
+      discount_amount: '0.00',
+      grand_total: '119.00',
+      notes: 'nota original',
+      internal_notes: null,
+      delivery_type: 'pickup',
+      billing_address_id: null,
+      shipping_address_id: null,
+      shipping_method_id: null,
+      shipping_rate_id: null,
+    };
+
+    const minimalDto = {
+      customer_id: 99,
+      items: [
+        {
+          product_id: 1,
+          product_name: 'Test product',
+          quantity: 1,
+          unit_price: 100,
+          total_price: 100,
+          tax_amount_item: 19,
+          tax_rate: 0.19,
+        },
+      ],
+    } as any;
+
+    const setupContext = () => {
+      mockRequestContextService.getContext.mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        user_id: 99,
+        request_id: 'req-test-001',
+      });
+    };
+
+    /**
+     * El servicio usa el método estático `RequestContextService.getContext()`
+     * (no la instancia inyectada). Lo interceptamos con `jest.spyOn` para
+     * que devuelva un RequestContext válido.
+     */
+    const spyContext = () =>
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        is_owner: false,
+        user_id: 99,
+        request_id: 'req-test-001',
+      });
+
+    it('lanza 403 ORD_EDIT_CUSTOMER_STORE_MISMATCH_001 si el cliente no pertenece al store', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // 1) La orden existe y está en estado editable.
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        // 2) Pero el cliente NO tiene store_users para este store.
+        mockPrismaService.store_users.findFirst.mockResolvedValue(null);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+
+        // El claim atómico del estado NUNCA debe dispararse si el cliente falla
+        // el gate — eso sería escribir un cliente inválido sobre la fila.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+
+        // El error tipado correcto.
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_CUSTOMER_STORE_MISMATCH_001.code,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 409 ORD_EDIT_INVALID_STATE_001 cuando el claim atómico pierde la carrera', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // Claim falla en count=0 (otro operador ganó la carrera).
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        mockPrismaService.orders.updateMany.mockResolvedValue({
+          count: 0,
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_INVALID_STATE_001.code,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
     });
   });
 });

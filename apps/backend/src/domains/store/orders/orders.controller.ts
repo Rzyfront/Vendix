@@ -19,6 +19,7 @@ import {
   UpdateOrderDto,
   OrderQueryDto,
   UpdateOrderItemsDto,
+  UpdateOrderEditorDto,
 } from './dto';
 import { AssignShippingMethodDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -310,6 +311,56 @@ export class OrdersController {
       if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar los items de la orden',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1 · PUT /api/store/orders/:id/editor
+   *
+   * Editor atómico de negocio: items, cliente, notas, dirección/método/rate
+   * de envío, promoción y cupón. NO edita state, payment, credit, KDS ni
+   * flags fiscales (esos viven en `OrderFlowService` / flujo canónico).
+   *
+   * Permiso: `store:orders:update` — el mismo que `PUT /items`, pero con un
+   * DTO dedicado que rechaza cualquier campo de estado/pago por construcción
+   * (no por validación genérica que el `whitelist` no pueda filtrar).
+   *
+   * Errores tipados (códigos del catálogo):
+   *  - `ORD_EDIT_INVALID_STATE_001` (409): claim atómico del estado perdió la
+   *    carrera contra otro operador.
+   *  - `ORD_EDIT_NOT_ALLOWED_001` (409): orden ya no es editable.
+   *  - `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001` (403): cliente no pertenece al
+   *    store del contexto.
+   *  - `ORD_EDIT_INVALID_SHIPPING_001` (422): dirección/método/rate/costo
+   *    inválidos o dirección faltante en entrega a domicilio.
+   *  - `ORD_EDIT_PROMOTION_INVALID_001` (422): promoción o cupón ya no aplica.
+   *  - `POS_STOCK_INSUFFICIENT_001` (409): stock insuficiente al validar la
+   *    edición de una orden `created`.
+   *  - `ORD_EDIT_RESPONSE_MISMATCH_001` (500): persistencia OK pero la fila
+   *    recargada difiere — nunca devolver éxito falso.
+   */
+  @Put(':id/editor')
+  @Permissions('store:orders:update')
+  async updateOrderEditor(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderEditorDto,
+  ) {
+    try {
+      const result = await this.ordersService.updateOrderFromEditor(id, dto);
+      return this.responseService.updated(
+        result,
+        'Orden actualizada exitosamente',
+      );
+    } catch (error) {
+      // Propaga las excepciones tipadas (gate de IVA, claim atómico, customer
+      // store mismatch, stock insuficiente) al AllExceptionsFilter para
+      // preservar status + error_code + details. El resto cae al legacy.
+      if (error instanceof VendixHttpException) throw error;
+      return this.responseService.error(
+        error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,
         error.status || 400,
       );
