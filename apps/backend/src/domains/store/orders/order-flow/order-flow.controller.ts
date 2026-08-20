@@ -120,12 +120,22 @@ export class OrderFlowController {
     // the available actions and skip the audit (and the call) when `pay` is
     // no longer in the action list. The action-set lookup is read-only and
     // uses the same `getOrder`/`state` resolution as the rest of the flow.
+    //
+    // QUI-POS-E2E: BUT `getAvailableActions` no incluye `pay` para `draft`
+    // (el SFM espera `created`+), aunque `OrderFlowService.payOrder` SÍ
+    // auto-promueve `draft → created` con `promoteDraftToCreated`. Si
+    // aplicáramos el gate ciegamente, los drafts POS nuevos no podrían
+    // pagarse nunca desde el editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy
+    // path). Excluimos `draft` del gate y dejamos que `payOrder` haga la
+    // promoción idempotente.
     const availableActions =
       await this.orderFlowService.getAvailableActions(orderId);
     const payAction = (availableActions as any[])?.find?.(
       (a) => a?.code === 'pay',
     );
-    const payEnabled = !!payAction?.enabled;
+    const orderRow = await this.orderFlowService.getOrder(orderId);
+    const isDraft = orderRow?.state === 'draft';
+    const payEnabled = isDraft || !!payAction?.enabled;
 
     if (!payEnabled) {
       // Mirror the canonical error shape so the cashier sees the same code
