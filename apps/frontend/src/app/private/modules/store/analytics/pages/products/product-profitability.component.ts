@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -9,6 +9,10 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
@@ -39,6 +43,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     ExportButtonComponent,
     DateRangeFilterComponent,
     AnalyticsCardComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './product-profitability.component.html',
   styleUrls: ['./product-profitability.component.scss'],
@@ -116,6 +121,20 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
 
   exportReport(): void {
     this.store.dispatch(ProfitabilityActions.exportProfitabilityReport());
+  }
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   onDateRangeChange(range: DateRangeFilter): void {

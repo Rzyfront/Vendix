@@ -155,6 +155,14 @@ export const analyticsRoutes: Routes = [
                 (c) => c.MovementAnalysisComponent,
               ),
           },
+          {
+            // CP-low-stock-by-supplier / Phase H — analytics shell (FB-06).
+            path: 'low-stock-by-supplier',
+            loadComponent: () =>
+              import(
+                './pages/inventory/inventory-low-stock-by-supplier/inventory-low-stock-by-supplier.component'
+              ).then((c) => c.InventoryLowStockBySupplierComponent),
+          },
         ],
       },
       // Products Analytics (shell)

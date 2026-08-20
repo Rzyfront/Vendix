@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma, movement_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -6,6 +6,15 @@ import {
   InventoryAnalyticsQueryDto,
   Granularity,
 } from '../dto/analytics-query.dto';
+import {
+  LowStockBySupplierQueryDto,
+  LowStockBySupplierAnalyticsQueryDto,
+  LowStockStatusFilter,
+} from '../dto/low-stock-by-supplier-query.dto';
+import type {
+  LowStockBySupplierRow,
+  LowStockBySupplierAnalyticsEnvelope,
+} from '../interfaces/low-stock-by-supplier-row.interface';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
 import {
   formatPeriodFromDate,
@@ -17,13 +26,17 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ResponseService } from '@common/responses/response.service';
+import { paginatedOrAll } from '@common/reports/report-response.util';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
 import {
   buildCostCoverage,
+  COMPLETED_SALE_STATES,
   INBOUND_MOVEMENT_TYPES,
   OUTBOUND_MOVEMENT_TYPES,
+  PURCHASE_COMMITTED_STATES,
   TRANSFER_MOVEMENT_TYPE,
   sqlStateList,
 } from '../analytics-metrics.contract';
@@ -94,12 +107,62 @@ interface SummaryProductRow {
   reorder_point: number | null;
 }
 
+/**
+ * Builds the synthetic "AVISO" row appended to the XLSX export when the
+ * 10.000-row cap is hit (ADR-5). Every numeric field is `0` or `null`,
+ * every text field is `null` except `product_name`, which carries the
+ * Spanish warning so it surfaces in the spreadsheet itself even when the
+ * user skims only the data rows.
+ *
+ * Shape is a {@link LowStockBySupplierRow} so the same `ReportColumn[]`
+ * mapping that renders real rows can render this one without branching.
+ */
+function buildLowStockTruncationAvisoRow(): LowStockBySupplierRow {
+  return {
+    product_id: 0,
+    product_name:
+      'AVISO: Dataset truncado a 10.000 filas. Refinar filtros para ver el resto.',
+    sku: null,
+    current_stock: 0,
+    previous_stock: null,
+    previous_stock_source: 'na',
+    delta: null,
+    min_threshold: 0,
+    status: 'low_stock',
+    supplier_id: null,
+    supplier_name: null,
+    supplier_sku: null,
+    last_purchase_date: null,
+    last_purchase_cost: null,
+    last_purchase_po_number: null,
+    days_without_sale: null,
+    units_per_package: 0,
+  };
+}
+
 @Injectable()
 export class InventoryAnalyticsService {
   // QUI-553: OperatingScopeService is no longer injected here. This reader is
   // store-scoped in every operating scope, so there is no scope decision left
   // to resolve; org-wide consolidation belongs to the organization domain.
-  constructor(private readonly prisma: StorePrismaService) {}
+  //
+  // Cap of 10.000 rows (ADR-5): the universe is bounded at the DB query so a
+  // store with > 10k active inventory-tracked SKUs cannot fan out into an
+  // unbounded export. When the cap is hit, callers emit a footer warning so
+  // the user knows to refine filters — see {@link getLowStockBySupplierForExport}.
+  private static readonly LOW_STOCK_EXPORT_CAP = 10000;
+
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly responseService: ResponseService,
+  ) {
+    // Logger kept as an instance field (not via @InjectLogger) so the class
+    // declares its logging surface at construction time — easier to grep and
+    // to stub in unit tests.
+    this.logger = new Logger(InventoryAnalyticsService.name);
+  }
+
+  private readonly logger: Logger;
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -1446,5 +1509,810 @@ export class InventoryAnalyticsService {
         reference_id: m.source_order_id?.toString() ?? null,
       };
     });
+  }
+
+  // ===========================================================================
+  // Report: Stock Bajo por Proveedor (CP-low-stock-by-supplier, FB-01..FB-06)
+  // ===========================================================================
+
+  /**
+   * In-app paginated view of the "Stock Bajo por Proveedor" report.
+   *
+   * Returns the same row shape as {@link getLowStockBySupplierForExport} but
+   * wrapped with the centralized {@link paginatedOrAll} helper so the
+   * controller can simply `return` the value without re-implementing the
+   * `if (Array.isArray)` branch.
+   *
+   * Contract: FB-01 (rows), ERR-01 (invalid supplier_id), ERR-02 (invalid
+   * status). The cap of 10.000 rows lives in
+   * {@link buildLowStockBySupplierRows} and is documented in
+   * {@link getLowStockBySupplierForExport}.
+   */
+  async getLowStockBySupplier(query: LowStockBySupplierQueryDto) {
+    this.assertLowStockBySupplierQuery(query);
+    await this.assertSupplierExistsForQuery(query.supplier_id);
+    const settings = await this.loadMergedSettings();
+    const { rows } = await this.buildLowStockBySupplierRows(query, settings);
+    return paginatedOrAll(this.responseService, query, rows);
+  }
+
+  /**
+   * Shape returned by {@link InventoryAnalyticsService.getLowStockBySupplierForExport}.
+   *
+   * - `rows`     — the COMPLETE, un-paginated row array for the XLSX export.
+   *                When `truncated` is true, the LAST entry of `rows` is a
+   *                synthetic `aviso` row (every numeric field is `0` or
+   *                `null`, every text field is `null` except `product_name`
+   *                which carries the warning message). Treat the aviso row
+   *                as display-only — it is NOT a product and must never be
+   *                counted, summed, or imported.
+   * - `truncated` — `true` when the active-inventory product universe hit
+   *                 {@link InventoryAnalyticsService.LOW_STOCK_EXPORT_CAP}.
+   *                 The controller always renders the footer warning in this
+   *                 case; the aviso row in `rows` is the in-sheet marker.
+   *
+   * Contract: FB-02 (XLSX), ERR-01, ERR-02.
+   */
+  async getLowStockBySupplierForExport(
+    query: LowStockBySupplierQueryDto,
+  ): Promise<{ rows: LowStockBySupplierRow[]; truncated: boolean }> {
+    const startedAt = Date.now();
+    this.logger.debug(
+      { query: { ...query } },
+      'getLowStockBySupplierForExport start',
+    );
+
+    this.assertLowStockBySupplierQuery(query);
+    await this.assertSupplierExistsForQuery(query.supplier_id);
+    const settings = await this.loadMergedSettings();
+    const { rows, truncated } = await this.buildLowStockBySupplierRows(
+      query,
+      settings,
+    );
+
+    if (truncated) {
+      // Loud warning: a hit at the cap means a store's dataset is too large
+      // to show in one XLSX without narrowing the filters. Easier to spot
+      // here in the logs than to chase from a user complaint about a missing
+      // product.
+      this.logger.warn(
+        'getLowStockBySupplierForExport cap reached — dataset may be truncated at 10k rows',
+      );
+      rows.push(buildLowStockTruncationAvisoRow());
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    this.logger.debug(
+      { rowCount: rows.length, ms: elapsedMs },
+      'getLowStockBySupplierForExport end',
+    );
+
+    return { rows, truncated };
+  }
+
+  /**
+   * Aggregated analytics envelope for the "Stock Bajo por Proveedor"
+   * analytics shell view (FB-06). Reuses
+   * {@link getLowStockBySupplierForExport} so the rows and the aggregates
+   * cannot drift apart — single source of truth for the universe of
+   * "low stock by supplier" rows.
+   *
+   * `history_30d` is omitted when no daily stock snapshot table exists
+   * (ADR-2 — confirmed absent in Phase A.2).
+   *
+   * Contract: FB-06, ERR-05 (date_from > date_to).
+   */
+  async getLowStockBySupplierAnalytics(
+    query: LowStockBySupplierAnalyticsQueryDto,
+  ): Promise<LowStockBySupplierAnalyticsEnvelope> {
+    // ERR-05: defensive — class-validator already rejects malformed date
+    // strings, but the service still has to enforce the ordering invariant.
+    // Uses the inherited `date_from` / `date_to` from BaseReportQueryDto
+    // (see LowStockBySupplierAnalyticsQueryDto JSDoc).
+    if (query.date_from && query.date_to) {
+      if (
+        new Date(query.date_from).getTime() >
+        new Date(query.date_to).getTime()
+      ) {
+        throw new VendixHttpException(ErrorCodes.ANALYTICS_DATE_RANGE_001);
+      }
+    }
+    this.assertLowStockBySupplierQuery(query);
+    await this.assertSupplierExistsForQuery(query.supplier_id);
+    const settings = await this.loadMergedSettings();
+    const { rows } = await this.buildLowStockBySupplierRows(query, settings);
+    return this.buildLowStockBySupplierAnalytics(rows);
+  }
+
+  // --------------------------- helpers --------------------------------------
+
+  /**
+   * Defensive status validation — class-validator already filters at the DTO
+   * boundary, but the service must still reject internally-constructed
+   * payloads that bypassed the DTO (e.g. tests, internal callers).
+   *
+   * Emits ERR-02 (`LOW_STOCK_BY_SUPPLIER_002`) on invalid input.
+   */
+  private assertLowStockBySupplierQuery(query: LowStockBySupplierQueryDto) {
+    const validStatuses: ReadonlyArray<LowStockStatusFilter | undefined> = [
+      undefined,
+      LowStockStatusFilter.LOW_STOCK,
+      LowStockStatusFilter.OUT_OF_STOCK,
+    ];
+    if (!validStatuses.includes(query.status)) {
+      throw new VendixHttpException(ErrorCodes.LOW_STOCK_BY_SUPPLIER_002);
+    }
+  }
+
+  /**
+   * Validates that `supplier_id` resolves to an active supplier visible to
+   * the current store. Suppliers are org-scoped (`organization_id`) and may
+   * belong to a specific store (`store_id`) or be org-wide (`store_id IS
+   * NULL`); both are accepted for the user-facing filter.
+   *
+   * Emits ERR-01 (`LOW_STOCK_BY_SUPPLIER_001`) when the supplier does not
+   * exist or does not belong to the current organization. No-op when
+   * `supplierId` is undefined.
+   */
+  private async assertSupplierExistsForQuery(
+    supplierId: number | undefined,
+  ): Promise<void> {
+    if (supplierId === undefined) return;
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+    if (!context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const supplier = await this.prisma.suppliers.findFirst({
+      where: {
+        id: supplierId,
+        organization_id: context.organization_id,
+        state: 'active',
+        OR: [{ store_id: context.store_id }, { store_id: null }],
+      },
+      select: { id: true },
+    });
+    if (!supplier) {
+      throw new VendixHttpException(ErrorCodes.LOW_STOCK_BY_SUPPLIER_001);
+    }
+  }
+
+  /**
+   * Builds the COMPLETE, unpaginated row set shared by the in-app view
+   * ({@link getLowStockBySupplier}), the XLSX export
+   * ({@link getLowStockBySupplierForExport}) and the analytics envelope
+   * ({@link getLowStockBySupplierAnalytics}). The cap of 10.000 rows
+   * (ADR-5) is enforced here so all three callers stay aligned.
+   *
+   * Pipeline:
+   *  1. Active, inventory-tracked product universe (cap 10.000).
+   *  2. Aggregate `stock_levels.quantity_available` per product, filtered
+   *     to in-scope locations (ADR-1).
+   *  3. Resolve preferred supplier per product (ADR-3, desempate by
+   *     `cost_per_unit ASC NULLS LAST`, fallback to cheapest active goods
+   *     supplier, then to `null`).
+   *  4. Resolve last purchase (commitment + unit_price_net).
+   *  5. Resolve days without sale (delivered/finished).
+   *  6. Estimate previous stock from 24h movements (ADR-2).
+   *  7. Apply user filters (supplier_id, category_id already in WHERE,
+   *     status here in memory).
+   */
+  private async buildLowStockBySupplierRows(
+    query: LowStockBySupplierQueryDto,
+    settings: StoreSettings,
+  ): Promise<{ rows: LowStockBySupplierRow[]; truncated: boolean }> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+    if (!context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const organizationId = context.organization_id;
+
+    // 1. Product universe — capped at 10.000 rows (ADR-5). When the cap is
+    // hit (products.length === LOW_STOCK_EXPORT_CAP) the dataset may be
+    // truncated; the caller decides whether to emit a footer warning.
+    const cap = InventoryAnalyticsService.LOW_STOCK_EXPORT_CAP;
+    const productWhere: Prisma.productsWhereInput = {
+      state: 'active',
+      track_inventory: true,
+      ...(query.category_id !== undefined && {
+        product_categories: { some: { category_id: query.category_id } },
+      }),
+    };
+
+    const products = await this.prisma.products.findMany({
+      where: productWhere,
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        cost_price: true,
+        min_stock_level: true,
+        reorder_point: true,
+        purchase_to_stock_factor: true,
+      },
+      take: cap,
+    });
+
+    const truncated = products.length === cap;
+    if (products.length === 0) return { rows: [], truncated: false };
+
+    const productIds = products.map((p) => p.id);
+    const now = new Date();
+    const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // 2. Stock levels aggregated per product (ADR-1).
+    // `stock_levels` is the auditable source; `products.stock_quantity` is the
+    // denormalized mirror and is intentionally avoided here.
+    const stockRaw = await (
+      this.prisma.withoutScope() as {
+        $queryRaw: <T>(query: any) => Promise<T>;
+      }
+    ).$queryRaw<Array<{ product_id: number; current_stock: string | number }>>(
+      Prisma.sql`
+        SELECT sl.product_id AS product_id,
+               COALESCE(SUM(sl.quantity_available), 0)::decimal AS current_stock
+        FROM stock_levels sl
+        INNER JOIN inventory_locations il ON il.id = sl.location_id
+        WHERE il.store_id = ${storeId}
+          AND il.is_central_warehouse = false
+          AND sl.product_id IN (${Prisma.join(productIds)})
+        GROUP BY sl.product_id
+      `,
+    );
+    const stockByProduct = new Map<number, number>();
+    for (const row of stockRaw) {
+      stockByProduct.set(Number(row.product_id), Number(row.current_stock));
+    }
+
+    // 3. Preferred supplier per product (ADR-3) — two passes.
+    //    Pass A: pick the cheapest preferred (is_preferred=true) active goods
+    //    supplier. Pass B: fallback to the cheapest active goods supplier if
+    //    the product had no preferred link. Final bucket: products with no
+    //    active goods supplier at all show `supplier_id = null`.
+    const supplierRaw = await (
+      this.prisma.withoutScope() as {
+        $queryRaw: <T>(query: any) => Promise<T>;
+      }
+    ).$queryRaw<
+      Array<{
+        product_id: number;
+        supplier_id: number;
+        supplier_name: string;
+        supplier_sku: string | null;
+        cost_per_unit: string | number | null;
+        is_preferred: boolean;
+      }>
+    >(Prisma.sql`
+      SELECT DISTINCT ON (sp.product_id)
+        sp.product_id           AS product_id,
+        sp.supplier_id          AS supplier_id,
+        s.name                  AS supplier_name,
+        sp.supplier_sku         AS supplier_sku,
+        sp.cost_per_unit        AS cost_per_unit,
+        sp.is_preferred         AS is_preferred
+      FROM supplier_products sp
+      INNER JOIN suppliers s ON s.id = sp.supplier_id
+      WHERE sp.product_id IN (${Prisma.join(productIds)})
+        AND s.state = 'active'
+        AND s.supplier_category = 'goods'
+        AND s.organization_id = ${organizationId}
+        AND (s.store_id = ${storeId} OR s.store_id IS NULL)
+      ORDER BY sp.product_id, sp.is_preferred DESC, sp.cost_per_unit ASC NULLS LAST
+    `);
+
+    const supplierByProduct = new Map<
+      number,
+      {
+        supplier_id: number;
+        supplier_name: string;
+        supplier_sku: string | null;
+        cost_per_unit: number | null;
+      }
+    >();
+    // First populate preferred links (already DISTINCT ON with is_preferred DESC).
+    for (const row of supplierRaw) {
+      if (!row.is_preferred) continue;
+      supplierByProduct.set(Number(row.product_id), {
+        supplier_id: row.supplier_id,
+        supplier_name: row.supplier_name,
+        supplier_sku: row.supplier_sku,
+        cost_per_unit:
+          row.cost_per_unit !== null ? Number(row.cost_per_unit) : null,
+      });
+    }
+    // Fallback: cheapest active goods supplier for products without a
+    // preferred link (ADR-3).
+    for (const row of supplierRaw) {
+      const pid = Number(row.product_id);
+      if (supplierByProduct.has(pid)) continue;
+      supplierByProduct.set(pid, {
+        supplier_id: row.supplier_id,
+        supplier_name: row.supplier_name,
+        supplier_sku: row.supplier_sku,
+        cost_per_unit:
+          row.cost_per_unit !== null ? Number(row.cost_per_unit) : null,
+      });
+    }
+
+    // 4. Last purchase per product (commitment + unit_price_net).
+    //
+    // Cross-store guard: purchase_orders.location_id points at an
+    // inventory_location row; the row carries the owning store_id. We join
+    // through inventory_locations and require pol.store_id = context.store_id
+    // so a sibling store of the same organization cannot be picked as
+    // "última compra" for this store's products. Same pattern the stock_levels
+    // pass uses (`inventory_locations.store_id = ${storeId}`), so the universe
+    // stays coherent across steps 2 and 4. Audit finding: without this JOIN,
+    // a store with no committed purchases of its own still received a
+    // last_purchase_date / last_purchase_cost / last_purchase_po_number taken
+    // from a sister store's PO — silent cross-tenant leak.
+    const purchaseRaw = await (
+      this.prisma.withoutScope() as {
+        $queryRaw: <T>(query: any) => Promise<T>;
+      }
+    ).$queryRaw<
+      Array<{
+        product_id: number;
+        last_purchase_date: Date;
+        last_purchase_cost: string | number | null;
+        last_purchase_po_number: string;
+      }>
+    >(Prisma.sql`
+      SELECT DISTINCT ON (poi.product_id)
+        poi.product_id       AS product_id,
+        po.created_at        AS last_purchase_date,
+        poi.unit_price_net   AS last_purchase_cost,
+        po.order_number      AS last_purchase_po_number
+      FROM purchase_order_items poi
+      INNER JOIN purchase_orders po
+        ON po.id = poi.purchase_order_id
+      INNER JOIN inventory_locations pol
+        ON pol.id = po.location_id
+        AND pol.store_id = ${storeId}
+      WHERE poi.product_id IN (${Prisma.join(productIds)})
+        AND po.status IN (${sqlStateList(PURCHASE_COMMITTED_STATES)})
+        AND po.organization_id = ${organizationId}
+      ORDER BY poi.product_id, po.created_at DESC
+    `);
+    const purchaseByProduct = new Map<
+      number,
+      {
+        last_purchase_date: Date;
+        last_purchase_cost: number | null;
+        last_purchase_po_number: string;
+      }
+    >();
+    for (const row of purchaseRaw) {
+      purchaseByProduct.set(Number(row.product_id), {
+        last_purchase_date: row.last_purchase_date,
+        last_purchase_cost:
+          row.last_purchase_cost !== null
+            ? Number(row.last_purchase_cost)
+            : null,
+        last_purchase_po_number: row.last_purchase_po_number,
+      });
+    }
+
+    // 5. Days without sale per product (delivered/finished, store-scoped).
+    const saleRaw = await (
+      this.prisma.withoutScope() as {
+        $queryRaw: <T>(query: any) => Promise<T>;
+      }
+    ).$queryRaw<Array<{ product_id: number; last_sale: Date }>>(
+      Prisma.sql`
+        SELECT oi.product_id AS product_id,
+               MAX(o.created_at) AS last_sale
+        FROM order_items oi
+        INNER JOIN orders o ON o.id = oi.order_id
+        WHERE oi.product_id IN (${Prisma.join(productIds)})
+          AND o.store_id = ${storeId}
+          AND o.state IN (${sqlStateList(COMPLETED_SALE_STATES)})
+          AND oi.product_id IS NOT NULL
+        GROUP BY oi.product_id
+      `,
+    );
+    const lastSaleByProduct = new Map<number, Date>();
+    for (const row of saleRaw) {
+      lastSaleByProduct.set(Number(row.product_id), row.last_sale);
+    }
+
+    // 6. 24h movements to estimate previous stock (ADR-2).
+    //    `im.quantity` is the UNSIGNED magnitude (stock-level-manager writes
+    //    `Math.abs(quantity_change)`). We must apply the sign here based on
+    //    movement_type, matching the pattern in {@link getMovementTrends}.
+    //    Without the CASE, the SUM would add outbound magnitudes as if they
+    //    were inbound and invert the delta — blocker audit #2.
+    const movementRaw = await (
+      this.prisma.withoutScope() as {
+        $queryRaw: <T>(query: any) => Promise<T>;
+      }
+    ).$queryRaw<Array<{ product_id: number; net: string | number }>>(
+      Prisma.sql`
+        SELECT im.product_id AS product_id,
+               COALESCE(SUM(
+                 CASE
+                   WHEN im.movement_type IN (${sqlStateList([...INBOUND_MOVEMENT_TYPES])})
+                     THEN im.quantity
+                   WHEN im.movement_type IN (${sqlStateList([...OUTBOUND_MOVEMENT_TYPES])})
+                     THEN -im.quantity
+                   ELSE 0
+                 END
+               ), 0)::decimal AS net
+        FROM inventory_movements im
+        WHERE im.product_id IN (${Prisma.join(productIds)})
+          AND im.created_at >= ${since24h}
+          AND im.created_at <= ${now}
+          AND im.movement_type IN (
+            ${sqlStateList([...INBOUND_MOVEMENT_TYPES, ...OUTBOUND_MOVEMENT_TYPES])}
+          )
+        GROUP BY im.product_id
+      `,
+    );
+    const netMovementByProduct = new Map<number, number>();
+    for (const row of movementRaw) {
+      netMovementByProduct.set(Number(row.product_id), Number(row.net));
+    }
+
+    // 7. Build the rows in memory. The threshold filter is applied HERE
+    //    (after the cap, so the universe is bounded first, but only rows
+    //    that qualify as low-stock are emitted). Without this guard, the
+    //    report would return every active product — blocker audit #1.
+    const rows: LowStockBySupplierRow[] = [];
+    for (const product of products) {
+      const currentStock = stockByProduct.get(product.id) ?? 0;
+      const threshold = resolveProductLowStockThreshold(settings, product);
+      // Threshold gate: skip products whose stock is at or above the
+      // threshold (i.e. NOT low-stock). The status flag below is only
+      // emitted for rows that survive this check.
+      if (currentStock > threshold) continue;
+      const status: LowStockBySupplierRow['status'] =
+        currentStock === 0 ? 'out_of_stock' : 'low_stock';
+
+      const supplier = supplierByProduct.get(product.id);
+      const purchase = purchaseByProduct.get(product.id);
+      const lastSale = lastSaleByProduct.get(product.id);
+      const net24h = netMovementByProduct.get(product.id);
+
+      let previousStock: number | null = null;
+      let previousStockSource: LowStockBySupplierRow['previous_stock_source'] =
+        'na';
+      let delta: number | null = null;
+      if (net24h !== undefined) {
+        previousStock = currentStock - net24h;
+        previousStockSource = 'estimated';
+        delta = currentStock - previousStock;
+      }
+
+      const unitsPerPackage = product.purchase_to_stock_factor ?? 1;
+
+      rows.push({
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku ?? null,
+        current_stock: currentStock,
+        previous_stock: previousStock,
+        previous_stock_source: previousStockSource,
+        delta: delta,
+        min_threshold: threshold,
+        status,
+        supplier_id: supplier?.supplier_id ?? null,
+        supplier_name: supplier?.supplier_name ?? 'Sin proveedor asignado',
+        supplier_sku: supplier?.supplier_sku ?? null,
+        last_purchase_date: purchase?.last_purchase_date ?? null,
+        last_purchase_cost: purchase?.last_purchase_cost ?? null,
+        last_purchase_po_number: purchase?.last_purchase_po_number ?? null,
+        days_without_sale:
+          lastSale !== undefined
+            ? Math.floor(
+                (now.getTime() - lastSale.getTime()) / (1000 * 60 * 60 * 24),
+              )
+            : null,
+        units_per_package: unitsPerPackage,
+      });
+    }
+
+    // Apply user filters AFTER the join (status, supplier_id, without_supplier).
+    // `category_id` was already pushed into the products WHERE clause above.
+    let filtered = rows;
+    if (query.status === LowStockStatusFilter.LOW_STOCK) {
+      filtered = filtered.filter(
+        (r) => r.status === 'low_stock' && r.current_stock > 0,
+      );
+    } else if (query.status === LowStockStatusFilter.OUT_OF_STOCK) {
+      filtered = filtered.filter((r) => r.status === 'out_of_stock');
+    }
+    if (query.supplier_id !== undefined) {
+      filtered = filtered.filter(
+        (r) => r.supplier_id === query.supplier_id,
+      );
+    } else if (query.without_supplier === true) {
+      // Major R2-M7: drill-down on the analytics chart's "Sin proveedor"
+      // bucket. Mutually exclusive with `supplier_id` (handled by the
+      // `else if`).
+      filtered = filtered.filter((r) => r.supplier_id === null);
+    }
+
+    return { rows: filtered, truncated };
+  }
+
+  /**
+   * Aggregates the row set into the analytics envelope (FB-06).
+   * - `kpis`: counts + value-at-risk + average days without sale.
+   * - `by_supplier`: GROUP BY supplier (including the `null` bucket).
+   * - `by_category`: re-reads the products→categories mapping once (the row
+   *   set already carries the supplier pivot but NOT the category pivot).
+   * - `top_critical`: top 10 by `value_at_risk DESC`, excluding unauditable
+   *   rows (cost = null/0) — see {@link buildCostCoverage}.
+   * - `history_30d`: OMITTED when no daily snapshot table exists.
+   */
+  private async buildLowStockBySupplierAnalytics(
+    rows: LowStockBySupplierRow[],
+  ): Promise<LowStockBySupplierAnalyticsEnvelope> {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    // Categories — one query for the category name per row.
+    let categoryByProduct = new Map<number, { id: number; name: string }>();
+    if (rows.length > 0) {
+      const links = await this.prisma.product_categories.findMany({
+        where: {
+          product_id: { in: rows.map((r) => r.product_id) },
+        },
+        select: {
+          product_id: true,
+          categories: { select: { id: true, name: true } },
+        },
+      });
+      for (const link of links) {
+        categoryByProduct.set(link.product_id, {
+          id: link.categories.id,
+          name: link.categories.name,
+        });
+      }
+    }
+
+    // Cost for value_at_risk: prefer supplier_products.cost_per_unit
+    // (carried on the row as `cost_per_unit` — but the row doesn't expose
+    // it, so we re-read by supplier_id for rows with a supplier).
+    const supplierIds = Array.from(
+      new Set(
+        rows
+          .map((r) => r.supplier_id)
+          .filter((id): id is number => id !== null),
+      ),
+    );
+    const supplierCostMap = new Map<number, number | null>();
+    if (supplierIds.length > 0 && storeId) {
+      const links = await (
+        this.prisma.withoutScope() as {
+          $queryRaw: <T>(query: any) => Promise<T>;
+        }
+      ).$queryRaw<
+        Array<{
+          product_id: number;
+          supplier_id: number;
+          cost_per_unit: string | number | null;
+        }>
+      >(Prisma.sql`
+        SELECT DISTINCT ON (product_id)
+          product_id, supplier_id, cost_per_unit
+        FROM supplier_products
+        WHERE product_id IN (${Prisma.join(rows.map((r) => r.product_id))})
+          AND supplier_id IN (${Prisma.join(supplierIds)})
+          AND is_preferred = true
+        ORDER BY product_id, cost_per_unit ASC NULLS LAST
+      `);
+      for (const link of links) {
+        supplierCostMap.set(
+          link.product_id,
+          link.cost_per_unit !== null ? Number(link.cost_per_unit) : null,
+        );
+      }
+    }
+
+    // Per-row enriched view (category + auditable cost).
+    type EnrichedRow = LowStockBySupplierRow & {
+      category_id: number | null;
+      category_name: string;
+      value_at_risk: number | null;
+      unauditable: boolean;
+    };
+    // Cost resolution must reject null, undefined AND NaN/Infinity. A loose
+    // `cost !== null` check used to let `undefined` slip through (when the
+    // preferred-supplier map has no entry for the product) — `current_stock *
+    // undefined` yields NaN, which then poisoned the KPI sum (NaN →
+    // JSON null → UI "$0"). We use `Number.isFinite` to gate both the
+    // multiplication and the later accumulator, so any non-finite value
+    // re-routes to `unauditable` / `unitsWithoutCost` instead of propagating.
+    const isFiniteCost = (v: number | null | undefined): v is number =>
+      typeof v === 'number' && Number.isFinite(v);
+    const enriched: EnrichedRow[] = rows.map((row) => {
+      const cat = categoryByProduct.get(row.product_id);
+      const preferredCost = supplierCostMap.get(row.product_id);
+      // Fallback cost: re-read product.cost_price for rows without a
+      // preferred supplier link.
+      const cost =
+        preferredCost !== undefined
+          ? preferredCost
+          : null; // resolved below in a second pass for the fallback case
+      return {
+        ...row,
+        category_id: cat?.id ?? null,
+        category_name: cat?.name ?? 'Sin categoría',
+        // Cost resolution handled by buildCostCoverage semantics below.
+        value_at_risk: isFiniteCost(cost) ? row.current_stock * cost : null,
+        unauditable: !isFiniteCost(cost),
+      };
+    });
+
+    // Fallback pass: re-read product.cost_price for rows with no preferred
+    // supplier cost (keeps the value_at_risk auditable when possible).
+    const needFallback = enriched.filter((r) => r.value_at_risk === null);
+    if (needFallback.length > 0) {
+      const fallback = await this.prisma.products.findMany({
+        where: {
+          id: { in: needFallback.map((r) => r.product_id) },
+        },
+        select: { id: true, cost_price: true },
+      });
+      const fallbackMap = new Map<number, number | null>();
+      for (const p of fallback) {
+        fallbackMap.set(
+          p.id,
+          p.cost_price !== null ? Number(p.cost_price) : null,
+        );
+      }
+      for (const row of enriched) {
+        if (row.value_at_risk !== null) continue;
+        const fallbackCost = fallbackMap.get(row.product_id);
+        if (isFiniteCost(fallbackCost)) {
+          row.value_at_risk = row.current_stock * fallbackCost;
+          row.unauditable = false;
+        }
+      }
+    }
+
+    // KPIs.
+    let totalLowStock = 0;
+    let totalOutOfStock = 0;
+    let totalValueAtRisk = 0;
+    let daysSum = 0;
+    let daysCount = 0;
+    let productsWithoutSupplier = 0;
+    // Tracks rows whose value_at_risk could not be resolved (no preferred
+    // supplier cost AND no product.cost_price fallback). They contribute
+    // zero to totalValueAtRisk but roll into cost_coverage so the UI can
+    // surface "X productos sin costo registrado — valor no auditable"
+    // instead of silently swallowing the gap.
+    let unitsWithoutCost = 0;
+    for (const r of enriched) {
+      if (r.status === 'low_stock') totalLowStock++;
+      else if (r.status === 'out_of_stock') totalOutOfStock++;
+      // `Number.isFinite` rejects NaN/Infinity; before this guard, a single
+      // NaN row would poison the SUM (`NaN + finite = NaN`) and bubble up to
+      // the frontend as `null` → KPI rendered as `$0`. Now non-finite values
+      // are routed to `unitsWithoutCost` so the cost-coverage UI can surface
+      // them instead.
+      if (Number.isFinite(r.value_at_risk)) {
+        totalValueAtRisk += r.value_at_risk as number;
+      } else {
+        unitsWithoutCost++;
+      }
+      if (r.days_without_sale !== null) {
+        daysSum += r.days_without_sale;
+        daysCount++;
+      }
+      if (r.supplier_id === null) productsWithoutSupplier++;
+    }
+
+    // Cost coverage mirrors the contract used by getInventoryValuation so
+    // the UI renders "X / Y con costo conocido" the same way across reports.
+    const unitsTotal = enriched.length;
+    const costCoverage = buildCostCoverage(unitsTotal, unitsWithoutCost);
+
+    // by_supplier (includes the null bucket as 'Sin proveedor asignado').
+    const supplierBuckets = new Map<
+      number | null,
+      {
+        supplier_id: number | null;
+        supplier_name: string;
+        low_stock_count: number;
+        out_of_stock_count: number;
+        value_at_risk: number;
+      }
+    >();
+    for (const r of enriched) {
+      const key = r.supplier_id;
+      const bucket =
+        supplierBuckets.get(key) ??
+        {
+          supplier_id: key,
+          supplier_name: r.supplier_name ?? 'Sin proveedor asignado',
+          low_stock_count: 0,
+          out_of_stock_count: 0,
+          value_at_risk: 0,
+        };
+      if (r.status === 'low_stock') bucket.low_stock_count++;
+      else if (r.status === 'out_of_stock') bucket.out_of_stock_count++;
+      if (Number.isFinite(r.value_at_risk)) bucket.value_at_risk += r.value_at_risk as number;
+      supplierBuckets.set(key, bucket);
+    }
+
+    // by_category (includes the null bucket as 'Sin categoría').
+    const categoryBuckets = new Map<
+      number | null,
+      {
+        category_id: number | null;
+        category_name: string;
+        low_stock_count: number;
+        out_of_stock_count: number;
+      }
+    >();
+    for (const r of enriched) {
+      const key = r.category_id;
+      const bucket =
+        categoryBuckets.get(key) ??
+        {
+          category_id: key,
+          category_name: r.category_name,
+          low_stock_count: 0,
+          out_of_stock_count: 0,
+        };
+      if (r.status === 'low_stock') bucket.low_stock_count++;
+      else if (r.status === 'out_of_stock') bucket.out_of_stock_count++;
+      categoryBuckets.set(key, bucket);
+    }
+
+    // top_critical — top 10 by value_at_risk DESC, excluding unauditable.
+    const auditable = enriched.filter(
+      (r) => !r.unauditable && Number.isFinite(r.value_at_risk),
+    );
+    const topCritical = auditable
+      .sort((a, b) => (b.value_at_risk as number) - (a.value_at_risk as number))
+      .slice(0, 10)
+      .map((r) => ({
+        product_id: r.product_id,
+        product_name: r.product_name,
+        sku: r.sku,
+        current_stock: r.current_stock,
+        min_threshold: r.min_threshold,
+        status: r.status,
+        supplier_name: r.supplier_name,
+        value_at_risk: Math.round((r.value_at_risk as number) * 100) / 100,
+      }));
+
+    const envelope: LowStockBySupplierAnalyticsEnvelope = {
+      kpis: {
+        total_low_stock: totalLowStock,
+        total_out_of_stock: totalOutOfStock,
+        total_value_at_risk: Math.round(totalValueAtRisk * 100) / 100,
+        avg_days_without_sale:
+          daysCount > 0 ? Math.round((daysSum / daysCount) * 100) / 100 : null,
+        products_without_supplier: productsWithoutSupplier,
+      },
+      by_supplier: Array.from(supplierBuckets.values()).map((b) => ({
+        supplier_id: b.supplier_id,
+        supplier_name: b.supplier_name,
+        low_stock_count: b.low_stock_count,
+        out_of_stock_count: b.out_of_stock_count,
+        value_at_risk: Math.round(b.value_at_risk * 100) / 100,
+      })),
+      by_category: Array.from(categoryBuckets.values()),
+      top_critical: topCritical,
+      // Cobertura del valor-en-riesgo: cuando unidades sin costo > 0,
+      // `total_value_at_risk` está subestimado. El frontend usa este campo
+      // para mostrar "X / Y con costo conocido" en la card de valor.
+      cost_coverage: costCoverage,
+      // history_30d intentionally omitted — no daily stock snapshot table
+      // exists in the current schema (Phase A.2 decision, ADR-2).
+    };
+
+    return envelope;
   }
 }

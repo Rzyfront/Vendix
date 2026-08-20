@@ -1,7 +1,15 @@
 :host {
   display: block;
-  width: 100%;
+  margin: -16px;
+  @media (min-width: 768px) { margin: -24px; }
 }
+
+/* Canonical pattern (mirrors customer-summary): the space-y-6 wrapper applies
+   margin-top:1.5rem to all siblings, but the stats-container must sit flush with
+   the sticky header above it — reset its margin so the wrapper's gap stays
+   between the other sections. */
+:host ::ng-deep .stats-container { margin: 0; margin-top: 0 !important; }
+:host ::ng-deep .results-header { padding: 0.75rem 1rem; }
 
 .catalog-section {
   display: flex;

@@ -58,6 +58,8 @@ export class AnalyticsShellComponent {
     '/admin/analytics/inventory/valuation': '/admin/reports/inventory/inventory-valuation',
     '/admin/analytics/inventory/movements': '/admin/reports/inventory/inventory-movements',
     '/admin/analytics/inventory/movement-analysis': '/admin/reports/inventory/inventory-movement-analysis',
+    // CP-low-stock-by-supplier / Phase H — drill-down target (FB-07).
+    '/admin/analytics/inventory/low-stock-by-supplier': '/admin/reports/inventory/inventory-low-stock-by-supplier',
     // Products
     '/admin/analytics/products/performance': '/admin/reports/products/product-performance',
     '/admin/analytics/products/top-sellers': '/admin/reports/products/product-top-sellers',

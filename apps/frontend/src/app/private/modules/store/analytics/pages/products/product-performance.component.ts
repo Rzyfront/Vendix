@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject, signal,
+import {Component, OnInit, OnDestroy, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -10,6 +10,10 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -46,6 +50,7 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     ExportButtonComponent,
     DateRangeFilterComponent,
     AnalyticsCardComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './product-performance.component.html',
   styleUrls: ['./product-performance.component.scss'] })
@@ -133,6 +138,20 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
 
   exportReport(): void {
     this.store.dispatch(ProductsActions.exportProductsReport());
+  }
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   onDateRangeChange(range: DateRangeFilter): void {

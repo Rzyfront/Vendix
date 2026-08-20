@@ -53,6 +53,13 @@ export const reportsRoutes: Routes = [
           { path: 'inventory-overview', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-overview' } },
           { path: 'inventory-stock-info', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-stock-info' } },
           { path: 'inventory-low-stock', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-low-stock' } },
+          // CP-low-stock-by-supplier — custom page (not the generic viewer)
+          // because it needs a searchable supplier dropdown + a status
+          // filter that the viewer doesn't expose.
+          {
+            path: 'inventory-low-stock-by-supplier',
+            loadComponent: () => import('./pages/inventory-low-stock-by-supplier/inventory-low-stock-by-supplier.component').then(c => c.InventoryLowStockBySupplierComponent),
+          },
           { path: 'inventory-valuation', loadComponent: () => import('./pages/inventory/inventory-valuation-report/inventory-valuation-report.component').then(c => c.InventoryValuationReportComponent) },
           { path: 'inventory-movements', loadComponent: () => import('./pages/inventory/inventory-movements-report/inventory-movements-report.component').then(c => c.InventoryMovementsReportComponent) },
           { path: 'inventory-movement-analysis', loadComponent: () => import('./pages/inventory/inventory-movement-analysis-report/inventory-movement-analysis-report.component').then(c => c.InventoryMovementAnalysisReportComponent) },
@@ -89,6 +96,7 @@ export const reportsRoutes: Routes = [
           { path: '', redirectTo: 'purchase-summary', pathMatch: 'full' },
           { path: 'purchase-summary', loadComponent: () => import('./pages/purchases/purchase-summary-report/purchase-summary-report.component').then(c => c.PurchaseSummaryReportComponent) },
           { path: 'purchase-by-supplier', loadComponent: () => import('./pages/purchases/purchase-by-supplier-report/purchase-by-supplier-report.component').then(c => c.PurchaseBySupplierReportComponent) },
+          { path: 'purchase-trends', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'purchase-trends' } },
         ],
       },
       {
@@ -98,6 +106,7 @@ export const reportsRoutes: Routes = [
         children: [
           { path: '', redirectTo: 'reviews-summary', pathMatch: 'full' },
           { path: 'reviews-summary', loadComponent: () => import('./pages/reviews/reviews-summary-report/reviews-summary-report.component').then(c => c.ReviewsSummaryReportComponent) },
+          { path: 'reviews-by-product', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'reviews-by-product' } },
         ],
       },
       {

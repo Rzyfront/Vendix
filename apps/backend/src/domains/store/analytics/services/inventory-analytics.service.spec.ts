@@ -53,7 +53,7 @@ describe('InventoryAnalyticsService', () => {
       is_owner: false,
     } as any);
 
-    service = new InventoryAnalyticsService(prisma as any);
+    service = new InventoryAnalyticsService(prisma as any, {} as any);
   });
 
   afterEach(() => {

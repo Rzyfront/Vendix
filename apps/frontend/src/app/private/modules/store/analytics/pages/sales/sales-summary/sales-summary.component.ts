@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject, signal,
+import {Component, OnInit, OnDestroy, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
@@ -10,6 +10,10 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import {
+  OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -41,6 +45,7 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     StatsComponent,
     ChartComponent,
     IconComponent,
+    OptionsDropdownComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
     CurrencyPipe,
@@ -121,6 +126,25 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
 
   exportReport(): void {
     this.store.dispatch(SalesActions.exportSalesReport());
+  }
+
+  /**
+   * Actions exposed via the `<app-options-dropdown>` in the card header.
+   * Single action today (Export XLSX); kept as a `DropdownAction[]` computed
+   * so future actions slot in without changing the template.
+   */
+  dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   onDateRangeChange(range: DateRangeFilter): void {

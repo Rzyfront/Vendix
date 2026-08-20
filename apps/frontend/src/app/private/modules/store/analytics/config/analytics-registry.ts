@@ -237,6 +237,17 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'line-chart',
   },
 
+  {
+    // CP-low-stock-by-supplier / Phase H — analytics shell for FB-06.
+    key: 'inventory_low_stock_by_supplier',
+    title: 'Stock Bajo por Proveedor',
+    description: 'Analisis de bajo stock agrupado por proveedor y categoria',
+    detailedDescription: 'Vista analitica del reporte operativo de stock bajo: distribucion por proveedor, por categoria y serie historica.',
+    route: '/admin/analytics/inventory/low-stock-by-supplier',
+    category: 'inventory',
+    icon: 'truck',
+  },
+
   // Products (3)
   {
     key: 'products_performance',

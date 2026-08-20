@@ -4678,6 +4678,42 @@ export const ErrorCodes = {
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
   },
+
+  // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).
+  // 400 y no 404: el proveedor no existe o pertenece a otra tienda; la
+  // petición nunca llegó a ser una búsqueda real contra el row del
+  // proveedor, así que devolver 404 afirmaría que se buscó y no se
+  // encontró cuando lo cierto es que el identificador no es legal para
+  // el contexto del usuario. ERR-01 en el plan.
+  LOW_STOCK_BY_SUPPLIER_001: {
+    code: 'LOW_STOCK_BY_SUPPLIER_001',
+    httpStatus: 400,
+    devMessage:
+      'The supplier_id filter does not match any active supplier of the current store',
+  },
+
+  // Reporte "Stock Bajo por Proveedor" — estado inválido.
+  // 400: el DTO acepta `low_stock | out_of_stock | all`; cualquier otro
+  // valor cae al class-validator genérico (SYS_VALIDATION_001) si el
+  // cliente lo manda por query. Este código se emite cuando el servicio
+  // lo construye internamente y se topa con un valor que no debería
+  // existir. ERR-02 en el plan.
+  LOW_STOCK_BY_SUPPLIER_002: {
+    code: 'LOW_STOCK_BY_SUPPLIER_002',
+    httpStatus: 400,
+    devMessage:
+      'The status filter must be one of: low_stock, out_of_stock, all',
+  },
+
+  // Genérico para endpoints de analytics: rango de fechas con `from > to`.
+  // 400: el DTO acepta strings ISO; la invariante de orden es responsabilidad
+  // del servicio. ERR-05 en el plan (low-stock-by-supplier analytics).
+  ANALYTICS_DATE_RANGE_001: {
+    code: 'ANALYTICS_DATE_RANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'Invalid date range: history_from must be less than or equal to history_to',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

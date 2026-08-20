@@ -8,6 +8,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   FilterConfig,
   FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
@@ -35,6 +36,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     StatsComponent,
     ChartComponent,
     OptionsDropdownComponent,
+    IconComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],

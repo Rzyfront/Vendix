@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, DestroyRef, computed} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
@@ -8,9 +8,11 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   FilterConfig,
   FilterValues,
+  DropdownAction,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
@@ -46,6 +48,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     StatsComponent,
     ChartComponent,
     OptionsDropdownComponent,
+    IconComponent,
     ExportButtonComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
@@ -205,6 +208,20 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
 
   exportReport(): void {
     this.store.dispatch(AbandonedCartsActions.exportAbandonedCartsReport());
+  }
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   getGrowthText(growth?: number): string {

@@ -1,7 +1,7 @@
-<div>
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
   <!-- Stats Cards -->
   @if (loading()) {
-    <div class="stats-container">
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
       @for (i of [1, 2, 3, 4]; track i) {
         <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
           <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
@@ -48,33 +48,27 @@
     </div>
   }
 
-  <!-- Filter Bar -->
-  <div
-    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
-  >
-    <div class="flex items-center justify-between gap-2">
-      <div class="min-w-0">
-        <h2
-          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
-        >
-          Rentabilidad de Productos
-        </h2>
-        <p
-          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
-        >
-          Analiza márgenes de ganancia y rentabilidad por producto
-        </p>
+    <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+    <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2 min-w-0">
+        <app-icon name="trending-up" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+        <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Rentabilidad de Productos</span>
       </div>
-
-      <div class="flex items-center gap-2 flex-shrink-0">
-        <vendix-export-button
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
+      <div class="flex items-end gap-2 flex-wrap shrink-0">
+      <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="[]"
+                [actions]="dropdownActions()"
+                [showActions]="true"
+                triggerLabel="Acciones"
+                triggerIcon="plus"
+                [isLoading]="exporting()"
+                (actionClick)="onActionsDropdownClick($event)"
+              ></app-options-dropdown>
       </div>
     </div>
-  </div>
+    <div class="p-4 space-y-6">
+
 
   <!-- Charts Grid -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:mt-4">
@@ -85,7 +79,7 @@
       overflow="hidden"
       [showHeader]="true"
     >
-      <div slot="header" class="flex flex-col">
+      <div slot="header" class="results-header flex flex-col">
         <span class="text-sm font-bold text-[var(--color-text-primary)]"
           >Distribución por Rentabilidad</span
         >
@@ -123,7 +117,7 @@
       overflow="hidden"
       [showHeader]="true"
     >
-      <div slot="header" class="flex items-center justify-between">
+      <div slot="header" class="results-header flex items-center justify-between">
         <div class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]"
             >Top 5 por Ganancia</span
@@ -169,7 +163,7 @@
       [showHeader]="true"
       class="lg:col-span-2"
     >
-      <div slot="header" class="flex flex-col">
+      <div slot="header" class="results-header flex flex-col">
         <span class="text-sm font-bold text-[var(--color-text-primary)]"
           >Comparativa: Ingresos, Costos y Ganancia</span
         >
@@ -210,6 +204,8 @@
       @for (view of productsViews; track view.key) {
         <app-analytics-card [view]="view"></app-analytics-card>
       }
+    </div>
+  </app-card>
     </div>
   </app-card>
 </div>

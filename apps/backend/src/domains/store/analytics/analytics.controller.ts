@@ -17,6 +17,10 @@ import {
   InventoryAnalyticsQueryDto,
   ProductsAnalyticsQueryDto,
 } from './dto/analytics-query.dto';
+import {
+  LowStockBySupplierQueryDto,
+  LowStockBySupplierAnalyticsQueryDto,
+} from './dto/low-stock-by-supplier-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
   buildReportBuffer,
@@ -592,6 +596,107 @@ export class AnalyticsController {
     await this.emitReport(res, 'inventario', tz, [
       this.toSheet('Inventario', columns, rows, tz),
     ]);
+  }
+
+  // ==================== LOW STOCK BY SUPPLIER (CP-low-stock-by-supplier) ====================
+  // Reporte operativo para el comprador: une bajo stock (ADR-1) con proveedor
+  // preferido (ADR-3), última OC (PURCHASE_COMMITTED_STATES) y velocidad de
+  // rotación (COMPLETED_SALE_STATES). Tres endpoints: pantalla, XLSX, analytics.
+
+  @Get('inventory/low-stock-by-supplier')
+  @Permissions('store:analytics:read')
+  async getLowStockBySupplier(@Query() query: LowStockBySupplierQueryDto) {
+    return this.inventory_analytics_service.getLowStockBySupplier(query);
+  }
+
+  @Get('inventory/low-stock-by-supplier/export')
+  @Permissions('store:analytics:read')
+  async exportLowStockBySupplierXlsx(
+    @Query() query: LowStockBySupplierQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    // ADR-5: the service returns { rows, truncated }. When truncated, the
+    // LAST row of `rows` is a synthetic "AVISO" row painted by the service
+    // (see `buildLowStockTruncationAvisoRow`) so the warning lands inside
+    // the spreadsheet itself — easier to spot than a header banner. The
+    // controller does not need to branch on `truncated` here.
+    const { rows } =
+      await this.inventory_analytics_service.getLowStockBySupplierForExport(
+        query,
+      );
+
+    const columns: ReportColumn[] = [
+      { key: 'product_id', header: 'ID Producto', type: 'number' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'current_stock', header: 'Stock Actual', type: 'number' },
+      { key: 'previous_stock', header: 'Stock Anterior', type: 'number' },
+      {
+        key: 'previous_stock_source',
+        header: 'Fuente Stock Ant.',
+        type: 'text',
+        width: 14,
+      },
+      { key: 'delta', header: 'Delta', type: 'number' },
+      { key: 'min_threshold', header: 'Stock Mínimo', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'supplier_id', header: 'ID Proveedor', type: 'number' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_sku', header: 'SKU Proveedor', type: 'text' },
+      {
+        key: 'last_purchase_date',
+        header: 'Última Compra',
+        type: 'date-only',
+      },
+      {
+        key: 'last_purchase_cost',
+        header: 'Costo Última Compra',
+        type: 'currency',
+      },
+      {
+        key: 'last_purchase_po_number',
+        header: 'OC Última Compra',
+        type: 'text',
+      },
+      {
+        key: 'days_without_sale',
+        header: 'Días Sin Venta',
+        type: 'number',
+      },
+      {
+        key: 'units_per_package',
+        header: 'Unidades/Paquete',
+        type: 'number',
+      },
+    ];
+
+    await this.emitReport(res, 'stock_bajo_por_proveedor', tz, [
+      this.toSheet('Stock Bajo por Proveedor', columns, rows, tz),
+    ]);
+  }
+
+  /**
+   * Analytics envelope para la vista paralela (Fase H, FB-06). Devuelve
+   * series pre-agregadas (kpis, by_supplier, by_category, top_critical,
+   * history_30d opcional). La caché de analytics del frontend debe incluir
+   * `supplier_id` en la llave para evitar filtraciones cruzadas.
+   */
+  @Get('inventory/low-stock-by-supplier/analytics')
+  @Permissions('store:analytics:read')
+  async getLowStockBySupplierAnalytics(
+    @Query() query: LowStockBySupplierAnalyticsQueryDto,
+  ) {
+    const result =
+      await this.inventory_analytics_service.getLowStockBySupplierAnalytics(
+        query,
+      );
+    // Envelope MUST travel under `data` so the two consumers
+    // (report page L386 + analytics page L261) read `res.data`. There is no
+    // global response interceptor that rewraps — every other endpoint in
+    // this controller calls `this.response_service.success(...)`. Blocker
+    // audit #3.
+    return this.response_service.success(result);
   }
 
   // ==================== CUSTOMERS ANALYTICS ====================

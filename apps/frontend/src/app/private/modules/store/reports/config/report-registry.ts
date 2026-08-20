@@ -561,6 +561,48 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // CP-low-stock-by-supplier: operativo para el comprador. Une bajo stock
+    // (ADR-1, contra `stock_levels.quantity_available` agregado) con
+    // proveedor preferido (ADR-3), última OC (`PURCHASE_COMMITTED_STATES`)
+    // y velocidad de rotación (`COMPLETED_SALE_STATES`). El selector de
+    // proveedor con búsqueda vive en la página custom
+    // `pages/inventory-low-stock-by-supplier/` (F.1), NO en el viewer
+    // genérico.
+    id: 'inventory-low-stock-by-supplier',
+    category: 'inventory',
+    title: 'Stock Bajo por Proveedor',
+    description:
+      'Productos con bajo stock o sin stock, agrupados por proveedor preferido, con última OC y días sin venta.',
+    detailedDescription:
+      'Filtra por proveedor, categoría y estado (bajo stock / sin stock). Útil para emitir un solo pedido agrupado: muestra qué hay que pedir, cuánto se va a tardar en rotar y cuándo fue la última compra.',
+    icon: 'truck',
+    route: '/admin/reports/inventory/inventory-low-stock-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'current_stock', header: 'Stock Actual', type: 'number' },
+      { key: 'min_threshold', header: 'Stock Mínimo', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'last_purchase_date', header: 'Última Compra', type: 'date-only' },
+      { key: 'days_without_sale', header: 'Días Sin Venta', type: 'number' },
+    ],
+    exportFilename: 'stock_bajo_por_proveedor',
+    stats: [
+      { key: 'total_low_stock', label: 'Productos Bajo Stock', type: 'number', icon: 'alert-triangle' },
+      { key: 'total_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
+      { key: 'products_without_supplier', label: 'Sin Proveedor', type: 'number', icon: 'package-x' },
+      { key: 'avg_days_without_sale', label: 'Días Prom. Sin Venta', type: 'number', icon: 'clock' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/low-stock-by-supplier',
+    exportEndpoint: 'store/analytics/inventory/low-stock-by-supplier/export',
+  },
+
+  {
     id: 'inventory-valuation',
     category: 'inventory',
     title: 'Valoracion',

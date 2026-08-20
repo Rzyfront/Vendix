@@ -30,6 +30,7 @@ import {
   MovementSummaryItem,
   MovementTrend,
 } from '../interfaces/inventory-analytics.interface';
+import { LowStockBySupplierAnalyticsEnvelope } from '../interfaces/low-stock-by-supplier-analytics.interface';
 import {
   ProductsSummary,
   TopSellingProduct,
@@ -770,6 +771,36 @@ export class AnalyticsService {
 
   exportMovementsXlsx(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('inventory/movements/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  /**
+   * CP-low-stock-by-supplier / Phase H — pre-aggregated envelope for the
+   * analytics shell (FB-06). Cache key MUST include `supplier_id` /
+   * `category_id` / `date_from` / `date_to` so FB-07's
+   * "drill-down from chart → report" works without leaking a previous
+   * supplier's data through the cache.
+   */
+  getLowStockBySupplierAnalytics(
+    query: Record<string, any> = {},
+  ): Observable<ApiResponse<LowStockBySupplierAnalyticsEnvelope>> {
+    const cacheKey = `inventory-low-stock-by-supplier-analytics-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<LowStockBySupplierAnalyticsEnvelope>>(
+        this.getApiUrl('inventory/low-stock-by-supplier/analytics'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  /**
+   * XLSX export for the "Stock Bajo por Proveedor" report.
+   * Filters mirror the rows endpoint (`supplier_id`, `category_id`, `status`).
+   */
+  exportLowStockBySupplier(query: Record<string, any> = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('inventory/low-stock-by-supplier/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

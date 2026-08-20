@@ -38,8 +38,17 @@ function sanitizeFilename(filename: string): string {
  * `rows` for the sheet) or by an in-browser paginator (the caller slices
  * server-side using `page` / `limit`).
  *
- * If `query.page` AND `query.limit` are present, returns a paginated
- * envelope; otherwise returns a success envelope with the full array.
+ * **Always returns a paginated envelope** (`{ data, meta: { total, page,
+ * limit, totalPages, ... } }`) — even when no `page` / `limit` were passed,
+ * so every analytics endpoint exposes a consistent shape to clients. The
+ * non-paginated branch delegates to `responseService.paginated(rows,
+ * rows.length, 1, rows.length || 1)` which keeps `meta.total === rows.length`
+ * and `meta.limit === rows.length` (1 when the array is empty, so the meta
+ * stays a single-page envelope).
+ *
+ * FB-01 contract requires `{ data, meta: { total, page, limit } }` on every
+ * successful response, so we never fall back to `responseService.success(rows)`
+ * (which omits `meta` and breaks `rows.meta?.total ?? 0` on the frontend).
  *
  * Centralized here (QUI-573 transversal) so every analytics controller uses
  * the same shape — no copy/pasted `if (Array.isArray)` branches per route.
@@ -60,7 +69,15 @@ export function paginatedOrAll<T = unknown>(
   const page = query?.page;
   const limit = query?.limit;
   if (!page || !limit) {
-    return responseService.success(rows);
+    // No pagination requested: still emit a paginated envelope with
+    // meta.total === rows.length and meta.limit === rows.length so the
+    // client sees the same shape it gets from the paginated branch.
+    return responseService.paginated(
+      rows,
+      rows.length,
+      1,
+      rows.length || 1,
+    );
   }
   const total = rows.length;
   const offset = (page - 1) * limit;
