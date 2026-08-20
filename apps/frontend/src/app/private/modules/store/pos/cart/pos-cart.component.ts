@@ -40,6 +40,11 @@ import {
   formatSaleQuantity,
   isSaleUnitLine as isLineCapturedInSaleUnit,
 } from '../utils/line-units.util';
+import {
+  EMPTY_CART_MESSAGE,
+  EMPTY_CART_INLINE_TITLE,
+  EMPTY_CART_INLINE_HINT,
+} from '../../../../../core/utils/error-messages';
 
 @Component({
   selector: 'app-pos-cart',
@@ -441,7 +446,6 @@ import {
                   (click)="charge.emit()"
                   [disabled]="isEmpty() || isCharging()"
                   [attr.aria-busy]="isCharging() ? 'true' : null"
-                  aria-label="Cobrar la orden editada"
                 >
                   <app-icon name="credit-card" [size]="18"></app-icon>
                   <span>Cobrar</span>
@@ -492,10 +496,10 @@ import {
               ></app-icon>
             </div>
             <h3 class="text-sm font-semibold text-text-primary mb-1">
-              Tu carrito está vacío
+              {{ emptyCartTitle }}
             </h3>
             <p class="text-[11px] text-text-secondary">
-              Selecciona productos en el panel izquierdo
+              {{ emptyCartHint }}
             </p>
           </div>
         }
@@ -978,6 +982,13 @@ private cartService = inject(PosCartService);
   private saleUnitService = inject(PosSaleUnitService);
 
   readonly cartState = this.cartService.cartState;
+  // QUI-audit-round-1: copy centralizada para los tres sitios que muestran
+  // «El carrito está vacío» (estado inline, toast de `proceedToPayment` y
+  // mensaje de error genérico). Cualquier ajuste futuro vive en un único
+  // archivo en lugar de tres.
+  readonly emptyCartMessage = EMPTY_CART_MESSAGE;
+  readonly emptyCartTitle = EMPTY_CART_INLINE_TITLE;
+  readonly emptyCartHint = EMPTY_CART_INLINE_HINT;
   readonly availableTiers = signal<PriceTier[]>([]);
   /** Per-product (number key) override cache so the selector resolves instantly. */
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
@@ -1567,7 +1578,7 @@ private cartService = inject(PosCartService);
   proceedToPayment(): void {
     const currentState = this.cartService.getCurrentState();
     if (currentState.items.length === 0) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(this.emptyCartMessage);
       return;
     }
 

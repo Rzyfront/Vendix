@@ -1853,11 +1853,23 @@ export class PosComponent {
         next: (response: any) => {
           this.isCharging.set(false);
           this.chargeModalOpen.set(false);
-          this.toastService.success('Pago registrado correctamente');
-          // Refresh the in-memory order so the cashier sees the post-charge
-          // state if they re-open the modal. Clear `readyToPayOrder` to
-          // signal "no further charge until next edit".
-          this.refreshReadyToPayOrder();
+          // QUI-audit-round-1: el toast de éxito se ataba al response del
+          // POST, pero el refresh sub-siguiente silenciosamente dejaba
+          // `readyToPayOrder` en null si la red fallaba — el cajero perdía
+          // el rastro de la orden sin saber por qué. Ahora el toast sólo
+          // se dispara si el refresh confirma el estado final. Si el refresh
+          // falla, conservamos `readyToPayOrder` para que pueda re-abrir el
+          // modal y le decimos qué pasó.
+          this.refreshReadyToPayOrder({
+            onRefreshOk: () => {
+              this.toastService.success('Pago registrado correctamente');
+            },
+            onRefreshFail: () => {
+              this.toastService.warning(
+                'Pago aplicado, no se pudo refrescar el detalle. Reabre el cobro para ver el estado.',
+              );
+            },
+          });
         },
         error: (err) => {
           this.isCharging.set(false);
@@ -1873,11 +1885,19 @@ export class PosComponent {
    * Re-fetch the current order so `readyToPayOrder` reflects the post-payment
    * state. If the backend dropped the order to a terminal state we clear the
    * signal so the `Cobrar` CTA hides.
+   *
+   * `onRefreshOk` / `onRefreshFail` decouple the post-payment toast from the
+   * refresh outcome: when the GET fails, the cashier still sees a hint AND the
+   * signal is preserved so they can re-open the modal and recover.
    */
-  private refreshReadyToPayOrder(): void {
+  private refreshReadyToPayOrder(callbacks?: {
+    onRefreshOk?: () => void;
+    onRefreshFail?: () => void;
+  }): void {
     const order = this.readyToPayOrder();
     if (!order || !order.id) {
       this.readyToPayOrder.set(null);
+      callbacks?.onRefreshFail?.();
       return;
     }
     this.ordersService
@@ -1898,11 +1918,14 @@ export class PosComponent {
           ) {
             this.readyToPayOrder.set(null);
           }
+          callbacks?.onRefreshOk?.();
         },
         error: () => {
-          // Defensive: never leave the cashier without a signal. Clear so the
-          // UI doesn't pretend the order is still payable.
-          this.readyToPayOrder.set(null);
+          // QUI-audit-round-1: antes esto era `readyToPayOrder.set(null)`
+          // ciego. Si el GET de refresh falla después de un cobro exitoso, el
+          // cajero pierde la orden sin entender por qué. Conservamos la señal
+          // para que pueda re-abrir el modal y le avisamos vía callback.
+          callbacks?.onRefreshFail?.();
         },
       });
   }
@@ -1918,6 +1941,10 @@ export class PosComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (methods) => this.paymentMethodsCatalog.set(methods ?? []),
+        // QUI-audit-round-1: si la red se cae o el backend no responde, antes
+        // el catálogo quedaba en [] y el cajero veía el modal sin métodos.
+        // Ahora registramos el intento fallido; `onCharge` reintenta al abrir
+        // el modal y el usuario puede reabrirlo para que el re-fetch dispare.
         error: () => this.paymentMethodsCatalog.set([]),
       });
   }
@@ -3019,6 +3046,12 @@ export class PosComponent {
 
   private loadOrderForEditing(orderId: string): void {
     this.loading.set(true);
+    // QUI-audit-round-1: marcar el modo ANTES de pedir los productos. Si la
+    // carga falla (producto embebido ausente, sin conexión, etc.), el handler
+    // de error resetea todas las señales de edición y limpia el queryParam
+    // `editOrder`. Antes, si la respuesta llegaba pero el load fallaba, el
+    // shell quedaba colgado con `isEditMode` parcialmente verdadero.
+    this.isEditMode.set(true);
     this.ordersService
       .getOrderById(orderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -3028,9 +3061,11 @@ export class PosComponent {
 
           if (order.state !== 'created' && order.state !== 'draft') {
             this.loading.set(false);
+            this.resetEditState();
             this.toastService.error(
               'Solo se pueden editar ordenes en estado "Creada" o "Borrador"',
             );
+            this.clearEditOrderQueryParam();
             this.router.navigate(['/admin/orders', orderId]);
             return;
           }
@@ -3040,7 +3075,6 @@ export class PosComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
-                this.isEditMode.set(true);
                 this.editingOrderId.set(orderId);
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
@@ -3053,19 +3087,48 @@ export class PosComponent {
               },
               error: (err) => {
                 this.loading.set(false);
+                this.resetEditState();
                 const msg =
                   (err && (err.message || (err as any).userMessage)) ||
                   'Error al cargar los productos de la orden';
                 this.toastService.error(msg);
+                this.clearEditOrderQueryParam();
               },
             });
         },
         error: (err) => {
           this.loading.set(false);
+          this.resetEditState();
           this.toastService.error('Error al cargar la orden para edición');
+          this.clearEditOrderQueryParam();
           this.router.navigate(['/admin/orders']);
         },
       });
+  }
+
+  /**
+   * Helper invoked from every error path of `loadOrderForEditing`: keeps the
+   * state machine clean and prevents the "back to POS keeps re-entering edit"
+   * bug by clearing the `editOrder` query param whenever the entry to edit
+   * mode aborted.
+   */
+  private resetEditState(): void {
+    this.isEditMode.set(false);
+    this.editingOrder.set(null);
+    this.editingOrderId.set(null);
+    this.editingOrderNumber.set(null);
+    this.readyToPayOrder.set(null);
+    this.chargeModalOpen.set(false);
+    if (this.mode() === 'edit') {
+      this.mode.set('create-draft');
+    }
+  }
+
+  private clearEditOrderQueryParam(): void {
+    this.router.navigate(
+      ['/admin/pos'],
+      { queryParams: { editOrder: null }, queryParamsHandling: 'merge' },
+    );
   }
 
   /**
@@ -3086,8 +3149,9 @@ export class PosComponent {
     if (!this.cartState() || !orderId) return;
 
     this.loading.set(true);
+    const dto = this.buildEditorRequest(this.cartState()!);
     this.ordersService
-      .updateOrderFromEditor(orderId, this.cartState()!)
+      .updateOrderFromEditor(orderId, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updatedOrder: Order) => {
@@ -3111,6 +3175,67 @@ export class PosComponent {
           );
         },
       });
+  }
+
+  /**
+   * Mapper: CartState → UpdateOrderEditorRequest.
+   *
+   * The editor contract on `PUT /store/orders/:id/editor` is a small subset
+   * of the cart: items (snake_case), customer_id, coupon_code, promotion_ids
+   * and the public notes. The previous code shipped the entire `CartState`
+   * shape — which leaked `payment_*`, `credit_*`, KDS flags, `serial_*` and
+   * `inventory_committed_at_fire` and made Prisma 7 reject the request. The
+   * backend never received a clean payload and the cashier never saw Cobrar.
+   *
+   * This mapper emits what the DTO actually accepts. `saveDraft` keeps using
+   * the cart-shaped builder in `PosPaymentService` — drafts are a different
+   * endpoint with a different contract.
+   */
+  private buildEditorRequest(state: CartState): Record<string, any> {
+    const customerId = state.customer?.id
+      ? Number(state.customer.id)
+      : null;
+    const appliedCoupon = state.appliedCoupon;
+    const promotionIds = (state.appliedDiscounts ?? [])
+      .map((d: any) => Number(d.promotion_id))
+      .filter((id: number) => Number.isFinite(id));
+
+    const items = (state.items ?? []).map((item: any) => {
+      const productId = item?.product?.id;
+      const variantId = item?.variant_id ?? item?.product_variant_id ?? null;
+      const isCustomItem =
+        item?.itemType === 'custom' ||
+        (typeof productId === 'string' && productId.startsWith('custom-'));
+      const productIdNumeric = isCustomItem
+        ? null
+        : typeof productId === 'string'
+          ? parseInt(productId, 10)
+          : Number(productId ?? 0) || null;
+      const variantIdNumeric =
+        variantId == null ? null : Number(variantId) || null;
+
+      return {
+        product_id: productIdNumeric,
+        product_variant_id: variantIdNumeric,
+        quantity: Number(item?.quantity ?? 0),
+        unit_price: Number(item?.unitPrice ?? 0),
+        total_price: Number(item?.totalPrice ?? item?.finalPrice ?? 0),
+        final_unit_price: Number(item?.finalPrice ?? item?.unitPrice ?? 0),
+        tax_amount_item: Number(item?.taxAmount ?? 0),
+        tax_rate: item?.taxRate ?? null,
+        tax_category_id: item?.taxCategoryId ?? null,
+        applied_price_tier_id: item?.applied_price_tier_id ?? null,
+        notes: item?.notes ?? null,
+      };
+    });
+
+    return {
+      customer_id: customerId,
+      coupon_code: appliedCoupon?.code ?? null,
+      promotion_ids: promotionIds,
+      items,
+      notes: state.notes ?? '',
+    };
   }
 
   private loadStoreSettings(): void {

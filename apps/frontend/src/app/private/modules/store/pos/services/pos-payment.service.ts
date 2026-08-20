@@ -795,6 +795,11 @@ export class PosPaymentService {
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
       promotion_ids: this.getAppliedPromotionIds(cartState),
+      // QUI-audit-round-1: el backend recalcula el descuento a partir de
+      // `promotion_ids` + `coupon_code` y es la fuente de verdad; sin esto, el cupn
+      // se perdía al guardar el borrador y reaparecía como `coupon_code = null`.
+      coupon_id: cartState.appliedCoupon?.id ?? null,
+      coupon_code: cartState.appliedCoupon?.code ?? null,
       total_amount: Number(cartState.summary.total.toFixed(2)),
       is_draft: true,
       requires_payment: false,

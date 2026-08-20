@@ -963,6 +963,37 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La lectura de la factura llegó dañada. Vuelve a intentarlo con una imagen más nítida.',
   INV_SCAN_INCOMPLETE:
     'No se pudieron leer los datos mínimos de la factura (proveedor y productos). Sube una imagen más nítida o la página donde aparece el detalle de los productos.',
+
+  // POS — flujo de venta y edición de orden (QUI-audit-round-1)
+  // El cajero o el sistema corrigen estos códigos sin reiniciar la pantalla.
+  POS_CUSTOMER_REQUIRED_001:
+    'Selecciona o crea un cliente antes de guardar la orden.',
+  POS_DRAFT_REQUIRES_PAYMENT_001:
+    'No puedes cobrar y guardar borrador al mismo tiempo. Guarda la orden primero y luego cobra.',
+  POS_STOCK_INSUFFICIENT_001:
+    'No hay stock suficiente para uno o más productos.',
+  ORD_EDIT_STATE_CHANGED_001:
+    'La orden cambió mientras se editaba. Actualiza la pantalla.',
+  ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',
+  ORD_EDIT_CUSTOMER_STORE_MISMATCH_001:
+    'El cliente no pertenece a esta tienda.',
+  ORD_EDIT_INVALID_SHIPPING_001:
+    'Revisa la dirección, el método y el costo de envío.',
+  ORD_EDIT_INVALID_STATE_001:
+    'No se pudo guardar la orden. Vuelve a cargarla.',
+  ORD_EDIT_PROMOTION_INVALID_001:
+    'La promoción o cupón ya no está disponible.',
+  ORD_EDIT_COUPON_COMMIT_001:
+    'No fue posible registrar el cupón. Revisa la orden.',
+  ORD_EDIT_RESPONSE_MISMATCH_001:
+    'La orden se guardó pero no se pudo recargar. Actualiza el detalle.',
+  ORD_FLOW_PAYMENT_FAILED_001:
+    'No se pudo registrar el cobro. La orden sigue pendiente.',
 };
+
+export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';
+export const EMPTY_CART_INLINE_TITLE = 'Tu carrito está vacío';
+export const EMPTY_CART_INLINE_HINT =
+  'Selecciona productos en el panel izquierdo';
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

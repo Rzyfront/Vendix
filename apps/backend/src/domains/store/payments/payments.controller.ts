@@ -12,6 +12,7 @@ import {
   HttpStatus,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -50,6 +51,8 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 @ApiBearerAuth()
 @UseGuards(PermissionsGuard)
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly responseService: ResponseService,
@@ -274,11 +277,8 @@ export class PaymentsController {
    * rewriting the handler.
    */
   private logControllerError(prefix: string, error: unknown): void {
-    const logger = new (require('@nestjs/common').Logger)(
-      PaymentsController.name,
-    );
     const stack = error instanceof Error ? error.stack : undefined;
-    logger.error(prefix, stack);
+    this.logger.error(prefix, stack);
   }
 
   @Get('payment-methods')

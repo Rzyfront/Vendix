@@ -43,6 +43,9 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
           [class.scale-95]="!isOpen()"
           [class.opacity-100]="isOpen()"
           [class.opacity-0]="!isOpen()"
+          [attr.role]="dialog() ? 'dialog' : null"
+          [attr.aria-modal]="dialog() ? 'true' : null"
+          [attr.aria-labelledby]="dialog() && titleId() ? titleId() : null"
         >
           <!-- Modal content con diseño mejorado -->
           <div [class]="contentClasses()">
@@ -56,6 +59,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                   <div class="min-w-0 flex-1">
                     @if (title()) {
                       <h3
+                        [id]="titleId()"
                         class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
                       >
                         {{ title() }}
@@ -143,6 +147,11 @@ export class ModalComponent {
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
   readonly customClasses = input<string>('');
+  // QUI-audit-round-1: opt-in, backwards-compatible. Activar `dialog=true`
+  // sella el contrato de accesibilidad: role="dialog", aria-modal="true",
+  // aria-labelledby al título, focus trap Tab/Shift+Tab, restauración del
+  // foco al elemento que abrió el modal al cerrar, y Escape cierra (siempre).
+  readonly dialog = input<boolean>(false);
   // QUI-438: el consumidor puede bloquear el cierre (ej. cuando hay form
   // dirty). Default: `() => true` (cierra normal — sin cambio de comportamiento).
   readonly canClose = input<() => boolean | Promise<boolean>>(() => true);
@@ -159,6 +168,15 @@ export class ModalComponent {
   readonly cancel = output<void>();
 
   private escapeListener?: (event: KeyboardEvent) => void;
+  private keydownListener?: (event: KeyboardEvent) => void;
+  private previouslyFocusedElement?: HTMLElement | null;
+  private static titleCounter = 0;
+  // Cada modal que se monta con `dialog=true` recibe un id único para el
+  // heading, de modo que aria-labelledby apunte a un nodo del DOM propio.
+  private readonly _titleId = `app-modal-title-${++ModalComponent.titleCounter}`;
+  readonly titleId = computed(() =>
+    this.dialog() && this.title() ? this._titleId : null
+  );
 
   readonly modalClasses = computed(() => {
     const baseClasses = ['w-full', 'flex', 'flex-col'];
@@ -257,9 +275,33 @@ export class ModalComponent {
       const open = this.isOpen();
       if (open !== this.previousIsOpen) {
         if (open) {
+          // Captura el foco en el elemento que abrió el modal ANTES de
+          // moverlo dentro, para poder restaurarlo al cerrar.
+          if (this.isBrowser && this.dialog()) {
+            this.previouslyFocusedElement =
+              document.activeElement as HTMLElement | null;
+          }
           this.opened.emit();
+          // Mover el foco al primer elemento focuseable del modal después
+          // de que el DOM se haya pintado (microtask, suficiente para el
+          // @if wrapper).
+          if (this.isBrowser && this.dialog()) {
+            queueMicrotask(() => this.focusFirstElement());
+          }
         } else {
           this.closed.emit();
+          // Restaurar foco al disparador original — sólo si seguimos vivos
+          // (el effect puede dispararse durante teardown, en cuyo caso el
+          // nodo ya no está en el DOM y el focus() lanzaría).
+          if (
+            this.isBrowser &&
+            this.dialog() &&
+            this.previouslyFocusedElement &&
+            document.contains(this.previouslyFocusedElement)
+          ) {
+            this.previouslyFocusedElement.focus();
+          }
+          this.previouslyFocusedElement = undefined;
         }
         this.previousIsOpen = open;
       }
@@ -277,10 +319,44 @@ export class ModalComponent {
       document.addEventListener('keydown', this.escapeListener);
     }
 
+    if (this.isBrowser) {
+      this.keydownListener = (event: KeyboardEvent) => {
+        if (!this.isOpen() || !this.dialog()) return;
+        if (event.key !== 'Tab') return;
+        const container = this.modalContainer();
+        if (!container) return;
+        const focusables = this.getFocusableElements(container.nativeElement);
+        if (focusables.length === 0) {
+          // Sin elementos focuseables: mantener el foco dentro para que
+          // el lector de pantalla no escape al body.
+          event.preventDefault();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (event.shiftKey) {
+          if (active === first || !this.isInsideModal(active, container.nativeElement)) {
+            event.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (active === last || !this.isInsideModal(active, container.nativeElement)) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      };
+      document.addEventListener('keydown', this.keydownListener);
+    }
+
     this.destroyRef.onDestroy(() => {
       if (this.isBrowser) {
         if (this.escapeListener) {
           document.removeEventListener('keydown', this.escapeListener);
+        }
+        if (this.keydownListener) {
+          document.removeEventListener('keydown', this.keydownListener);
         }
         // Always clear body scroll-lock on destroy, even when isOpen() is
         // already false. Without this, a @defer/@if that removes the modal
@@ -292,6 +368,39 @@ export class ModalComponent {
         document.body.style.overflow = '';
       }
     });
+  }
+
+  private getFocusableElements(root: HTMLElement): HTMLElement[] {
+    const selector = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
+      (el) => !el.hasAttribute('disabled') && el.tabIndex !== -1
+    );
+  }
+
+  private isInsideModal(el: HTMLElement | null, root: HTMLElement): boolean {
+    if (!el) return false;
+    return root.contains(el);
+  }
+
+  private focusFirstElement(): void {
+    const container = this.modalContainer();
+    if (!container) return;
+    const focusables = this.getFocusableElements(container.nativeElement);
+    if (focusables.length > 0) {
+      focusables[0].focus();
+    } else {
+      // Si no hay nada focuseable, mover el foco al contenedor del modal
+      // para que el lector de pantalla anuncie el diálogo.
+      container.nativeElement.setAttribute('tabindex', '-1');
+      container.nativeElement.focus();
+    }
   }
 
   open(): void {

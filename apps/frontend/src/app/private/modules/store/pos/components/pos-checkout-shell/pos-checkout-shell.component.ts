@@ -148,33 +148,43 @@ export class PosCheckoutShellComponent {
    * huérfanas porque `allow_anonymous_sales=false` bloqueaba el flujo sin
    * marcar la obligatoriedad del cliente en el editor.
    *
-   * De este predicado depende el ORDEN de {@link steps} / {@link stepKeys}, y
-   * {@link currentStep} es un ÍNDICE numérico: si el arreglo de pasos se
-   * reordenara a mitad del checkout (el operador togglea "Venta Anónima" con el
-   * modal abierto), el índice pasaría a apuntar a OTRO paso y la UI quedaría
-   * desalineada. El setting es estable durante toda la venta; el flag es
-   * mutable por el operador. Ésa es la trampa.
+   * QUI-audit-round-1: la rama `checkoutIntent() === 'pickup'` que vivía aquí
+   * era POLLUTION — pickup NO fuerza cliente por sí solo; la obligatoriedad
+   * viene de la política o de la dirección de envío. Se separan los dos
+   * motivos en sendos computed para que el template componga.
    *
    * Lazy-eval: `customerRequired` se declara más abajo, pero este computed solo
    * corre al leerse (ya inicializado).
    */
+  readonly customerRequiredByPolicy = computed<boolean>(
+    () => this.checkoutRequireCustomerData(),
+  );
+
+  /**
+   * El cliente es obligatorio PORQUE la venta tiene dirección de envío (no por
+   * política): la dirección se ata a un cliente y sin él no se puede capturar
+   * un envío. Distinto motivo → distinto computed.
+   */
+  readonly customerRequiredByAddress = computed<boolean>(
+    () => this.requiresAddress(),
+  );
+
+  /**
+   * Composición que alimenta templates y guards que sólo necesitan "se requiere
+   * cliente" sin importar el motivo. Cero rama pickup solapada.
+   */
   readonly customerRequired = computed<boolean>(
-    () =>
-      // Pickup always passes through Cliente first (even when anonymous sales
-      // are allowed — operator picks "Venta Anónima" in the sub-step to skip).
-      // Delivery keeps the original semantics: cliente required by default.
-      this.checkoutIntent() === 'pickup' ||
-      this.checkoutRequireCustomerData(),
+    () => this.customerRequiredByPolicy() || this.customerRequiredByAddress(),
   );
 
   /**
    * El paso Cliente no se puede abandonar sin cliente, por cualquiera de sus dos
    * razones: hay envío (la dirección lo exige) o la tienda prohíbe ventas
-   * anónimas ({@link customerRequired}). Alimenta el badge "Obligatorio" y el
-   * aviso inline del panel Cliente.
+   * anónimas ({@link customerRequiredByPolicy}). Alimenta el badge
+   * "Obligatorio" y el aviso inline del panel Cliente.
    */
   readonly customerMandatory = computed<boolean>(
-    () => this.requiresAddress() || this.customerRequired(),
+    () => this.customerRequiredByAddress() || this.customerRequiredByPolicy(),
   );
 
   /**
