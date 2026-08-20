@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
 import { S3Service } from '@common/services/s3.service';
@@ -26,6 +27,29 @@ import { PromotionEngineService } from '../../store/promotions/promotion-engine/
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+
+/**
+ * CP-ECOM-PROMO-UX-001 convergence-R5: retry helpers for the cart promo
+ * summary load. The cart view MUST keep serving 200s on transient DB blips
+ * (advisory-lock contention, brief deadlocks), but a sustained failure has
+ * to be visible to the customer — that's the `promotions_load_state: 'degraded'`
+ * banner the frontend renders. Codes here are the ones Prisma emits for the
+ * two transient shapes we see in production: P2002 (unique-key contention)
+ * and P2028 (transaction timeout / advisory-lock conflict).
+ */
+const PROMO_SUMMARY_RETRY_BACKOFFS_MS = [100, 500, 1500] as const;
+const PROMO_SUMMARY_RETRYABLE_CODES = new Set<string>(['P2002', 'P2028']);
+
+function isRetryablePromoSummaryError(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    PROMO_SUMMARY_RETRYABLE_CODES.has(err.code)
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 @Injectable()
 export class CartService {
@@ -93,6 +117,17 @@ export class CartService {
     // Surface the automatic promotional discount alongside the existing cart
     // shape (additive: never removes fields). Degrade silently on any failure
     // so the cart view never breaks because of promotions.
+    //
+    // CP-ECOM-PROMO-UX-001 convergence-R5: a brief DB blip (P2002 unique-key
+    // contention, P2028 advisory-lock timeout) used to silently surface a
+    // zero-discount cart and the customer never knew promotions failed to
+    // load. We now retry up to 3 times with 100/500/1500 ms backoff on those
+    // two codes — both are transient in production — and emit
+    // `promotions_load_state: 'degraded'` when every attempt fails so the
+    // frontend can render a banner and the customer knows to refresh.
+    // Non-retryable errors (validation, schema, anything else) degrade
+    // immediately, with the same banner: a missing promo is the same UX
+    // outcome regardless of the underlying cause.
     let promotion_discount = 0;
     let promotional_subtotal = mapped.subtotal;
     let applied_promotions: Array<{
@@ -116,15 +151,21 @@ export class CartService {
           current_tier_index: number | null;
         }>
       | undefined;
+    let promotions_load_state: 'ok' | 'degraded' = 'ok';
     try {
-      const summary = await this.getCartSummary();
+      const summary = await this.loadCartPromotionsSummaryWithRetry();
       promotion_discount = summary.promotion_discount;
       promotional_subtotal = summary.promotional_subtotal;
       applied_promotions = summary.applied_promotions;
       per_product_tier_ladder = summary.per_product_tier_ladder;
     } catch (error) {
+      // Every retry exhausted (or a non-retryable error surfaced on attempt
+      // 1). The cart still returns 200 with zeros for the promo fields — the
+      // customer can keep shopping — and the frontend shows the degraded
+      // banner so the failure is visible.
+      promotions_load_state = 'degraded';
       this.logger.warn(
-        `Failed to resolve cart promotions summary: ${error?.message ?? error}`,
+        `Cart promotions summary degraded after retries: ${error?.message ?? error}`,
       );
     }
 
@@ -133,6 +174,7 @@ export class CartService {
       promotion_discount,
       promotional_subtotal,
       applied_promotions,
+      promotions_load_state,
       // Conditional spread: omit the field when no tiered promos survived
       // the filter in `getCartSummary`. Cart UI gets the SAME shape across
       // auth and guest paths because both delegates to `getCartSummary`.
@@ -140,6 +182,46 @@ export class CartService {
         ? { per_product_tier_ladder }
         : {}),
     };
+  }
+
+  /**
+   * CP-ECOM-PROMO-UX-001 convergence-R5: load the cart promotions summary
+   * with bounded retries on transient Prisma errors (P2002 unique-key
+   * contention, P2028 advisory-lock timeout). On the third failure the
+   * error propagates and `getCart` flips `promotions_load_state` to
+   * `'degraded'` so the frontend can render the banner.
+   *
+   * Why a private helper instead of inlining the loop in `getCart`: keeps
+   * the `getCart` shape readable (the merged response is the source of
+   * truth) and isolates the retry policy from the cart enrichment.
+   * Non-retryable errors fail fast on attempt 1 — the catch in `getCart`
+   * still degrades, so the UX is identical regardless of cause.
+   */
+  private async loadCartPromotionsSummaryWithRetry(): Promise<Awaited<
+    ReturnType<CartService['getCartSummary']>
+  >> {
+    let lastError: unknown;
+    for (
+      let attempt = 0;
+      attempt <= PROMO_SUMMARY_RETRY_BACKOFFS_MS.length;
+      attempt++
+    ) {
+      try {
+        return await this.getCartSummary();
+      } catch (error) {
+        lastError = error;
+        // Non-retryable: bail out on the first failure and let the caller
+        // mark the cart as degraded. Retrying won't help on a validation /
+        // schema error and would only delay the user-visible banner.
+        if (!isRetryablePromoSummaryError(error)) break;
+        // We just used attempt `attempt` and it failed with a retryable
+        // code; sleep only if another attempt remains.
+        if (attempt < PROMO_SUMMARY_RETRY_BACKOFFS_MS.length) {
+          await delay(PROMO_SUMMARY_RETRY_BACKOFFS_MS[attempt]);
+        }
+      }
+    }
+    throw lastError;
   }
 
   async addItem(dto: AddToCartDto) {

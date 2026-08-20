@@ -47,6 +47,21 @@ import {
   imports: [CommonModule, PromotionStackComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- CP-ECOM-PROMO-UX-001 convergence-R5: degraded-load banner. When the
+         backend exhausted its retries loading the promotions summary, the
+         customer is staring at a cart WITHOUT automatic discounts and without
+         the tier nudge. A yellow banner tells them why and what to do; without
+         it the failure is silent and the customer assumes "no promos apply". -->
+    @if (showDegradedBanner()) {
+      <div
+        role="alert"
+        class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        data-testid="cart-promotions-degraded-banner"
+      >
+        <span aria-hidden="true" class="mt-0.5">⚠</span>
+        <span>No pudimos cargar las promociones. Refresca para reintentar.</span>
+      </div>
+    }
     @if (inline()) {
       <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
            (para el bannersito del carrito). -->
@@ -169,6 +184,18 @@ export class CartPromotionsComponent {
    * other input changes (the nudge already reacts via the tierProgress computed).
    */
   protected readonly currencyCode = this.currencyFormat.currencyCode;
+
+  /**
+   * CP-ECOM-PROMO-UX-001 convergence-R5: when the backend exhausts its
+   * promotion-summary retries it returns `promotions_load_state: 'degraded'`.
+   * Show a yellow banner so the customer knows the missing discount is a
+   * transient failure and not "this cart has no promotions". Defaults to
+   * `false` for the legacy response shape (older backend that doesn't emit
+   * the field at all).
+   */
+  protected readonly showDegradedBanner = computed<boolean>(
+    () => this.cart()?.promotions_load_state === 'degraded',
+  );
 
   // ── Primary projections (Phase E.1) ───────────────────────────────────
 

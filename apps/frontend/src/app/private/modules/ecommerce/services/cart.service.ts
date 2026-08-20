@@ -160,6 +160,12 @@ export interface CartSummaryData {
     }>;
     current_tier_index: number | null;
   }>;
+  /**
+   * CP-ECOM-PROMO-UX-001 convergence-R5: same degraded-state signal as
+   * `Cart.promotions_load_state`. Surfaced here so the cart enrichment
+   * path can propagate it without re-deriving the failure shape.
+   */
+  promotions_load_state?: 'ok' | 'degraded';
 }
 
 export interface Cart {
@@ -198,6 +204,14 @@ export interface Cart {
     }>;
     current_tier_index: number | null;
   }>;
+  /**
+   * CP-ECOM-PROMO-UX-001 convergence-R5: visibility of the promotions load.
+   * `ok` (default) means the backend built the summary successfully;
+   * `degraded` means every retry exhausted and the customer is looking at
+   * the cart without the automatic promo discount. Surfaced as a yellow
+   * banner by `<app-cart-promotions>` so the failure is no longer silent.
+   */
+  promotions_load_state?: 'ok' | 'degraded';
 }
 
 /**
@@ -964,10 +978,33 @@ export class CartService {
             applied_promotions: data.applied_promotions ?? [],
             tier_progress: data.tier_progress ?? [],
             per_product_tier_ladder: data.per_product_tier_ladder,
+            // CP-ECOM-PROMO-UX-001 convergence-R5: propagate the backend's
+            // load-state. The summary endpoint uses the same retry/degraded
+            // machinery as `GET /cart`, so a sustained failure here ALSO flips
+            // the banner to 'degraded' instead of letting the cart look
+            // healthy.
+            promotions_load_state:
+              data.promotions_load_state === 'degraded' ? 'degraded' : 'ok',
           });
         },
-        // On failure keep the cart as-is (no promo lines shown).
-        error: () => {},
+        // CP-ECOM-PROMO-UX-001 R3-M8: surface summary failures instead of
+        // silently swallowing them. A silent failure here means the cart
+        // shows no discounts/nudges and the operator never knows why. We
+        // log a structured warning and pop a non-blocking toast so the
+        // customer can still complete checkout (promo fields stay empty,
+        // cart is left untouched) but the failure is observable.
+        // The cart signal is NOT mutated on error — promo lines stay empty
+        // until the next successful enrichment, which is the previous
+        // behaviour and is the correct conservative default.
+        error: (err) => {
+          const parsed = parseApiError(err);
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[cart] summary failed: ${parsed.errorCode ?? 'unknown'}`,
+            parsed.devMessage ?? parsed.userMessage,
+          );
+          this.toastService.warning('No se pudieron actualizar las promociones');
+        },
       });
   }
 
