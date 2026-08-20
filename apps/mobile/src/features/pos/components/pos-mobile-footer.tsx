@@ -42,6 +42,10 @@ interface PrimaryCtaMeta {
   icon: string;
   bg: string;
   shadow: string;
+  // Handler name resolved at render time. The parent passes the
+  // `onSaveDraft`/`onCharge` callback through `onPrimaryCta`; we select the
+  // right action label/icon based on mode AND edit mode.
+  hint: string;
 }
 
 const PRIMARY_CTA_META: Record<PosMode, PrimaryCtaMeta> = {
@@ -50,19 +54,34 @@ const PRIMARY_CTA_META: Record<PosMode, PrimaryCtaMeta> = {
     icon: 'credit-card',
     bg: colors.primary,
     shadow: colors.primary,
+    hint: 'Procesa el cobro de la venta actual',
   },
   quotation: {
     label: 'Crear cotización',
     icon: 'file-text',
     bg: colors.primary,
     shadow: colors.primary,
+    hint: 'Genera una cotización con los productos del carrito',
   },
   layaway: {
     label: 'Crear plan separé',
     icon: 'calendar-clock',
     bg: colorScales.amber[600],
     shadow: colorScales.amber[600],
+    hint: 'Inicia la configuración de un plan separé',
   },
+};
+
+// CP-POS-CREAR-EDITAR-COBRAR-001 — cuando hay un draft cargado en el cart
+// store (`draftId != null`), el CTA primario del footer es **guardar cambios**,
+// NO cobrar. Cobrar solo aparece DESPUÉS de un guardado exitoso (el padre
+// controla la transición). El ruteo se hace vía `onPrimaryCta` + `onEdit`:
+const EDIT_MODE_PRIMARY_CTA: PrimaryCtaMeta = {
+  label: 'Guardar cambios',
+  icon: 'save',
+  bg: colors.primary,
+  shadow: colors.primary,
+  hint: 'Persiste los cambios sobre la orden en edición',
 };
 
 export function PosMobileFooter({
@@ -82,8 +101,13 @@ export function PosMobileFooter({
   const insets = useSafeAreaInsets();
   if (itemCount === 0) return null;
 
-  const cta = PRIMARY_CTA_META[mode];
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el CTA primario en modo "edit" rutea
+  // al handler `onEdit` (que el padre conecta a `handleSaveDraft` →
+  // `updateOrderEditor`) y se etiqueta "Guardar cambios". En modo normal,
+  // sigue siendo el cobro del modo activo.
   const isEditing = isEditMode && typeof onEdit === 'function';
+  const cta = isEditing ? EDIT_MODE_PRIMARY_CTA : PRIMARY_CTA_META[mode];
+  const handlePrimaryPress = isEditing ? onEdit : onPrimaryCta;
   const createLabel = isEditing ? 'Guardar cambios' : 'Crear';
   const handleCreatePress = isEditing ? onEdit : onCreate;
   const createA11yLabel = isEditing
@@ -114,7 +138,7 @@ export function PosMobileFooter({
 
         <Pressable
           style={styles.viewDetailBtn}
-          onPress={onViewCart}
+          onPress={typeof onViewCart === 'function' ? onViewCart : undefined}
           accessibilityRole="button"
           accessibilityLabel="Ver detalle del carrito"
         >
@@ -127,11 +151,11 @@ export function PosMobileFooter({
       <View style={styles.actionsRow}>
         <Pressable
           style={[styles.actionBtn, styles.customItemBtn]}
-          onPress={onCustomItem}
-          disabled={!canCreateCustomItems}
+          onPress={typeof onCustomItem === 'function' ? onCustomItem : undefined}
+          disabled={!canCreateCustomItems || typeof onCustomItem !== 'function'}
           accessibilityRole="button"
           accessibilityLabel="Agregar ítem personalizado"
-          accessibilityState={{ disabled: !canCreateCustomItems }}
+          accessibilityState={{ disabled: !canCreateCustomItems || typeof onCustomItem !== 'function' }}
         >
           <Icon name="file-plus" size={16} color={colors.primary} />
           <Text style={[styles.actionText, styles.customItemText]}>Ítem</Text>
@@ -139,7 +163,7 @@ export function PosMobileFooter({
 
         <Pressable
           style={[styles.actionBtn, styles.createBtn]}
-          onPress={handleCreatePress}
+          onPress={typeof handleCreatePress === 'function' ? handleCreatePress : undefined}
           accessibilityRole="button"
           accessibilityLabel={createA11yLabel}
         >
@@ -149,7 +173,7 @@ export function PosMobileFooter({
 
         <Pressable
           style={[styles.actionBtn, styles.shippingBtn]}
-          onPress={onShipping}
+          onPress={typeof onShipping === 'function' ? onShipping : undefined}
           accessibilityRole="button"
           accessibilityLabel="Crear pedido con envío a domicilio"
         >
@@ -158,19 +182,15 @@ export function PosMobileFooter({
         </Pressable>
       </View>
 
-      {/* Row 3: Primary CTA — varía por modo */}
+      {/* Row 3: Primary CTA — varía por modo. En edit mode rutea a `onEdit`
+           (handleSaveDraft → updateOrderEditor) en lugar de `onPrimaryCta`
+           (que en modo normal abre el payment modal). */}
       <Pressable
         style={[styles.checkoutBtn, { backgroundColor: cta.bg, shadowColor: cta.shadow }]}
-        onPress={onPrimaryCta}
+        onPress={typeof handlePrimaryPress === 'function' ? handlePrimaryPress : undefined}
         accessibilityRole="button"
         accessibilityLabel={cta.label}
-        accessibilityHint={
-          mode === 'sale'
-            ? 'Procesa el cobro de la venta actual'
-            : mode === 'quotation'
-              ? 'Genera una cotización con los productos del carrito'
-              : 'Inicia la configuración de un plan separé'
-        }
+        accessibilityHint={cta.hint}
       >
         <Icon name={cta.icon} size={18} color="#FFFFFF" />
         <Text style={styles.checkoutText}>{cta.label}</Text>

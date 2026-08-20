@@ -31,6 +31,15 @@ interface PosOrderCreateModalProps {
 }
 
 /**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 — el backend rechaza CREATE/SAVE con
+ * `items=[]` y el frontend no debe ni siquiera mandar el request. Es la
+ * razón por la que el modal expone el carrito como sólo-lectura: si
+ * quedó vacío por error del cajero, no se persiste nada.
+ */
+const EMPTY_CART_MESSAGE =
+  'No hay productos en el carrito. Agrega al menos uno antes de crear la orden. (POS_EMPTY_CART_001)';
+
+/**
  * Modal-resumen "Crear" (parity web `pos-order-create-modal.component.ts`).
  *
  * Aparece antes de persistir el borrador de la orden. Muestra:
@@ -95,7 +104,7 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
 
   const handleConfirm = useCallback(async () => {
     if (items.length === 0) {
-      toastWarning('El carrito está vacío');
+      toastError(EMPTY_CART_MESSAGE);
       return;
     }
     if (!hasCustomer) {
@@ -298,7 +307,12 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                     </View>
                   ))}
                   {items.length === 0 && (
-                    <Text style={styles.emptyText}>Sin productos</Text>
+                    <View style={styles.emptyState}>
+                      <Icon name="shopping-cart" size={32} color={colorScales.gray[300]} />
+                      <Text style={styles.emptyText}>
+                        {EMPTY_CART_MESSAGE}
+                      </Text>
+                    </View>
                   )}
                 </View>
 
@@ -415,9 +429,11 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                 accessibilityRole="button"
                 accessibilityLabel="Crear orden sin cobrar"
                 accessibilityHint={
-                  !hasCustomer
-                    ? 'Selecciona un cliente antes de crear la orden'
-                    : 'Persiste la orden como borrador'
+                  items.length === 0
+                    ? 'Agrega productos al carrito antes de crear la orden'
+                    : !hasCustomer
+                      ? 'Selecciona un cliente antes de crear la orden'
+                      : 'Persiste la orden como borrador'
                 }
                 accessibilityState={{ busy: isSubmitting, disabled: !canConfirm || isSubmitting }}
               >
@@ -587,6 +603,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     paddingVertical: spacing[4],
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[6],
+    gap: spacing[2],
   },
   summaryBlock: {
     paddingHorizontal: spacing[4],

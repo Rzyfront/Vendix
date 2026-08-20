@@ -34,7 +34,10 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
           [class.opacity-100]="isOpen()"
           [class.opacity-0]="!isOpen()"
         ></div>
-        <!-- Modal container: animación restringida a transform+opacity -->
+        <!-- Modal container: animación restringida a transform+opacity.
+             ARIA dialog se aplica al contenedor ENFOCABLE (modalContainer),
+             no al wrapper, para que screen readers anuncien el diálogo
+             desde el nodo que recibe el foco. -->
         <div
           #modalContainer
           class="relative transform transition-[transform,opacity] duration-300 ease-out"
@@ -325,6 +328,13 @@ export class ModalComponent {
         if (event.key !== 'Tab') return;
         const container = this.modalContainer();
         if (!container) return;
+        // QUI-audit-round-1 — focus trap scope now includes the wrapper too.
+        // The wrapper is the parent of `modalContainer` and the ARIA dialog
+        // host (role/aria-modal live on it). If the focus ever lands on a
+        // link inside the wrapper backdrop (e.g. a banner), we still want
+        // to consider it "inside the modal" so the trap doesn't snap focus
+        // back to the first content element.
+        const wrapperEl = (container.nativeElement.parentElement as HTMLElement) ?? null;
         const focusables = this.getFocusableElements(container.nativeElement);
         if (focusables.length === 0) {
           // Sin elementos focuseables: mantener el foco dentro para que
@@ -335,13 +345,16 @@ export class ModalComponent {
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
         const active = document.activeElement as HTMLElement | null;
+        const insideModal =
+          this.isInsideModal(active, container.nativeElement) ||
+          (wrapperEl !== null && this.isInsideModal(active, wrapperEl));
         if (event.shiftKey) {
-          if (active === first || !this.isInsideModal(active, container.nativeElement)) {
+          if (active === first || !insideModal) {
             event.preventDefault();
             last.focus();
           }
         } else {
-          if (active === last || !this.isInsideModal(active, container.nativeElement)) {
+          if (active === last || !insideModal) {
             event.preventDefault();
             first.focus();
           }

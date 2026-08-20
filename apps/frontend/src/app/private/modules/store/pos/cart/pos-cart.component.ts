@@ -446,6 +446,7 @@ import {
                   (click)="charge.emit()"
                   [disabled]="isEmpty() || isCharging()"
                   [attr.aria-busy]="isCharging() ? 'true' : null"
+                  [attr.aria-label]="cobrarAriaLabel()"
                 >
                   <app-icon name="credit-card" [size]="18"></app-icon>
                   <span>Cobrar</span>
@@ -1095,6 +1096,22 @@ private cartService = inject(PosCartService);
   readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+
+  /**
+   * QUI-audit-round-1 — accessible label for the `Cobrar` CTA. The CTA only
+   * renders when `readyToPayOrder !== null`, so the order_number is
+   * available via a generic cast. Fallback to `Cobrar orden` when the
+   * caller forgets to include the order_number in the payload.
+   */
+  readonly cobrarAriaLabel = computed<string>(() => {
+    const order = this.readyToPayOrder() as
+      | { order_number?: string | number }
+      | null;
+    const orderNumber = order?.order_number;
+    return orderNumber != null && orderNumber !== ''
+      ? `Cobrar orden #${orderNumber}`
+      : 'Cobrar orden';
+  });
 
   constructor() {
     this.taxesService

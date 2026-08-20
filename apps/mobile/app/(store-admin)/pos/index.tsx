@@ -2725,6 +2725,14 @@ const PosScreen = () => {
       setShowCustomerModal(true);
       return;
     }
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — cuando hay un `draftId` cargado en el
+    // cart store, el guardado NO crea un nuevo draft: edita la orden
+    // existente vía `PUT /store/orders/:id/editor`. Esto evita:
+    //   1. doble cobro (un PUT no muta state ni dispara cobros).
+    //   2. órdenes huérfanas al "Guardar" sobre un draft persistido.
+    // `updateOrderEditor` re-resuelve totales server-side (es la fuente de
+    // verdad) y devuelve la `Order` canónica.
+    const editingDraftId = (state as any).draftId ? Number((state as any).draftId) : null;
     setSavingDraft(true);
     try {
       const tenantStoreId = useTenantStore.getState().storeId;
@@ -2736,6 +2744,42 @@ const PosScreen = () => {
         return;
       }
 
+      if (editingDraftId != null && Number.isFinite(editingDraftId) && editingDraftId > 0) {
+        // === MODO EDICIÓN ===
+        // El editor atómico backend solo acepta campos de negocio (items,
+        // cliente, notas, envío, cupón). NO acepta state/payment/is_draft.
+        const editorItems = items.map((i) => ({
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
+          product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
+          product_name: i.product.name,
+          product_sku: i.product.sku || undefined,
+          variant_sku: i.variant?.sku || undefined,
+          quantity: i.quantity,
+          unit_price: Number(i.unitPrice.toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
+          tax_amount_item: Number(i.taxAmount.toFixed(2)),
+          cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
+        }));
+        const editorPayload = {
+          items: editorItems,
+          customer_id: Number(customer.id),
+          internal_notes: state.notes || undefined,
+          delivery_type: 'direct_delivery' as const,
+        };
+        const updatedOrder = await OrderService.updateOrderEditor(editingDraftId, editorPayload);
+        // Éxito: limpiamos el carrito y mantenemos el flujo abierto para
+        // que el operador pueda volver a "Cobrar" sobre la orden guardada.
+        toastSuccess(
+          updatedOrder?.order_number
+            ? `Cambios guardados en ${updatedOrder.order_number}`
+            : 'Cambios guardados',
+        );
+        state.clearCart();
+        return;
+      }
+
+      // === MODO NUEVO BORRADOR ===
       const payload: CreatePosPaymentDto = {
         customer_id: Number(customer.id),
         customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
@@ -2853,7 +2897,11 @@ const PosScreen = () => {
   }, [summary.totalItems]);
 
   // CTA primario del footer — despacha según el modo activo.
-  // - `sale`     → abre modal de pago
+  // - `sale` + draft cargado (edit-mode) → persiste los cambios sobre el
+  //   draft existente (paridad web `updateExistingOrder`). El mobile NO
+  //   tiene `flow/pay`; el cobro directo lo hace `processPosPayment`
+  //   con `is_draft=true` desde el mismo modal de cobro.
+  // - `sale` (sin draft) → abre modal de pago
   // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
   // - `layaway`  → abre `PosLayawayConfigModal` (paridad con desktop
   //   `LayawayConfigModalComponent`, ver QUI-499). El modal POSTea
@@ -2862,6 +2910,12 @@ const PosScreen = () => {
   const handlePrimaryCta = useCallback(() => {
     if (summary.totalItems === 0) {
       toastWarning('El carrito está vacío');
+      return;
+    }
+    // QUI-audit-round-2: en modo edición del draft, "Cobrar" debe persistir
+    // sobre el draft, NO abrir el flujo de venta nueva.
+    if (mode === 'sale' && draftId != null) {
+      void handleSaveDraft();
       return;
     }
     switch (mode) {
@@ -2880,7 +2934,7 @@ const PosScreen = () => {
         setShowLayawayConfigModal(true);
         return;
     }
-  }, [mode, customer, summary.totalItems]);
+  }, [mode, customer, summary.totalItems, draftId, handleSaveDraft]);
 
   // Cambia el modo del POS (POS / Cotizar / Separé). En paridad con el web
   // `pos.component.ts` (`setQuotationMode` / `setLayawayMode`), los handlers

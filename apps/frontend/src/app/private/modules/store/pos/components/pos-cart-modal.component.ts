@@ -48,6 +48,9 @@ import {
       class="modal-overlay"
       [class.open]="isOpen()"
       (click)="onOverlayClick($event)"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pos-cart-modal-title"
       >
       <!-- Modal Content -->
       <div
@@ -60,7 +63,7 @@ import {
           <button class="back-btn" (click)="closed.emit()">
             <app-icon name="chevron-left" [size]="24"></app-icon>
           </button>
-          <h2 class="modal-title">
+          <h2 id="pos-cart-modal-title" class="modal-title">
             Carrito
             <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
           </h2>

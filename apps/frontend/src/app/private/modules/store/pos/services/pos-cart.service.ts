@@ -175,10 +175,11 @@ export class PosCartService {
     const current = this.cartState();
     const amount = Number(result?.total_withholding ?? 0) || 0;
     const lines = result?.lines ?? [];
-    if (
-      (current.summary.withholdingAmount ?? 0) === amount &&
-      (current.summary.withholdingLines?.length ?? 0) === lines.length
-    ) {
+    // QUI-audit-round-1 — compare by `total_withholding` only (not by line
+    // count). Counting lines is a proxy that gets out of sync when the
+    // backend de-duplicates, drops zero-amount lines, or returns the same
+    // total split differently. The amount is the only canonical signal.
+    if ((current.summary.withholdingAmount ?? 0) === amount) {
       return; // No-op: avoids a redundant signal write / re-render loop.
     }
     this.cartState.set({
@@ -191,21 +192,26 @@ export class PosCartService {
     });
   }
 
-  // Observable getters
+  // Observable getters — historical shape kept for NgRx bridge consumers
+  // that already subscribe. Internally we drive everything off `computed`
+  // signals so cart mutations don't re-fire every effect (toObservable re-
+  // emits on every signal write, including unrelated tax recalcs). The
+  // public observable getters are now thin `.subscribe()` wrappers around
+  // the signals, exposing the same `Observable<T>` shape for compatibility.
   get cartState$(): Observable<CartState> {
     return toObservable(this.cartState);
   }
 
   get items(): Observable<CartItem[]> {
-    return toObservable(this.cartState).pipe(map((state) => state.items));
+    return toObservable(this.cartItems);
   }
 
   get customer(): Observable<PosCustomer | null> {
-    return toObservable(this.cartState).pipe(map((state) => state.customer));
+    return toObservable(this.cartCustomer);
   }
 
   get summary(): Observable<CartSummary> {
-    return toObservable(this.cartState).pipe(map((state) => state.summary));
+    return toObservable(this.cartSummary);
   }
 
   get loading$(): Observable<boolean> {
@@ -213,9 +219,28 @@ export class PosCartService {
   }
 
   get isEmpty(): Observable<boolean> {
-    return toObservable(this.cartState)
-      .pipe(map((state) => state.items.length === 0));
+    return toObservable(this.cartIsEmpty);
   }
+
+  // ── Projected signals (read-only, exposed for template consumers) ──
+  // Qui-audit-round-1 — these are the primary signal-based projections of
+  // cart state. They derive from `cartState` but only re-emit when the
+  // specific projection changes, so unrelated cart mutations (e.g. a new
+  // withholding total) don't fire unrelated consumers.
+  readonly cartItems = computed<CartItem[]>(() => this.cartState().items);
+  readonly cartCustomer = computed<PosCustomer | null>(
+    () => this.cartState().customer,
+  );
+  readonly cartSubtotal = computed<number>(
+    () => this.cartState().summary.subtotal,
+  );
+  readonly cartTax = computed<number>(
+    () => this.cartState().summary.taxAmount,
+  );
+  readonly cartSummary = computed<CartSummary>(() => this.cartState().summary);
+  readonly cartIsEmpty = computed<boolean>(
+    () => this.cartState().items.length === 0,
+  );
 
   /**
    * Add product to cart
@@ -605,6 +630,7 @@ export class PosCartService {
       items: cartItems,
       customer: this.mapOrderUsersToCustomer(order),
       notes: order?.notes ?? '',
+      internalNotes: order?.internal_notes ?? '',
       appliedDiscounts: discounts,
       appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
       pendingBookings: [],
@@ -885,16 +911,36 @@ export class PosCartService {
    * leave the order in `state: 'created'` so another operator (or the same
    * one) can pick it up, edit it, or cancel it from the orders module.
    *
-   * Follow-up (out of scope for QUI-649): wire this to a `PATCH` on the
-   * order that sets `state: 'cancelled'` when the cashier explicitly chooses
-   * "abandon order" from the UI. For now, silent no-op keeps the bug-fix
-   * scope tight and the order recoverable from the orders module.
+   * QUI-audit-round-1 — adopted orders no longer vanish in `state: 'created'`
+   * when the cashier clicks "Vaciar". We now call `POST /store/orders/:id/cancel`
+   * so the backend takes the order out of the active set. The reason is
+   * forwarded so the orders module shows a coherent trail. Failure is
+   * swallowed: the local cart still resets so the POS doesn't block, and
+   * the orphan order is recoverable from the orders module where the
+   * operator can re-cancel it.
    */
   private releaseAdoptedOrder(
-    _orderId: number,
-    _orderNumber: string | null,
+    orderId: number,
+    orderNumber: string | null,
   ): Observable<void> {
-    return of(undefined);
+    const reason = `Liberada desde el POS al vaciar el carrito (orden ${orderNumber ?? orderId})`;
+    if (!orderId || !Number.isFinite(Number(orderId))) {
+      return of(undefined);
+    }
+    return this.posApi.cancelOrder(String(orderId), reason).pipe(
+      map(() => undefined),
+      catchError((err) => {
+        // Log only — never block the cashier on a backend release failure.
+        // The order can be re-cancelled from the orders module.
+        // eslint-disable-next-line no-console
+        console.warn('[pos-cart][releaseAdoptedOrder] cancel failed', {
+          orderId,
+          orderNumber,
+          error: err?.message ?? err,
+        });
+        return of(undefined);
+      }),
+    );
   }
 
   /**
@@ -2534,6 +2580,7 @@ export class PosCartService {
       items: [],
       customer: null,
       notes: '',
+      internalNotes: '',
       appliedDiscounts: [],
       pendingBookings: [],
       summary: {
@@ -2557,19 +2604,40 @@ export class PosCartService {
    * Generate unique item ID
    */
   private generateItemId(): string {
-    return 'ITEM_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    return 'ITEM_' + this.randomId();
   }
 
   private generateCustomProductId(): string {
-    return (
-      'custom-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9)
-    );
+    return 'custom-' + this.randomId();
   }
 
   /**
    * Generate unique discount ID
    */
   private generateDiscountId(): string {
-    return 'DISC_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    return 'DISC_' + this.randomId();
+  }
+
+  /**
+   * Cryptographically unique ID. Uses `crypto.randomUUID()` when available
+   * (modern browsers + Node 19+) and falls back to a `Date.now()` + random
+   * suffix only in environments where the API is missing. Qui-audit-round-1
+   * — `Date.now() + Math.random()` could collide when two lines were added
+   * in the same millisecond with the same hash seed (Math.random is not
+   * seeded with high entropy). `crypto.randomUUID` is RFC 4122 compliant.
+   */
+  private randomId(): string {
+    const cryptoObj = (typeof globalThis !== 'undefined'
+      ? (globalThis as { crypto?: Crypto }).crypto
+      : undefined);
+    if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+      return cryptoObj.randomUUID();
+    }
+    // Defensive fallback for very old environments. Still better than
+    // `Date.now() + Math.random()` because it draws from a wider character
+    // set and is explicit about the lack of crypto support.
+    return (
+      Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14)
+    );
   }
 }

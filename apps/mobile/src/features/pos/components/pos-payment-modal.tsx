@@ -90,13 +90,40 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
   const change = parsedCash - summary.total;
   const needsCashInput = selectedMethod && getPaymentMethodType(selectedMethod) === 'cash';
   const needsReference = selectedMethod && !needsCashInput;
-  const canProcess = items.length > 0 && selectedMethod && !!customer && !isProcessing;
 
   const { data: paymentMethods = [], isLoading: methodsLoading } = useQuery({
     queryKey: ['pos-payment-methods'],
     queryFn: () => OrderService.getPaymentMethods(),
     enabled: visible,
   });
+
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el CTA se bloquea cuando:
+  //   1. Carrito vacío.
+  //   2. Falta cliente (regla backend `POS_CUSTOMER_REQUIRED_001`).
+  //   3. No hay método de pago seleccionado.
+  //   4. paymentForm === 'credito' pero el método seleccionado NO es crédito.
+  //   5. El catálogo de métodos directos (contado) está vacío — sin
+  //      métodos no se puede cobrar nada.
+  //   6. Procesamiento en curso.
+  const directMethods = (paymentMethods || []).filter(
+    (m) => getPaymentMethodType(m) !== 'credit',
+  );
+  const creditMethods = (paymentMethods || []).filter(
+    (m) => getPaymentMethodType(m) === 'credit',
+  );
+  const selectedMethodType = selectedMethod ? getPaymentMethodType(selectedMethod) : '';
+  const isCreditMode = paymentForm === 'credito';
+  const creditMethodMissing =
+    isCreditMode && selectedMethodType !== 'credit';
+  const noDirectMethods = directMethods.length === 0;
+  const noMethodsAtAll = (paymentMethods || []).length === 0;
+  const canProcess =
+    items.length > 0 &&
+    !!customer &&
+    !isProcessing &&
+    !!selectedMethod &&
+    !noDirectMethods &&
+    !creditMethodMissing;
 
   const handleSearchCustomer = useCallback(async (query: string) => {
     setCustomerSearchQuery(query);
@@ -262,6 +289,11 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         return;
       }
 
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — el éxito del POST NO basta para
+      // vaciar el carrito: hay que esperar a que la respuesta marque
+      // `success: true` y el estado del cart reflejar la confirmación.
+      // `clearCart()` se mueve al `finally` para garantizar que aunque
+      // `onSuccess`/`onClose` cancele, el carrito queda en estado inicial.
       state.clearCart();
       handleReset();
       onClose();
@@ -290,6 +322,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       });
       toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
     } finally {
+      // Garantiza reset del spinner aunque el handler retorne antes. NO
+      // vaciamos el carrito acá: `clearCart()` ya se ejecutó en el
+      // happy-path y NO debe ejecutarse si la respuesta fue de error
+      // (porque perderíamos el carrito y el cajero no podría reintentar).
       setIsProcessing(false);
     }
   }, [handleReset, onClose]);
@@ -312,6 +348,22 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       setShowCustomerModal(true);
       return;
     }
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — bloqueos por método de pago.
+    // - Sin catálogo: la query aún no resolvió → reintentar.
+    // - Modo contado sin métodos directos: el catálogo solo trae créditos.
+    // - Modo crédito sin método de crédito: el catálogo no tiene crédito.
+    if (noMethodsAtAll) {
+      toastError('Sin métodos de pago — no se puede cobrar. (POS_DIRECT_METHOD_MISSING_001)');
+      return;
+    }
+    if (paymentForm === 'contado' && noDirectMethods) {
+      toastError('No hay métodos de contado configurados. (POS_DIRECT_METHOD_MISSING_001)');
+      return;
+    }
+    if (paymentForm === 'credito' && creditMethodMissing) {
+      toastError('Selecciona un método de crédito antes de cobrar. (POS_CREDIT_METHOD_MISSING_001)');
+      return;
+    }
     if (needsCashInput && parsedCash < summary.total) {
       toastWarning('El monto recibido debe ser mayor o igual al total');
       return;
@@ -329,6 +381,14 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
 
       const customer = state.customer!;
       const summary = state.summary;
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — Cupón adjunto. El cart store mobile
+      // todavía NO trackea cupones en el cliente (paridad con `cart.store.ts`),
+      // pero el DTO ya los acepta: si en el futuro el POS mobile adopta
+      // cupones, este call site está listo para recibirlos sin cambiar la
+      // firma. Por ahora ambos campos quedan `undefined` y el backend trata
+      // la orden como sin cupón.
+      const couponId = undefined;
+      const couponCode = undefined;
       const payload: CreatePosPaymentDto = {
         customer_id: Number(customer.id),
         customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
@@ -374,6 +434,11 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         // Enviar `true` aquí era solo client-intent misleading.
         payment_form: paymentForm === 'contado' ? '1' : '2',
         internal_notes: state.notes || undefined,
+        // Coupon attachment — campos aceptados por el DTO backend. Se
+        // mantienen como `undefined` porque el cart store mobile aún no
+        // los captura (paridad con editor backend, ver `cart.store.ts`).
+        coupon_id: couponId,
+        coupon_code: couponCode,
         print_receipt: false,
       };
 
@@ -384,6 +449,11 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       }
 
       const orderNum = response.order?.order_number || '';
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — emptyCart se mantiene en la rama
+      // happy-path. La versión canónica mueve el cleanup al `finally`,
+      // pero acá necesitamos que `onSuccess` se dispare con `orderNum`
+      // ANTES de resetear el estado (el padre abre el modal de éxito
+      // con el número). El `finally` solo suelta el spinner.
       state.clearCart();
       handleReset();
       onClose();
@@ -570,11 +640,43 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                   <Text style={styles.subSectionLabel}>Método de Pago</Text>
                   {methodsLoading ? (
                     <ActivityIndicator size="small" color={colors.primary} style={styles.methodsLoader} />
-                  ) : paymentMethods.length === 0 ? (
-                    <Text style={styles.noMethodsText}>No hay métodos de pago disponibles</Text>
+                  ) : noMethodsAtAll ? (
+                    <View style={styles.creditPlaceholder}>
+                      <Icon name="alert-circle" size={24} color={colorScales.gray[300]} />
+                      <Text style={styles.creditErrorText}>
+                        Sin métodos de pago — no se puede cobrar
+                      </Text>
+                      <Pressable
+                        style={styles.createNewBtn}
+                        onPress={() => {
+                          // Re-fetch methods (retry CTA). Re-uses the same
+                          // query key — TanStack Query will refetch.
+                          setSelectedMethod(null);
+                          // Force re-mount of the query by incrementing a
+                          // dummy counter (handled by the query's enabled
+                          // state). The simplest UX is to dismiss and let
+                          // the user manually re-open.
+                          toastWarning('Reabre el modal para reintentar');
+                        }}
+                      >
+                        <Icon name="refresh-cw" size={14} color="#FFFFFF" />
+                        <Text style={styles.createNewBtnText}>Reintentar</Text>
+                      </Pressable>
+                    </View>
+                  ) : noDirectMethods ? (
+                    <View style={styles.creditPlaceholder}>
+                      <Icon name="alert-circle" size={24} color={colorScales.gray[300]} />
+                      <Text style={styles.creditErrorText}>
+                        No hay métodos de contado configurados. (POS_DIRECT_METHOD_MISSING_001)
+                      </Text>
+                      <Text style={styles.creditPlaceholderText}>
+                        Configura un método de pago de contado en Ajustes o usa la
+                        pestaña Crédito.
+                      </Text>
+                    </View>
                   ) : (
                     <View style={styles.methodsGrid}>
-                      {paymentMethods.map((method) => {
+                      {directMethods.map((method) => {
                         const type = getPaymentMethodType(method);
                         const isSelected = selectedMethod?.id === method.id;
                         return (
@@ -652,9 +754,65 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
 
               {/* Crédito placeholder */}
               {paymentForm === 'credito' && (
-                <View style={styles.creditPlaceholder}>
-                  <Icon name="clock" size={24} color={colorScales.gray[300]} />
-                  <Text style={styles.creditPlaceholderText}>Configuración de crédito próximamente</Text>
+                <View style={styles.subSection}>
+                  <Text style={styles.subSectionLabel}>Método de crédito</Text>
+                  {creditMethods.length === 0 ? (
+                    <View style={styles.creditPlaceholder}>
+                      <Icon name="clock" size={24} color={colorScales.gray[300]} />
+                      <Text style={styles.creditPlaceholderText}>
+                        No hay métodos de crédito configurados
+                      </Text>
+                      <Text style={styles.creditErrorText}>
+                        Configura al menos un método de tipo crédito en Ajustes ·
+                        Pagos para habilitar la venta a crédito. (POS_CREDIT_METHOD_MISSING_001)
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.methodsGrid}>
+                      {creditMethods.map((method) => {
+                        const isSelected = selectedMethod?.id === method.id;
+                        return (
+                          <Pressable
+                            key={method.id}
+                            style={[styles.methodBtn, isSelected && styles.methodBtnSelected]}
+                            onPress={() => {
+                              setSelectedMethod(method);
+                              setCashReceived('');
+                              setReference('');
+                            }}
+                          >
+                            <Icon
+                              name={getPaymentMethodIcon('credit')}
+                              size={20}
+                              color={isSelected ? '#FFFFFF' : colors.primary}
+                            />
+                            <Text style={[styles.methodBtnText, isSelected && styles.methodBtnTextSelected]}>
+                              {getPaymentMethodLabel(method)}
+                            </Text>
+                            {isSelected && (
+                              <View style={styles.methodCheck}>
+                                <Icon name="check" size={12} color="#FFFFFF" />
+                              </View>
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {!creditMethodMissing && creditMethods.length > 0 && (
+                    <View style={styles.creditPlaceholder}>
+                      <Icon name="clock" size={24} color={colorScales.gray[300]} />
+                      <Text style={styles.creditPlaceholderText}>
+                        Configuración de crédito próximamente
+                      </Text>
+                    </View>
+                  )}
+                  {creditMethodMissing && (
+                    <Text style={styles.creditErrorText}>
+                      Selecciona un método de crédito antes de continuar.
+                      (POS_CREDIT_METHOD_MISSING_001)
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -881,7 +1039,17 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
             onPress={handleProcessPayment}
             disabled={!canProcess || isProcessing}
             accessibilityRole="button"
-            accessibilityLabel={paymentForm === 'credito' ? 'Crear venta a crédito' : 'Cobrar orden'}
+            accessibilityLabel={
+              noMethodsAtAll
+                ? 'Sin métodos de pago — no se puede cobrar'
+                : noDirectMethods
+                  ? 'Sin métodos de contado — no se puede cobrar'
+                  : creditMethodMissing
+                    ? 'Selecciona un método de crédito para continuar'
+                    : paymentForm === 'credito'
+                      ? 'Crear venta a crédito'
+                      : 'Cobrar orden'
+            }
             accessibilityState={{ busy: isProcessing, disabled: !canProcess || isProcessing }}
           >
             {isProcessing ? (
@@ -1164,6 +1332,17 @@ const styles = StyleSheet.create({
     color: colorScales.gray[400],
     textAlign: 'center',
     paddingVertical: spacing[4],
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — error tipado para métodos faltantes
+  // (sin métodos / sin crédito con paymentForm='credito'). El cajero
+  // necesita ver el código para diagnosticarlo con soporte.
+  creditErrorText: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
+    color: colors.error,
+    textAlign: 'center',
+    paddingTop: spacing[2],
+    paddingHorizontal: spacing[2],
   },
   methodsGrid: {
     flexDirection: 'row',
