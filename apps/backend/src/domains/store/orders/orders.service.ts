@@ -2084,10 +2084,32 @@ export class OrdersService {
             // pre-flight del paso 12: si el cliente superó ese gate, la
             // reserva debería entrar; si falla acá, hay una race con otro
             // consumidor concurrente que queremos reportar.
+            //
+            // Round 4 BLOCKER: `group.locationId` se construye arriba
+            // desde `getDefaultLocationForProduct`, que devuelve
+            // `number | null`. La key de agrupación ya codifica el caso
+            // `null` con la literal `'null'`, así que si la bodega por
+            // defecto del producto no está configurada, abortamos el
+            // editor con `POS_STOCK_INSUFFICIENT_001` ANTES de pasar
+            // `null` a `reserveStock` (que exige `number`). Este es el
+            // mismo código de error que se devuelve cuando la reserva
+            // falla por falta de stock: la falta de bodega operativa es
+            // imposibilidad logística, no un error 500 opaco.
+            if (group.locationId == null) {
+              throw new VendixHttpException(
+                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+                undefined,
+                {
+                  reason: 'no default location for product',
+                  product_id: group.productId,
+                  variant_id: group.variantId,
+                },
+              );
+            }
             await this.stockLevelManager.reserveStock(
               group.productId,
               group.variantId || undefined,
-              group.locationId,
+              group.locationId, // narrowed to `number` by the guard above
               group.quantity,
               'order',
               orderId,

@@ -823,9 +823,15 @@ describe('OrdersService', () => {
           .mockReset()
           .mockResolvedValueOnce(editableOrder as any)
           .mockResolvedValue(persistedOrder as any);
-        mockPrismaService.products.findUnique.mockResolvedValue({
-          track_inventory: true,
-        });
+        // Round 3 MAJOR #10: el pre-flight de stock ahora es batch
+        // (`findMany` con `select: { id, track_inventory }`) en lugar
+        // de un `findUnique` por item. Marcamos `track_inventory: true`
+        // en el row que devuelve `findMany` para que el bucle del
+        // pre-flight entre al path de `allocateForLine` y dispare el
+        // shortfall → `POS_STOCK_INSUFFICIENT_001`.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1, track_inventory: true },
+        ]);
         mockSellableStockAllocator.allocateForLine.mockResolvedValue({
           slices: [],
           allocated: 0,
