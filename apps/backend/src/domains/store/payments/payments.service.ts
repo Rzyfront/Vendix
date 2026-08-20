@@ -76,6 +76,10 @@ import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
+import {
+  AuditService,
+  AuditResource,
+} from '@common/audit/audit.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -131,6 +135,11 @@ export class PaymentsService {
     // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT entre documento
     // equivalente POS y factura electrónica nominativa.
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · audit emission for `order.draft_saved`.
+    // Only used in the draft short-circuit (no other behavior change). Wired
+    // here because `@Global()` AuditModule already exports it, so DI resolves
+    // without touching the module wiring.
+    private readonly auditService: AuditService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -1721,6 +1730,42 @@ export class PaymentsService {
       // No cash movement, no installments, no invoice data request, no
       // success message tied to a sale.
       if (result.success && createPosPaymentDto.is_draft) {
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · `order.draft_saved`.
+        //
+        // Emit AFTER the $transaction commits (we are outside it here) so an
+        // audit row never claims a save that the DB rolled back. Correlate by
+        // `request_id` so support can pivot from a frontend error / X-Request-Id
+        // straight to the timeline row. Wrapped in try/catch: a missing audit
+        // row is observability debt, never a blocker for an already-persisted
+        // draft.
+        const draftCtx = RequestContextService.getContext();
+        try {
+          await this.auditService.logCustom(
+            user?.id,
+            'order.draft_saved',
+            AuditResource.ORDERS,
+            {
+              order_id: result.order.id,
+              order_number: result.order.order_number,
+              store_id: createPosPaymentDto.store_id,
+              user_id: user?.id,
+              request_id: draftCtx?.request_id,
+              customer_id: createPosPaymentDto.customer_id ?? null,
+              // Carry enough snapshot to reconstruct the save intent without
+              // touching the order row again: no payment, no coupon use, no
+              // accounting entries — that is exactly the point of a draft.
+              has_customer: !!createPosPaymentDto.customer_id,
+              requires_payment: false,
+              grand_total: result.order.total_amount,
+            },
+            Number(result.order.id),
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[POS] draft_saved audit failed for order #${result.order.id}: ${(err as Error).message}`,
+          );
+        }
+
         return {
           success: true,
           order: result.order,

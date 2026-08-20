@@ -27,6 +27,10 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { OrderEtaService } from '../services/order-eta.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
+import {
+  AuditService,
+  AuditResource,
+} from '@common/audit/audit.service';
 
 type OrderState = order_state_enum;
 
@@ -100,6 +104,12 @@ export class OrderFlowService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly orderEtaService: OrderEtaService,
     private readonly orderStockCommit: OrderStockCommitService,
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · audit emission for the pay flow.
+    // `payment.attempt` / `payment.succeeded` / `payment.failed` ride this
+    // service so the timeline reflects exactly what happened to the cash /
+    // state machine. Injected (not global lookup) so the constructor stays
+    // the single source of truth for what the service depends on.
+    private readonly auditService: AuditService,
   ) {}
 
   private async getOrder(orderId: number) {

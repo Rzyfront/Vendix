@@ -6,6 +6,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
+import * as crypto from 'crypto';
 import {
   RequestContextService,
   RequestContext,
@@ -18,6 +20,7 @@ export class RequestContextInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const ctx = context.switchToHttp();
     const req = ctx.getRequest();
+    const res = ctx.getResponse();
     const user = req.user;
     const domain_context = req['domain_context'];
 
@@ -27,10 +30,25 @@ export class RequestContextInterceptor implements NestInterceptor {
       is_owner: false,
     };
 
-    // Propagate X-Request-Id for idempotent operations (e.g. quota dedup)
-    const requestId = req.headers['x-request-id'];
-    if (typeof requestId === 'string' && requestId) {
-      contextObj.request_id = requestId;
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.1 · X-Request-Id correlation.
+    //
+    // Honor a caller-provided X-Request-Id when present (lets a frontend or
+    // upstream gateway pin the same correlation token across services); fall
+    // back to a fresh UUID so EVERY request is correlatable, even if the
+    // caller forgot to set the header. We also stamp the same id on the
+    // response header so the client can echo it back in support tickets
+    // without having to dig through DevTools.
+    const inboundRequestId = req.headers['x-request-id'];
+    const requestId =
+      typeof inboundRequestId === 'string' && inboundRequestId.length > 0
+        ? inboundRequestId
+        : crypto.randomUUID();
+    contextObj.request_id = requestId;
+    try {
+      res.setHeader('X-Request-Id', requestId);
+    } catch {
+      // Some response shapes (e.g. SSE) forbid header mutation after stream
+      // start; the ALS context still carries the id, so logging keeps working.
     }
 
     // Combined Context Logic
@@ -85,12 +103,23 @@ export class RequestContextInterceptor implements NestInterceptor {
     }
 
     this.logger.debug(
-      `Context Initialized: store_id=${contextObj.store_id}, user_id=${contextObj.user_id}, path=${req.originalUrl}`,
+      `Context Initialized: store_id=${contextObj.store_id}, user_id=${contextObj.user_id}, request_id=${contextObj.request_id}, path=${req.originalUrl}`,
     );
 
     // Always run within AsyncLocalStorage to ensure a request-safe context
     return RequestContextService.asyncLocalStorage.run(contextObj, () => {
-      return next.handle();
+      return next.handle().pipe(
+        tap({
+          // Defensive: also stamp the header on completion in case a
+          // middleware short-circuited before the synchronous `setHeader`
+          // (rare, but free insurance).
+          next: () => {
+            try {
+              res.setHeader('X-Request-Id', requestId);
+            } catch {}
+          },
+        }),
+      );
     });
   }
 
