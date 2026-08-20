@@ -172,19 +172,29 @@ export class PosCheckoutShellComponent {
   /**
    * Composición que alimenta templates y guards que sólo necesitan "se requiere
    * cliente" sin importar el motivo. Cero rama pickup solapada.
+   *
+   * Round 8 — el POS-side flag `pos.allow_anonymous_sales` es escape hatch:
+   * aunque la política exija cliente, el cashier puede vender sin él desde el
+   * POS. Por tanto "obligatorio" sólo cuando la política lo exige Y el POS
+   * no tiene la ventana abierta. La dirección de envío sigue exigiendo
+   * cliente siempre (no hay forma de atar un envío sin un customer_id).
    */
   readonly customerRequired = computed<boolean>(
-    () => this.customerRequiredByPolicy() || this.customerRequiredByAddress(),
+    () =>
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) ||
+      this.customerRequiredByAddress(),
   );
 
   /**
    * El paso Cliente no se puede abandonar sin cliente, por cualquiera de sus dos
    * razones: hay envío (la dirección lo exige) o la tienda prohíbe ventas
-   * anónimas ({@link customerRequiredByPolicy}). Alimenta el badge
-   * "Obligatorio" y el aviso inline del panel Cliente.
+   * anónimas ({@link customerRequiredByPolicy}) sin el escape hatch POS abierto.
+   * Alimenta el badge "Obligatorio" y el aviso inline del panel Cliente.
    */
   readonly customerMandatory = computed<boolean>(
-    () => this.customerRequiredByAddress() || this.customerRequiredByPolicy(),
+    () =>
+      this.customerRequiredByAddress() ||
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()),
   );
 
   /**
@@ -920,8 +930,13 @@ export class PosCheckoutShellComponent {
    */
   onSelectSaleType(anonymous: boolean): void {
     if (anonymous) {
-      if (this.customerRequiredByPolicy()) {
-        // Policy forbids anonymous — force the customer path.
+      // Round 8 — `pos.allow_anonymous_sales=true` is the POS-side escape
+      // hatch: even when `checkout.require_customer_data=true` (which
+      // governs ecommerce + electronic invoicing), the cashier may sell
+      // without a customer from the POS. Mirror the backend gate: refuse
+      // anonymous ONLY when the policy forbids it AND the POS flag is off.
+      if (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) {
+        // Policy forbids anonymous AND POS doesn't allow it — force Con Cliente.
         this.toggleAnonymousSale(false);
         this.goToClienteSubStep(1);
         return;
