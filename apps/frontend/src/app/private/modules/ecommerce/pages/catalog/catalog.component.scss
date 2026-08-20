@@ -2,6 +2,18 @@
   min-height: 60vh;
 }
 
+// Banner de promociones activas (CP-ECOM-PROMO-UX-001 C.1).
+// Full-width en mobile (edge-to-edge), respiro lateral en desktop. Se pinta
+// solo cuando hay promos: el wrapper nunca queda vacío ni deja espacio en
+// blanco cuando no hay promos activas.
+.catalog-promo-banner {
+  margin: 0 -0.5rem 0.75rem;
+
+  @media (min-width: 993px) {
+    margin: 0 0 1rem;
+  }
+}
+
 // Header — compact sticky bar on mobile, clean inline on desktop
 .catalog-header {
   position: sticky;

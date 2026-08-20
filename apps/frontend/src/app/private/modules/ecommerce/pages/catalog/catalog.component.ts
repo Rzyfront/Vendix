@@ -19,6 +19,7 @@ import {
   Category,
   Brand,
   CatalogQuery,
+  ActiveStorePromotion,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
@@ -42,6 +43,11 @@ import {
   SelectorOption,
 } from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+  PromotionScope,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 interface CatalogSettings {
   products_per_page: number;
@@ -76,6 +82,7 @@ const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
     MultiSelectorComponent,
     PaginationComponent,
     SelectorComponent,
+    PromotionStackComponent,
   ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
@@ -171,6 +178,42 @@ export class CatalogComponent implements OnInit {
   readonly shareModalOpen = signal(false);
   readonly shareProduct = signal<EcommerceProduct | null>(null);
 
+  // ── Store-wide active promotions banner (CP-ECOM-PROMO-UX-001 C.1) ──
+  readonly storePromotions = signal<ActiveStorePromotion[]>([]);
+  /**
+   * Proyecta `ActiveStorePromotion[]` a la forma que espera
+   * `<app-promotion-stack>`. Marca como `featured` la primera promo
+   * (la de mayor descuento efectivo: `percentage` > `fixed_amount` más alto).
+   */
+  readonly promotionStackItems = computed<PromotionStackItem[]>(() => {
+    const promos = this.storePromotions();
+    if (promos.length === 0) return [];
+
+    // Ranking simple: percentage gana sobre fixed_amount; empates se
+    // conservan en el orden original del backend. Solo la primera entrada se
+    // marca featured; las demás siguen en su orden natural.
+    const ranked = [...promos].sort((a, b) => {
+      if (a.type === b.type) return 0;
+      if (a.type === 'percentage') return -1;
+      return 1;
+    });
+
+    return ranked.map((promo, index) => ({
+      id: promo.id,
+      label: promo.badge_label,
+      type: promo.type,
+      value: promo.value,
+      scope: (['order', 'product', 'category'].includes(promo.scope)
+        ? promo.scope
+        : 'order') as PromotionScope,
+      // Phase B actualmente no expone `quantity_tiers` a nivel de tienda; el
+      // banner solo necesita pintar el badge principal.
+      min_quantity: undefined,
+      max_quantity: undefined,
+      featured: index === 0,
+    }));
+  });
+
   private destroyRef = inject(DestroyRef);
   private search_subject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
@@ -202,6 +245,10 @@ export class CatalogComponent implements OnInit {
     // Load categories and brands
     this.loadCategories();
     this.loadBrands();
+
+    // Banner de promociones activas (C.1). Independiente del catálogo:
+    // corre en paralelo con `loadProducts()` y nunca lo bloquea.
+    this.loadStorePromotions();
 
     // Handle search debounce
     this.search_subject
@@ -382,6 +429,29 @@ export class CatalogComponent implements OnInit {
           if (response.success) {
             this.brands.set(response.data);
           }
+        },
+      });
+  }
+
+  /**
+   * Carga las promociones activas de la tienda para pintar el banner superior
+   * del catálogo. Se ejecuta en paralelo con `loadProducts()` desde `ngOnInit`
+   * para no sumar latencia. Si la API falla o devuelve vacío, el banner
+   * simplemente no se renderiza (la condición está en el template).
+   */
+  loadStorePromotions(): void {
+    this.catalog_service
+      .getActivePromotions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.storePromotions.set(response.data ?? []);
+          }
+        },
+        // On failure keep the banner hidden — never block the catalog.
+        error: () => {
+          this.storePromotions.set([]);
         },
       });
   }

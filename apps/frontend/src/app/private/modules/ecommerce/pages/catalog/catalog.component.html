@@ -1,4 +1,18 @@
 <div class="catalog-page">
+  <!-- Store-wide active promotions banner (CP-ECOM-PROMO-UX-001 C.1).
+       Solo se renderiza cuando hay promociones activas. Fuera del modal de
+       Quick View: vive en la página, no en el overlay. -->
+  @if (promotionStackItems().length > 0) {
+    <div class="catalog-promo-banner">
+      <app-promotion-stack
+        mode="scroll-batch"
+        [items]="promotionStackItems()"
+        ariaLabel="Promociones activas"
+        data-testid="catalog-promo-banner"
+      />
+    </div>
+  }
+
   <!-- Header -->
   <div class="catalog-header">
     <div class="catalog-header-row">
