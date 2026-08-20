@@ -7,16 +7,11 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-import {
-  AppliedPromotion,
-  Cart,
-  CartTierProgress,
-} from '../../services/cart.service';
+import { Cart } from '../../services/cart.service';
 import {
   PromotionStackComponent,
   PromotionStackItem,
 } from '../../../../../shared/components/promotion-stack/promotion-stack.component';
-import type { BadgeVariant } from '../../../../../shared/components/badge/badge.component';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -179,99 +174,69 @@ export class CartPromotionsComponent {
    * component, accepted deliberately while Phase F (cart summary polish)
    * lands the bespoke applied-promo card. See E.1 acceptance item 3.
    */
-  readonly appliedPromotionItems = computed<PromotionStackItem[]>(() =>
-    (this.cart()?.applied_promotions ?? []).map((promo) => ({
-      id: promo.promotion_id,
-      label: promo.name,
-      type: (promo.type ?? 'percentage') as PromotionStackItem['type'],
-      value: promo.discount_amount,
-      scope: (promo.scope ?? 'order') as PromotionStackItem['scope'],
-      // Sentinel so the expanded-cards filter renders this row. See JSDoc above.
-      min_quantity: 1,
-    })),
-  );
+  readonly appliedPromotionItems = computed<PromotionStackItem[]>(() => {
+    // CP-ECOM-PROMO-UX-001 R2-B (Minor #8): whitelist `promo.type` and
+    // `promo.scope` before casting — never silently coerce unknown values
+    // into the union. CP-ECOM-PROMO-UX-001 R2-B (Minor #2): when type is
+    // missing/invalid, drop the promo and warn (don't project a
+    // misleading default).
+    const validTypes: Array<'percentage' | 'fixed_amount'> = [
+      'percentage',
+      'fixed_amount',
+    ];
+    const validScopes: Array<'order' | 'product' | 'category'> = [
+      'order',
+      'product',
+      'category',
+    ];
 
-  // ── Backward-compat surface (Phase D- era consumers) ──────────────────
-  //
-  // The computeds below used to drive this component's OWN template. Phase
-  // E.1 replaced the inline template with `<app-promotion-stack>`, so the
-  // primary projection path is `tierProgressItems` + `appliedPromotionItems`
-  // above. The legacy fields are KEPT (marked `@deprecated`) because:
-  //
-  //   * they were `public readonly` so any test, storybook story, or
-  //     external consumer that read them would silently break otherwise;
-  //   * they expose the SAME classification logic the POS nudge uses, so
-  //     future QA harnesses can compare web vs POS parity through one
-  //     stable surface.
-  //
-  // They will be removed in a follow-up cleanup once Phase F's bespoke
-  // applied-promo card lands (acceptance item 10 of E.1).
+    const items: PromotionStackItem[] = [];
+    for (const promo of this.cart()?.applied_promotions ?? []) {
+      const safeType: 'percentage' | 'fixed_amount' | undefined =
+        promo.type && validTypes.includes(promo.type as 'percentage' | 'fixed_amount')
+          ? (promo.type as 'percentage' | 'fixed_amount')
+          : undefined;
 
-  /**
-   * @deprecated Use `tierProgressItems()` instead — it returns the same
-   * shape consumed by `<app-promotion-stack mode="compact-pills">`. Kept for
-   * backward compatibility with test/storybook consumers that read this
-   * signal directly. Will be removed after Phase F lands.
-   */
-  readonly tierProgress = computed<
-    Array<{
-      promotion_id: number;
-      name: string;
-      remaining_quantity: number;
-      benefitLabel: string;
-      target_product_name: string | null;
-    }>
-  >(() =>
-    (this.cart()?.tier_progress ?? []).map((tier) => ({
-      promotion_id: tier.promotion_id,
-      name: tier.name,
-      remaining_quantity: tier.remaining_quantity,
-      benefitLabel:
-        tier.benefit_type === 'percentage'
-          ? `-${tier.benefit_value}%`
-          : `-${this.currencyFormat.format(tier.benefit_value)}`,
-      target_product_name: this.resolveProductName(tier.target_product_id),
-    })),
-  );
+      if (!safeType) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[cart-promotions] Skipping applied promo ${promo.promotion_id} with invalid/missing type:`,
+          promo.type,
+        );
+        continue;
+      }
 
-  /**
-   * @deprecated Use `appliedPromotionItems()` instead — it returns the same
-   * shape consumed by `<app-promotion-stack mode="expanded-cards">`. Kept for
-   * backward compatibility with test/storybook consumers. Will be removed
-   * after Phase F lands.
-   */
-  readonly appliedPromotions = computed<
-    Array<{
-      promotion_id: number;
-      name: string;
-      discount_amount: number;
-      typeLabel: string;
-      typeVariant: BadgeVariant;
-      target_product_names: string[];
-    }>
-  >(() =>
-    (this.cart()?.applied_promotions ?? []).map((promo) => ({
-      promotion_id: promo.promotion_id,
-      name: promo.name,
-      discount_amount: promo.discount_amount,
-      typeLabel:
-        promo.type === 'percentage'
-          ? 'Porcentaje'
-          : promo.type === 'fixed_amount'
-            ? 'Monto fijo'
-            : 'Promoción',
-      typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
-      target_product_names: this.resolveAffectedNames(promo),
-    })),
-  );
+      const safeScope:
+        | 'order'
+        | 'product'
+        | 'category'
+        | undefined =
+        promo.scope &&
+        validScopes.includes(
+          promo.scope as 'order' | 'product' | 'category',
+        )
+          ? (promo.scope as 'order' | 'product' | 'category')
+          : undefined;
+
+      items.push({
+        id: promo.promotion_id,
+        label: promo.name,
+        type: safeType,
+        value: promo.discount_amount,
+        scope: safeScope,
+        // Sentinel so the expanded-cards filter renders this row. See JSDoc above.
+        min_quantity: 1,
+      });
+    }
+    return items;
+  });
 
   // ── Private helpers ───────────────────────────────────────────────────
 
   /**
    * Look up a single `product_id` against the cart's items and return the
    * product's display name (or null if absent / backend didn't supply an id).
-   * Shared by `tierProgressItems` (Phase E.1 primary) and the deprecated
-   * `tierProgress` so they cannot drift apart.
+   * Shared by `tierProgressItems` so the projection cannot drift apart.
    */
   private resolveProductName(productId: number | null | undefined): string | null {
     if (productId == null) return null;
@@ -303,54 +268,6 @@ export class CartPromotionsComponent {
       }
     }
     return matched ? total : null;
-  }
-
-  /**
-   * Nombres que se muestran en la línea "en: ..." debajo de la promo aplicada.
-   *
-   * QUI-515: hay DOS fuentes y no son intercambiables, así que se consultan en
-   * orden de especificidad:
-   *
-   *  1. `target_product_ids` — sólo lo llena el engine para promos
-   *     `per_product`, y dice exactamente qué SKU alcanzó la escala por su
-   *     cuenta. Es la información más precisa: los productos que NO calificaron
-   *     quedan fuera aunque compartan el scope.
-   *  2. `applicable_descriptions` — a qué líneas se aplicó el descuento. Es la
-   *     única fuente disponible para promos `cart_total` de scope
-   *     producto/categoría, donde el punto 1 viene vacío por definición.
-   *
-   * Sin el fallback al punto 2, toda promo que no sea `per_product` perdería la
-   * etiqueta que hoy ya se muestra, y el cliente dejaría de ver sobre qué se le
-   * aplicó el descuento. Para `scope: 'order'` ambas vienen vacías y la línea no
-   * se pinta, que es lo correcto: el descuento va sobre todo el carrito.
-   *
-   * Kept for the deprecated `appliedPromotions` computed above.
-   */
-  private resolveAffectedNames(promo: AppliedPromotion): string[] {
-    const targeted = this.resolveProductNames(promo.target_product_ids);
-    if (targeted.length > 0) return targeted;
-    return (promo.applicable_descriptions ?? [])
-      .map((d) => d.label?.trim())
-      .filter((label): label is string => !!label && label.length > 0);
-  }
-
-  /**
-   * Bulk variant of `resolveProductName` for the applied-promotions list.
-   * Preserves the input order and drops ids that aren't in the cart (e.g.
-   * stale product_ids from a removed line) so the UI never renders "en: "
-   * followed by an empty string.
-   *
-   * Kept for the deprecated `appliedPromotions` computed above.
-   */
-  private resolveProductNames(productIds: number[] | undefined): string[] {
-    if (!productIds || productIds.length === 0) return [];
-    const items = this.cart()?.items ?? [];
-    const names: string[] = [];
-    for (const id of productIds) {
-      const item = items.find((i) => i.product_id === id);
-      if (item?.product?.name) names.push(item.product.name);
-    }
-    return names;
   }
 
   /**
