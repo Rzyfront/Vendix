@@ -1043,6 +1043,99 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Stock insuficiente para una o más líneas del POS',
   },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — gate obligatorio de cliente en POS.
+  // Política canónica: `settings.checkout.require_customer_data=true`. Una orden
+  // POS sin cliente queda huérfana y no se puede cobrar, facturar ni atender
+  // soporte. Se valida en backend ANTES de abrir la transacción de pago.
+  POS_CUSTOMER_REQUIRED_001: {
+    code: 'POS_CUSTOMER_REQUIRED_001',
+    httpStatus: 422,
+    devMessage:
+      'POS order requires a valid customer_id when checkout.require_customer_data is enabled',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — invariante draft/payment. `is_draft=true`
+  // significa "guardar orden pendiente de cobro"; combinarlo con `requires_payment=true`
+  // es contradictorio y debe rechazarse antes de tomar numeración o escribir pagos.
+  POS_DRAFT_REQUIRES_PAYMENT_001: {
+    code: 'POS_DRAFT_REQUIRES_PAYMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — race en editor. Otro operador cambió la
+  // orden de `created`/`draft` mientras editábamos. 409 porque la petición está
+  // bien formada; lo que cambió es el estado del recurso.
+  ORD_EDIT_STATE_CHANGED_001: {
+    code: 'ORD_EDIT_STATE_CHANGED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order state changed while it was being edited; refresh and retry',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — la orden ya no es editable (pending, finished,
+  // cancelled, refunded…). El editor no debe ni siquiera cargarla.
+  ORD_EDIT_NOT_ALLOWED_001: {
+    code: 'ORD_EDIT_NOT_ALLOWED_001',
+    httpStatus: 409,
+    devMessage:
+      'This order is no longer in an editable state (created/draft required)',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
+  // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
+  // de scope/tenant).
+  ORD_EDIT_CUSTOMER_STORE_MISMATCH_001: {
+    code: 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001',
+    httpStatus: 403,
+    devMessage: 'The selected customer does not belong to the current store',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
+  // método inactivo, rate no pertenece al método, o costo negativo.
+  ORD_EDIT_INVALID_SHIPPING_001: {
+    code: 'ORD_EDIT_INVALID_SHIPPING_001',
+    httpStatus: 422,
+    devMessage:
+      'Shipping address, method, rate or cost is invalid for the current order',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — claim atómico del estado de la orden
+  // perdió la carrera. Diferente de ORD_EDIT_STATE_CHANGED_001: aquí no sabemos
+  // cuál fue el estado final, sólo que la transición atómica no se aplicó.
+  ORD_EDIT_INVALID_STATE_001: {
+    code: 'ORD_EDIT_INVALID_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Order could not be claimed for editing; reload and try again',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — promoción o cupón seleccionado ya no aplica
+  // al carrito editado. 422 porque la petición está bien formada; lo que cambió
+  // es la elegibilidad del descuento.
+  ORD_EDIT_PROMOTION_INVALID_001: {
+    code: 'ORD_EDIT_PROMOTION_INVALID_001',
+    httpStatus: 422,
+    devMessage:
+      'Selected promotion or coupon no longer applies to the edited order',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — race al confirmar el cupón en el cobro.
+  // El cupón ya fue consumido por otro cargo concurrente y no debe duplicarse.
+  ORD_EDIT_COUPON_COMMIT_001: {
+    code: 'ORD_EDIT_COUPON_COMMIT_001',
+    httpStatus: 409,
+    devMessage:
+      'Coupon could not be committed; it may have been consumed by a concurrent charge',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el servicio detectó que la fila persistida
+  // difiere de la respuesta autoritativa. Nunca devolver éxito falso.
+  ORD_EDIT_RESPONSE_MISMATCH_001: {
+    code: 'ORD_EDIT_RESPONSE_MISMATCH_001',
+    httpStatus: 500,
+    devMessage:
+      'Order was persisted but the response payload does not match the stored row; refresh and verify',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro canónico (flow/pay) falló por
+  // estado, monto o condición pendiente. La orden sigue lista para pagar.
+  ORD_FLOW_PAYMENT_FAILED_001: {
+    code: 'ORD_FLOW_PAYMENT_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order payment could not be processed; the order remains ready-to-pay',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,

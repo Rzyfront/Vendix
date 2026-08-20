@@ -459,6 +459,12 @@ model audit_logs {
   resource_id     Int?
   old_values      Json?
   new_values      Json?
+  /// CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B1.
+  /// Aditiva: nullable JSON para que cada caller persista contexto extra
+  /// (request_id, transaction_id, error_code, before/after_totals, etc.) sin
+  /// tener que inventar columnas por evento. Estándar bajo `metadata` para que
+  /// la consulta de timeline no se acople a un catálogo volátil de columnas.
+  metadata        Json?
   ip_address      String?        @db.VarChar(45)
   user_agent      String?
   created_at      DateTime?      @default(now()) @db.Timestamp(6)

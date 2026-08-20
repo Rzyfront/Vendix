@@ -6,6 +6,7 @@ import { selectStoreSettings } from '../auth/auth.selectors';
 import {
   StoreSettings,
   PosSettings,
+  CheckoutSettings,
   NotificationsSettings,
   ReceiptsSettings,
   VexiSettings,
@@ -42,6 +43,19 @@ export class StoreSettingsFacade {
 
   readonly pos = computed<PosSettings | null>(
     () => this.settings()?.pos ?? null,
+  );
+
+  /**
+   * Phase D.2 — canonical customer-required policy source.
+   *
+   * `settings.checkout.require_customer_data` is the SOLE authoritative
+   * setting for "every POS order must have a customer". It is NOT derived
+   * from `pos.allow_anonymous_sales`, which represents a different axis
+   * (cashier-tunable anonymous flow on the cashier). Components that need to
+   * decide whether to gate the create/update UI read this signal directly.
+   */
+  readonly checkout = computed<CheckoutSettings | null>(
+    () => this.settings()?.checkout ?? null,
   );
 
   readonly branding = computed<Record<string, any> | null>(

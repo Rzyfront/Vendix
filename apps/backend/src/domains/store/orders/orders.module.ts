@@ -15,9 +15,12 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from '../dispatch-routes/dispatch-routes.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { PromotionsModule } from '../promotions/promotions.module';
+import { CouponsModule } from '../coupons/coupons.module';
 // Vexi tool families owned by this domain. AIToolRegistry comes from the
 // @Global() AIEngineModule, so it is injectable WITHOUT importing that module
 // here — importing it would risk a cycle, since it is global and this domain
@@ -53,12 +56,15 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     // only import ResponseModule + PrismaModule, so neither introduces a cycle.
     AnalyticsModule,
     CashRegistersModule,
+    PromotionsModule,
+    CouponsModule,
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [
     OrdersService,
     OrdersBulkService,
     StockLevelManager,
+    SellableStockAllocator,
     InventoryTransactionsService,
     OrderEtaService,
   ],

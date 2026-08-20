@@ -33,6 +33,14 @@ import { ResponseService } from '@common/responses/response.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import {
+  AuditService,
+  AuditResource,
+} from '@common/audit/audit.service';
+import { VendixHttpException } from '@common/errors';
+import { ErrorCodes } from '@common/errors/error-codes';
+import { RequestContextService } from '@common/context/request-context.service';
+import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 
 @Controller('store/orders/:orderId/flow')
 @UseGuards(PermissionsGuard)
@@ -42,6 +50,17 @@ export class OrderFlowController {
     private readonly refundFlowService: RefundFlowService,
     private readonly refundMethodsService: RefundMethodsService,
     private readonly responseService: ResponseService,
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · emits the timeline rows
+    // (`payment.attempt`, `payment.succeeded`, `payment.failed`) for the
+    // canonical pay endpoint. AuditModule is `@Global()` so the import is
+    // resolved without touching the OrderFlowModule wiring.
+    private readonly auditService: AuditService,
+    // Round 3 MAJOR #8 — needed by the controller to enrich `payment.attempt`
+    // with `amount`, `customer_id`, `is_draft` and `requires_payment`. The
+    // service's `getOrder` is private, so the controller reads the order
+    // directly via the store-scoped prisma. The query is single-row, scoped
+    // to the store already in context.
+    private readonly prisma: StorePrismaService,
   ) {}
 
   @Get('transitions')
@@ -68,10 +87,179 @@ export class OrderFlowController {
   async payOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: PayOrderDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    const result = await this.orderFlowService.payOrder(orderId, dto);
-    return this.responseService.success(result, 'Order paid successfully');
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · payment lifecycle observ.
+    //
+    // Emit three distinct timeline rows for the canonical pay path:
+    //  - `payment.attempt`: as soon as the request reaches the controller
+    //    (intent recorded even if the service throws before any DB write).
+    //  - `payment.succeeded`: after the service returns without throwing —
+    //    the cashier sees a 200 and the timeline agrees.
+    //  - `payment.failed`: every error from the service — `VendixHttpException`
+    //    (typed code in `details`) and bare errors (HTTP 500) alike. We always
+    //    rethrow so the filter owns the HTTP shape; the audit row is purely
+    //    observability, never a blocker.
+    //
+    // Correlation: `request_id` comes from `RequestContextService` (set by the
+    // request-context interceptor on every request, possibly caller-supplied
+    // via `X-Request-Id`). The structured prefix
+    // `[store=<id> order=<id> req=<rid> user=<id>]` matches the editor
+    // pattern so a single grep covers both flows.
+    const ctxUser = req?.user;
+    const auditCtx = () => ({
+      store_id: ctxUser?.store_id,
+      user_id: ctxUser?.id,
+      request_id: RequestContextService.getRequestId(),
+    });
+
+    // Round 3 MAJOR #9 — gate `payment.attempt` so it does NOT fire when the
+    // order is already past `pay`. Previously a stale POST against a refunded
+    // order still emitted `payment.attempt`, polluting the timeline with a row
+    // for an intent that was structurally rejected by the service. We peek at
+    // the available actions and skip the audit (and the call) when `pay` is
+    // no longer in the action list. The action-set lookup is read-only and
+    // uses the same `getOrder`/`state` resolution as the rest of the flow.
+    //
+    // QUI-POS-E2E: BUT `getAvailableActions` no incluye `pay` para `draft`
+    // (el SFM espera `created`+), aunque `OrderFlowService.payOrder` SÍ
+    // auto-promueve `draft → created` con `promoteDraftToCreated`. Si
+    // aplicáramos el gate ciegamente, los drafts POS nuevos no podrían
+    // pagarse nunca desde el editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy
+    // path). Excluimos `draft` del gate y dejamos que `payOrder` haga la
+    // promoción idempotente.
+    const availableActions =
+      await this.orderFlowService.getAvailableActions(orderId);
+    const payAction = (availableActions as any[])?.find?.(
+      (a) => a?.code === 'pay',
+    );
+    const orderRow = await this.orderFlowService.getOrder(orderId);
+    const isDraft = orderRow?.state === 'draft';
+    const payEnabled = isDraft || !!payAction?.enabled;
+
+    if (!payEnabled) {
+      // Mirror the canonical error shape so the cashier sees the same code
+      // the editor / order-detail pages already handle, AND the timeline is
+      // left clean of `payment.attempt` rows for terminal states.
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001,
+        undefined,
+        {
+          order_id: orderId,
+          available_actions: (availableActions as any[])?.map?.(
+            (a) => a?.code,
+          ),
+          reason: 'pay is not in the available actions for this order state',
+        },
+      );
+    }
+
+    // Round 3 MAJOR #8 — enrich `payment.attempt` with the financial context
+    // a timeline reader needs: amount, customer_id, is_draft and
+    // requires_payment. Without these the audit row only told you "someone
+    // tried to pay" — support couldn't pivot from a row to the actual
+    // order state or who was being invoiced.
+    const storeCtx = RequestContextService.getContext();
+    const orderForAudit = await this.prisma.orders
+      .findFirst({
+        where: {
+          id: orderId,
+          ...(storeCtx?.store_id ? { store_id: storeCtx.store_id } : {}),
+        },
+        select: {
+          grand_total: true,
+          customer_id: true,
+          state: true,
+        },
+      })
+      .catch(() => null);
+    const orderCtx = {
+      amount: orderForAudit ? Number(orderForAudit.grand_total ?? 0) : null,
+      customer_id: orderForAudit?.customer_id ?? null,
+      is_draft: orderForAudit?.state === 'draft',
+      requires_payment: true,
+    };
+
+    try {
+      await this.auditService.logCustom(
+        ctxUser?.id,
+        'payment.attempt',
+        AuditResource.PAYMENTS,
+        {
+          order_id: orderId,
+          payment_type: dto?.payment_type,
+          store_payment_method_id: dto?.store_payment_method_id,
+          ...orderCtx,
+          ...auditCtx(),
+        },
+        orderId,
+      );
+
+      const result = await this.orderFlowService.payOrder(orderId, dto);
+      await this.auditService.logCustom(
+        ctxUser?.id,
+        'payment.succeeded',
+        AuditResource.PAYMENTS,
+        {
+          order_id: orderId,
+          payment_type: dto?.payment_type,
+          // Pull the transaction id the service returned so support can pivot
+          // from a timeline row straight to the provider-side payment.
+          transaction_id:
+            (result as any)?.payment?.transaction_id ?? null,
+          ...orderCtx,
+          ...auditCtx(),
+        },
+        orderId,
+      );
+      return this.responseService.success(result, 'Order paid successfully');
+    } catch (error) {
+      // DO NOT swallow: the filter still owns the HTTP shape (typed code
+      // preserved when `error instanceof VendixHttpException`, generic 500
+      // otherwise). The audit row + structured log are additive.
+      const errorCode =
+        error instanceof VendixHttpException
+          ? (error as any).errorCode
+          : (error as any)?.code ?? 'n/a';
+      const ctx = auditCtx();
+      this.payOrderLog.error(
+        `[OrderFlow.payOrder failed] store=${ctx.store_id ?? 'unknown'} order=${orderId} req=${ctx.request_id ?? 'unknown'} user=${ctx.user_id ?? 'unknown'} errorCode=${errorCode} message=${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      try {
+        await this.auditService.logCustom(
+          ctxUser?.id,
+          'payment.failed',
+          AuditResource.PAYMENTS,
+          {
+            order_id: orderId,
+            payment_type: dto?.payment_type,
+            error_code: errorCode,
+            error_message:
+              (error as Error)?.message ?? 'unknown',
+            ...ctx,
+          },
+          orderId,
+        );
+      } catch (auditErr) {
+        // Audit failure must never mask the original error. Log and rethrow.
+        this.payOrderLog.warn(
+          `[OrderFlow.payOrder audit.failed] order=${orderId} message=${(auditErr as Error).message}`,
+        );
+      }
+      throw error;
+    }
   }
+
+  /**
+   * Per-handler logger so the structured prefix above is grep-friendly without
+   * adding instance state to every controller.
+   */
+  private readonly payOrderLog = new (require('@nestjs/common').Logger)(
+    OrderFlowController.name + '.payOrder',
+  );
 
   @Post('ship')
   @Permissions('store:orders:order_flow:create')

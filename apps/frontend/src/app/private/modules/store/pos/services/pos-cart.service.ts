@@ -175,10 +175,11 @@ export class PosCartService {
     const current = this.cartState();
     const amount = Number(result?.total_withholding ?? 0) || 0;
     const lines = result?.lines ?? [];
-    if (
-      (current.summary.withholdingAmount ?? 0) === amount &&
-      (current.summary.withholdingLines?.length ?? 0) === lines.length
-    ) {
+    // QUI-audit-round-1 — compare by `total_withholding` only (not by line
+    // count). Counting lines is a proxy that gets out of sync when the
+    // backend de-duplicates, drops zero-amount lines, or returns the same
+    // total split differently. The amount is the only canonical signal.
+    if ((current.summary.withholdingAmount ?? 0) === amount) {
       return; // No-op: avoids a redundant signal write / re-render loop.
     }
     this.cartState.set({
@@ -191,21 +192,26 @@ export class PosCartService {
     });
   }
 
-  // Observable getters
+  // Observable getters — historical shape kept for NgRx bridge consumers
+  // that already subscribe. Internally we drive everything off `computed`
+  // signals so cart mutations don't re-fire every effect (toObservable re-
+  // emits on every signal write, including unrelated tax recalcs). The
+  // public observable getters are now thin `.subscribe()` wrappers around
+  // the signals, exposing the same `Observable<T>` shape for compatibility.
   get cartState$(): Observable<CartState> {
     return toObservable(this.cartState);
   }
 
   get items(): Observable<CartItem[]> {
-    return toObservable(this.cartState).pipe(map((state) => state.items));
+    return toObservable(this.cartItems);
   }
 
   get customer(): Observable<PosCustomer | null> {
-    return toObservable(this.cartState).pipe(map((state) => state.customer));
+    return toObservable(this.cartCustomer);
   }
 
   get summary(): Observable<CartSummary> {
-    return toObservable(this.cartState).pipe(map((state) => state.summary));
+    return toObservable(this.cartSummary);
   }
 
   get loading$(): Observable<boolean> {
@@ -213,9 +219,28 @@ export class PosCartService {
   }
 
   get isEmpty(): Observable<boolean> {
-    return toObservable(this.cartState)
-      .pipe(map((state) => state.items.length === 0));
+    return toObservable(this.cartIsEmpty);
   }
+
+  // ── Projected signals (read-only, exposed for template consumers) ──
+  // Qui-audit-round-1 — these are the primary signal-based projections of
+  // cart state. They derive from `cartState` but only re-emit when the
+  // specific projection changes, so unrelated cart mutations (e.g. a new
+  // withholding total) don't fire unrelated consumers.
+  readonly cartItems = computed<CartItem[]>(() => this.cartState().items);
+  readonly cartCustomer = computed<PosCustomer | null>(
+    () => this.cartState().customer,
+  );
+  readonly cartSubtotal = computed<number>(
+    () => this.cartState().summary.subtotal,
+  );
+  readonly cartTax = computed<number>(
+    () => this.cartState().summary.taxAmount,
+  );
+  readonly cartSummary = computed<CartSummary>(() => this.cartState().summary);
+  readonly cartIsEmpty = computed<boolean>(
+    () => this.cartState().items.length === 0,
+  );
 
   /**
    * Add product to cart
@@ -451,94 +476,333 @@ export class PosCartService {
 
   /**
    * Load items from an existing order into the cart for editing
+   *
+   * Phase D.1 / CP-POS-CREAR-EDITAR-COBRAR-001:
+   *  - Use the embedded `order.order_items[].products` (and `product_variants`)
+   *    returned by `GET /store/orders/:id` FIRST. The response is already
+   *    authoritative for the editor: variant, SKU, price tier, image, taxes.
+   *  - Only fetch a missing product via `productService.getProductById` as a
+   *    FALLBACK when the embedded snapshot is absent (legacy payloads, custom
+   *    items, or a stale cache).
+   *  - If a fetch fails AND the embedded snapshot is also missing, surface a
+   *    TYPED error (`errorCode: 'POS_PRODUCT_HYDRATION_FAILED'`) so the cashier
+   *    sees a real reason rather than a silent stub.
+   *  - Restore `linkedOrderId` / `linkedOrderNumber` from the order metadata.
+   *  - Restore `notes` (public) and `internal_notes` (staff-only).
+   *  - Restore `appliedDiscounts` from `order.order_promotions`.
+   *  - Restore `appliedCoupon` from `order.coupons` / `order.coupon_code`.
+   *  - Restore `customer` from `order.users` (NOT from cartState default).
    */
   loadFromOrder(order: any): Observable<CartState> {
     if (!order?.order_items || order.order_items.length === 0) {
-      return of(this.getInitialState());
+      // Even on an empty order, persist the linked order metadata so the editor
+      // can navigate back / stay in edit mode without losing context.
+      // Round 3 MAJOR #2 — also restore `internal_notes` (staff-only). The
+      // main branch already does it via `buildLoadedCartState`; the empty
+      // branch used to drop it, which meant editing an empty/zero-item order
+      // silently reset the staff note.
+      const linkedState = this.getInitialState();
+      return of({
+        ...linkedState,
+        linkedOrderId: order?.id ?? null,
+        linkedOrderNumber: order?.order_number ?? null,
+        notes: order?.notes ?? '',
+        internalNotes: order?.internal_notes ?? '',
+        appliedDiscounts: this.mapOrderPromotionsToDiscounts(order),
+        appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
+        customer: this.mapOrderUsersToCustomer(order),
+        summary: this.calculateSummary([], this.mapOrderPromotionsToDiscounts(order)),
+        updatedAt: new Date(),
+      });
     }
 
-    // Fetch full product data for each order item
-    const productRequests: Observable<{ item: any; product: Product | null }>[] = order.order_items.map((item: any) =>
-      item.product_id
-        ? this.productService.getProductById(item.product_id.toString()).pipe(
-            map((product: Product | null) => ({ item, product })),
-            catchError(() => of({ item, product: null as Product | null })),
-          )
-        : of({ item, product: null as Product | null }),
-    );
+    // Phase D.1: prefer the embedded product snapshot from the order response.
+    // The order was already loaded with its include set; a per-line GET now
+    // would be N+1 and unnecessary. Only fall back when the embedded snapshot
+    // is missing — the response shape varies between backends, so accept any of
+    // the well-known embedded keys.
+    const missingProductIds: string[] = [];
+    const initialItems: Array<{ item: any; product: Product | null }> =
+      order.order_items.map((item: any) => {
+        const embedded = this.extractEmbeddedProduct(item);
+        return { item, product: embedded };
+      });
 
-    return forkJoin(productRequests).pipe(
-      map((results) => {
-        const cartItems: CartItem[] = results.map((result: any) => {
-          const { item, product } = result;
+    for (const { item, product } of initialItems) {
+      if (!product && item.product_id && !String(item.product_id).startsWith('custom-')) {
+        missingProductIds.push(String(item.product_id));
+      }
+    }
 
-          // If product was found from API, use it; otherwise create a stub
-          const cartProduct: Product = product || {
-            id: item.product_id?.toString() || this.generateCustomProductId(),
-            name: item.product_name,
-            sku: item.variant_sku || '',
-            price: Number(item.unit_price),
-            final_price: Number(item.final_unit_price || item.unit_price),
-            category: '',
-            stock: 9999,
-            track_inventory: false,
-            minStock: 0,
-            isActive: true,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            has_variants: false,
-            product_variants: [],
-          };
+    if (missingProductIds.length === 0) {
+      return of(this.buildLoadedCartState(order, initialItems));
+    }
 
-          const unitPrice = Number(item.unit_price);
-          const quantity = Number(item.quantity);
-          const totalPrice = Number(item.total_price);
-          const taxAmount = Number(item.tax_amount_item || 0) * quantity;
+    // Fallback: fetch only the genuinely missing products. Deduplicate so the
+    // same id is only requested once (still one call per unique missing id —
+    // the realistic case is one or two, not the full cart).
+    const uniqueMissing = Array.from(new Set(missingProductIds));
+    const fallbackRequests: Observable<{ id: string; product: Product | null }>[] =
+      uniqueMissing.map((id) =>
+        this.productService.getProductById(id).pipe(
+          map((product: Product | null) => ({ id, product })),
+          catchError(() => of({ id, product: null as Product | null })),
+        ),
+      );
 
-          return {
-            id: this.generateItemId(),
-            product: cartProduct,
-            quantity,
-            unitPrice,
-            finalPrice: Number(item.final_unit_price || totalPrice / quantity),
-            totalPrice: Number(item.final_unit_price || totalPrice / quantity) * quantity,
-            taxAmount,
-            addedAt: new Date(),
-            itemType: item.item_type === 'custom' || !item.product_id ? 'custom' : 'product',
-            description: item.description || undefined,
-            originalFinalPrice: Number(item.catalog_final_price || item.final_unit_price || totalPrice / quantity),
-            isPriceOverridden: item.is_price_overridden === true,
-            priceOverrideReason: item.price_override_reason || undefined,
-          } as CartItem;
-        });
+    return forkJoin(fallbackRequests).pipe(
+      map((fetched) => {
+        const byId = new Map<string, Product | null>();
+        for (const { id, product } of fetched) byId.set(id, product);
 
-        const newState: CartState = {
-          items: cartItems,
-          customer: order.users ? {
-            id: order.users.id,
-            name: `${order.users.first_name} ${order.users.last_name}`,
-            first_name: order.users.first_name,
-            last_name: order.users.last_name,
-            email: order.users.email,
-            phone: order.users.phone || '',
-          } as PosCustomer : null,
-          notes: '',
-          appliedDiscounts: [],
-          pendingBookings: [],
-          summary: this.calculateSummary(cartItems, []),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          // QUI-649 — al cargar una orden existente en el carrito (sin
-          // adopción por reserva), la entrada al carrito sigue siendo local.
-          // El step 4 setea estos campos solo cuando llega `booking.order`.
-          linkedOrderId: null,
-          linkedOrderNumber: null,
-        };
+        const stillMissing: string[] = [];
+        const resolved: Array<{ item: any; product: Product | null }> =
+          initialItems.map(({ item, product }) => {
+            if (product) return { item, product };
+            const id = item.product_id ? String(item.product_id) : null;
+            if (!id || id.startsWith('custom-')) return { item, product: null };
+            const fetchedProduct = byId.get(id) ?? null;
+            if (!fetchedProduct) stillMissing.push(id);
+            return { item, product: fetchedProduct };
+          });
 
-        return newState;
+        if (stillMissing.length > 0) {
+          // Typed surface: do not silently stub. The POS shows a real reason.
+          throw this.buildHydrationError(stillMissing);
+        }
+
+        return this.buildLoadedCartState(order, resolved);
       }),
       tap((newState) => this.cartState.set(newState)),
+      catchError((err) => {
+        if (err && (err as any).errorCode) {
+          return throwError(() => err);
+        }
+        // Defensive: wrap any unexpected throw with the typed code.
+        return throwError(() =>
+          this.buildHydrationError(missingProductIds),
+        );
+      }),
     );
+  }
+
+  /**
+   * Pull the product snapshot embedded in an order item.
+   *
+   * The Prisma include shape varies (`products`, `product`, `item.product`),
+   * and the backend may also stash `product_variants` under the same key. We
+   * accept any of those so the loader is resilient to response-shape changes.
+   */
+  private extractEmbeddedProduct(item: any): Product | null {
+    if (!item) return null;
+    const candidates = [item.products, item.product, item.item_product];
+    for (const c of candidates) {
+      if (c && typeof c === 'object' && (c.id || c.sku || c.name)) {
+        return c as Product;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Build a typed error for product hydration failure. Mirrors the
+   * `POS_*_001` family so the cashier sees a real reason, not a silent stub.
+   */
+  private buildHydrationError(missingIds: string[]): Error {
+    const wrapped = new Error(
+      `No se pudieron cargar ${missingIds.length} producto(s) de la orden. Revisa la conexión e inténtalo de nuevo.`,
+    ) as Error & { errorCode: string; details: { missing_product_ids: string[] } };
+    wrapped.errorCode = 'POS_PRODUCT_HYDRATION_FAILED';
+    wrapped.details = { missing_product_ids: missingIds };
+    return wrapped;
+  }
+
+  /**
+   * Construct the loaded CartState from resolved items + order metadata.
+   * Centralized so the empty-order branch and the populated branch stay
+   * byte-identical for the metadata fields.
+   */
+  private buildLoadedCartState(
+    order: any,
+    resolved: Array<{ item: any; product: Product | null }>,
+  ): CartState {
+    const discounts = this.mapOrderPromotionsToDiscounts(order);
+    const cartItems: CartItem[] = resolved.map(({ item, product }) =>
+      this.mapOrderItemToCartItem(item, product),
+    );
+
+    return {
+      items: cartItems,
+      customer: this.mapOrderUsersToCustomer(order),
+      notes: order?.notes ?? '',
+      internalNotes: order?.internal_notes ?? '',
+      appliedDiscounts: discounts,
+      appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
+      pendingBookings: [],
+      summary: this.calculateSummary(cartItems, discounts),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      // Phase D.1 — preserve the linked-order context across the load. This
+      // makes the cart "in flight" against an existing order until the cashier
+      // explicitly clears it; the editor uses this for re-load + save.
+      linkedOrderId: order?.id ?? null,
+      linkedOrderNumber: order?.order_number ?? null,
+    };
+  }
+
+  /**
+   * Map an `order.order_promotions[]` row to a CartDiscount. We keep the same
+   * shape the rest of the cart already consumes (so the coupon/promo UI works
+   * without further conversion on save).
+   */
+  private mapOrderPromotionsToDiscounts(order: any): CartDiscount[] {
+    const rows = Array.isArray(order?.order_promotions) ? order.order_promotions : [];
+    return rows
+      .filter((row: any) => row && (row.promotion_id || row.id))
+      .map((row: any) => ({
+        id: 'ORDER_PROMO_' + (row.promotion_id ?? row.id),
+        type:
+          row.discount_type === 'percentage' || row.type === 'percentage'
+            ? 'percentage'
+            : 'fixed',
+        value: Number(row.discount_percentage ?? row.value ?? 0),
+        description:
+          row.promotion?.name ??
+          row.promotion_name ??
+          row.name ??
+          `Promoción #${row.promotion_id ?? row.id}`,
+        amount: Number(row.discount_amount ?? 0),
+        promotion_id: row.promotion_id ?? row.id ?? null,
+        is_auto_applied: row.is_auto_applied === true,
+      }));
+  }
+
+  /**
+   * Map the order's coupon use to the cart's `appliedCoupon` shape. We accept
+   * either the new `order.coupons[]` join (preferred) or the legacy
+   * `order.coupon_code` flat field as fallback.
+   */
+  private mapOrderCouponsToAppliedCoupon(order: any):
+    | {
+        id: number;
+        code: string;
+        discount_type: string;
+        discount_value: number;
+      }
+    | undefined {
+    const fromJoin = Array.isArray(order?.coupons) ? order.coupons[0] : null;
+    const couponRow = fromJoin ?? order?.coupon ?? null;
+    if (couponRow) {
+      return {
+        id: Number(couponRow.coupon_id ?? couponRow.id ?? 0) || 0,
+        code:
+          couponRow.coupon_code ??
+          couponRow.code ??
+          order?.coupon_code ??
+          '',
+        discount_type:
+          couponRow.discount_type ?? couponRow.coupons?.discount_type ?? 'FIXED',
+        discount_value: Number(
+          couponRow.discount_value ??
+            couponRow.coupons?.discount_value ??
+            0,
+        ),
+      };
+    }
+    if (order?.coupon_code) {
+      return {
+        id: Number(order.coupon_id ?? 0) || 0,
+        code: order.coupon_code,
+        discount_type: order.coupon_discount_type ?? 'FIXED',
+        discount_value: Number(order.coupon_discount_value ?? 0),
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Map `order.users` (the embedded customer) to a PosCustomer. Returns null
+   * when the order is anonymous (cashier will be forced to pick one in the
+   * editor if `checkout.require_customer_data` is true).
+   */
+  private mapOrderUsersToCustomer(order: any): PosCustomer | null {
+    const u = order?.users ?? order?.customer ?? null;
+    if (!u || (!u.id && !u.user_id)) return null;
+    const id = Number(u.id ?? u.user_id ?? 0) || 0;
+    if (!id) return null;
+    return {
+      id,
+      name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.name || '',
+      first_name: u.first_name ?? '',
+      last_name: u.last_name ?? '',
+      email: u.email ?? '',
+      phone: u.phone ?? '',
+      document_number: u.document_number ?? '',
+      created_at: u.created_at ? new Date(u.created_at) : new Date(),
+      updated_at: u.updated_at ? new Date(u.updated_at) : new Date(),
+    } as PosCustomer;
+  }
+
+  /**
+   * Convert one `order.order_items[]` row to a CartItem. The embedded product
+   * is preferred; if absent (custom item or stale snapshot), the row's own
+   * denormalized fields seed a synthetic Product stub the cart already
+   * understands.
+   */
+  private mapOrderItemToCartItem(item: any, product: Product | null): CartItem {
+    const unitPrice = Number(item.unit_price ?? 0);
+    const quantity = Number(item.quantity ?? 0);
+    const totalPrice = Number(item.total_price ?? unitPrice * quantity);
+    const taxAmount = Number(item.tax_amount_item ?? 0) * quantity;
+
+    const cartProduct: Product =
+      product ??
+      ({
+        id:
+          item.product_id?.toString() ||
+          this.generateCustomProductId(),
+        name: item.product_name ?? '',
+        sku: item.variant_sku ?? '',
+        price: unitPrice,
+        final_price: Number(item.final_unit_price ?? unitPrice),
+        category: '',
+        stock: 9999,
+        track_inventory: false,
+        minStock: 0,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        has_variants: false,
+        product_variants: [],
+      } as Product);
+
+    const finalUnitPrice = Number(
+      item.final_unit_price ?? totalPrice / Math.max(quantity, 1),
+    );
+
+    return {
+      id: this.generateItemId(),
+      product: cartProduct,
+      quantity,
+      unitPrice,
+      finalPrice: finalUnitPrice,
+      totalPrice: finalUnitPrice * quantity,
+      taxAmount,
+      addedAt: new Date(),
+      itemType:
+        item.item_type === 'custom' || !item.product_id ? 'custom' : 'product',
+      description: item.description || undefined,
+      variant_id: item.product_variant_id ?? undefined,
+      variant_sku: item.variant_sku ?? undefined,
+      variant_attributes: item.variant_attributes ?? undefined,
+      variant_display_name: item.variant_display_name ?? undefined,
+      variant_image_url: item.variant_image_url ?? undefined,
+      isPriceOverridden: item.is_price_overridden === true,
+      priceOverrideReason: item.price_override_reason || undefined,
+      originalFinalPrice: Number(
+        item.catalog_final_price ?? item.final_unit_price ?? finalUnitPrice,
+      ),
+    } as CartItem;
   }
 
   /**
@@ -652,16 +916,36 @@ export class PosCartService {
    * leave the order in `state: 'created'` so another operator (or the same
    * one) can pick it up, edit it, or cancel it from the orders module.
    *
-   * Follow-up (out of scope for QUI-649): wire this to a `PATCH` on the
-   * order that sets `state: 'cancelled'` when the cashier explicitly chooses
-   * "abandon order" from the UI. For now, silent no-op keeps the bug-fix
-   * scope tight and the order recoverable from the orders module.
+   * QUI-audit-round-1 — adopted orders no longer vanish in `state: 'created'`
+   * when the cashier clicks "Vaciar". We now call `POST /store/orders/:id/cancel`
+   * so the backend takes the order out of the active set. The reason is
+   * forwarded so the orders module shows a coherent trail. Failure is
+   * swallowed: the local cart still resets so the POS doesn't block, and
+   * the orphan order is recoverable from the orders module where the
+   * operator can re-cancel it.
    */
   private releaseAdoptedOrder(
-    _orderId: number,
-    _orderNumber: string | null,
+    orderId: number,
+    orderNumber: string | null,
   ): Observable<void> {
-    return of(undefined);
+    const reason = `Liberada desde el POS al vaciar el carrito (orden ${orderNumber ?? orderId})`;
+    if (!orderId || !Number.isFinite(Number(orderId))) {
+      return of(undefined);
+    }
+    return this.posApi.cancelOrder(String(orderId), reason).pipe(
+      map(() => undefined),
+      catchError((err) => {
+        // Log only — never block the cashier on a backend release failure.
+        // The order can be re-cancelled from the orders module.
+        // eslint-disable-next-line no-console
+        console.warn('[pos-cart][releaseAdoptedOrder] cancel failed', {
+          orderId,
+          orderNumber,
+          error: err?.message ?? err,
+        });
+        return of(undefined);
+      }),
+    );
   }
 
   /**
@@ -2301,6 +2585,7 @@ export class PosCartService {
       items: [],
       customer: null,
       notes: '',
+      internalNotes: '',
       appliedDiscounts: [],
       pendingBookings: [],
       summary: {
@@ -2324,19 +2609,40 @@ export class PosCartService {
    * Generate unique item ID
    */
   private generateItemId(): string {
-    return 'ITEM_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    return 'ITEM_' + this.randomId();
   }
 
   private generateCustomProductId(): string {
-    return (
-      'custom-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9)
-    );
+    return 'custom-' + this.randomId();
   }
 
   /**
    * Generate unique discount ID
    */
   private generateDiscountId(): string {
-    return 'DISC_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    return 'DISC_' + this.randomId();
+  }
+
+  /**
+   * Cryptographically unique ID. Uses `crypto.randomUUID()` when available
+   * (modern browsers + Node 19+) and falls back to a `Date.now()` + random
+   * suffix only in environments where the API is missing. Qui-audit-round-1
+   * — `Date.now() + Math.random()` could collide when two lines were added
+   * in the same millisecond with the same hash seed (Math.random is not
+   * seeded with high entropy). `crypto.randomUUID` is RFC 4122 compliant.
+   */
+  private randomId(): string {
+    const cryptoObj = (typeof globalThis !== 'undefined'
+      ? (globalThis as { crypto?: Crypto }).crypto
+      : undefined);
+    if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+      return cryptoObj.randomUUID();
+    }
+    // Defensive fallback for very old environments. Still better than
+    // `Date.now() + Math.random()` because it draws from a wider character
+    // set and is explicit about the lack of crypto support.
+    return (
+      Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14)
+    );
   }
 }

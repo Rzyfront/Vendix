@@ -98,6 +98,13 @@ export { AccountSelectComponent } from './account-select/account-select.componen
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
 export { SaveRequirementsModalComponent } from './save-requirements-modal/save-requirements-modal.component';
 export { StoreUnavailableBannerComponent } from './store-unavailable-banner/store-unavailable-banner.component';
+export { PromotionStackComponent } from './promotion-stack/promotion-stack.component';
+export type {
+  PromotionStackItem,
+  PromotionStackMode,
+  PromotionType,
+  PromotionScope,
+} from './promotion-stack/promotion-stack.component';
 export { DomainResolutionErrorComponent } from './domain-resolution-error/domain-resolution-error.component';
 export type { DomainResolutionErrorKind } from './domain-resolution-error/domain-resolution-error.component';
 export { MapViewComponent } from './map-view/map-view.component';

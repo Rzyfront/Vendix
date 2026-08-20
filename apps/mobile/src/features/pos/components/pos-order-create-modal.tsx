@@ -31,15 +31,30 @@ interface PosOrderCreateModalProps {
 }
 
 /**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 — el backend rechaza CREATE/SAVE con
+ * `items=[]` y el frontend no debe ni siquiera mandar el request. Es la
+ * razón por la que el modal expone el carrito como sólo-lectura: si
+ * quedó vacío por error del cajero, no se persiste nada.
+ */
+const EMPTY_CART_MESSAGE =
+  'No hay productos en el carrito. Agrega al menos uno antes de crear la orden. (POS_EMPTY_CART_001)';
+
+/**
  * Modal-resumen "Crear" (parity web `pos-order-create-modal.component.ts`).
  *
  * Aparece antes de persistir el borrador de la orden. Muestra:
  *  - Resumen: lista de ítems del carrito + subtotal/impuestos/total.
- *  - Cliente: toggle Venta Anónima / Con Cliente + selector inline.
+ *  - Cliente: bloque único obligatorio + selector inline.
+ *
+ * CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es obligatorio
+ * (`settings.checkout.require_customer_data=true`). Eliminamos el toggle
+ * "Venta Anónima / Con Cliente": el backend rechaza el payload con
+ * `POS_CUSTOMER_REQUIRED_001` si falta. El botón Crear queda deshabilitado
+ * con accesibilidad mientras no haya cliente.
  *
  * Footer: Cancelar / Crear orden. El submit dispara
- * `OrderService.processPosPayment` con `requires_payment: false` (mismo
- * path que el botón "Guardar" actual) y limpia el carrito al éxito.
+ * `OrderService.processPosPayment` con `is_draft=true, requires_payment=false`
+ * y limpia el carrito al éxito.
  *
  * Mobile no expone `product_type === 'prepared'` ni fulfillment restaurante
  * todavía (el tipo mobile es solo `'physical' | 'service'`), por lo que la
@@ -56,7 +71,6 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
   const clearCart = useCartStore((s) => s.clearCart);
   const notes = useCartStore((s) => s.notes);
 
-  const [isAnonymous, setIsAnonymous] = useState(false);
   const [showCustomerSearch, setShowCustomerSearch] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -73,13 +87,16 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
   // block in the web version).
   useEffect(() => {
     if (visible) {
-      setIsAnonymous(!customer);
       setShowCustomerSearch(false);
       setIsSubmitting(false);
     }
-  }, [visible, customer]);
+  }, [visible]);
 
-  const canConfirm = items.length > 0 && (isAnonymous || !!customer);
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — `canConfirm` requiere cliente válido.
+  // El toggle "Venta Anónima" se eliminó porque el backend rechaza pedidos
+  // POS sin cliente (`POS_CUSTOMER_REQUIRED_001`).
+  const hasCustomer = !!customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0;
+  const canConfirm = items.length > 0 && hasCustomer;
 
   const handleClose = useCallback(() => {
     onClose();
@@ -87,11 +104,14 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
 
   const handleConfirm = useCallback(async () => {
     if (items.length === 0) {
-      toastWarning('El carrito está vacío');
+      toastError(EMPTY_CART_MESSAGE);
       return;
     }
-    if (!isAnonymous && !customer) {
-      toastWarning('Selecciona un cliente o marca venta anónima');
+    if (!hasCustomer) {
+      toastError(
+        'Selecciona o crea un cliente antes de crear la orden. (POS_CUSTOMER_REQUIRED_001)',
+      );
+      setShowCustomerSearch(true);
       return;
     }
 
@@ -107,19 +127,14 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
         return;
       }
 
+      // `customer` está garantizado por `hasCustomer` justo arriba, pero
+      // TypeScript no lo sabe — usamos `!` con comentario.
+      const c = customer!;
       const payload: CreatePosPaymentDto = {
-        customer_id: isAnonymous
-          ? undefined
-          : customer
-            ? Number(customer.id)
-            : undefined,
-        customer_name: isAnonymous
-          ? undefined
-          : customer
-            ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || undefined
-            : undefined,
-        customer_email: isAnonymous ? undefined : (customer?.email ?? undefined),
-        customer_phone: isAnonymous ? undefined : (customer?.phone ?? undefined),
+        customer_id: Number(c.id),
+        customer_name: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || undefined,
+        customer_email: c.email ?? undefined,
+        customer_phone: c.phone ?? undefined,
         store_id: storeId,
         items: items.map((i) => ({
           product_id: i.product.id === 0 ? undefined : Number(i.product.id),
@@ -145,11 +160,24 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 fase B.2 — Crear es SIEMPRE un
+        // draft. Backend valida la combinación `is_draft=true ∧ requires_payment=false`
+        // y rechaza lo contrario con `POS_DRAFT_REQUIRES_PAYMENT_001`.
+        is_draft: true,
         requires_payment: false,
         delivery_type: 'direct_delivery',
         internal_notes: notes || undefined,
         update_inventory: false,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora para
+        // borradores y el rechazo por stock insuficiente viene por
+        // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
+        // client-intent misleading — el server es la fuente de verdad.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
+        // incluyen en el payload para mantener paridad con el DTO y permitir
+        // adopción futura sin tocar el call site.
+        coupon_id: undefined,
+        coupon_code: undefined,
         print_receipt: false,
       };
 
@@ -171,13 +199,30 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
       if (onCreated && orderNum) onCreated(orderNum);
     } catch (err: any) {
       const data = err?.response?.data;
+      const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || err?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || err?.message || 'Error al crear la orden';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
-      toastError(fullMsg);
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`c` están en scope del
+      // `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][order-create-modal] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: customer ? Number(customer.id) : undefined,
+        request_id: requestId,
+        error_code: errorCode,
+        status: err?.response?.status,
+      });
+      toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
       setIsSubmitting(false);
     }
-  }, [items, isAnonymous, customer, summary, notes, clearCart, onClose, onCreated, queryClient]);
+  }, [items, hasCustomer, customer, summary, notes, clearCart, onClose, onCreated, queryClient]);
 
   if (!visible) return null;
 
@@ -201,7 +246,11 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
             Nesting Pressables + stopPropagation does NOT work in RN. */}
         <Pressable style={styles.backdrop} onPress={handleClose} />
         <View style={styles.centerWrap}>
-        <View style={[styles.container, { paddingBottom: 0 }]}>
+        <View
+          style={[styles.container, { paddingBottom: 0 }]}
+          accessibilityViewIsModal
+          accessibilityLiveRegion="polite"
+        >
             {/* Header */}
             <View style={styles.header}>
               <View style={styles.headerIcon}>
@@ -213,7 +262,13 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                   Confirma los datos antes de generar el borrador
                 </Text>
               </View>
-              <Pressable onPress={handleClose} hitSlop={8} style={styles.closeBtn}>
+              <Pressable
+                onPress={handleClose}
+                hitSlop={8}
+                style={styles.closeBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar modal crear orden"
+              >
                 <Icon name="x" size={20} color={colorScales.gray[400]} />
               </Pressable>
             </View>
@@ -252,7 +307,12 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                     </View>
                   ))}
                   {items.length === 0 && (
-                    <Text style={styles.emptyText}>Sin productos</Text>
+                    <View style={styles.emptyState}>
+                      <Icon name="shopping-cart" size={32} color={colorScales.gray[300]} />
+                      <Text style={styles.emptyText}>
+                        {EMPTY_CART_MESSAGE}
+                      </Text>
+                    </View>
                   )}
                 </View>
 
@@ -289,43 +349,22 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                   <Text style={styles.sectionTitle}>Cliente</Text>
                 </View>
 
-                {/* Toggle: Venta Anónima / Con Cliente */}
+                {/* CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es OBLIGATORIO.
+                    Ya no existe la rama "Venta Anónima" porque el backend
+                    rechaza el cobro (`POS_CUSTOMER_REQUIRED_001`). */}
                 <View style={styles.saleTypeOptions}>
                   <Pressable
-                    style={[styles.saleTypeBtn, isAnonymous && styles.saleTypeBtnSelected]}
-                    onPress={() => {
-                      setIsAnonymous(true);
-                      setShowCustomerSearch(false);
-                    }}
+                    style={[styles.saleTypeBtn, styles.saleTypeBtnSelected]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: true }}
+                    accessibilityLabel="Cliente obligatorio para crear la orden"
                   >
                     <View style={styles.radioIndicator}>
-                      {isAnonymous && <View style={styles.radioDot} />}
+                      <View style={styles.radioDot} />
                     </View>
-                    <Icon
-                      name="user-x"
-                      size={20}
-                      color={isAnonymous ? colors.primary : colorScales.gray[600]}
-                    />
+                    <Icon name="user" size={20} color={colors.primary} />
                     <View style={styles.saleTypeInfo}>
-                      <Text style={styles.saleTypeName}>Venta Anónima</Text>
-                      <Text style={styles.saleTypeDesc}>Consumidor Final</Text>
-                    </View>
-                  </Pressable>
-
-                  <Pressable
-                    style={[styles.saleTypeBtn, !isAnonymous && styles.saleTypeBtnSelected]}
-                    onPress={() => setIsAnonymous(false)}
-                  >
-                    <View style={styles.radioIndicator}>
-                      {!isAnonymous && <View style={styles.radioDot} />}
-                    </View>
-                    <Icon
-                      name="user"
-                      size={20}
-                      color={!isAnonymous ? colors.primary : colorScales.gray[600]}
-                    />
-                    <View style={styles.saleTypeInfo}>
-                      <Text style={styles.saleTypeName}>Con Cliente</Text>
+                      <Text style={styles.saleTypeName}>Cliente obligatorio</Text>
                       <Text style={styles.saleTypeDesc}>
                         {customer ? customerDisplayName : 'Seleccionar cliente'}
                       </Text>
@@ -334,7 +373,7 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                 </View>
 
                 {/* Cliente seleccionado (chip verde + edit). */}
-                {!isAnonymous && customer && (
+                {customer && (
                   <View style={styles.selectedCustomer}>
                     <View style={styles.customerAvatar}>
                       <Icon name="user-check" size={16} color={colorScales.green[700]} />
@@ -356,7 +395,7 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                 )}
 
                 {/* CTA para abrir el selector. */}
-                {!isAnonymous && !customer && (
+                {!customer && (
                   <Pressable
                     style={styles.selectCustomerBtn}
                     onPress={() => setShowCustomerSearch(true)}
@@ -368,12 +407,15 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
               </View>
             </ScrollView>
 
-            {/* Footer */}
+            {/* Footer — accessibility: type=button + busy state + ARIA. */}
             <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
               <Pressable
                 style={styles.cancelBtn}
                 onPress={handleClose}
                 disabled={isSubmitting}
+                accessibilityRole="button"
+                accessibilityLabel="Cancelar crear orden"
+                accessibilityState={{ busy: isSubmitting }}
               >
                 <Text style={styles.cancelBtnText}>Cancelar</Text>
               </Pressable>
@@ -384,6 +426,16 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                 ]}
                 onPress={handleConfirm}
                 disabled={!canConfirm || isSubmitting}
+                accessibilityRole="button"
+                accessibilityLabel="Crear orden sin cobrar"
+                accessibilityHint={
+                  items.length === 0
+                    ? 'Agrega productos al carrito antes de crear la orden'
+                    : !hasCustomer
+                      ? 'Selecciona un cliente antes de crear la orden'
+                      : 'Persiste la orden como borrador'
+                }
+                accessibilityState={{ busy: isSubmitting, disabled: !canConfirm || isSubmitting }}
               >
                 {isSubmitting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -391,7 +443,7 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                   <Icon name="check" size={16} color="#FFFFFF" />
                 )}
                 <Text style={styles.createBtnText}>
-                  {isSubmitting ? 'Creando…' : 'Crear orden'}
+                  {isSubmitting ? 'Creando…' : 'Crear orden (no cobra)'}
                 </Text>
               </Pressable>
             </View>
@@ -406,7 +458,6 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
         onSelectCustomer={(c) => {
           if (c) {
             setCustomer(c as PosCustomer);
-            setIsAnonymous(false);
           }
           setShowCustomerSearch(false);
         }}
@@ -552,6 +603,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     paddingVertical: spacing[4],
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[6],
+    gap: spacing[2],
   },
   summaryBlock: {
     paddingHorizontal: spacing[4],

@@ -48,6 +48,9 @@ import {
       class="modal-overlay"
       [class.open]="isOpen()"
       (click)="onOverlayClick($event)"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pos-cart-modal-title"
       >
       <!-- Modal Content -->
       <div
@@ -60,7 +63,7 @@ import {
           <button class="back-btn" (click)="closed.emit()">
             <app-icon name="chevron-left" [size]="24"></app-icon>
           </button>
-          <h2 class="modal-title">
+          <h2 id="pos-cart-modal-title" class="modal-title">
             Carrito
             <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
           </h2>
@@ -301,14 +304,16 @@ import {
         <div class="modal-actions">
           <div class="modal-actions-row">
             <button
+              type="button"
               class="action-btn save-btn"
-              (click)="create.emit()"
+              (click)="saveDraft.emit()"
               [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="clipboard-list" [size]="18"></app-icon>
-              <span>Crear</span>
+              <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
             </button>
             <button
+              type="button"
               class="action-btn shipping-btn"
               (click)="shipping.emit()"
               [disabled]="!cartState()?.items?.length"
@@ -317,14 +322,43 @@ import {
               <span>Envío</span>
             </button>
           </div>
+          <!--
+            CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays Cobrar. The
+            previous label "Guardar Orden / Actualizar Orden" on this slot
+            was a regression: it duplicated the secondary save button
+            copy and broke the Cobrar = charge mental model. Restored to
+            the canonical charge copy; the secondary save button above now
+            carries the "no cobra" suffix because it persists without
+            payment.
+          -->
           <button
+            type="button"
             class="action-btn checkout-btn"
             (click)="checkout.emit()"
-            [disabled]="!cartState()?.items?.length"
-            >
+            [disabled]="!cartState()?.items?.length || isCharging()"
+            [attr.aria-busy]="isCharging() ? 'true' : null"
+          >
             <app-icon name="credit-card" [size]="18"></app-icon>
-            <span>Finalizar Venta</span>
+            <span>Cobrar</span>
           </button>
+          <!--
+            Phase D.3 — secondary Cobrar mirrors the desktop cart sidebar;
+            only renders when the parent has a fresh readyToPayOrder to
+            charge (post-edit payment flow).
+          -->
+          @if (readyToPayOrder() !== null) {
+            <button
+              type="button"
+              class="action-btn checkout-btn cobrar-btn"
+              (click)="charge.emit()"
+              [disabled]="!cartState()?.items?.length || isCharging()"
+              [attr.aria-busy]="isCharging() ? 'true' : null"
+              aria-label="Cobrar la orden editada"
+            >
+              <app-icon name="credit-card" [size]="18"></app-icon>
+              <span>Cobrar</span>
+            </button>
+          }
         </div>
       </div>
     </div>
@@ -901,6 +935,20 @@ import {
         filter: brightness(1.1);
       }
 
+      .cobrar-btn {
+        background: linear-gradient(
+          135deg,
+          var(--color-success, #16a34a) 0%,
+          var(--color-primary) 100%
+        );
+        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+      }
+
+      .cobrar-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       /* Hide on desktop */
       @media (min-width: 1024px) {
         .modal-overlay {
@@ -923,6 +971,9 @@ export class PosCartModalComponent {
   readonly cartState = input<CartState | null>(null);
   readonly canCreateCustomItems = input<boolean>(false);
   readonly canOverridePrices = input<boolean>(false);
+  readonly isEditMode = input<boolean>(false);
+  readonly readyToPayOrder = input<unknown>(null);
+  readonly isCharging = input<boolean>(false);
 
   /**
    * Techo de 5 UVT (Art. 616-1 ET / Res. 000165 de 2023) — se REUSAN los
@@ -945,8 +996,16 @@ export class PosCartModalComponent {
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
   readonly create = output<void>();
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
+   * checkout shell stepper). The Guardar button persists the order with
+   * is_draft=true, requires_payment=false and NEVER opens the payment
+   * step. The Cobrar button uses the full shell wizard.
+   */
+  readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
+  readonly charge = output<void>();
 
   readonly availableTiers = signal<PriceTier[]>([]);
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});

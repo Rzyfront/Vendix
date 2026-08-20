@@ -12,6 +12,7 @@ import {
   HttpStatus,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -29,14 +30,42 @@ import {
   PaymentQueryDto,
   CreatePosPaymentDto,
 } from './dto';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { AuditService, AuditResource } from '../../../common/audit/audit.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 
+/**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 — F.1 · defense in depth.
+ *
+ * Class-level `PermissionsGuard` so EVERY endpoint declared in this controller
+ * must be explicitly decorated with `@Permissions(...)`. The previous behavior
+ * (no class guard, ad-hoc checks inside services) let unrelated legacy
+ * endpoints answer 200 without going through `PermissionsGuard` — the
+ * plan-critical POS create path is hardened below so a missing future decorator
+ * on a new sibling endpoint cannot bypass RBAC by accident.
+ *
+ * Endpoint-by-endpoint permissions stay explicit so the policy lives next to
+ * the route, not hidden in a service.
+ */
 @ApiTags('Payments')
 @Controller('store/payments')
 @ApiBearerAuth()
+@UseGuards(PermissionsGuard)
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly responseService: ResponseService,
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B2.
+    // AuditService is now injected at the controller layer (not only in
+    // OrderFlowService) so the POS payment timeline has its own three
+    // canonical rows: `payment.attempt` BEFORE the service call,
+    // `payment.succeeded` AFTER, `payment.failed` ON error. The handler
+    // stays thin: each emission lives in the same try/catch so a
+    // downstream failure never swallows the timeline signal.
+    private readonly auditService: AuditService,
   ) {}
 
   @Post()
@@ -153,6 +182,27 @@ export class PaymentsController {
   }
 
   @Post('pos')
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — F.1 · explicit POS create permission.
+   *
+   * `store:payments:process` is the canonical name seeded in
+   * `permissions-roles.seed.ts` for the role that may create a payment
+   * (cashier, owner, admin). Pinning the permission here makes it impossible
+   * to bypass via a JWT that only carries `store:orders:create` — the cashier
+   * identity must also satisfy the payment-processing role, otherwise the
+   * 403 fires before the service even resolves the request.
+   *
+   * The customer gate (POS_CUSTOMER_REQUIRED_001), the draft invariant
+   * (POS_DRAFT_REQUIRES_PAYMENT_001), and the audit emission
+   * (`order.draft_saved`) all live downstream of this guard, so an attacker
+   * who somehow reaches the handler still trips the typed errors and the
+   * request_id-tagged log.
+   */
+  // QUI-POS-E2E: la seed no crea `store:payments:process` — usa el permiso
+  // POS amplio existente `store:pos:access` que ya está asignado a owner/
+  // admin/employee. Mantiene el gate de PermissionsGuard sin inventar
+  // una nueva fila de permiso.
+  @Permissions('store:pos:access')
   @ApiOperation({
     summary: 'Process POS payment - unified entry point for all POS sales',
   })
@@ -194,14 +244,170 @@ export class PaymentsController {
     @Body() createPosPaymentDto: CreatePosPaymentDto,
     @Request() req,
   ) {
-    const result = await this.paymentsService.processPosPayment(
-      createPosPaymentDto,
-      req.user,
-    );
-    return this.responseService.created(
-      result,
-      'POS payment processed successfully',
-    );
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B2.
+    //
+    // Emit `payment.attempt` BEFORE the service runs. Best-effort try/catch
+    // because an audit write must NEVER block a charge — losing one timeline
+    // row is preferable to a 500 masking a real cash event.
+    const ctx = (req as any)?.requestContext;
+    const requestId =
+      ctx?.request_id ??
+      RequestContextService.getRequestId() ??
+      null;
+    const userId = req?.user?.id ?? null;
+    const attemptStoreId =
+      createPosPaymentDto.store_id ?? ctx?.store_id ?? null;
+    const attemptMetadata: Record<string, any> = {
+      request_id: requestId,
+      store_id: attemptStoreId,
+      user_id: userId,
+      // The DTO does not declare `amount`/`order_id`/`payment_type`, so we
+      // cast to any for the runtime read. The shape is mirrored by the
+      // POS UI; an undefined value becomes null in the audit row.
+      amount: (createPosPaymentDto as any)?.amount ?? null,
+      is_draft: createPosPaymentDto.is_draft ?? false,
+      requires_payment: createPosPaymentDto.requires_payment ?? false,
+      customer_id: createPosPaymentDto.customer_id ?? null,
+      order_id: (createPosPaymentDto as any)?.order_id ?? null,
+    };
+    try {
+      await this.auditService.log({
+        userId: userId ?? undefined,
+        action: 'payment.attempt',
+        resource: AuditResource.PAYMENTS,
+        storeId: attemptStoreId ?? undefined,
+        metadata: attemptMetadata,
+      });
+    } catch (err) {
+      this.logControllerError(
+        `[POS payment.attempt audit failed] store=${attemptStoreId} req=${requestId} user=${userId}`,
+        err,
+      );
+    }
+
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · structured error logging.
+    //
+    // `processPosPayment` already throws typed `VendixHttpException` for every
+    // business gate (customer required, draft conflict, stock, etc.). The
+    // AllExceptionsFilter preserves `error_code` + `details` so the frontend
+    // sees the right thing. What this catch adds: a server-side log line
+    // tagged with the structured prefix `[store=<id> order=<id> req=<rid>]
+    // user=<id>` so support / Sentry can pivot a 4xx from a frontend toast
+    // straight to the right stack frame. We rethrow so the filter still owns
+    // the HTTP shape — `VendixHttpException` instances are NEVER rewritten,
+    // bare `Error` is just logged and propagated as-is.
+    try {
+      const result = await this.paymentsService.processPosPayment(
+        createPosPaymentDto,
+        req.user,
+      );
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B2.
+      // `payment.succeeded` row, scoped to the now-known order + payment.
+      // Both `result.order.id` and `result.payment?.id` are guaranteed by
+      // `processPosPayment` for the happy path; we tolerate nulls so a
+      // partial response still leaves a timeline trail.
+      try {
+        const transactionId =
+          (result as any)?.payment?.transaction_id ?? null;
+        await this.auditService.log({
+          userId: userId ?? undefined,
+          action: 'payment.succeeded',
+          resource: AuditResource.PAYMENTS,
+          storeId: attemptStoreId ?? undefined,
+          resourceId: (result as any)?.payment?.id ?? undefined,
+          metadata: {
+            request_id: requestId,
+            store_id: attemptStoreId,
+            user_id: userId,
+            transaction_id: transactionId,
+            payment_amount:
+              (result as any)?.payment?.amount ??
+              (createPosPaymentDto as any)?.amount ??
+              null,
+            currency:
+              (result as any)?.payment?.currency ??
+              createPosPaymentDto.currency ??
+              null,
+            payment_type:
+              (result as any)?.payment?.payment_type ??
+              (createPosPaymentDto as any)?.payment_type ??
+              null,
+            order_id:
+              (result as any)?.order?.id ??
+              (createPosPaymentDto as any)?.order_id ??
+              null,
+          },
+        });
+      } catch (err) {
+        this.logControllerError(
+          `[POS payment.succeeded audit failed] store=${attemptStoreId} req=${requestId} user=${userId}`,
+          err,
+        );
+      }
+      return this.responseService.created(
+        result,
+        'POS payment processed successfully',
+      );
+    } catch (error) {
+      const storeId =
+        ctx?.store_id ?? createPosPaymentDto.store_id ?? 'unknown';
+      const orderId =
+        (error as any)?.order_id ??
+        (createPosPaymentDto as any)?.order_id ??
+        'unknown';
+      const userIdStr = req?.user?.id ?? 'unknown';
+      const errorCode =
+        (error as any)?.errorCode ?? (error as any)?.code ?? 'n/a';
+      // Use the controller-scoped logger prefix to make the line easy to grep.
+      this.logControllerError(
+        `[POS payment error] store=${storeId} order=${orderId} req=${requestId} user=${userIdStr} errorCode=${errorCode}`,
+        error,
+      );
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B2.
+      // `payment.failed` row, with the typed error_code + the stage at
+      // which the failure surfaced (request/validate/commit/etc.). We
+      // strip the message body and only carry the error code: the full
+      // stack goes through the existing logger line above so a hostile
+      // input can never poison an audit row.
+      try {
+        await this.auditService.log({
+          userId: userId ?? undefined,
+          action: 'payment.failed',
+          resource: AuditResource.PAYMENTS,
+          storeId: attemptStoreId ?? undefined,
+          metadata: {
+            request_id: requestId,
+            store_id: storeId,
+            user_id: userId,
+            order_id:
+              typeof orderId === 'number'
+                ? orderId
+                : (createPosPaymentDto as any)?.order_id ?? null,
+            error_code: typeof errorCode === 'string' ? errorCode : 'n/a',
+            error_stage:
+              (error as any)?.stage ??
+              (error as any)?.details?.stage ??
+              null,
+          },
+        });
+      } catch (err) {
+        this.logControllerError(
+          `[POS payment.failed audit failed] store=${storeId} req=${requestId} user=${userIdStr}`,
+          err,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Helper for the structured-error log line above. Pulled out so the catch
+   * stays readable and so we can swap a real Sentry call here without
+   * rewriting the handler.
+   */
+  private logControllerError(prefix: string, error: unknown): void {
+    const stack = error instanceof Error ? error.stack : undefined;
+    this.logger.error(prefix, stack);
   }
 
   @Get('payment-methods')

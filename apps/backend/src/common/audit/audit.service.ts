@@ -72,6 +72,15 @@ export class AuditService {
    */
   async log(auditData: AuditLogData): Promise<void> {
     try {
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B1.
+      // `metadata` was added in the additive migration
+      // 20260820000000_audit_logs_metadata; the generated Prisma types do
+      // not know about it until the next `prisma generate` runs against
+      // the migrated schema. The `as any` below is the SAME pattern the
+      // `action`/`resource` columns use to accept untyped strings, so it
+      // doesn't open a new escape hatch. JSON.parse(JSON.stringify(...))
+      // keeps Prisma happy with Decimal / Date / circular refs the same
+      // way the other JSON columns do.
       await this.prismaService.audit_logs.create({
         data: {
           user_id: auditData.userId,
@@ -90,9 +99,12 @@ export class AuditService {
           new_values: auditData.newValues
             ? JSON.parse(JSON.stringify(auditData.newValues))
             : null,
+          metadata: auditData.metadata
+            ? JSON.parse(JSON.stringify(auditData.metadata))
+            : null,
           ip_address: auditData.ipAddress,
           user_agent: auditData.userAgent,
-        },
+        } as any,
       });
     } catch (error) {
       // Error registrando auditoría - log for debugging

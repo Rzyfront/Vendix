@@ -136,12 +136,63 @@ export interface CreatePosPaymentItemDto {
   product_name: string;
   product_sku?: string;
   variant_sku?: string;
-  variant_attributes?: Record<string, unknown>;
+  /**
+   * Atributos de la variante. El backend (`CreateOrderItemDto.variant_attributes`)
+   * acepta string serializado — la forma JSON/Record del cliente se serializa
+   * antes del POST.
+   */
+  variant_attributes?: Record<string, unknown> | string;
+  /**
+   * Tipo de línea (paridad con `CreateOrderItemDto.item_type`).
+   */
+  item_type?: 'product' | 'custom' | 'physical' | 'service';
+  /**
+   * Ids de categoría del producto. El motor de promociones lo consume
+   * cuando las reglas son por categoría.
+   */
+  category_id?: number | null;
+  category_ids?: number[] | null;
+  /** Descripción libre de la línea (max 1000). */
+  description?: string;
   quantity: number;
   unit_price: number;
   total_price: number;
+  /** Precio final por unidad con impuestos incluidos. */
+  final_unit_price?: number;
+  /**
+   * FK a `tax_categories` del store. Si está presente, el backend la valida
+   * antes de derivar `tax_amount_item`.
+   */
+  tax_category_id?: number;
+  /** Razón legible del override de precio (backend la persiste). */
+  price_override_reason?: string;
+  /** Tasa del impuesto de la línea como FRACCIÓN: `0.19` es 19%. */
+  tax_rate?: number;
   tax_amount_item?: number;
+  /**
+   * Costo del producto al momento de la venta. Soporta costeo en líneas
+   * custom (sin `product_id`).
+   */
   cost?: number;
+  /** Peso y unidad de la línea (snapshot para ticket y reporte). */
+  weight?: number;
+  weight_unit?: string;
+  /** Notas operativas de la línea (max 1000 chars). */
+  notes?: string;
+  /**
+   * Flag KDS — el backend lo acepta en processPosPayment pero NO en el
+   * editor (`UpdateOrderEditorItemDto`). El POS legacy puede mandarlo para
+   * saltarse el envío a cocina.
+   */
+  skip_kds?: boolean;
+  /** Números de serie vendidos (backend valida pertenencia al producto). */
+  serial_numbers?: string[];
+  serial_ids?: number[];
+  /**
+   * Tipo de producto (`physical` / `prepared` / `service` / `custom` /
+   * `combo` / `ingredient`). Necesario para `resolveInitialOrderState`.
+   */
+  product_type?: 'physical' | 'prepared' | 'service' | 'custom' | 'combo' | 'ingredient';
   /**
    * Presentación aplicada a la línea. El backend valida el permiso
    * `store:products:apply_pricing_tier`, verifica el allowlist
@@ -155,7 +206,13 @@ export interface CreatePosPaymentItemDto {
 }
 
 export interface CreatePosPaymentDto {
-  customer_id?: number;
+  /**
+   * Cliente obligatorio cuando el backend aplica
+   * `settings.checkout.require_customer_data=true` (canónico).
+   * El endpoint `POST /store/payments/pos` rechaza el payload con
+   * `POS_CUSTOMER_REQUIRED_001` (HTTP 422) si falta o no pertenece al store.
+   */
+  customer_id: number;
   customer_name?: string;
   customer_email?: string;
   customer_phone?: string;
@@ -169,14 +226,85 @@ export interface CreatePosPaymentDto {
   store_payment_method_id?: number;
   amount_received?: number;
   payment_reference?: string;
-  requires_payment?: boolean;
+  /**
+   * `false` = cobrar ahora, `true` = guardar borrador (no cobra).
+   * CP-POS-CREAR-EDITAR-COBRAR-001 fase B.2: combinar `is_draft=true` con
+   * `requires_payment=true` es contradictorio y devuelve
+   * `POS_DRAFT_REQUIRES_PAYMENT_001` (HTTP 409).
+   */
+  requires_payment: boolean;
+  /**
+   * `true` indica al backend que persista la orden como `state='draft'`
+   * sin emitir `payments`/`order_installments`/COGS ni incrementar
+   * `coupons.current_uses`. El cobro va por `flow/pay`.
+   */
+  is_draft?: boolean;
   delivery_type?: string;
   internal_notes?: string;
   update_inventory?: boolean;
+  /**
+   * `allow_oversell` se conserva en el payload porque el DTO backend
+   * lo exige (`forbidNonWhitelisted: true`) y eliminarlo provocaría 400.
+   * **NO se usa como autorización para vender sin stock**: el editor
+   * sigue dependiendo del rechazo `POS_STOCK_INSUFFICIENT_001` cuando
+   * aplica. Esta flag queda ignorada por el server para órdenes en
+   * estado `draft` y se respeta sólo en el camino de cobro.
+   */
   allow_oversell?: boolean;
   print_receipt?: boolean;
   payment_form?: string;
   credit_type?: 'free' | 'installments';
+  /**
+   * Coupon attached to the order. Optional — mobile cart store does NOT track
+   * coupons today, so these are typically undefined. The fields are present
+   * for parity with the backend DTO (see `UpdateOrderEditorPayload.coupon_*`
+   * and `CreateOrderDto.coupon_*`) and to allow forward compatibility when
+   * mobile eventually wires coupons into the cart.
+   */
+  coupon_id?: number | null;
+  coupon_code?: string | null;
+  /**
+   * IDs de bookings a asociar a la orden (servicios con fecha/hora).
+   */
+  booking_ids?: number[];
+  /** Sesión de caja activa al cobrar. */
+  cash_register_session_id?: number;
+  /** Sesión de mesa activa. */
+  table_session_id?: number;
+  /** ID de la mesa a ocupar. */
+  table_id?: number;
+  /** Dirección de facturación — debe pertenecer al `customer_id`. */
+  billing_address_id?: number;
+  /** Dirección de envío — debe pertenecer al `customer_id`. */
+  shipping_address_id?: number;
+  /** Método de envío seleccionado (FK a `shipping_methods`). */
+  shipping_method_id?: number;
+  /** Tarifa concreta dentro del método (FK a `shipping_rates`). */
+  shipping_rate_id?: number;
+  /** Costo de envío enviado por el cliente. */
+  shipping_cost?: number;
+  /** Snapshot JSON del destino de envío. */
+  shipping_address_snapshot?: Record<string, unknown>;
+  /** Propina sugerida. */
+  tip_amount?: number;
+  /** Metadata libre del comercio — no se filtra al cliente. */
+  metadata?: Record<string, unknown>;
+  /** `true` para que el backend enqueue el email de confirmación. */
+  send_email_confirmation?: boolean;
+  /** `true` cuando el pago es PARCIAL y la orden quedará con saldo. */
+  is_partial_payment?: boolean;
+  /** Términos del pago a crédito: N cuotas mensuales. */
+  installment_terms?: number;
+  /** Método de Wompi (`CARD` / `NEQUI` / `PSE` / etc.). */
+  wompi_payment_method?: string;
+  /** ID de la wallet del cliente (cuando el método es wallet). */
+  wallet_id?: number;
+  /** URL de retorno del proveedor de pago online. */
+  return_url?: string;
+  /** ID del registro de caja que cobra el pago. */
+  register_id?: number;
+  /** Vendedor asignado (típicamente el cashier logueado). */
+  seller_user_id?: number;
 }
 
 export interface PosPaymentResponse {
@@ -199,6 +327,36 @@ export interface PosPaymentResponse {
     transaction_id?: string;
     change?: number;
   };
+}
+
+/**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 fase C.1 — payload del nuevo editor
+ * atómico backend `PUT /api/store/orders/:id/editor`. Sólo muta campos de
+ * negocio (items, cliente, notas, envío, promoción/cupón). El estado, los
+ * pagos, el crédito y los flags KDS/fiscales NO se aceptan — pertenecen al
+ * flujo canónico `flow/pay` y a la máquina de estados de órdenes.
+ *
+ * El backend responde con la `Order` completa y autoritativa (totales
+ * recalculados, cupón validado, stock verificado). El cliente NO manda
+ * totales: el servidor es la fuente de verdad.
+ */
+export interface UpdateOrderEditorPayload {
+  /** Líneas del pedido. Requerido y no-vacío: el editor reemplaza TODAS las líneas. */
+  items: CreatePosPaymentItemDto[];
+  /** Cliente obligatorio; pertenece al store del contexto o devuelve 403. */
+  customer_id: number;
+  notes?: string;
+  internal_notes?: string;
+  /** Enum Prisma `order_delivery_type_enum`. */
+  delivery_type?: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' | 'dine_in';
+  billing_address_id?: number;
+  shipping_address_id?: number;
+  shipping_method_id?: number;
+  shipping_rate_id?: number;
+  shipping_cost?: number;
+  /** Promociones manuales a forzar; las auto-apply las resuelve el motor. */
+  promotion_ids?: number[];
+  coupon_code?: string | null;
 }
 
 export interface PaymentResult {

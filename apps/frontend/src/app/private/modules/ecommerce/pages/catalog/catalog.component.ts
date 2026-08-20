@@ -19,11 +19,13 @@ import {
   Category,
   Brand,
   CatalogQuery,
+  ActiveStorePromotion,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
 import { TableContextService } from '../../services/table-context.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
@@ -42,6 +44,11 @@ import {
   SelectorOption,
 } from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+  PromotionScope,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 interface CatalogSettings {
   products_per_page: number;
@@ -76,6 +83,7 @@ const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
     MultiSelectorComponent,
     PaginationComponent,
     SelectorComponent,
+    PromotionStackComponent,
   ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
@@ -171,6 +179,42 @@ export class CatalogComponent implements OnInit {
   readonly shareModalOpen = signal(false);
   readonly shareProduct = signal<EcommerceProduct | null>(null);
 
+  // ── Store-wide active promotions banner (CP-ECOM-PROMO-UX-001 C.1) ──
+  readonly storePromotions = signal<ActiveStorePromotion[]>([]);
+  /**
+   * Proyecta `ActiveStorePromotion[]` a la forma que espera
+   * `<app-promotion-stack>`. Marca como `featured` la primera promo
+   * (la de mayor descuento efectivo: `percentage` > `fixed_amount` más alto).
+   */
+  readonly promotionStackItems = computed<PromotionStackItem[]>(() => {
+    const promos = this.storePromotions();
+    if (promos.length === 0) return [];
+
+    // Ranking simple: percentage gana sobre fixed_amount; empates se
+    // conservan en el orden original del backend. Solo la primera entrada se
+    // marca featured; las demás siguen en su orden natural.
+    const ranked = [...promos].sort((a, b) => {
+      if (a.type === b.type) return 0;
+      if (a.type === 'percentage') return -1;
+      return 1;
+    });
+
+    return ranked.map((promo, index) => ({
+      id: promo.id,
+      label: promo.badge_label,
+      type: promo.type,
+      value: promo.value,
+      scope: (['order', 'product', 'category'].includes(promo.scope)
+        ? promo.scope
+        : 'order') as PromotionScope,
+      // Phase B actualmente no expone `quantity_tiers` a nivel de tienda; el
+      // banner solo necesita pintar el badge principal.
+      min_quantity: undefined,
+      max_quantity: undefined,
+      featured: index === 0,
+    }));
+  });
+
   private destroyRef = inject(DestroyRef);
   private search_subject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
@@ -191,7 +235,41 @@ export class CatalogComponent implements OnInit {
     // QR dine-in (Step 8): parent must NOT re-add in mesa-mode — the
     // product-card has already routed via the mesa chokepoint.
     private table_context_service: TableContextService,
+    // Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1).
+    private promotions_analytics: PromotionsAnalyticsService,
   ) {}
+
+  /**
+   * Forward `promotionViewed` from the catalog banner's scroll-batch
+   * stack to the analytics sink. Mode is fixed at `scroll-batch` here
+   * because the catalog only renders the banner in that mode, but we
+   * still forward the `mode` from the event so the sink keeps the
+   * discrimination logic in one place.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotions_analytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * The catalog banner does not emit `promotionIntent` (no tier ladder
+   * and no `currentQuantity` input), but the output is bound in the
+   * template so the shared stack can be swapped without a template
+   * change later. Forwarding is a no-op-safe courtesy.
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotions_analytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
 
   ngOnInit(): void {
     this.applyCatalogSettings(
@@ -202,6 +280,10 @@ export class CatalogComponent implements OnInit {
     // Load categories and brands
     this.loadCategories();
     this.loadBrands();
+
+    // Banner de promociones activas (C.1). Independiente del catálogo:
+    // corre en paralelo con `loadProducts()` y nunca lo bloquea.
+    this.loadStorePromotions();
 
     // Handle search debounce
     this.search_subject
@@ -382,6 +464,29 @@ export class CatalogComponent implements OnInit {
           if (response.success) {
             this.brands.set(response.data);
           }
+        },
+      });
+  }
+
+  /**
+   * Carga las promociones activas de la tienda para pintar el banner superior
+   * del catálogo. Se ejecuta en paralelo con `loadProducts()` desde `ngOnInit`
+   * para no sumar latencia. Si la API falla o devuelve vacío, el banner
+   * simplemente no se renderiza (la condición está en el template).
+   */
+  loadStorePromotions(): void {
+    this.catalog_service
+      .getActivePromotions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.storePromotions.set(response.data ?? []);
+          }
+        },
+        // On failure keep the banner hidden — never block the catalog.
+        error: () => {
+          this.storePromotions.set([]);
         },
       });
   }

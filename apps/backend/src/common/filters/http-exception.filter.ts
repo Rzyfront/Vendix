@@ -8,6 +8,7 @@ import {
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from '../errors';
+import { RequestContextService } from '../context/request-context.service';
 
 /**
  * DESAJUSTE DE TIPO EN UN VALOR — el ÚNICO subconjunto de
@@ -152,6 +153,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ...(errorCode && { error_code: errorCode }),
       message,
       ...(details && { details }),
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
+      // Surface the per-request id from AsyncLocalStorage so the frontend
+      // can quote it in the same toast it shows when something fails.
+      // The audit log on the server side already carries it, but the
+      // client never saw it — operators were stuck copy-pasting the
+      // timestamp and the order id to get support to find their request.
+      ...(RequestContextService.getRequestId()
+        ? { request_id: RequestContextService.getRequestId() }
+        : {}),
       timestamp: new Date().toISOString(),
       path: request.url,
     };

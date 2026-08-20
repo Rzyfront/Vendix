@@ -6,6 +6,7 @@ import {
   OrderQueryDto,
   UpdateOrderItemsDto,
   AssignShippingMethodDto,
+  UpdateOrderEditorDto,
 } from './dto';
 import {
   Prisma,
@@ -21,6 +22,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import { resolvePackSize } from '../products/services/packaging.util';
@@ -33,6 +35,9 @@ import {
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { CouponsService } from '../coupons/coupons.service';
+import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
 
 @Injectable()
 export class OrdersService {
@@ -102,8 +107,12 @@ export class OrdersService {
     private settingsService: SettingsService,
     private scheduleValidationService: ScheduleValidationService,
     private stockLevelManager: StockLevelManager,
+    private sellableStockAllocator: SellableStockAllocator,
     private shippingCalculatorService: ShippingCalculatorService,
     private orderFlowService: OrderFlowService,
+    private promotionEngine: PromotionEngineService,
+    private couponsService: CouponsService,
+    private auditService: AuditService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -517,9 +526,18 @@ export class OrdersService {
 
   async findOne(id: number) {
     // Auto-scoped by StorePrismaService
+    //
+    // Round 2 MAJOR · defense-in-depth: pin the WHERE with `store_id` from
+    // the request context so a missing/bypassed scope filter on
+    // `orders.findFirst` never crosses a tenant boundary. The scoped
+    // Prisma service already filters by `store_id` for STORE-scoped
+    // callers, but this anchor makes the isolation explicit at the read
+    // site — and survives a future refactor that drops the auto-scope.
+    const context = RequestContextService.getContext();
     const order = await this.prisma.orders.findFirst({
       where: {
         id,
+        ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
@@ -1149,6 +1167,1334 @@ export class OrdersService {
         },
       });
     });
+  }
+
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1/C.2/C.3 · updateOrderFromEditor
+   *
+   * Editor atómico de negocio. Reemplaza items, cliente, notas, dirección,
+   * método/rate/costo de envío, promoción y cupón en UNA transacción.
+   *
+   * NO edita: state, payment_status, payment_form, credit_type, installments,
+   * serial_numbers, inventory_committed_at_fire, skip_kds, table_session_id,
+   * table_id, cash_register_session_id, store_id, allow_oversell.
+   *
+   * El cobro siempre va por `OrderFlowService.payOrder` (POST /flow/pay),
+   * que es la máquina de estados canónica existente. El editor deja la orden
+   * en `created` (o `draft` si ya estaba en draft) y devuelve la fila
+   * hidratada completa para que la UI dispare Cobrar sin navegar a detalle.
+   *
+   * Invariantes:
+   *  1. Customer del store: 403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001` si
+   *     `customer_id` no pertenece a `store_users` del store del contexto.
+   *  2. Claim atómico: `updateMany({ where: { id, store_id, state IN ('created','draft') } })`
+   *     con count=0 → 409 `ORD_EDIT_INVALID_STATE_001`. Evita lost updates
+   *     si dos operadores editan la misma orden a la vez.
+   *  3. Pricing server-owned: subtotal/tax/discount/total se recalculan con
+   *     `PromotionEngineService.quoteDiscounts` + `CouponsService.validate`
+   *     + recálculo de envío. El cliente nunca es fuente de verdad.
+   *  4. Shipping válido: dirección/método/rate pertenecen al store y la
+   *     combinación es legal para `delivery_type`. Costo enviado vs calculado
+   *     con tolerancia 0.01.
+   *  5. Stock para `created`: `SellableStockAllocator.allocateForLine` cubre
+   *     cada línea. Shortfall → 409 `POS_STOCK_INSUFFICIENT_001`.
+   *  6. Reservas: para `created` libera las reservas activas por referencia
+   *     antes de validar el nuevo stock y reserva de nuevo. Para `draft` no
+   *     crea reservas (la promoción a `created` ocurre en `flow/pay`).
+   *  7. Cupón: `coupons.current_uses` se ajusta UNA vez si el código
+   *     cambió, sólo si la orden ya era `created`. Para `draft` la snapshot
+   *     queda pendiente y el cobro se encarga de consumir.
+   *  8. Promociones: se borran y reinsertan las filas `order_promotions`
+   *     dentro de la transacción, después de recotizar el motor.
+   *  9. Audit: `order.editor.updated` se emite DESPUÉS del commit.
+   *     `order.editor.pricing_failed` y `order.stock_reservation_failed`
+   *     se emiten con snapshot seguro (sin secrets ni datos sensibles).
+   */
+  async updateOrderFromEditor(orderId: number, dto: UpdateOrderEditorDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    const userId: number = context?.user_id ?? 0;
+    const requestId = context?.request_id;
+
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // 1) Scoped lookup: si la orden no pertenece al store del contexto, el
+    //    findFirst scoped por StorePrismaService devuelve null y respondemos
+    //    404 sin filtrar IDs.
+    const existingOrder = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+    });
+
+    if (!existingOrder) {
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+
+    // 2) State gate ANTES del claim atómico. Una orden cancelada/refunded/
+    //    shipped nunca debe mutar metadata vía el editor.
+    if (
+      existingOrder.state !== 'created' &&
+      existingOrder.state !== 'draft'
+    ) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
+    }
+
+    const isDraft = existingOrder.state === 'draft';
+
+    // 2.5) CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · idempotency short-circuit.
+    //
+    // If the caller passed an `idempotency_key` (web POS, mobile POS, batch
+    // job), look up the most recent `audit_logs` row carrying the same key
+    // for `action='order.editor.updated'`. If found, return the persisted
+    // full Order without touching the claim / pricing / stock / coupon
+    // pipeline. This is the defense-in-depth against double-clicks and
+    // network retries: the FIRST call wins, the SECOND call returns the
+    // cached response.
+    //
+    // The audit row is written AFTER commit (step 16), so by construction
+    // the cache lookup only fires for an edit that has already committed.
+    // A failed/rolled-back edit never produces an audit row, so a retry
+    // that arrives AFTER the rollback correctly re-enters the pipeline.
+    if (dto.idempotency_key) {
+      const cached = await this.prisma.audit_logs.findFirst({
+        where: {
+          resource: 'orders',
+          resource_id: orderId,
+          action: 'order.editor.updated',
+          metadata: {
+            path: ['idempotency_key'],
+            equals: dto.idempotency_key,
+          } as any,
+        },
+        orderBy: { created_at: 'desc' },
+        select: { id: true, created_at: true },
+      });
+      if (cached) {
+        this.logger.log(
+          `[editor] idempotency hit for key=${dto.idempotency_key} order=${orderId}; short-circuiting to cached response`,
+        );
+        return await this.findOne(orderId);
+      }
+    }
+
+    // 3) Customer del store. Backend es autoritativo: si el frontend manda un
+    //    customer_id que no pertenece a este store, falla ANTES del claim
+    //    atómico para no contaminar la fila.
+    const storeMembership = await this.prisma.store_users.findFirst({
+      where: { store_id: storeId, user_id: dto.customer_id },
+      select: { id: true },
+    });
+    if (!storeMembership) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_CUSTOMER_STORE_MISMATCH_001,
+      );
+    }
+
+    // 4) Validar items: cada item debe tener un producto/variante que exista
+    //    en el store. La búsqueda es scoped por `store_id` vía StorePrismaService
+    //    para que un id de OTRA tienda no satisfaga la validación.
+    const productIds = Array.from(
+      new Set(
+        dto.items
+          .map((item) => item.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    if (productIds.length > 0) {
+      const productRows = await this.prisma.products.findMany({
+        where: { id: { in: productIds }, store_id: storeId },
+        select: { id: true },
+      });
+      const found = new Set(productRows.map((p) => p.id));
+      const missing = productIds.filter((id) => !found.has(id));
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_FIND_001,
+          undefined,
+          { missing_product_ids: missing },
+        );
+      }
+    }
+
+    // 5) Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
+    //    líneas traen applied_price_tier_id.
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
+      dto.items,
+      context,
+    );
+
+    // 6) F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertSaleVatAllowed(dto.items);
+
+    // 7) Precio por N unidades de stock: misma corrección que create/update.
+    const priceUnits = await normalizePriceUnitLines(
+      this.prisma as any,
+      dto.items,
+      {
+        isPresentationAtIndex: (index) =>
+          resolvePackSize(
+            tierSnapshots[index]?.units_per_package,
+            tierSnapshots[index]?.override_units_per_package,
+          ) > 1,
+      },
+    );
+
+    // 8) Shipping validation (precio, método, rate, dirección). El servidor
+    //    calcula el costo a partir de la dirección + método + items, y el
+    //    cliente puede traer un `shipping_cost` para mostrar UI; si difiere
+    //    en más de 0.01, rechaza con `ORD_EDIT_INVALID_SHIPPING_001`.
+    let shippingCost = 0;
+    let resolvedShippingRateId: number | null = null;
+    let resolvedDeliveryType: order_delivery_type_enum | null = null;
+
+    if (dto.shipping_method_id) {
+      const method = await this.prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
+      });
+      if (!method) {
+        throw new VendixHttpException(ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001);
+      }
+
+      resolvedDeliveryType =
+        method.type === 'pickup'
+          ? order_delivery_type_enum.pickup
+          : order_delivery_type_enum.home_delivery;
+
+      if (
+        (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
+          dto.delivery_type === 'home_delivery' ||
+          dto.delivery_type === 'direct_delivery') &&
+        !dto.shipping_address_id
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'Delivery requires a shipping_address_id',
+        );
+      }
+
+      if (dto.shipping_rate_id) {
+        const rate = await this.prisma.shipping_rates.findFirst({
+          where: {
+            id: dto.shipping_rate_id,
+            shipping_method_id: method.id,
+            is_active: true,
+          },
+        });
+        if (!rate) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'Shipping rate does not belong to the selected method',
+          );
+        }
+        resolvedShippingRateId = rate.id;
+        shippingCost = Number(rate.base_cost);
+      } else {
+        // Auto-calcular si no hay rate explícito.
+        if (dto.shipping_address_id) {
+          // La dirección debe pertenecer al customer_id del editor — sin esto
+          // un operador con acceso al store podría leer o grabar la dirección
+          // de cualquier cliente que comparta tienda (Round 1, blocker 8).
+          const address = await this.prisma.addresses.findFirst({
+            where: {
+              id: dto.shipping_address_id,
+              user_id: dto.customer_id,
+            },
+            select: {
+              country_code: true,
+              state_province: true,
+              city: true,
+              postal_code: true,
+            },
+          });
+          if (address?.country_code) {
+            const itemsForCalc = dto.items
+              .filter((it): it is typeof it & { product_id: number } =>
+                typeof it.product_id === 'number',
+              )
+              .map((it) => ({
+                product_id: it.product_id,
+                quantity: Number(it.quantity || 0),
+                // Round 3 MAJOR #7 — server-owned price. Trusting the client
+                // `total_price` (or anything the operator typed in the editor)
+                // lets a manipulated row bias the shipping calculator; here we
+                // derive the price the shipping calculator needs from
+                // `final_unit_price × quantity` so the rate the server picks
+                // never depends on a client-supplied total. The original
+                // `total_price` is still accepted by the rest of the editor
+                // (recomputed server-side in step 11).
+                price:
+                  Number(it.final_unit_price ?? it.unit_price ?? 0) *
+                  Number(it.quantity || 0),
+                weight: it.weight ? Number(it.weight) : undefined,
+                product_type: (it as any).product_type,
+              }));
+            const options = await this.shippingCalculatorService.calculateRates(
+              storeId,
+              itemsForCalc,
+              {
+                country_code: address.country_code,
+                state_province: address.state_province || undefined,
+                city: address.city || undefined,
+                postal_code: address.postal_code || undefined,
+              },
+            );
+            const match = options.find((o) => o.method_id === method.id);
+            if (match) {
+              resolvedShippingRateId = match.rate_id;
+              shippingCost = Number(match.cost);
+            }
+          }
+        }
+      }
+    }
+
+    // MAJOR (Round 1, #8): `billing_address_id` debe pertenecer al
+    // `customer_id` del editor. Sin esto, un operador podría cambiar la
+    // dirección de facturación a una dirección de OTRO cliente del store y
+    // terminar facturando a nombre equivocado.
+    if (dto.billing_address_id) {
+      const billingOwner = await this.prisma.addresses.findFirst({
+        where: {
+          id: dto.billing_address_id,
+          user_id: dto.customer_id,
+        },
+        select: { id: true },
+      });
+      if (!billingOwner) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'billing_address_id does not belong to the selected customer',
+        );
+      }
+    }
+
+    if (
+      dto.shipping_cost !== undefined &&
+      Math.abs(dto.shipping_cost - shippingCost) > 0.01
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'Client shipping_cost differs from server-calculated cost',
+        {
+          client_shipping_cost: dto.shipping_cost,
+          server_shipping_cost: shippingCost,
+          tolerance: 0.01,
+        },
+      );
+    }
+
+    // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
+    //    `promotion_ids` como verdad. El motor decide qué aplica.
+    let promotionDiscount = 0;
+    let promotionSnapshots: { promotion_id: number; discount_amount: number }[] =
+      [];
+    try {
+      const promotionInput = {
+        customer_id: dto.customer_id,
+        manual_promotion_ids: Array.isArray(dto.promotion_ids)
+          ? dto.promotion_ids
+          : [],
+        items: dto.items
+          .filter((item) => item.product_id)
+          .map((item, index) => ({
+            line_id: index,
+            product_id: item.product_id as number,
+            variant_id: item.product_variant_id ?? null,
+            category_id: null,
+            category_ids: null,
+            unit_price: Number(item.final_unit_price ?? item.unit_price ?? 0),
+            quantity: Number(item.quantity || 0),
+            applied_price_tier_id: item.applied_price_tier_id ?? null,
+            stock_units_consumed: null,
+          })),
+      };
+      const promotionQuote =
+        await this.promotionEngine.quoteDiscounts(promotionInput);
+      promotionDiscount = promotionQuote.total_discount || 0;
+      promotionSnapshots = (promotionQuote.order_promotions_snapshot || []).map(
+        (s) => ({
+          promotion_id: s.promotion_id,
+          discount_amount: Number(s.discount_amount || 0),
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `[editor] quoteDiscounts failed: ${(err as Error).message}`,
+      );
+      // El editor nunca devuelve éxito falso: si la cotización falla y el
+      // cliente envió `promotion_ids`, emitimos auditoría y rechazamos.
+      if (Array.isArray(dto.promotion_ids) && dto.promotion_ids.length > 0) {
+        await this.auditService.logCustom(
+          userId,
+          'order.editor.pricing_failed',
+          AuditResource.ORDERS,
+          {
+            order_id: orderId,
+            store_id: storeId,
+            request_id: requestId,
+            stage: 'promotion_quote',
+            error: (err as Error).message,
+            // NO logueamos ids de cupón, customer_id, ni secretos.
+            item_count: dto.items.length,
+          },
+          orderId,
+        );
+        throw new VendixHttpException(ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001);
+      }
+    }
+
+    // 10) Coupon validation. Draft no consume `current_uses`; `created` lo
+    //     ajusta una vez si el código cambió.
+    let couponId: number | null = existingOrder.coupon_id ?? null;
+    let couponDiscount = 0;
+    const requestedCode = (dto.coupon_code || '').trim();
+    const currentCode = (existingOrder.coupon_code || '').trim();
+    const couponChanged = requestedCode !== currentCode;
+
+    if (requestedCode) {
+      try {
+        const remainingSubtotal = Math.max(
+          0,
+          Number(existingOrder.subtotal_amount) - promotionDiscount,
+        );
+        const cartItems = dto.items
+          .filter((item) => item.product_id)
+          .map((item) => ({
+            product_id: item.product_id as number,
+            category_id: null,
+            category_ids: null,
+            line_total: roundMoney(
+              Number(item.final_unit_price ?? item.unit_price ?? 0) *
+                Number(item.quantity || 0),
+            ),
+          }));
+        const validation = await this.couponsService.validate({
+          code: requestedCode,
+          cart_subtotal: remainingSubtotal,
+          customer_id: dto.customer_id,
+          items: cartItems,
+          store_id: storeId,
+        } as any);
+        couponId = validation.coupon_id;
+        couponDiscount = roundMoney(
+          Math.min(validation.discount_amount || 0, remainingSubtotal),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[editor] coupon validation failed: ${(err as Error).message}`,
+        );
+        await this.auditService.logCustom(
+          userId,
+          'order.editor.pricing_failed',
+          AuditResource.ORDERS,
+          {
+            order_id: orderId,
+            store_id: storeId,
+            request_id: requestId,
+            stage: 'coupon_validation',
+            // No logueamos el código del cupón — sólo su longitud.
+            coupon_code_length: requestedCode.length,
+            error: (err as Error).message,
+          },
+          orderId,
+        );
+        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
+        // de promoción/cupón inválido. La causa original viaja en `details`
+        // para depuración sin filtrar PII.
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+          undefined,
+          { stage: 'coupon_validation', cause: (err as Error).message },
+        );
+      }
+    } else if (couponChanged && currentCode) {
+      // El cliente quitó el cupón. Limpiamos la referencia sin ajustar el
+      // contador: el consumo se hizo en `flow/pay`, no en el editor.
+      couponId = null;
+      couponDiscount = 0;
+    }
+
+    // 11) Totales server-owned. Subtotal = Σ items.final_unit_price × qty;
+    //     tax_amount se respeta del DTO recalculado por `normalizePriceUnitLines`;
+    //     discount = promotionDiscount + couponDiscount.
+    let recalculatedSubtotal = 0;
+    let recalculatedTax = 0;
+    for (let i = 0; i < dto.items.length; i++) {
+      const item = dto.items[i];
+      const unitBase = Number(item.final_unit_price ?? item.unit_price ?? 0);
+      const quantity = Number(item.quantity || 0);
+      // Multi-tarifa + packSize: si la línea tenía scale (price_units),
+      // `normalizePriceUnitLines` ya aplicó el delta. Usamos el `total_price`
+      // del DTO cuando viene, o recalculamos desde `final_unit_price × priceUnits`.
+      const priceUnitsQty =
+        priceUnits.priceUnitByIndex[i] ?? quantity;
+      const lineTotal = roundMoney(unitBase * priceUnitsQty);
+      recalculatedSubtotal = roundMoney(recalculatedSubtotal + lineTotal);
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F16.
+      // `tax_amount_item` is a PER-UNIT snapshot. The previous version
+      // summed it directly into `recalculatedTax`, which silently
+      // under-counted the tax for any line with `quantity > 1` — an
+      // editor that just bumped quantities would persist a tax_amount
+      // that didn't match the order_item rows the same editor just
+      // wrote. Match the POS pattern (`pos-payment.service.ts:148-151`)
+      // and multiply by `quantity` so the totals reconcile.
+      recalculatedTax = roundMoney(
+        recalculatedTax +
+          Number(item.tax_amount_item || 0) * quantity,
+      );
+    }
+    if (priceUnits.adjusted > 0) {
+      recalculatedSubtotal = roundMoney(
+        recalculatedSubtotal + priceUnits.subtotalDelta,
+      );
+      recalculatedTax = roundMoney(recalculatedTax + priceUnits.taxDelta);
+    }
+    const discountAmount = roundMoney(promotionDiscount + couponDiscount);
+    const grandTotal = roundMoney(
+      recalculatedSubtotal +
+        recalculatedTax -
+        discountAmount +
+        (dto.shipping_cost ?? shippingCost),
+    );
+
+    // 12) Stock validation se ejecuta DENTRO de la transacción. Para
+    //     cada línea con `track_inventory`, el asignador cubre la cantidad
+    //     repartiendo entre bodegas. Shortfall → 409 + audit + throw.
+    //
+    //     La validación pre-flight sigue siendo importante para fallar ANTES
+    //     de tocar la fila: la diferencia es que `tx` se inyecta al asignador
+    //     para que la lectura del stock y la reserva vivan en la MISMA
+    //     transacción (Round 1 MAJOR #12). El chequeo pre-flight conserva la
+    //     verificación temprana de shortfall pero deja la reserva definitiva
+    //     al camino `13d` dentro de la transacción.
+    if (!isDraft) {
+      // Round 3 MAJOR #10 — pre-flight used to issue one `products.findUnique`
+      // per item (N+1) before the stock allocator even ran. A 30-line cart
+      // became 30 round-trips for the products alone. We collapse the lookup
+      // into a single batched query: pull `id` + `track_inventory` for every
+      // distinct product id, then resolve each item from a Map.
+      const productIds = Array.from(
+        new Set(
+          dto.items
+            .map((it) => (typeof it.product_id === 'number' ? it.product_id : null))
+            .filter((id): id is number => id !== null),
+        ),
+      );
+      const productRows =
+        productIds.length > 0
+          ? await this.prisma.products.findMany({
+              where: { id: { in: productIds }, store_id: storeId },
+              select: { id: true, track_inventory: true },
+            })
+          : [];
+      const trackInventoryByProduct = new Map<number, boolean>();
+      for (const row of productRows) {
+        trackInventoryByProduct.set(row.id, !!row.track_inventory);
+      }
+
+      for (const item of dto.items) {
+        if (!item.product_id) continue;
+        if (!trackInventoryByProduct.get(item.product_id)) continue;
+        const allocation = await this.sellableStockAllocator.allocateForLine(
+          storeId,
+          item.product_id,
+          item.product_variant_id,
+          Number(item.quantity || 0),
+        );
+        if (allocation.shortfall > 0) {
+          await this.auditService.logCustom(
+            userId,
+            'order.stock_reservation_failed',
+            AuditResource.ORDERS,
+            {
+              order_id: orderId,
+              store_id: storeId,
+              request_id: requestId,
+              stage: 'pre_flight',
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              requested_quantity: Number(item.quantity || 0),
+              shortfall: allocation.shortfall,
+            },
+            orderId,
+          );
+          throw new VendixHttpException(
+            ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+            undefined,
+            {
+              product_id: item.product_id,
+              variant_id: item.product_variant_id,
+              requested: Number(item.quantity || 0),
+              shortfall: allocation.shortfall,
+            },
+          );
+        }
+      }
+    }
+
+    const beforeTotals = {
+      subtotal: Number(existingOrder.subtotal_amount),
+      tax_amount: Number(existingOrder.tax_amount),
+      discount_amount: Number(existingOrder.discount_amount),
+      shipping_cost: Number(existingOrder.shipping_cost),
+      grand_total: Number(existingOrder.grand_total),
+      coupon_id: existingOrder.coupon_id,
+      coupon_code: existingOrder.coupon_code,
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #15.
+      // Customer swaps were invisible in the audit timeline because
+      // before/after totals only carried the money fields. Persist
+      // `customer_id` on both sides so a re-enactment query can pin
+      // the moment the order changed hands (legal & tax-relevant).
+      customer_id: existingOrder.customer_id ?? null,
+    };
+
+    // 13) Transacción atómica: claim + replace items + order_promotions +
+    //     cupón + reservas de stock + commit.
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 13a) Claim atómico del estado. Si otro operador cambió la orden
+      //      entre el findFirst y acá, count=0 → 409.
+      //
+      //      Round 1 MAJOR #6: el error genérico `ORD_EDIT_INVALID_STATE_001`
+      //      perdía la distinción entre tres casos reales. Ahora leemos el
+      //      estado real de la orden tras el fallo del claim y mapeamos:
+      //        - pending / pending_payment / processing / shipped /
+      //          delivered / finished / cancelled / refunded
+      //            → `ORD_EDIT_NOT_ALLOWED_001` (la orden ya no es editable)
+      //        - created / draft (race por microsegundos)
+      //            → `ORD_EDIT_STATE_CHANGED_001` (otro operador ganó la
+      //              carrera; pedirle al cliente que recargue)
+      //        - cualquier otro estado inesperado
+      //            → `ORD_EDIT_INVALID_STATE_001` (catch-all)
+      const claim = await tx.orders.updateMany({
+        where: {
+          id: orderId,
+          store_id: storeId,
+          state: { in: ['created', 'draft'] as order_state_enum[] },
+        },
+        data: { updated_at: new Date() },
+      });
+      if (claim.count === 0) {
+        const currentRow = await tx.orders.findFirst({
+          where: { id: orderId, store_id: storeId },
+          select: { state: true },
+        });
+        const currentState = currentRow?.state as order_state_enum | undefined;
+        const lockedStates: order_state_enum[] = [
+          'pending_payment',
+          'processing',
+          'shipped',
+          'delivered',
+          'finished',
+          'cancelled',
+          'refunded',
+          'pending_delivery',
+        ];
+        if (currentState && lockedStates.includes(currentState)) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_NOT_ALLOWED_001,
+            undefined,
+            { state: currentState },
+          );
+        }
+        if (currentState === 'created' || currentState === 'draft') {
+          // El claim falló pero el estado sigue siendo editable: race pura
+          // (otro editor ganó por microsegundos). Distinguido para que la
+          // UI pueda mostrar "recargue" en vez de un error permanente.
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_STATE_CHANGED_001,
+          );
+        }
+        // Catch-all: la orden no existe, o el estado no está en el enum
+        // conocido. Devolvemos el código genérico como red de seguridad.
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_STATE_001,
+          undefined,
+          { state: currentState ?? null },
+        );
+      }
+
+      // 13b) Reservas de stock (sólo si NO es draft). Se liberan las
+      //      activas ANTES de reservar las nuevas.
+      if (!isDraft) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'order',
+          orderId,
+          'cancelled',
+          tx,
+        );
+      }
+
+      // Round 3 MINOR #15 — `orders.currency` is intentionally NOT mutated
+      // by the editor. The currency is fixed at order creation:
+      //   `createOrderDto.currency || (await this.settingsService.getStoreCurrency())`
+      // (see `createOrder` above), and the order_items that carry
+      // monetary values all inherit that scale. Changing it mid-edit
+      // would mean re-scaling every line total, tax, discount and
+      // shipping cost to a different unit — that's a separate decision
+      // (re-create the order, or migrate manually), not a side effect
+      // of editing items. We document the choice rather than to over-write
+      // it: a re-render of an existing order keeps the currency it was
+      // created with.
+
+      // 13c) Replace items. Antes del `deleteMany + createMany`, capturamos
+      //      las filas existentes para MERGAR los campos que el DTO NO
+      //      expone: KDS (`skip_kds`), seriales (`serial_numbers`,
+      //      `serial_ids`) y `inventory_commumed_at_fire`. Sin esta
+      //      preservación, una edición de una orden ya disparada a cocina
+      //      borraba esos flags y el listener de KDS veía "skip_kds=true"
+      //      — platos que ya estaban en cocina aparecían como no
+      //      enviados.
+      //
+      //      Round 1 BLOCKER #5.
+      const previousItems = await tx.order_items.findMany({
+        where: { order_id: orderId },
+      });
+      const previousByKey = new Map<
+        string,
+        {
+          skip_kds?: boolean | null;
+          serial_numbers?: unknown;
+          serial_ids?: number[] | null;
+          inventory_committed_at_fire?: boolean | null;
+          inventory_consumed_at_fire?: boolean | null;
+          cost_price?: Prisma.Decimal | number | null;
+          sale_unit_code_snapshot?: string | null;
+          sale_quantity_snapshot?: Prisma.Decimal | number | null;
+          catalog_unit_price?: Prisma.Decimal | number | null;
+          catalog_final_price?: Prisma.Decimal | number | null;
+          kitchen_ticket_items?: unknown;
+        }
+      >();
+      for (const prev of previousItems) {
+        // Clave: producto + variante. Si el operador agrega la misma
+        // variante dos veces, el segundo gana (mismo comportamiento que la
+        // sustitución cruda anterior).
+        const key = `${prev.product_id ?? 'null'}:${prev.product_variant_id ?? 'null'}`;
+        previousByKey.set(key, prev as any);
+      }
+
+      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+
+      const variantIds = dto.items
+        .map((it) => (it.product_id ? it.product_variant_id : null))
+        .filter((v): v is number => typeof v === 'number');
+      const variantImageById = new Map<number, string | null>();
+      if (variantIds.length) {
+        // Round 1 BLOCKER #3: el `tx.product_variants.findMany` corría
+        // sobre el cliente no-scoped, así que un `product_variant_id` de OTRA
+        // tienda satisfacía la búsqueda y la imagen (o la ausencia de ella)
+        // terminaba mezclada en la fila de nuestra tienda. Filtro por el
+        // `products.store_id` del contexto para que un id "huérfano" devuelva
+        // `null` y conserve la invariante multi-tenant.
+        const variants = await tx.product_variants.findMany({
+          where: {
+            id: { in: Array.from(new Set(variantIds)) },
+            products: { store_id: storeId },
+          },
+          include: { product_images: true },
+        });
+        for (const v of variants) {
+          variantImageById.set(v.id, v.product_images?.image_url ?? null);
+        }
+      }
+
+      await tx.order_items.createMany({
+        data: dto.items.map((item, index) => {
+          const tierSnap = tierSnapshots[index];
+          const variant_image_url =
+            item.product_id && item.product_variant_id
+              ? variantImageById.get(item.product_variant_id) ?? null
+              : null;
+          // MERGE: si el editor no trae `skip_kds / inventory_committed_at_fire`,
+          // preservamos el valor previo para que editar no "despida" platos ya
+          // enviados a cocina.
+          const key = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
+          const previous = previousByKey.get(key);
+          const mergedSkipKds =
+            previous?.skip_kds !== undefined ? previous.skip_kds : false;
+          const mergedInventoryCommitted =
+            previous?.inventory_committed_at_fire !== undefined
+              ? previous.inventory_committed_at_fire
+              : null;
+          const mergedInventoryConsumed =
+            previous?.inventory_consumed_at_fire !== undefined
+              ? previous.inventory_consumed_at_fire
+              : null;
+          const mergedSerialNumbers = previous?.serial_numbers ?? null;
+          const mergedSerialIds = previous?.serial_ids ?? null;
+          // El DTO no expone `cost_price` / `sale_unit_code_snapshot` /
+          // `sale_quantity_snapshot` / `catalog_*`; se preservan desde la fila
+          // previa para que la edición no destruya snapshots históricos
+          // (costeo, UoM, ticket, reporte).
+          const mergedCost =
+            previous?.cost_price !== undefined ? previous.cost_price : null;
+          const mergedSaleUnit =
+            previous?.sale_unit_code_snapshot !== undefined
+              ? previous.sale_unit_code_snapshot
+              : null;
+          const mergedSaleQty =
+            previous?.sale_quantity_snapshot !== undefined
+              ? previous.sale_quantity_snapshot
+              : null;
+          const mergedCatalogUnit =
+            previous?.catalog_unit_price !== undefined
+              ? previous.catalog_unit_price
+              : null;
+          const mergedCatalogFinal =
+            previous?.catalog_final_price !== undefined
+              ? previous.catalog_final_price
+              : null;
+          return {
+            order_id: orderId,
+            product_id: item.product_id || null,
+            product_variant_id: item.product_id
+              ? item.product_variant_id
+              : null,
+            product_name: item.product_name,
+            description: item.description,
+            variant_sku: item.variant_sku,
+            variant_attributes: item.variant_attributes,
+            variant_image_url,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: item.total_price,
+            tax_rate: item.tax_rate,
+            tax_amount_item: item.tax_amount_item,
+            catalog_unit_price:
+              mergedCatalogUnit !== null && mergedCatalogUnit !== undefined
+                ? (mergedCatalogUnit as any)
+                : item.unit_price,
+            catalog_final_price:
+              mergedCatalogFinal !== null && mergedCatalogFinal !== undefined
+                ? (mergedCatalogFinal as any)
+                : item.final_unit_price ?? item.unit_price,
+            final_unit_price: item.final_unit_price ?? item.unit_price,
+            is_price_overridden:
+              item.is_price_overridden ??
+              Boolean(item.price_override_reason),
+            price_override_reason: item.price_override_reason,
+            weight: item.weight,
+            weight_unit: item.weight_unit,
+            // UoM de venta snapshot (mismo comportamiento que `create`).
+            sale_unit_code_snapshot: mergedSaleUnit as any,
+            sale_quantity_snapshot: mergedSaleQty as any,
+            // Campos fusionados — KDS, seriales, inventario consumido.
+            skip_kds: mergedSkipKds as any,
+            serial_numbers_snapshot: mergedSerialNumbers as any,
+            // `serial_ids` e `inventory_committed_at_fire` no son columnas
+            // en order_items — la asociación con `inventory_serial_numbers`
+            // se hace por separado en `OrderSerialResolver`, y
+            // `committed_at_fire` es una columna propuesta en planes
+            // futuros pero no presente en el schema actual.
+            inventory_consumed_at_fire: mergedInventoryConsumed as any,
+            cost_price: mergedCost as any,
+            item_type:
+              item.item_type === 'product'
+                ? 'physical'
+                : item.item_type || (item.product_id ? 'physical' : 'custom'),
+            applied_price_tier_id: tierSnap?.tier_id ?? null,
+            applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
+            stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+            price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
+            updated_at: new Date(),
+          };
+        }),
+      });
+
+      // 13d) Reservas para los nuevos items (sólo si NO es draft).
+      //
+      //      Round 1 BLOCKER #2: el bloque anterior hacía `reserveStock` con
+      //      `validate_availability=false` + `allow_negative_available=true`
+      //      y SWALLOWEA el error con `logger.warn` — una reserva fallida se
+      //      perdía silenciosamente y dejaba la orden en disco sin su
+      //      reserva. La reserva ahora es ESTRICTA: si falla, auditamos
+      //      ANTES del throw y abortamos la transacción para que el caller
+      //      reciba un `POS_STOCK_INSUFFICIENT_001` (409 accionable, no un
+      //      500 opaco).
+      if (!isDraft) {
+        const newItems = await tx.order_items.findMany({
+          where: { order_id: orderId },
+          include: {
+            products: { select: { id: true, track_inventory: true } },
+          },
+        });
+
+        // Round 3 MAJOR #11 — group reservation work by the (product, variant,
+        // location) tuple so we issue ONE `reserveStock` per group instead of
+        // one per row. The default-location lookup is cached inside
+        // `getDefaultLocationForProduct` already, but batching the calls
+        // themselves cuts DB round-trips from N (one per item) to the
+        // cardinality of the groups. Quantities are summed across rows that
+        // share the tuple (e.g. two lines of the same product+variant collapse
+        // into a single reservation); `stockUnitsConsumed` falls back to the
+        // first row's value when the group is homogeneous, otherwise it is
+        // `undefined` and `reserveStock` re-resolves from quantity.
+        const reservationGroups = new Map<
+          string,
+          {
+            productId: number;
+            variantId: number | null;
+            locationId: number | null;
+            quantity: number;
+            stockUnitsConsumed: number | undefined;
+          }
+        >();
+        for (const item of newItems) {
+          if (!item.products?.track_inventory) continue;
+          const variantId =
+            item.product_variant_id == null ? null : Number(item.product_variant_id);
+          // `getDefaultLocationForProduct` is awaited inline to keep ordering
+          // deterministic; the call is idempotent and cheap (cached at the
+          // stock level manager level).
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+          const stockUnitsConsumed =
+            typeof item.stock_units_consumed === 'number' &&
+            item.stock_units_consumed > 0
+              ? item.stock_units_consumed
+              : undefined;
+          const key = `${item.product_id}::${variantId ?? 'null'}::${location_id ?? 'null'}`;
+          const existing = reservationGroups.get(key);
+          if (existing) {
+            existing.quantity += Number(item.quantity || 0);
+            // Only keep `stockUnitsConsumed` if every row in the group had
+            // the same value (otherwise `reserveStock` falls back to qty).
+            if (existing.stockUnitsConsumed !== stockUnitsConsumed) {
+              existing.stockUnitsConsumed = undefined;
+            }
+          } else {
+            reservationGroups.set(key, {
+              productId: item.product_id,
+              variantId,
+              locationId: location_id,
+              quantity: Number(item.quantity || 0),
+              stockUnitsConsumed,
+            });
+          }
+        }
+
+        for (const group of reservationGroups.values()) {
+          try {
+            // `validate_availability=true` (defensa) +
+            // `allow_negative_available=false` (Round 1 BLOCKER #2): si la
+            // reserva no cabe, `reserveStock` lanza `INV_STOCK_001` y la
+            // transacción aborta. Esto es coherente con la validación
+            // pre-flight del paso 12: si el cliente superó ese gate, la
+            // reserva debería entrar; si falla acá, hay una race con otro
+            // consumidor concurrente que queremos reportar.
+            //
+            // Round 4 BLOCKER: `group.locationId` se construye arriba
+            // desde `getDefaultLocationForProduct`, que devuelve
+            // `number | null`. La key de agrupación ya codifica el caso
+            // `null` con la literal `'null'`, así que si la bodega por
+            // defecto del producto no está configurada, abortamos el
+            // editor con `POS_STOCK_INSUFFICIENT_001` ANTES de pasar
+            // `null` a `reserveStock` (que exige `number`). Este es el
+            // mismo código de error que se devuelve cuando la reserva
+            // falla por falta de stock: la falta de bodega operativa es
+            // imposibilidad logística, no un error 500 opaco.
+            if (group.locationId == null) {
+              throw new VendixHttpException(
+                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+                undefined,
+                {
+                  reason: 'no default location for product',
+                  product_id: group.productId,
+                  variant_id: group.variantId,
+                },
+              );
+            }
+            await this.stockLevelManager.reserveStock(
+              group.productId,
+              group.variantId || undefined,
+              group.locationId, // narrowed to `number` by the guard above
+              group.quantity,
+              'order',
+              orderId,
+              userId,
+              true, // validate_availability (Round 1 #2)
+              tx,
+              undefined,
+              false,
+              group.stockUnitsConsumed,
+              false, // allow_negative_available=false (Round 1 #2)
+            );
+          } catch (err) {
+            const message = (err as Error)?.message ?? 'reserve failed';
+            // Audit ANTES del throw: la timeline tiene que registrar la
+            // intención de reserva fallida aunque la transacción aborte.
+            try {
+              await this.auditService.logCustom(
+                userId,
+                'order.stock_reservation_failed',
+                AuditResource.ORDERS,
+                {
+                  order_id: orderId,
+                  store_id: storeId,
+                  request_id: requestId,
+                  stage: 'commit_reserve',
+                  product_id: group.productId,
+                  product_variant_id: group.variantId,
+                  requested_quantity: group.quantity,
+                  error: message,
+                },
+                orderId,
+              );
+            } catch {
+              // audit es observabilidad, no bloquea.
+            }
+            throw new VendixHttpException(
+              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+              message,
+              {
+                product_id: group.productId,
+                variant_id: group.variantId,
+                requested: group.quantity,
+              },
+            );
+          }
+        }
+
+        // Round 3 MINOR #15 — `orders.currency` is intentionally NOT mutated
+        // by the editor. The currency is fixed at order creation:
+        //   `createOrderDto.currency || (await this.settingsService.getStoreCurrency())`
+        // (see `createOrder` above), and the order_items that carry
+        // monetary values all inherit that scale. Changing it mid-edit
+        // would mean re-scaling every line total, tax, discount and
+        // shipping cost to a different unit — that's a separate decision
+        // (re-create the order, or migrate manually), not a side effect
+        // of editing items. We document the choice rather than to over-write
+        // it: a re-render of an existing order keeps the currency it was
+        // created with.
+      }
+
+      // 13e) Reconciliar `order_promotions`: borrar existentes, reinsertar
+      //      snapshots nuevas del motor.
+      await tx.order_promotions.deleteMany({
+        where: { order_id: orderId },
+      });
+      if (promotionSnapshots.length > 0) {
+        await tx.order_promotions.createMany({
+          data: promotionSnapshots.map((snap) => ({
+            order_id: orderId,
+            promotion_id: snap.promotion_id,
+            customer_id: dto.customer_id,
+            discount_amount: snap.discount_amount,
+          })),
+        });
+      }
+
+      // 13f) Cupón: ajustar `current_uses` UNA vez si cambió y la orden
+      //      ya estaba creada. Draft no incrementa ni decrementa: la
+      //      snapshot queda pendiente y `flow/pay` consume.
+      //
+      //      Round 1 MAJOR #10: `coupons.update` (cruzar el contador) se
+      //      hace con `updateMany` idempotente y guarda `current_uses:
+      //      { lt: max_uses }` + `state='active'`. count=0 ⇒ otro cargo
+      //      consumió el cupón primero y lanzamos `ORD_EDIT_COUPON_COMMIT_001`.
+      //      El `decrement` usa el mismo patrón para que un rollback que
+      //      ya bajó el contador no se vuelva a bajar.
+      //
+      //      Round 1 BLOCKER #4: el `tx.coupons.update` corría sobre el
+      //      cliente no-scoped; un cupón de OTRA tienda cuya id cayera en
+      //      el filtro sería aceptado por la FK y mutaba su contador.
+      //      Ahora el `where` exige `stores: { some: { id: storeId } }`
+      //      para garantizar pertenencia.
+      if (!isDraft && couponChanged) {
+        if (currentCode && existingOrder.coupon_id) {
+          const dec = await tx.coupons.updateMany({
+            where: {
+              id: existingOrder.coupon_id,
+              stores: { some: { id: storeId } },
+              current_uses: { gt: 0 },
+            },
+            data: { current_uses: { decrement: 1 } },
+          });
+          if (dec.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              { stage: 'decrement', coupon_id: existingOrder.coupon_id },
+            );
+          }
+        }
+        if (couponId) {
+          const inc = await tx.coupons.updateMany({
+            where: {
+              id: couponId,
+              stores: { some: { id: storeId } },
+              state: 'active',
+            },
+            data: { current_uses: { increment: 1 } },
+          });
+          if (inc.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              { stage: 'increment', coupon_id: couponId },
+            );
+          }
+        }
+      }
+
+      // 13g) Update orden: metadata, totales, shipping, cupón snapshot.
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          customer_id: dto.customer_id,
+          notes: dto.notes ?? existingOrder.notes,
+          internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
+          delivery_type: dto.delivery_type ?? existingOrder.delivery_type,
+          billing_address_id: dto.billing_address_id ?? existingOrder.billing_address_id,
+          shipping_address_id: dto.shipping_address_id ?? existingOrder.shipping_address_id,
+          shipping_method_id: dto.shipping_method_id ?? existingOrder.shipping_method_id,
+          shipping_rate_id: resolvedShippingRateId ?? existingOrder.shipping_rate_id,
+          shipping_cost: dto.shipping_cost ?? shippingCost,
+          subtotal_amount: recalculatedSubtotal,
+          tax_amount: recalculatedTax,
+          discount_amount: discountAmount,
+          grand_total: grandTotal,
+          coupon_id: couponId,
+          coupon_code: requestedCode || null,
+          updated_at: new Date(),
+        },
+      });
+
+      // 13h) Hidratar respuesta completa dentro de la misma transacción.
+      return tx.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          stores: {
+            select: { id: true, name: true, store_code: true },
+          },
+          order_items: {
+            include: {
+              products: {
+                include: {
+                  product_images: {
+                    where: { is_main: true },
+                    take: 1,
+                  },
+                },
+              },
+              product_variants: true,
+              kitchen_ticket_items: {
+                orderBy: { id: 'desc' },
+                select: {
+                  id: true,
+                  status: true,
+                  kitchen_ticket_id: true,
+                },
+              },
+            },
+          },
+          addresses_orders_billing_address_idToaddresses: true,
+          addresses_orders_shipping_address_idToaddresses: true,
+          payments: {
+            include: {
+              store_payment_method: {
+                include: { system_payment_method: true },
+              },
+            },
+            orderBy: { created_at: 'asc' },
+          },
+          shipping_method: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              provider_name: true,
+              min_days: true,
+              max_days: true,
+              logo_url: true,
+            },
+          },
+          shipping_rate: {
+            include: {
+              shipping_zone: {
+                select: { id: true, name: true, display_name: true },
+              },
+            },
+          },
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+          order_installments: {
+            orderBy: { installment_number: 'asc' },
+          },
+          order_promotions: {
+            select: {
+              id: true,
+              promotion_id: true,
+              customer_id: true,
+              discount_amount: true,
+              promotions: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                  type: true,
+                  scope: true,
+                  value: true,
+                },
+              },
+            },
+            orderBy: { created_at: 'asc' },
+          },
+          coupon_uses: {
+            select: {
+              id: true,
+              coupon_id: true,
+              customer_id: true,
+              discount_applied: true,
+              used_at: true,
+              coupon: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  discount_type: true,
+                  discount_value: true,
+                },
+              },
+            },
+            orderBy: { used_at: 'asc' },
+          },
+        },
+      });
+    });
+
+    // 14) Coherencia: si la fila devuelta no coincide con la actualización,
+    //     no devolver éxito falso. `ORD_EDIT_RESPONSE_MISMATCH_001` es 500
+    //     porque es un fallo interno del servicio.
+    //
+    //     Round 1 MAJOR #7: el chequeo original sólo cubría subtotal y
+    //     grand_total. Eso deja escapar divergencias en tax_amount,
+    //     discount_amount, shipping_cost, coupon_id o coupon_code —
+    //     exactamente los campos que el backend recalcula y que la UI
+    //     muestra. Ampliamos la comparación y exponemos los deltas en
+    //     `details` para que la timeline sea depurable sin abrir SQL.
+    const expectedCouponCode = requestedCode || null;
+    if (
+      !result ||
+      Number(result.subtotal_amount) !== recalculatedSubtotal ||
+      Number(result.tax_amount) !== recalculatedTax ||
+      Number(result.discount_amount) !== discountAmount ||
+      Number(result.shipping_cost) !==
+        (dto.shipping_cost ?? shippingCost) ||
+      Number(result.grand_total) !== grandTotal ||
+      (result.coupon_id ?? null) !== (couponId ?? null) ||
+      (result.coupon_code ?? null) !== (expectedCouponCode ?? null)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001,
+        undefined,
+        {
+          expected: {
+            subtotal: recalculatedSubtotal,
+            tax_amount: recalculatedTax,
+            discount_amount: discountAmount,
+            shipping_cost: dto.shipping_cost ?? shippingCost,
+            grand_total: grandTotal,
+            coupon_id: couponId ?? null,
+            coupon_code: expectedCouponCode,
+          },
+          actual: result
+            ? {
+                subtotal: Number(result.subtotal_amount),
+                tax_amount: Number(result.tax_amount),
+                discount_amount: Number(result.discount_amount),
+                shipping_cost: Number(result.shipping_cost),
+                grand_total: Number(result.grand_total),
+                coupon_id: result.coupon_id ?? null,
+                coupon_code: result.coupon_code ?? null,
+              }
+            : null,
+        },
+      );
+    }
+
+    // 15) Firma las imágenes S3.
+    await this.signOrderItemImages(result);
+
+    // 16) Audit AFTER commit. Nunca antes: si falla el commit, no debe
+    //     quedar una fila de auditoría que afirme lo contrario.
+    try {
+      await this.auditService.logCustom(
+        userId,
+        'order.editor.updated',
+        AuditResource.ORDERS,
+        {
+          order_id: orderId,
+          store_id: storeId,
+          request_id: requestId,
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #14.
+          // Surface `customer_id_before` so SIEM rules that grep for
+          // "customer switched" can match without diffing the totals
+          // block. The same id is also persisted in `before_totals` /
+          // `after_totals` for re-enactment queries.
+          customer_id: dto.customer_id,
+          customer_id_before: existingOrder.customer_id ?? null,
+          item_count: dto.items.length,
+          before_totals: beforeTotals,
+          after_totals: {
+            subtotal: recalculatedSubtotal,
+            tax_amount: recalculatedTax,
+            discount_amount: discountAmount,
+            shipping_cost: dto.shipping_cost ?? shippingCost,
+            grand_total: grandTotal,
+            coupon_id: couponId,
+            coupon_code: requestedCode || null,
+            // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #15.
+            // Mirror `customer_id` on the after side so the row is
+            // self-contained: a reader that only looks at `after_totals`
+            // gets the new owner without having to JOIN against `orders`.
+            customer_id: dto.customer_id ?? null,
+          },
+          is_draft: isDraft,
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
+          // `coupon_changed` alone doesn't tell SIEM rules WHICH coupon
+          // was removed/applied. Surface both `coupon_code_before` and
+          // `coupon_code_after` so a rule like "operator removed
+          // `WELCOME5` and applied `SUMMER20` on a draft > $X" can match
+          // directly. `coupon_code_before` is null when no coupon was
+          // previously applied; `coupon_code_after` is null when the
+          // operator cleared the coupon. We log code lengths only when
+          // the codes contain PII-style content; here we treat the code
+          // as non-sensitive (it's already shown to the cashier and
+          // printed on the ticket) so the literal value travels.
+          coupon_changed: couponChanged,
+          coupon_code_before: currentCode || null,
+          coupon_code_after: requestedCode || null,
+          // Carry the idempotency key into the audit row so future calls
+          // with the same key short-circuit via step 2.5. Without this,
+          // a retry would re-execute the whole pipeline.
+          ...(dto.idempotency_key
+            ? { idempotency_key: dto.idempotency_key }
+            : {}),
+        },
+        orderId,
+      );
+    } catch (err) {
+      // El audit es observabilidad, no bloquea el commit.
+      this.logger.warn(
+        `[editor] audit event failed: ${(err as Error).message}`,
+      );
+    }
+
+    return result;
   }
 
   async assignShipping(orderId: number, dto: AssignShippingMethodDto) {

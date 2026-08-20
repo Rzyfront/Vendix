@@ -40,6 +40,11 @@ import {
   formatSaleQuantity,
   isSaleUnitLine as isLineCapturedInSaleUnit,
 } from '../utils/line-units.util';
+import {
+  EMPTY_CART_MESSAGE,
+  EMPTY_CART_INLINE_TITLE,
+  EMPTY_CART_INLINE_HINT,
+} from '../../../../../core/utils/error-messages';
 
 @Component({
   selector: 'app-pos-cart',
@@ -394,11 +399,11 @@ import {
                 <button
                   type="button"
                   class="cart-btn save-btn"
-                  (click)="create.emit()"
+                  (click)="saveDraft.emit()"
                   [disabled]="isEmpty()"
                 >
                   <app-icon name="clipboard-list" [size]="16"></app-icon>
-                  <span>Crear</span>
+                  <span>Guardar</span>
                 </button>
                 <button
                   type="button"
@@ -410,18 +415,50 @@ import {
                   <span>Envío</span>
                 </button>
               </div>
+              <!--
+                CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
+                proceedToPayment() delegates to checkout.emit() which the
+                parent wires to onCheckout():
+                  - create mode → opens the checkout shell stepper (customer
+                    + shipping + payment) — the full payment flow.
+                  - edit mode   → calls updateExistingOrder() first, then
+                    surfaces readyToPayOrder so the secondary Cobrar
+                    button below opens the payment modal.
+                The label was previously mistyped as "Guardar Orden (no cobra)"
+                in this slot — fixed back to Cobrar per D.2: only the
+                secondary save button above renames to "Guardar Orden (no
+                cobra)" because it saves a draft without payment.
+              -->
               <button
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="proceedToPayment()"
-                [disabled]="isEmpty()"
+                [disabled]="isEmpty() || isCharging()"
+                [attr.aria-busy]="isCharging() ? 'true' : null"
               >
-                <app-icon
-                  [name]="isEditMode() ? 'check' : 'credit-card'"
-                  [size]="18"
-                ></app-icon>
-                <span>{{ isEditMode() ? 'Actualizar Orden' : 'Cobrar' }}</span>
+                <app-icon name="credit-card" [size]="18"></app-icon>
+                <span>Cobrar</span>
               </button>
+              <!--
+                Phase D.3 — Cobrar only when an updated order is sitting in
+                readyToPayOrder. Visible in BOTH create-draft and edit modes,
+                but realistically only ever non-null after an edit update.
+                Separate button so the label matches the action: the primary
+                CTA never silently opens payment.
+              -->
+              @if (readyToPayOrder() !== null) {
+                <button
+                  type="button"
+                  class="cart-btn cobrar-btn"
+                  (click)="charge.emit()"
+                  [disabled]="isEmpty() || isCharging()"
+                  [attr.aria-busy]="isCharging() ? 'true' : null"
+                  [attr.aria-label]="cobrarAriaLabel()"
+                >
+                  <app-icon name="credit-card" [size]="18"></app-icon>
+                  <span>Cobrar</span>
+                </button>
+              }
             }
           </div>
         </div>
@@ -467,10 +504,10 @@ import {
               ></app-icon>
             </div>
             <h3 class="text-sm font-semibold text-text-primary mb-1">
-              Tu carrito está vacío
+              {{ emptyCartTitle }}
             </h3>
             <p class="text-[11px] text-text-secondary">
-              Selecciona productos en el panel izquierdo
+              {{ emptyCartHint }}
             </p>
           </div>
         }
@@ -829,6 +866,30 @@ import {
         transform: translateY(-1px);
       }
 
+      .cobrar-btn {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(
+          135deg,
+          var(--color-success, #16a34a) 0%,
+          var(--color-primary) 100%
+        );
+        color: white;
+        font-size: 15px;
+        font-weight: 700;
+        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+      }
+
+      .cobrar-btn:hover:not(:disabled) {
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+      }
+
+      .cobrar-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       .save-btn {
         background: var(--color-muted);
         border: 1px solid var(--color-border);
@@ -929,6 +990,13 @@ private cartService = inject(PosCartService);
   private saleUnitService = inject(PosSaleUnitService);
 
   readonly cartState = this.cartService.cartState;
+  // QUI-audit-round-1: copy centralizada para los tres sitios que muestran
+  // «El carrito está vacío» (estado inline, toast de `proceedToPayment` y
+  // mensaje de error genérico). Cualquier ajuste futuro vive en un único
+  // archivo en lugar de tres.
+  readonly emptyCartMessage = EMPTY_CART_MESSAGE;
+  readonly emptyCartTitle = EMPTY_CART_INLINE_TITLE;
+  readonly emptyCartHint = EMPTY_CART_INLINE_HINT;
   readonly availableTiers = signal<PriceTier[]>([]);
   /** Per-product (number key) override cache so the selector resolves instantly. */
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
@@ -1018,11 +1086,47 @@ private cartService = inject(PosCartService);
   readonly isEditMode = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  /**
+   * Phase D.3 — when non-null, the parent has a fresh order ready to be
+   * charged. We render a separate `Cobrar` button under the primary CTA so
+   * the cashier has a single, unambiguous next step.
+   */
+  readonly readyToPayOrder = input<unknown>(null);
+  readonly isCharging = input<boolean>(false);
   readonly create = output<void>();
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
+   * shell stepper). Bound by the parent to `posPaymentService.saveDraft()`
+   * so the "Guardar" button persists the order with `is_draft=true,
+   * requires_payment=false` and NEVER opens the payment step. The
+   * separate `Cobrar` button below uses the full shell wizard.
+   */
+  readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
+  /**
+   * Phase D.3 — emitted when the cashier clicks the `Cobrar` CTA. The parent
+   * mounts the reused `OrderPaymentModalComponent` over the fresh order.
+   */
+  readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+
+  /**
+   * QUI-audit-round-1 — accessible label for the `Cobrar` CTA. The CTA only
+   * renders when `readyToPayOrder !== null`, so the order_number is
+   * available via a generic cast. Fallback to `Cobrar orden` when the
+   * caller forgets to include the order_number in the payload.
+   */
+  readonly cobrarAriaLabel = computed<string>(() => {
+    const order = this.readyToPayOrder() as
+      | { order_number?: string | number }
+      | null;
+    const orderNumber = order?.order_number;
+    return orderNumber != null && orderNumber !== ''
+      ? `Cobrar orden #${orderNumber}`
+      : 'Cobrar orden';
+  });
 
   constructor() {
     this.taxesService
@@ -1506,7 +1610,7 @@ private cartService = inject(PosCartService);
   proceedToPayment(): void {
     const currentState = this.cartService.getCurrentState();
     if (currentState.items.length === 0) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(this.emptyCartMessage);
       return;
     }
 

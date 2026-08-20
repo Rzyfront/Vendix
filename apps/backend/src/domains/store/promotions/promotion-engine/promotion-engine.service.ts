@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { resolvePriceUnits } from '../../products/services/price-unit.util';
 import {
@@ -13,6 +13,7 @@ import {
   PromotionQuoteScope,
   PromotionQuoteType,
   PromotionTierProgress,
+  QuantityTierSummary,
 } from '../dto/promotion-quote.interface';
 
 /** Promotions resolve rule types from the Prisma enum. */
@@ -80,6 +81,8 @@ interface PromotionRecord {
 
 @Injectable()
 export class PromotionEngineService {
+  private readonly logger = new Logger(PromotionEngineService.name);
+
   constructor(private prisma: StorePrismaService) {}
 
   /**
@@ -111,19 +114,36 @@ export class PromotionEngineService {
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
 
+    // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
+    // counts via a single `groupBy` instead of issuing one `count` per
+    // candidate promo. With N promos carrying `per_customer_limit`, the
+    // loop below used to issue N extra queries per `getCart`; now it is a
+    // single round-trip and the per-promo check is a Map lookup. Same
+    // shape as the optimization applied to `quoteDiscounts`.
+    const usageCounts = new Map<number, number>();
+    const candidateIds = promotions.map((p) => p.id);
+    if (customerId && candidateIds.length > 0) {
+      const rows = await this.prisma.order_promotions.groupBy({
+        by: ['promotion_id'],
+        where: {
+          promotion_id: { in: candidateIds },
+          customer_id: customerId,
+        },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        usageCounts.set(Number(row.promotion_id), Number(row._count._all));
+      }
+    }
+
     const eligible: any[] = [];
     for (const promo of promotions) {
       // Check usage limit
       if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
 
-      // Check per-customer limit
+      // Check per-customer limit (looked up from the batched Map above).
       if (promo.per_customer_limit && customerId) {
-        const customerUsage = await this.prisma.order_promotions.count({
-          where: {
-            promotion_id: promo.id,
-            customer_id: customerId,
-          },
-        });
+        const customerUsage = usageCounts.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
@@ -450,6 +470,16 @@ export class PromotionEngineService {
     const scale = scaleByProduct.get(Number(item.product_id));
     if (!scale || scale <= 1) return quantity;
     const converted = resolvePriceUnits(quantity, scale);
+    // CP-ECOM-PROMO-UX-001 M7: trace scale conversions so that "I bought 3
+    // meters of cable and the tier didn't fire" reports can be reconstructed.
+    this.logger.debug(
+      {
+        productId: Number(item.product_id),
+        unitsPerPackage: scale,
+        convertedQty: converted,
+      },
+      'Scale converted',
+    );
     return converted >= 1 ? Math.floor(converted) : converted;
   }
 
@@ -568,6 +598,32 @@ export class PromotionEngineService {
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
 
+    // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
+    // counts via a single `groupBy` instead of issuing one `count` per
+    // candidate promo. With N promos carrying `per_customer_limit`, the
+    // winner-takes-all loop below used to issue N extra queries per
+    // `quoteDiscounts`; now it is a single round-trip and the per-promo
+    // check is a Map lookup. Same shape as the optimization applied to
+    // `getEligiblePromotions`.
+    const customerUsageByPromotion = new Map<number, number>();
+    const candidateIds = candidates.map((c) => Number(c.id));
+    if (customerId && candidateIds.length > 0) {
+      const rows = await this.prisma.order_promotions.groupBy({
+        by: ['promotion_id'],
+        where: {
+          promotion_id: { in: candidateIds },
+          customer_id: customerId,
+        },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        customerUsageByPromotion.set(
+          Number(row.promotion_id),
+          Number(row._count._all),
+        );
+      }
+    }
+
     /**
      * WINNER-TAKES-ALL policy (per Edward's design):
      *   An order should only have ONE active promotion. Among all eligible
@@ -598,14 +654,9 @@ export class PromotionEngineService {
       // Usage limit (global).
       if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
 
-      // Per-customer usage limit.
+      // Per-customer usage limit (looked up from the batched Map above).
       if (promo.per_customer_limit && customerId) {
-        const customerUsage = await this.prisma.order_promotions.count({
-          where: {
-            promotion_id: promo.id,
-            customer_id: customerId,
-          },
-        });
+        const customerUsage = customerUsageByPromotion.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
@@ -743,6 +794,21 @@ export class PromotionEngineService {
         if (!matchedTier) continue;
         if (tierIndexes.length === 0 || tierTotal <= 0) continue;
 
+        // CP-ECOM-PROMO-UX-001 M7: trace which tier was selected so that
+        // "I added 3 and got the wrong band" reports can be reconstructed.
+        // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
+        // out by Nest in production, so the trace was effectively dead and
+        // "the wrong tier fired" support tickets couldn't be diagnosed.
+        this.logger.log(
+          {
+            promotionId: promo.id,
+            tierMinQuantity: matchedTier.min_quantity,
+            tierMaxQuantity: matchedTier.max_quantity,
+            quantityInCart: scopedQty,
+          },
+          'Tier selected',
+        );
+
         // Per-line discount computed from the FIXED winning tier (resolved once
         // from scopedQty above), not from each line's individual quantity.
         // percentage tiers apply per line; fixed_amount tiers apply a single
@@ -776,6 +842,19 @@ export class PromotionEngineService {
         discountAmount = Math.min(discountAmount, tierTotal);
         discountAmount = this.roundMoney(discountAmount);
         if (discountAmount <= 0) continue;
+
+        // CP-ECOM-PROMO-UX-001 M7: trace when the cap silently clips the
+        // discount so support can confirm "the engine honored max_discount_amount".
+        if (discountAmount < rawTotal) {
+          this.logger.debug(
+            {
+              promotionId: promo.id,
+              rawDiscount: rawTotal,
+              cappedAt: discountAmount,
+            },
+            'Discount capped',
+          );
+        }
 
         // Rescale the per-line shares so the SUM of shares matches the capped
         // `discountAmount` exactly. The proportional split preserves the
@@ -847,6 +926,24 @@ export class PromotionEngineService {
         };
       }
     }
+
+    // CP-ECOM-PROMO-UX-001 M7: trace which candidate won the tiebreak so that
+    // customer reports ("the wrong promo applied") can be diagnosed without
+    // re-running the cart.
+    // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
+    // out by Nest in production, so the trace was effectively dead and
+    // "the wrong promo applied" support tickets couldn't be diagnosed.
+    if (winner) {
+      this.logger.log(
+        {
+          promotionId: winner.promo.id,
+          priority: winner.promo.priority,
+          scope: winner.promo.scope,
+        },
+        'Winner resolved',
+      );
+    }
+
 
     // Apply ONLY the winner (if any) to the per-item breakdown. All other
     // candidates were evaluated but discarded by the "highest priority wins"
@@ -949,6 +1046,194 @@ export class PromotionEngineService {
       order_promotions_snapshot: snapshot,
       tier_progress: tierProgress,
     };
+  }
+
+  /**
+   * Per-product tier ladder for promotions that touched the current cart.
+   *
+   * Returns one entry per `(promotion_id, target_product_id)` for every
+   * `quantity_tiered` promotion in `promotionIds` whose target product is
+   * listed in that promotion's `promotion_products` mapping. `tiers` is the
+   * FULL ladder (ordered by `min_quantity` ASC, secondary by `sort_order`,
+   * final tie-break by tier id), and `current_tier_index` reflects how many
+   * units of THAT product are already in the cart — the last tier whose
+   * `min_quantity <= quantity` wins (`null` when quantity is below the
+   * first threshold).
+   *
+   * Pure READ — no discount math, no DB writes. Powers the per-product
+   * tier-ladder UI (`Lleva 3 → -10% · Lleva 6 → -15% …`) so consumers can
+   * render the full ladder next to each cart line without re-querying
+   * `promotion_quantity_tiers`. Mirrors `ActiveProductPromotion.quantity_tiers`
+   * (same `QuantityTierSummary` rows, same ordering) so the rendering code
+   * stays symmetric with the product card surface.
+   *
+   * `perProductQuantity` is optional: when omitted, the engine aggregates
+   * `quantity` from `cartItems` per `product_id` to build the per-product
+   * map. Callers that already aggregate quantities (e.g. via the engine's
+   * `toSaleUnits`) can pass a precomputed Map to skip the re-aggregation.
+   *
+   * Promotions whose `promotion_products` is empty (scope='order' /
+   * scope='category') produce NO entries — they have no single
+   * `target_product_id`. Callers that want a single ladder for those promos
+   * can query `ActiveProductPromotion.quantity_tiers` directly.
+   *
+   * Resilience: errors from the DB read bubble up; callers are expected to
+   * `try/catch` and degrade silently (the cart view must keep serving 200s
+   * without the ladder field — same policy as `quoteDiscounts`).
+   */
+  async getTierLaddersForQuote(
+    promotionIds: number[],
+    cartItems: Array<{ product_id: number; quantity: number }>,
+    perProductQuantity?: Map<number, number>,
+  ): Promise<
+    Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: QuantityTierSummary[];
+      current_tier_index: number | null;
+    }>
+  > {
+    const ids = Array.from(
+      new Set((promotionIds ?? []).map((id) => Number(id))),
+    ).filter((id) => Number.isFinite(id) && id > 0);
+    if (ids.length === 0) return [];
+
+    // One batched query through `promotions` (the model that owns the store
+    // scope + the relations we need): tiers ordered by `min_quantity` ASC
+    // (the same ordering the engine uses internally for tier resolution),
+    // plus the promotion's `promotion_products` mapping so we know which
+    // `product_id`s each promotion targets. We read via `promotions` rather
+    // than `promotion_quantity_tiers` directly because `StorePrismaService`
+    // doesn't expose a scoped getter for the tier model — its sole
+    // cross-store query surface is the promotions relation here.
+    const promoRows = (await this.prisma.promotions.findMany({
+      where: { id: { in: ids } },
+      include: {
+        promotion_quantity_tiers: {
+          orderBy: [
+            { min_quantity: 'asc' },
+            { sort_order: 'asc' },
+            { id: 'asc' },
+          ],
+        },
+        promotion_products: { select: { product_id: true } },
+      },
+    })) as unknown as Array<{
+      id: number;
+      promotion_quantity_tiers?: Array<{
+        id: number;
+        promotion_id: number;
+        min_quantity: number;
+        max_quantity: number | null;
+        type: PromotionQuoteType;
+        value: unknown;
+        sort_order: number;
+      }>;
+      promotion_products?: Array<{ product_id: number | string }>;
+    }>;
+
+    // Per-product quantity: build from `cartItems` when the caller didn't
+    // pass an aggregated map. Sum across lines of the same product — same
+    // summation the engine does for `per_product` grouping in
+    // `quoteDiscounts`.
+    const quantityByProduct = new Map<number, number>();
+    if (perProductQuantity) {
+      for (const [pid, qty] of perProductQuantity.entries()) {
+        const n = Number(pid);
+        const q = Number(qty);
+        if (Number.isFinite(n) && Number.isFinite(q) && q > 0) {
+          quantityByProduct.set(n, (quantityByProduct.get(n) ?? 0) + q);
+        }
+      }
+    } else {
+      for (const item of cartItems ?? []) {
+        const pid = Number(item?.product_id);
+        const qty = Number(item?.quantity) || 0;
+        if (!Number.isFinite(pid)) continue;
+        if (qty <= 0) continue;
+        quantityByProduct.set(pid, (quantityByProduct.get(pid) ?? 0) + qty);
+      }
+    }
+
+    // Group tier rows per promotion so we emit one ladder per (promo,
+    // target_product_id). `targetProductIds` is de-duplicated so a product
+    // linked to the same promotion by multiple rows still appears once.
+    const ladderByPromo = new Map<
+      number,
+      { tiers: QuantityTierSummary[]; targetProductIds: number[] }
+    >();
+    for (const promo of promoRows) {
+      const promotionId = Number(promo.id);
+      const tiers = promo.promotion_quantity_tiers ?? [];
+      if (tiers.length === 0) continue;
+      const bucket: { tiers: QuantityTierSummary[]; targetProductIds: number[] } =
+        {
+          tiers: tiers.map((t) => ({
+            min_quantity: Number(t.min_quantity),
+            max_quantity:
+              t.max_quantity === null ? null : Number(t.max_quantity),
+            type: t.type,
+            value: Number(t.value),
+            sort_order: Number(t.sort_order),
+          })),
+          targetProductIds: [],
+        };
+      for (const pp of promo.promotion_products ?? []) {
+        const targetProductId = Number(pp.product_id);
+        if (!Number.isFinite(targetProductId)) continue;
+        if (!bucket.targetProductIds.includes(targetProductId)) {
+          bucket.targetProductIds.push(targetProductId);
+        }
+      }
+      ladderByPromo.set(promotionId, bucket);
+    }
+
+    const result: Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: QuantityTierSummary[];
+      current_tier_index: number | null;
+    }> = [];
+    for (const [promotionId, bucket] of ladderByPromo.entries()) {
+      if (bucket.tiers.length === 0) continue;
+      if (bucket.targetProductIds.length === 0) continue;
+      for (const targetProductId of bucket.targetProductIds) {
+        const quantity = quantityByProduct.get(targetProductId) ?? 0;
+        result.push({
+          promotion_id: promotionId,
+          target_product_id: targetProductId,
+          tiers: bucket.tiers,
+          current_tier_index: this.resolveCurrentTierIndex(
+            bucket.tiers,
+            quantity,
+          ),
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Index of the highest tier whose `min_quantity <= quantity`.
+   * `null` when quantity is below the first threshold. Returns
+   * `tiers.length - 1` when quantity crosses the top tier (since tiers are
+   * ordered ASC by `min_quantity`, the top one is still "the last whose
+   * `min_quantity <= quantity`").
+   */
+  private resolveCurrentTierIndex(
+    tiers: QuantityTierSummary[],
+    quantity: number,
+  ): number | null {
+    if (!tiers || tiers.length === 0) return null;
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return tiers[0].min_quantity <= 0 ? 0 : null;
+    }
+    let idx = -1;
+    for (let i = 0; i < tiers.length; i++) {
+      if (tiers[i].min_quantity <= quantity) idx = i;
+      else break;
+    }
+    return idx >= 0 ? idx : null;
   }
 
   /**
@@ -1192,6 +1477,11 @@ export class PromotionEngineService {
               return a.sort_order - b.sort_order;
             return a.id - b.id;
           });
+        // ERR-01 defensive guard: a `quantity_tiered` promo with ZERO rows is
+        // not eligible — there is no tier to fire, and falling through to the
+        // flat branch below would advertise a phantom discount. Mirrors the
+        // exact guard already used by `quoteDiscounts` and `buildTierProgress`.
+        if (tiers.length === 0) continue;
         const firstTier = tiers[0];
         if (!firstTier) continue;
         const tierValue = Number(firstTier.value);
@@ -1202,7 +1492,21 @@ export class PromotionEngineService {
             ? this.roundMoney((unitPrice * tierValue) / 100)
             : this.roundMoney(tierValue);
 
-        const baseEntry: ActiveProductPromotion = {
+        // Emit the FULL tier ladder so the frontend can render every step
+        // ("Lleva 3 → -10% · Lleva 6 → -15%") without re-querying. `value` is
+        // coerced from the DB's `unknown` (Decimal) to a plain `number`; tier
+        // `type` is narrowed to the strict literal union declared by
+        // `QuantityTierSummary`. Ordering matches the sort above so consumers
+        // never need to re-sort.
+        const quantityTiers: QuantityTierSummary[] = tiers.map((t) => ({
+          min_quantity: Number(t.min_quantity),
+          max_quantity: t.max_quantity === null ? null : Number(t.max_quantity),
+          type: t.type,
+          value: Number(t.value),
+          sort_order: Number(t.sort_order),
+        }));
+
+        result.set(productId, {
           id: promo.id,
           name: promo.name,
           type: promoType,
@@ -1214,19 +1518,10 @@ export class PromotionEngineService {
           promotional_price: this.roundMoney(unitPrice),
           badge_label: this.buildQuantityTieredBadgeLabel(firstTier),
           priority: promo.priority ?? 0,
-        };
-
-        // Forward extra signals for downstream consumers (Agent C may extend
-        // the interface contract). The shared `ActiveProductPromotion`
-        // interface does not declare these today, so we cast to keep the
-        // engine's typed contract intact while still surfacing them at
-        // runtime.
-        const extendedEntry = {
-          ...baseEntry,
           is_quantity_tiered: true,
           preview_min_discount: previewMinDiscount,
-        };
-        result.set(productId, extendedEntry as unknown as ActiveProductPromotion);
+          quantity_tiers: quantityTiers,
+        });
         continue;
       }
 
@@ -1246,6 +1541,11 @@ export class PromotionEngineService {
         promotional_price: promotionalPrice,
         badge_label: this.buildBadgeLabel(promo, discount, unitPrice),
         priority: promo.priority ?? 0,
+        // Flat promo: always emit an EMPTY array (NOT `undefined`) so the
+        // shape is symmetric with `quantity_tiered` rows. Consumers can
+        // iterate `entry.quantity_tiers ?? []` unconditionally; the field is
+        // also a reliable discriminator for "this promo has no tier ladder".
+        quantity_tiers: [],
       });
     }
 

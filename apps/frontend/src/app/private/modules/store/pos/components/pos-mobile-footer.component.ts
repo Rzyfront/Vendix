@@ -80,11 +80,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </button>
           <button
             class="action-btn save-btn"
-            (click)="create.emit()"
+            (click)="saveDraft.emit()"
             [disabled]="itemCount() === 0"
             >
             <app-icon name="clipboard-list" [size]="16"></app-icon>
-            <span>Crear</span>
+            <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
           </button>
           <button
             class="action-btn shipping-btn"
@@ -95,15 +95,40 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <span>Envío</span>
           </button>
         </div>
-        <!-- Row 3: Primary CTA -->
+        <!--
+          Row 3 — Primary CTA stays Cobrar. The previous label
+          "Guardar Orden / Actualizar Orden" on this slot was a regression
+          that duplicated the secondary save button copy. Restored to the
+          canonical charge copy; the secondary save button above now carries
+          the "no cobra" suffix because it persists without payment.
+        -->
         <button
+          type="button"
           class="action-btn checkout-btn checkout-btn-full"
           (click)="checkout.emit()"
-          [disabled]="itemCount() === 0"
-          >
+          [disabled]="itemCount() === 0 || isCharging()"
+          [attr.aria-busy]="isCharging() ? 'true' : null"
+        >
           <app-icon name="credit-card" [size]="18"></app-icon>
           <span>Cobrar</span>
         </button>
+        <!--
+          Phase D.3 — Cobrar only when an updated order is sitting in
+          readyToPayOrder. Mirrors the desktop cart sidebar.
+        -->
+        @if (readyToPayOrder() !== null) {
+          <button
+            type="button"
+            class="action-btn checkout-btn checkout-btn-full cobrar-btn"
+            (click)="charge.emit()"
+            [disabled]="itemCount() === 0 || isCharging()"
+            [attr.aria-busy]="isCharging() ? 'true' : null"
+            aria-label="Cobrar la orden editada"
+          >
+            <app-icon name="credit-card" [size]="18"></app-icon>
+            <span>Cobrar</span>
+          </button>
+        }
       }
     </div>
     `,
@@ -319,6 +344,20 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         filter: brightness(1.1);
       }
 
+      .cobrar-btn {
+        background: linear-gradient(
+          135deg,
+          var(--color-success, #16a34a) 0%,
+          var(--color-primary) 100%
+        );
+        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+      }
+
+      .cobrar-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       /* Tablet: Sync with sidebar width */
       @media (min-width: 768px) and (max-width: 1023px) {
         .pos-mobile-footer {
@@ -363,12 +402,27 @@ export class PosMobileFooterComponent {
   readonly isTablet = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  readonly isEditMode = input<boolean>(false);
   readonly canCreateCustomItems = input<boolean>(false);
+  /**
+   * Phase D.3 — when non-null, the parent has a fresh order ready to be
+   * charged. We render a separate `Cobrar` button mirroring the desktop cart.
+   */
+  readonly readyToPayOrder = input<unknown>(null);
+  readonly isCharging = input<boolean>(false);
   readonly viewCart = output<void>();
   readonly customItem = output<void>();
   readonly create = output<void>();
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
+   * checkout shell stepper). The Guardar button persists the order with
+   * is_draft=true, requires_payment=false and NEVER opens the payment
+   * step. The Cobrar button uses the full shell wizard.
+   */
+  readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
+  readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
 

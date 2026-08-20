@@ -785,13 +785,52 @@
 
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ cart()!.subtotal | currency }}</span>
+              <span>{{
+                ((cart()!.promotion_discount ?? 0) > 0
+                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal ?? 0)
+                  : (cart()!.subtotal ?? 0)) | currency
+              }}</span>
             </div>
+            @if (
+              cart()!.promotion_discount != null &&
+              cart()!.promotion_discount! > 0
+            ) {
+              <div class="summary-row summary-row--discount">
+                <span class="flex items-center gap-1">
+                  <app-icon
+                    name="tag"
+                    [size]="14"
+                    class="text-success"
+                  ></app-icon>
+                  <span>Descuento por promociones</span>
+                </span>
+                <span class="text-success"
+                  >-{{ cart()!.promotion_discount | currency }}</span
+                >
+              </div>
+            }
+            @if (cartCouponCode()) {
+              <div class="summary-row summary-row--discount">
+                <span class="flex items-center gap-1">
+                  <app-icon
+                    name="ticket"
+                    [size]="14"
+                    class="text-primary"
+                  ></app-icon>
+                  <span>Cupón {{ cartCouponCode() }}</span>
+                </span>
+                <span class="text-primary"
+                  >-{{ couponDiscount() | currency }}</span
+                >
+              </div>
+            }
             @if (!cartHasOnlyServices) {
               <div class="summary-row">
                 <span>Envio</span>
                 <span>{{
-                  shipping_cost === 0 ? "Gratis" : (shipping_cost | currency)
+                  shippingDisplay() === "Gratis"
+                    ? "Gratis"
+                    : (shippingCost() | currency)
                 }}</span>
               </div>
             }
@@ -814,15 +853,44 @@
 
             <app-cart-promotions [cart]="cart()" />
 
+            <!-- F.2 — Per-promo breakdown: nombre + scope label + monto -->
+            <div
+              class="checkout-promo-breakdown"
+              data-testid="checkout-promo-breakdown"
+            >
+              @for (
+                promo of appliedPromotionsWithScope();
+                track promo.promotion_id
+              ) {
+                <div class="breakdown-row">
+                  <app-icon
+                    [name]="scopeIcon(promo.scope)"
+                    [size]="14"
+                    [class]="scopeColor(promo.scope)"
+                  ></app-icon>
+                  <span class="breakdown-label">
+                    {{ promo.name }}
+                    <small>({{ scopeLabel(promo.scope) }})</small>
+                  </span>
+                  <span class="breakdown-amount">
+                    -{{ promo.discount_amount | currency }}
+                  </span>
+                </div>
+              }
+            </div>
+
             <hr />
 
-            <div class="summary-row total">
+            <div
+              class="summary-row total"
+              data-testid="checkout-total"
+            >
               <span>Total estimado</span>
-              <span>{{ cart()!.subtotal + shipping_cost | currency }}</span>
+              <span>{{
+                (cart()!.promotional_subtotal ?? cart()!.subtotal) +
+                  shippingCost() | currency
+              }}</span>
             </div>
-            <small class="summary-total-hint">
-              Los cupones se aplican al confirmar.
-            </small>
           }
         </div>
       </div>

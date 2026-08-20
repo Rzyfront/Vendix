@@ -196,6 +196,23 @@ function resolveUserMessage(
       : firstBlocker.problem;
   }
 
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
+  // `payOrder` (order-flow.service.ts) returns a single surface code
+  // `ORD_FLOW_PAYMENT_FAILED_001` and stuffs the typed cause into
+  // `details.cause_code` (e.g. `INV_STOCK_002`, `SERIAL_REQUIRED_001`,
+  // `ORDER_HAS_PENDING_KITCHEN_ITEMS`). When the canned message for the
+  // surface code is a generic "el cobro falló", the operator is left
+  // wondering WHICH business gate fired. We look up the canned
+  // message for `details.cause_code` as a tiebreaker so the cashier
+  // sees the real reason without the surface translation being lost.
+  const causeCode = readNonEmptyString(asRecord(details)?.['cause_code']);
+  if (causeCode) {
+    const causeMessage = ERROR_MESSAGES[causeCode];
+    if (causeMessage) {
+      return causeMessage;
+    }
+  }
+
   if (isPresentableApiMessage(devMessage)) {
     return devMessage.trim();
   }

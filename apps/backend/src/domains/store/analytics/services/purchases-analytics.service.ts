@@ -490,7 +490,7 @@ export class PurchasesAnalyticsService {
         organization_id: organizationId,
         location: { store_id: storeId },
         status: { in: PURCHASE_COMMITTED_STATES },
-        order_date: { gte: startDate, lte: endDate },
+        order_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date en TZ del store
       },
       select: {
         status: true,
@@ -640,17 +640,17 @@ function truncateToGranularity(date: Date, granularity: Granularity): Date {
       // Keep the hour-of-day — DO NOT reset to 0 (that would collapse HOUR into DAY).
       return d;
     case Granularity.YEAR:
-      d.setUTCHours(0);
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment sobre UTC instants ya normalizados por parseDateRange
       d.setUTCMonth(0);
       d.setUTCDate(1);
       return d;
     case Granularity.MONTH:
-      d.setUTCHours(0);
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       d.setUTCDate(1);
       return d;
     case Granularity.WEEK: {
       // Semana inicia en lunes (ISO 8601). setUTCDate(1 - dayOfWeek) ajusta.
-      d.setUTCHours(0);
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       const day = d.getUTCDay(); // 0=domingo..6=sábado
       const isoDay = day === 0 ? 7 : day; // 1=lunes..7=domingo
       d.setUTCDate(d.getUTCDate() - (isoDay - 1));
@@ -658,7 +658,7 @@ function truncateToGranularity(date: Date, granularity: Granularity): Date {
     }
     case Granularity.DAY:
     default:
-      d.setUTCHours(0);
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       return d;
   }
 }

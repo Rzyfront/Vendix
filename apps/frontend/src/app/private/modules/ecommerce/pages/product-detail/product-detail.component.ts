@@ -32,6 +32,7 @@ import { NextAvailableNoticeComponent } from '../../components/next-available-no
 import { AddProductOptions, CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
 import { TableContextService } from '../../services/table-context.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -51,6 +52,10 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -72,6 +77,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
     CurrencyPipe,
     NextAvailableNoticeComponent,
     SaleUnitSelectorComponent,
+    PromotionStackComponent,
   ],
   template: `
     <div class="product-detail-page" [attr.data-currency]="currencyCode()">
@@ -108,13 +114,20 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
               @if (p.images && p.images.length > 1) {
                 <div class="thumbnail-list">
                   @for (img of p.images; track img.id) {
-                    <div
+                    <button
+                      type="button"
                       class="thumbnail"
                       [class.active]="activeImageUrl() === img.image_url"
                       (click)="setActiveImage(img.image_url)"
+                      (keydown.enter)="
+                        setActiveImage(img.image_url); $event.preventDefault()
+                      "
+                      (keydown.space)="
+                        setActiveImage(img.image_url); $event.preventDefault()
+                      "
                     >
                       <img [src]="img.image_url" [alt]="p.name" />
-                    </div>
+                    </button>
                   }
                 </div>
               }
@@ -215,8 +228,19 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
-                @if (promotionBadgeLabel()) {
-                  <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
+                @if (
+                  product()?.active_promotion?.quantity_tiers?.length ||
+                  product()?.active_promotion?.badge_label
+                ) {
+                  <app-promotion-stack
+                    mode="expanded-cards"
+                    [items]="expandedTierItems()"
+                    [currentQuantity]="quantity()"
+                    [ariaLabel]="'Niveles de descuento por cantidad'"
+                    data-testid="detail-promo-tier-ladder"
+                    (promotionViewed)="onPromotionViewed($event)"
+                    (promotionIntent)="onPromotionIntent($event)"
+                  />
                 }
               </div>
 
@@ -464,6 +488,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                 <button
                   type="button"
                   class="rv-write-btn"
+                  aria-controls="rv-form-section"
                   (click)="openReviewForm()"
                 >
                   <app-icon name="edit-2" [size]="16"></app-icon>
@@ -637,7 +662,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
             <!-- Write Review Form (collapsible: only visible after the
                  user clicks the "Escribir reseña" CTA) -->
-            <div class="rv-form-section">
+            <div class="rv-form-section" id="rv-form-section">
               @if (reviewSubmitted()) {
                 <div class="rv-submitted">
                   <app-icon
@@ -814,6 +839,8 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
           border-radius: var(--radius-md);
           overflow: hidden;
           border: 1px solid var(--color-border);
+          background: transparent;
+          padding: 0;
           cursor: pointer;
           transition: 0.2s;
           img {
@@ -826,6 +853,17 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
             border-color: var(--color-primary);
           }
         }
+      }
+
+      /* ─── Focus styles (a11y, CP-ECOM-PROMO-UX-001 R3-M3) ───
+         Visible ring only for keyboard users via :focus-visible;
+         mouse clicks do NOT trigger the outline. The outline
+         color reuses the tenant primary brand token with a
+         hardcoded fallback so the ring is always visible even if
+         the tenant config hasn't defined --color-primary. */
+      :focus-visible {
+        outline: 2px solid var(--color-primary, #2ecc71);
+        outline-offset: 2px;
       }
 
       .product-info-panel {
@@ -1496,6 +1534,39 @@ export class ProductDetailComponent implements OnInit {
   private currencyFormat = inject(CurrencyFormatService);
   /** Single source of truth for QR-mode-aware purchase visibility (Step 7). */
   protected readonly tableContext = inject(TableContextService);
+  /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
+  private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+
+  /**
+   * Forward `promotionViewed` from the PDP tier ladder's expanded-cards
+   * stack to the analytics sink. The stack fires this when an item
+   * enters the viewport (50% threshold) — useful for funnel analytics
+   * on tier visibility vs. tier conversion.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotionsAnalytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * Forward `promotionIntent` from the PDP tier ladder when the buyer
+   * crosses a tier boundary (the stack's `effect()` only emits when
+   * `currentTier()` changes). The stack already de-duplicates repeats,
+   * so this handler is a pure forwarder.
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotionsAnalytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
 
   /**
    * Moneda del tenant, leída en la plantilla vía `data-currency`. El
@@ -1731,6 +1802,18 @@ export class ProductDetailComponent implements OnInit {
   displayPriceLabel = computed((): string | null => {
     const variant = this.selectedVariant();
     const p = this.product();
+    // Promoción quantity-tiered: el primer escalón define el mínimo para
+    // empezar a obtener descuento. Pintar "Desde N und" deja claro al
+    // comprador que una unidad suelta NO entra en la promo.
+    const tiers = p?.active_promotion?.quantity_tiers;
+    if (
+      p?.active_promotion?.is_quantity_tiered === true &&
+      Array.isArray(tiers) &&
+      tiers.length > 0
+    ) {
+      const firstMin = tiers[0]?.min_quantity ?? 0;
+      if (firstMin > 1) return `Desde ${firstMin} und`;
+    }
     if (variant || !p?.variants?.length) return null;
     const prices = p.variants.map((v) => v.final_price);
     const min = Math.min(...prices);
@@ -1752,6 +1835,64 @@ export class ProductDetailComponent implements OnInit {
   /** Informative label for the active promotion badge. */
   promotionBadgeLabel = computed((): string => {
     return this.product()?.active_promotion?.badge_label ?? '';
+  });
+
+  /**
+   * Items para `<app-promotion-stack mode="expanded-cards">` en el detalle.
+   *
+   * Reglas (CP-ECOM-PROMO-UX-001 D.1):
+   *  1. Hay `quantity_tiers` con entries → 1 item por tier, ordenados por
+   *     `sort_order` (con `tier_index` 0..N-1 para que el stack pinte la
+   *     escalera completa).
+   *  2. No hay tiers pero sí `badge_label` → 1 item plano (promoción
+   *     simple: percentage / fixed_amount sin escalera).
+   *  3. No hay nada → `[]` (el template no renderiza el stack).
+   *
+   * `currentQuantity` del stack se alimenta con `quantity()` (la cantidad
+   * actual del selector del comprador), así el stack resalta en vivo el
+   * escalón actual según el comprador sube o baja la cantidad.
+   */
+  readonly expandedTierItems = computed<PromotionStackItem[]>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return [];
+
+    const tiers = promo.quantity_tiers;
+    if (Array.isArray(tiers) && tiers.length > 0) {
+      const sorted = [...tiers].sort(
+        (a, b) => a.sort_order - b.sort_order,
+      );
+      return sorted.map((tier, index) => ({
+        // `id` is a composite (real_promotion_id + "-detail-tier-" + index) so
+        // the stack keeps stable per-tier identity across renders. The real
+        // backend `promotion_id` is also exposed via `original_promotion_id`
+        // for any downstream consumer (analytics, `promotionIntent`, etc.)
+        // that needs to correlate the tier back to the parent promotion.
+        id: `${promo.id}-detail-tier-${index}`,
+        original_promotion_id: promo.id,
+        label: promo.badge_label,
+        type: promo.type,
+        value: tier.value,
+        scope: promo.scope,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        tier_index: index,
+      }));
+    }
+
+    if (promo.badge_label) {
+      return [
+        {
+          id: promo.id,
+          label: promo.badge_label,
+          type: promo.type,
+          value:
+            promo.discount_percentage ?? promo.discount_amount ?? undefined,
+          scope: promo.scope,
+        },
+      ];
+    }
+
+    return [];
   });
 
   displayStock = computed((): number => {
@@ -2051,13 +2192,20 @@ export class ProductDetailComponent implements OnInit {
     const query: CatalogQuery = { limit: 10, sort_by: 'newest' };
     if (product.categories?.length)
       query.category_id = product.categories[0].id;
-    this.catalogService.getProducts(query).subscribe({
-      next: (response) => {
-        this.recommendedProducts.set(
-          response.data.filter((p) => p.id !== product.id),
-        );
-      },
-    });
+    // CP-ECOM-PROMO-UX-001 R3-m2: pipe the request through
+    // `takeUntilDestroyed(this.destroyRef)` so navigating away mid-fetch
+    // doesn't leak — the response would otherwise arrive after destroy and
+    // write to `recommendedProducts()` against a dead component.
+    this.catalogService
+      .getProducts(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.recommendedProducts.set(
+            response.data.filter((p) => p.id !== product.id),
+          );
+        },
+      });
   }
 
   loadReviews(productId: number): void {
@@ -2320,10 +2468,16 @@ export class ProductDetailComponent implements OnInit {
     this.showReviewForm.set(!this.showReviewForm());
     if (this.showReviewForm()) {
       // Wait for Angular to render the form, then smooth-scroll it
-      // into view.
+      // into view and move focus to the first interactive field for
+      // keyboard / screen-reader users (a11y: the CTA advertised this
+      // section via aria-controls="rv-form-section").
       queueMicrotask(() => {
-        const el = document.querySelector('.rv-form-section');
-        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const form = document.getElementById('rv-form-section');
+        form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const firstInput = form?.querySelector(
+          'input, textarea, select',
+        ) as HTMLElement | null;
+        firstInput?.focus();
       });
     }
   }
