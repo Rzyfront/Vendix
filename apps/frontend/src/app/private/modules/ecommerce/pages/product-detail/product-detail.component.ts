@@ -1534,6 +1534,39 @@ export class ProductDetailComponent implements OnInit {
   private currencyFormat = inject(CurrencyFormatService);
   /** Single source of truth for QR-mode-aware purchase visibility (Step 7). */
   protected readonly tableContext = inject(TableContextService);
+  /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
+  private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+
+  /**
+   * Forward `promotionViewed` from the PDP tier ladder's expanded-cards
+   * stack to the analytics sink. The stack fires this when an item
+   * enters the viewport (50% threshold) — useful for funnel analytics
+   * on tier visibility vs. tier conversion.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotionsAnalytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * Forward `promotionIntent` from the PDP tier ladder when the buyer
+   * crosses a tier boundary (the stack's `effect()` only emits when
+   * `currentTier()` changes). The stack already de-duplicates repeats,
+   * so this handler is a pure forwarder.
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotionsAnalytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
 
   /**
    * Moneda del tenant, leída en la plantilla vía `data-currency`. El
