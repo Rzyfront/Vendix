@@ -13,6 +13,7 @@ import {
   PromotionQuoteScope,
   PromotionQuoteType,
   PromotionTierProgress,
+  QuantityTierSummary,
 } from '../dto/promotion-quote.interface';
 
 /** Promotions resolve rule types from the Prisma enum. */
@@ -1192,6 +1193,11 @@ export class PromotionEngineService {
               return a.sort_order - b.sort_order;
             return a.id - b.id;
           });
+        // ERR-01 defensive guard: a `quantity_tiered` promo with ZERO rows is
+        // not eligible — there is no tier to fire, and falling through to the
+        // flat branch below would advertise a phantom discount. Mirrors the
+        // exact guard already used by `quoteDiscounts` and `buildTierProgress`.
+        if (tiers.length === 0) continue;
         const firstTier = tiers[0];
         if (!firstTier) continue;
         const tierValue = Number(firstTier.value);
@@ -1202,7 +1208,21 @@ export class PromotionEngineService {
             ? this.roundMoney((unitPrice * tierValue) / 100)
             : this.roundMoney(tierValue);
 
-        const baseEntry: ActiveProductPromotion = {
+        // Emit the FULL tier ladder so the frontend can render every step
+        // ("Lleva 3 → -10% · Lleva 6 → -15%") without re-querying. `value` is
+        // coerced from the DB's `unknown` (Decimal) to a plain `number`; tier
+        // `type` is narrowed to the strict literal union declared by
+        // `QuantityTierSummary`. Ordering matches the sort above so consumers
+        // never need to re-sort.
+        const quantityTiers: QuantityTierSummary[] = tiers.map((t) => ({
+          min_quantity: Number(t.min_quantity),
+          max_quantity: t.max_quantity === null ? null : Number(t.max_quantity),
+          type: t.type,
+          value: Number(t.value),
+          sort_order: Number(t.sort_order),
+        }));
+
+        result.set(productId, {
           id: promo.id,
           name: promo.name,
           type: promoType,
@@ -1214,19 +1234,10 @@ export class PromotionEngineService {
           promotional_price: this.roundMoney(unitPrice),
           badge_label: this.buildQuantityTieredBadgeLabel(firstTier),
           priority: promo.priority ?? 0,
-        };
-
-        // Forward extra signals for downstream consumers (Agent C may extend
-        // the interface contract). The shared `ActiveProductPromotion`
-        // interface does not declare these today, so we cast to keep the
-        // engine's typed contract intact while still surfacing them at
-        // runtime.
-        const extendedEntry = {
-          ...baseEntry,
           is_quantity_tiered: true,
           preview_min_discount: previewMinDiscount,
-        };
-        result.set(productId, extendedEntry as unknown as ActiveProductPromotion);
+          quantity_tiers: quantityTiers,
+        });
         continue;
       }
 
@@ -1246,6 +1257,11 @@ export class PromotionEngineService {
         promotional_price: promotionalPrice,
         badge_label: this.buildBadgeLabel(promo, discount, unitPrice),
         priority: promo.priority ?? 0,
+        // Flat promo: always emit an EMPTY array (NOT `undefined`) so the
+        // shape is symmetric with `quantity_tiered` rows. Consumers can
+        // iterate `entry.quantity_tiers ?? []` unconditionally; the field is
+        // also a reliable discriminator for "this promo has no tier ladder".
+        quantity_tiers: [],
       });
     }
 

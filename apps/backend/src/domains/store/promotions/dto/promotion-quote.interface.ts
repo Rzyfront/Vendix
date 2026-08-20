@@ -182,6 +182,28 @@ export interface PromotionQuoteResult {
 }
 
 /**
+ * Compact snapshot of a single tier row from `promotion_quantity_tiers`,
+ * surfaced on `ActiveProductPromotion.quantity_tiers` so the frontend can
+ * render the full tier ladder ("Lleva 3 → -10% · Lleva 6 → -15% …") without
+ * re-querying the backend. Values are flattened to a strict shape:
+ *   - `type` is the literal union, not the broader `PromotionQuoteType` alias.
+ *   - `value` is normalised to `number` (raw `Decimal`-compatible values from
+ *     Prisma are coerced here so consumers never see `unknown`).
+ *   - `max_quantity` is `null` for open-ended top tiers.
+ *
+ * Rows are emitted ordered by `min_quantity` ASC; secondary order by
+ * `sort_order` ASC; final tie-break by tier `id` ASC — same ordering the
+ * engine uses internally for tier resolution.
+ */
+export interface QuantityTierSummary {
+  min_quantity: number;
+  max_quantity: number | null;
+  type: 'percentage' | 'fixed_amount';
+  value: number;
+  sort_order: number;
+}
+
+/**
  * Active promotion descriptor surfaced on product cards (POS + ecommerce).
  *
  * Represents the highest-priority auto-apply promotion eligible for a given
@@ -204,6 +226,25 @@ export interface ActiveProductPromotion {
   /** Short label that the UI badge can show ("-20% OFF", "$5.000 OFF"). */
   badge_label: string;
   priority: number;
+  /**
+   * `true` ONLY for `quantity_tiered` promos. Lets the frontend branch on
+   * the rule type without re-deriving it from `promotion_quantity_tiers`.
+   * `undefined` (NOT `false`) for flat promos.
+   */
+  is_quantity_tiered?: boolean;
+  /**
+   * Lowest-tier discount, in money, used as the card preview signal
+   * ("Descuentos por cantidad — desde $5.000 OFF"). Mirrors what the badge
+   * advertises so the frontend can show a numeric hint without re-running
+   * the math. `undefined` for flat promos.
+   */
+  preview_min_discount?: number;
+  /**
+   * Full tier ladder for `quantity_tiered` promos, ordered by `min_quantity`
+   * ASC. Empty array `[]` (NOT `undefined`) for flat promos — the field is
+   * always present so consumers can iterate unconditionally.
+   */
+  quantity_tiers?: QuantityTierSummary[];
 }
 
 /**
