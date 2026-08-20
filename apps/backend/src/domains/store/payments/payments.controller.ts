@@ -198,7 +198,11 @@ export class PaymentsController {
    * who somehow reaches the handler still trips the typed errors and the
    * request_id-tagged log.
    */
-  @Permissions('store:payments:process')
+  // QUI-POS-E2E: la seed no crea `store:payments:process` — usa el permiso
+  // POS amplio existente `store:pos:access` que ya está asignado a owner/
+  // admin/employee. Mantiene el gate de PermissionsGuard sin inventar
+  // una nueva fila de permiso.
+  @Permissions('store:pos:access')
   @ApiOperation({
     summary: 'Process POS payment - unified entry point for all POS sales',
   })
