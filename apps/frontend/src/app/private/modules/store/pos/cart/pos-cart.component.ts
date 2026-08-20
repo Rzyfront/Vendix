@@ -403,7 +403,7 @@ import {
                   [disabled]="isEmpty()"
                 >
                   <app-icon name="clipboard-list" [size]="16"></app-icon>
-                  <span>Guardar Orden (no cobra)</span>
+                  <span>Guardar</span>
                 </button>
                 <button
                   type="button"
@@ -417,16 +417,16 @@ import {
               </div>
               <!--
                 CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
-                `proceedToPayment()` delegates to `checkout.emit()` which the
-                parent wires to `onCheckout()`:
+                proceedToPayment() delegates to checkout.emit() which the
+                parent wires to onCheckout():
                   - create mode → opens the checkout shell stepper (customer
                     + shipping + payment) — the full payment flow.
-                  - edit mode   → calls `updateExistingOrder()` first, then
-                    surfaces `readyToPayOrder` so the secondary "Cobrar"
+                  - edit mode   → calls updateExistingOrder() first, then
+                    surfaces readyToPayOrder so the secondary Cobrar
                     button below opens the payment modal.
                 The label was previously mistyped as "Guardar Orden (no cobra)"
-                in this slot — fixed back to "Cobrar" per D.2: only the
-                secondary `save-btn` above renames to "Guardar Orden (no
+                in this slot — fixed back to Cobrar per D.2: only the
+                secondary save button above renames to "Guardar Orden (no
                 cobra)" because it saves a draft without payment.
               -->
               <button

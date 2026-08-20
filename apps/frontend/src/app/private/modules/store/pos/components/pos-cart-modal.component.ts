@@ -310,7 +310,7 @@ import {
               [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="clipboard-list" [size]="18"></app-icon>
-              <span>{{ isEditMode() ? 'Actualizar Orden (no cobra)' : 'Guardar Orden (no cobra)' }}</span>
+              <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
             </button>
             <button
               type="button"
@@ -323,11 +323,11 @@ import {
             </button>
           </div>
           <!--
-            CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays "Cobrar". The
+            CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays Cobrar. The
             previous label "Guardar Orden / Actualizar Orden" on this slot
-            was a regression: it duplicated the secondary save button's
-            copy and broke the "Cobrar = charge" mental model. Restored to
-            the canonical charge copy; the secondary `save-btn` above now
+            was a regression: it duplicated the secondary save button
+            copy and broke the Cobrar = charge mental model. Restored to
+            the canonical charge copy; the secondary save button above now
             carries the "no cobra" suffix because it persists without
             payment.
           -->

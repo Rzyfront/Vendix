@@ -84,7 +84,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             [disabled]="itemCount() === 0"
             >
             <app-icon name="clipboard-list" [size]="16"></app-icon>
-            <span>{{ isEditMode() ? 'Actualizar Orden (no cobra)' : 'Guardar Orden (no cobra)' }}</span>
+            <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
           </button>
           <button
             class="action-btn shipping-btn"
@@ -96,10 +96,10 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </button>
         </div>
         <!--
-          Row 3 — Primary CTA stays "Cobrar". The previous label
+          Row 3 — Primary CTA stays Cobrar. The previous label
           "Guardar Orden / Actualizar Orden" on this slot was a regression
-          that duplicated the secondary save button's copy. Restored to the
-          canonical charge copy; the secondary `save-btn` above now carries
+          that duplicated the secondary save button copy. Restored to the
+          canonical charge copy; the secondary save button above now carries
           the "no cobra" suffix because it persists without payment.
         -->
         <button
