@@ -310,7 +310,7 @@ import {
               [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="clipboard-list" [size]="18"></app-icon>
-              <span>{{ isEditMode() ? 'Actualizar' : 'Crear' }}</span>
+              <span>{{ isEditMode() ? 'Actualizar Orden (no cobra)' : 'Guardar Orden (no cobra)' }}</span>
             </button>
             <button
               type="button"
@@ -323,9 +323,13 @@ import {
             </button>
           </div>
           <!--
-            Phase D.4 — primary CTA copy names the action explicitly.
-            Cobrar is reserved for the dedicated modal triggered by
-            readyToPayOrder; here we only persist (create-draft or update).
+            CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays "Cobrar". The
+            previous label "Guardar Orden / Actualizar Orden" on this slot
+            was a regression: it duplicated the secondary save button's
+            copy and broke the "Cobrar = charge" mental model. Restored to
+            the canonical charge copy; the secondary `save-btn` above now
+            carries the "no cobra" suffix because it persists without
+            payment.
           -->
           <button
             type="button"
@@ -334,19 +338,13 @@ import {
             [disabled]="!cartState()?.items?.length || isCharging()"
             [attr.aria-busy]="isCharging() ? 'true' : null"
           >
-            <app-icon
-              [name]="isEditMode() ? 'check' : 'check'"
-              [size]="18"
-            ></app-icon>
-            <span>{{
-              isEditMode()
-                ? 'Actualizar Orden (no cobra)'
-                : 'Guardar Orden (no cobra)'
-            }}</span>
+            <app-icon name="credit-card" [size]="18"></app-icon>
+            <span>Cobrar</span>
           </button>
           <!--
-            Phase D.3 — Cobrar mirrors the desktop cart sidebar; only renders
-            when the parent has a fresh readyToPayOrder to charge.
+            Phase D.3 — secondary Cobrar mirrors the desktop cart sidebar;
+            only renders when the parent has a fresh readyToPayOrder to
+            charge (post-edit payment flow).
           -->
           @if (readyToPayOrder() !== null) {
             <button

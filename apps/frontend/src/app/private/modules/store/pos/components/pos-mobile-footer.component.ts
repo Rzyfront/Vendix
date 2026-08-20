@@ -84,7 +84,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             [disabled]="itemCount() === 0"
             >
             <app-icon name="clipboard-list" [size]="16"></app-icon>
-            <span>{{ isEditMode() ? 'Actualizar' : 'Crear' }}</span>
+            <span>{{ isEditMode() ? 'Actualizar Orden (no cobra)' : 'Guardar Orden (no cobra)' }}</span>
           </button>
           <button
             class="action-btn shipping-btn"
@@ -95,7 +95,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <span>Envío</span>
           </button>
         </div>
-        <!-- Row 3: Primary CTA — explicit copy that names the action -->
+        <!--
+          Row 3 — Primary CTA stays "Cobrar". The previous label
+          "Guardar Orden / Actualizar Orden" on this slot was a regression
+          that duplicated the secondary save button's copy. Restored to the
+          canonical charge copy; the secondary `save-btn` above now carries
+          the "no cobra" suffix because it persists without payment.
+        -->
         <button
           type="button"
           class="action-btn checkout-btn checkout-btn-full"
@@ -103,12 +109,8 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           [disabled]="itemCount() === 0 || isCharging()"
           [attr.aria-busy]="isCharging() ? 'true' : null"
         >
-          <app-icon name="check" [size]="18"></app-icon>
-          <span>{{
-            isEditMode()
-              ? 'Actualizar Orden (no cobra)'
-              : 'Guardar Orden (no cobra)'
-          }}</span>
+          <app-icon name="credit-card" [size]="18"></app-icon>
+          <span>Cobrar</span>
         </button>
         <!--
           Phase D.3 — Cobrar only when an updated order is sitting in

@@ -403,7 +403,7 @@ import {
                   [disabled]="isEmpty()"
                 >
                   <app-icon name="clipboard-list" [size]="16"></app-icon>
-                  <span>Crear</span>
+                  <span>Guardar Orden (no cobra)</span>
                 </button>
                 <button
                   type="button"
@@ -415,6 +415,20 @@ import {
                   <span>Envío</span>
                 </button>
               </div>
+              <!--
+                CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
+                `proceedToPayment()` delegates to `checkout.emit()` which the
+                parent wires to `onCheckout()`:
+                  - create mode → opens the checkout shell stepper (customer
+                    + shipping + payment) — the full payment flow.
+                  - edit mode   → calls `updateExistingOrder()` first, then
+                    surfaces `readyToPayOrder` so the secondary "Cobrar"
+                    button below opens the payment modal.
+                The label was previously mistyped as "Guardar Orden (no cobra)"
+                in this slot — fixed back to "Cobrar" per D.2: only the
+                secondary `save-btn` above renames to "Guardar Orden (no
+                cobra)" because it saves a draft without payment.
+              -->
               <button
                 type="button"
                 class="cart-btn checkout-btn"
@@ -422,15 +436,8 @@ import {
                 [disabled]="isEmpty() || isCharging()"
                 [attr.aria-busy]="isCharging() ? 'true' : null"
               >
-                <app-icon
-                  [name]="isEditMode() ? 'check' : 'credit-card'"
-                  [size]="18"
-                ></app-icon>
-                <span>{{
-                  isEditMode()
-                    ? 'Actualizar Orden (no cobra)'
-                    : 'Guardar Orden (no cobra)'
-                }}</span>
+                <app-icon name="credit-card" [size]="18"></app-icon>
+                <span>Cobrar</span>
               </button>
               <!--
                 Phase D.3 — Cobrar only when an updated order is sitting in
