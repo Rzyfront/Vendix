@@ -114,19 +114,36 @@ export class PromotionEngineService {
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
 
+    // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
+    // counts via a single `groupBy` instead of issuing one `count` per
+    // candidate promo. With N promos carrying `per_customer_limit`, the
+    // loop below used to issue N extra queries per `getCart`; now it is a
+    // single round-trip and the per-promo check is a Map lookup. Same
+    // shape as the optimization applied to `quoteDiscounts`.
+    const usageCounts = new Map<number, number>();
+    const candidateIds = promotions.map((p) => p.id);
+    if (customerId && candidateIds.length > 0) {
+      const rows = await this.prisma.order_promotions.groupBy({
+        by: ['promotion_id'],
+        where: {
+          promotion_id: { in: candidateIds },
+          customer_id: customerId,
+        },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        usageCounts.set(Number(row.promotion_id), Number(row._count._all));
+      }
+    }
+
     const eligible: any[] = [];
     for (const promo of promotions) {
       // Check usage limit
       if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
 
-      // Check per-customer limit
+      // Check per-customer limit (looked up from the batched Map above).
       if (promo.per_customer_limit && customerId) {
-        const customerUsage = await this.prisma.order_promotions.count({
-          where: {
-            promotion_id: promo.id,
-            customer_id: customerId,
-          },
-        });
+        const customerUsage = usageCounts.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
@@ -581,6 +598,32 @@ export class PromotionEngineService {
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
 
+    // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
+    // counts via a single `groupBy` instead of issuing one `count` per
+    // candidate promo. With N promos carrying `per_customer_limit`, the
+    // winner-takes-all loop below used to issue N extra queries per
+    // `quoteDiscounts`; now it is a single round-trip and the per-promo
+    // check is a Map lookup. Same shape as the optimization applied to
+    // `getEligiblePromotions`.
+    const customerUsageByPromotion = new Map<number, number>();
+    const candidateIds = candidates.map((c) => Number(c.id));
+    if (customerId && candidateIds.length > 0) {
+      const rows = await this.prisma.order_promotions.groupBy({
+        by: ['promotion_id'],
+        where: {
+          promotion_id: { in: candidateIds },
+          customer_id: customerId,
+        },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        customerUsageByPromotion.set(
+          Number(row.promotion_id),
+          Number(row._count._all),
+        );
+      }
+    }
+
     /**
      * WINNER-TAKES-ALL policy (per Edward's design):
      *   An order should only have ONE active promotion. Among all eligible
@@ -611,14 +654,9 @@ export class PromotionEngineService {
       // Usage limit (global).
       if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
 
-      // Per-customer usage limit.
+      // Per-customer usage limit (looked up from the batched Map above).
       if (promo.per_customer_limit && customerId) {
-        const customerUsage = await this.prisma.order_promotions.count({
-          where: {
-            promotion_id: promo.id,
-            customer_id: customerId,
-          },
-        });
+        const customerUsage = customerUsageByPromotion.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
@@ -758,7 +796,10 @@ export class PromotionEngineService {
 
         // CP-ECOM-PROMO-UX-001 M7: trace which tier was selected so that
         // "I added 3 and got the wrong band" reports can be reconstructed.
-        this.logger.debug(
+        // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
+        // out by Nest in production, so the trace was effectively dead and
+        // "the wrong tier fired" support tickets couldn't be diagnosed.
+        this.logger.log(
           {
             promotionId: promo.id,
             tierMinQuantity: matchedTier.min_quantity,
@@ -889,8 +930,11 @@ export class PromotionEngineService {
     // CP-ECOM-PROMO-UX-001 M7: trace which candidate won the tiebreak so that
     // customer reports ("the wrong promo applied") can be diagnosed without
     // re-running the cart.
+    // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
+    // out by Nest in production, so the trace was effectively dead and
+    // "the wrong promo applied" support tickets couldn't be diagnosed.
     if (winner) {
-      this.logger.debug(
+      this.logger.log(
         {
           promotionId: winner.promo.id,
           priority: winner.promo.priority,

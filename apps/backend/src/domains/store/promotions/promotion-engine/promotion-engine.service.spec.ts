@@ -42,7 +42,14 @@ describe('PromotionEngineService - quoteDiscounts', () => {
   let service: PromotionEngineService;
   let prisma: {
     promotions: { findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
-    order_promotions: { count: jest.Mock; create: jest.Mock };
+    order_promotions: {
+      count: jest.Mock;
+      create: jest.Mock;
+      // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: limit checks are batched
+      // via `groupBy`, so the spec exposes the mock surface the engine
+      // actually queries against.
+      groupBy: jest.Mock;
+    };
     products: { findMany: jest.Mock };
   };
 
@@ -58,6 +65,11 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       order_promotions: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
+        // Default to "no usage yet" so tests that don't care about
+        // per_customer_limit behave the same as before. Tests that DO care
+        // override the mock per-case with a concrete `{ promotion_id,
+        // _count: { _all } }` row.
+        groupBy: jest.fn().mockResolvedValue([]),
       },
       // QUI-648: el motor lee la escala de venta del producto para contar
       // presentaciones en vez de unidades mínimas. Por defecto ningún producto
@@ -363,7 +375,12 @@ describe('PromotionEngineService - quoteDiscounts', () => {
           per_customer_limit: 1,
         }),
       ]);
-      prisma.order_promotions.count.mockResolvedValue(1);
+      // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: the engine now batches
+      // per-customer usage counts via `groupBy` instead of issuing a
+      // per-promo `count`. Mock the new surface and assert against it.
+      prisma.order_promotions.groupBy.mockResolvedValue([
+        { promotion_id: 63, _count: { _all: 1 } },
+      ] as any);
 
       const result = await service.quoteDiscounts({
         items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
@@ -371,8 +388,10 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
 
-      expect(prisma.order_promotions.count).toHaveBeenCalledWith({
-        where: { promotion_id: 63, customer_id: 77 },
+      expect(prisma.order_promotions.groupBy).toHaveBeenCalledWith({
+        by: ['promotion_id'],
+        where: { promotion_id: { in: [63] }, customer_id: 77 },
+        _count: { _all: true },
       });
       expect(result.applied_promotions).toEqual([]);
     });
