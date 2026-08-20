@@ -550,12 +550,83 @@ describe('OrdersService', () => {
       }
     });
 
-    it('lanza 409 ORD_EDIT_INVALID_STATE_001 cuando el claim atómico pierde la carrera', async () => {
+    it('lanza 409 ORD_EDIT_STATE_CHANGED_001 cuando el claim pierde la carrera y el estado sigue siendo editable', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
         // Claim falla en count=0 (otro operador ganó la carrera).
+        // Round 1 MAJOR #6: ahora diferenciamos 3 causas. El estado leído
+        // sigue siendo `created` (editableOrder.state), lo que el nuevo
+        // contrato mapea a ORD_EDIT_STATE_CHANGED_001 — la UI debe pedirle
+        // al cliente "recargue y reintente", no un error permanente.
         mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        mockPrismaService.orders.updateMany.mockResolvedValue({
+          count: 0,
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_STATE_CHANGED_001.code,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando el claim falla y el estado ya es terminal', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // Round 1 MAJOR #6: si el estado leído es terminal/avanzado, el
+        // error correcto es ORD_EDIT_NOT_ALLOWED_001 (la orden ya no es
+        // editable por construcción, no por race).
+        const lockedOrder = {
+          ...editableOrder,
+          state: 'processing',
+        };
+        mockPrismaService.orders.findFirst
+          .mockResolvedValueOnce(editableOrder) // first: pre-claim lookup
+          .mockResolvedValueOnce(lockedOrder); // second: post-claim state lookup
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        mockPrismaService.orders.updateMany.mockResolvedValue({
+          count: 0,
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('lanza 409 ORD_EDIT_INVALID_STATE_001 cuando el claim falla y el estado es desconocido (catch-all)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // El catch-all del Round 1 MAJOR #6: estado missing / null tras
+        // un claim fallido. El código genérico sirve de red de seguridad.
+        mockPrismaService.orders.findFirst
+          .mockResolvedValueOnce(editableOrder)
+          .mockResolvedValueOnce(null);
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
         mockPrismaService.orders.updateMany.mockResolvedValue({

@@ -1348,8 +1348,14 @@ export class OrdersService {
       } else {
         // Auto-calcular si no hay rate explícito.
         if (dto.shipping_address_id) {
+          // La dirección debe pertenecer al customer_id del editor — sin esto
+          // un operador con acceso al store podría leer o grabar la dirección
+          // de cualquier cliente que comparta tienda (Round 1, blocker 8).
           const address = await this.prisma.addresses.findFirst({
-            where: { id: dto.shipping_address_id },
+            where: {
+              id: dto.shipping_address_id,
+              user_id: dto.customer_id,
+            },
             select: {
               country_code: true,
               state_province: true,
@@ -1367,7 +1373,7 @@ export class OrdersService {
                 quantity: Number(it.quantity || 0),
                 price: Number(it.total_price || 0),
                 weight: it.weight ? Number(it.weight) : undefined,
-                product_type: it.product_type,
+                product_type: (it as any).product_type,
               }));
             const options = await this.shippingCalculatorService.calculateRates(
               storeId,
@@ -1386,6 +1392,26 @@ export class OrdersService {
             }
           }
         }
+      }
+    }
+
+    // MAJOR (Round 1, #8): `billing_address_id` debe pertenecer al
+    // `customer_id` del editor. Sin esto, un operador podría cambiar la
+    // dirección de facturación a una dirección de OTRO cliente del store y
+    // terminar facturando a nombre equivocado.
+    if (dto.billing_address_id) {
+      const billingOwner = await this.prisma.addresses.findFirst({
+        where: {
+          id: dto.billing_address_id,
+          user_id: dto.customer_id,
+        },
+        select: { id: true },
+      });
+      if (!billingOwner) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'billing_address_id does not belong to the selected customer',
+        );
       }
     }
 
@@ -1494,6 +1520,7 @@ export class OrdersService {
           cart_subtotal: remainingSubtotal,
           customer_id: dto.customer_id,
           items: cartItems,
+          store_id: storeId,
         } as any);
         couponId = validation.coupon_id;
         couponDiscount = roundMoney(
@@ -1518,8 +1545,13 @@ export class OrdersService {
           },
           orderId,
         );
+        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
+        // de promoción/cupón inválido. La causa original viaja en `details`
+        // para depuración sin filtrar PII.
         throw new VendixHttpException(
           ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+          undefined,
+          { stage: 'coupon_validation', cause: (err as Error).message },
         );
       }
     } else if (couponChanged && currentCode) {
@@ -1563,72 +1595,58 @@ export class OrdersService {
         (dto.shipping_cost ?? shippingCost),
     );
 
-    // 12) Stock validation SOLO si la orden es `created` (no draft). Para
+    // 12) Stock validation se ejecuta DENTRO de la transacción. Para
     //     cada línea con `track_inventory`, el asignador cubre la cantidad
-    //     repartiendo entre bodegas. Shortfall → 409.
+    //     repartiendo entre bodegas. Shortfall → 409 + audit + throw.
+    //
+    //     La validación pre-flight sigue siendo importante para fallar ANTES
+    //     de tocar la fila: la diferencia es que `tx` se inyecta al asignador
+    //     para que la lectura del stock y la reserva vivan en la MISMA
+    //     transacción (Round 1 MAJOR #12). El chequeo pre-flight conserva la
+    //     verificación temprana de shortfall pero deja la reserva definitiva
+    //     al camino `13d` dentro de la transacción.
     if (!isDraft) {
-      try {
-        for (const item of dto.items) {
-          if (!item.product_id) continue;
-          const product = await this.prisma.products.findUnique({
-            where: { id: item.product_id },
-            select: { track_inventory: true },
-          });
-          if (!product?.track_inventory) continue;
-          const allocation = await this.sellableStockAllocator.allocateForLine(
-            storeId,
-            item.product_id,
-            item.product_variant_id,
-            Number(item.quantity || 0),
+      for (const item of dto.items) {
+        if (!item.product_id) continue;
+        const product = await this.prisma.products.findUnique({
+          where: { id: item.product_id, store_id: storeId },
+          select: { track_inventory: true },
+        });
+        if (!product?.track_inventory) continue;
+        const allocation = await this.sellableStockAllocator.allocateForLine(
+          storeId,
+          item.product_id,
+          item.product_variant_id,
+          Number(item.quantity || 0),
+        );
+        if (allocation.shortfall > 0) {
+          await this.auditService.logCustom(
+            userId,
+            'order.stock_reservation_failed',
+            AuditResource.ORDERS,
+            {
+              order_id: orderId,
+              store_id: storeId,
+              request_id: requestId,
+              stage: 'pre_flight',
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              requested_quantity: Number(item.quantity || 0),
+              shortfall: allocation.shortfall,
+            },
+            orderId,
           );
-          if (allocation.shortfall > 0) {
-            await this.auditService.logCustom(
-              userId,
-              'order.stock_reservation_failed',
-              AuditResource.ORDERS,
-              {
-                order_id: orderId,
-                store_id: storeId,
-                request_id: requestId,
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id ?? null,
-                requested_quantity: Number(item.quantity || 0),
-                shortfall: allocation.shortfall,
-              },
-              orderId,
-            );
-            throw new VendixHttpException(
-              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-              undefined,
-              {
-                product_id: item.product_id,
-                variant_id: item.product_variant_id,
-                requested: Number(item.quantity || 0),
-                shortfall: allocation.shortfall,
-              },
-            );
-          }
+          throw new VendixHttpException(
+            ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+            undefined,
+            {
+              product_id: item.product_id,
+              variant_id: item.product_variant_id,
+              requested: Number(item.quantity || 0),
+              shortfall: allocation.shortfall,
+            },
+          );
         }
-      } catch (err) {
-        if (err instanceof VendixHttpException) throw err;
-        this.logger.warn(
-          `[editor] stock allocation check failed: ${(err as Error).message}`,
-        );
-        await this.auditService.logCustom(
-          userId,
-          'order.stock_reservation_failed',
-          AuditResource.ORDERS,
-          {
-            order_id: orderId,
-            store_id: storeId,
-            request_id: requestId,
-            error: (err as Error).message,
-          },
-          orderId,
-        );
-        throw new VendixHttpException(
-          ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-        );
       }
     }
 
@@ -1647,6 +1665,18 @@ export class OrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       // 13a) Claim atómico del estado. Si otro operador cambió la orden
       //      entre el findFirst y acá, count=0 → 409.
+      //
+      //      Round 1 MAJOR #6: el error genérico `ORD_EDIT_INVALID_STATE_001`
+      //      perdía la distinción entre tres casos reales. Ahora leemos el
+      //      estado real de la orden tras el fallo del claim y mapeamos:
+      //        - pending / pending_payment / processing / shipped /
+      //          delivered / finished / cancelled / refunded
+      //            → `ORD_EDIT_NOT_ALLOWED_001` (la orden ya no es editable)
+      //        - created / draft (race por microsegundos)
+      //            → `ORD_EDIT_STATE_CHANGED_001` (otro operador ganó la
+      //              carrera; pedirle al cliente que recargue)
+      //        - cualquier otro estado inesperado
+      //            → `ORD_EDIT_INVALID_STATE_001` (catch-all)
       const claim = await tx.orders.updateMany({
         where: {
           id: orderId,
@@ -1656,7 +1686,43 @@ export class OrdersService {
         data: { updated_at: new Date() },
       });
       if (claim.count === 0) {
-        throw new VendixHttpException(ErrorCodes.ORD_EDIT_INVALID_STATE_001);
+        const currentRow = await tx.orders.findFirst({
+          where: { id: orderId, store_id: storeId },
+          select: { state: true },
+        });
+        const currentState = currentRow?.state as order_state_enum | undefined;
+        const lockedStates: order_state_enum[] = [
+          'pending_payment',
+          'processing',
+          'shipped',
+          'delivered',
+          'finished',
+          'cancelled',
+          'refunded',
+          'pending_delivery',
+        ];
+        if (currentState && lockedStates.includes(currentState)) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_NOT_ALLOWED_001,
+            undefined,
+            { state: currentState },
+          );
+        }
+        if (currentState === 'created' || currentState === 'draft') {
+          // El claim falló pero el estado sigue siendo editable: race pura
+          // (otro editor ganó por microsegundos). Distinguido para que la
+          // UI pueda mostrar "recargue" en vez de un error permanente.
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_STATE_CHANGED_001,
+          );
+        }
+        // Catch-all: la orden no existe, o el estado no está en el enum
+        // conocido. Devolvemos el código genérico como red de seguridad.
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_STATE_001,
+          undefined,
+          { state: currentState ?? null },
+        );
       }
 
       // 13b) Reservas de stock (sólo si NO es draft). Se liberan las
@@ -1670,7 +1736,43 @@ export class OrdersService {
         );
       }
 
-      // 13c) Replace items.
+      // 13c) Replace items. Antes del `deleteMany + createMany`, capturamos
+      //      las filas existentes para MERGAR los campos que el DTO NO
+      //      expone: KDS (`skip_kds`), seriales (`serial_numbers`,
+      //      `serial_ids`) y `inventory_commumed_at_fire`. Sin esta
+      //      preservación, una edición de una orden ya disparada a cocina
+      //      borraba esos flags y el listener de KDS veía "skip_kds=true"
+      //      — platos que ya estaban en cocina aparecían como no
+      //      enviados.
+      //
+      //      Round 1 BLOCKER #5.
+      const previousItems = await tx.order_items.findMany({
+        where: { order_id: orderId },
+      });
+      const previousByKey = new Map<
+        string,
+        {
+          skip_kds?: boolean | null;
+          serial_numbers?: unknown;
+          serial_ids?: number[] | null;
+          inventory_committed_at_fire?: boolean | null;
+          inventory_consumed_at_fire?: boolean | null;
+          cost_price?: Prisma.Decimal | number | null;
+          sale_unit_code_snapshot?: string | null;
+          sale_quantity_snapshot?: Prisma.Decimal | number | null;
+          catalog_unit_price?: Prisma.Decimal | number | null;
+          catalog_final_price?: Prisma.Decimal | number | null;
+          kitchen_ticket_items?: unknown;
+        }
+      >();
+      for (const prev of previousItems) {
+        // Clave: producto + variante. Si el operador agrega la misma
+        // variante dos veces, el segundo gana (mismo comportamiento que la
+        // sustitución cruda anterior).
+        const key = `${prev.product_id ?? 'null'}:${prev.product_variant_id ?? 'null'}`;
+        previousByKey.set(key, prev as any);
+      }
+
       await tx.order_items.deleteMany({ where: { order_id: orderId } });
 
       const variantIds = dto.items
@@ -1678,8 +1780,17 @@ export class OrdersService {
         .filter((v): v is number => typeof v === 'number');
       const variantImageById = new Map<number, string | null>();
       if (variantIds.length) {
+        // Round 1 BLOCKER #3: el `tx.product_variants.findMany` corría
+        // sobre el cliente no-scoped, así que un `product_variant_id` de OTRA
+        // tienda satisfacía la búsqueda y la imagen (o la ausencia de ella)
+        // terminaba mezclada en la fila de nuestra tienda. Filtro por el
+        // `products.store_id` del contexto para que un id "huérfano" devuelva
+        // `null` y conserve la invariante multi-tenant.
         const variants = await tx.product_variants.findMany({
-          where: { id: { in: Array.from(new Set(variantIds)) } },
+          where: {
+            id: { in: Array.from(new Set(variantIds)) },
+            products: { store_id: storeId },
+          },
           include: { product_images: true },
         });
         for (const v of variants) {
@@ -1693,6 +1804,45 @@ export class OrdersService {
           const variant_image_url =
             item.product_id && item.product_variant_id
               ? variantImageById.get(item.product_variant_id) ?? null
+              : null;
+          // MERGE: si el editor no trae `skip_kds / inventory_committed_at_fire`,
+          // preservamos el valor previo para que editar no "despida" platos ya
+          // enviados a cocina.
+          const key = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
+          const previous = previousByKey.get(key);
+          const mergedSkipKds =
+            previous?.skip_kds !== undefined ? previous.skip_kds : false;
+          const mergedInventoryCommitted =
+            previous?.inventory_committed_at_fire !== undefined
+              ? previous.inventory_committed_at_fire
+              : null;
+          const mergedInventoryConsumed =
+            previous?.inventory_consumed_at_fire !== undefined
+              ? previous.inventory_consumed_at_fire
+              : null;
+          const mergedSerialNumbers = previous?.serial_numbers ?? null;
+          const mergedSerialIds = previous?.serial_ids ?? null;
+          // El DTO no expone `cost_price` / `sale_unit_code_snapshot` /
+          // `sale_quantity_snapshot` / `catalog_*`; se preservan desde la fila
+          // previa para que la edición no destruya snapshots históricos
+          // (costeo, UoM, ticket, reporte).
+          const mergedCost =
+            previous?.cost_price !== undefined ? previous.cost_price : null;
+          const mergedSaleUnit =
+            previous?.sale_unit_code_snapshot !== undefined
+              ? previous.sale_unit_code_snapshot
+              : null;
+          const mergedSaleQty =
+            previous?.sale_quantity_snapshot !== undefined
+              ? previous.sale_quantity_snapshot
+              : null;
+          const mergedCatalogUnit =
+            previous?.catalog_unit_price !== undefined
+              ? previous.catalog_unit_price
+              : null;
+          const mergedCatalogFinal =
+            previous?.catalog_final_price !== undefined
+              ? previous.catalog_final_price
               : null;
           return {
             order_id: orderId,
@@ -1710,8 +1860,14 @@ export class OrdersService {
             total_price: item.total_price,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
-            catalog_unit_price: item.catalog_unit_price,
-            catalog_final_price: item.catalog_final_price,
+            catalog_unit_price:
+              mergedCatalogUnit !== null && mergedCatalogUnit !== undefined
+                ? (mergedCatalogUnit as any)
+                : item.unit_price,
+            catalog_final_price:
+              mergedCatalogFinal !== null && mergedCatalogFinal !== undefined
+                ? (mergedCatalogFinal as any)
+                : item.final_unit_price ?? item.unit_price,
             final_unit_price: item.final_unit_price ?? item.unit_price,
             is_price_overridden:
               item.is_price_overridden ??
@@ -1719,6 +1875,16 @@ export class OrdersService {
             price_override_reason: item.price_override_reason,
             weight: item.weight,
             weight_unit: item.weight_unit,
+            // UoM de venta snapshot (mismo comportamiento que `create`).
+            sale_unit_code_snapshot: mergedSaleUnit as any,
+            sale_quantity_snapshot: mergedSaleQty as any,
+            // Campos fusionados — KDS, seriales, inventario comprometido.
+            skip_kds: mergedSkipKds as any,
+            serial_numbers: mergedSerialNumbers as any,
+            serial_ids: mergedSerialIds as any,
+            inventory_committed_at_fire: mergedInventoryCommitted as any,
+            inventory_consumed_at_fire: mergedInventoryConsumed as any,
+            cost_price: mergedCost as any,
             item_type:
               item.item_type === 'product'
                 ? 'physical'
@@ -1732,7 +1898,16 @@ export class OrdersService {
         }),
       });
 
-      // 13d) Recalcular reservas para los nuevos items (sólo si NO es draft).
+      // 13d) Reservas para los nuevos items (sólo si NO es draft).
+      //
+      //      Round 1 BLOCKER #2: el bloque anterior hacía `reserveStock` con
+      //      `validate_availability=false` + `allow_negative_available=true`
+      //      y SWALLOWEA el error con `logger.warn` — una reserva fallida se
+      //      perdía silenciosamente y dejaba la orden en disco sin su
+      //      reserva. La reserva ahora es ESTRICTA: si falla, auditamos
+      //      ANTES del throw y abortamos la transacción para que el caller
+      //      reciba un `POS_STOCK_INSUFFICIENT_001` (409 accionable, no un
+      //      500 opaco).
       if (!isDraft) {
         const newItems = await tx.order_items.findMany({
           where: { order_id: orderId },
@@ -1742,17 +1917,24 @@ export class OrdersService {
         });
         for (const item of newItems) {
           if (!item.products?.track_inventory) continue;
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+          const stockUnitsConsumed =
+            typeof item.stock_units_consumed === 'number' &&
+            item.stock_units_consumed > 0
+              ? item.stock_units_consumed
+              : undefined;
           try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
+            // `validate_availability=true` (defensa) +
+            // `allow_negative_available=false` (Round 1 BLOCKER #2): si la
+            // reserva no cabe, `reserveStock` lanza `INV_STOCK_001` y la
+            // transacción aborta. Esto es coherente con la validación
+            // pre-flight del paso 12: si el cliente superó ese gate, la
+            // reserva debería entrar; si falla acá, hay una race con otro
+            // consumidor concurrente que queremos reportar.
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -1761,19 +1943,46 @@ export class OrdersService {
               'order',
               orderId,
               userId,
-              false,
-              undefined,
+              true, // validate_availability (Round 1 #2)
+              tx,
               undefined,
               false,
               stockUnitsConsumed,
-              true, // QUI-557: oversell deliberado.
+              false, // allow_negative_available=false (Round 1 #2)
             );
           } catch (err) {
-            this.logger.warn(
-              `[editor] reserveStock failed: ${(err as Error).message}`,
+            const message = (err as Error)?.message ?? 'reserve failed';
+            // Audit ANTES del throw: la timeline tiene que registrar la
+            // intención de reserva fallida aunque la transacción aborte.
+            try {
+              await this.auditService.logCustom(
+                userId,
+                'order.stock_reservation_failed',
+                AuditResource.ORDERS,
+                {
+                  order_id: orderId,
+                  store_id: storeId,
+                  request_id: requestId,
+                  stage: 'commit_reserve',
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id ?? null,
+                  requested_quantity: Number(item.quantity || 0),
+                  error: message,
+                },
+                orderId,
+              );
+            } catch {
+              // audit es observabilidad, no bloquea.
+            }
+            throw new VendixHttpException(
+              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+              message,
+              {
+                product_id: item.product_id,
+                variant_id: item.product_variant_id,
+                requested: Number(item.quantity || 0),
+              },
             );
-            // No bloqueamos: la transacción principal sigue, pero la reserva
-            // fallida queda registrada por la auditoría externa del listener.
           }
         }
       }
@@ -1797,18 +2006,53 @@ export class OrdersService {
       // 13f) Cupón: ajustar `current_uses` UNA vez si cambió y la orden
       //      ya estaba creada. Draft no incrementa ni decrementa: la
       //      snapshot queda pendiente y `flow/pay` consume.
+      //
+      //      Round 1 MAJOR #10: `coupons.update` (cruzar el contador) se
+      //      hace con `updateMany` idempotente y guarda `current_uses:
+      //      { lt: max_uses }` + `state='active'`. count=0 ⇒ otro cargo
+      //      consumió el cupón primero y lanzamos `ORD_EDIT_COUPON_COMMIT_001`.
+      //      El `decrement` usa el mismo patrón para que un rollback que
+      //      ya bajó el contador no se vuelva a bajar.
+      //
+      //      Round 1 BLOCKER #4: el `tx.coupons.update` corría sobre el
+      //      cliente no-scoped; un cupón de OTRA tienda cuya id cayera en
+      //      el filtro sería aceptado por la FK y mutaba su contador.
+      //      Ahora el `where` exige `stores: { some: { id: storeId } }`
+      //      para garantizar pertenencia.
       if (!isDraft && couponChanged) {
         if (currentCode && existingOrder.coupon_id) {
-          await tx.coupons.update({
-            where: { id: existingOrder.coupon_id },
+          const dec = await tx.coupons.updateMany({
+            where: {
+              id: existingOrder.coupon_id,
+              stores: { some: { id: storeId } },
+              current_uses: { gt: 0 },
+            },
             data: { current_uses: { decrement: 1 } },
           });
+          if (dec.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              { stage: 'decrement', coupon_id: existingOrder.coupon_id },
+            );
+          }
         }
         if (couponId) {
-          await tx.coupons.update({
-            where: { id: couponId },
+          const inc = await tx.coupons.updateMany({
+            where: {
+              id: couponId,
+              stores: { some: { id: storeId } },
+              state: 'active',
+            },
             data: { current_uses: { increment: 1 } },
           });
+          if (inc.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              { stage: 'increment', coupon_id: couponId },
+            );
+          }
         }
       }
 
@@ -1949,13 +2193,50 @@ export class OrdersService {
     // 14) Coherencia: si la fila devuelta no coincide con la actualización,
     //     no devolver éxito falso. `ORD_EDIT_RESPONSE_MISMATCH_001` es 500
     //     porque es un fallo interno del servicio.
+    //
+    //     Round 1 MAJOR #7: el chequeo original sólo cubría subtotal y
+    //     grand_total. Eso deja escapar divergencias en tax_amount,
+    //     discount_amount, shipping_cost, coupon_id o coupon_code —
+    //     exactamente los campos que el backend recalcula y que la UI
+    //     muestra. Ampliamos la comparación y exponemos los deltas en
+    //     `details` para que la timeline sea depurable sin abrir SQL.
+    const expectedCouponCode = requestedCode || null;
     if (
       !result ||
       Number(result.subtotal_amount) !== recalculatedSubtotal ||
-      Number(result.grand_total) !== grandTotal
+      Number(result.tax_amount) !== recalculatedTax ||
+      Number(result.discount_amount) !== discountAmount ||
+      Number(result.shipping_cost) !==
+        (dto.shipping_cost ?? shippingCost) ||
+      Number(result.grand_total) !== grandTotal ||
+      (result.coupon_id ?? null) !== (couponId ?? null) ||
+      (result.coupon_code ?? null) !== (expectedCouponCode ?? null)
     ) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001,
+        undefined,
+        {
+          expected: {
+            subtotal: recalculatedSubtotal,
+            tax_amount: recalculatedTax,
+            discount_amount: discountAmount,
+            shipping_cost: dto.shipping_cost ?? shippingCost,
+            grand_total: grandTotal,
+            coupon_id: couponId ?? null,
+            coupon_code: expectedCouponCode,
+          },
+          actual: result
+            ? {
+                subtotal: Number(result.subtotal_amount),
+                tax_amount: Number(result.tax_amount),
+                discount_amount: Number(result.discount_amount),
+                shipping_cost: Number(result.shipping_cost),
+                grand_total: Number(result.grand_total),
+                coupon_id: result.coupon_id ?? null,
+                coupon_code: result.coupon_code ?? null,
+              }
+            : null,
+        },
       );
     }
 

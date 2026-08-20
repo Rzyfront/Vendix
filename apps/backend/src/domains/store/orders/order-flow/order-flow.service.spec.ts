@@ -48,10 +48,24 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
         create: jest.fn().mockResolvedValue(CREATED_PAYMENT),
         update: jest.fn().mockResolvedValue({}),
       },
+      // Round 1 MAJOR #13: payOrder ahora llama commitCouponUseForOrder
+      // después de cada pago creado. La orden mockeada (buildOrder) NO trae
+      // `coupon_id`, así que el primer findFirst devuelve `null` y el método
+      // retorna sin tocar cupones. Mock explícito para evitar TypeErrors.
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      coupon_uses: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      coupons: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
 
-    // 8 args del constructor; solo prisma se ejercita (el resto se espía o no
-    // se alcanza en la rama de bloqueo).
+    // 9 args del constructor (incluye AuditService — F.2). Sólo `prisma`
+    // se ejercita directamente; el resto se espía o no se alcanza en la
+    // rama de bloqueo.
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       {} as any,
@@ -61,6 +75,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       {} as any,
       {} as any,
       {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     // Aísla la rama: métodos privados/colaboradores reducidos a stubs.
@@ -171,6 +186,7 @@ describe('OrderFlowService.reconcileOrderFromDispatch — tabla de derivación',
       {} as any,
       {} as any,
       {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     const updateSpy = jest

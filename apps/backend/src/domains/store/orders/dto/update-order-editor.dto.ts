@@ -8,11 +8,166 @@ import {
   MaxLength,
   IsIn,
   IsNumber,
+  IsBoolean,
   ValidateNested,
+  Max,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { CreateOrderItemDto } from './create-order.dto';
 import { order_delivery_type_enum } from '@prisma/client';
+
+/**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1 · UpdateOrderEditorItemDto
+ *
+ * Subset estricto del editor. El backend rechaza CUALQUIER campo que no esté
+ * declarado acá — por construcción, no por validación genérica. La diferencia
+ * con `CreateOrderItemDto` es que ESTE DTO no expone:
+ *
+ *   - state, payment_status, payment_form, credit_type, installment_terms
+ *   - requires_payment, is_draft
+ *   - table_session_id, table_id
+ *   - cash_register_session_id, store_id
+ *   - allow_oversell
+ *   - skip_kds, inventory_committed_at_fire
+ *   - serial_numbers, serial_ids
+ *
+ * Todas esas columnas pertenecen al flujo canónico `flow/pay` y a la máquina
+ * de estados. El editor solo muta lo seguro de forma atómica (ver C.1 del plan
+ * para el contrato completo).
+ *
+ * Por qué un DTO dedicado y no un `OmitType`: el `whitelist` del
+ * ValidationPipe filtra los campos no declarados, pero la presencia de un
+ * campo prohibido en el body sigue siendo 400 silencioso. Declarar el contrato
+ * en código es la única forma de que el editor nunca pueda escribir
+ * `orders.state` ni `order_items.skip_kds`, aunque el operador lo envíe.
+ */
+export class UpdateOrderEditorItemDto {
+  @IsOptional()
+  @IsString()
+  @IsIn(['product', 'custom', 'physical', 'service'])
+  item_type?: 'product' | 'custom' | 'physical' | 'service';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
+  @IsString()
+  @MaxLength(255)
+  product_name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  product_sku?: string;
+
+  @IsOptional()
+  @IsString()
+  variant_sku?: string;
+
+  /**
+   * Atributos serializados de la variante. El frontend suele mandar JSON; el
+   * backend lo acepta como string y lo persiste tal cual para no introducir
+   * una segunda fuente de verdad del shape de la variante.
+   */
+  @IsOptional()
+  @IsString()
+  variant_attributes?: string;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  unit_price: number;
+
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  total_price: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  final_unit_price?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  tax_category_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  price_override_reason?: string;
+
+  /**
+   * Tasa del impuesto de la línea como FRACCIÓN: `0.19` es 19%. La columna es
+   * `Decimal(6,5)`, así que mandar `19` desbordaba el numérico de Postgres y
+   * salía un `500 SYS_INTERNAL_001` en lugar de un 400 accionable.
+   */
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 5 })
+  @Min(0)
+  @Max(1, {
+    message:
+      'tax_rate se expresa como fracción: usa 0.19 para 19% (máximo 1 = 100%)',
+  })
+  tax_rate?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  tax_amount_item?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  cost?: number;
+
+  /**
+   * Peso de la línea (no del producto base). Backend no usa para costeo ni
+   * inventario: queda como snapshot para reportes y ticket.
+   */
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 3 })
+  weight?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  weight_unit?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  applied_price_tier_id?: number;
+
+  /**
+   * Flag opcional persistido en la línea. El editor NO acepta reescribir el
+   * `is_price_overridden` ya guardado: si el operador manda el mismo DTO sin
+   * este campo, conservamos el valor previo (ver merge en el servicio).
+   */
+  @IsOptional()
+  @IsBoolean()
+  is_price_overridden?: boolean;
+}
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1 · UpdateOrderEditorDto
@@ -41,8 +196,8 @@ export class UpdateOrderEditorDto {
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateOrderItemDto)
-  items: CreateOrderItemDto[];
+  @Type(() => UpdateOrderEditorItemDto)
+  items: UpdateOrderEditorItemDto[];
 
   /**
    * Cliente obligatorio. Se valida pertenencia al store (store_users) ANTES
@@ -87,7 +242,9 @@ export class UpdateOrderEditorDto {
 
   /**
    * IDs de dirección de facturación/envío y método/rate de envío. El backend
-   * los valida contra el store en la fase de shipping validation.
+   * los valida contra el store en la fase de shipping validation y verifica
+   * que la dirección pertenezca al `customer_id` enviado — si no, devuelve
+   * `ORD_EDIT_INVALID_SHIPPING_001` (no exponer FK de otro cliente).
    */
   @IsOptional()
   @IsInt()
