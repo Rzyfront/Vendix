@@ -399,7 +399,7 @@ import {
                 <button
                   type="button"
                   class="cart-btn save-btn"
-                  (click)="create.emit()"
+                  (click)="saveDraft.emit()"
                   [disabled]="isEmpty()"
                 >
                   <app-icon name="clipboard-list" [size]="16"></app-icon>
@@ -1094,6 +1094,14 @@ private cartService = inject(PosCartService);
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
   readonly create = output<void>();
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
+   * shell stepper). Bound by the parent to `posPaymentService.saveDraft()`
+   * so the "Guardar" button persists the order with `is_draft=true,
+   * requires_payment=false` and NEVER opens the payment step. The
+   * separate `Cobrar` button below uses the full shell wizard.
+   */
+  readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
   /**

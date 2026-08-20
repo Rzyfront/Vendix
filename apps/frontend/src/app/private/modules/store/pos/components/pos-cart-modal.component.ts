@@ -306,7 +306,7 @@ import {
             <button
               type="button"
               class="action-btn save-btn"
-              (click)="create.emit()"
+              (click)="saveDraft.emit()"
               [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="clipboard-list" [size]="18"></app-icon>
@@ -996,6 +996,13 @@ export class PosCartModalComponent {
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
   readonly create = output<void>();
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
+   * checkout shell stepper). The Guardar button persists the order with
+   * is_draft=true, requires_payment=false and NEVER opens the payment
+   * step. The Cobrar button uses the full shell wizard.
+   */
+  readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly charge = output<void>();

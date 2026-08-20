@@ -431,6 +431,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 [readyToPayOrder]="readyToPayOrder()"
                 [isCharging]="isCharging()"
                 (create)="onOpenCreateModal()"
+                (saveDraft)="onSaveDraft()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
                 (charge)="onCharge()"
@@ -470,7 +471,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (viewCart)="onOpenCartModal()"
           (customItem)="openCustomItemModal()"
           (create)="onOpenCreateModal()"
-                (shipping)="onShipping()"
+          (saveDraft)="onSaveDraft()"
+          (shipping)="onShipping()"
           (checkout)="onCheckout()"
           (charge)="onCharge()"
           (quote)="onQuote()"
@@ -494,6 +496,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
         (create)="onOpenCreateModal()"
+        (saveDraft)="onSaveDraft()"
         (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
         (charge)="onCharge()"
@@ -1405,12 +1408,61 @@ export class PosComponent {
   }
 
   /**
-   * Legacy entrypoint kept for any call site that still binds to it.
-   * The "Crear" UX is now folded into the checkout shell ("Guardar
-   * borrador" in the footer), so it delegates to `onOpenCreateModal`.
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
+   * shell stepper). The Guardar button persists the order with
+   * `is_draft=true, requires_payment=false` and NEVER opens the payment
+   * step. The Cobrar button uses the full shell wizard.
+   *
+   * Honors `settings.checkout.require_customer_data` — if the policy
+   * forbids guest checkout the backend returns POS_CUSTOMER_REQUIRED_001
+   * and we surface that toast. The `pos.allow_anonymous_sales` flag lets
+   * the cashier skip the customer step entirely when set.
    */
   onSaveDraft(): void {
-    this.onOpenCreateModal();
+    const cart = this.cartState();
+    if (!cart || this.isEmpty) {
+      this.toastService.warning(this.emptyCartMessage);
+      return;
+    }
+    this.loading.set(true);
+    this.paymentService
+      .saveDraft(cart, 'current_user')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.loading.set(false);
+          if (result?.order) {
+            this.currentOrderId.set(
+              result.order.id ? String(result.order.id) : null,
+            );
+            this.currentOrderNumber.set(
+              result.order.order_number ?? null,
+            );
+          }
+          this.cartService
+            .clearCart()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => {
+                this.toastService.success(
+                  result?.message || 'Orden guardada (pendiente de cobro)',
+                );
+                this.showOrderConfirmation.set(true);
+              },
+              error: () => {
+                this.toastService.success(
+                  result?.message || 'Orden guardada (pendiente de cobro)',
+                );
+              },
+            });
+        },
+        error: (error: any) => {
+          this.loading.set(false);
+          this.toastService.error(
+            error?.message || 'Error al guardar la orden',
+          );
+        },
+      });
   }
 
   /**
