@@ -9,6 +9,7 @@ import {
 import { CommonModule } from '@angular/common';
 
 import { Cart } from '../../services/cart.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
 import {
   PromotionStackComponent,
   PromotionStackItem,
@@ -55,6 +56,8 @@ import {
           [items]="tierProgressItems()"
           [ariaLabel]="'Próximo tramo de descuento'"
           data-testid="cart-promotions-inline-pills"
+          (promotionViewed)="onPromotionViewed($event)"
+          (promotionIntent)="onPromotionIntent($event)"
         />
       }
     } @else if (
@@ -73,6 +76,8 @@ import {
             [items]="appliedPromotionItems()"
             [ariaLabel]="'Promociones aplicadas'"
             data-testid="cart-promotions-applied"
+            (promotionViewed)="onPromotionViewed($event)"
+            (promotionIntent)="onPromotionIntent($event)"
           />
         }
 
@@ -87,6 +92,8 @@ import {
               [items]="tierProgressItems()"
               [ariaLabel]="'Próximo tramo de descuento'"
               data-testid="cart-promotions-tier"
+              (promotionViewed)="onPromotionViewed($event)"
+              (promotionIntent)="onPromotionIntent($event)"
             />
           </div>
         }
@@ -107,6 +114,39 @@ export class CartPromotionsComponent {
   readonly inline = input<boolean>(false);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
+  /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
+  private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+
+  /**
+   * Forward `promotionViewed` from the cart's promotion stacks (applied
+   * expanded-cards + tier-progress compact-pills) to the analytics sink.
+   * Both stacks co-exist (dropdown, page, checkout, mobile footer) and
+   * funnel through the same shared `<app-promotion-stack>`, so a single
+   * handler covers every surface.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotionsAnalytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * Forward `promotionIntent` from the cart's promotion stacks when a
+   * tier boundary is crossed (compact-pills mode does not emit intent,
+   * but the bound output keeps the seam consistent across the 3 consumers).
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotionsAnalytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
 
   /**
    * CP-ECOM-PROMO-UX-001 R3-M6: contract-drift breadcrumb.

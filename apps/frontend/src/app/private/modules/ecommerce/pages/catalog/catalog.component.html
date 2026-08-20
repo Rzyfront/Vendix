@@ -9,6 +9,8 @@
         [items]="promotionStackItems()"
         ariaLabel="Promociones activas"
         data-testid="catalog-promo-banner"
+        (promotionViewed)="onPromotionViewed($event)"
+        (promotionIntent)="onPromotionIntent($event)"
       />
     </div>
   }

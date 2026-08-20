@@ -25,6 +25,7 @@ import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
 import { TableContextService } from '../../services/table-context.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
@@ -234,7 +235,41 @@ export class CatalogComponent implements OnInit {
     // QR dine-in (Step 8): parent must NOT re-add in mesa-mode — the
     // product-card has already routed via the mesa chokepoint.
     private table_context_service: TableContextService,
+    // Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1).
+    private promotions_analytics: PromotionsAnalyticsService,
   ) {}
+
+  /**
+   * Forward `promotionViewed` from the catalog banner's scroll-batch
+   * stack to the analytics sink. Mode is fixed at `scroll-batch` here
+   * because the catalog only renders the banner in that mode, but we
+   * still forward the `mode` from the event so the sink keeps the
+   * discrimination logic in one place.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotions_analytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * The catalog banner does not emit `promotionIntent` (no tier ladder
+   * and no `currentQuantity` input), but the output is bound in the
+   * template so the shared stack can be swapped without a template
+   * change later. Forwarding is a no-op-safe courtesy.
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotions_analytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
 
   ngOnInit(): void {
     this.applyCatalogSettings(
