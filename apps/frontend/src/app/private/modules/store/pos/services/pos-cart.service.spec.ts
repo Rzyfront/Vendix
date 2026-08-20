@@ -68,7 +68,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
     TestBed.configureTestingModule({
       providers: [
         PosCartService,
-        { provide: PosProductService, useValue: productService },
+        { provide: PosProductService, useValue: productService as unknown as PosProductService },
         { provide: PosApiService, useValue: {} },
         { provide: PosSaleUnitService, useValue: {} },
         { provide: PriceResolverService, useValue: {} },
