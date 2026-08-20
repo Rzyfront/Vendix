@@ -431,10 +431,23 @@ export class PosCheckoutShellComponent {
    *  rather than shown-then-rejected. The legacy `pos-order-create-modal`
    *  used to expose it anyway; the backend then returned 422 with
    *  `POS_CUSTOMER_REQUIRED_001`. */
+  /**
+   * Whether the "Venta Anónima" toggle is visible. Driven by the POS
+   * flag `pos.allow_anonymous_sales` — that flag is the canonical source
+   * for whether the cashier can sell without a customer at the POS. We
+   * intentionally ignore `settings.checkout.require_customer_data` here
+   * because that flag governs electronic invoicing (DIAN/factura
+   * electrónica), not POS-terminal walk-in sales. The customer-required
+   * gate still fires when the operator tries to save a draft via the
+   * "Guardar" button (the POS-side flag is the policy for that path), so
+   * both flags stay honored at their respective code paths.
+   *
+   * `paymentStep.mode === 'credito'` (installment/credit sale) still
+   * requires a customer because the credit plan attaches to a person.
+   */
   readonly canBeAnonymous = computed<boolean>(
     () =>
       this.allowAnonymousSales() &&
-      !this.customerRequiredByPolicy() &&
       this.paymentStep()?.mode() !== 'credito',
   );
 
