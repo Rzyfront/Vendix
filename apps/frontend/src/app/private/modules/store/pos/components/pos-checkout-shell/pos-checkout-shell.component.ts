@@ -43,6 +43,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
 
@@ -86,6 +87,18 @@ export class PosCheckoutShellComponent {
   readonly tableId = input<number | null>(null);
   readonly paymentMethods = input<PaymentMethod[] | null>(null);
   readonly isProcessing = input<boolean>(false);
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.1 — drives stepper, footer CTAs and
+   * handler routing. `create-draft` shows only the Cliente step + Guardar;
+   * `edit` shows Cliente+Cobro with Actualizar+Cobrar; `create-payment`
+   * shows Cliente+Cobro with only Cobrar. Defaults to `create-draft` so
+   * the legacy flow keeps working for any caller that forgets to bind it.
+   */
+  readonly mode = input<'create-draft' | 'edit' | 'create-payment'>(
+    'create-draft',
+  );
+  /** Set when `mode='edit'`; identifies the order being updated. */
+  readonly editingOrderId = input<number | null>(null);
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
@@ -99,12 +112,23 @@ export class PosCheckoutShellComponent {
   readonly tableSessionOpened = output<OpenTableSessionResult>();
   /** Emitted when a draft order has been persisted (and KDS fired if applicable). */
   readonly draftSaved = output<PosOrderCreateResult>();
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.3 — emitted when `mode='edit'` and the
+   * order is updated via PUT /editor. Payload is the fresh Order returned by
+   * the backend. The parent should refresh `readyToPayOrder`, `editingOrder`
+   * and `cartState` so the cashier can immediately Cobrar on the updated
+   * order without leaving the POS.
+   */
+  readonly editorUpdated = output<any>();
 
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
+  // CP-POS-MODAL-SCOPE-001 / Phase A.2 — orderService for PUT /editor
+  // (mode='edit') and for any future order-level operations.
+  private readonly ordersService = inject(StoreOrdersService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly host = inject(ElementRef<HTMLElement>);
@@ -305,6 +329,13 @@ export class PosCheckoutShellComponent {
    * solo cuando la intención es delivery.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — `create-draft` (Crear) renders
+    // only the Cliente step. There is no Cobro step in the create-draft
+    // flow because the order has not been saved yet and there is nothing
+    // to charge. The cashier exits via `Guardar borrador`.
+    if (this.mode() === 'create-draft') {
+      return [{ label: 'Cliente' }];
+    }
     if (this.checkoutIntent() === 'delivery') {
       return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
@@ -323,6 +354,10 @@ export class PosCheckoutShellComponent {
    *  la matriz documentada en {@link steps}: ambos comparten {@link currentStep}
    *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
   readonly stepKeys = computed<string[]>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — same scoping as `steps()`.
+    if (this.mode() === 'create-draft') {
+      return ['cliente'];
+    }
     if (this.checkoutIntent() === 'delivery') {
       return ['cliente', 'envio', 'cobro'];
     }
@@ -537,6 +572,13 @@ export class PosCheckoutShellComponent {
   });
   /** Delivery → 'Finalizar venta'. Pickup → replica el label del collector. */
   readonly confirmLabel = computed<string>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — the terminal CTA label varies
+    // by mode so the cashier knows which action will fire:
+    // - create-draft → "Guardar" (saves draft, no payment)
+    // - edit         → "Actualizar" (PUT /editor)
+    // - create-payment / delivery / pickup → existing copy
+    if (this.mode() === 'create-draft') return 'Guardar';
+    if (this.mode() === 'edit') return 'Actualizar';
     if (this.checkoutIntent() === 'delivery') return 'Finalizar venta';
     const step = this.paymentStep();
     if (!step) return 'Confirmar Pago';
@@ -621,6 +663,19 @@ export class PosCheckoutShellComponent {
         if (this.currentStep() >= len) {
           this.currentStep.set(Math.max(0, len - 1));
         }
+      });
+    });
+
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — when `mode` flips (e.g. parent
+    // opens the shell again with a different intent), reset the top-level
+    // cursor AND the Cliente sub-cursor so we never land on an out-of-range
+    // step (e.g. mode='edit' → mode='create-draft' would otherwise leave
+    // currentStep=1 on a single-step wizard). Reset is idempotent.
+    effect(() => {
+      this.mode();
+      untracked(() => {
+        this.currentStep.set(0);
+        this.clienteSubStep.set(0);
       });
     });
 
@@ -833,6 +888,87 @@ export class PosCheckoutShellComponent {
   }
 
   // ── Footer actions ───────────────────────────────────────────────────────
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.2 — single primary CTA handler that
+   * routes by `mode()`:
+   * - `create-draft`  → saveDraft (no payment, no editor).
+   * - `edit`          → ordersService.updateOrderEditor (PUT /editor).
+   * - `create-payment` / delivery → existing Cobro step path (kept verbatim).
+   *
+   * The legacy `onConfirm` continues to be called by template events that
+   * need the payment-step flow only (delivery). We keep both methods on the
+   * component so existing bindings keep working until the template is
+   * migrated.
+   */
+  onPrimaryConfirm(): void {
+    const mode = this.mode();
+    if (mode === 'create-draft') {
+      this.onSaveDraft();
+      return;
+    }
+    if (mode === 'edit') {
+      this.onUpdateEditor();
+      return;
+    }
+    // create-payment (or any future mode): fall through to the payment-step
+    // collector path. Existing semantics preserved.
+    this.onConfirm();
+  }
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.2 — handler for `mode='edit'`. Calls
+   * the canonical editor endpoint and emits `editorUpdated` with the fresh
+   * Order. Cart re-hydration is the parent's responsibility.
+   *
+   * TODO(Phase C): wire idempotency_key + dedupe with concurrent pay.
+   */
+  private onUpdateEditor(): void {
+    const state = this.cartState();
+    const orderId = this.editingOrderId();
+    if (!state || !(state.items?.length ?? 0)) {
+      this.toastService.error(
+        'El carrito está vacío; agrega productos antes de actualizar.',
+      );
+      return;
+    }
+    if (orderId == null) {
+      this.toastService.error('No hay una orden seleccionada.');
+      return;
+    }
+
+    // Phase A.2 minimal payload — Phase C will expand with coupon/promotion
+    // recompute. For now we send items + customer_id only; the backend
+    // returns the persisted Order, which we re-emit to the parent.
+    const items = state.items.map((it) => ({
+      product_id: (it.product as any)?.id,
+      quantity: it.quantity,
+      unit_price: Number(it.unitPrice ?? 0),
+      total_price: Number(it.totalPrice ?? 0),
+      product_name: it.product?.name,
+    }));
+    const customer = this.cartState()?.customer;
+
+    this.ordersService
+      .updateOrderFromEditor(String(orderId), {
+        items,
+        customer_id: customer?.id,
+      } as any)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const order = res?.data ?? res?.order ?? res;
+          this.editorUpdated.emit(order);
+          this.toastService.success('Orden actualizada correctamente');
+          this.isOpenChange.emit(false);
+        },
+        error: (err: any) => {
+          this.toastService.error(
+            err?.error?.message ?? err?.message ?? 'No se pudo actualizar la orden',
+          );
+        },
+      });
+  }
+
   onConfirm(): void {
     // pickup (B1): the Cobro step self-executes (autoExecute=true).
     if (this.checkoutIntent() !== 'delivery') {

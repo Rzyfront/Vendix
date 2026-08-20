@@ -1281,11 +1281,34 @@ export class OrdersService {
     // 3) Customer del store. Backend es autoritativo: si el frontend manda un
     //    customer_id que no pertenece a este store, falla ANTES del claim
     //    atómico para no contaminar la fila.
-    const storeMembership = await this.prisma.store_users.findFirst({
-      where: { store_id: storeId, user_id: dto.customer_id },
-      select: { id: true },
-    });
-    if (!storeMembership) {
+    //
+    // CP-POS-MODAL-SCOPE-001 / Phase C.3 — escape hatch:
+    //   `pos.allow_anonymous_sales=true` permite que `customer_id` llegue como
+    //   `null` y la edición se guarde como venta anónima. La política de
+    //   ecommerce (`checkout.require_customer_data`) sigue activa para el
+    //   storefront; este atajo es POS-only.
+    if (dto.customer_id == null) {
+      const settings = await this.prisma.store_settings.findFirst({
+        where: { store_id: storeId },
+        select: { settings: true },
+      });
+      const pos = (settings?.settings as any)?.pos ?? {};
+      const allowAnonymous = pos?.allow_anonymous_sales === true;
+      if (!allowAnonymous) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_CUSTOMER_REQUIRED_001,
+        );
+      }
+    }
+
+    const storeMembership =
+      dto.customer_id != null
+        ? await this.prisma.store_users.findFirst({
+            where: { store_id: storeId, user_id: dto.customer_id },
+            select: { id: true },
+          })
+        : null;
+    if (dto.customer_id != null && !storeMembership) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_CUSTOMER_STORE_MISMATCH_001,
       );
