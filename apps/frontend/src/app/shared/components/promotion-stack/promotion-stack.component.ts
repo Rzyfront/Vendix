@@ -155,10 +155,13 @@ export class PromotionStackComponent {
   private readonly lastEmittedTierId = signal<string | number | null>(null);
   /** Bandera para evitar emitir el mismo view antes de que cambie. */
   private intersectionObserver: IntersectionObserver | null = null;
-  private readonly initialReducedMotion =
+  /** `matchMedia` reactivo: si el usuario cambia el setting mid-session,
+   *  el listener en `constructor()` detiene/arranca el autoplay sin
+   *  requerir un rebuild del componente. */
+  private readonly reducedMotionQuery =
     typeof window !== 'undefined'
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      : false;
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null;
 
   // ── Computeds ─────────────────────────────────────────────────────────
   readonly hasItems = computed(() => this.items().length > 0);
@@ -202,7 +205,16 @@ export class PromotionStackComponent {
     return tiers.find((t) => (t.min_quantity ?? 0) > qty) ?? null;
   });
 
-  /** Ancho de la barra de progreso (0–100). */
+  /**
+   * Ancho de la barra de progreso (0–100).
+   *
+   * CP-ECOM-PROMO-UX-001 R3-M4: anchor at the LOWER BOUND MINUS ONE of the
+   * customer's current tier (NOT at `min_quantity` exactly). With the exact
+   * threshold, `currentQuantity === min_quantity` reported `0%` — which
+   * looked broken the instant a tier was unlocked. Anchoring one unit below
+   * the threshold means "0% only when BELOW the tier" and the bar starts
+   * showing movement as soon as the customer lands on the tier.
+   */
   readonly progressPercent = computed<number>(() => {
     const qty = this.currentQuantity();
     const current = this.currentTier();
@@ -215,12 +227,14 @@ export class PromotionStackComponent {
       const target = next.min_quantity ?? 1;
       return Math.min(100, Math.round((qty / target) * 100));
     }
-    const min = current.min_quantity ?? 0;
-    const target = next.min_quantity ?? min + 1;
-    const span = target - min;
+    // Anchor at min_quantity - 1 so 0% only when BELOW the tier.
+    const lowerBound = (current.min_quantity ?? 0) - 1;
+    const upperBound = next.min_quantity ?? lowerBound + 1;
+    const span = upperBound - lowerBound;
     if (span <= 0) return 100;
-    const offset = qty - min;
-    return Math.min(100, Math.round((offset / span) * 100));
+    if (qty <= lowerBound) return 0;
+    if (qty >= upperBound) return 100;
+    return Math.min(100, Math.round(((qty - lowerBound) / span) * 100));
   });
 
   /** Posición del item activo en scroll-batch (para aria-current). */
@@ -232,6 +246,23 @@ export class PromotionStackComponent {
     this.destroyRef.onDestroy(() => this.stopAutoplay());
     this.destroyRef.onDestroy(() => this.disconnectIntersectionObserver());
     queueMicrotask(() => this.syncAutoplay());
+
+    // Listener reactivo de `prefers-reduced-motion`: si el usuario cambia
+    // el setting mid-session (común en macOS desde Configuración del
+    // sistema), detenemos o arrancamos el autoplay sin necesidad de
+    // recargar el componente. CP-ECOM-PROMO-UX-001 R3-M2.
+    if (this.reducedMotionQuery) {
+      this.reducedMotionQuery.addEventListener(
+        'change',
+        this.handleReducedMotionChange,
+      );
+      this.destroyRef.onDestroy(() => {
+        this.reducedMotionQuery?.removeEventListener(
+          'change',
+          this.handleReducedMotionChange,
+        );
+      });
+    }
 
     // IntersectionObserver para `scroll-batch`: se monta después del
     // primer render para que el `<div #scroller>` y sus `<article>`
@@ -379,6 +410,35 @@ export class PromotionStackComponent {
     return Math.max(0, need - qty);
   }
 
+  /**
+   * Texto accesible del progressbar. WCAG 1.1.1 / 4.1.2: describe el
+   * estado del progreso en lenguaje humano (no solo el porcentaje), para
+   * que screen readers anuncien "Te faltan 3 und para -10% en Promo X"
+   * en lugar de "Progreso hacia la próxima promoción, 47".
+   *
+   * CP-ECOM-PROMO-UX-001 R3-M1.
+   */
+  progressAriaValueText(): string {
+    const next = this.nextTier();
+    if (!next) return 'Sin siguiente tramo disponible';
+    const remaining = this.remainingQty();
+    const y = this.formatNextTierValue(next);
+    const tierName = next.target_product_name?.trim() || next.label;
+    return `Te faltan ${remaining} und para ${y} en ${tierName}`;
+  }
+
+  /** Formato humano del valor de una promoción de tier (ej: `-10%`, `-$5.000`). */
+  private formatNextTierValue(item: PromotionStackItem): string {
+    if (item.type === 'percentage' && item.value !== undefined) {
+      return `-${item.value}%`;
+    }
+    if (item.type === 'fixed_amount' && item.value !== undefined) {
+      return `-${this.currencyFormat.format(item.value)}`;
+    }
+    if (item.type === 'coupon') return 'cupón especial';
+    return item.label;
+  }
+
   // ── Scroll-batch: autoplay ────────────────────────────────────────────
   private syncAutoplay(): void {
     if (this.mode() === 'scroll-batch') {
@@ -389,7 +449,7 @@ export class PromotionStackComponent {
   }
 
   private startAutoplay(): void {
-    if (this.autoplayInterval || this.initialReducedMotion) return;
+    if (this.autoplayInterval || this.reducedMotionQuery?.matches) return;
     this.autoplayInterval = setInterval(() => this.advanceScroll(), this.autoplayMs());
   }
 
@@ -411,6 +471,24 @@ export class PromotionStackComponent {
       this.startAutoplay();
     }
   }
+
+  /**
+   * Reacciona a cambios en `prefers-reduced-motion`. Si el usuario
+   * activa el setting, detiene el autoplay; si lo desactiva y estamos
+   * en modo `scroll-batch` con items, lo arranca (respetando el flag
+   * `autoplayPaused` para no interrumpir un hover/focus manual).
+   */
+  private handleReducedMotionChange = (): void => {
+    if (this.reducedMotionQuery?.matches) {
+      this.stopAutoplay();
+    } else if (
+      this.mode() === 'scroll-batch' &&
+      this.hasItems() &&
+      !this.autoplayPaused
+    ) {
+      this.startAutoplay();
+    }
+  };
 
   private advanceScroll(): void {
     const items = this.scrollBatchItems();

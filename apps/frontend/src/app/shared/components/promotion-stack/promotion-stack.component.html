@@ -159,8 +159,8 @@
         aria-valuemin="0"
         aria-valuemax="100"
         [attr.aria-valuenow]="progressPercent()"
+        [attr.aria-valuetext]="progressAriaValueText()"
         aria-label="Progreso hacia la próxima promoción"
-        aria-live="polite"
       >
         <div
           class="promotion-stack__progress-bar"
