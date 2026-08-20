@@ -584,6 +584,28 @@ export class StoreOrdersService {
     );
   }
 
+  /**
+   * Phase D.1 / D.2 — `PUT /store/orders/:id/editor`.
+   *
+   * Thin wrapper around the editor endpoint. The full DTO is shaped by the
+   * caller (the POS editor builds the payload from the cart state). The
+   * response is the canonical `Order`, which the parent then uses as the
+   * source of truth for the subsequent `flow/pay` charge.
+   *
+   * Errors are normalized through {@link buildApiError} so the cashier
+   * surfaces `errorCode` / `details` instead of raw HTTP text.
+   */
+  updateOrderFromEditor(orderId: string, dto: any): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/editor`;
+    return this.http.put<any>(url, dto).pipe(
+      map((r) => (r?.data ?? r) as Order),
+      catchError((error) => {
+        console.error('Error updating order via editor endpoint:', error);
+        return throwError(() => this.buildApiError(error));
+      }),
+    );
+  }
+
   flowCancelOrder(orderId: string, dto: CancelOrderDto): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel`;
     return this.http.post<any>(url, dto).pipe(

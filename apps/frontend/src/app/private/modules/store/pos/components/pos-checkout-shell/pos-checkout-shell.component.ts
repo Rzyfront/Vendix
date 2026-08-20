@@ -141,27 +141,30 @@ export class PosCheckoutShellComponent {
   );
 
   /**
-   * QUI-561 — "toda venta lleva cliente": la tienda apagó
-   * `pos.allow_anonymous_sales`, así que ninguna venta puede cerrarse sin un
-   * cliente adjunto.
+   * Phase D.2 / ADR-1 — "toda venta lleva cliente": el ajuste canónico es
+   * `settings.checkout.require_customer_data`, NO `pos.allow_anonymous_sales`.
+   * El primero es la política de checkout (alta en la jerarquía de settings);
+   * el segundo es un eje operativo del cashier. Mezclarlos producía órdenes
+   * huérfanas porque `allow_anonymous_sales=false` bloqueaba el flujo sin
+   * marcar la obligatoriedad del cliente en el editor.
    *
-   * **Se deriva del SETTING, nunca de {@link isAnonymousSale}.** De este predicado
-   * depende el ORDEN de {@link steps} / {@link stepKeys}, y {@link currentStep} es
-   * un ÍNDICE numérico: si el arreglo de pasos se reordenara a mitad del checkout
-   * (el operador togglea "Venta Anónima" con el modal abierto), el índice pasaría
-   * a apuntar a OTRO paso y la UI quedaría desalineada. El setting es estable
-   * durante toda la venta; el flag es mutable por el operador. Ésa es la trampa.
+   * De este predicado depende el ORDEN de {@link steps} / {@link stepKeys}, y
+   * {@link currentStep} es un ÍNDICE numérico: si el arreglo de pasos se
+   * reordenara a mitad del checkout (el operador togglea "Venta Anónima" con el
+   * modal abierto), el índice pasaría a apuntar a OTRO paso y la UI quedaría
+   * desalineada. El setting es estable durante toda la venta; el flag es
+   * mutable por el operador. Ésa es la trampa.
    *
-   * Lazy-eval: `allowAnonymousSales` se declara más abajo, pero este computed solo
+   * Lazy-eval: `customerRequired` se declara más abajo, pero este computed solo
    * corre al leerse (ya inicializado).
    */
   readonly customerRequired = computed<boolean>(
     () =>
       // Pickup always passes through Cliente first (even when anonymous sales
       // are allowed — operator picks "Venta Anónima" in the sub-step to skip).
-      // Delivery keeps the original semantics: cliente required only when
-      // anonymous sales are forbidden at the store level.
-      this.checkoutIntent() === 'pickup' || !this.allowAnonymousSales(),
+      // Delivery keeps the original semantics: cliente required by default.
+      this.checkoutIntent() === 'pickup' ||
+      this.checkoutRequireCustomerData(),
   );
 
   /**
@@ -397,6 +400,18 @@ export class PosCheckoutShellComponent {
   );
   readonly anonymousSalesAsDefault = computed(
     () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
+  );
+
+  /**
+   * Phase D.2 / ADR-1 — canonical customer-required source. Defaults to
+   * `true` when the settings have not resolved yet: the BACKEND is
+   * authoritative, but failing closed in the UI prevents a stale
+   * "no customer required" preview while settings load. The backend rejects
+   * the request anyway with `POS_CUSTOMER_REQUIRED_001` if the policy is
+   * actually false and we let the cashier skip the step.
+   */
+  readonly checkoutRequireCustomerData = computed<boolean>(
+    () => this.settingsFacade.checkout()?.require_customer_data ?? true,
   );
 
   /** Anonymous option is hidden when the collector is in credit mode. */
@@ -1132,6 +1147,23 @@ export class PosCheckoutShellComponent {
   }
 
   private createRetailDraft(state: CartState): void {
+    // Phase D.2 — draft path. We DO NOT open payment, we DO NOT navigate to
+    // detail, and we emit ONLY `draftSaved` to the parent (never
+    // `checkoutCompleted`). The parent already routes on `(draftSaved)` via
+    // `onCreateOrderConfirmed`, which surfaces the order-confirmation modal
+    // and clears the cart; the cashier can decide to "Cobrar" next or close.
+    //
+    // The customer-id gate is enforced here as a defensive UI guard: the
+    // backend is authoritative and will return `POS_CUSTOMER_REQUIRED_001`,
+    // but failing locally saves a round-trip and keeps the cashier oriented.
+    if (!state.customer || state.customer.id == null) {
+      this.submittingDraft.set(false);
+      this.toastService.error(
+        'Selecciona o crea un cliente antes de guardar la orden.',
+      );
+      return;
+    }
+
     this.paymentService
       .saveDraft(state, 'current_user')
       .pipe(takeUntilDestroyed(this.destroyRef))

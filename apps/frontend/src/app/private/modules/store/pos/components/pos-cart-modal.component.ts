@@ -301,14 +301,16 @@ import {
         <div class="modal-actions">
           <div class="modal-actions-row">
             <button
+              type="button"
               class="action-btn save-btn"
               (click)="create.emit()"
               [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="clipboard-list" [size]="18"></app-icon>
-              <span>Crear</span>
+              <span>{{ isEditMode() ? 'Actualizar' : 'Crear' }}</span>
             </button>
             <button
+              type="button"
               class="action-btn shipping-btn"
               (click)="shipping.emit()"
               [disabled]="!cartState()?.items?.length"
@@ -317,14 +319,45 @@ import {
               <span>Envío</span>
             </button>
           </div>
+          <!--
+            Phase D.4 — primary CTA copy names the action explicitly.
+            Cobrar is reserved for the dedicated modal triggered by
+            readyToPayOrder; here we only persist (create-draft or update).
+          -->
           <button
+            type="button"
             class="action-btn checkout-btn"
             (click)="checkout.emit()"
-            [disabled]="!cartState()?.items?.length"
-            >
-            <app-icon name="credit-card" [size]="18"></app-icon>
-            <span>Finalizar Venta</span>
+            [disabled]="!cartState()?.items?.length || isCharging()"
+            [attr.aria-busy]="isCharging() ? 'true' : null"
+          >
+            <app-icon
+              [name]="isEditMode() ? 'check' : 'check'"
+              [size]="18"
+            ></app-icon>
+            <span>{{
+              isEditMode()
+                ? 'Actualizar Orden (no cobra)'
+                : 'Guardar Orden (no cobra)'
+            }}</span>
           </button>
+          <!--
+            Phase D.3 — Cobrar mirrors the desktop cart sidebar; only renders
+            when the parent has a fresh readyToPayOrder to charge.
+          -->
+          @if (readyToPayOrder() !== null) {
+            <button
+              type="button"
+              class="action-btn checkout-btn cobrar-btn"
+              (click)="charge.emit()"
+              [disabled]="!cartState()?.items?.length || isCharging()"
+              [attr.aria-busy]="isCharging() ? 'true' : null"
+              aria-label="Cobrar la orden editada"
+            >
+              <app-icon name="credit-card" [size]="18"></app-icon>
+              <span>Cobrar</span>
+            </button>
+          }
         </div>
       </div>
     </div>
@@ -901,6 +934,20 @@ import {
         filter: brightness(1.1);
       }
 
+      .cobrar-btn {
+        background: linear-gradient(
+          135deg,
+          var(--color-success, #16a34a) 0%,
+          var(--color-primary) 100%
+        );
+        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+      }
+
+      .cobrar-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       /* Hide on desktop */
       @media (min-width: 1024px) {
         .modal-overlay {
@@ -923,6 +970,9 @@ export class PosCartModalComponent {
   readonly cartState = input<CartState | null>(null);
   readonly canCreateCustomItems = input<boolean>(false);
   readonly canOverridePrices = input<boolean>(false);
+  readonly isEditMode = input<boolean>(false);
+  readonly readyToPayOrder = input<unknown>(null);
+  readonly isCharging = input<boolean>(false);
 
   /**
    * Techo de 5 UVT (Art. 616-1 ET / Res. 000165 de 2023) — se REUSAN los
@@ -947,6 +997,7 @@ export class PosCartModalComponent {
   readonly create = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
+  readonly charge = output<void>();
 
   readonly availableTiers = signal<PriceTier[]>([]);
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});

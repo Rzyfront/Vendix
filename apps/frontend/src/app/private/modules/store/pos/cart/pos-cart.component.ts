@@ -414,14 +414,39 @@ import {
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="proceedToPayment()"
-                [disabled]="isEmpty()"
+                [disabled]="isEmpty() || isCharging()"
+                [attr.aria-busy]="isCharging() ? 'true' : null"
               >
                 <app-icon
                   [name]="isEditMode() ? 'check' : 'credit-card'"
                   [size]="18"
                 ></app-icon>
-                <span>{{ isEditMode() ? 'Actualizar Orden' : 'Cobrar' }}</span>
+                <span>{{
+                  isEditMode()
+                    ? 'Actualizar Orden (no cobra)'
+                    : 'Guardar Orden (no cobra)'
+                }}</span>
               </button>
+              <!--
+                Phase D.3 — Cobrar only when an updated order is sitting in
+                readyToPayOrder. Visible in BOTH create-draft and edit modes,
+                but realistically only ever non-null after an edit update.
+                Separate button so the label matches the action: the primary
+                CTA never silently opens payment.
+              -->
+              @if (readyToPayOrder() !== null) {
+                <button
+                  type="button"
+                  class="cart-btn cobrar-btn"
+                  (click)="charge.emit()"
+                  [disabled]="isEmpty() || isCharging()"
+                  [attr.aria-busy]="isCharging() ? 'true' : null"
+                  aria-label="Cobrar la orden editada"
+                >
+                  <app-icon name="credit-card" [size]="18"></app-icon>
+                  <span>Cobrar</span>
+                </button>
+              }
             }
           </div>
         </div>
@@ -829,6 +854,30 @@ import {
         transform: translateY(-1px);
       }
 
+      .cobrar-btn {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(
+          135deg,
+          var(--color-success, #16a34a) 0%,
+          var(--color-primary) 100%
+        );
+        color: white;
+        font-size: 15px;
+        font-weight: 700;
+        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+      }
+
+      .cobrar-btn:hover:not(:disabled) {
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+      }
+
+      .cobrar-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       .save-btn {
         background: var(--color-muted);
         border: 1px solid var(--color-border);
@@ -1018,9 +1067,21 @@ private cartService = inject(PosCartService);
   readonly isEditMode = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  /**
+   * Phase D.3 — when non-null, the parent has a fresh order ready to be
+   * charged. We render a separate `Cobrar` button under the primary CTA so
+   * the cashier has a single, unambiguous next step.
+   */
+  readonly readyToPayOrder = input<unknown>(null);
+  readonly isCharging = input<boolean>(false);
   readonly create = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
+  /**
+   * Phase D.3 — emitted when the cashier clicks the `Cobrar` CTA. The parent
+   * mounts the reused `OrderPaymentModalComponent` over the fresh order.
+   */
+  readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
 
