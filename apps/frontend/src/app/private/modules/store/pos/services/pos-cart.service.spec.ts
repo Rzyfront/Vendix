@@ -28,7 +28,12 @@ import { InvoicingService } from '../../invoicing/services/invoicing.service';
  */
 describe('PosCartService — loadFromOrder (editor hydration)', () => {
   let service: PosCartService;
-  let productService: jasmine.SpyObj<PosProductService>;
+  // Cast del spy a `any`: jasmine.SpyObj<T> genera intersección con Spy<>
+  // para CADA propiedad de T (incluidos signals WritableSignal que no son
+  // funciones), y ng build --prod strict template checking rechaza la
+  // intersección porque Spy<WritableSignal<T>> no existe. Mantenemos
+  // tipado fuerte en los métodos usados abajo con `.and.returnValue(...)`.
+  let productService: any;
 
   const embeddedProduct = (id: number) => ({
     id: String(id),
@@ -63,7 +68,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
     productService = jasmine.createSpyObj<PosProductService>(
       'PosProductService',
       ['getProductById'],
-    );
+    ) as unknown as jasmine.SpyObj<PosProductService>;
 
     TestBed.configureTestingModule({
       providers: [
