@@ -38,6 +38,7 @@ import {
   AuditResource,
 } from '@common/audit/audit.service';
 import { VendixHttpException } from '@common/errors';
+import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 
@@ -131,7 +132,7 @@ export class OrderFlowController {
       // the editor / order-detail pages already handle, AND the timeline is
       // left clean of `payment.attempt` rows for terminal states.
       throw new VendixHttpException(
-        'ORD_FLOW_PAYMENT_FAILED_001',
+        ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001,
         undefined,
         {
           order_id: orderId,
