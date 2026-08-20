@@ -29,6 +29,25 @@ export interface ActiveProductPromotion {
   is_quantity_tiered?: boolean;
   /** Minimum discount preview across the tier ladder (informative only). */
   preview_min_discount?: number;
+  /**
+   * Ladder of quantity-tiered discount steps. Emitted by the backend (Phase
+   * A.1) when the promotion is quantity-tiered (`is_quantity_tiered=true`).
+   * Each entry defines the discount applied when `quantity` is between
+   * `min_quantity` and `max_quantity` (inclusive lower, exclusive upper; null
+   * `max_quantity` = open-ended). `value` is in the unit defined by `type`
+   * (percentage points or fixed amount in cents).
+   *
+   * Used by `<app-promotion-stack mode="expanded-cards">` to render the
+   * full tier ladder on the product detail page, so the buyer can see what
+   * each step unlocks as they increase the quantity.
+   */
+  quantity_tiers?: Array<{
+    min_quantity: number;
+    max_quantity: number | null;
+    type: 'percentage' | 'fixed_amount';
+    value: number;
+    sort_order: number;
+  }>;
 }
 
 /**
@@ -48,6 +67,25 @@ export interface ActiveStorePromotion {
   value: number;
   badge_label: string;
   min_purchase_amount: number | null;
+  /**
+   * Optional human-readable label for the promotion type (e.g. "2x1",
+   * "Descuento por volumen"). Backend-driven (Phase A.3) so the storefront
+   * does not have to localize the rule_type enum itself.
+   */
+  promotion_type_label?: string;
+  /**
+   * Optional quantity-tier ladder. Mirrors the same shape used by
+   * `ActiveProductPromotion.quantity_tiers` and lets the storefront render
+   * the `<app-promotion-stack mode="expanded-cards">` ladder for store-wide
+   * automatic promotions when the public endpoint decides to expose them.
+   */
+  quantity_tiers?: Array<{
+    min_quantity: number;
+    max_quantity: number | null;
+    type: 'percentage' | 'fixed_amount';
+    value: number;
+    sort_order: number;
+  }>;
 }
 
 /**

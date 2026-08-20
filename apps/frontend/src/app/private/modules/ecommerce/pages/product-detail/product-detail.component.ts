@@ -51,6 +51,10 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -72,6 +76,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
     CurrencyPipe,
     NextAvailableNoticeComponent,
     SaleUnitSelectorComponent,
+    PromotionStackComponent,
   ],
   template: `
     <div class="product-detail-page" [attr.data-currency]="currencyCode()">
@@ -215,8 +220,17 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
-                @if (promotionBadgeLabel()) {
-                  <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
+                @if (
+                  product()?.active_promotion?.quantity_tiers?.length ||
+                  product()?.active_promotion?.badge_label
+                ) {
+                  <app-promotion-stack
+                    mode="expanded-cards"
+                    [items]="expandedTierItems()"
+                    [currentQuantity]="quantity()"
+                    [ariaLabel]="'Niveles de descuento por cantidad'"
+                    data-testid="detail-promo-tier-ladder"
+                  />
                 }
               </div>
 
@@ -1731,6 +1745,18 @@ export class ProductDetailComponent implements OnInit {
   displayPriceLabel = computed((): string | null => {
     const variant = this.selectedVariant();
     const p = this.product();
+    // Promoción quantity-tiered: el primer escalón define el mínimo para
+    // empezar a obtener descuento. Pintar "Desde N und" deja claro al
+    // comprador que una unidad suelta NO entra en la promo.
+    const tiers = p?.active_promotion?.quantity_tiers;
+    if (
+      p?.active_promotion?.is_quantity_tiered === true &&
+      Array.isArray(tiers) &&
+      tiers.length > 0
+    ) {
+      const firstMin = tiers[0]?.min_quantity ?? 0;
+      if (firstMin > 1) return `Desde ${firstMin} und`;
+    }
     if (variant || !p?.variants?.length) return null;
     const prices = p.variants.map((v) => v.final_price);
     const min = Math.min(...prices);
@@ -1752,6 +1778,58 @@ export class ProductDetailComponent implements OnInit {
   /** Informative label for the active promotion badge. */
   promotionBadgeLabel = computed((): string => {
     return this.product()?.active_promotion?.badge_label ?? '';
+  });
+
+  /**
+   * Items para `<app-promotion-stack mode="expanded-cards">` en el detalle.
+   *
+   * Reglas (CP-ECOM-PROMO-UX-001 D.1):
+   *  1. Hay `quantity_tiers` con entries → 1 item por tier, ordenados por
+   *     `sort_order` (con `tier_index` 0..N-1 para que el stack pinte la
+   *     escalera completa).
+   *  2. No hay tiers pero sí `badge_label` → 1 item plano (promoción
+   *     simple: percentage / fixed_amount sin escalera).
+   *  3. No hay nada → `[]` (el template no renderiza el stack).
+   *
+   * `currentQuantity` del stack se alimenta con `quantity()` (la cantidad
+   * actual del selector del comprador), así el stack resalta en vivo el
+   * escalón actual según el comprador sube o baja la cantidad.
+   */
+  readonly expandedTierItems = computed<PromotionStackItem[]>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return [];
+
+    const tiers = promo.quantity_tiers;
+    if (Array.isArray(tiers) && tiers.length > 0) {
+      const sorted = [...tiers].sort(
+        (a, b) => a.sort_order - b.sort_order,
+      );
+      return sorted.map((tier, index) => ({
+        id: `${promo.id}-detail-tier-${index}`,
+        label: promo.badge_label,
+        type: promo.type,
+        value: tier.value,
+        scope: promo.scope,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        tier_index: index,
+      }));
+    }
+
+    if (promo.badge_label) {
+      return [
+        {
+          id: promo.id,
+          label: promo.badge_label,
+          type: promo.type,
+          value:
+            promo.discount_percentage ?? promo.discount_amount ?? undefined,
+          scope: promo.scope,
+        },
+      ];
+    }
+
+    return [];
   });
 
   displayStock = computed((): number => {
