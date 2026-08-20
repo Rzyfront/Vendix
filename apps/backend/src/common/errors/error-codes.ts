@@ -1136,6 +1136,15 @@ export const ErrorCodes = {
     devMessage:
       'Order payment could not be processed; the order remains ready-to-pay',
   },
+  // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
+  // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
+  // Actualizar) antes de cobrar.
+  ORD_EDIT_PAY_NOT_ALLOWED_001: {
+    code: 'ORD_EDIT_PAY_NOT_ALLOWED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order cannot be paid: customer is required and pos.allow_anonymous_sales is disabled',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,

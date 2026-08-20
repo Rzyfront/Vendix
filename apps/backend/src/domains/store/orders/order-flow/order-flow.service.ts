@@ -628,6 +628,37 @@ export class OrderFlowService {
 
     let order = await this.getOrder(orderId);
 
+    // CP-POS-MODAL-SCOPE-001 / Phase C.4 — defense in depth: edit→pay without
+    // customer is only allowed when the POS escape hatch is on
+    // (`pos.allow_anonymous_sales=true`). Otherwise the cashier must
+    // Actualizar (PUT /editor) with a customer selected before Cobrar.
+    if (order.customer_id == null) {
+      const settings = await this.prisma.store_settings.findFirst({
+        where: { store_id: order.store_id ?? -1 },
+        select: { settings: true },
+      });
+      const pos = (settings?.settings as any)?.pos ?? {};
+      const allowAnonymous = pos?.allow_anonymous_sales === true;
+      if (!allowAnonymous) {
+        // Roll back the state claim we just did so the order returns to its
+        // pre-attempt state and the cashier can fix the customer field.
+        try {
+          await this.prisma.orders.updateMany({
+            where: { id: orderId, state: 'processing' },
+            data: {
+              state: (order.state as any) ?? 'created',
+              updated_at: new Date(),
+            },
+          });
+        } catch {
+          /* swallow — surface the user-facing error anyway */
+        }
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_PAY_NOT_ALLOWED_001,
+        );
+      }
+    }
+
     // Table orders are born in 'draft' without a stock reservation. Promote
     // them to 'created' (reserving stock) so the guard below accepts them.
     // Idempotent + non-blocking; fastTrackOrder inherits this via payOrder.

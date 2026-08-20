@@ -701,21 +701,26 @@ export class PosCartService {
         discount_value: number;
       }
     | undefined {
-    const fromJoin = Array.isArray(order?.coupons) ? order.coupons[0] : null;
+    const fromJoin = Array.isArray(order?.coupon_uses)
+      ? order.coupon_uses[0]
+      : null;
     const couponRow = fromJoin ?? order?.coupon ?? null;
     if (couponRow) {
       return {
         id: Number(couponRow.coupon_id ?? couponRow.id ?? 0) || 0,
         code:
+          couponRow.coupon?.code ??
           couponRow.coupon_code ??
           couponRow.code ??
           order?.coupon_code ??
           '',
         discount_type:
-          couponRow.discount_type ?? couponRow.coupons?.discount_type ?? 'FIXED',
+          couponRow.coupon?.discount_type ??
+          couponRow.discount_type ??
+          'FIXED',
         discount_value: Number(
-          couponRow.discount_value ??
-            couponRow.coupons?.discount_value ??
+          couponRow.coupon?.discount_value ??
+            couponRow.discount_value ??
             0,
         ),
       };

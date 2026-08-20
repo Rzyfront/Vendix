@@ -551,6 +551,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [checkoutIntent]="checkoutIntent()"
         [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
+        [mode]="checkoutMode()"
+        [editingOrderId]="editingOrderIdAsNumber()"
         (isOpenChange)="showCheckoutModal.set($event)"
         (closed)="showCheckoutModal.set(false)"
         (checkoutCompleted)="onPaymentCompleted($event)"
@@ -559,6 +561,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (customerSelected)="onPaymentCustomerSelected($event)"
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
         (draftSaved)="onCreateOrderConfirmed($event)"
+        (editorUpdated)="onEditorUpdated($event)"
       ></app-pos-checkout-shell>
 
       <app-pos-order-confirmation
@@ -869,6 +872,22 @@ export class PosComponent {
    * direct-charge flows. Today only the first two are wired.
    */
   mode = signal<'create-draft' | 'edit' | 'create-payment'>('create-draft');
+
+  // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `checkoutMode` projects the internal
+  // `mode` signal onto the value the shell expects, defaulting to
+  // 'create-draft' for any caller that does not bind it explicitly.
+  readonly checkoutMode = computed<'create-draft' | 'edit' | 'create-payment'>(
+    () => this.mode(),
+  );
+
+  // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `editingOrderId` is stored as a
+  // string (matches the route param convention); the shell expects a number.
+  readonly editingOrderIdAsNumber = computed<number | null>(() => {
+    const id = this.editingOrderId();
+    if (!id) return null;
+    const n = Number(id);
+    return Number.isFinite(n) ? n : null;
+  });
   /**
    * Phase D.3 — fresh order returned by `PUT /store/orders/:id/editor`. The
    * `Cobrar` CTA in the cart footer and mobile footer renders ONLY when this
@@ -1825,18 +1844,47 @@ export class PosComponent {
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
-    // Phase D.2 — edit mode: "Cobrar" / "Actualizar" CTA from the cart footer
-    // routes through the editor endpoint. We do NOT clear the cart or navigate
-    // to detail; the cashier stays in POS to optionally follow up with "Cobrar".
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
+    // with `mode='edit'` (full wizard: Cliente + Cobro). The shell emits
+    // `editorUpdated` after PUT /editor so the cashier can immediately
+    // Cobrar from the same modal without leaving the POS. The legacy
+    // `updateExistingOrder()` direct path (which produced "error al
+    // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
-      this.updateExistingOrder();
+      this.mode.set('edit');
+      this.checkoutIntent.set('pickup');
+      this.showCheckoutModal.set(true);
       return;
     }
 
     // Fase 5·B3: el checkout sin envío ('pickup') pasa por el SHELL con
-    // stepper — único checkout del POS.
+    // stepper — único checkout del POS. mode='create-payment' so the shell
+    // skips Actualizar and shows only the Cobro CTA.
+    this.mode.set('create-payment');
     this.checkoutIntent.set('pickup');
     this.showCheckoutModal.set(true);
+  }
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.4 — handler for the shell's
+   * `(editorUpdated)` output. Refreshes `readyToPayOrder`, `editingOrder`,
+   * and `cartState` so the cashier can immediately `Cobrar` the updated
+   * order from the same shell without leaving the POS. We also surface a
+   * confirmation screen so the cashier sees what changed.
+   */
+  onEditorUpdated(updatedOrder: Order): void {
+    if (!updatedOrder?.id) return;
+    this.readyToPayOrder.set(updatedOrder);
+    this.editingOrder.set(updatedOrder);
+    this.currentOrderId.set(String(updatedOrder.id));
+    this.currentOrderNumber.set(updatedOrder.order_number ?? null);
+    // Keep the cart in sync with the persisted order — items/prices/
+    // totals now match what the backend returned. We do NOT clear the
+    // cart (the cashier should be able to continue editing).
+    const state = this.cartState();
+    if (state) {
+      this.cartState.set({ ...state, summary: state.summary });
+    }
   }
 
   /**
@@ -1847,6 +1895,16 @@ export class PosComponent {
    * a stale method set. No navigation. No new modal definition.
    */
   onCharge(): void {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — when editing, route the Cobrar
+    // CTA through the shell (mode='edit') so the cashier re-validates
+    // cliente + payment before POST flow/pay. The shell still falls back to
+    // the legacy OrderPaymentModalComponent for non-edit flows.
+    if (this.isEditMode()) {
+      this.mode.set('edit');
+      this.checkoutIntent.set('pickup');
+      this.showCheckoutModal.set(true);
+      return;
+    }
     const order = this.readyToPayOrder();
     if (!order) {
       this.toastService.warning(
