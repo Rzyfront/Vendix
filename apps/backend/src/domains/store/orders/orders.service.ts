@@ -1980,11 +1980,14 @@ export class OrdersService {
             // UoM de venta snapshot (mismo comportamiento que `create`).
             sale_unit_code_snapshot: mergedSaleUnit as any,
             sale_quantity_snapshot: mergedSaleQty as any,
-            // Campos fusionados — KDS, seriales, inventario comprometido.
+            // Campos fusionados — KDS, seriales, inventario consumido.
             skip_kds: mergedSkipKds as any,
-            serial_numbers: mergedSerialNumbers as any,
-            serial_ids: mergedSerialIds as any,
-            inventory_committed_at_fire: mergedInventoryCommitted as any,
+            serial_numbers_snapshot: mergedSerialNumbers as any,
+            // `serial_ids` e `inventory_committed_at_fire` no son columnas
+            // en order_items — la asociación con `inventory_serial_numbers`
+            // se hace por separado en `OrderSerialResolver`, y
+            // `committed_at_fire` es una columna propuesta en planes
+            // futuros pero no presente en el schema actual.
             inventory_consumed_at_fire: mergedInventoryConsumed as any,
             cost_price: mergedCost as any,
             item_type:
