@@ -785,7 +785,11 @@
 
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ cart()!.subtotal | currency }}</span>
+              <span>{{
+                ((cart()!.promotion_discount ?? 0) > 0
+                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal ?? 0)
+                  : (cart()!.subtotal ?? 0)) | currency
+              }}</span>
             </div>
             @if (
               cart()!.promotion_discount != null &&

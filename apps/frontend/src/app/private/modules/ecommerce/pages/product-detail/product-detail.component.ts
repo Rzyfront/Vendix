@@ -1805,7 +1805,13 @@ export class ProductDetailComponent implements OnInit {
         (a, b) => a.sort_order - b.sort_order,
       );
       return sorted.map((tier, index) => ({
+        // `id` is a composite (real_promotion_id + "-detail-tier-" + index) so
+        // the stack keeps stable per-tier identity across renders. The real
+        // backend `promotion_id` is also exposed via `original_promotion_id`
+        // for any downstream consumer (analytics, `promotionIntent`, etc.)
+        // that needs to correlate the tier back to the parent promotion.
         id: `${promo.id}-detail-tier-${index}`,
+        original_promotion_id: promo.id,
         label: promo.badge_label,
         type: promo.type,
         value: tier.value,
