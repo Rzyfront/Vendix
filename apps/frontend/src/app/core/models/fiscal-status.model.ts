@@ -101,10 +101,10 @@ export const REQUIRED_STEPS_BY_AREA: Record<FiscalArea, FiscalWizardStepId[]> =
 export const FISCAL_STEP_ORDER: FiscalWizardStepId[] = [
   'area_selection',
   'legal_data',
-  'dian_config',
+  'default_taxes',
   'puc',
   'accounting_period',
-  'default_taxes',
+  'dian_config',
   'accounting_mappings',
   'initial_inventory',
   'payroll_config',

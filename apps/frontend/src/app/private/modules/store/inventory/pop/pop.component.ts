@@ -2045,11 +2045,7 @@ export class PopComponent implements OnInit, OnDestroy {
           // /admin/products, pintar panel `app-success` con id + total.
           this.toastService.success('Orden creada exitosamente');
           this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-          this.orderResult.set({
-            id: response.data.id,
-            total: Number(response.data.total_amount ?? 0),
-            orderNumber: response.data.order_number ?? '',
-          });
+          this._setOrderResultFromCreated(response.data);
           this.isProcessingOrder.set(false);
         }
       },
@@ -2147,6 +2143,12 @@ export class PopComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.isProcessingOrder.set(false);
+          // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: pintar panel `app-success`
+          // también en el flujo create-receive. Antes solo
+          // `_executeSubmitOrder` (action='create') populaba `orderResult`,
+          // así que al confirmar "Crear y Recibir" el modal se quedaba
+          // abierto con el wizard visible aunque la OC ya existía en DB.
+          this._setOrderResultFromCreated(createdOrder);
           this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
           this._finalizeAfterOrder();
         },
@@ -2187,11 +2189,29 @@ export class PopComponent implements OnInit, OnDestroy {
               'Orden creada pero una etapa posterior falló',
             );
           }
-          // La OC existe y la mercancía ya entró: limpiamos y navegamos como el
-          // flujo previo.
+          // La OC existe y la mercancía ya entró (o el pago falló): pintamos
+          // el panel `app-success` igual que en el happy path — el operador
+          // DEBE ver la orden creada y decidir si reintenta el pago o sale.
+          this._setOrderResultFromCreated(createdOrder);
           this._finalizeAfterOrder();
         },
       });
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: pinta el panel `app-success` del
+   * shell con id + total + orderNumber. Se usa tras crear (en `_executeSubmitOrder`
+   * y en ambos caminos de `_executeCreateReceivePay`) para que el modal deje
+   * de mostrar el wizard y muestre el resultado. Sin esto, el modal se quedaba
+   * abierto con el formulario aunque la OC ya existía en DB.
+   */
+  private _setOrderResultFromCreated(order: any): void {
+    if (!order) return;
+    this.orderResult.set({
+      id: order.id,
+      total: Number(order.total_amount ?? 0),
+      orderNumber: order.order_number ?? '',
+    });
   }
 
   /**

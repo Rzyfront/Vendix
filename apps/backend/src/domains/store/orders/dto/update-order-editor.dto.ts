@@ -200,13 +200,20 @@ export class UpdateOrderEditorDto {
   items: UpdateOrderEditorItemDto[];
 
   /**
-   * Cliente obligatorio. Se valida pertenencia al store (store_users) ANTES
-   * del claim atómico del estado — un customer_id que no pertenezca al store
-   * devuelve 403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001` y no toca la fila.
+   * Cliente. Validación server-side:
+   * - Si llega, debe pertenecer al store (store_users) — sino 403
+   *   `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`.
+   * - Si NO llega (null/undefined), la edición se permite sólo cuando el
+   *   escape hatch POS está activo: `pos.allow_anonymous_sales=true`.
+   *   Sino 422 `POS_CUSTOMER_REQUIRED_001`.
+   *
+   * El escape hatch es POS-only; el storefront ecommerce sigue exigiendo
+   * cliente por `checkout.require_customer_data`.
    */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  customer_id: number;
+  customer_id?: number | null;
 
   /**
    * Nota visible para el cliente (max 500 chars, igual que `notes` en
