@@ -747,6 +747,14 @@ export class PaymentsService {
       // y se exige cliente. Sólo se omite el gate cuando el flag es EXPLÍCITAMENTE
       // `false`, política opt-in del comerciante.
       //
+      // Escape hatch POS-side: cuando `settings.pos.allow_anonymous_sales=true`
+      // (flag operativo del cajero, distinto de `checkout.require_customer_data`
+      // que gobierna la facturación electrónica), el operador puede hacer ventas
+      // sin cliente desde el POS. El cashier decide desde el modal de selección
+      // de cliente (Venta Anónima vs. Con Cliente); el frontend clona el cart
+      // sin `customer_id` cuando selecciona anónimo. Sólo aplica a POS; el
+      // ecommerce mantiene `checkout.require_customer_data` como autoridad.
+      //
       // Cuando hay `customer_id`, se valida que el cliente pertenezca a la tienda
       // del contexto vía `store_users` (manual scope — el getter `users` del
       // `StorePrismaService` devuelve el `baseClient` sin scope; el join se hace
@@ -758,7 +766,12 @@ export class PaymentsService {
       const requireCustomerData =
         checkoutSettings?.require_customer_data !== false;
 
-      if (requireCustomerData) {
+      const posSettings = (settings as any)?.pos as
+        | { allow_anonymous_sales?: boolean }
+        | undefined;
+      const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
+
+      if (requireCustomerData && !allowAnonymousSales) {
         const customerId = createPosPaymentDto.customer_id;
         const customerIdInvalid =
           customerId === undefined ||
