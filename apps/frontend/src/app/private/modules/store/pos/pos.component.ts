@@ -84,6 +84,7 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
+import { EMPTY_CART_MESSAGE } from '../../../../core/utils/error-messages';
 import type { PaymentSubmit } from '../../../../shared/components';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
 import { QuotationsService } from '../quotations/services/quotations.service';
@@ -1469,7 +1470,7 @@ export class PosComponent {
     }
 
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
 
@@ -1535,7 +1536,7 @@ export class PosComponent {
     }
 
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
 
@@ -2829,7 +2830,7 @@ export class PosComponent {
   // Shipping Modal Methods
   onShipping(): void {
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
     // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
