@@ -142,13 +142,14 @@ services:
     container_name: vendix_frontend
     restart: unless-stopped
     # Presupuesto del contenedor en build en frío, medido en dmesg:
-    #   ng serve (heap V8)  ~2.5 GB
+    #   ng serve (heap V8)  ~3.5 GB     (medido 2026-08-20 16:09, SIGKILL pid 469408)
     #   esbuild (binario Go) ~1.5 GB   <-- NO lo gobierna NODE_OPTIONS
     #   overhead de Node     ~0.3 GB
-    # Total ~4.3 GB, por eso 4g moría con CONSTRAINT_MEMCG. Requiere VM de
-    # colima con 10 GB (5.5g frontend + 2.5g backend + resto).
+    # Total ~5.3 GB, rozando el cgroup → SIGKILL con CONSTRAINT_MEMCG.
+    # Subir mem_limit requiere VM con más RAM (hoy 10 GB, 1.6 GB libres).
+    # memswap +512 MB da aire para picos sin tocar el presupuesto VM.
     mem_limit: 5632m
-    memswap_limit: 6656m
+    memswap_limit: 7168m
     environment:
       - NODE_ENV=development
       - BACKEND_URL=http://api.vendix.com
@@ -157,9 +158,11 @@ services:
       # "Worker terminated due to reaching memory limit: JS heap out of memory"
       # y el compiler-plugin quedaba con compilation=null, lo que se manifiesta
       # como un críptico assert(compilation) en el ciclo siguiente.
-      # 3072 le alcanza y sigue por debajo del 4096 original que dejaba al GC
-      # crecer hasta reventar la VM.
-      - NODE_OPTIONS=--max-old-space-size=3072
+      # 3072 dejaba a V8 holgado y al cgroup sin margen; 2560 (~-500 MiB en V8
+      # heap observado) deja al cgroup con ~1 GB libre y mantiene al worker
+      # por encima del umbral crítico de 2048. Medido estable tras fix del
+      # 2026-08-20 (SIGKILL por anon-rss=3.47 GB con 3072).
+      - NODE_OPTIONS=--max-old-space-size=2560
       - CHOKIDAR_USEPOLLING="true"
     depends_on:
       - backend
