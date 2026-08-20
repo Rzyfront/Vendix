@@ -2290,6 +2290,31 @@ export class PosComponent {
   onStartNewSale(): void {
     this.showOrderConfirmation.set(false);
     this.completedOrder.set(null);
+
+    // CP-POS-MODAL-SCOPE-001 / Phase F.7 — Nueva compra must hand the cashier
+    // a fresh POS regardless of how they got into the previous sale. If the
+    // cashier was editing an order (the URL had `?editOrder=`), every signal
+    // that was pinned to that order is still in memory: `editingOrderId`,
+    // `editingOrder`, `currentOrderId`, `currentOrderNumber`, `linkedOrderId`,
+    // `linkedOrderNumber`, the shell `mode`, the parent's `readyToPayOrder`.
+    // Without a reset, the next sale hits `PUT /store/orders/:id/items` on
+    // the previous order's id and silently edits the previous order again.
+    this.editingOrderId.set(null);
+    this.editingOrder.set(null);
+    this.currentOrderId.set(null);
+    this.currentOrderNumber.set(null);
+    this.readyToPayOrder.set(null);
+    this.mode.set('create-draft');
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(false);
+
+    // Drop the `editOrder` query param too so a browser refresh on the same
+    // URL does not re-enter the edit flow.
+    this.router.navigate(
+      ['/admin/pos'],
+      { queryParams: { editOrder: null }, queryParamsHandling: 'merge' },
+    );
+
     this.onClearCart();
   }
 
