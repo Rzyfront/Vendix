@@ -67,8 +67,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [cashReceived, setCashReceived] = useState('');
   const [reference, setReference] = useState('');
-  const [isAnonymous, setIsAnonymous] = useState(false);
-
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — la política canónica
+  // `settings.checkout.require_customer_data=true` rechaza ventas POS sin
+  // cliente (`POS_CUSTOMER_REQUIRED_001`). Eliminamos la rama anónima del
+  // payment modal: el cliente es obligatorio.
   const [showCustomerSearch, setShowCustomerSearch] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
@@ -88,7 +90,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
   const change = parsedCash - summary.total;
   const needsCashInput = selectedMethod && getPaymentMethodType(selectedMethod) === 'cash';
   const needsReference = selectedMethod && !needsCashInput;
-  const canProcess = items.length > 0 && selectedMethod && (isAnonymous || !!customer) && !isProcessing;
+  const canProcess = items.length > 0 && selectedMethod && !!customer && !isProcessing;
 
   const { data: paymentMethods = [], isLoading: methodsLoading } = useQuery({
     queryKey: ['pos-payment-methods'],
@@ -167,7 +169,6 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
     setSelectedMethod(null);
     setCashReceived('');
     setReference('');
-    setIsAnonymous(false);
     setShowCustomerSearch(false);
     setCustomerSearchQuery('');
     setCustomerSearchResults([]);
@@ -234,6 +235,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 fase B.2 — Guardar es SIEMPRE un
+        // draft sin pago. Backend valida `is_draft=true ∧ requires_payment=false`
+        // y rechaza combinaciones inválidas con `POS_DRAFT_REQUIRES_PAYMENT_001`.
+        is_draft: true,
         requires_payment: false,
         delivery_type: 'direct_delivery',
         internal_notes: state.notes || undefined,
@@ -271,8 +276,14 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       toastWarning('Seleccione un método de pago');
       return;
     }
-    if (!isAnonymous && !state.customer) {
-      toastWarning('Seleccione un cliente o marque venta anónima');
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — el backend rechaza pagos POS sin
+    // cliente (`POS_CUSTOMER_REQUIRED_001`). Bloqueamos aquí también para
+    // no enviar un request inválido y mapear el error tipado.
+    if (!state.customer || !Number.isFinite(Number(state.customer.id)) || Number(state.customer.id) <= 0) {
+      toastError(
+        'Selecciona o crea un cliente antes de cobrar. (POS_CUSTOMER_REQUIRED_001)',
+      );
+      setShowCustomerModal(true);
       return;
     }
     if (needsCashInput && parsedCash < summary.total) {
@@ -290,13 +301,13 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         return;
       }
 
-      const customer = state.customer;
+      const customer = state.customer!;
       const summary = state.summary;
       const payload: CreatePosPaymentDto = {
-        customer_id: isAnonymous ? undefined : (customer ? Number(customer.id) : undefined),
-        customer_name: isAnonymous ? undefined : (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || undefined : undefined),
-        customer_email: isAnonymous ? undefined : (customer?.email ?? undefined),
-        customer_phone: isAnonymous ? undefined : (customer?.phone ?? undefined),
+        customer_id: Number(customer.id),
+        customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
+        customer_email: customer.email ?? undefined,
+        customer_phone: customer.phone ?? undefined,
         store_id: storeId,
         items: items.map((i) => ({
           product_id: i.product.id === 0 ? undefined : Number(i.product.id),
@@ -325,6 +336,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         store_payment_method_id: selectedMethod.id,
         amount_received: needsCashInput ? parsedCash : undefined,
         payment_reference: needsReference ? reference.trim() || undefined : undefined,
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro es siempre
+        // `is_draft=false, requires_payment=true`. El draft pertenece a
+        // "Guardar"; el cobro va por `flow/pay`.
+        is_draft: false,
         requires_payment: true,
         delivery_type: 'direct_delivery',
         update_inventory: true,
@@ -347,12 +362,18 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       onSuccess(orderNum);
       toastSuccess(response.message || 'Pago procesado exitosamente');
     } catch (err: any) {
-      const message = err?.response?.data?.message || err?.message || 'Error al procesar el pago';
-      toastError(message);
+      const data = err?.response?.data;
+      // Backend `AllExceptionsFilter` preserva `error_code` — lo mostramos
+      // verbatim para que el operador sepa qué falló y el soporte tenga
+      // // referencia directa en logs.
+      const errorCode = data?.error_code || data?.code;
+      const baseMsg = data?.message || err?.message || 'Error al procesar el pago';
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      toastError(`${baseMsg}${codeSuffix}`);
     } finally {
       setIsProcessing(false);
     }
-  }, [selectedMethod, isAnonymous, needsCashInput, needsReference, parsedCash, summary.total, reference, paymentForm, handleReset, onClose, onSuccess]);
+  }, [selectedMethod, needsCashInput, needsReference, parsedCash, summary.total, reference, paymentForm, handleReset, onClose, onSuccess]);
 
   const customerDisplayName = customer
     ? `${customer.first_name} ${customer.last_name || ''}`.trim()
@@ -361,7 +382,12 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
   if (!visible) return null;
 
   return (
-    <View style={[styles.overlay, { paddingTop: insets.top }]}>
+    <View
+      style={[styles.overlay, { paddingTop: insets.top }]}
+      accessibilityViewIsModal
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
@@ -369,7 +395,13 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Procesar Pago</Text>
-          <Pressable onPress={handleClose} hitSlop={8} style={styles.headerCloseBtn}>
+          <Pressable
+            onPress={handleClose}
+            hitSlop={8}
+            style={styles.headerCloseBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar modal de pago"
+          >
             <Icon name="x" size={24} color={colorScales.gray[500]} />
           </Pressable>
         </View>
@@ -582,32 +614,22 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
               <Text style={styles.sectionTitle}>Cliente</Text>
             </View>
 
-              {/* Anonymous sale */}
+              {/* CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es OBLIGATORIO.
+                  Ya no existe la rama "Venta Anónima" porque el backend
+                  rechaza el cobro (`POS_CUSTOMER_REQUIRED_001`). */}
               <View style={styles.saleTypeOptions}>
                 <Pressable
-                  style={[styles.saleTypeBtn, isAnonymous && styles.saleTypeBtnSelected]}
-                  onPress={() => { setIsAnonymous(true); setShowCustomerSearch(false); }}
+                  style={[styles.saleTypeBtn, styles.saleTypeBtnSelected]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: true }}
+                  accessibilityLabel="Cliente obligatorio para cobrar"
                 >
                   <View style={styles.radioIndicator}>
-                    {isAnonymous && <View style={styles.radioDot} />}
+                    <View style={styles.radioDot} />
                   </View>
-                  <Icon name="user-x" size={20} color={isAnonymous ? colors.primary : colorScales.gray[600]} />
+                  <Icon name="user" size={20} color={colors.primary} />
                   <View style={styles.saleTypeInfo}>
-                    <Text style={styles.saleTypeName}>Venta Anónima</Text>
-                    <Text style={styles.saleTypeDesc}>Sin cliente asociado</Text>
-                  </View>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.saleTypeBtn, !isAnonymous && styles.saleTypeBtnSelected]}
-                  onPress={() => setIsAnonymous(false)}
-                >
-                  <View style={styles.radioIndicator}>
-                    {!isAnonymous && <View style={styles.radioDot} />}
-                  </View>
-                  <Icon name="user" size={20} color={!isAnonymous ? colors.primary : colorScales.gray[600]} />
-                  <View style={styles.saleTypeInfo}>
-                    <Text style={styles.saleTypeName}>Con Cliente</Text>
+                    <Text style={styles.saleTypeName}>Cliente obligatorio</Text>
                     <Text style={styles.saleTypeDesc}>
                       {customer ? customerDisplayName : 'Seleccionar cliente'}
                     </Text>
@@ -616,7 +638,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
               </View>
 
               {/* Selected customer display */}
-              {!isAnonymous && customer && !showCustomerSearch && (
+              {customer && !showCustomerSearch && (
                 <View style={styles.selectedCustomer}>
                   <View style={styles.customerAvatar}>
                     <Icon name="user-check" size={16} color={colorScales.green[700]} />
@@ -635,8 +657,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
               )}
 
               {/* Select customer / Search */}
-              {!isAnonymous && (
-                <>
+              <>
                   {!customer && !showCustomerSearch && (
                     <Pressable
                       style={styles.selectCustomerBtn}
@@ -771,33 +792,42 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                     </View>
                   )}
                 </>
-              )}
             </View>
         </ScrollView>
 
-        {/* Footer with 3 buttons */}
+        {/* Footer with 3 buttons — accessibility: type=button + busy state + ARIA. */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
           <View style={styles.footerRow}>
             <Pressable
               style={styles.cancelBtn}
               onPress={handleClose}
               disabled={isProcessing}
+              accessibilityRole="button"
+              accessibilityLabel="Cancelar cobro"
+              accessibilityState={{ busy: isProcessing }}
             >
               <Text style={styles.cancelBtnText}>Cancelar</Text>
             </Pressable>
             <Pressable
               style={styles.draftBtn}
               onPress={handleSaveDraft}
-              disabled={isProcessing || items.length === 0}
+              disabled={isProcessing || items.length === 0 || !customer}
+              accessibilityRole="button"
+              accessibilityLabel="Guardar orden sin cobrar"
+              accessibilityHint="Crea una orden en borrador sin procesar pago"
+              accessibilityState={{ busy: isProcessing, disabled: isProcessing || items.length === 0 || !customer }}
             >
               <Icon name="save" size={16} color={isProcessing ? colorScales.gray[400] : colors.primary} />
-              <Text style={[styles.draftBtnText, isProcessing && { color: colorScales.gray[400] }]}>Guardar</Text>
+              <Text style={[styles.draftBtnText, isProcessing && { color: colorScales.gray[400] }]}>Guardar orden (no cobra)</Text>
             </Pressable>
           </View>
           <Pressable
             style={[styles.chargeBtn, (!canProcess || isProcessing) && styles.chargeBtnDisabled]}
             onPress={handleProcessPayment}
             disabled={!canProcess || isProcessing}
+            accessibilityRole="button"
+            accessibilityLabel={paymentForm === 'credito' ? 'Crear venta a crédito' : 'Cobrar orden'}
+            accessibilityState={{ busy: isProcessing, disabled: !canProcess || isProcessing }}
           >
             {isProcessing ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
@@ -817,7 +847,6 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         onSelectCustomer={(c) => {
           if (c) {
             setCustomer(c);
-            setIsAnonymous(false);
           }
           setShowCustomerModal(false);
         }}

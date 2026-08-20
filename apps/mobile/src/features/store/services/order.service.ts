@@ -14,6 +14,7 @@ import type {
   PaymentMethod,
   CreatePosPaymentDto,
   PosPaymentResponse,
+  UpdateOrderEditorPayload,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -106,6 +107,27 @@ export const OrderService = {
   async fastTrack(orderId: number, dto?: Record<string, unknown>): Promise<Order> {
     const endpoint = Endpoints.STORE.ORDERS.FLOW_FAST_TRACK.replace(':id', String(orderId));
     const res = await apiClient.post(endpoint, dto || {});
+    return unwrap<Order>(res);
+  },
+
+  /**
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — fase C.1 · editor atómico de negocio.
+   *
+   * `PUT /api/store/orders/:id/editor` reemplaza items, cliente, notas,
+   * envío y promoción/cupón en una sola transacción. No edita state,
+   * payment ni flags KDS/fiscales (esos pasan por `flow/pay`).
+   *
+   * Errores tipados que el caller puede mapear:
+   *  - `POS_CUSTOMER_REQUIRED_001` (422) si el customer_id falta/no pertenece al store.
+   *  - `ORD_EDIT_NOT_ALLOWED_001` (409) si la orden ya no es `created`/`draft`.
+   *  - `ORD_EDIT_STATE_CHANGED_001` (409) si otro operador cambió el estado.
+   *  - `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001` (403).
+   *  - `ORD_EDIT_INVALID_SHIPPING_001` (422).
+   *  - `POS_STOCK_INSUFFICIENT_001` (409).
+   */
+  async updateOrderEditor(orderId: number, dto: UpdateOrderEditorPayload): Promise<Order> {
+    const endpoint = `/store/orders/${orderId}/editor`;
+    const res = await apiClient.put(endpoint, dto);
     return unwrap<Order>(res);
   },
 

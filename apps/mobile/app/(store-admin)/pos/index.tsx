@@ -1924,12 +1924,24 @@ const PaymentSheet = ({
 
   const mutation = useMutation({
     mutationFn: async (): Promise<PosSaleResult> => {
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es obligatorio.
+      // `customer_id` debe ser un número > 0 o el backend rechaza el payload
+      // (`POS_CUSTOMER_REQUIRED_001`). `handleConfirm` ya bloquea esta
+      // entrada cuando el cliente falta, pero añadimos un guard defensivo.
+      if (!customer || !Number.isFinite(Number(customer.id)) || Number(customer.id) <= 0) {
+        throw new PosCheckoutError(
+          'Selecciona o crea un cliente antes de cobrar. (POS_CUSTOMER_REQUIRED_001)',
+          ['customer_id faltante o inválido en mobile'],
+          false,
+        );
+      }
+
       const buildPayload = (
         requiresPayment: boolean,
         method: PaymentMethod | null,
         updateInventory: boolean,
       ): CreatePosPaymentDto => ({
-        customer_id: customer?.id ? Number(customer.id) : undefined,
+        customer_id: Number(customer.id),
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : undefined,
         customer_email: customer?.email,
         customer_phone: sanitizePhoneForDto(customer?.phone),
@@ -1958,6 +1970,10 @@ const PaymentSheet = ({
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro es SIEMPRE
+        // `is_draft=false, requires_payment=true`. El fallback "venta sin
+        // pago" se eliminó: ya no aceptamos órdenes anónimas.
+        is_draft: false,
         requires_payment: requiresPayment,
         store_payment_method_id: method?.id,
         amount_received: requiresPayment
@@ -1989,38 +2005,11 @@ const PaymentSheet = ({
       };
 
       const requiresPayment = Boolean(selectedMethod);
-      try {
-        const response = await processSale(buildPayload(requiresPayment, selectedMethod, true));
-        return {
-          response,
-          paymentMethodLabel: selectedMethod ? getPaymentMethodLabel(selectedMethod) : 'Venta sin pago',
-        };
-      } catch (primaryError) {
-        const parsedPrimary = parsePosCheckoutError(primaryError);
-        if (!requiresPayment || !parsedPrimary.canFallback) {
-          throw parsedPrimary;
-        }
-
-        try {
-          const response = await processSale(buildPayload(false, null, false));
-          return {
-            response,
-            paymentMethodLabel: 'Venta sin pago',
-            fallbackReason: parsedPrimary.message,
-          };
-        } catch (fallbackError) {
-          const parsedFallback = parsePosCheckoutError(fallbackError);
-          throw new PosCheckoutError(
-            parsedFallback.message,
-            [
-              `Intento con pago: ${parsedPrimary.message}`,
-              `Intento sin pago: ${parsedFallback.message}`,
-              ...parsedFallback.details,
-            ],
-            false,
-          );
-        }
-      }
+      const response = await processSale(buildPayload(requiresPayment, selectedMethod, true));
+      return {
+        response,
+        paymentMethodLabel: selectedMethod ? getPaymentMethodLabel(selectedMethod) : 'Venta sin pago',
+      };
     },
     onMutate: () => {
       setSaleError(null);
@@ -2044,11 +2033,10 @@ const PaymentSheet = ({
       queryClient.invalidateQueries({ queryKey: ['pos-products'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      if (result.fallbackReason) {
-        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 3500);
-      } else {
-        toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
-      }
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — sin fallback anónimo: el cliente es
+      // obligatorio y el cobro se hace siempre con método de pago o vía
+      // "Guardar orden" (draft).
+      toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
       onSuccess(orderNumber, receiptData);
     },
     onError: (error) => {
@@ -2059,6 +2047,14 @@ const PaymentSheet = ({
   });
 
   const handleConfirm = () => {
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es obligatorio. Bloqueamos
+    // el cobro si falta o no pertenece al store (`POS_CUSTOMER_REQUIRED_001`).
+    if (!customer || !Number.isFinite(Number(customer.id)) || Number(customer.id) <= 0) {
+      toastError(
+        'Selecciona o crea un cliente antes de cobrar. (POS_CUSTOMER_REQUIRED_001)',
+      );
+      return;
+    }
     if (selectedMethod && isCash && received < summary.total) {
       toastError('El monto recibido es insuficiente');
       return;
@@ -2709,8 +2705,17 @@ const PosScreen = () => {
       toastWarning('El carrito está vacío');
       return;
     }
-    if (!customer) {
-      toastWarning('Debe seleccionar un cliente antes de guardar');
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — el backend rechaza borradores sin
+    // cliente (`POS_CUSTOMER_REQUIRED_001`). Bloqueamos el guardado si
+    // falta y abrimos el selector para que el operador pueda asignarlo.
+    if (
+      !customer ||
+      !Number.isFinite(Number(customer.id)) ||
+      Number(customer.id) <= 0
+    ) {
+      toastError(
+        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
+      );
       setShowCustomerModal(true);
       return;
     }
@@ -2721,6 +2726,7 @@ const PosScreen = () => {
       const storeId = resolvePositiveId(tenantStoreId, authStoreId);
       if (!storeId) {
         toastError('La sesión no tiene una tienda activa');
+        setSavingDraft(false);
         return;
       }
 
@@ -2753,6 +2759,10 @@ const PosScreen = () => {
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 fase B.2 — Guardar es SIEMPRE un
+        // draft sin pago. Backend valida `is_draft=true ∧ requires_payment=false`
+        // y rechaza combinaciones inválidas con `POS_DRAFT_REQUIRES_PAYMENT_001`.
+        is_draft: true,
         requires_payment: false,
         delivery_type: 'direct_delivery',
         internal_notes: state.notes || undefined,
@@ -2771,10 +2781,12 @@ const PosScreen = () => {
       toastSuccess('Guardado correctamente');
     } catch (error: any) {
       const data = error?.response?.data;
+      const errorCode = data?.error_code || data?.code;
       const baseMsg = data?.message || error?.message || 'Error al guardar';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
-      toastError(fullMsg);
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      toastError(`${fullMsg}${codeSuffix}`);
     } finally {
       setSavingDraft(false);
     }

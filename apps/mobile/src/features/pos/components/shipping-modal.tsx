@@ -86,12 +86,19 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
   const selectedShippingMethod = enabledShippingMethods.find((m) => m.id === selectedShippingMethodId);
   const selectedPaymentMethod = paymentMethods.find((m) => m.id === selectedPaymentMethodId);
 
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — `canSubmit` requiere cliente Y dirección.
+  // El backend rechaza pedidos POS sin cliente (`POS_CUSTOMER_REQUIRED_001`)
+  // y el envío a domicilio sin dirección válida.
+  const hasCustomer = !!customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0;
   const canSubmit = useMemo(() => {
     if (items.length === 0) return false;
+    // Cliente obligatorio: si falta, bloqueamos el submit y dejamos que el
+    // operador abra el selector desde el CTA "Seleccionar cliente".
+    if (!hasCustomer) return false;
     if (deliveryType === 'home_delivery' && (!address.trim() || !selectedShippingMethod)) return false;
     if (paymentMode === 'pay_now' && !selectedPaymentMethod) return false;
     return true;
-  }, [items.length, deliveryType, address, selectedShippingMethod, paymentMode, selectedPaymentMethod]);
+  }, [items.length, hasCustomer, deliveryType, address, selectedShippingMethod, paymentMode, selectedPaymentMethod]);
 
   const shippingCost = selectedShippingMethod?.price ?? 0;
   const totalWithShipping = summary.total + shippingCost;
@@ -102,11 +109,19 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
       toastError('La sesión no tiene una tienda activa');
       return;
     }
+    // Defensive: aunque `canSubmit` ya cubre `hasCustomer`, este guard
+    // mapea el código tipado del backend si la validación cambia.
+    if (!customer || !Number.isFinite(Number(customer.id)) || Number(customer.id) <= 0) {
+      toastError(
+        'Selecciona o crea un cliente antes de crear el pedido. (POS_CUSTOMER_REQUIRED_001)',
+      );
+      return;
+    }
 
     setSaving(true);
     try {
       const payload: CreatePosPaymentDto = {
-        customer_id: customer?.id ? Number(customer.id) : undefined,
+        customer_id: Number(customer.id),
         customer_name: customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : undefined,
         customer_email: customer?.email,
         customer_phone: customer?.phone ?? undefined,
@@ -135,6 +150,11 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(totalWithShipping.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro se hace en `flow/pay`.
+        // Aquí siempre creamos orden: `is_draft=true` (guardar) cuando NO
+        // hay método de pago seleccionado (pago contra entrega), o
+        // `is_draft=false, requires_payment=true` cuando ya se eligió.
+        is_draft: paymentMode !== 'pay_now',
         requires_payment: paymentMode === 'pay_now',
         store_payment_method_id: selectedPaymentMethod?.id,
         delivery_type: deliveryType === 'pickup' ? 'pickup' : 'home_delivery',
@@ -168,9 +188,12 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
       }
       toastSuccess('Pedido creado exitosamente');
     } catch (err: any) {
-      const apiMsg = err?.response?.data?.message;
-      const detailMsg = err?.response?.data?.errors?.[0];
-      toastError(apiMsg || detailMsg || err?.message || 'Error al procesar el pedido');
+      const data = err?.response?.data;
+      const errorCode = data?.error_code || data?.code;
+      const apiMsg = data?.message || err?.response?.data?.errors?.[0];
+      const detailMsg = err?.message || 'Error al procesar el pedido';
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      toastError(`${apiMsg || detailMsg}${codeSuffix}`);
     } finally {
       setSaving(false);
     }
@@ -192,10 +215,18 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
           <Pressable
             style={[styles.container, { paddingBottom: 0 }]}
             onPress={(e) => e.stopPropagation()}
+            accessibilityViewIsModal
+            accessibilityLiveRegion="polite"
+            accessibilityRole="alert"
           >
         <View style={styles.header}>
           <Text style={styles.title}>Pedido con envío</Text>
-          <Pressable onPress={onClose} style={styles.closeBtn}>
+          <Pressable
+            onPress={onClose}
+            style={styles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar modal de pedido con envío"
+          >
             <Icon name="x" size={24} color={colorScales.gray[500]} />
           </Pressable>
         </View>
@@ -480,13 +511,26 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
-          <Pressable style={styles.cancelBtn} onPress={onClose}>
+          <Pressable
+            style={styles.cancelBtn}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Cancelar pedido"
+          >
             <Text style={styles.cancelText}>Cancelar</Text>
           </Pressable>
           <Pressable
             style={[styles.submitBtn, (!canSubmit || saving) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
             disabled={!canSubmit || saving}
+            accessibilityRole="button"
+            accessibilityLabel="Crear pedido con envío"
+            accessibilityHint={
+              !hasCustomer
+                ? 'Selecciona un cliente antes de crear el pedido'
+                : 'Persiste el pedido sin cobrar'
+            }
+            accessibilityState={{ busy: saving, disabled: !canSubmit || saving }}
           >
             {saving ? (
               <Spinner size="sm" color="#FFFFFF" />
