@@ -84,6 +84,12 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
+import type { PayOrderDto } from '../orders/interfaces/order.interface';
+import {
+  PaymentMethodState,
+  type StorePaymentMethod,
+} from '../settings/payments/interfaces/payment-methods.interface';
+import type { PaymentMethod as CanonicalPaymentMethod } from '../../../../shared/models/payment-method.model';
 import { EMPTY_CART_MESSAGE } from '../../../../core/utils/error-messages';
 import type { PaymentSubmit } from '../../../../shared/components';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
@@ -664,7 +670,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     <app-order-payment-modal
       [isOpen]="chargeModalOpen()"
       [order]="readyToPayOrder()"
-      [paymentMethods]="paymentMethodsCatalog()"
+      [paymentMethods]="storePaymentMethodsForModal()"
       [isCreditOrder]="false"
       [remainingBalance]="0"
       [installments]="[]"
@@ -871,10 +877,13 @@ export class PosComponent {
   isCharging = signal(false);
   /**
    * Enabled payment methods for the active store, fetched once via the shared
-   * catalog. Used as input for `OrderPaymentModalComponent` and refreshed
-   * lazily when the modal opens.
+   * catalog. Stored in the canonical `PaymentMethod` shape from
+   * `payment-method.model`. The OrderPaymentModal needs the richer
+   * `StorePaymentMethod[]` shape, so we expose a converter (see
+   * `storePaymentMethodsForModal()`) rather than mutate the signal type —
+   * keeps the catalog consumer-readable and avoids a parallel cache.
    */
-  paymentMethodsCatalog = signal<any[]>([]);
+  paymentMethodsCatalog = signal<CanonicalPaymentMethod[]>([]);
 
   // Cash Register
   cashRegisterEnabled = signal(false);
@@ -1807,8 +1816,10 @@ export class PosComponent {
 
   /**
    * Phase D.3 — open the reused `OrderPaymentModalComponent` over the fresh
-   * `readyToPayOrder`. Pre-fetches the catalog if needed, then flips the open
-   * signal. No navigation. No new modal definition.
+   * `readyToPayOrder`. ALWAYS re-fetches the catalog: the operator may have
+   * enabled a new method between the last editor save and the Cobrar click,
+   * and the previous "skip when non-empty" guard silently kept the modal on
+   * a stale method set. No navigation. No new modal definition.
    */
   onCharge(): void {
     const order = this.readyToPayOrder();
@@ -1818,10 +1829,60 @@ export class PosComponent {
       );
       return;
     }
-    if (this.paymentMethodsCatalog().length === 0) {
-      this.fetchPaymentMethodsCatalog();
-    }
+    this.fetchPaymentMethodsCatalog();
     this.chargeModalOpen.set(true);
+  }
+
+  /**
+   * Adapt the canonical catalog (`PaymentMethod[]`) to the `StorePaymentMethod[]`
+   * shape that `OrderPaymentModalComponent` expects. We re-hydrate the fields the
+   * modal's `fromStorePaymentMethod` mapper reads:
+   *  - `id`            → numeric when possible (the modal forwards it to
+   *                       `flow/pay` as `store_payment_method_id`).
+   *  - `display_name`  → catalog's `displayName` || `name`.
+   *  - `state`         → 'enabled' for every catalog row (the catalog only
+   *                       returns enabled methods).
+   *  - `system_payment_method.{ type, name, provider, dian_code }` →
+   *                       mirrored from the catalog `type` / `provider`.
+   *  - `min_amount` / `max_amount` → forwarded as-is.
+   *
+   * Anything the catalog does not know about (e.g. the original `custom_config`,
+   * `display_order`) is left undefined; the modal does not require those for
+   * charging.
+   */
+  storePaymentMethodsForModal(): StorePaymentMethod[] {
+    const nowIso = new Date().toISOString();
+    return (this.paymentMethodsCatalog() ?? []).map((m) => ({
+      id: String(m.id),
+      store_id: 'catalog',
+      system_payment_method_id: String(m.id),
+      display_name: m.displayName ?? m.name ?? '',
+      custom_config: {},
+      state: m.enabled ? PaymentMethodState.ENABLED : PaymentMethodState.DISABLED,
+      display_order: 0,
+      min_amount: m.minAmount ?? undefined,
+      max_amount: m.maxAmount ?? undefined,
+      created_at: nowIso,
+      updated_at: nowIso,
+      system_payment_method: {
+        id: String(m.id),
+        name: m.name ?? '',
+        display_name: m.displayName ?? m.name ?? '',
+        description: '',
+        type: m.type as any,
+        provider: m.provider ?? '',
+        is_active: m.enabled,
+        requires_config: false,
+        config_schema: {},
+        default_config: {},
+        supported_currencies: [],
+        processing_fee_type: 'FIXED' as any,
+        processing_fee_value: 0,
+        dian_code: m.dianCode,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+    }));
   }
 
   /**
@@ -1836,9 +1897,11 @@ export class PosComponent {
 
   /**
    * Phase D.3 — submit from `OrderPaymentModalComponent` maps to the canonical
-   * `flow/pay` endpoint via `StoreOrdersService.flowPayOrder`. The modal has
-   * already collected one method + amount + reference; we forward them as the
-   * canonical `PayOrderDto` shape and refresh the order on success.
+   * `flow/pay` endpoint via `StoreOrdersService.flowPayOrder`. The modal emits
+   * the collector's normalized `PaymentSubmit` (camelCase superset); we map it
+   * to the `PayOrderDto` snake_case shape the backend expects, mirroring the
+   * `order-details-page.component.ts` translation so the two call sites stay
+   * in lock-step. `submit as any` is gone — the DTO is typed end-to-end.
    */
   onPaymentSubmitted(submit: PaymentSubmit): void {
     const order = this.readyToPayOrder();
@@ -1846,9 +1909,30 @@ export class PosComponent {
       this.toastService.error('No hay una orden lista para cobrar.');
       return;
     }
+    if (submit.storePaymentMethodId == null) {
+      this.toastService.error('Selecciona un método de pago válido');
+      return;
+    }
+    const dto: PayOrderDto = {
+      store_payment_method_id: Number(submit.storePaymentMethodId),
+      payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
+      ...(submit.amountReceived != null
+        ? { amount_received: Number(submit.amountReceived) }
+        : {}),
+      ...(submit.amount != null ? { amount: Number(submit.amount) } : {}),
+      ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      ...(submit.tip != null ? { tip_amount: Number(submit.tip) } : {}),
+      ...(submit.installmentId != null
+        ? { installment_id: Number(submit.installmentId) }
+        : {}),
+      ...(submit.wompi
+        ? { wompi_payment_method: submit.wompi as unknown as never }
+        : {}),
+      ...(submit.walletId != null ? { wallet_id: Number(submit.walletId) } : {}),
+    };
     this.isCharging.set(true);
     this.ordersService
-      .flowPayOrder(String(order.id), submit as any)
+      .flowPayOrder(String(order.id), dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
@@ -3062,6 +3146,11 @@ export class PosComponent {
 
           if (order.state !== 'created' && order.state !== 'draft') {
             this.loading.set(false);
+            // QUI-audit-round-2: el handler no reseteaba `editingOrder` ni
+            // `readyToPayOrder` antes del toast, dejando residuos de un intento
+            // previo en pantalla. Forzamos la limpieza aquí también.
+            this.readyToPayOrder.set(null);
+            this.editingOrder.set(null);
             this.resetEditState();
             this.toastService.error(
               'Solo se pueden editar ordenes en estado "Creada" o "Borrador"',
@@ -3088,6 +3177,8 @@ export class PosComponent {
               },
               error: (err) => {
                 this.loading.set(false);
+                this.readyToPayOrder.set(null);
+                this.editingOrder.set(null);
                 this.resetEditState();
                 const msg =
                   (err && (err.message || (err as any).userMessage)) ||
@@ -3099,6 +3190,8 @@ export class PosComponent {
         },
         error: (err) => {
           this.loading.set(false);
+          this.readyToPayOrder.set(null);
+          this.editingOrder.set(null);
           this.resetEditState();
           this.toastService.error('Error al cargar la orden para edición');
           this.clearEditOrderQueryParam();
@@ -3142,15 +3235,39 @@ export class PosComponent {
    *    `Cobrar` CTA renders. `flow/pay` will charge THAT order, never a stale
    *    snapshot.
    *
+   * Empty-cart guard: a save with zero items would push `items: []` and the
+   * editor endpoint would either no-op (silently losing the cashier's work)
+   * or reject the request. We block here with the same `EMPTY_CART_MESSAGE`
+   * used by the create flow so the operator sees a consistent reason.
+   *
    * On error: surface the typed message via `parseApiError` (no raw Prisma /
    * container strings reach the cashier).
    */
   private updateExistingOrder(): void {
     const orderId = this.editingOrderId();
-    if (!this.cartState() || !orderId) return;
+    const state = this.cartState();
+    if (!state || !orderId) return;
+    if (!state.items || state.items.length === 0) {
+      this.toastService.warning(EMPTY_CART_MESSAGE);
+      return;
+    }
 
     this.loading.set(true);
-    const dto = this.buildEditorRequest(this.cartState()!);
+    let dto: Record<string, any>;
+    try {
+      dto = this.buildEditorRequest(state);
+    } catch (err: any) {
+      // Local `POS_CUSTOMER_REQUIRED_001` thrown by the mapper (defensive).
+      this.loading.set(false);
+      const code = err?.errorCode as string | undefined;
+      if (code) {
+        this.toastService.error(
+          err?.message || 'No se pudo preparar la orden para guardar.',
+        );
+        return;
+      }
+      throw err;
+    }
     this.ordersService
       .updateOrderFromEditor(orderId, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -3182,20 +3299,46 @@ export class PosComponent {
    * Mapper: CartState → UpdateOrderEditorRequest.
    *
    * The editor contract on `PUT /store/orders/:id/editor` is a small subset
-   * of the cart: items (snake_case), customer_id, coupon_code, promotion_ids
-   * and the public notes. The previous code shipped the entire `CartState`
-   * shape — which leaked `payment_*`, `credit_*`, KDS flags, `serial_*` and
-   * `inventory_committed_at_fire` and made Prisma 7 reject the request. The
-   * backend never received a clean payload and the cashier never saw Cobrar.
+   * of the cart: items (snake_case), customer_id, coupon_code, promotion_ids,
+   * public + internal notes, and the shipping fields. The previous code
+   * shipped the entire `CartState` shape — which leaked `payment_*`,
+   * `credit_*`, KDS flags, `serial_*` and `inventory_committed_at_fire` and
+   * made Prisma 7 reject the request. The backend never received a clean
+   * payload and the cashier never saw Cobrar.
    *
-   * This mapper emits what the DTO actually accepts. `saveDraft` keeps using
-   * the cart-shaped builder in `PosPaymentService` — drafts are a different
-   * endpoint with a different contract.
+   * Customer fallback: when the cart has no customer attached (the cashier
+   * didn't pick one during edit) we fall back to the order's existing
+   * `customer_id`. Sending `null` would let Prisma 7 drop the FK and break
+   * the next `flow/pay`. If both are missing we surface
+   * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
+   * the backend's authoritative rejection.
+   *
+   * Shipping fields: forwarded from `state.shippingContext` (populated by
+   * `loadFromOrder`). Undefined keys are omitted, not nulled — the editor
+   * endpoint treats absent keys as "no change" and any explicit `null`
+   * could clear a value the cashier did not intend to clear.
+   *
+   * `saveDraft` keeps using the cart-shaped builder in `PosPaymentService` —
+   * drafts are a different endpoint with a different contract.
    */
   private buildEditorRequest(state: CartState): Record<string, any> {
-    const customerId = state.customer?.id
+    const cartCustomerId = state.customer?.id
       ? Number(state.customer.id)
       : null;
+    const orderCustomerId = this.editingOrder()?.customer_id
+      ? Number(this.editingOrder()!.customer_id)
+      : null;
+    const customerId = cartCustomerId ?? orderCustomerId;
+    if (customerId == null || !Number.isFinite(customerId) || customerId < 1) {
+      // Defensive mirror of `POS_CUSTOMER_REQUIRED_001`. Backend would reject
+      // with that code; we throw the same shape so the cashier sees a real
+      // reason instead of a silent 422.
+      const err = new Error(
+        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
+      ) as Error & { errorCode: string };
+      err.errorCode = 'POS_CUSTOMER_REQUIRED_001';
+      throw err;
+    }
     const appliedCoupon = state.appliedCoupon;
     const promotionIds = (state.appliedDiscounts ?? [])
       .map((d: any) => Number(d.promotion_id))
@@ -3214,10 +3357,16 @@ export class PosComponent {
           : Number(productId ?? 0) || null;
       const variantIdNumeric =
         variantId == null ? null : Number(variantId) || null;
+      const productName = item?.product?.name ?? '';
 
       return {
         product_id: productIdNumeric,
         product_variant_id: variantIdNumeric,
+        product_name: productName,
+        product_sku: item?.product?.sku ?? null,
+        variant_sku: item?.variant_sku ?? null,
+        variant_attributes: item?.variant_attributes ?? null,
+        description: item?.description ?? item?.notes ?? null,
         quantity: Number(item?.quantity ?? 0),
         unit_price: Number(item?.unitPrice ?? 0),
         total_price: Number(item?.totalPrice ?? item?.finalPrice ?? 0),
@@ -3230,12 +3379,37 @@ export class PosComponent {
       };
     });
 
+    const shipping = state.shippingContext;
+    const shippingKeys: Record<string, unknown> = {};
+    if (shipping) {
+      if (shipping.deliveryType != null) {
+        shippingKeys['delivery_type'] = shipping.deliveryType;
+      }
+      if (shipping.shippingAddressId != null) {
+        shippingKeys['shipping_address_id'] = shipping.shippingAddressId;
+      }
+      if (shipping.billingAddressId != null) {
+        shippingKeys['billing_address_id'] = shipping.billingAddressId;
+      }
+      if (shipping.shippingMethodId != null) {
+        shippingKeys['shipping_method_id'] = shipping.shippingMethodId;
+      }
+      if (shipping.shippingRateId != null) {
+        shippingKeys['shipping_rate_id'] = shipping.shippingRateId;
+      }
+      if (shipping.shippingCost != null) {
+        shippingKeys['shipping_cost'] = shipping.shippingCost;
+      }
+    }
+
     return {
       customer_id: customerId,
       coupon_code: appliedCoupon?.code ?? null,
       promotion_ids: promotionIds,
       items,
       notes: state.notes ?? '',
+      internal_notes: state.internalNotes ?? '',
+      ...shippingKeys,
     };
   }
 
